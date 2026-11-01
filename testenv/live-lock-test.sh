@@ -661,6 +661,8 @@ case "$*" in
   *) printf 200; exit 0 ;;
 esac
 grep -q " restart $p " "$REF_LOG" 2>/dev/null && left=10800
+# A run that renewed it while the refresher waited for nothing but the lock.
+[ -z "${REF_RENEWED_UNDER_LOCK:-}" ] || [ ! -L "$REF_DIR/knobas-live-$p.lock" ] || left=10800
 printf '{"expiryDate":%s}' $((($(date +%s) + left) * 1000))
 STUB
 chmod +x "$ref/bin/docker" "$ref/bin/curl"
@@ -708,6 +710,21 @@ touch "$scratch/live-up-jira-kept.release"
 lock_gone "the keeper lets go" "$rdir/knobas-live-jira.lock"
 out=$(REF_LEFT_JIRA=-600 refresh)
 check "a Jira whose licence ran out is restarted" "$out" "restart jira [jira lock held]"
+out=$(REF_RENEWED_UNDER_LOCK=1 refresh)
+check "a Jira renewed by the time the lock is taken is read again and left alone" "$out" "jira: renewed meanwhile"
+check_not "and not restarted" "$out" "restart jira"
+checks=$((checks + 1))
+[ ! -e "$rdir/knobas-live-jira.lock" ] || fail "and its lock given back" "$(readlink "$rdir/knobas-live-jira.lock")"
+# A dead holder's lock is taken over -- but not while another run reclaims it.
+ln -s "99999999 0 dead-suite $scratch/gone" "$rdir/knobas-live-jira.lock"
+mkdir "$rdir/knobas-live-jira.lock.reclaim"
+out=$(refresh)
+check_not "a dead holder's lock that another run is reclaiming is left to it" "$out" "restart jira"
+rmdir "$rdir/knobas-live-jira.lock.reclaim"
+out=$(refresh)
+check "a dead holder's lock is taken over and Jira restarted" "$out" "restart jira [jira lock held]"
+checks=$((checks + 1))
+[ ! -e "$rdir/knobas-live-jira.lock" ] || fail "and the lock given back" "$(readlink "$rdir/knobas-live-jira.lock")"
 out=$(refresh local)
 check "the local target has no refresher" "$out" "rc=1"
 check_not "and touches nothing" "$out" "restart"

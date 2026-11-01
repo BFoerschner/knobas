@@ -927,6 +927,10 @@ _live_atlassian_start() {
       existed=1
       echo "live: $product: about $((left / 60)) min of its 3-hour licence left; re-seeding it"
     fi
+  elif docker volume inspect "knobas-testenv_$product-data" >/dev/null 2>&1; then
+    # Kept data that does not answer yet -- started from stopped a moment
+    # ago, which renewed it: still an instance that was already there.
+    existed=1
   fi
   _live_atlassian_seed "$product" && return 0
   [ -n "$existed" ] || return 1
@@ -963,9 +967,21 @@ live_refresh() {
       echo "live: $p: about $((left / 60)) min of licence left"
       continue
     fi
-    if ! grabbed=$(_live_lock_grab "$p"); then
+    if ! grabbed=$(_live_lock_grab "$p" "refresh-renews-$p"); then
       holder=$(readlink "${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$p.lock" 2>/dev/null || true)
       echo "live: $p: about $((left > 0 ? left / 60 : 0)) min of licence left, but its lock is held by $(_live_lock_describe "$holder"); not restarting it under that run, next tick"
+      continue
+    fi
+    # Read again under the lock: a run that held it a moment ago may have
+    # renewed it already.
+    if ! left=$(_live_licence_left "$p"); then
+      echo "live: $p: stopped telling its licence under the lock; next tick"
+      _live_lock_drop "$p" "$grabbed"
+      continue
+    fi
+    if [ "$left" -ge "$margin" ]; then
+      echo "live: $p: renewed meanwhile, about $((left / 60)) min of licence left"
+      _live_lock_drop "$p" "$grabbed"
       continue
     fi
     _live_atlassian_renew "$p" "$left" || rc=1
@@ -1026,18 +1042,23 @@ _live_stop() {
   esac
 }
 
-# _live_lock_grab <product> -- take a product's lock without waiting, for the
-# few seconds a stop takes; fail when anyone holds it -- a run inside that
-# product, or the keeper of its live-up. A dead holder's lock is taken over.
-# Prints the link it made, for _live_lock_drop.
+# _live_lock_grab <product> [<recipe>] -- take a product's lock without
+# waiting, for a stop or a restart; fail when anyone holds it -- a run inside
+# that product, or the keeper of its live-up. A dead holder's lock is taken
+# over under `$lock.reclaim`, as live_lock_hold does, and only if it still
+# names that holder: a run that reclaimed it first and linked its own keeps
+# it. Prints the link it made, for _live_lock_drop.
 _live_lock_grab() {
-  local lock=${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$1.lock target
+  local lock=${KNOBAS_LIVE_LOCK_DIR:-${TMPDIR:-/tmp}}/knobas-live-$1.lock target held
   # $$, the run's own shell: this runs in a command substitution, whose pid
   # is gone the moment it returns, and a dead holder is anyone's to take.
-  target="$$ $(date +%s) make-room-stops-$1 ${LIVE_TESTENV%/testenv}"
+  target="$$ $(date +%s) ${2:-make-room-stops-$1} ${LIVE_TESTENV%/testenv}"
   if ! ln -s "$target" "$lock" 2>/dev/null; then
-    _live_lock_pid_alive "$(readlink "$lock" 2>/dev/null || true)" && return 1
-    rm -f "$lock"
+    held=$(readlink "$lock" 2>/dev/null || true)
+    _live_lock_pid_alive "$held" && return 1
+    mkdir "$lock.reclaim" 2>/dev/null || return 1
+    [ "$(readlink "$lock" 2>/dev/null || true)" != "$held" ] || rm -f "$lock"
+    rmdir "$lock.reclaim" 2>/dev/null || true
     ln -s "$target" "$lock" 2>/dev/null || return 1
   fi
   echo "$target"

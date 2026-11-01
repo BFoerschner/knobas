@@ -506,11 +506,15 @@ case $out in *"holds this machine's product ports"*) ;; *) fail "and says the tu
 # endpoint with an expiry $STUB_LEFT seconds from now (nothing when unset) --
 # or, once a `restart` is in the log and $STUB_RENEWS is set, three hours from
 # now, as the real products do (2026-11-01, #2373) -- and 200 to the rest.
+# Its data volume is there unless $STUB_NO_VOLUME is set.
 lic=$scratch/licence
 mkdir -p "$lic/bin" "$lic/testenv"
 cat >"$lic/bin/docker" <<'STUB'
 #!/usr/bin/env bash
-case "${1:-} ${2:-}" in "ps "*) exit 0 ;; esac
+case "${1:-} ${2:-}" in
+  "ps "*) exit 0 ;;
+  "volume inspect") [ -z "${STUB_NO_VOLUME:-}" ]; exit ;;
+esac
 echo "docker $*" >>"$STUB_LOG"
 STUB
 cat >"$lic/bin/curl" <<'STUB'
@@ -577,7 +581,9 @@ check_licence "a seed failing on the instance that was there is retried once fro
   "the seed failed against the instance that was already there" "rm --stop --force jira jira-db"
 checks=$((checks + 1))
 [ "$(cat "$lic/rc")" = 0 ] || fail "and the retry from empty passes"
-check_licence "a seed failing from empty is not retried" none 1 \
+check_licence "a kept Jira that does not tell its licence yet is retried from empty when its seed fails" none 1 \
+  "the seed failed against the instance that was already there" "rm --stop --force jira jira-db"
+STUB_NO_VOLUME=1 check_licence "a seed failing from empty is not retried" none 1 \
   "seed-atlassian.sh jira" --absent "rm --stop"
 checks=$((checks + 1))
 [ "$(cat "$lic/rc")" != 0 ] || fail "and fails the start"
