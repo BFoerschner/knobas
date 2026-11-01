@@ -34,8 +34,12 @@
   border-radius: 6px; padding: 8px 10px; cursor: pointer;
 }
 .tf-tcard:hover { border-color: var(--ink-2); }
-/* The selected card is the yellow card, and the one card that floats. */
-.tf-tcard.tf-card { border-color: var(--card-2); box-shadow: var(--shadow); }
+/* Yellow is the chosen job's card, selected or not (spec #2396, #2398). The selected card carries a two-pixel ink
+   outline and is the one card that floats; on the yellow the outline is the card's ink. A ring, not `outline`, so
+   the focus ring never replaces it. */
+.tf-tcard.tf-card { border-color: var(--card-2); }
+.tf-tcard.tf-sel { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
+.tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
 .tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tkind { font-size: var(--t-xs); margin-left: 4px; }
@@ -67,6 +71,11 @@
 .tf-row:hover td { background: var(--sheet-2); }
 .tf-row.tf-card td { background: var(--card); color: var(--card-ink); }
 .tf-row.tf-card .tf-dim, .tf-row.tf-card .tf-sub { color: var(--card-ink-2); }
+/* The selected row's outline, two pixels inside each edge of the row: its cells draw it, as a row cannot. */
+.tf-row.tf-sel td { --tf-sel-ink: var(--ink); box-shadow: inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
+.tf-row.tf-card.tf-sel td { --tf-sel-ink: var(--card-ink); }
+.tf-row.tf-sel td:first-child { box-shadow: inset 2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
+.tf-row.tf-sel td:last-child { box-shadow: inset -2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }

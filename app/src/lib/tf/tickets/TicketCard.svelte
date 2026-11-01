@@ -1,8 +1,9 @@
 <!--
   One ticket on the ticket board (#810, R-3.7): key, type and priority, the
   summary, the epic under it, its signals (#815) and the assignee's
-  initials. The selected card is the yellow card, lifted off the board. A
-  double click opens the job (#813). The epic is its key and name and the
+  initials. The chosen job's card is the yellow card, selected or not; the
+  selected card carries a two-pixel ink outline and is lifted off the board
+  (spec #2396, #2398). A double click opens the ticket's page (#813). The epic is its key and name and the
   comment count is drawn above zero only (#894).
 
   A key another source holds too (#1476) draws its source's name beside it,
@@ -22,6 +23,7 @@
     card,
     needles,
     selected,
+    chosen = false,
     onselect,
     onopen,
     fields = null,
@@ -30,6 +32,8 @@
     card: MiniBoardCard;
     needles: readonly string[];
     selected: boolean;
+    /** The card is the chosen job's (`job/chosen.svelte.ts`): the yellow card. */
+    chosen?: boolean;
     onselect: () => void;
     /** A double click: open the job. */
     onopen: () => void;
@@ -51,7 +55,8 @@
 <button
   type="button"
   class="tf-tcard"
-  class:tf-card={selected}
+  class:tf-card={chosen}
+  class:tf-sel={selected}
   aria-current={selected ? "true" : undefined}
   data-entity={card.entity_id}
   onclick={onselect}
