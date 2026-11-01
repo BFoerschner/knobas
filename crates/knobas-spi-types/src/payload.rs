@@ -1141,13 +1141,9 @@ pub fn resolve_attachments(
                 id: resolve_string(e, &candidate.id)?,
                 name: resolve_string(e, &candidate.name)?,
                 mime: resolve_string(e, &candidate.mime),
-                size: candidate
-                    .size
-                    .iter()
-                    .find_map(|path| at(e, path)?.as_u64()),
+                size: candidate.size.iter().find_map(|path| at(e, path)?.as_u64()),
                 author: resolve_string(e, &candidate.author),
-                created: resolve_string(e, &candidate.created)
-                    .and_then(|t| parse_instant(&t)),
+                created: resolve_string(e, &candidate.created).and_then(|t| parse_instant(&t)),
                 content_url: resolve_string(e, &candidate.content)?,
                 thumbnail_url: resolve_string(e, &candidate.thumbnail),
             })
@@ -2382,8 +2378,9 @@ mod tests {
                     size: None,
                     author: Some("priya.nair".to_owned()),
                     created: None,
-                    content_url: "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf"
-                        .to_owned(),
+                    content_url:
+                        "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf"
+                            .to_owned(),
                     thumbnail_url: None,
                 },
             ]
@@ -2403,7 +2400,10 @@ mod tests {
             serde_json::json!({ "fields": { "attachment": null } }),
             serde_json::json!({ "fields": { "attachment": { "id": "1" } } }),
         ] {
-            assert!(resolve_attachments(&payload, &jira_attachments()).is_empty(), "{payload}");
+            assert!(
+                resolve_attachments(&payload, &jira_attachments()).is_empty(),
+                "{payload}"
+            );
         }
     }
 

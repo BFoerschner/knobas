@@ -137,6 +137,29 @@ text: string | null,
 truncated: boolean, };
 
 /**
+ * One file attached to an item, as [`resolve_attachments`] reads it off the
+ * record (#2404). `EntityDetail.attachments` on the wire. Every optional
+ * fact is `null` where the source did not say, never a guess.
+ */
+export type Attachment = { 
+/**
+ * The source's id for the file: what a later read of its bytes names.
+ */
+id: string, name: string, mime: string | null, 
+/**
+ * Bytes.
+ */
+size: number | null, author: string | null, created: string | null, 
+/**
+ * Where the source serves the bytes: what *Open* hands the browser.
+ */
+content_url: string, 
+/**
+ * Where the source serves a small preview, for an image.
+ */
+thumbnail_url: string | null, };
+
+/**
  * Which of the Code tile's groups a row is drawn under (#712): what needs
  * me first. Under [`EntityOrder::Attention`], in this order.
  *
@@ -1285,6 +1308,13 @@ estimate_seconds: number | null,
  * not drawn (ADR-0007); never an empty list.
  */
 labels?: Array<string>, 
+/**
+ * A ticket's attachment list through the declared `attachments` path
+ * (#2404): the ticket page's Attachments section. The list, never the
+ * bytes. `None`, absent on the wire, where there are none, so no section
+ * is drawn (ADR-0007); never an empty list.
+ */
+attachments?: Array<Attachment>, 
 /**
  * A repository's default branch as its source declares it (#2307),
  * through the kind's `default_branch` path: what the repository page

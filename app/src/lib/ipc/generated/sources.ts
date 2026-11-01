@@ -76,6 +76,59 @@ refused: string | null,
 update: UpdateCheck | null, };
 
 /**
+ * Where a record keeps **the files attached to it**, and where each file's
+ * facts sit inside its element (#2404): Jira's `fields.attachment`.
+ *
+ * * `at` leads to an **array of objects**, in the source's order. Anything
+ *   else is a miss.
+ * * every other field is a list of candidate paths inside one element, read
+ *   as [`KindPaths::project_key`] is: the first non-blank string wins, and
+ *   `size` the first whole number. An element with no readable `id`, `name`
+ *   or `content` is left out: a file without an address is not one a reader
+ *   can open.
+ *
+ * The list, not the bytes: the mirror holds what Jira says about each file,
+ * and the bytes come live through the source's credential.
+ */
+export type AttachmentPath = { 
+/**
+ * Where the array of attachment objects is.
+ */
+at: PayloadPath, 
+/**
+ * The source's id for the file, unique within the source.
+ */
+id: Array<PayloadPath>, 
+/**
+ * The file name.
+ */
+name: Array<PayloadPath>, 
+/**
+ * The media type the source reports (`image/png`).
+ */
+mime: Array<PayloadPath>, 
+/**
+ * The size in bytes, a whole JSON number.
+ */
+size: Array<PayloadPath>, 
+/**
+ * Who attached it, by the name a person reads.
+ */
+author: Array<PayloadPath>, 
+/**
+ * When it was attached, an ISO 8601 instant ([`parse_instant`]).
+ */
+created: Array<PayloadPath>, 
+/**
+ * The address of the file's bytes at the source.
+ */
+content: Array<PayloadPath>, 
+/**
+ * The address of a small preview the source renders, for images.
+ */
+thumbnail: Array<PayloadPath>, };
+
+/**
  * How an adapter authenticates against its remote system (spec §3).
  *
  * The descriptor declares which of these it accepts; the secret itself is
@@ -688,7 +741,14 @@ response_time: Array<PayloadPath>,
  * it is opened from (#1227): Gitea's `base.ref`. Empty for every kind
  * that is not a proposal.
  */
-base: Array<PayloadPath>, };
+base: Array<PayloadPath>, 
+/**
+ * The files attached to a ticket (#2404): Jira's `fields.attachment`,
+ * each file's facts declared inside its element. The ticket page's
+ * Attachments section reads it. Empty for every kind with no
+ * attachments, and a miss lists none.
+ */
+attachments: Array<AttachmentPath>, };
 
 /**
  * Where a **list** of strings lives: the array, and where the string sits

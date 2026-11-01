@@ -72,6 +72,9 @@ pub struct Detail {
     /// A ticket's labels through the declared `labels` path (#2400), in the
     /// record's order, as the mini board reads them; empty on a miss.
     pub labels: Vec<String>,
+    /// A ticket's attachment list through the declared `attachments` path
+    /// (#2404), in the record's order; empty on a miss.
+    pub attachments: Vec<crate::payload::Attachment>,
     /// A repository's default branch through its declared `default_branch`
     /// path (#2307); `None` where nothing is declared or the record misses it.
     pub default_branch: Option<String>,
@@ -249,6 +252,15 @@ pub async fn read(
         None => Vec::new(),
     };
 
+    // The attachment list (#2404) is read off the payload here rather than in
+    // the statement: its declaration is a structure of paths per element,
+    // which `resolve_attachments` walks as it does for every other reader.
+    let payload: serde_json::Value = row.get("payload");
+    let attachments = declarations
+        .get(&source_id, &kind)
+        .map(|paths| crate::payload::resolve_attachments(&payload, &paths.attachments))
+        .unwrap_or_default();
+
     Ok(Some(Detail {
         row: EntityRow {
             entity_id: row.get("entity_id"),
@@ -273,7 +285,7 @@ pub async fn read(
         configured_adapter_kind: adapter_kind,
         body_text: row.get("body_text"),
         author: row.get("author"),
-        payload: row.get("payload"),
+        payload,
         web_url: row.get("web_url"),
         deleted_at: row.get("deleted_at"),
         links: crate::link::entries_of(pool, entity).await?,
@@ -284,6 +296,7 @@ pub async fn read(
         priority: row.get("priority"),
         estimate_seconds: row.get("estimate_seconds"),
         labels: row.get("labels"),
+        attachments,
         default_branch: row.get("default_branch"),
         description: row.get("description"),
         markup: markup_of(row.get("markup")),

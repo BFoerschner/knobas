@@ -95,6 +95,13 @@ pub struct EntityDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub labels: Option<Vec<String>>,
+    /// A ticket's attachment list through the declared `attachments` path
+    /// (#2404): the ticket page's Attachments section. The list, never the
+    /// bytes. `None`, absent on the wire, where there are none, so no section
+    /// is drawn (ADR-0007); never an empty list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub attachments: Option<Vec<knobas_core::payload::Attachment>>,
     /// A repository's default branch as its source declares it (#2307),
     /// through the kind's `default_branch` path: what the repository page
     /// draws its tabs on before the branch list answers. Absent on the wire
@@ -173,6 +180,7 @@ pub async fn get_entity_inner(
         priority: detail.priority,
         estimate_seconds: detail.estimate_seconds,
         labels: Some(detail.labels).filter(|labels| !labels.is_empty()),
+        attachments: Some(detail.attachments).filter(|files| !files.is_empty()),
         default_branch: detail.default_branch,
         description: detail.description,
         markup: detail.markup,

@@ -937,7 +937,9 @@ async fn a_synced_issue_carries_its_attachment_list() {
                 a.author.as_deref(),
                 a.created.map(|t| t.to_rfc3339()),
                 a.content_url.strip_prefix(base),
-                a.thumbnail_url.as_deref().and_then(|t| t.strip_prefix(base)),
+                a.thumbnail_url
+                    .as_deref()
+                    .and_then(|t| t.strip_prefix(base)),
                 a.mime.as_deref(),
             )
         })
@@ -987,7 +989,10 @@ async fn a_synced_issue_carries_its_attachment_list() {
         files.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
         ["50000", "50001", "50002", "50003"]
     );
-    assert_eq!(payload("OPS-77")["fields"]["attachment"], serde_json::json!([]));
+    assert_eq!(
+        payload("OPS-77")["fields"]["attachment"],
+        serde_json::json!([])
+    );
 
     jira.assert_no_violations();
 }
@@ -1002,19 +1007,28 @@ async fn a_cursor_from_before_the_attachment_list_orders_a_full_re_sync() {
     let source = source(&jira.base_url(), serde_json::json!({}));
     let (every, cursor) = sync_all(source.as_ref(), None).await;
     let (idle, _) = sync_all(source.as_ref(), Some(cursor.clone())).await;
-    assert!(idle.is_empty(), "this build's own cursor is incremental: {idle:?}");
+    assert!(
+        idle.is_empty(),
+        "this build's own cursor is incremental: {idle:?}"
+    );
 
     let mut before: serde_json::Value = serde_json::from_str(&cursor).unwrap();
     assert_eq!(before["v"], 5);
     before["v"] = serde_json::json!(4);
     let mut sink = VecSink(Vec::new());
-    source.sync(Some(before.to_string()), &mut sink).await.unwrap();
+    source
+        .sync(Some(before.to_string()), &mut sink)
+        .await
+        .unwrap();
 
     let mut keys: Vec<_> = sink.0.iter().map(|i| i.entity.key.clone()).collect();
     let mut every = every;
     keys.sort();
     every.sort();
-    assert_eq!(keys, every, "the run after the upgrade walks the whole source");
+    assert_eq!(
+        keys, every,
+        "the run after the upgrade walks the whole source"
+    );
     assert!(
         sink.0
             .iter()

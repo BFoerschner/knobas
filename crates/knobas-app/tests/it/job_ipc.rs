@@ -125,6 +125,57 @@ async fn a_tickets_detail_carries_its_labels_and_leaves_them_off_the_wire_when_t
     assert!(wire.get("labels").is_none(), "{wire}");
 }
 
+/// **The ticket page's attachment list** (#2404) comes with the detail,
+/// through the `attachments` declaration the Jira adapter makes, in the
+/// record's order with each file's name, size, author, date and addresses; a
+/// ticket with none leaves the field off the wire.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_attachments_and_leaves_them_off_the_wire_when_there_are_none()
+{
+    let pool = pool().await;
+    let attached = issue(
+        &pool,
+        &key(),
+        serde_json::json!({ "attachment": [
+            { "id": "50000", "filename": "psp-409-trace.png", "mimeType": "image/png",
+              "size": 186_368, "author": { "name": "lena.hoffmann", "displayName": "Lena Hoffmann" },
+              "created": "2026-08-12T11:14:00.000+0200",
+              "content": "https://jira.example/secure/attachment/50000/psp-409-trace.png",
+              "thumbnail": "https://jira.example/secure/thumbnail/50000/psp-409-trace.png" },
+            { "id": "50002", "filename": "sepa-error-codes.pdf", "mimeType": "application/pdf",
+              "size": 1_258_291, "author": { "name": "priya.nair", "displayName": "Priya Nair" },
+              "created": "2026-08-12T13:30:00.000+0200",
+              "content": "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf" }
+        ] }),
+    )
+    .await;
+    let bare = issue(&pool, &key(), serde_json::json!({ "attachment": [] })).await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &attached)
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&detail).unwrap();
+    assert_eq!(
+        wire["attachments"],
+        serde_json::json!([
+            { "id": "50000", "name": "psp-409-trace.png", "mime": "image/png", "size": 186_368,
+              "author": "Lena Hoffmann", "created": "2026-08-12T09:14:00Z",
+              "content_url": "https://jira.example/secure/attachment/50000/psp-409-trace.png",
+              "thumbnail_url": "https://jira.example/secure/thumbnail/50000/psp-409-trace.png" },
+            { "id": "50002", "name": "sepa-error-codes.pdf", "mime": "application/pdf",
+              "size": 1_258_291, "author": "Priya Nair", "created": "2026-08-12T11:30:00Z",
+              "content_url": "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf",
+              "thumbnail_url": null }
+        ])
+    );
+    let none = get_entity_inner(&pool, &Registry::for_process(), &bare)
+        .await
+        .unwrap();
+    assert_eq!(none.attachments, None);
+    let wire = serde_json::to_value(&none).unwrap();
+    assert!(wire.get("attachments").is_none(), "{wire}");
+}
+
 /// A miss is a miss (ADR-0007): no estimate, an estimate Jira wrote as `null`
 /// and one that is not a number all read as none, never as zero.
 #[tokio::test]
