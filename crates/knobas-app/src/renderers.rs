@@ -492,11 +492,17 @@ pub fn frame_response(
                 .header("access-control-allow-origin", "*")
                 .header("x-content-type-options", "nosniff")
                 .body(body),
-            None => tauri::http::Response::builder().status(404).body(Vec::new()),
+            None => tauri::http::Response::builder()
+                .status(404)
+                .body(Vec::new()),
         }
     } else {
         use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-        match URL_SAFE_NO_PAD.decode(path).ok().filter(|bytes| !bytes.is_empty()) {
+        match URL_SAFE_NO_PAD
+            .decode(path)
+            .ok()
+            .filter(|bytes| !bytes.is_empty())
+        {
             Some(body) => tauri::http::Response::builder()
                 .status(200)
                 .header("content-type", "text/html; charset=utf-8")
@@ -504,7 +510,9 @@ pub fn frame_response(
                 .header("x-content-type-options", "nosniff")
                 .header("cache-control", "no-store")
                 .body(body),
-            None => tauri::http::Response::builder().status(400).body(Vec::new()),
+            None => tauri::http::Response::builder()
+                .status(400)
+                .body(Vec::new()),
         }
     };
     built.unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
@@ -743,8 +751,12 @@ mod tests {
     fn the_d2_frame_and_its_scripts_are_served_under_the_engine_policy() {
         let dist = |path: &str| match path {
             "d2-frame.html" => Some((b"<!doctype html>frame".to_vec(), "text/html".to_owned())),
-            "assets/d2-frame-Ab1.js" => Some((b"export {};".to_vec(), "text/javascript".to_owned())),
-            "index.html" | "assets/app.css" | "assets/x.wasm" => Some((b"x".to_vec(), "text/html".to_owned())),
+            "assets/d2-frame-Ab1.js" => {
+                Some((b"export {};".to_vec(), "text/javascript".to_owned()))
+            }
+            "index.html" | "assets/app.css" | "assets/x.wasm" => {
+                Some((b"x".to_vec(), "text/html".to_owned()))
+            }
             _ => None,
         };
         let header = |answer: &tauri::http::Response<Vec<u8>>, name: &str| {
@@ -770,9 +782,18 @@ mod tests {
         let script = frame_response("/assets/d2-frame-Ab1.js", dist);
         assert_eq!(script.status(), 200);
         assert_eq!(script.body().as_slice(), b"export {};");
-        assert_eq!(header(&script, "content-type").as_deref(), Some("text/javascript"));
-        assert_eq!(header(&script, "access-control-allow-origin").as_deref(), Some("*"));
-        assert_eq!(header(&script, "x-content-type-options").as_deref(), Some("nosniff"));
+        assert_eq!(
+            header(&script, "content-type").as_deref(),
+            Some("text/javascript")
+        );
+        assert_eq!(
+            header(&script, "access-control-allow-origin").as_deref(),
+            Some("*")
+        );
+        assert_eq!(
+            header(&script, "x-content-type-options").as_deref(),
+            Some("nosniff")
+        );
 
         // Nothing else of the app's: not its page, not a stylesheet or WASM,
         // not a path that climbs out of `assets/`, not a script that is not there.
@@ -785,7 +806,11 @@ mod tests {
             "/assets/missing.js",
         ] {
             let answer = frame_response(refused, dist);
-            assert!(answer.status().as_u16() >= 400, "{refused}: {}", answer.status());
+            assert!(
+                answer.status().as_u16() >= 400,
+                "{refused}: {}",
+                answer.status()
+            );
             assert!(answer.body().is_empty(), "{refused}");
         }
     }

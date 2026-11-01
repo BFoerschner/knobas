@@ -238,13 +238,15 @@ pub fn run() {
     // A command renderer's HTML frame is served from its own origin under its
     // own policy (#2304, `renderers::frame_response`), and so is D2's frame,
     // from the app's assets (#2381).
-    let builder = tauri::Builder::default()
-        .register_uri_scheme_protocol(renderers::FRAME_SCHEME, |context, request| {
+    let builder = tauri::Builder::default().register_uri_scheme_protocol(
+        renderers::FRAME_SCHEME,
+        |context, request| {
             renderers::frame_response(request.uri().path(), |path| {
                 let asset = context.app_handle().asset_resolver().get(path.to_owned())?;
                 Some((asset.bytes, asset.mime_type))
             })
-        });
+        },
+    );
     // The single-instance guard (#748), registered **first**: its setup runs
     // before the builder's `setup` closure, so a second launch exits before it
     // can start the database or the scheduler (whose startup closes every
