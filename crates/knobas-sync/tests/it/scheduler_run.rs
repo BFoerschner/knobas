@@ -691,10 +691,16 @@ async fn a_run_that_left_something_out_is_ok_and_says_what() {
     one_run(&h, SyncTrigger::Manual).await;
     let cfg = config::get(&h.deps.pool, &h.id).await.unwrap().unwrap();
     assert_eq!(cfg.health.state, AuthState::Ok);
-    assert_eq!(cfg.health.detail, None, "a run that left nothing out clears it");
+    assert_eq!(
+        cfg.health.detail, None,
+        "a run that left nothing out clears it"
+    );
     let healths = h.events.healths.lock().unwrap();
     assert_eq!(
-        healths.iter().map(|x| x.detail.as_deref()).collect::<Vec<_>>(),
+        healths
+            .iter()
+            .map(|x| x.detail.as_deref())
+            .collect::<Vec<_>>(),
         [Some(why), None],
         "each change is announced"
     );

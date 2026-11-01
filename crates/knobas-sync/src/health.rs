@@ -62,7 +62,9 @@ pub struct CredentialHealth {
     /// When the credential was last checked; `None` if it never has been.
     pub checked_at: Option<DateTime<Utc>>,
     /// One line of detail for the sources view -- the server's own message
-    /// where there is one. Never a secret.
+    /// where there is one. Never a secret. On `ok`, what the last sync on
+    /// the good credential left out and why (#2374): *boards unavailable:
+    /// Jira Software is unlicensed or refuses this account (403)*.
     pub detail: Option<String>,
     /// When the credential expires, if the source says. Feeds §3's credential
     /// expiry countdown.

@@ -18,8 +18,7 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 /// Jira's answer to the board listing with Jira Software unlicensed.
-const NO_ACCESS: &str =
-    r#"{"errorMessages":["You currently don't have access to perform this operation."],"errors":{}}"#;
+const NO_ACCESS: &str = r#"{"errorMessages":["You currently don't have access to perform this operation."],"errors":{}}"#;
 
 fn one_issue() -> serde_json::Value {
     serde_json::json!({
@@ -42,7 +41,7 @@ fn one_issue() -> serde_json::Value {
 
 /// A Jira that answers core REST and refuses the Agile REST with `board`.
 async fn jira(board: ResponseTemplate) -> MockServer {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     let ok = |body: serde_json::Value| ResponseTemplate::new(200).set_body_json(body);
     for (route, body) in [
         (
