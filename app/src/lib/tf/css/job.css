@@ -42,6 +42,17 @@
 .tf-ticketcard .tf-facts .tf-av.tf-me { background: var(--card-ink); border-color: var(--card-ink); color: var(--card); }
 .tf-sheetcard .tf-facts .tf-av { background: var(--sheet-2); border-color: var(--rule); color: var(--ink-2); }
 .tf-sheetcard .tf-facts .tf-av.tf-me { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+/* Under the Logged line a meter in the week chart's language (#2403): what is logged in the darker fill, the reader's
+   share in full ink, the estimate the track, the track in the error tint once logged passes the estimate. */
+.tf-tkmeter { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(0,0,0,.12); }
+.tf-tkmeter i { display: block; height: 100%; }
+.tf-tkmeter .tf-tkme { background: var(--card-ink); }
+.tf-tkmeter .tf-tkothers { background: rgba(0,0,0,.3); }
+.tf-sheetcard .tf-tkmeter { background: var(--rule-2); }
+.tf-sheetcard .tf-tkmeter .tf-tkme { background: var(--ink); }
+.tf-sheetcard .tf-tkmeter .tf-tkothers { background: var(--ink-2); }
+.tf-tkmeter.tf-tkover { background: var(--err-bg); }
+.tf-ticketcard .tf-facts dd .tf-tkmeter { flex: 1 0 100%; margin: -2px 0 4px; }
 .tf-ticketcard .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
 .tf-sheetcard .tf-lab { border-color: var(--rule); color: var(--ink-2); }
 /* The epic as a chip that links: the status chip's shape, cut with an ellipsis (its whole name is its title),

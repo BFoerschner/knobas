@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { EntityDetail } from "../../ipc/entity";
-import { footAction, resolveJob, resolveTicket } from "./job";
+import { footAction, loggedRow, resolveJob, resolveTicket } from "./job";
 
 const SOURCES = [{ id: "mock" }, { id: "gitea" }, { id: "jira" }];
 /** The mirror: PAY-231 in the mock source and in Jira, PAY-9 in Jira alone. */
@@ -54,4 +54,56 @@ test("the card's foot: the decision while reading, the timer once pinned, nothin
   const pinned = { pinned: true, status: "Done", mine: false };
   expect(footAction({ ...pinned, timerOnIt: true })).toEqual({ label: "Stop and log", does: "stop" });
   expect(footAction({ ...pinned, timerOnIt: false })).toEqual({ label: "Start timer", does: "start-timer" });
+});
+
+// ---- the card's Logged row (#2403) ----
+
+const logged = (
+  time_spent_seconds?: number,
+  estimate_seconds: number | null = null,
+  logged_by?: { author: string; seconds: number }[],
+): Pick<EntityDetail, "time_spent_seconds" | "estimate_seconds" | "logged_by"> => ({
+  estimate_seconds,
+  ...(time_spent_seconds === undefined ? {} : { time_spent_seconds }),
+  ...(logged_by === undefined ? {} : { logged_by }),
+});
+
+test("the Logged row: spent of the estimate over a meter, the track's error tint once spent passes it", () => {
+  expect(loggedRow(logged(7800, 6 * 3600), "mara")).toEqual({
+    text: "2h 10m of 6h",
+    yours: null,
+    meter: { mine: 0, others: (7800 / 21600) * 100, over: false },
+  });
+  // 7h against 6h: the track is the 7h, the estimate passed.
+  expect(loggedRow(logged(7 * 3600, 6 * 3600), "mara")?.meter).toEqual({ mine: 0, others: 100, over: true });
+  expect(loggedRow(logged(6 * 3600, 6 * 3600), "mara")?.meter?.over, "exactly the estimate is not over it").toBe(false);
+});
+
+test("the Logged row tells my share only when somebody else has logged too", () => {
+  const shared = logged(7800, 6 * 3600, [
+    { author: "lena", seconds: 1800 },
+    { author: "mara", seconds: 6000 },
+  ]);
+  expect(loggedRow(shared, "mara")).toEqual({
+    text: "2h 10m of 6h",
+    yours: "1h 40m yours",
+    meter: { mine: (6000 / 21600) * 100, others: (1800 / 21600) * 100, over: false },
+  });
+  // All of it mine: nothing to tell apart, one segment.
+  const alone = logged(6000, 6 * 3600, [{ author: "mara", seconds: 6000 }]);
+  expect(loggedRow(alone, "mara")).toMatchObject({ yours: null, meter: { mine: 0 } });
+  // None of it mine, or no username to match: one segment, no share.
+  expect(loggedRow(shared, "jonas")?.yours).toBeNull();
+  expect(loggedRow(shared, null)?.yours).toBeNull();
+});
+
+test("the Logged row: the time alone with no estimate, 0m of an estimate with nothing logged, no row with neither", () => {
+  expect(loggedRow(logged(13200), "mara")).toEqual({ text: "3h 40m", yours: null, meter: null });
+  expect(loggedRow(logged(13200, 0), "mara"), "a zero estimate is no track to draw").toEqual({ text: "3h 40m", yours: null, meter: null });
+  expect(loggedRow(logged(undefined, 2 * 3600), "mara")).toEqual({
+    text: "0m of 2h",
+    yours: null,
+    meter: { mine: 0, others: 0, over: false },
+  });
+  expect(loggedRow(logged(), "mara")).toBeNull();
 });
