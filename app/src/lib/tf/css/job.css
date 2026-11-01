@@ -86,6 +86,25 @@
 .tf-tkread .tf-convo { max-width: none; }
 .tf-tkread .tf-compose textarea { min-height: 36px; }
 .tf-tkread .tf-compose:focus-within textarea { min-height: 80px; }
+/* Attachments (#2404): the mirror's list folded to one line, a native disclosure closed by default whose summary is the
+   section heading, a count badge and a chevron (right closed, down open). Open, one row a file, the job's `.tf-r`: its
+   kind in mono, the name with who, when and how big under it, and *Open*. */
+.tf-tkread details.tf-tkfold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); margin-bottom: 10px; border-radius: 4px; }
+.tf-tkread details.tf-tkfold > summary::-webkit-details-marker { display: none; }
+.tf-tkread details.tf-tkfold > summary h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-tkread details.tf-tkfold > summary .tf-tkmark { width: 14px; height: 14px; color: var(--ink-2); transition: transform 120ms ease-out; }
+.tf-tkread details.tf-tkfold[open] > summary .tf-tkmark { transform: rotate(90deg); }
+.tf-tkread details.tf-tkfold > summary:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
+.tf-tkatt .tf-r { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; }
+.tf-tkatt .tf-rows > .tf-r:first-child { border-top: 0; }
+.tf-tkatt .tf-r .tf-rend { margin-left: 0; }
+.tf-tkatt .tf-r .tf-t { display: flex; flex-direction: column; gap: 2px; }
+.tf-tkatt .tf-rsub { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tkkind {
+  width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2);
+  display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
+}
+.tf-tkatt .tf-rend .tf-btn { color: var(--ink-2); }
 
 .tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
 .tf-work > * { flex: none; }

@@ -605,3 +605,68 @@ test("both moods draw the same card markup", async () => {
   await until(() => facts(pinned).length === 5, "the pinned facts never drew");
   expect(shape(pinned)).toBe(before);
 });
+
+// ---- the attachments (#2404) ----
+
+/** The reading column's Attachments section, if it draws one. */
+function attachments(): HTMLDetailsElement | null {
+  return reading()?.querySelector<HTMLDetailsElement>("section[aria-labelledby='tf-tkatt'] details.tf-tkfold") ?? null;
+}
+
+test("PAY-231 folds its four attachments to one line between the description and the conversation", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  await until(() => attachments() !== null, "no Attachments section");
+
+  const fold = attachments()!;
+  expect(fold.open, "closed by default").toBe(false);
+  const summary = fold.querySelector("summary")!;
+  expect(summary.querySelector("h2")?.textContent?.trim()).toBe("Attachments");
+  expect(summary.querySelector(".tf-count")?.textContent?.trim()).toBe("4");
+  expect(summary.querySelector("svg.tf-tkmark"), "the chevron").not.toBeNull();
+
+  const sections = [...reading()!.querySelectorAll(":scope > section")];
+  const at = sections.indexOf(fold.closest("section")!);
+  expect(sections[at - 1]?.getAttribute("aria-label")).toBe("Description");
+  expect(sections[at + 1]?.getAttribute("aria-labelledby")).toBe("tf-tktalk");
+});
+
+test("open, PAY-231's attachments are four rows, each with its kind, its name, who, when and how big, and Open on its content address", async () => {
+  sent = [];
+  installFakeTauri(recorded({ ...withTicketSearch(demoHandlers()), "plugin:opener|open_url": () => null }));
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  await until(() => attachments() !== null, "no Attachments section");
+  const fold = attachments()!;
+  fold.querySelector("summary")!.click();
+  flushSync();
+  expect(fold.open).toBe(true);
+
+  const rows = [...fold.querySelectorAll<HTMLElement>(".tf-tkatt .tf-r")];
+  const read = rows.map((row) => [
+    row.querySelector(".tf-tkkind")?.textContent?.trim(),
+    row.querySelector(".tf-t")?.firstChild?.textContent?.trim(),
+    row.querySelector(".tf-rsub")?.textContent?.trim(),
+    row.querySelector<HTMLAnchorElement>("a.tf-btn")?.textContent?.trim(),
+    row.querySelector<HTMLAnchorElement>("a.tf-btn")?.getAttribute("href"),
+  ]);
+  const at = "http://127.0.0.1:5399/secure/attachment";
+  expect(read).toEqual([
+    ["PNG", "psp-409-trace.png", "Lena Hoffmann, 2026-08-12, 182 KB", "Open", `${at}/50000/psp-409-trace.png`],
+    ["PNG", "retry-timeline.png", "Mara Lindqvist, 2026-08-19, 96 KB", "Open", `${at}/50001/retry-timeline.png`],
+    ["PDF", "sepa-error-codes.pdf", "Priya Nair, 2026-08-12, 1.2 MB", "Open", `${at}/50002/sepa-error-codes.pdf`],
+    ["CSV", "batch-13-failures.csv", "Lena Hoffmann, 2026-08-14, 48 KB", "Open", `${at}/50003/batch-13-failures.csv`],
+  ]);
+
+  rows[2]!.querySelector<HTMLAnchorElement>("a.tf-btn")!.click();
+  await until(() => sent.some((call) => call.cmd === "plugin:opener|open_url"), "Open handed nothing to the browser");
+  expect(sent.find((call) => call.cmd === "plugin:opener|open_url")!.args["url"]).toBe(`${at}/50002/sepa-error-codes.pdf`);
+});
+
+test("OPS-77 has no attachments and draws no Attachments section", async () => {
+  await openOn("#/ticket/mock%3AOPS-77", "Rotate the staging database credentials");
+  await pageOf("OPS-77");
+  await until(() => reading()?.querySelector("section[aria-labelledby='tf-tktalk']") !== null, "the reading column never drew");
+  expect(attachments()).toBeNull();
+  expect(reading()!.textContent).not.toContain("Attachments");
+});

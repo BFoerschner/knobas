@@ -2,7 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
-import type { EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
+import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -288,6 +288,11 @@ function getEntity(args: Record<string, unknown>) {
     // The mock adapter declares `labels` on the flat record (#811); none is
     // left off, as the real command leaves an empty list off the wire (#2400).
     ...fakeLabels(entry.payload["labels"]),
+    // The attachment list (#2404), held in its wire shape on the fixture row;
+    // none is left off, as the real command leaves an empty list off the wire.
+    ...(Array.isArray(entry.payload["attachments"]) && entry.payload["attachments"].length > 0
+      ? { attachments: entry.payload["attachments"] as Attachment[] }
+      : {}),
     // A repository's declared default branch and its tree's sections, as
     // Gitea declares both (#2307, #2298): the repository page's demo rows are
     // Gitea-shaped (`repoView`).

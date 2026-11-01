@@ -98,6 +98,25 @@ export const CORPUS: {
     description:
       "Payouts to two SEPA banks fail with a **409** on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n- Retry only the transient codes (`AC04` is final)\n- Cap the retry budget",
     comments: [{ by: "mara" }, { by: "jonas" }],
+    // The ticket page's attachment list (#2404), as `get_entity` answers it:
+    // the four files the Tidewater fixture gives PAY-231, at the addresses
+    // mockd serves them from. Only Jira declares attachments; the fake draws
+    // them on the mock ticket so the page has them under `?fake-ipc`.
+    attachments: [
+      ["50000", "psp-409-trace.png", "image/png", 186_368, "Lena Hoffmann", "2026-08-12T09:14:00Z"],
+      ["50001", "retry-timeline.png", "image/png", 98_304, "Mara Lindqvist", "2026-08-19T15:02:00Z"],
+      ["50002", "sepa-error-codes.pdf", "application/pdf", 1_258_291, "Priya Nair", "2026-08-12T11:30:00Z"],
+      ["50003", "batch-13-failures.csv", "text/csv", 49_152, "Lena Hoffmann", "2026-08-14T08:45:00Z"],
+    ].map(([id, name, mime, size, author, created]) => ({
+      id,
+      name,
+      mime,
+      size,
+      author,
+      created,
+      content_url: `${FIXTURE_HOST}/secure/attachment/${id}/${name}`,
+      thumbnail_url: String(mime).startsWith("image/") ? `${FIXTURE_HOST}/secure/thumbnail/${id}/${name}` : null,
+    })),
   }),
   // Deliberately in **no** project, key prefix notwithstanding: the miss
   // direction ADR-0010 fixes, and the one a QA pass has to be able to see. It

@@ -80,6 +80,7 @@
   import TfConnections from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
+  import TfJobAttachments from "./TfJobAttachments.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { proseMarkdown } from "../../render/prose";
   import TfLinkTo from "./TfLinkTo.svelte";
@@ -503,6 +504,9 @@
               {/if}
             </div>
           </section>
+          {#if detail.attachments !== undefined && detail.attachments.length > 0}
+            <TfJobAttachments files={detail.attachments} />
+          {/if}
           <section aria-labelledby="tf-tktalk">
             <header><h2 id="tf-tktalk">Conversation</h2></header>
             <TfConversation
