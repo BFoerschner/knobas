@@ -134,6 +134,11 @@ export function sourceState(
     const text = `Failed ${ago(finished, now)}`;
     return { tone: "warn", text: limit ? `${text}, stopped at ${limit}` : text, failed: false };
   }
+  // A sync on a good credential that left part of the source out says what
+  // (#2374): Jira Software refusing the boards is not a sign-in failure.
+  if (health?.state === "ok" && health.detail) {
+    return { tone: "warn", text: `Synced ${ago(finished, now)}, ${health.detail}`, failed: false };
+  }
   const misses = source.role_misses;
   if (misses.length > 0) {
     const [first] = misses;
