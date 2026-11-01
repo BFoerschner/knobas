@@ -23,6 +23,10 @@
 //! http://ipc.localhost` is what the IPC needs: Tauri's `ipc-protocol.js`
 //! reaches the backend with a `fetch`, and without it every command call is
 //! blocked in a release build while working perfectly in dev.
+//!
+//! Tauri sends the policy with `.html` assets only, so the module workers
+//! (Shiki, D2, Graphviz, pdf.js) run under no CSP at all and rely on it. A
+//! test below pins that and names the policy they would need (#2312).
 
 pub mod assets;
 pub mod backup;
@@ -1163,6 +1167,92 @@ fn install_panic_hook() {
 
 #[cfg(test)]
 mod tests {
+    /// The policy every module worker would need if Tauri sent it the CSP
+    /// (#2312). Shiki (`highlight.worker.ts`), D2 and Graphviz
+    /// (`diagram.worker.ts`) need `'unsafe-eval'` and `blob:` (D2 starts a
+    /// `blob:` worker of its own); pdf.js's worker compiles WASM and fetches
+    /// its decoders, fonts, CMaps and ICC profile from `/pdfjs/` (#2313).
+    const WORKER_POLICY: &str =
+        "script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval' blob:; connect-src 'self'";
+
+    /// Tauri sends `app.security.csp` with `.html` assets only, so every
+    /// module worker runs under no CSP at all, and D2, Graphviz, Shiki and
+    /// pdf.js depend on that (#2312). Pinned through Tauri's own asset
+    /// resolver, the `get_asset` the `tauri://` protocol answers with, so a
+    /// `tauri` upgrade that starts sending the policy with scripts fails here
+    /// rather than as a broken diagram in a release build.
+    #[test]
+    fn tauri_sends_the_csp_with_html_assets_only() {
+        use std::borrow::Cow;
+        use tauri::utils::assets::{AssetKey, AssetsIter, CspHash};
+
+        const WORKERS: [&str; 3] = [
+            "assets/highlight.worker-Bq3x9.js",
+            "assets/diagram.worker-Cr4y0.js",
+            "assets/pdf.worker.min-Ds5z1.mjs",
+        ];
+
+        struct Dist;
+        impl<R: tauri::Runtime> tauri::Assets<R> for Dist {
+            fn get(&self, key: &AssetKey) -> Option<Cow<'_, [u8]>> {
+                // Tauri roots every key: `/index.html`.
+                let path = key.as_ref().trim_start_matches('/');
+                let body: &[u8] = match path {
+                    "index.html" => b"<!doctype html><html><head></head><body></body></html>",
+                    _ if WORKERS.contains(&path) => b"self.onmessage = () => {};",
+                    _ => return None,
+                };
+                Some(Cow::Borrowed(body))
+            }
+            fn iter(&self) -> Box<AssetsIter<'_>> {
+                Box::new(std::iter::empty())
+            }
+            fn csp_hashes(&self, _: &AssetKey) -> Box<dyn Iterator<Item = CspHash<'_>> + '_> {
+                Box::new(std::iter::empty())
+            }
+        }
+
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        let csp = serde_json::from_value(config["app"]["security"]["csp"].clone())
+            .expect("app.security.csp is a CSP");
+        let mut context = tauri::test::mock_context(Dist);
+        context.config_mut().app.security.csp = Some(csp);
+        let app = tauri::test::mock_builder()
+            .build(context)
+            .expect("mock app");
+        let resolver = app.asset_resolver();
+
+        // Not vacuous: the document does get the policy.
+        let document = resolver.get("index.html".into()).expect("index.html");
+        assert!(
+            document
+                .csp_header()
+                .is_some_and(|csp| csp.contains("default-src 'self'")),
+            "the document lost its CSP: {:?}",
+            document.csp_header()
+        );
+
+        for worker in WORKERS {
+            let asset = resolver.get(worker.into()).expect(worker);
+            assert_eq!(
+                asset.bytes(),
+                b"self.onmessage = () => {};",
+                "{worker} fell back to another asset"
+            );
+            assert_eq!(
+                asset.csp_header(),
+                None,
+                "Tauri now sends the CSP with {worker}, so every module worker runs \
+                 under the document's policy and D2, Graphviz, Shiki and pdf.js's \
+                 decoders break in a release build (#2312). The workers need \
+                 `{WORKER_POLICY}`: widen `app.security.csp` in tauri.conf.json, or \
+                 give the workers a policy of their own through \
+                 `web_resource_request_handler`."
+            );
+        }
+    }
+
     /// The window `tauri.conf.json` declares is visible from the start, and
     /// `run` no longer shows it by hand.
     ///
