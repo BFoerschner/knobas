@@ -65,10 +65,15 @@
 //! in `just check` over `keyring-core`'s in-memory mock store, which opens no
 //! keychain.
 
+// Debug builds only (#2384): the demo profile's credentials in a 0600 file.
+#[cfg(debug_assertions)]
+pub mod file_store;
 pub mod keyring_store;
 pub mod memory;
 pub mod spawn;
 
+#[cfg(debug_assertions)]
+pub use file_store::FileStore;
 pub use keyring_store::KeyringStore;
 pub use memory::MemoryStore;
 

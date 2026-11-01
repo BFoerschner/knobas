@@ -2,7 +2,7 @@
 # Every live product as a source on the demo profile (#2371): Gitea, Forgejo,
 # Jira, Confluence, TeamCity and Uptime Kuma, through the app's own
 # `knobas-app live-sources` (crud add/update + set_secret), so each credential
-# lands in the keychain item the app reads.
+# lands in the demo profile's secret store, where the app reads it.
 #
 #   testenv/live-sources.sh add    [<knobas.app>] [--data-dir <dir>]
 #   testenv/live-sources.sh remove [<knobas.app>] [--data-dir <dir>]
@@ -15,12 +15,12 @@
 # `remove` deletes the six with what they synced and their credentials.
 #
 # A bundle given runs the bundle's own binary; without it target/debug/knobas-app is
-# built and run, which is the one `just demo` starts. Use the binary that will
-# read the credentials: macOS lets the binary that wrote a keychain item read
-# it without asking, and asks for any other one. No demo knobas may be running:
-# the demo profile's database is one process's at a time. --data-dir puts the
-# profile under a scratch directory instead (the recipe's own tests); the
-# keychain service is the demo profile's either way.
+# built and run, which is the one `just demo` starts. A debug build keeps the
+# demo profile's credentials in the profile's dev-secrets.json, not the
+# keychain (#2384), so every debug binary and bundle reads them without a
+# prompt. No demo knobas may be running: the demo profile's database is one
+# process's at a time. --data-dir puts the profile, and its credential file,
+# under a scratch directory instead (the recipe's own tests).
 
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
