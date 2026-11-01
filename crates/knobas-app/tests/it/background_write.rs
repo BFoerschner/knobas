@@ -650,9 +650,14 @@ async fn a_start_work_step_at_the_source_at_quit_lands_and_a_run_after_sends_not
     }
     let entity = |id: &str| EntityRef::parse(id).unwrap();
     for ticket in [BEFORE, AFTER] {
-        knobas_app::start_work::begin(&state.pool, &knobas_core::payload::Declarations::empty(), &entity(ticket), &entity(REPO))
-            .await
-            .expect("a flow is proposed");
+        knobas_app::start_work::begin(
+            &state.pool,
+            &knobas_core::payload::Declarations::empty(),
+            &entity(ticket),
+            &entity(REPO),
+        )
+        .await
+        .expect("a flow is proposed");
     }
     let app = tauri::test::mock_builder()
         .build(tauri::test::mock_context(tauri::test::noop_assets()))

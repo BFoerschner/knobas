@@ -372,7 +372,9 @@ async fn a_pull_request_opens_in_a_worktree_at_its_head_and_the_checkout_is_unto
         "the fetch wrote the worktree's FETCH_HEAD, not the checkout's"
     );
     assert_eq!(
-        worktree::list(&w.pool, &Registry::for_process()).await.unwrap(),
+        worktree::list(&w.pool, &Registry::for_process())
+            .await
+            .unwrap(),
         [worktree::PullRequestWorktree {
             repo_entity_id: w.repo.clone(),
             number: 7,
@@ -426,10 +428,16 @@ async fn a_closed_pull_requests_worktree_is_removed_on_the_next_open() {
     w.open(7, Some(&seven)).await.unwrap();
     w.open(9, Some(&nine)).await.unwrap();
     fs::write(w.worktree(9).join("wip.txt"), "unsaved\n").unwrap();
-    w.set_state(&seven, serde_json::json!({"state": "closed", "merged": false}))
-        .await;
-    w.set_state(&nine, serde_json::json!({"state": "closed", "merged": true}))
-        .await;
+    w.set_state(
+        &seven,
+        serde_json::json!({"state": "closed", "merged": false}),
+    )
+    .await;
+    w.set_state(
+        &nine,
+        serde_json::json!({"state": "closed", "merged": true}),
+    )
+    .await;
     let before = standing(&w.checkout);
 
     w.open(8, None).await.unwrap();
@@ -452,7 +460,8 @@ async fn a_closed_pull_requests_worktree_is_removed_on_the_next_open() {
     // Closed is read where Gitea's pull request kind declares its state
     // (#2358): a word that declaration does not name is not known to be
     // closed, and a worktree is never swept on a guess.
-    w.set_state(&nine, serde_json::json!({"state": "draft"})).await;
+    w.set_state(&nine, serde_json::json!({"state": "draft"}))
+        .await;
     assert_eq!(listed().await, [(9, false), (8, false)]);
     let registered = git(&w.checkout, &["worktree", "list", "--porcelain"]);
     assert!(
@@ -486,9 +495,13 @@ async fn settings_removes_a_worktree_and_git_refuses_one_with_changes() {
     assert_eq!(error.code, IpcErrorCode::Conflict, "{error:?}");
     assert!(eight.join("b.txt").exists());
 
-    let error = worktree::remove(&w.pool, &Registry::for_process(), &w.checkout.to_string_lossy())
-        .await
-        .unwrap_err();
+    let error = worktree::remove(
+        &w.pool,
+        &Registry::for_process(),
+        &w.checkout.to_string_lossy(),
+    )
+    .await
+    .unwrap_err();
     assert_eq!(
         error.code,
         IpcErrorCode::NotFound,
@@ -519,7 +532,12 @@ async fn a_folder_knobas_did_not_make_is_refused_and_a_failed_fetch_leaves_nothi
     assert_eq!(error.code, IpcErrorCode::Invalid, "{error:?}");
     assert!(error.message.contains("#41"), "{}", error.message);
     assert!(!w.worktree(41).exists());
-    assert!(worktree::list(&w.pool, &Registry::for_process()).await.unwrap().is_empty());
+    assert!(
+        worktree::list(&w.pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let registered = git(&w.checkout, &["worktree", "list", "--porcelain"]);
     assert!(!registered.contains("-41"), "{registered}");
     assert_eq!(standing(&w.checkout), before);

@@ -485,13 +485,25 @@ async fn the_proposed_base_is_the_default_branch_the_repository_kind_declares() 
             .to_owned()
     };
 
-    let flow = start_work::begin(&pool, &declaring(&["mainbranch", "name"]), &ticket(), &repo())
-        .await
-        .unwrap();
+    let flow = start_work::begin(
+        &pool,
+        &declaring(&["mainbranch", "name"]),
+        &ticket(),
+        &repo(),
+    )
+    .await
+    .unwrap();
     assert_eq!(base(&flow), "develop");
 
     let other = EntityRef::parse("jira:PAY-232").unwrap();
-    item(&pool, "jira:PAY-232", "ticket", "a second ticket", serde_json::json!({})).await;
+    item(
+        &pool,
+        "jira:PAY-232",
+        "ticket",
+        "a second ticket",
+        serde_json::json!({}),
+    )
+    .await;
     let flow = start_work::begin(&pool, &declaring(&["trunk"]), &other, &repo())
         .await
         .unwrap();
@@ -1646,10 +1658,9 @@ async fn a_source_that_spells_head_and_base_its_own_way_is_read_where_it_declare
         .unwrap();
     assert_eq!(found, PullRequestOnHead::Open(PR_REOPENED.to_owned()));
 
-    let found =
-        queue::pull_request_on_head(&pool, &declarations, &repo(), head, "release/2026.08")
-            .await
-            .unwrap();
+    let found = queue::pull_request_on_head(&pool, &declarations, &repo(), head, "release/2026.08")
+        .await
+        .unwrap();
     assert_eq!(
         found,
         PullRequestOnHead::Closed {

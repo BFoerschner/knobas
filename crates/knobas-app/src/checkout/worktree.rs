@@ -58,8 +58,8 @@ use knobas_sync::scheduler::AdapterRegistry;
 
 use super::working_tree::{self, PROTOCOL_VARIABLES, REPOSITORY_VARIABLES};
 use crate::IpcError;
-use crate::sources::paths::declared_paths;
 use crate::settings::{read_value, write_value};
+use crate::sources::paths::declared_paths;
 
 /// The `knobas.setting` key holding the worktrees knobas made.
 pub const WORKTREES_KEY: &str = "checkout.pull_request_worktrees";
@@ -418,8 +418,7 @@ async fn sweep_but(
         if !exists(&path).await {
             continue;
         }
-        if !closed(pool, &declarations, record.item.as_deref()).await?
-            || !is_worktree(&path).await
+        if !closed(pool, &declarations, record.item.as_deref()).await? || !is_worktree(&path).await
         {
             kept.push(record);
             continue;
