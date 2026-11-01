@@ -1711,6 +1711,13 @@ records `refs/pull/<n>/head` from the https address, the clone's branch, `HEAD`
 and status are unchanged; the diff tool's right-hand folder holds every file
 the pull request changes; the *Browser* item names the page and the default
 browser comes to the front. It then removes the source with what it synced.
+The page draws two *Open in…*: the header's, for the pull request, and the
+*Local checkout* card's, for the repository. The header's comes first and is
+drawn last, so the driver waits for both and opens the first; the first run
+(2026-11-01) opened the card's, whose application ran at the checkout. To
+bring knobas back from the browser it focuses the window through AeroSpace
+and opens the running bundle: `ax activate` alone is refused while the browser
+holds the front.
 
 `capture` (#503, ported by #1084) is the **global** shortcut, which is the one
 keystroke in knobas that has to arrive while knobas is not the application

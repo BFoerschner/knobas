@@ -45,6 +45,7 @@ cd "$(dirname "$0")/../.."
 
 ax=${KNOBAS_WITNESS_AX:?the harness passes this}
 pid=${KNOBAS_WITNESS_PID:?the harness passes this}
+app=${KNOBAS_WITNESS_APP:?the harness passes this}
 
 # The accessible names this driver presses and fills, each pinned against the
 # file that carries it by `just witness-unit`.
@@ -159,6 +160,18 @@ click_words() {
     wait_until "could not click '$1'" visible_words "$1"
 }
 
+# to_sources -- Settings opens on the section it last showed, Sources the
+# first time: there 'Sources' is the crumb, the nav item and the heading at
+# once (3 names, #2316's first run), and the section needs no press. From any
+# other section the nav item is the only one.
+to_sources() {
+    press_when "$SETTINGS_BUTTON"
+    on_some_section() { [ "$(count_of "$SOURCES_SECTION")" != x ] && [ "$(count_of "$SOURCES_SECTION")" -gt 0 ]; }
+    wait_until "Settings drew no '$SOURCES_SECTION'" on_some_section
+    absent "$ADD_A_SOURCE" || return 0
+    press_when "$SOURCES_SECTION"
+}
+
 # The focused menu item's title and description, `|`-separated.
 focused_item() {
     local focused
@@ -166,11 +179,24 @@ focused_item() {
     [ "$(tsv_field "$focused" role)" = AXMenuItem ] || return 1
     printf '%s|%s\n' "$(tsv_field "$focused" title)" "$(tsv_field "$focused" description)"
 }
-# open_menu_at <item> -- open *Open in…* and walk up to the item whose name
-# starts with <item>: the menu wraps, so this reaches every item, and the
-# focus is asserted by name before anything is pressed.
+# The pull request's page draws two *Open in…*: the header's, for the pull
+# request (`TfOpenObject`: its worktree, the Diff tool, its page), and the
+# Local checkout card's, for the repository's checkout (`TfOpenIn`). The
+# header's comes first in the page and draws last, once the source view gave
+# both branches: #2316's first run pressed the only one drawn yet, the card's,
+# and its application ran at the checkout.
+both_open_ins() {
+    local n
+    n=$(count_of "$OPEN_IN")
+    seen="'$OPEN_IN' counted $n"
+    [ "$n" = 2 ]
+}
+# open_menu_at <item> -- open the header's *Open in…* and walk up to the item
+# whose name starts with <item>: the menu wraps, so this reaches every item,
+# and the focus is asserted by name before anything is pressed.
 open_menu_at() {
-    press_when "$OPEN_IN"
+    wait_until "the pull request's page does not draw both '$OPEN_IN'" both_open_ins
+    "$ax" press-visible "$pid" "$OPEN_IN" 1 || die "could not press the header's '$OPEN_IN'"
     menu_focused() { focused_item >/dev/null; }
     wait_until "'$OPEN_IN' opened no menu with a focused item" menu_focused
     local tries item
@@ -257,12 +283,26 @@ say "a clone at $checkout, a stub at $stub"
 
 say "bringing pid $pid to the front"
 "$ax" activate "$pid"
+# knobas' window, while it is in front: AeroSpace focuses a window by this id.
+window=$("$ax" window-id "$pid" 2>/dev/null | cut -f1) || window=
+# to_front -- knobas back in front once the browser has it. `ax activate`
+# alone is refused then (#2316's first run: macOS's cooperative activation
+# lets the app in front keep it, and AeroSpace had the browser on another
+# workspace), so AeroSpace focuses the window and Launch Services opens the
+# running bundle, as a click in the Dock would, before `activate` checks.
+to_front() {
+    if [ -n "$window" ] && command -v aerospace >/dev/null; then
+        aerospace focus --window-id "$window" >/dev/null 2>&1 || true
+    fi
+    KNOBAS_WITNESS_WAIT_S=5 "$ax" activate "$pid" 2>/dev/null && return 0
+    open "$app"
+    "$ax" activate "$pid" || die "knobas (pid $pid) would not come back to the front after '$BROWSER'."
+}
 
 # --- 1. Settings › Sources: the testenv Gitea, over https --------------------
 
 say "adding $GITEA_HTTPS as '$SOURCE_NAME' in Settings › $SOURCES_SECTION"
-press_when "$SETTINGS_BUTTON"
-press_when "$SOURCES_SECTION"
+to_sources
 lands_named settings-sources "$ADD_A_SOURCE"
 press_when "$ADD_A_SOURCE"
 click_words "$ADAPTER_GITEA"
@@ -319,12 +359,18 @@ absent "$OPEN_IN" || die "an '$OPEN_IN' is on screen before the pull request is 
 "$ax" key "$KEY_RETURN"
 # The header's *Open in…* is drawn only once the source view gave the
 # pull request both branches (`TfPr.svelte`).
-wait_until "the pull request's page drew no '$OPEN_IN' after Return" exactly_one "$OPEN_IN"
+wait_until "the pull request's page drew no header '$OPEN_IN' after Return" both_open_ins
 say "pull request #$PR_NUMBER is open, with its '$OPEN_IN'"
 
 # --- 4. the worktree (#2285) -------------------------------------------------
 
 open_menu_at "$APP_NAME"
+# The item shows the command it runs, filled with the worktree: the header's menu.
+item=$(focused_item)
+case $item in
+*"$worktree"*) ;;
+*) die "the '$APP_NAME' item does not run at the worktree $worktree: '$item'." ;;
+esac
 "$ax" key "$KEY_RETURN"
 wait_for_record "$record" "$SETTLE_SECONDS" || die "the application's stub never finished a record."
 only=$(sole_argument "$(cat "$record")")
@@ -365,12 +411,11 @@ esac
 browser_in_front() { [ "$(frontmost_bundle "$("$ax" frontmost 2>/dev/null || true)")" = "$browser" ]; }
 witness_poll "$pid" "$SETTLE_SECONDS" browser_in_front || die "the default browser ($browser) did not come to the front after '$BROWSER'."
 say "'$BROWSER' handed $PR_PAGE to $browser"
-"$ax" activate "$pid"
+to_front
 
 # --- 7. remove the source ----------------------------------------------------
 
-press_when "$SETTINGS_BUTTON"
-press_when "$SOURCES_SECTION"
+to_sources
 lands_named settings-sources "$ADD_A_SOURCE"
 click_words "$SOURCE_NAME"
 press_when "$REMOVE_SOURCE"
