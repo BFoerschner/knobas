@@ -14,7 +14,7 @@ use knobas_source::SyncItem;
 use knobas_source::contract::VecSink;
 use knobas_source::docs::{DocBlock, DocContent, EmbedContent, Inline};
 use knobas_source::instance::SourceInstance;
-use knobas_wasm_host::limits::Limits;
+use knobas_wasm_host::limits::{self, Limits};
 use knobas_wasm_host::{WasmAdapter, load_fixture, manifest, patched_fixture};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -393,6 +393,29 @@ fn a_projection_that_traps_spins_or_hogs_is_no_content_and_the_adapter_goes_on()
         );
     }
     assert!(adapter.project("page", &payload("<p>words</p>")).is_some());
+}
+
+/// A projection that spins under the adapter's default deadline of ten
+/// minutes is stopped at the projection's own, so opening a page never
+/// waits on it for longer (spec #2432 story 48).
+#[test]
+fn a_spinning_projection_stops_at_its_own_deadline_not_the_adapters() {
+    let adapter = load_fixture();
+    assert_eq!(adapter.limits().deadline, limits::DEFAULT_DEADLINE);
+    let mut spins = payload("<p>words</p>");
+    spins["spin"] = true.into();
+    let started = Instant::now();
+    let (sent, answer) = std::sync::mpsc::channel();
+    std::thread::spawn(move || sent.send(adapter.project("page", &spins)));
+    let drawn = answer
+        .recv_timeout(limits::PROJECTION_DEADLINE * 3)
+        .expect("the projection is stopped well before the adapter's deadline");
+    assert_eq!(drawn, None);
+    let took = started.elapsed();
+    assert!(
+        took >= limits::PROJECTION_DEADLINE,
+        "stopped at the projection's deadline: {took:?}"
+    );
 }
 
 /// A new component whose projection draws differently draws the same

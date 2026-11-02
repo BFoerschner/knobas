@@ -310,6 +310,22 @@ pub trait Adapter: Sized + 'static {
         Ok(None)
     }
 
+    /// The docs projection (1.5.0, ADR-0040): the record of entity kind
+    /// `kind` whose payload, as this adapter emitted it, is `payload`, drawn
+    /// as a docs page, or `None`, the default, for a kind it draws no page
+    /// for. A plain function of the payload: the host calls it when a page
+    /// is opened and when it indexes a `page` at sync, with no instance and
+    /// no HTTP capability (every request is refused), and stops it after
+    /// at most 5 s. A projection that panics or is stopped is no content,
+    /// and the page draws as the source's failure.
+    /// Built against 1.4.0 or earlier, which has no `docs`, it is never
+    /// called.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn project(kind: &str, payload: &serde_json::Value) -> Option<knobas_source::docs::DocContent> {
+        let _ = (kind, payload);
+        None
+    }
+
     /// Read one item by id (ADR-0031): `entity` is an entity ref in string
     /// form, in this instance's namespace. [`RefreshAnswer::Item`] is the
     /// item as `sync` hands it to the sink for that id, [`RefreshAnswer::Gone`]
@@ -319,21 +335,6 @@ pub trait Adapter: Sized + 'static {
     /// [`spi::Capability::Refresh`]; the contract battery's clause 13 holds
     /// both, and holds each answer to what the sync emitted. Built against
     /// 1.3.0 or earlier, which has no `refresh`, it is never called.
-    /// The docs projection (1.5.0, ADR-0040): the record of entity kind
-    /// `kind` whose payload, as this adapter emitted it, is `payload`, drawn
-    /// as a docs page, or `None`, the default, for a kind it draws no page
-    /// for. A plain function of the payload: the host calls it when a page
-    /// is opened and when it indexes a `page` at sync, with no instance and
-    /// no HTTP capability (every request is refused). A projection that
-    /// panics is no content, and the page draws as the source's failure.
-    /// Built against 1.4.0 or earlier, which has no `docs`, it is never
-    /// called.
-    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
-    fn project(kind: &str, payload: &serde_json::Value) -> Option<knobas_source::docs::DocContent> {
-        let _ = (kind, payload);
-        None
-    }
-
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
     fn refresh(&self, entity: &str) -> Result<RefreshAnswer, SourceError> {
         let _ = entity;

@@ -358,15 +358,17 @@ pub(crate) async fn check_project(adapter: &WasmAdapter) -> Result<(), String> {
 ///
 /// The store's policy allows no host, so a request the component sends is
 /// refused before a socket opens: a projection reads the payload it is
-/// handed and nothing else. The adapter's deadline and memory cap hold it as
-/// they hold every call.
+/// handed and nothing else. The adapter's memory cap holds it as it holds
+/// every call, and its deadline does up to [`limits::PROJECTION_DEADLINE`],
+/// so a page open never waits on a projection for longer.
 pub(crate) async fn project(
     adapter: &WasmAdapter,
     kind: &str,
     payload: &serde_json::Value,
 ) -> Option<DocContent> {
     let payload = convert::to_json(payload);
-    let answer = limits::bounded(adapter, async {
+    let deadline = adapter.limits().deadline.min(limits::PROJECTION_DEADLINE);
+    let answer = limits::bounded_by(adapter, deadline, async {
         let mut store = new_store(
             adapter,
             adapter.kind(),

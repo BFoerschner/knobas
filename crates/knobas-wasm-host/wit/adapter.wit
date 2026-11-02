@@ -273,7 +273,8 @@ interface refresh {
 /// **No way out.** The host calls it with no HTTP capability: every request
 /// the component sends is refused before it leaves, whatever its manifest
 /// declares. A projection reads the payload it is handed and nothing else,
-/// under the adapter's deadline and memory cap. One that traps, runs past
+/// under the adapter's memory cap and its deadline, held to at most 5 s so
+/// that opening a page never waits longer. One that traps, runs past
 /// either or answers what does not decode is no content: the page draws as
 /// the source's failure.
 interface docs {

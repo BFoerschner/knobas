@@ -25,8 +25,9 @@
 //! the limit.
 //!
 //! **The docs projection** (1.5.0, #2442, ADR-0040) is the one call made
-//! with no way out: [`WasmAdapter::project`] runs under the same deadline
-//! and memory cap with a policy that allows no host, so every request the
+//! with no way out: [`WasmAdapter::project`] runs under the same memory cap,
+//! a deadline held to [`limits::PROJECTION_DEADLINE`], and a policy that
+//! allows no host, so every request the
 //! component sends is refused, whatever its manifest declares. A page's
 //! search text is built here from it at sync ([`WasmSource`]).
 //!
@@ -629,16 +630,50 @@ fn new_store(
 /// Where `just wasm-fixture` writes the fixture component, or
 /// `KNOBAS_WASM_FIXTURE` when that names another file. For tests: the
 /// fixture is a test adapter and nothing ships it, hence `test-util`.
+///
+/// Panics when the component at the default path is older than a source it
+/// was built from (#2442): a test on a stale fixture can pass without
+/// seeing what the fixture now does, as a mutant once survived that way.
 #[cfg(feature = "test-util")]
 #[must_use]
 pub fn fixture_component() -> std::path::PathBuf {
     std::env::var_os("KNOBAS_WASM_FIXTURE").map_or_else(
         || {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/wasm32-wasip2/release/knobas_wasm_fixture.wasm")
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/wasm32-wasip2/release/knobas_wasm_fixture.wasm");
+            assert_fixture_fresh(&path);
+            path
         },
         std::path::PathBuf::from,
     )
+}
+
+/// Panics naming a source newer than the component at `path`, read from
+/// the dep-info file cargo writes beside it (every source the build read,
+/// the WIT included). A component or dep-info that is missing is left to
+/// the load, which names the recipe.
+#[cfg(feature = "test-util")]
+fn assert_fixture_fresh(path: &Path) {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let Some(built) = modified(path) else {
+        return;
+    };
+    let Ok(dep_info) = std::fs::read_to_string(path.with_extension("d")) else {
+        return;
+    };
+    let Some((_, sources)) = dep_info.lines().next().and_then(|l| l.split_once(": ")) else {
+        return;
+    };
+    for source in sources.split_whitespace().map(Path::new) {
+        if modified(source).is_some_and(|changed| changed > built) {
+            panic!(
+                "the fixture component at {} is older than {}, which it is built from; \
+                 `just wasm-fixture` rebuilds it",
+                path.display(),
+                source.display()
+            );
+        }
+    }
 }
 
 /// The fixture built against the frozen 1.0.0 world, which `just
