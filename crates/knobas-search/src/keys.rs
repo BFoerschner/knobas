@@ -152,7 +152,9 @@ pub async fn bind_action(
 ) -> Result<(), SearchError> {
     let chord = checked(chord)?;
     if kind.trim().is_empty() || action_id.trim().is_empty() {
-        return Err(SearchError::Invalid("a key names a kind and an action".into()));
+        return Err(SearchError::Invalid(
+            "a key names a kind and an action".into(),
+        ));
     }
     let mut tx = pool.begin().await?;
     sqlx::query("delete from knobas.action_key where kind = $1 and (action_id = $2 or chord = $3)")
@@ -182,7 +184,8 @@ mod tests {
         for good in ["⌘O", "⌘⇧O", "⌘⌃⌥⇧9", "⌥1", "⌃K"] {
             assert!(is_chord(good), "{good}");
         }
-        for bad in ["O", "⇧O", "⌘", "⌘OO", "⌘/", "⌘o", "⇧⌘O", "⌥⌘O", "", "⌘⌘O"] {
+        for bad in ["O", "⇧O", "⌘", "⌘OO", "⌘/", "⌘o", "⇧⌘O", "⌥⌘O", "", "⌘⌘O"]
+        {
             assert!(!is_chord(bad), "{bad}");
         }
     }

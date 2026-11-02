@@ -1097,7 +1097,11 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     assert_eq!(
         keys.actions
             .iter()
-            .map(|key| (key.kind.as_str(), key.chord.as_str(), key.action_id.as_str()))
+            .map(|key| (
+                key.kind.as_str(),
+                key.chord.as_str(),
+                key.action_id.as_str()
+            ))
             .collect::<Vec<_>>(),
         vec![("pr", "⌘⇧O", "approve"), ("repo", "⌘⇧O", "open-vscode")],
         "the actions' chords did not cross"
