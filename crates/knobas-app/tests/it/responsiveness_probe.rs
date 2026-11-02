@@ -1240,6 +1240,9 @@ async fn what_the_reader_waits_on() {
         "payment retry",
         "JIRA0-42",
         "kind:build fail",
+        // The `#` letters (#2420): one kind, and two combined.
+        "#t payment",
+        "#tp payment retry",
     ] {
         time("search keystroke", &format!("search {raw:?}"), runs, || {
             search_inner(
