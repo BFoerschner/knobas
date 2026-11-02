@@ -44,7 +44,7 @@
 import type { Handlers } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 import { signInFails } from "../../health.svelte";
-import { fakeOpenAlerts } from "./monitors";
+import { fakeHiddenMonitors, fakeOpenAlerts } from "./monitors";
 import { FIXTURE_SOURCES } from "./sources";
 import type { InboxCategory, InboxEntry, InboxShelf } from "../../../ipc/entity";
 import type { AuthState } from "../../../ipc/sources";
@@ -149,11 +149,13 @@ function snoozed(): InboxEntry[] {
 }
 
 /**
- * Whether an alert row's monitor has been acked (`monitors.ts` keeps the ack),
- * as a test made once per read: the alerts are read once, not once per row.
+ * Whether an alert row's monitor has been acked or hidden (`monitors.ts` keeps
+ * both), as a test made once per read: the alerts are read once, not once per
+ * row. A hidden monitor's alert reaches no inbox, as the backend's rule says.
  */
 function ackedNow(): (entry: InboxEntry) => boolean {
   const acked = new Set(fakeOpenAlerts().filter((alert) => alert.acked_at !== null).map((alert) => alert.monitor_id));
+  for (const id of fakeHiddenMonitors()) acked.add(id);
   return (entry) => entry.item.category === "alert" && acked.has(entry.item.key.slice("alert:".length));
 }
 
