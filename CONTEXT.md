@@ -198,6 +198,10 @@ _Avoid_: filter, saved search, built-in list
 An entity or a [smart list](#smart-list) a reader keeps at the top of the [launcher](#launcher)'s empty box, set with *Favourite* and *Unfavourite* in the Tab sheet: a row in `knobas.favourite` holding the entity id or the list id and a position. The empty box draws them under one Favourites heading, lists and entities together in the order they were favourited, then Recent. Deleting a list forgets its favourite; an entity favourite whose entity is not known yet is kept and drawn once it is. The [share export](#share-export) carries them in the saved lists' part.
 _Avoid_: bookmark, starred
 
+**Key**:
+A chord a reader binds in the [launcher](#launcher): a modifier and one letter or digit, read by the key's code and spelled `⌘⇧O` (⌘ ⌃ ⌥ ⇧, then the key). A [smart list](#smart-list)'s key (`knobas.list_key`, *Assign key…* in its Tab sheet) opens the launcher on the list from anywhere, launcher closed or not. An action's key (`knobas.action_key`, ⌘B on the action in the Tab sheet) is kept per kind and runs that action on the selected row of the kind, so one chord can mean *Open in VS Code* on a repository and *Approve* on a pull request. Bound in the key panel; the launcher's own chords (⌘K, ⌘S, ⌘B, ⌘D, ⌘?), the shell's (⌘T, ⌘R) and the system's editing and window chords are refused there. The [share export](#share-export) carries both tables in the saved lists' part.
+_Avoid_: shortcut, hotkey, binding
+
 ## Acting on sources
 
 **Write-back**:
@@ -357,7 +361,7 @@ _Avoid_: incident, notification (bare), problem (the rolled-up count on a closed
 Everything knobas owns, notes included; the mirror is excluded, since it re-syncs.
 
 **Share export**:
-A curated export in the backup's own format restricted to tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, read by the ordinary restore. Parts: links, assets, contexts, [source](#source) configurations, smart lists with the [favourites](#favourite), ticket views and link sets on by default; notes and time (the timer, [blocks](#block) and [worklogs](#worklog)) off. A part whose table is empty is sent off rather than hidden. Because `pg_dump` restricts by table and never by row, the time settings cannot cross and the whole address book of entity rows does. No credential is ever in an archive, so a restored source lands as *missing secret* and at no position, since no archive carries the [mirror](#mirror). Saved queries cross exactly as written.
+A curated export in the backup's own format restricted to tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, read by the ordinary restore. Parts: links, assets, contexts, [source](#source) configurations, smart lists with the [favourites](#favourite) and [keys](#key), ticket views and link sets on by default; notes and time (the timer, [blocks](#block) and [worklogs](#worklog)) off. A part whose table is empty is sent off rather than hidden. Because `pg_dump` restricts by table and never by row, the time settings cannot cross and the whole address book of entity rows does. No credential is ever in an archive, so a restored source lands as *missing secret* and at no position, since no archive carries the [mirror](#mirror). Saved queries cross exactly as written.
 
 ## Surfaces
 
