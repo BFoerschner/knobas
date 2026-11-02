@@ -751,7 +751,9 @@ impl Searcher {
 fn flag_lists_needing_attention(groups: &mut [ResultGroup], vocab: &Vocabulary) {
     for group in groups.iter_mut().filter(|group| group.kind == "list") {
         for hit in &mut group.hits {
-            let Some(text) = hit.row.path.as_deref() else { continue };
+            let Some(text) = hit.row.path.as_deref() else {
+                continue;
+            };
             if let Err(refusal) = saved::plan(text, vocab) {
                 hit.row.state = Some(knobas_core::payload::StateChip {
                     text: refusal.description(),
@@ -967,11 +969,9 @@ mod tests {
             match prefix {
                 Prefix::Asset => Some("'asset'"),
                 Prefix::Note => Some("'note'"),
-                Prefix::Action
-                | Prefix::Person
-                | Prefix::Source
-                | Prefix::Time
-                | Prefix::Help => None,
+                Prefix::Action | Prefix::Person | Prefix::Source | Prefix::Time | Prefix::Help => {
+                    None
+                }
             }
         }
         for prefix in [

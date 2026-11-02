@@ -995,7 +995,10 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     // And in `smart_lists`, alone: there are no built-ins beside it (#2423).
     let listed = rail(&pool).await;
     assert_eq!(
-        listed.iter().map(|list| list.id.as_str()).collect::<Vec<_>>(),
+        listed
+            .iter()
+            .map(|list| list.id.as_str())
+            .collect::<Vec<_>>(),
         [made.id.as_str()]
     );
 
@@ -1247,10 +1250,17 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
     let found = search_inner(&pool, &Registry::for_process(), query("#l"))
         .await
         .expect("#l answers");
-    let group = found.groups.iter().find(|g| g.kind == "list").expect("lists");
+    let group = found
+        .groups
+        .iter()
+        .find(|g| g.kind == "list")
+        .expect("lists");
     assert_eq!(group.hits.len(), broken.len() + 1, "{found:?}");
     for hit in &group.hits {
-        let summary = listed.iter().find(|list| list.id == hit.row.entity_id).unwrap();
+        let summary = listed
+            .iter()
+            .find(|list| list.id == hit.row.entity_id)
+            .unwrap();
         match &hit.row.state {
             Some(state) => assert_eq!(state.text, summary.description, "{hit:?}"),
             None => assert_eq!(hit.row.entity_id, healthy.id, "{hit:?}"),
@@ -1610,13 +1620,22 @@ fn a_query_without_the_titles_flag_reads_as_everything() {
 }
 
 /// The hits of one kind in an answer, as `(entity_id, title, path)`.
-fn hits_of(response: &knobas_search::SearchResponse, kind: &str) -> Vec<(String, String, Option<String>)> {
+fn hits_of(
+    response: &knobas_search::SearchResponse,
+    kind: &str,
+) -> Vec<(String, String, Option<String>)> {
     response
         .groups
         .iter()
         .filter(|group| group.kind == kind)
         .flat_map(|group| group.hits.iter())
-        .map(|hit| (hit.row.entity_id.clone(), hit.row.title.clone(), hit.row.path.clone()))
+        .map(|hit| {
+            (
+                hit.row.entity_id.clone(),
+                hit.row.title.clone(),
+                hit.row.path.clone(),
+            )
+        })
         .collect()
 }
 
@@ -1644,7 +1663,11 @@ async fn hash_l_answers_the_saved_lists_with_their_text_as_the_path_line() {
     assert_eq!(
         lists,
         [
-            ("payout-tickets".to_owned(), "Payout tickets".to_owned(), Some(other.clone())),
+            (
+                "payout-tickets".to_owned(),
+                "Payout tickets".to_owned(),
+                Some(other.clone())
+            ),
             (made.id.clone(), "Reviews".to_owned(), Some(gitea.clone())),
         ],
         "{every:?}"
@@ -1660,12 +1683,18 @@ async fn hash_l_answers_the_saved_lists_with_their_text_as_the_path_line() {
     let by_text = search_inner(&pool, &Registry::for_process(), query("#l gitea"))
         .await
         .expect("#l gitea answers");
-    assert_eq!(hits_of(&by_text, "list"), [(made.id.clone(), "Reviews".to_owned(), Some(gitea.clone()))]);
+    assert_eq!(
+        hits_of(&by_text, "list"),
+        [(made.id.clone(), "Reviews".to_owned(), Some(gitea.clone()))]
+    );
     let by_name = search_inner(&pool, &Registry::for_process(), query("#l payout"))
         .await
         .expect("#l payout answers");
     assert_eq!(
-        hits_of(&by_name, "list").into_iter().map(|hit| hit.0).collect::<Vec<_>>(),
+        hits_of(&by_name, "list")
+            .into_iter()
+            .map(|hit| hit.0)
+            .collect::<Vec<_>>(),
         ["payout-tickets"]
     );
 }
@@ -1676,9 +1705,14 @@ async fn hash_l_answers_the_saved_lists_with_their_text_as_the_path_line() {
 async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
     let pool = saved_pool("list-attention").await;
     let t = token("la");
-    create_smart_list_inner(&pool, &Registry::for_process(), "Healthy", &format!("#t {t}"))
-        .await
-        .expect("a query the grammar runs");
+    create_smart_list_inner(
+        &pool,
+        &Registry::for_process(),
+        "Healthy",
+        &format!("#t {t}"),
+    )
+    .await
+    .expect("a query the grammar runs");
     // Written as an older knobas could have: `>` is the palette, not a search.
     sqlx::query("insert into knobas.smart_list (id, label, query) values ('broken', 'Broken', '> settings')")
         .execute(&pool)
@@ -1688,7 +1722,11 @@ async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
     let every = search_inner(&pool, &Registry::for_process(), query("#l"))
         .await
         .expect("#l answers");
-    let group = every.groups.iter().find(|g| g.kind == "list").expect("a list group");
+    let group = every
+        .groups
+        .iter()
+        .find(|g| g.kind == "list")
+        .expect("a list group");
     let state = |id: &str| {
         group
             .hits

@@ -158,15 +158,18 @@ label: string, };
  *
  * **The one DTO in this stream that composes two streams' data**, which is
  * why it lives in the command module rather than in `knobas-search`:
- * `smart_lists` and `recent` are the search crate's [`LauncherBoard`],
+ * `recent` is the search crate's [`LauncherBoard`],
  * `sources` is stream F's [`CredentialHealth`], and `pending_writes` counts
  * stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
  * depends on none of those crates.
  *
  * [`LauncherBoard`]: knobas_search::LauncherBoard
  * [`CredentialHealth`]: knobas_sync::CredentialHealth
+ *
+ * No lists since #2423 (spec #2419): a saved list is a `list` hit behind
+ * `#l`, and the built-in ones are gone.
  */
-export type LauncherHome = { smart_lists: Array<SmartListSummary>, 
+export type LauncherHome = { 
 /**
  * `knobas_search::EntityRow`, a *different Rust struct* from
  * `knobas_core::entity_list::EntityRow` with the same eight fields on
@@ -258,15 +261,16 @@ text: string, prefix: Prefix | null, filters: SearchFilters,
 unknown_tokens: Array<string>, };
 
 /**
- * The launcher's prefixes (§4): `>` `@` `t ` `note:` `list:` `asset:` `?`,
- * and `source:` for [`Prefix::Source`].
+ * The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and
+ * `source:` for [`Prefix::Source`].
  *
  * `#` is no prefix since spec #2419 (#2420): `#t`, `#rl` and the other filter
  * letters are kind filters, which claim none, as `kind:` claims none; the
  * `ticket` variant went with the bare-key lookup it named. `/` for a source
- * went too, and `source:` is what claims `source` now.
+ * went too, and `source:` is what claims `source` now. `list:` went with
+ * #2423: a saved list is found behind `#l` and applied by its own text.
  */
-export type Prefix = "action" | "person" | "source" | "time" | "note" | "list" | "asset" | "help";
+export type Prefix = "action" | "person" | "source" | "time" | "note" | "asset" | "help";
 
 /**
  * One condition: a key, *is* or *is not*, and values any of which it means.
@@ -547,54 +551,6 @@ coverage: Array<FilterCoverage>, };
  * the bridge (roadmap §4 gotcha 7).
  */
 export type Segment = { text: string, hit: boolean, };
-
-/**
- * One entry of the launcher board's smart-list rail (interfaces §2.4).
- *
- * Built-in and saved lists are **one shape** (#506, story 57): both are
- * opened by `list:<id>`, both carry a count and a change badge, and
- * [`Self::saved`] is the only thing that tells them apart.
- */
-export type SmartListSummary = { 
-/**
- * Stable id; also what `list:<id>` in the box names.
- */
-id: string, label: string, 
-/**
- * How many items are in the list right now.
- */
-count: number, 
-/**
- * Something in this list is newer than the last time it was opened.
- */
-changed: boolean, 
-/**
- * Display text: the list's blurb, the reason it is empty, or -- for a
- * saved list -- the query it stands for.
- */
-description: string, 
-/**
- * Whether somebody saved this list, rather than knobas shipping it
- * (#506).
- *
- * The one thing the rail needs to tell the two apart, and it is a
- * *capability* rather than a provenance note: a saved list can be renamed
- * and deleted and a built-in cannot, so the row draws those two controls
- * exactly when this is `true`. Both kinds are opened the same way, by
- * `list:<id>`, which is why the id is not what says which one this is.
- */
-saved: boolean, 
-/**
- * The saved query cannot be run by today's grammar (#506, story 60).
- *
- * Always `false` for a built-in: a built-in's predicate is compiled in, so
- * there is no version of it the launcher could fail to understand.
- * [`Self::count`] is `0` and [`Self::changed`] `false` on such a row --
- * not because the list is empty, but because nothing was asked -- and
- * [`Self::description`] carries [`crate::saved::NEEDS_ATTENTION`] and the
- * reason, the rule that refused it. The row does not open.
- */
-needs_attention: boolean, };
 
 /**
  * One source, and what it could do with the dimension it is listed under.

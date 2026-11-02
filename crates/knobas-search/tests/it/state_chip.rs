@@ -264,4 +264,3 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
     let board = searcher(&pool).await.launcher_board().await.unwrap();
     assert_eq!(states(&board.recent, &ids), expected());
 }
-

@@ -782,8 +782,14 @@ mod tests {
     #[test]
     fn a_list_saved_under_the_old_grammar_needs_attention() {
         let v = Vocabulary::fixture();
-        assert_eq!(plan("list:mine", &v).unwrap_err(), Refusal::NamesAnotherList);
-        assert_eq!(plan("  LIST:mine sepa", &v).unwrap_err(), Refusal::NamesAnotherList);
+        assert_eq!(
+            plan("list:mine", &v).unwrap_err(),
+            Refusal::NamesAnotherList
+        );
+        assert_eq!(
+            plan("  LIST:mine sepa", &v).unwrap_err(),
+            Refusal::NamesAnotherList
+        );
         assert_eq!(
             plan("/ji sepa", &v).unwrap_err(),
             Refusal::OldSourceMarker("/ji".to_owned())
@@ -796,7 +802,10 @@ mod tests {
         assert!(plan("source:ji sepa", &v).is_ok());
         assert!(plan("#t sepa", &v).is_ok());
         let said = Refusal::OldSourceMarker("/ji".to_owned()).description();
-        assert!(said.contains("`/ji`") && said.contains("`source:ji`"), "{said}");
+        assert!(
+            said.contains("`/ji`") && said.contains("`source:ji`"),
+            "{said}"
+        );
     }
 
     /// Every refusal says which rule it is, and says it under one heading.
