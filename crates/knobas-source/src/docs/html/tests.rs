@@ -304,7 +304,9 @@ fn the_tree_keeps_where_each_element_sits() {
 
 #[test]
 fn a_span_past_what_html_draws_is_cut_to_it() {
-    let [DocBlock::Table { rows }] = &plain(r#"<table><tr><td colspan="4000000000" rowspan="70000">x</td></tr></table>"#)[..] else {
+    let [DocBlock::Table { rows }] =
+        &plain(r#"<table><tr><td colspan="4000000000" rowspan="70000">x</td></tr></table>"#)[..]
+    else {
         panic!("one table")
     };
     assert_eq!((rows[0][0].colspan, rows[0][0].rowspan), (1_000, 65_534));

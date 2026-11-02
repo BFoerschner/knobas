@@ -538,11 +538,19 @@ mod tests {
     fn a_cell_crosses_with_its_blocks_and_spans_which_default_to_one() {
         let cell = TableCell {
             colspan: 3,
-            ..TableCell::new(true, vec![DocBlock::Placeholder { name: "expand".into() }])
+            ..TableCell::new(
+                true,
+                vec![DocBlock::Placeholder {
+                    name: "expand".into(),
+                }],
+            )
         };
         let wire = serde_json::to_value(&cell).unwrap();
         assert_eq!(wire["blocks"][0]["type"], "placeholder");
-        assert_eq!((wire["colspan"].as_u64(), wire["rowspan"].as_u64()), (Some(3), Some(1)));
+        assert_eq!(
+            (wire["colspan"].as_u64(), wire["rowspan"].as_u64()),
+            (Some(3), Some(1))
+        );
         let bare: TableCell =
             serde_json::from_value(serde_json::json!({"header": false, "blocks": []})).unwrap();
         assert_eq!(bare, TableCell::new(false, vec![]));

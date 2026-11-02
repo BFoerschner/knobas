@@ -1196,7 +1196,15 @@ async fn a_table_reads_with_spans_header_column_and_block_cells_and_exports_ever
         .unwrap();
     let text = std::fs::read_to_string(folder.join(&done.file)).unwrap();
     std::fs::remove_dir_all(&folder).ok();
-    for word in ["Rota", "Mon", "Tomasz", "Swap first.", "Then page.", "inner", "Tue"] {
+    for word in [
+        "Rota",
+        "Mon",
+        "Tomasz",
+        "Swap first.",
+        "Then page.",
+        "inner",
+        "Tue",
+    ] {
         assert!(text.contains(word), "{word} in {text}");
     }
     assert!(text.contains("<!-- macro: roadmap -->"), "{text}");

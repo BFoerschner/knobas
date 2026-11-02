@@ -923,9 +923,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                                 title: None,
                                 blocks: vec![para("Swap.")],
                             },
-                            DocBlock::Placeholder {
-                                name: "toc".into(),
-                            },
+                            DocBlock::Placeholder { name: "toc".into() },
                         ]),
                     ],
                 ]
