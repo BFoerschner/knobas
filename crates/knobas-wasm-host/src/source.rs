@@ -412,8 +412,6 @@ fn docs_deadline(adapter: &WasmAdapter) -> std::time::Duration {
     adapter.limits().deadline.min(limits::PROJECTION_DEADLINE)
 }
 
-/// A docs call's answer, or `None` for a failure, logged as `what` failed
-/// and `so` follows.
 /// One docs call (1.5.0): export `name` of a fresh instance, in a store
 /// that allows no host, called with `params` under the docs deadline and the
 /// adapter's memory cap. `None` for every failure, logged as `what` failed,
@@ -443,6 +441,8 @@ where
     docs_answer(adapter, what, so, answer)
 }
 
+/// A docs call's answer, or `None` for a failure, logged as `what` failed
+/// and `so` follows.
 fn docs_answer<T>(
     adapter: &WasmAdapter,
     what: &str,
