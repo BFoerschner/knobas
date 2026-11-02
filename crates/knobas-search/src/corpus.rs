@@ -744,12 +744,61 @@ pub const VIEW: Corpus = Corpus {
     fields: &[],
 };
 
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE, &VIEW];
+/// A link set (#2422, `knobas.link_set`, migration `0039`): the launcher's
+/// kind `set`, found by its name (weight A) and its description (weight B).
+/// Its path line counts what it is: its fixed members, its patterns, and the
+/// live tickets its rules apply to now, `2 items · 1 pattern · 4 tickets`,
+/// the count the Sets page's *Tickets now* column draws, by the same walk
+/// (`knobas_core::link_set_rule_tickets!`). The walk runs for the rows a page
+/// shows and no others, since `path` is read in the detail stage.
+///
+/// Computed in the relation for [`VIEW`]'s reason; a set is no entity either,
+/// and its id is the slug its address `#/sets/<id>` carries.
+pub const SET: Corpus = Corpus {
+    relation: "(select ls.id, ls.name, ls.description, ls.updated_at, \
+               setweight(to_tsvector('english', ls.name), 'A') || \
+               setweight(to_tsvector('english', ls.description), 'B') as fts \
+               from knobas.link_set ls) s",
+    entity_id: "s.id",
+    kind: "'set'",
+    source_id: "'set'",
+    title: "s.name",
+    named: None,
+    fts: "s.fts",
+    headline_text: "s.name || ' — ' || s.description",
+    author: None,
+    updated_at: "s.updated_at",
+    synced_at: "s.updated_at",
+    path: concat!(
+        "(select concat_ws(' · ', ",
+        "c.items || case when c.items = 1 then ' item' else ' items' end, ",
+        "c.patterns || case when c.patterns = 1 then ' pattern' else ' patterns' end, ",
+        "c.tickets || case when c.tickets = 1 then ' ticket' else ' tickets' end) ",
+        "from (select ",
+        "(select count(*) from knobas.link_set_member lm \
+          where lm.set_id = s.id and lm.entity_id is not null) as items, ",
+        "(select count(*) from knobas.link_set_member lm \
+          where lm.set_id = s.id and lm.query is not null) as patterns, ",
+        "(with recursive rules(n, rule, kind, value) as (",
+        "select 0, lr.position, lr.kind, lr.value from knobas.link_set_rule lr \
+         where lr.set_id = s.id), ",
+        knobas_core::link_set_rule_tickets!(),
+        " select count(distinct li.entity_id) from rule_ticket rt \
+          join sync.live_item li on li.entity_id = rt.id and li.kind = 'ticket') as tickets",
+        ") c)"
+    ),
+    state: "null::jsonb",
+    scope: None,
+    under: None,
+    fields: &[],
+};
+
+pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE, &VIEW, &SET];
 
 /// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
 /// quick capture* is off (#940, R-13a.6). The note data and commands stay
 /// (D10); only the search leaves them out.
-pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &VIEW];
+pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &VIEW, &SET];
 
 #[cfg(test)]
 mod tests {

@@ -171,3 +171,127 @@ async fn under_titles_a_view_is_found_by_its_name_alone() {
     );
     assert!(ids(&search(&pool, &format!("{t}group"), true).await).is_empty());
 }
+
+async fn link_set(pool: &sqlx::PgPool, id: &str, name: &str, description: &str) {
+    sqlx::query("insert into knobas.link_set (id, name, description) values ($1, $2, $3)")
+        .bind(id)
+        .bind(name)
+        .bind(description)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+async fn member(pool: &sqlx::PgPool, set: &str, kind: &str, entity: Option<&str>, query: Option<&str>) {
+    sqlx::query(
+        "insert into knobas.link_set_member (set_id, kind, entity_id, query, pattern, position)
+         values ($1, $2, $3, $4, case when $4::text is null then null else '{}'::jsonb end, 0)",
+    )
+    .bind(set)
+    .bind(kind)
+    .bind(entity)
+    .bind(query)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn rule(pool: &sqlx::PgPool, set: &str, kind: &str, value: &str) {
+    sqlx::query(
+        "insert into knobas.link_set_rule (set_id, kind, value, position) values ($1, $2, $3, 0)",
+    )
+    .bind(set)
+    .bind(kind)
+    .bind(value)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A mirrored row: an entity and its live item.
+async fn item(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    key: &str,
+    title: &str,
+    payload: serde_json::Value,
+    at: DateTime<Utc>,
+) -> String {
+    let id = format!("{source}:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
+        .bind(&id)
+        .bind(kind)
+        .bind(title)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                item_updated_at, synced_at)
+         values ($1,$2,$3,$4,'',$5,$6,$6)",
+    )
+    .bind(&id)
+    .bind(source)
+    .bind(kind)
+    .bind(title)
+    .bind(payload)
+    .bind(at)
+    .execute(pool)
+    .await
+    .unwrap();
+    id
+}
+
+#[tokio::test]
+async fn a_set_is_found_by_its_name_and_its_description_with_its_counts() {
+    let pool = pool().await;
+    let t = token();
+    let id = format!("{t}-stack");
+    link_set(&pool, &id, &format!("Payout {t}name"), &format!("What {t}desc needs")).await;
+    member(&pool, &id, "repo", Some("gitea:tidewater/payout-service"), None).await;
+    member(&pool, &id, "page", Some("confluence:123"), None).await;
+    member(&pool, &id, "pipeline", None, Some("project:Payouts")).await;
+    // Two live tickets by hand, and one rule naming no ticket the mirror holds.
+    let now = Utc::now();
+    let one = item(&pool, "jira", "ticket", &format!("{t}-1"), "one", serde_json::json!({}), now).await;
+    let two = item(&pool, "jira", "ticket", &format!("{t}-2"), "two", serde_json::json!({}), now).await;
+    rule(&pool, &id, "manual", &one).await;
+    rule(&pool, &id, "manual", &two).await;
+    rule(&pool, &id, "manual", "jira:GONE-1").await;
+
+    for word in ["name", "desc"] {
+        let response = search(&pool, &format!("{t}{word}"), false).await;
+        assert_eq!(
+            hits(&response)
+                .into_iter()
+                .filter(|(kind, ..)| kind == "set")
+                .collect::<Vec<_>>(),
+            vec![(
+                "set".to_owned(),
+                id.clone(),
+                Some("2 items · 1 pattern · 2 tickets".to_owned())
+            )],
+            "searching its {word}"
+        );
+    }
+    let response = search(&pool, &format!("{t}name"), false).await;
+    let group = response.groups.iter().find(|g| g.kind == "set").unwrap();
+    assert_eq!(
+        (group.label.as_str(), group.plural.as_str(), group.monogram.as_str()),
+        ("Link set", "Link sets", "LS")
+    );
+}
+
+#[tokio::test]
+async fn an_empty_set_counts_nothing_in_the_singular_and_plural_it_reads() {
+    let pool = pool().await;
+    let t = token();
+    let id = format!("{t}-empty");
+    link_set(&pool, &id, &format!("Empty {t}"), "").await;
+    member(&pool, &id, "repo", Some("gitea:tidewater/x"), None).await;
+    assert_eq!(
+        hits(&search(&pool, &t, false).await),
+        vec![("set".to_owned(), id, Some("1 item · 0 patterns · 0 tickets".to_owned()))]
+    );
+}
