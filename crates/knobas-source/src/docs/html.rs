@@ -36,7 +36,10 @@
 //!
 //! The markup is read into a small element tree ([`parse`]): an unmatched
 //! close tag closes up to its opener or is ignored, an unclosed element ends
-//! with the document, a `<` that never closes is text. It never fails: broken
+//! with the document, a `<` that never closes is text. HTML's implied end
+//! tags are read as a browser reads them (`<p>a<p>b` is two paragraphs,
+//! `<li>a<li>b` two items; likewise `dt`/`dd`, `tr`, `td`/`th`, `option`),
+//! and elements past [`MAX_DEPTH`] read as the text they hold. It never fails: broken
 //! markup reads as the text it holds. Pure, synchronous, no dependency beyond
 //! `std`, so it compiles for `wasm32-wasip2` and the adapter SDK can carry it.
 
@@ -115,6 +118,12 @@ fn is_void(name: &str) -> bool {
         "br" | "hr" | "img" | "col" | "input" | "meta" | "link" | "wbr" | "source" | "area"
     )
 }
+
+/// How deep [`parse`] nests elements. Past it a start tag is dropped and
+/// what it holds reads as text in the innermost element, so the tree, the
+/// reader's walks over it and a hook's [`Reading::blocks`] stay bounded.
+/// Real pages, Confluence macros in layouts included, nest a few dozen deep.
+pub const MAX_DEPTH: usize = 128;
 
 /// One open element on the parse stack: name, tag, children, start offset.
 type Open = (String, String, Vec<Node>, usize);
@@ -229,6 +238,23 @@ pub fn parse(markup: &str) -> Vec<Node> {
             );
             continue;
         }
+        // HTML leaves some end tags out: an open `p` ends where a block
+        // starts, an `li` at the next `li`. The element ends where this tag
+        // starts, as when an ancestor's close tag ends it.
+        for rule in implied_ends(&name) {
+            if let Some(depth) = implied_end(&stack, rule) {
+                while stack.len() > depth {
+                    close(&mut stack, start);
+                }
+            }
+        }
+        if stack.len() > MAX_DEPTH {
+            // Past the depth the tag is dropped and its contents join the
+            // innermost open element: every walk over the tree recurses
+            // once per level, and markup anyone can author must not
+            // overflow the stack. Its close tag finds no opener.
+            continue;
+        }
         stack.push((name, tag.to_owned(), vec![], start));
     }
     let end = at(rest);
@@ -239,6 +265,168 @@ pub fn parse(markup: &str) -> Vec<Node> {
         .pop()
         .map(|(_, _, nodes, _)| nodes)
         .unwrap_or_default()
+}
+
+/// Start tags that end an open `p` (HTML's *in body* rules).
+fn ends_paragraph(name: &str) -> bool {
+    matches!(
+        name,
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "center"
+            | "details"
+            | "dialog"
+            | "dir"
+            | "div"
+            | "dl"
+            | "dd"
+            | "dt"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hgroup"
+            | "hr"
+            | "li"
+            | "listing"
+            | "main"
+            | "menu"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "search"
+            | "section"
+            | "summary"
+            | "table"
+            | "ul"
+            | "xmp"
+    )
+}
+
+/// Which open elements a start tag ends, and the open elements its search
+/// stops at: `(ends, stops)`.
+type Rule = (&'static [&'static str], &'static [&'static str]);
+
+/// The scope HTML searches for an open `p`: a table, a cell or a widget is
+/// a fresh start.
+const SCOPE: &[&str] = &[
+    "table", "td", "th", "caption", "template", "button", "object", "select",
+];
+
+/// Where HTML's search for an open `li`, `dt` or `dd` stops: any of its
+/// *special* elements but `address`, `div` and `p` (the void, raw-text and
+/// never-open ones left out), so `<li>a<blockquote><li>b` nests the second
+/// item in the quote, as a browser does.
+const ITEM_STOPS: &[&str] = &[
+    "applet",
+    "article",
+    "aside",
+    "blockquote",
+    "body",
+    "button",
+    "caption",
+    "center",
+    "colgroup",
+    "details",
+    "dir",
+    "dl",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "frameset",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "head",
+    "header",
+    "hgroup",
+    "html",
+    "iframe",
+    "listing",
+    "main",
+    "marquee",
+    "menu",
+    "nav",
+    "noembed",
+    "noframes",
+    "noscript",
+    "object",
+    "ol",
+    "plaintext",
+    "pre",
+    "search",
+    "section",
+    "select",
+    "summary",
+    "table",
+    "tbody",
+    "td",
+    "template",
+    "textarea",
+    "tfoot",
+    "th",
+    "thead",
+    "title",
+    "tr",
+    "ul",
+    "xmp",
+    "li",
+    "dt",
+    "dd",
+];
+
+/// The implied-end rules a start tag `name` applies, in order: an `li`
+/// first ends an open `p`, then the `li` before it.
+fn implied_ends(name: &str) -> impl Iterator<Item = Rule> {
+    let paragraph: Rule = (&["p"], SCOPE);
+    let own: Option<Rule> = match name {
+        "li" => Some((&["li"], ITEM_STOPS)),
+        "dt" | "dd" => Some((&["dt", "dd"], ITEM_STOPS)),
+        "tr" => Some((&["tr"], &["table", "template"])),
+        "td" | "th" => Some((&["td", "th"], &["tr", "table", "template"])),
+        "option" => Some((&["option"], &["select", "datalist", "optgroup"])),
+        _ => None,
+    };
+    ends_paragraph(name)
+        .then_some(paragraph)
+        .into_iter()
+        .chain(own)
+}
+
+/// The stack index of the open element `rule` ends, `None` when there is
+/// none in scope.
+///
+/// The search runs down from the innermost open element and stops at the
+/// rule's stops (an outer list's `li` is not ended by an inner list's `li`,
+/// an outer table's cell not by an inner table's) and at any namespaced
+/// element, so a Confluence macro body (`ac:rich-text-body`) inside a
+/// paragraph keeps its own paragraphs.
+fn implied_end(stack: &[Open], (ends, stops): Rule) -> Option<usize> {
+    for (depth, (open, ..)) in stack.iter().enumerate().skip(1).rev() {
+        if ends.contains(&open.as_str()) {
+            return Some(depth);
+        }
+        if stops.contains(&open.as_str()) || open.contains(':') {
+            return None;
+        }
+    }
+    None
 }
 
 // -- tags and entities ----------------------------------------------------------

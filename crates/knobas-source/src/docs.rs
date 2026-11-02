@@ -195,6 +195,9 @@ pub struct DocComment {
 /// - `table`: A table, row by row; a header cell says so, and a cell holds
 ///   blocks and may span columns and rows.
 /// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+/// - `collapsible`: A titled part the reader draws closed, with the blocks
+///   inside it, opened when the reader arrives on a search hit inside it
+///   (spec #2432). Confluence's `expand` is one; its words are the page's.
 /// - `include`: Another page of the source drawn in place (spec #2432): the
 ///   page by `title` and `space` as a page link names one, and whether only
 ///   its `excerpt` is wanted. The adapter leaves the rest empty; knobas fills
@@ -236,6 +239,10 @@ pub enum DocBlock {
     Panel {
         kind: PanelKind,
         title: Option<String>,
+        blocks: Vec<DocBlock>,
+    },
+    Collapsible {
+        title: String,
         blocks: Vec<DocBlock>,
     },
     Include {
@@ -508,7 +515,9 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
         }
         // What knobas filled an include with is drawn here, so its links,
         // chips and mentions are filled like the page's own.
-        DocBlock::Panel { blocks, .. } | DocBlock::Include { blocks, .. } => {
+        DocBlock::Panel { blocks, .. }
+        | DocBlock::Collapsible { blocks, .. }
+        | DocBlock::Include { blocks, .. } => {
             for inner in blocks {
                 collect(inner, out);
             }
@@ -518,7 +527,8 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
 }
 
 /// Every include in `blocks`, depth first, for knobas' include fill: those
-/// in lists, table cells and panels, not those inside an include.
+/// in lists, table cells, panels and collapsibles, not those inside an
+/// include.
 pub fn includes_mut(blocks: &mut [DocBlock]) -> Vec<&mut DocBlock> {
     let mut out = Vec::new();
     for block in blocks {
@@ -544,7 +554,7 @@ fn includes<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut DocBlock>) {
                 }
             }
         }
-        DocBlock::Panel { blocks, .. } => {
+        DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
             for inner in blocks {
                 includes(inner, out);
             }
@@ -868,7 +878,8 @@ mod tests {
     /// The include fill finds an include wherever the page draws one, and
     /// not inside what an include holds: that is the included page's.
     #[test]
-    fn the_include_fill_reaches_includes_in_lists_cells_and_panels_but_not_inside_one() {
+    fn the_include_fill_reaches_includes_in_lists_cells_panels_and_collapsibles_but_not_inside_one()
+    {
         let filled = DocBlock::Include {
             title: "A".into(),
             space: None,
@@ -893,6 +904,10 @@ mod tests {
                     vec![DocBlock::include("D", None, false)],
                 )]],
             },
+            DocBlock::Collapsible {
+                title: "More".into(),
+                blocks: vec![DocBlock::include("E", None, false)],
+            },
             filled,
         ];
         let titles: Vec<String> = includes_mut(&mut blocks)
@@ -902,7 +917,7 @@ mod tests {
                 _ => unreachable!(),
             })
             .collect();
-        assert_eq!(titles, ["B", "C", "D", "A"]);
+        assert_eq!(titles, ["B", "C", "D", "E", "A"]);
         // What an include was filled with is drawn, so it is filled in too.
         let mut drawn = vec![DocBlock::Include {
             title: "A".into(),

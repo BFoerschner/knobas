@@ -10,7 +10,7 @@
   placeholder saying why, naming the page and linking it where the mirror
   holds it, else offering the source.
 
-  Recurses into lists, panels, table cells and includes by importing itself. A task item (spec
+  Recurses into lists, panels, collapsibles, table cells and includes by importing itself. A task item (spec
   #2432) draws its state as the Markdown view's box: a picture, never a
   control, so nothing here ticks a task.
 -->
@@ -115,6 +115,15 @@
       <span class="tf-lbl">{panelLabel(block)}</span>
       <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
     </div>
+  {:else if block.type === "collapsible"}
+    <!-- Closed, as the source draws it (spec #2432); the find bar opens it when it steps to a match inside (`revealMatch`).
+         Keyed by the page, so one opened here is not still open where the next page draws one. -->
+    {#key entityId}
+      <details class="tf-collapse">
+        <summary><TfMarked text={block.title} {stems} /></summary>
+        <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
+      </details>
+    {/key}
   {:else if block.type === "include"}
     <!-- Another page drawn in place (spec #2432), as knobas filled it from the mirror when the page was read. -->
     {#if block.unfilled === null}

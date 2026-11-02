@@ -390,6 +390,26 @@ fn a_file_name_stays_in_its_folder_and_writable() {
     );
 }
 
+/// A collapsible is GitHub's `<details>`: its title the summary, as HTML
+/// text, and its blocks Markdown under it (spec #2432).
+#[test]
+fn a_collapsible_is_a_details_block_titled_by_its_summary() {
+    let md = body(&[DocBlock::Collapsible {
+        title: "Steps <1> & 2".to_owned(),
+        blocks: vec![
+            para("Lead *here*."),
+            DocBlock::List {
+                ordered: false,
+                items: vec![ListItem::new(vec![para("one")])],
+            },
+        ],
+    }]);
+    assert_eq!(
+        md,
+        "<details>\n<summary>Steps &lt;1&gt; &amp; 2</summary>\n\nLead \\*here\\*.\n\n- one\n\n</details>\n"
+    );
+}
+
 /// Spec #2432, story 40: a filled include is its contents, after a comment
 /// naming the page they are from; an unfilled one is a comment naming it.
 #[test]
