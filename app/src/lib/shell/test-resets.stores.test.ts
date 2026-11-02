@@ -13,7 +13,7 @@ import { createInbox } from "../inbox/inbox.svelte";
 import { createNotifications } from "../inbox/notify.svelte";
 import { createBadges } from "../tf/badges.svelte";
 import { createDepViewState } from "../tf/deps/views.svelte";
-import { breadcrumbJob, currentJob, linkRequest } from "../tf/job/current.svelte";
+import { breadcrumbJob, currentJob } from "../tf/job/current.svelte";
 import { createLayers } from "../tf/layers.svelte";
 import { createApps } from "../tf/openin/apps.svelte";
 import { createClones } from "../tf/openin/clones.svelte";
@@ -263,14 +263,12 @@ test("depViewState.reset forgets the views, the draft and the opening last drawn
   expect(state.current?.id, "the opening survived the reset").toBe("ticket");
 });
 
-test("the job id, the breadcrumb and the link request reset through their own doors", async () => {
+test("the job id and the breadcrumb reset through their own doors", async () => {
   currentJob.set("job-1");
   breadcrumbJob.set({ key: "PAY-1", entityId: "e" });
-  linkRequest.ask("k", { entity_id: "e", title: "t", kind: "ticket" });
   await resetStores();
   expect(currentJob.entityId).toBeNull();
   expect(breadcrumbJob.job).toBeNull();
-  expect(linkRequest.take("k")).toBeNull();
 });
 
 test("layers.reset forgets every open layer", () => {

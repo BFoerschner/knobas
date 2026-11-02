@@ -37,7 +37,84 @@ export interface SyntaxEntry {
   /** The `Prefix` the probe must claim, snake_case, or null for none. */
   prefix: string | null;
   expect: SyntaxExpectation;
+  /**
+   * The kind a `#` filter letter narrows to (#2420), which the Rust test pins
+   * to the parser's own; a kind chip is labelled with this row's summary.
+   */
+  kind?: string;
+  /**
+   * The row's word on the ⌘? overlay (#2424), for a row that is no `#` letter
+   * and still a whole filter (`>`, `@me`, `t`). A `#` letter's word is its
+   * summary. A row with neither is on the `?` card only.
+   */
+  word?: string;
 }
 
 /** The card, in the order it is drawn. */
 export const SYNTAX: readonly SyntaxEntry[] = table as SyntaxEntry[];
+
+/** One filter on the ⌘? overlay: the row it comes from and the one word it shows. */
+export interface OverlayFilter {
+  entry: SyntaxEntry;
+  word: string;
+}
+
+/**
+ * The ⌘? overlay's filters: every `#` letter, then the rows that carry a
+ * `word`, each in the card's order. Read from the table, so a letter the parser gains
+ * (pinned by `help_card.rs`) is on the overlay without an edit here.
+ */
+export function overlayFilters(table: readonly SyntaxEntry[]): OverlayFilter[] {
+  const letters = table.filter((entry) => entry.kind !== undefined).map((entry) => ({ entry, word: entry.summary }));
+  const others = table.flatMap((entry) =>
+    entry.kind === undefined && entry.word !== undefined ? [{ entry, word: entry.word }] : [],
+  );
+  return [...letters, ...others];
+}
+
+/**
+ * The filters the overlay's box narrows to: every typed character, spaces
+ * dropped, found in order in `token word`, case aside. An empty box keeps all.
+ */
+export function narrowFilters(filters: readonly OverlayFilter[], typed: string): OverlayFilter[] {
+  const needle = typed.toLowerCase().replace(/\s+/gu, "");
+  if (needle === "") return [...filters];
+  return filters.filter(({ entry, word }) => {
+    const hay = `${entry.token} ${word}`.toLowerCase();
+    let at = -1;
+    for (const char of needle) {
+      at = hay.indexOf(char, at + 1);
+      if (at < 0) return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Put a picked filter into the search `raw` (#2424).
+ *
+ * A `#` letter merges into a `#` filter token already in the box (`#r` plus
+ * lists is `#rl`), and a letter it already holds changes nothing; with no such
+ * token it goes first. Any other filter goes first. The result ends in a space,
+ * so the next word typed is a word of its own.
+ *
+ * Which tokens are filter tokens is read from `table`'s `#` rows, the letters
+ * the parser pins, so the frontend keeps no second list of them.
+ */
+export function addFilter(raw: string, entry: SyntaxEntry, table: readonly SyntaxEntry[]): string {
+  const words = raw.trim() === "" ? [] : raw.trim().split(/\s+/u);
+  const insert = entry.insert.trim();
+  if (entry.kind !== undefined) {
+    const letters = new Set(table.filter((row) => row.kind !== undefined).map((row) => row.token.slice(1)));
+    const isFilter = (word: string) =>
+      word.length > 1 && word.startsWith("#") && [...word.slice(1).toLowerCase()].every((c) => letters.has(c));
+    const at = words.findIndex(isFilter);
+    if (at >= 0) {
+      const have = words[at]!;
+      const letter = insert.slice(1);
+      if (!have.toLowerCase().includes(letter)) words[at] = `${have}${letter}`;
+      return `${words.join(" ")} `;
+    }
+  }
+  return `${[insert, ...words].join(" ")} `;
+}

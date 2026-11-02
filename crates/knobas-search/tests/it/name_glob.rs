@@ -45,6 +45,7 @@ async fn item(pool: &sqlx::PgPool, key: &str, title: &str) -> String {
 async fn search(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
     let response = Searcher::new(pool.clone())
         .search(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 200,
             filters: SearchFilters::default(),

@@ -126,7 +126,6 @@ test("each pipeline is a row: its name, err when its latest run failed, a strip 
   expect(rows()[0]!.querySelector(".tf-strip i")?.className).toBe("tf-run-run");
   expect(tests.title).toBe("Payout › Payout_IntegrationTests");
   expect(tests.getAttribute("href")).toBe("#/builds/teamcity%3AbuildType%3APayout_IntegrationTests");
-  expect(target.querySelector<HTMLInputElement>("[data-filter]")?.placeholder).toBe("Filter 3 pipelines");
 });
 
 test("a bare #/builds selects the first failing pipeline and lists its runs newest first", async () => {
@@ -151,18 +150,9 @@ test("the address's entity id selects that pipeline", async () => {
   expect(target.querySelector(".tf-runs tbody tr")?.textContent).toContain("#904");
 });
 
-test("the filter keeps what its words match, and the chips keep the failing or the running ones", async () => {
+test("the chips keep the failing or the running ones", async () => {
   draw([]);
   await settle();
-  const field = target.querySelector<HTMLInputElement>("[data-filter]")!;
-  field.value = "lint";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  expect(names()).toEqual(["Payout_Lint"]);
-  expect(target.querySelector(".tf-pi mark")?.textContent).toBe("Lint");
-
-  field.value = "";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
   const chip = (word: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === word)!;
   chip("Failing").click();
   flushSync();
@@ -324,12 +314,10 @@ test("a fold the reader closes stays closed as the list redraws", async () => {
   data.open = false;
   data.dispatchEvent(new Event("toggle"));
   flushSync();
-  const field = target.querySelector<HTMLInputElement>("[data-filter]")!;
-  field.value = "dbt";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
+  const running = [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!;
+  running.click();
   flushSync();
-  field.value = "";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
+  running.click();
   flushSync();
   expect(fold("Data").open).toBe(false);
 });
@@ -466,18 +454,19 @@ test("This job reads the pipelines of the ticket the reader opened, not the firs
   expect(entityIpc.jobPipelines).not.toHaveBeenCalledWith("jira:PAY-231");
 });
 
-test("/ focuses the pipeline filter, and the runs filter beside it draws no hint (#1453)", async () => {
+test("the pipeline list draws no search field and leaves / to the shell, which opens the launcher on #b (#2425)", async () => {
   draw(["teamcity:buildType:Payout_IntegrationTests"]);
   await settle();
+  expect(target.querySelector(".tf-pl input")).toBeNull();
+  expect(target.querySelector(".tf-pl .tf-fsearch")).toBeNull();
+  // The runs filter of the selected pipeline is the page's, not a search; it keeps its field.
   const fields = [...target.querySelectorAll<HTMLInputElement>("[data-filter]")];
-  expect(fields).toHaveLength(2);
-  const runs = target.querySelector(".tf-runbar .tf-fbar")!;
-  expect(runs.querySelector("kbd")).toBeNull();
+  expect(fields).toHaveLength(1);
+  expect(target.querySelector(".tf-runbar")!.contains(fields[0]!)).toBe(true);
   const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
   document.body.dispatchEvent(event);
-  expect(event.defaultPrevented).toBe(true);
-  expect(document.activeElement).toBe(fields[0]);
-  expect(runs.contains(document.activeElement)).toBe(false);
+  expect(event.defaultPrevented, "the shell's TfShell test witnesses what / opens").toBe(false);
+  expect(document.activeElement).not.toBe(fields[0]);
 });
 
 test("Refresh on a pipeline reads the list again, and its row as the read answers it (#2137)", async () => {
@@ -518,7 +507,7 @@ test("a read again of the list that answers takes away the note an earlier faile
 test("a filter that opens every fold of a big CI draws only the rows near the viewport, the selection among them (#2211)", async () => {
   const many = Array.from({ length: 1000 }, (_, i) => {
     const name = `Bulk_${String(i).padStart(4, "0")}`;
-    return { ...pipeline(name, name, [run(`teamcity:build:${i}`, "ok")]), path: [`Area ${i % 10}`, `Service ${Math.floor(i / 8)}`] };
+    return { ...pipeline(name, name, [run(`teamcity:build:${i}`, "ok", { finished: null })]), path: [`Area ${i % 10}`, `Service ${Math.floor(i / 8)}`] };
   });
   const open = () =>
     mount(TfBuilds, {
@@ -533,13 +522,12 @@ test("a filter that opens every fold of a big CI draws only the rows near the vi
     });
   page = open();
   await settle();
-  const type = (text: string) => {
-    const field = target.querySelector<HTMLInputElement>("[data-filter]")!;
-    field.value = text;
-    field.dispatchEvent(new Event("input", { bubbles: true }));
+  // Every one of them is running, so the chip keeps them all and opens every fold.
+  const running = () => {
+    [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Running")!.click();
     flushSync();
   };
-  type("bulk");
+  running();
   expect([...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].every((d) => d.open)).toBe(true);
   expect(names().length).toBeGreaterThan(5);
   expect(names().length).toBeLessThan(200);
@@ -550,5 +538,5 @@ test("a filter that opens every fold of a big CI draws only the rows near the vi
   await settle();
   expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Bulk_0997");
   expect(names()).not.toContain("Bulk_0000");
-  type("");
+  running();
 });

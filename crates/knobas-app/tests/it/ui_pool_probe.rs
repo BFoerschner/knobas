@@ -521,6 +521,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                         &ui,
                         &Registry::for_process(),
                         knobas_search::SearchQuery {
+                            titles: false,
                             raw: q.into(),
                             limit: 50,
                             filters: Default::default(),

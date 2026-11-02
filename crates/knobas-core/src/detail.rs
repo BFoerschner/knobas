@@ -153,7 +153,7 @@ select b.* from (
     r#" as path,
          "#,
     crate::declared_state!("$2"),
-    r#" as state
+    r#" as state, i.key_cell as cell
     from sync.item_revision r
     join sync.live_item i on i.entity_id = r.entity_id
     join knobas.source_config s on s.id = i.source_id and s.kind = r.adapter_kind
@@ -185,7 +185,7 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
     r#" as path,
        "#,
     crate::declared_state!("$2"),
-    r#" as state,
+    r#" as state, i.key_cell as cell,
        "#,
     crate::declared_string!("$2", "commit"),
     r#" as commit,
@@ -321,6 +321,7 @@ pub async fn read(
             // and ADR-0007 requirement 2 exists to stop exactly that.
             path: row.get("path"),
             state: state_of(&row)?,
+            cell: row.get("cell"),
         },
         source: SourceRef {
             display_name: display_name.unwrap_or_else(|| source_id.clone()),

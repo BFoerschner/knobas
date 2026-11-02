@@ -156,7 +156,7 @@ fn expected() -> [Option<StateChip>; 4] {
 /// What each id's row carries, among the rows a read answered with.
 fn states<'a>(
     rows: impl IntoIterator<Item = &'a knobas_search::EntityRow>,
-    ids: &[String; 4],
+    ids: &[String],
 ) -> Vec<Option<StateChip>> {
     let rows: Vec<&knobas_search::EntityRow> = rows.into_iter().collect();
     ids.iter()
@@ -170,6 +170,20 @@ fn states<'a>(
         .collect()
 }
 
+/// The ids and chips the launcher's own answer holds: all but the build. A
+/// run is in neither a search's answer nor the board's newest rows (#2422);
+/// its colour is its pipeline's, which `launcher_kinds.rs` witnesses.
+fn without_the_run(ids: &[String; 4]) -> (Vec<String>, Vec<Option<StateChip>>) {
+    let keep = |at: &usize| *at != 2;
+    (
+        (0..4).filter(keep).map(|at| ids[at].clone()).collect(),
+        (0..4)
+            .filter(keep)
+            .map(|at| expected()[at].clone())
+            .collect(),
+    )
+}
+
 #[tokio::test]
 async fn a_search_hit_carries_its_state_chip() {
     let _guard = SERIAL.lock().await;
@@ -179,14 +193,84 @@ async fn a_search_hit_carries_its_state_chip() {
     let response = searcher(&pool)
         .await
         .search(SearchQuery {
+            titles: false,
             raw: t.clone(),
             limit: 30,
             filters: SearchFilters::default(),
         })
         .await
         .unwrap();
-    let hits = response.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row);
-    assert_eq!(states(hits, &ids), expected());
+    let hits: Vec<_> = response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| &h.row)
+        .collect();
+    assert!(
+        hits.iter().all(|row| row.entity_id != ids[2]),
+        "a run is in no answer"
+    );
+    let (ids, want) = without_the_run(&ids);
+    assert_eq!(states(hits, &ids), want);
+}
+
+/// A ticket's hit carries its status as a state in the tone Jira's descriptor
+/// declares for it (#2421): the launcher colours the monogram from this and
+/// reads no status name of its own.
+#[tokio::test]
+async fn a_tickets_hit_carries_its_declared_status_tone() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let t = token();
+    let at = Utc::now() - chrono::Duration::days(400);
+    let mut ids = Vec::new();
+    for (n, status) in ["Done", "In Review", "Closed", "To Do"].iter().enumerate() {
+        ids.push(
+            item(
+                &pool,
+                "jira",
+                "ticket",
+                &format!("{t}-{n}"),
+                &format!("ticket {t}"),
+                serde_json::json!({ "fields": { "status": { "name": status } } }),
+                at,
+            )
+            .await,
+        );
+    }
+    let response = searcher(&pool)
+        .await
+        .search(SearchQuery {
+            titles: false,
+            raw: t.clone(),
+            limit: 30,
+            filters: SearchFilters::default(),
+        })
+        .await
+        .unwrap();
+    let hits: Vec<_> = response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| &h.row)
+        .collect();
+    let tone = |id: &String| {
+        hits.iter()
+            .find(|row| &row.entity_id == id)
+            .unwrap_or_else(|| panic!("{id} is among the hits"))
+            .state
+            .as_ref()
+            .map(|chip| (chip.text.clone(), chip.tone))
+    };
+    assert_eq!(
+        ids.iter().map(tone).collect::<Vec<_>>(),
+        [
+            Some(("Done".to_owned(), Tone::Ok)),
+            Some(("In Review".to_owned(), Tone::Info)),
+            Some(("Closed".to_owned(), Tone::Muted)),
+            None,
+        ]
+    );
 }
 
 #[tokio::test]
@@ -202,20 +286,10 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
     let at = newest.unwrap_or_else(Utc::now).max(Utc::now()) + chrono::Duration::seconds(1);
     let ids = four(&pool, &t, at).await;
     let board = searcher(&pool).await.launcher_board().await.unwrap();
-    assert_eq!(states(&board.recent, &ids), expected());
-}
-
-#[tokio::test]
-async fn a_built_in_lists_rows_carry_their_state_chip() {
-    let _guard = SERIAL.lock().await;
-    let pool = pool().await;
-    let t = token();
-    let ids = four(&pool, &t, Utc::now()).await;
-    let list = searcher(&pool)
-        .await
-        .smart_list_items("just-synced", 500)
-        .await
-        .unwrap();
-    let rows = list.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row);
-    assert_eq!(states(rows, &ids), expected());
+    assert!(
+        board.recent.iter().all(|row| row.entity_id != ids[2]),
+        "a run is not on the board"
+    );
+    let (ids, want) = without_the_run(&ids);
+    assert_eq!(states(&board.recent, &ids), want);
 }

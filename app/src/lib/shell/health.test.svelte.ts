@@ -545,7 +545,7 @@ test("a state this build does not know is not shouted about", () => {
  * and it is answered *here*.
  *
  * A chip can name a source the health store has never returned a row for —
- * `/gitea` typed before the first scheduler run, or against a source id that
+ * `in:gitea` typed before the first scheduler run, or against a source id that
  * is only in the query. Until #72 the signature forbade `undefined` while
  * `Chips.svelte` checked for it itself, so the rule this doc comment says
  * lives in one place lived in two. Folding it in is why the parameter is

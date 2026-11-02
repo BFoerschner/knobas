@@ -152,11 +152,11 @@
 .tf-doc .tf-sec-queued { color: var(--muted); white-space: pre-wrap; border-left: 2px dashed var(--rule); padding-left: 10px; }
 /* The Docs search, the outline, the find bar and the writes (#860 to #862) */
 /* The column's own search, under the space picker and beside no button: the default control height. */
-.tf-dl-head .tf-fsearch { max-width: none; flex: none; height: var(--control-h); padding: 0 9px; }
 .tf-dl-head .tf-dl-scope { display: flex; }
 .tf-dl-scope button { flex: 1; }
-.tf-dl-hint { font-size: var(--t-2xs); color: var(--ink-2); }
-.tf-dl-hint code { font: var(--t-2xs) var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 0 3px; border-radius: 2px; color: var(--ink); }
+/* The search the address or a label chip started (#2425), in place of a field. */
+.tf-dl-q { margin: 0; font-size: var(--t-xs); color: var(--ink-2); overflow-wrap: anywhere; }
+.tf-dl-q b { color: var(--ink); font-weight: 600; }
 .tf-dl-foot { padding: 10px 12px; border-top: 1px solid var(--rule-2); }
 .tf-dl-meta { padding: 6px 14px 8px; font-size: var(--t-xs); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
 .tf-rd-tree a.tf-dl-hit {

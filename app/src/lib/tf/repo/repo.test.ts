@@ -47,7 +47,7 @@ import {
 const REPO = "gitea:tidewater/payout-service";
 
 test("an address names the repository, its tab and what the tab has selected", () => {
-  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null });
+  expect(readRepoRoute([REPO])).toEqual({ repoId: REPO, tab: "files", path: null, line: null, commit: null, branch: null, base: null });
   expect(readRepoRoute([REPO, "files", "src", "sepa", "retry.rs"])).toMatchObject({ tab: "files", path: "src/sepa/retry.rs" });
   expect(readRepoRoute([REPO, "commits"])).toMatchObject({ tab: "commits", commit: null });
   expect(readRepoRoute([REPO, "commits", `${REPO}@c90d11`])).toMatchObject({ tab: "commits", commit: `${REPO}@c90d11` });
@@ -70,6 +70,7 @@ test("a link to a line of a file is the Files tab at that line (#2251)", () => {
     line: 40_000,
     commit: null,
     branch: null,
+    base: null,
   });
   expect(readRepoRoute([REPO, "files", "line", "7"])).toMatchObject({ path: "line/7", line: null });
   // No line number, or none worth one, is the file at its top.
@@ -420,6 +421,19 @@ test("the edit and compare addresses", () => {
   expect(editHash(REPO, "src/a b.rs")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/edit/src/a%20b.rs");
   expect(compareHash(REPO, "feature/x")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2Fx");
   expect(readRepoRoute([REPO, "edit", "src", "a b.rs"])).toMatchObject({ tab: "edit", path: "src/a b.rs" });
+});
+
+test("the compare address carries the base too, as git's `base...head`, read back whole (#2427)", () => {
+  // The route hands segments decoded, as `parseHash` does.
+  const segments = (hash: string) => hash.split("/").slice(2).map(decodeURIComponent);
+  const hash = compareHash(REPO, "feature/x", "release/2.1");
+  expect(hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/release%2F2.1...feature%2Fx");
+  expect(readRepoRoute(segments(hash))).toMatchObject({ tab: "compare", branch: "feature/x", base: "release/2.1" });
+  // Without a base, and the address typed with its slashes bare, the head alone, as before.
+  expect(readRepoRoute(segments(compareHash(REPO, "feature/x")))).toMatchObject({ branch: "feature/x", base: null });
+  expect(readRepoRoute([REPO, "compare", "release", "2.1...feature", "x"])).toMatchObject({ branch: "feature/x", base: "release/2.1" });
+  // A ref name never holds `..` (git-check-ref-format), so a lone dot or two stay in the head.
+  expect(readRepoRoute([REPO, "compare", "v1.2"])).toMatchObject({ branch: "v1.2", base: null });
 });
 
 test("a branch from a commit starts where the commit's own New branch… starts, disabled where the source says", () => {

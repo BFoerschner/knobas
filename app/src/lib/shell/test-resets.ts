@@ -28,6 +28,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "detail/view/pending-comments.svelte.ts#pendingComments": async () => (await import("../detail/view/pending-comments.svelte")).pendingComments.forget(),
   // Split or unified (#2266), stored in `localStorage`: each test starts unified.
   "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
+  // Titles or Everything (#2430), stored in `localStorage`: each test starts on Titles.
+  "launcher/scope.svelte.ts#launcherScope": async () => (await import("../launcher/scope.svelte")).launcherScope.reset(),
+  // The keys bound (#2429), read from the backend: each test starts with none.
+  "launcher/keys.svelte.ts#launcherKeys": async () => (await import("../launcher/keys.svelte")).launcherKeys.reset(),
   // *Run pipelines on diffs* (#2270), stored in `localStorage`: each test starts with it on.
   "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
   // The source list's role claims (#1196), held once per window.
@@ -56,10 +60,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
-  // Three stores in one file, each cleared through its own public door.
+  // Two stores in one file, each cleared through its own public door.
   "tf/job/current.svelte.ts#entityId": async () => void (await import("../tf/job/current.svelte")).currentJob.set(null),
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
-  "tf/job/current.svelte.ts#asked": async () => (await import("../tf/job/current.svelte")).linkRequest.drop(),
   // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
   "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
   // The ticket page card's width (#2402), kept in `localStorage`: each test starts at the default.

@@ -28,7 +28,7 @@
  */
 import { listAdapters as realListAdapters } from "../ipc/sources";
 import type { KindInfo } from "../ipc/entity";
-import type { Frame, SourceDescriptor } from "../ipc/sources";
+import type { Frame, SourceDescriptor, StateValue } from "../ipc/sources";
 
 /** The one command this needs, injectable so a test needs no Tauri bridge. */
 export interface KindRegistryPorts {
@@ -83,6 +83,14 @@ export interface KindRegistry {
    * registry has been read, so a caller can tell *none* from *not known*.
    */
   frameKinds(role: string, frame: Frame): string[] | null;
+  /**
+   * Every kind some adapter declares a state for, with the values it draws
+   * (`KindPaths.state`, #666): what the launcher's colour legend lists
+   * (#2421), so the legend is the declarations and cannot drift from them.
+   * One entry per kind, in the adapters' order, its values in declaration
+   * order across every candidate path and adapter.
+   */
+  declaredStates(): { kind: string; values: StateValue[] }[];
   /** Read the registry. Idempotent after a success; retryable after a failure. */
   load(): Promise<void>;
   /** Forget what was read, and drop any read still out, so the next {@link load} asks again. */
@@ -133,6 +141,17 @@ export function createKindRegistry(ports?: KindRegistryPorts): KindRegistry {
         .filter((adapter) => adapter.roles.some((claim) => claim.role === role))
         .flatMap((adapter) => adapter.payload_paths.filter((paths) => paths.frame === frame).map((paths) => paths.kind));
       return [...new Set(kinds)];
+    },
+    declaredStates() {
+      const byKind = new Map<string, StateValue[]>();
+      for (const adapter of state.adapters) {
+        for (const paths of adapter.payload_paths) {
+          const values = paths.state.flatMap((candidate) => candidate.values);
+          if (values.length === 0) continue;
+          byKind.set(paths.kind, [...(byKind.get(paths.kind) ?? []), ...values]);
+        }
+      }
+      return [...byKind].map(([kind, values]) => ({ kind, values }));
     },
     load() {
       if (loaded) return Promise.resolve();

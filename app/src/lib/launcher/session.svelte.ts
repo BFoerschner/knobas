@@ -17,6 +17,7 @@
  * suffix are compiled by `vite-plugin-svelte`.
  */
 import {
+  type FavouriteTarget,
   type FilterSuggestions,
   type LauncherHome,
   type SearchQuery,
@@ -54,20 +55,27 @@ export interface SessionPorts {
    */
   resolveUrl?(url: string): Promise<UrlMatch | null>;
   /**
-   * Save the box's current query as a smart list, and the two writes that keep
-   * the rail tidy afterwards — `create_smart_list`, `rename_smart_list`,
+   * Save the box's current query as a list, and the two writes that keep the
+   * lists tidy afterwards — `create_smart_list`, `rename_smart_list`,
    * `delete_smart_list` (#506).
    *
    * **Optional as a group, and their absence is the switch**, exactly as
    * {@link SessionPorts.resolveUrl}'s is: the two link pickers built on this
    * class (`detail/LinkDialog.svelte`, `notes/NoteView.svelte`) are choosing a
-   * target from the corpus and have no rail to save anything to, so they pass
+   * target from the corpus and have no lists to save anything to, so they pass
    * none and {@link Session.canSave} is false there. The launcher passes all
    * three, and it is the launcher that draws the controls.
    */
   createSmartList?(label: string, query: string): Promise<SmartListSummary>;
   renameSmartList?(id: string, label: string): Promise<void>;
   deleteSmartList?(id: string): Promise<void>;
+  /**
+   * *Favourite* and *Unfavourite* (#2428) — `add_favourite`,
+   * `remove_favourite`. Optional as a pair, as the list writes are: the link
+   * pickers pass none and favourite nothing.
+   */
+  addFavourite?(target: FavouriteTarget): Promise<void>;
+  removeFavourite?(target: FavouriteTarget): Promise<void>;
   /**
    * The values the box suggests after `kind:`, `source:` and `under:` —
    * `filter_suggestions` (#601).
@@ -87,11 +95,18 @@ export interface SessionPorts {
 export interface SessionOptions extends SessionPorts {
   actions?: LauncherAction[];
   debounceMs?: number;
+  /**
+   * Whether each query asks for *Titles* (#2430), read when it is sent. The
+   * launcher passes the reader's choice; the link pickers built on this class
+   * pass none and search everything, as they always have.
+   */
+  titles?: () => boolean;
 }
 
 export class Session {
   #ports: SessionPorts;
   #debounceMs: number;
+  #titles: () => boolean;
   #timer: ReturnType<typeof setTimeout> | undefined;
 
   /**
@@ -134,12 +149,10 @@ export class Session {
   selected = $state(0);
   actions = $state<LauncherAction[]>([]);
   /**
-   * The inbox preview and today's time the board draws beside {@link home}
-   * (#1418). The shell's live reads, set by the launcher from its props; rows
-   * of the board's list like the lists and the recent items, so the arrows
-   * reach them.
+   * The shell's live inbox (#1418), set by the launcher from its props. The
+   * empty box no longer draws it (#2421); `#i` answers from it (#2423).
    */
-  extras = $state<BoardExtras>({ inbox: null, today: null });
+  extras = $state<BoardExtras>({ inbox: null });
   /**
    * The id of the list the query in the box was just saved as, or `null`.
    *
@@ -174,6 +187,7 @@ export class Session {
   constructor(options: SessionOptions) {
     this.#ports = options;
     this.#debounceMs = options.debounceMs ?? DEBOUNCE_MS;
+    this.#titles = options.titles ?? (() => false);
     this.actions = options.actions ?? [];
   }
 
@@ -190,6 +204,7 @@ export class Session {
       actions: this.actions,
       syntax: this.syntax,
       extras: this.extras,
+      titles: this.#titles(),
     });
   }
 
@@ -222,6 +237,17 @@ export class Session {
     void this.run();
   }
 
+  /**
+   * The same words asked again at once, under a mode that changed (*Titles*
+   * or *Everything*, #2430). Unlike {@link Session.set} the query is the one
+   * it was, so a list just saved from it stays saved: a saved list keeps the
+   * text, never the mode.
+   */
+  rerun(): void {
+    this.#cancel();
+    void this.run();
+  }
+
   /** Move the cursor, clamped. The list does not wrap: a launcher whose
    *  selection jumps from the last row back to the first loses the reader. */
   move(delta: number): void {
@@ -234,23 +260,23 @@ export class Session {
   }
 
   /**
-   * Whether this session can save what is in the box as a smart list.
+   * Whether this session can save what is in the box as a list.
    *
    * Four things: a caller that supplied the write, a query to save, an answer
    * to it, and an answer the backend could save. Without an answer there is
    * nothing to save — nothing has answered yet, or the search failed and the
    * box shows its error line. The mode is what keeps the control off the `>`
    * palette, the `?` card and a pasted link. The prefix check keeps it off the
-   * two that draw as results and that `saved::create` still refuses: an opened
-   * list (`list:`, a list of a list) and a worklog query (`t `), #1413.
+   * one that draws as results and that `saved::create` still refuses: a
+   * worklog query (`t `), #1413. (`list:` was the other until #2423 retired
+   * it; a saved list is applied by its own text now.)
    *
    * **Ruling P2 holds for the parse, not for the rule.** Both the mode and the
    * prefix are read off the *backend's own interpretation* of the query (the
    * same field `modeOf` reads for `?` and `>`), so no prefix is recognised
-   * here. The rule that a list or a worklog query cannot be saved is
-   * `saved::plan`'s, and these two names are the cases of it the box can
-   * reach; a prefix `plan` starts refusing is refused by name until it is
-   * added here.
+   * here. The rule that a worklog query cannot be saved is `saved::plan`'s,
+   * and this name is the case of it the box can reach; a prefix `plan` starts
+   * refusing is refused by name until it is added here.
    */
   get canSave(): boolean {
     const prefix = this.response?.interpreted.prefix;
@@ -259,13 +285,12 @@ export class Session {
       this.raw.trim() !== "" &&
       this.response !== null &&
       this.mode === "results" &&
-      prefix !== "list" &&
       prefix !== "time"
     );
   }
 
   /**
-   * Save what is in the box, under `label`, and redraw the rail.
+   * Save what is in the box, under `label`, and ask the box again.
    *
    * The id the backend generated is remembered in {@link Session.savedId} so
    * the control can say it worked; the next keystroke clears it, because it is
@@ -279,40 +304,64 @@ export class Session {
     });
   }
 
-  /** Rename a saved list and redraw the rail. */
-  async renameList(id: string, label: string): Promise<void> {
+  /** Rename a saved list and ask the box again; whether the backend took it. */
+  async renameList(id: string, label: string): Promise<boolean> {
     const rename = this.#ports.renameSmartList;
-    if (!rename) return;
-    await this.#write(() => rename(id, label));
+    if (!rename) return false;
+    return this.#write(() => rename(id, label));
   }
 
-  /** Delete a saved list and redraw the rail. */
-  async deleteList(id: string): Promise<void> {
+  /** Delete a saved list and ask the box again; whether the backend took it. */
+  async deleteList(id: string): Promise<boolean> {
     const remove = this.#ports.deleteSmartList;
-    if (!remove) return;
-    await this.#write(async () => {
+    if (!remove) return false;
+    return this.#write(async () => {
       await remove(id);
       if (this.savedId === id) this.savedId = null;
     });
   }
 
   /**
-   * One write to the rail, then a **re-read** of the board.
+   * Favourite (`on`) or unfavourite `target`, then read the board again, so
+   * the empty box draws the block as the backend now has it (#2428). The
+   * board, whatever the box holds: the favourites are the board's, and the
+   * sheet's *Favourite* or *Unfavourite* reads them. Whether the backend took
+   * it; a refusal is in {@link Session.error}.
+   */
+  async favourite(target: FavouriteTarget, on: boolean): Promise<boolean> {
+    const write = on ? this.#ports.addFavourite : this.#ports.removeFavourite;
+    if (!write) return false;
+    try {
+      await write(target);
+      this.error = null;
+    } catch (cause) {
+      this.error = ipcErrorMessage(cause);
+      return false;
+    }
+    await this.loadHome();
+    return true;
+  }
+
+  /**
+   * One write to the lists, then a **re-read** of what the box shows: the
+   * query in it asked again (a `#l` answer draws the renamed or deleted list
+   * as the backend now has it), or the board for an empty box.
    *
-   * Never a patch of `home` in place: the count and the badge of a list this
-   * write did not touch are still the backend's answer, and a hand-patched
-   * array is a second opinion about them. The re-read is one round trip on a
+   * Never a patch of the answer in place: a hand-patched array is a second
+   * opinion about what the backend holds. The re-read is one round trip on a
    * gesture a reader makes by hand, which is not the ⌘K budget.
    */
-  async #write(write: () => Promise<void>): Promise<void> {
+  async #write(write: () => Promise<void>): Promise<boolean> {
     try {
       await write();
       this.error = null;
     } catch (cause) {
       this.error = ipcErrorMessage(cause);
-      return;
+      return false;
     }
-    await this.loadHome();
+    if (this.raw.trim() === "") await this.loadHome();
+    else await this.run();
+    return true;
   }
 
   /**
@@ -406,6 +455,7 @@ export class Session {
         // `noFilters()` rather than the literal: the shape is the bridge's, so
         // a dimension added to `SearchFilters` is one edit there and none here.
         filters: noFilters(),
+        titles: this.#titles(),
       });
       // The whole point of the counter. A stale answer is dropped *silently*:
       // a newer one is already on screen and there is nothing to report.

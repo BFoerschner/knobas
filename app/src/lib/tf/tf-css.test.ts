@@ -253,20 +253,19 @@ test("the launcher's rules are a part of tf.css, and its components have no styl
   expect(readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8")).toMatch(/^@import "\.\/css\/launcher\.css";$/m);
   expect(code).toContain(".tf-ln-res");
   expect(launcherRules.length).toBeGreaterThan(40);
-  for (const source of [...LAUNCHER, readFileSync(join(APP, "src/lib/shell/StateChip.svelte"), "utf8")]) {
+  for (const source of LAUNCHER) {
     expect(source).not.toMatch(/<style\b/);
     expect(source).not.toMatch(/\btf-mono\b|--mono\b/);
   }
 });
 
-test("the launcher sets mono on a result row's key and path and nowhere else (#1422)", () => {
+test("the launcher sets mono on a ticket's key cell and nowhere else (#1422, #2421)", () => {
   const mono = launcherRules.filter(([, body]) => /var\(--mono\)/.test(body)).map(([selector]) => selector);
-  expect(mono).toEqual([".tf-ln-k", ".tf-ln-pa"]);
-  // Both spans are drawn by the row, and only there.
+  expect(mono).toEqual([".tf-ln-k.tf-ln-mono"]);
+  // The key cell is drawn by the row, and only there.
   const row = LAUNCHER[6]!;
-  expect(row).toMatch(/<span class="tf-ln-k">\{key\}<\/span>/);
-  expect(row).toMatch(/<span class="tf-ln-pa">\{path\}<\/span>/);
-  expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|pa)\b/);
+  expect(row).toMatch(/<span class="tf-ln-k" class:tf-ln-mono=\{mono\}>\{cell\}<\/span>/);
+  expect(LAUNCHER.slice(0, 6).join("\n")).not.toMatch(/tf-ln-(k|mono)\b/);
 });
 
 test("the launcher is prototype-6's dialog: an ink selection bar, a borderless 17px box, no capitals and no rooms tokens (#1422)", () => {

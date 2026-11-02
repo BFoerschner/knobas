@@ -29,11 +29,15 @@ import {
   setStandupPublishTarget,
   standupPublishTarget,
   type EntityDetail,
+  type EntityRow,
   type LinkSetRow,
   type PublishTarget,
 } from "../../ipc/entity";
 import {
+  type Keys,
+  favourites,
   hideSavedView,
+  keys,
   search,
   smartLists,
   ticketViews,
@@ -206,7 +210,12 @@ export interface SectionPorts {
   setBackupSchedule: (schedule: BackupSchedule) => Promise<BackupStatus>;
   shareExport: (parts: ShareParts) => Promise<BackupRecord>;
   restoreBackup: (file: string) => Promise<void>;
-  smartLists: () => Promise<Pick<SmartListSummary, "saved">[]>;
+  /** Whether any saved list exists, for the share export's tick (#507). */
+  smartLists: () => Promise<Pick<SmartListSummary, "id">[]>;
+  /** Whether any favourite exists (#2428): they ride in the saved lists' part, so either one draws its tick. */
+  favourites: () => Promise<Pick<EntityRow, "entity_id">[]>;
+  /** Whether any key is bound (#2429): the keys ride in the saved lists' part too. */
+  keys: () => Promise<Pick<Keys, "lists" | "actions">>;
   /** Whether any ticket view exists, for the share export's tick (#812). */
   ticketViews: () => Promise<Pick<TicketViewRow, "id">[]>;
   /** Whether any link set exists, for the share export's tick (#870). */
@@ -246,6 +255,8 @@ export const realSectionPorts: SectionPorts = {
   shareExport: (parts) => shareExport(parts),
   restoreBackup: (file) => restoreBackup(file),
   smartLists: () => smartLists(),
+  favourites: () => favourites(),
+  keys: () => keys(),
   ticketViews: () => ticketViews(),
   linkSets: () => linkSets(),
   appStatus: () => appStatus(),

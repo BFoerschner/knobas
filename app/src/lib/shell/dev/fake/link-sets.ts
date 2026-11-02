@@ -395,6 +395,21 @@ function fakeHints(): LinkSetHint[] {
   ];
 }
 
+/**
+ * The sets as `knobas_search::corpus::SET` reads them, for the launcher's
+ * fixture search (#2422): the counts are the fixed members, the patterns and
+ * the rules (the engine counts the tickets the rules reach; fixture-only).
+ */
+export function fakeLinkSetLines(): { id: string; name: string; description: string; path: string }[] {
+  const counted = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  return SETS.map((set) => ({
+    id: set.id,
+    name: set.name,
+    description: set.description,
+    path: [counted(set.members.length, "item"), counted(set.patterns.length, "pattern"), counted(set.rules.length, "ticket")].join(" · "),
+  }));
+}
+
 export function handlers(): Handlers {
   return {
     link_sets: () => [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),

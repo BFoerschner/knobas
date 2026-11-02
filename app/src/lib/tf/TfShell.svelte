@@ -79,13 +79,16 @@
   import { provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
+  import { sectionFilter } from "../launcher/section";
+  import { chordOf, refusalOf } from "../launcher/keys";
+  import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
   import { sourceRoles } from "./roles.svelte";
   import { entityAddress, legacyAddress } from "./address";
   import { ticketRef } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
-  import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
+  import { breadcrumbJob, currentJob } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
   import { scopedTicket } from "./job/scoped.svelte";
   import { cardWidth } from "./job/card-width.svelte";
@@ -129,10 +132,14 @@
     ontimechanged,
     nav = { back: () => history.back(), forward: () => history.forward() },
     kept = sharedKeptPages,
+    keys = launcherKeys,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
-    /** Open the launcher. */
-    onsearch: () => void;
+    /**
+     * Open the launcher with `query` in its box (#2425): `""` for ⌘K, the
+     * section's filter (`sectionFilter`) for `/`, ⌘/ and the top bar's button.
+     */
+    onsearch: (query: string) => void;
     /** The timer verb: stop into the worklog draft, or start. Required, as in `TopStrip`. */
     ontimer: (() => void) | undefined;
     timer?: Pick<Timer, "current" | "elapsed">;
@@ -167,6 +174,8 @@
     nav?: { back: () => void; forward: () => void };
     /** *Pages kept open* (#2247), which the page host reads; the window's when omitted. */
     kept?: KeptPagesSetting;
+    /** The keys bound (#2429), whose saved lists' chords open search on the list; the window's when omitted. */
+    keys?: KeyStore;
   } = $props();
 
   let hash = $state(location.hash);
@@ -312,11 +321,6 @@
     breadcrumbJob.set(job);
     return () => breadcrumbJob.set(null);
   });
-  // A link asked for a job is the job page's to take; leaving for any other
-  // page before it did drops it, so a later visit does not open the dialog.
-  $effect(() => {
-    if (route.view !== "job" && route.view !== "ticket") linkRequest.drop();
-  });
 
   // ---- the status bar's reads, once the database can answer ----
   let sources = $state<Pick<SourceSummary, "id" | "display_name">[] | null>(null);
@@ -337,6 +341,8 @@
   const ready = () => lifecycle.ready;
   // *Pages kept open* as stored (#2247): until it answers, the default holds.
   onReady(ready, () => ports.pagesKeptOpen, (count) => kept.set(count));
+  // The saved lists' chords (#2429), read once the database answers; the launcher reads them again on each opening.
+  onReady(ready, () => keys.load, () => {});
   // The command renderers (#2262): until they answer, the built-ins draw everything.
   onReady(ready, () => ports.userRenderers, (saved) => installCommands(saved));
   // The default renderer per file pattern (#2263): until it answers, the registry's order decides.
@@ -454,8 +460,19 @@
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      onsearch();
+      onsearch("");
       return;
+    }
+    // `/` outside a field, and ⌘/ anywhere, are the section's search (#2425):
+    // the launcher with the section's filter, the pages having no field of
+    // their own. Read by the key, not the code: on a German board `/` is ⇧7.
+    // A dialog owns the keyboard, the launcher's own included.
+    if (event.key === "/" && !event.altKey && !event.defaultPrevented && !dialogOpen()) {
+      if (mod || focusedField() === null) {
+        event.preventDefault();
+        onsearch(sectionFilter(route));
+        return;
+      }
     }
     if (mod && event.key.toLowerCase() === "t") {
       event.preventDefault();
@@ -466,6 +483,19 @@
       event.preventDefault();
       go("#/settings");
       return;
+    }
+    // A saved list's chord (#2429): search on the list, from any page and in
+    // a field too, as ⌘K is. After the shell's own keys, which win; never a
+    // chord the panel refuses; a dialog, the open launcher's included, owns
+    // the keyboard (the launcher answers it there itself).
+    const chord = chordOf(event);
+    if (chord !== null && !event.defaultPrevented && refusalOf(event) === null && !dialogOpen()) {
+      const list = keys.listOf(chord);
+      if (list) {
+        event.preventDefault();
+        onsearch(`${list.text} `);
+        return;
+      }
     }
     if (event.key !== "Escape" || event.defaultPrevented) return;
 
@@ -543,7 +573,7 @@
     {inbox}
     {badges}
     {timer}
-    {onsearch}
+    onsearch={() => onsearch(sectionFilter(route))}
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
   />

@@ -18,7 +18,7 @@
 
 use std::collections::BTreeSet;
 
-use knobas_search::{Prefix, Vocabulary, parse};
+use knobas_search::{KIND_LETTERS, Prefix, Vocabulary, parse};
 
 /// One row of the card, as `syntax.json` spells it.
 #[derive(Debug, serde::Deserialize)]
@@ -29,6 +29,10 @@ struct Entry {
     probe: String,
     prefix: Option<String>,
     expect: String,
+    /// The kind a `#` filter letter's probe narrows to (#2420), and the kind
+    /// whose chip the launcher labels with this row's summary.
+    #[serde(default)]
+    kind: Option<String>,
 }
 
 fn card() -> Vec<Entry> {
@@ -96,6 +100,17 @@ fn every_row_of_the_help_card_does_what_it_says() {
             ),
             other => panic!("`{}` has an unknown expectation {other:?}", entry.token),
         }
+
+        if let Some(kind) = &entry.kind {
+            assert_eq!(
+                parsed.query.filters.kinds,
+                [kind.as_str()],
+                "`{}` says it narrows to {kind:?}; the parser made {:?} of {:?}",
+                entry.token,
+                parsed.query.filters.kinds,
+                entry.probe
+            );
+        }
     }
 }
 
@@ -116,12 +131,10 @@ fn every_prefix_the_grammar_has_is_documented() {
     // stronger signal than a missing set member.
     let all = [
         Prefix::Action,
-        Prefix::Ticket,
         Prefix::Person,
         Prefix::Source,
         Prefix::Time,
         Prefix::Note,
-        Prefix::List,
         Prefix::Asset,
         Prefix::Help,
     ];
@@ -129,12 +142,10 @@ fn every_prefix_the_grammar_has_is_documented() {
         // The compiler's half: a new variant makes this match non-exhaustive.
         match prefix {
             Prefix::Action
-            | Prefix::Ticket
             | Prefix::Person
             | Prefix::Source
             | Prefix::Time
             | Prefix::Note
-            | Prefix::List
             | Prefix::Asset
             | Prefix::Help => {}
         }
@@ -178,6 +189,34 @@ fn what_a_row_inserts_never_becomes_a_search_word() {
             !entry.summary.is_empty(),
             "`{}` has no explanation, which is the only reason the card exists",
             entry.token
+        );
+    }
+}
+
+/// Every `#` filter letter has its row on the card, one word for what it
+/// narrows to, and the row inserts that letter (#2420).
+///
+/// Driven by the parser's own [`KIND_LETTERS`], so a letter the grammar gains
+/// fails here until the card draws it.
+#[test]
+fn every_filter_letter_has_its_row() {
+    let rows = card();
+    for (letter, kind) in KIND_LETTERS {
+        let token = format!("#{letter}");
+        let row = rows
+            .iter()
+            .find(|entry| entry.token == token)
+            .unwrap_or_else(|| panic!("`{token}` filters on {kind:?} and the `?` card has no row"));
+        assert_eq!(row.kind.as_deref(), Some(kind), "`{token}`");
+        assert!(
+            row.insert.starts_with(&token),
+            "`{token}` inserts {:?}",
+            row.insert
+        );
+        assert!(
+            !row.summary.is_empty() && !row.summary.contains('—'),
+            "`{token}`: {:?}",
+            row.summary
         );
     }
 }

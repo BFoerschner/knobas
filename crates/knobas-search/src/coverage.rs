@@ -135,6 +135,7 @@ select i.source_id                            as source_id,
   from sync.live_item i
  where i.source_id = any($1)
    and (cardinality($2::text[]) = 0 or i.kind = any($2))
+   and i.kind <> all($3::text[])
  group by i.source_id
 ";
 
@@ -219,7 +220,8 @@ pub(crate) async fn report(
     let ids: Vec<String> = scoped.iter().map(|source| source.id.clone()).collect();
     let probes: Vec<SourceProbe> = sqlx::query_as(AUTHOR_COVERAGE_SQL)
         .bind(&ids)
-        .bind(&filters.kinds)
+        .bind(filters.kind_scope())
+        .bind(&filters.hidden_kinds)
         .fetch_all(pool)
         .await?;
 

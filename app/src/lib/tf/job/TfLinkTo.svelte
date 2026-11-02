@@ -6,9 +6,6 @@
   the same debounce, sequencing and selection, over the job's ports. The link
   is written by `create_link` (BUILT) and stays in knobas, which the dialog
   says in one line (R-15.2).
-
-  The launcher's *Link to <key>* (#1500) opens it with the other end preset,
-  so only the relation and the note are left to pick.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -18,6 +15,7 @@
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
   import { linkFailureMessage } from "../../detail/links";
   import { drawn } from "../../detail/relations";
+  import { JOB_LINK_RELATIONS } from "./link-relations";
   import { kindSingular } from "../../shell/kinds";
   import type { Layers } from "../layers.svelte";
   import type { LinkTarget } from "./current.svelte";
@@ -26,7 +24,6 @@
   let {
     jobKey,
     entityId,
-    preset = null,
     ports,
     layers,
     onclose,
@@ -34,8 +31,6 @@
   }: {
     jobKey: string;
     entityId: string;
-    /** The other end, already chosen: the launcher's *Link to <key>* (#1500). */
-    preset?: LinkTarget | null;
     ports: Pick<SessionPorts, "search" | "launcherHome"> & {
       createLink: (fromId: string, toId: string, relation?: string, note?: string) => Promise<LinkRow>;
     };
@@ -44,15 +39,8 @@
     onlinked: (target: LinkTarget) => void;
   } = $props();
 
-  /** The relations prototype-6 offers, as `create_link` stores them. */
-  const OFFERED = [
-    { id: "related", label: "related" },
-    { id: "implements", label: "implements" },
-    { id: "documents", label: "documents" },
-    { id: "runs-on", label: "runs on" },
-    { id: "blocks", label: "blocks" },
-    { id: "depends-on", label: "depends on" },
-  ];
+  /** The relations a job's link offers, one list with the launcher's *Link to ⟨job⟩* (#2426). */
+  const OFFERED = JOB_LINK_RELATIONS;
 
   // svelte-ignore state_referenced_locally
   // Read once: a `Session` owns a debounce timer and a request counter.
@@ -61,9 +49,7 @@
   // debounce would otherwise fire a search for a dialog that is gone.
   onMount(() => () => session.dispose());
 
-  // svelte-ignore state_referenced_locally
-  // The preset is where the dialog starts; *Change* picks another.
-  let target = $state<LinkTarget | null>(preset);
+  let target = $state<LinkTarget | null>(null);
   let relation = $state("related");
   let note = $state("");
   let failure = $state<string | null>(null);

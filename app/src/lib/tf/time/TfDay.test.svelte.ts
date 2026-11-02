@@ -76,7 +76,7 @@ const FOUND = { entity_id: "jira:OPS-77", kind: "ticket", title: "Rotate the gat
 
 function found(): SearchResponse {
   return {
-    interpreted: { prefix: null },
+    interpreted: { text: "", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
     groups: [{ kind: "ticket", label: "Tickets", plural: "tickets", monogram: "T", total: 1, hits: [FOUND] }],
     total: 1,
     took_ms: 0,
@@ -143,7 +143,7 @@ function render(
           searches.push(query.raw);
           return Promise.resolve(found());
         },
-        launcherHome: () => Promise.resolve({ recent: RECENT, smart_lists: [], stale_sources: [] } as never),
+        launcherHome: () => Promise.resolve({ recent: RECENT, favourites: [], stale_sources: [] } as never),
         ...(over.refusedWrites ? { refusedWrites: over.refusedWrites } : {}),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),

@@ -36,12 +36,15 @@ function keyOf(token: string): string | null {
   return at > 0 ? token.slice(0, at).toLowerCase() : null;
 }
 
+/** `#` and filter letters only (`query::KIND_LETTERS`): a kind filter, `#t`, `#rl`. */
+const FILTER = /^#[tprbmdli]+$/iu;
+
 /** Whether the grammar takes the token as a key, a marker or a refused negation, not a search word. */
 function isGrammar(token: string): boolean {
-  if (token.startsWith("/") || token.startsWith("@")) return true;
+  if (token.startsWith("@") || FILTER.test(token)) return true;
   const bare = token.startsWith("-") ? token.slice(1) : token;
-  // `-@x`, `-/x`, `-#x` are refused whole (`negates_what_cannot_be_negated`).
-  if (token.startsWith("-") && /^[@/#]./u.test(bare)) return true;
+  // `-@x` and `-#t` are refused whole (`negates_what_cannot_be_negated`).
+  if (token.startsWith("-") && (/^@./u.test(bare) || FILTER.test(bare))) return true;
   const key = keyOf(bare);
   return key !== null && KEYS.has(key);
 }
@@ -58,13 +61,14 @@ export interface WordAlternative {
   lacks: string[];
 }
 
-/** The text's search words, keys taken out, as `query::parse` leaves them (`#key` is its rest). */
+/** The text's search words, keys taken out, as `query::parse` leaves them (`#word` is its word). */
 function terms(text: string): string[] {
   const out: string[] = [];
   for (const token of tokenize(text)) {
+    if (isGrammar(token)) continue;
     if (token.startsWith("#")) {
       if (token.length > 1) out.push(token.slice(1));
-    } else if (!isGrammar(token)) out.push(token);
+    } else out.push(token);
   }
   return out;
 }

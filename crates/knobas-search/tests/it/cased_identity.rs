@@ -96,6 +96,7 @@ async fn ticket(pool: &sqlx::PgPool, n: u32, assignee: &str, reviewer: &str) -> 
 async fn answer(searcher: &Searcher, raw: &str) -> Vec<String> {
     let response = searcher
         .search(SearchQuery {
+            titles: false,
             raw: format!("project:CASED {raw}"),
             limit: 50,
             filters: SearchFilters::default(),

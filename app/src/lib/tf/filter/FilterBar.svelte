@@ -24,16 +24,15 @@
   `filter.text`, so the bar re-renders only what changed and the view below
   re-renders only its results.
 
-  **Keys** (R-2.4): `/` anywhere outside a text field focuses the field. `Esc`
-  is the shell's ladder (`escape.ts`), which finds this field by its
-  `data-filter`: the first press clears it, the second leaves it.
+  **Keys**: `Esc` is the shell's ladder (`escape.ts`), which finds this field
+  by its `data-filter`: the first press clears it, the second leaves it. `/`
+  is not the bar's (#2425): outside a field the shell opens the launcher with
+  the section's filter, which is the section's search.
 -->
 <script lang="ts">
-  import { onMount, type Snippet } from "svelte";
+  import type { Snippet } from "svelte";
 
-  import { inTextField } from "../../shell/keys";
   import { countLine, type FilterConfig, type FilterState } from "./filter";
-  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     config,
@@ -90,25 +89,10 @@
     filter.scope = id;
     onchange();
   }
-
-  const pageShown = pageVisible();
-  onMount(() => {
-    if (config.hint === false) return;
-    const onkey = (event: KeyboardEvent) => {
-      // A page keep-alive holds hidden (#2247) takes no keys.
-      if (!pageShown()) return;
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
-      const at = document.activeElement;
-      if (at instanceof HTMLElement && inTextField(at)) return;
-      event.preventDefault();
-      field?.focus();
-    };
-    window.addEventListener("keydown", onkey);
-    return () => window.removeEventListener("keydown", onkey);
-  });
 </script>
 
 <div class="tf-fbar" data-fid={config.id}>
+  {#if config.search !== false}
   <label class="tf-fsearch" class:tf-has={filter.text !== ""}>
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
       ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
@@ -123,10 +107,9 @@
     />
     {#if filter.text !== ""}
       <button type="button" class="tf-fclear" aria-label="Clear filter" onclick={clear}>✕</button>
-    {:else if config.hint !== false}
-      <kbd>/</kbd>
     {/if}
   </label>
+  {/if}
   {#if scopes.length > 0}
     <div class="tf-seg" role="group" aria-label="Scope">
       {#each scopes as choice (choice.id)}

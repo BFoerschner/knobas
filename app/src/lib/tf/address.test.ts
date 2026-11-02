@@ -37,8 +37,17 @@ test("a Jira view opens its ticket view, by the projection's slug (#1094)", () =
   expect(entityAddress("jira_view", "jira:filter-10230")).toBe("#/tickets/jira-filter-10230");
 });
 
-test("a kind with no page of its own lands on its section, never on Code (#1094)", () => {
-  expect(entityAddress("build_config", "teamcity:Pay_Build")).toBe("#/builds");
+test("a pipeline opens itself in Builds, under the shell's word or the source's (#2422)", () => {
+  expect(entityAddress("pipeline", "teamcity:buildType:Pay_Build")).toBe("#/builds/teamcity%3AbuildType%3APay_Build");
+  expect(entityAddress("build_config", "teamcity:Pay_Build")).toBe("#/builds/teamcity%3APay_Build");
+  expect(parseTfHash(entityAddress("pipeline", "teamcity:Pay_Build"))).toMatchObject({ view: "full", section: "builds" });
+});
+
+test("a saved ticket view opens its Tickets page and a link set its own page, by their ids (#2422)", () => {
+  expect(entityAddress("view", "payments-backlog")).toBe("#/tickets/payments-backlog");
+  expect(entityAddress("set", "payout-stack")).toBe("#/sets/payout-stack");
+  expect(parseTfHash(entityAddress("view", "payments-backlog"))).toEqual({ view: "tickets", rest: ["payments-backlog"] });
+  expect(parseTfHash(entityAddress("set", "payout-stack"))).toMatchObject({ view: "full", section: "sets" });
 });
 
 test("a kind no surface draws, such as a custom role's, opens its item page (#1201)", () => {
@@ -47,7 +56,7 @@ test("a kind no surface draws, such as a custom role's, opens its item page (#12
 });
 
 test("every address entityAddress produces has a place in the new shell", () => {
-  for (const kind of ["ticket", "pr", "repo", "branch", "commit", "build", "page", "asset", "route", "monitor", "note", "mystery"]) {
+  for (const kind of ["ticket", "pr", "repo", "branch", "commit", "build", "page", "asset", "route", "monitor", "note", "view", "set", "pipeline", "mystery"]) {
     expect(parseTfHash(entityAddress(kind, "x:1")).view).not.toBe("unknown");
   }
 });

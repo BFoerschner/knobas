@@ -61,6 +61,7 @@ function hit(over: { id: string; kind?: string; title: string }) {
     title: over.title,
     rank: 1,
     snippet: [],
+    excerpts: [],
   };
 }
 

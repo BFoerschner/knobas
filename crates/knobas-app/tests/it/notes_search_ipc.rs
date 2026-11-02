@@ -21,6 +21,7 @@ async fn pool() -> sqlx::PgPool {
 
 fn query(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 20,
         filters: SearchFilters::default(),

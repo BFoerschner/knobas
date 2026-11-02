@@ -450,33 +450,11 @@ const slash = (on: EventTarget = window) => {
   return event;
 };
 
-test("/ focuses Find, and Find is the page's filter for the shell's Esc ladder (#1419)", async () => {
+test("Find is the page's filter for the shell's Esc ladder, and / leaves it alone: / is the shell's, and opens the launcher (#1419, #2425)", async () => {
   render();
   await settle();
   const find = target.querySelector<HTMLInputElement>('input[aria-label="Find"]')!;
   expect(find.hasAttribute("data-filter")).toBe(true);
-  expect(document.activeElement).not.toBe(find);
-  expect(slash().defaultPrevented).toBe(true);
-  expect(document.activeElement).toBe(find);
-});
-
-test("/ typed in another field does not steal focus (#1419)", async () => {
-  render();
-  await settle();
-  const other = document.body.appendChild(document.createElement("input"));
-  other.focus();
-  slash(other);
-  expect(document.activeElement).toBe(other);
-  other.remove();
-});
-
-test("the / listener is removed when the page unmounts (#1419)", async () => {
-  render();
-  await settle();
-  const find = target.querySelector<HTMLInputElement>('input[aria-label="Find"]')!;
-  unmount(app!);
-  app = null;
-  const event = slash();
-  expect(event.defaultPrevented).toBe(false);
+  expect(slash().defaultPrevented).toBe(false);
   expect(document.activeElement).not.toBe(find);
 });

@@ -1,7 +1,7 @@
 //! What the launcher shows before anything is typed.
 //!
-//! Spec §4: an empty box is a **board**, not a query -- the smart lists with
-//! their counts, and the newest items across every kind. Answering it with the
+//! Spec §4: an empty box is a **board**, not a query -- the newest items
+//! across every kind (no lists since #2423, spec #2419). Answering it with the
 //! search statement would be a full-corpus scan that returns nothing, which is
 //! why [`crate::Searcher::search`] refuses a query with neither text nor a
 //! filter and points here instead.
@@ -22,13 +22,11 @@
 //! promise every kind a slot: a kind that genuinely holds the twenty newest
 //! items owns the board, because that is what "recent" means. Fetching `limit`
 //! rows *per kind* is what makes the read index-backed and bounded, not a
-//! fairness device -- the per-kind rail the round-3 mockup draws is the smart
-//! lists, which have their own counts.
+//! fairness device.
 
 use chrono::{DateTime, Utc};
 
 use crate::SearchError;
-use crate::lists::SmartListSummary;
 use crate::types::EntityRow;
 
 /// How many items the board shows.
@@ -58,16 +56,16 @@ macro_rules! recent_sql {
         concat!(
             $prefix,
             "select s.entity_id, s.kind, s.source_id, s.title,\n",
-            "       s.item_updated_at as updated_at, s.synced_at, s.path, s.state\n",
+            "       s.item_updated_at as updated_at, s.synced_at, s.path, s.state, s.key_cell as cell\n",
             "  from unnest($1::text[]) as k(kind)\n",
             "  cross join lateral (\n",
             "      select i.entity_id, i.kind, i.source_id, i.title,\n",
-            "             i.item_updated_at, i.synced_at,\n",
+            "             i.item_updated_at, i.synced_at, i.key_cell,\n",
             "             ",
-            knobas_core::path_line_read!("$3"),
+            $crate::mirror_path!("$3"),
             " as path,\n",
             "             ",
-            knobas_core::declared_state!("$3"),
+            $crate::mirror_state!("$3"),
             " as state\n",
             "        from sync.item i\n",
             "       where i.kind = k.kind\n",
@@ -160,7 +158,9 @@ const EXPLAIN_RECENT_KINDS_SQL: &str = recent_kinds_sql!("explain (analyze false
 /// this crate's to read.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LauncherBoard {
-    pub smart_lists: Vec<SmartListSummary>,
+    /// What the reader favourited, in that order (#2428,
+    /// [`crate::favourites`]): entities and saved lists, one block.
+    pub favourites: Vec<EntityRow>,
     pub recent: Vec<EntityRow>,
 }
 
@@ -182,6 +182,8 @@ struct RecentRow {
     path: Option<String>,
     /// The row's state chip (#666); null for a kind that declares none.
     state: Option<sqlx::types::Json<knobas_core::payload::StateChip>>,
+    /// The key cell (#2452), `sync.item.key_cell`.
+    cell: Option<String>,
 }
 
 /// The newest items across every kind the mirror holds.
@@ -194,7 +196,15 @@ pub async fn recent(
     limit: u32,
     declarations: &knobas_core::payload::Declarations,
 ) -> Result<Vec<EntityRow>, SearchError> {
-    let kinds = kinds(pool).await?;
+    // No runs, commits or Jira views' mirror rows, and pipelines under the
+    // shell's word (#2422, `crate::frames`): the kinds left out are never
+    // read, so they cannot crowd the newest rows off the board either.
+    let frames = crate::frames::LauncherFrames::of(declarations);
+    let kinds: Vec<String> = kinds(pool)
+        .await?
+        .into_iter()
+        .filter(|kind| !frames.leaves_out(kind))
+        .collect();
     let rows = sqlx::query_as::<_, RecentRow>(RECENT_SQL)
         .bind(&kinds)
         .bind(i64::from(limit))
@@ -205,13 +215,14 @@ pub async fn recent(
         .into_iter()
         .map(|row| EntityRow {
             entity_id: row.entity_id,
-            kind: row.kind,
+            kind: frames.answered_as(&row.kind).to_owned(),
             source_id: row.source_id,
             title: row.title,
             updated_at: row.updated_at,
             synced_at: row.synced_at,
             path: row.path,
             state: row.state.map(|chip| chip.0),
+            cell: row.cell,
         })
         .collect())
 }

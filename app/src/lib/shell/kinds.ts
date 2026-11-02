@@ -101,6 +101,12 @@ const VOCABULARY: Record<string, { label: string; plural: string; monogram: stri
   // and the estate's *type* table spends both `RP` and `RT` on a reverse proxy
   // and a runtime. Matches `knobas_core::entity::OWNED_KINDS`.
   route: { label: "Route", plural: "Routes", monogram: "RO" },
+  // The launcher's own kinds (#2422, `knobas_search::vocab::LAUNCHER_KINDS`):
+  // a saved ticket view, a link set, and a pipeline under the shell's word
+  // whatever its source calls it (ADR-0022).
+  view: { label: "Ticket view", plural: "Ticket views", monogram: "VW" },
+  set: { label: "Link set", plural: "Link sets", monogram: "LS" },
+  pipeline: { label: "Pipeline", plural: "Pipelines", monogram: "PL" },
 };
 
 /**

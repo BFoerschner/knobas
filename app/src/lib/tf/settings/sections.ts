@@ -18,7 +18,9 @@ export interface ShareTick {
 
 /**
  * The ticks, in prototype-6's order. Each is a part of the share export
- * (`ShareParts`). *Smart lists* is drawn only once a saved list exists,
+ * (`ShareParts`). *Saved lists, favourites and keys* is drawn only once a
+ * saved list, a favourite or a key exists (they ride in that part, #2428,
+ * #2429),
  * *Ticket views* (#812) only once a view exists and *Link sets* (#870) only
  * once a set exists: each part is a box about nothing before that
  * (CONTEXT.md, *Share export*).
@@ -31,7 +33,7 @@ export function shareTicks(savedLists: boolean, savedViews = false, savedSets = 
     { part: "contexts", label: "Contexts" },
     { part: "assets", label: "Assets and routes" },
     { part: "sources", label: "Sources, without passwords" },
-    { part: "smart_lists", label: "Smart lists" },
+    { part: "smart_lists", label: "Saved lists, favourites and keys" },
     { part: "notes", label: "Notes" },
     { part: "time", label: "Time" },
   ];
@@ -99,12 +101,12 @@ export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
 
 /** Keyboard: requirements §14, in prototype-6's words. Fixed in this version. */
 export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: string])[] = [
-  ["⌘K", "Anywhere", "Search everything"],
+  ["⌘K", "Anywhere", "Search everything, from an empty box"],
   ["⌘T", "Anywhere", "Stop or start the timer"],
   ["⌘,", "Anywhere", "Settings"],
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
   ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
-  ["/", "A list", "Focus the filter"],
+  ["/ ⌘/", "Anywhere; / outside a field", "Search this section: the launcher with its filter"],
   ["Esc", "Anywhere", "Back one step: dialog, drawer, filter, view, job"],
   ["J K ↑ ↓", "Tickets", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],

@@ -1052,5 +1052,8 @@ fn reachs_start_set_is_resolved_once_per_statement() {
         10,
         40,
     );
-    assert!(!bare.sql().contains("reaches"), "{}", bare.sql());
+    // The CTE and its readers by name: a set's path line (#2422) carries the
+    // link-set walk, whose comments say what an index "reaches".
+    assert!(!bare.sql().contains("reaches as"), "{}", bare.sql());
+    assert!(!bare.sql().contains("reaches rx"), "{}", bare.sql());
 }

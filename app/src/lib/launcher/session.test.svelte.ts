@@ -43,6 +43,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
           title,
           rank: 1,
           snippet: [],
+          excerpts: [],
         })),
       },
     ],
@@ -53,8 +54,8 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
 }
 
 const EMPTY_HOME: LauncherHome = {
-  smart_lists: [],
   recent: [],
+  favourites: [],
   sources: [],
   pending_writes: 0,
   notes_shown: true,
@@ -286,7 +287,7 @@ test("the ? card drops the note: row exactly while notes are hidden", async () =
   expect(await help(true)).toContain("note:");
   const hidden = await help(false);
   expect(hidden).not.toContain("note:");
-  expect(hidden).toContain("list:");
+  expect(hidden).toContain("asset:");
 });
 
 // -- a pasted link (#496) ----------------------------------------------------
@@ -548,13 +549,13 @@ test("a parents-only read keeps the opening's ticket-key values (#811)", async (
 /**
  * *Save as list* is offered only on a query the backend can save (#1413).
  *
- * An opened list and a `t ` query both answer as results, and the backend
- * refuses to save either; a search that failed has no answer at all. The gate
+ * A `t ` query answers as results, and the backend refuses to save it; a
+ * search that failed has no answer at all. The gate
  * reads the backend's own `interpreted.prefix` (ruling P2), so the test hands
  * it responses carrying each prefix.
  */
-test("Save as list waits for an answer and is never offered on a list or a time query", async () => {
-  let prefix: "list" | "time" | null = null;
+test("Save as list waits for an answer and is never offered on a time query", async () => {
+  let prefix: "time" | null = null;
   let fail = false;
   const session = new Session({
     ...ports(async (q) => {
@@ -573,12 +574,6 @@ test("Save as list waits for an answer and is never offered on a list or a time 
   await vi.advanceTimersByTimeAsync(200);
   expect(session.canSave).toBe(true);
 
-  prefix = "list";
-  session.type("list:not-monitored");
-  await vi.advanceTimersByTimeAsync(200);
-  expect(session.response?.interpreted.prefix).toBe("list");
-  expect(session.canSave).toBe(false);
-
   prefix = "time";
   session.type("t today");
   await vi.advanceTimersByTimeAsync(200);
@@ -592,6 +587,61 @@ test("Save as list waits for an answer and is never offered on a list or a time 
   await vi.advanceTimersByTimeAsync(200);
   expect(session.error).not.toBeNull();
   expect(session.canSave).toBe(false);
+
+  session.dispose();
+});
+
+/**
+ * *Titles* (#2430) is read as each query is sent, so a flip between two
+ * queries reaches the second; a session given no reader (the link pickers)
+ * searches everything, as it always has.
+ */
+test("the titles flag is read when each query is sent, and is off without a reader", async () => {
+  const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
+  let titles = true;
+  const session = new Session({ ...ports(search), titles: () => titles });
+  session.set("pay-210");
+  await vi.advanceTimersByTimeAsync(0);
+  titles = false;
+  session.set("pay-210");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(search.mock.calls.map(([q]) => q.titles)).toEqual([true, false]);
+
+  const picker = vi.fn(async (q: SearchQuery) => answer(q.raw));
+  new Session(ports(picker)).set("pay-210");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(picker.mock.calls[0]?.[0]?.titles).toBe(false);
+});
+
+/**
+ * ⌘D (#2430) asks the same words again under the other mode. A saved list
+ * keeps the text and never the mode, so a list just saved from the box is
+ * still the query in it: the control keeps saying so, and a second save of
+ * the same text is not offered.
+ */
+test("asking again under the other mode keeps a list just saved as saved", async () => {
+  const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
+  let titles = true;
+  const session = new Session({
+    ...ports(search),
+    titles: () => titles,
+    createSmartList: async (name: string, query: string) => ({ id: "list-1", name, query }) as never,
+  });
+  session.type("payments");
+  await vi.advanceTimersByTimeAsync(200);
+  await session.saveCurrent("Payments");
+  expect(session.savedId).toBe("list-1");
+
+  titles = false;
+  session.rerun();
+  await vi.advanceTimersByTimeAsync(0);
+  // The save asks the box again (#2423), then the flip does.
+  expect(search.mock.calls.map(([q]) => [q.raw, q.titles])).toEqual([
+    ["payments", true],
+    ["payments", true],
+    ["payments", false],
+  ]);
+  expect(session.savedId).toBe("list-1");
 
   session.dispose();
 });

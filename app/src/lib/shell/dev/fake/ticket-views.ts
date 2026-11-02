@@ -355,6 +355,11 @@ function bulkTickets(n: number): (typeof CORPUS)[number][] {
   });
 }
 
+/** The views as `knobas_search::corpus::VIEW` reads them, for the launcher's fixture search (#2422). */
+export function fakeTicketViewLines(): { id: string; name: string; path: string }[] {
+  return VIEWS.map((view) => ({ id: view.id, name: view.name, path: view.query.trim() === "" ? view.group : `${view.group} · ${view.query}` }));
+}
+
 /** Reads `?fake-tickets=<n>` before the bridge is installed. */
 export function seed(params: URLSearchParams): void {
   CORPUS.push(...bulkTickets(Number(params.get("fake-tickets") ?? 0) || 0));

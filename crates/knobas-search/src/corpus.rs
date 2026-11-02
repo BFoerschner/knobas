@@ -136,6 +136,24 @@ pub struct Corpus {
     /// and a headline over the body alone would then be an excerpt with no
     /// visible relation to what was searched for.
     pub(crate) headline_text: &'static str,
+    /// The text a hit's excerpts are read from under *Everything* (#2431,
+    /// [`crate::excerpt`]), selected for the page's rows only, or
+    /// `null::text` for a corpus with no text beyond what the row shows.
+    pub(crate) excerpt: &'static str,
+    /// The number of [`Self::excerpt`]'s first line when that text is a run
+    /// log, whose excerpts are its lines (`line <n>`), else `null::bigint`.
+    pub(crate) excerpt_line: &'static str,
+    /// The `tsvector` of the row another corpus answers for when it matches
+    /// (`i.fts`), or `None`: a corpus that adds a second way to find a row
+    /// another corpus holds, [`PIPELINE_LOG`], leaves out the rows that one
+    /// already matched, so a pipeline is one hit.
+    pub(crate) unless: Option<&'static str>,
+    /// Whether a match here is a row of [`LIVE_ITEM`], drawn by its detail
+    /// branch rather than one of its own (#2431): [`PIPELINE_LOG`]'s hits are
+    /// live pipelines, and a second detail branch spelling the mirror's path
+    /// and state again cost every keystroke about 3 ms of planning, over an
+    /// empty table too (2,500 items, `just responsiveness-probe`).
+    pub(crate) drawn_as_mirror: bool,
     /// The author column, if the corpus has one. `None` means the corpus can
     /// hold nothing of anybody's, so an author filter excludes it entirely
     /// rather than silently ignoring the filter.
@@ -180,6 +198,13 @@ pub struct Corpus {
     /// relation `path` reads, and nothing else: one answer to "what state is
     /// this in", as `path_line_read!` is one to "where is this".
     pub(crate) state: &'static str,
+    /// The row's key cell as `text` (#2452), or `null::text` for a corpus
+    /// whose rows have none. For the mirror it is the stored
+    /// `sync.item.key_cell` (migration `0068`), resolved from the
+    /// declarations when the row is written -- the same text `fts` holds at
+    /// weight A, so what *Titles* matches and what the key column draws are
+    /// one value.
+    pub(crate) cell: &'static str,
     /// An extra `where` fragment scoping the corpus, for a relation that holds
     /// more than one kind of thing. `None` for [`LIVE_ITEM`].
     pub(crate) scope: Option<&'static str>,
@@ -463,6 +488,119 @@ macro_rules! estate_subtree {
     };
 }
 
+/// The Builds frame a mirrored row's kind declares (`pipeline`, `run`), or
+/// null; `$decl` holds the declarations and the row is `i`.
+macro_rules! mirror_frame {
+    ($decl:literal) => {
+        concat!(
+            "(",
+            $decl,
+            "::jsonb #>> array[i.source_id, i.kind, 'frame'])"
+        )
+    };
+}
+
+/// A mirrored row's path line (#2422): a pipeline's chain of groups, its
+/// project and the projects above it joined by ` › ` as the Builds view and
+/// a set's member row draw it (`group_path`), else the parent chain its kind
+/// declares (`knobas_core::path_line_read!`), the line every other row draws.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! mirror_path {
+    ($decl:literal) => {
+        concat!(
+            "(case when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select string_agg(btrim(e.elem #>> c.entry_segs), \
+             ' \u{203a} ' order by e.ord) from ",
+            knobas_core::declared_list_candidates!($decl, "group_path"),
+            " c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) \
+             = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord) \
+             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
+               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null), ",
+            knobas_core::path_line_read!($decl),
+            ") else ",
+            knobas_core::path_line_read!($decl),
+            " end)"
+        )
+    };
+}
+
+/// A mirrored row's state (#2422): a pipeline's is its newest run's, read
+/// from the head of its range of `sync.item_pipeline` as the Builds view and
+/// a set's member rows read it (`knobas_core::newest_runs!`), and its own
+/// declared state when it has no run that carries one; every other row's is
+/// its own (`knobas_core::declared_state!`).
+#[macro_export]
+#[doc(hidden)]
+macro_rules! mirror_state {
+    ($decl:literal) => {
+        concat!(
+            "(case when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select st.state from (select i.source_id, ",
+            knobas_core::declared_string!($decl, "pipeline"),
+            " as pkey, (select sc.kind from knobas.source_config sc where sc.id = i.source_id) \
+             as adapter_kind) pl cross join lateral (select ",
+            knobas_core::declared_state!($decl),
+            " as state from ",
+            knobas_core::newest_runs!("pl", "1"),
+            " n join sync.item i on i.entity_id = n.entity_id) st), ",
+            knobas_core::declared_state!($decl),
+            ") else ",
+            knobas_core::declared_state!($decl),
+            " end)"
+        )
+    };
+}
+/// A mirrored row's key cell (#2451, #2452, spec #2419 story 19): the text a
+/// person reads beside the title to know where the thing sits, resolved from
+/// the declarations alone.
+///
+/// - a ticket: none, its key is its id (`0048` indexes it);
+/// - a pipeline-framed kind: its nearest project, the last entry of its
+///   declared `group_path` (the last segment of [`mirror_path!`]'s chain),
+///   else its declared `project_name`, else its innermost parent;
+/// - any other kind: its declared `monitor_type`, else its declared
+///   `project_name` (a page's space), else its outermost parent's first name
+///   past its last `/` (a pull request's or a branch's repository).
+///
+/// **Not read per query.** Migration `0068` pastes this expansion with
+/// `$decl` = `d.decl` into `sync.key_cell_of`, which writes
+/// `sync.item.key_cell` when a row is written or its declarations change,
+/// and `fts` folds that column in at weight A.
+/// `the_stored_key_cell_is_this_expansion` holds the migration's text to this
+/// expansion: a change here fails it until a migration restates the function.
+/// Only that test expands it: the readers read the stored column.
+#[cfg(test)]
+macro_rules! key_cell {
+    ($decl:literal) => {
+        concat!(
+            "(case when i.kind = 'ticket' then null when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select btrim(e.elem #>> c.entry_segs) from ",
+            knobas_core::declared_list_candidates!($decl, "group_path"),
+            " c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) \
+             = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord) \
+             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
+               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null \
+             order by e.ord desc limit 1), ",
+            knobas_core::declared_string!($decl, "project_name"),
+            ", (select pn.name from ",
+            knobas_core::declared_parent_names!($decl),
+            " pn order by pn.pos desc, pn.name_ord limit 1)) else coalesce(",
+            knobas_core::declared_string!($decl, "monitor_type"),
+            ", ",
+            knobas_core::declared_string!($decl, "project_name"),
+            ", (select nullif(btrim(split_part(pn.name, '/', -1)), '') from ",
+            knobas_core::declared_parent_names!($decl),
+            " pn order by pn.pos, pn.name_ord limit 1)) end)"
+        )
+    };
+}
+
+pub(crate) use mirror_frame;
+
 /// The synced mirror: M1's only corpus.
 ///
 /// **`sync.live_item`, never `sync.item`.** Migration `0002` made the tombstone
@@ -494,11 +632,18 @@ pub const LIVE_ITEM: Corpus = Corpus {
         "i.title || ' — ' || ",
         knobas_core::body_text_shown!("i.body_text")
     ),
+    // A pipeline's preview is its stored latest run log (#2431, `0067`),
+    // every other row's its body, the Docs marks kept for the places.
+    excerpt: "coalesce((select pl.body from sync.pipeline_log pl where pl.pipeline_id = i.entity_id), i.body_text)",
+    excerpt_line: "(select pl.first_line from sync.pipeline_log pl where pl.pipeline_id = i.entity_id)",
+    unless: None,
+    drawn_as_mirror: false,
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
-    path: knobas_core::path_line_read!("pd.d"),
-    state: knobas_core::declared_state!("pd.d"),
+    path: mirror_path!("pd.d"),
+    state: mirror_state!("pd.d"),
+    cell: "i.key_cell",
     scope: None,
     under: Some(
         "i.entity_id in (select ip.entity_id from sync.item_parent ip \
@@ -543,6 +688,10 @@ pub const NOTE: Corpus = Corpus {
     // A note is the user's own; there is no author column and no author to
     // filter by, so an author filter must exclude this corpus entirely rather
     // than be silently dropped for it.
+    excerpt: "n.body_md",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "n.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -553,6 +702,7 @@ pub const NOTE: Corpus = Corpus {
     // string would draw an empty path line on every note in the launcher.
     path: "null::text",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     // A note is knobas' own and sits inside nothing (see `path`), so it is
     // beneath no parent `under:` could name.
@@ -605,12 +755,17 @@ pub const ASSET: Corpus = Corpus {
     named: None,
     fts: "a.fts",
     headline_text: "a.name || ' — ' || a.path_text || ' — ' || a.props_text",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "a.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
     synced_at: "a.updated_at",
     path: "nullif(a.path_text, '')",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     // Knobas' own rows declare no parent through a payload: an asset's parent
     // is its `parent_id` column (ADR-0014), read directly (#600).
@@ -688,17 +843,155 @@ pub const ROUTE: Corpus = Corpus {
     named: None,
     fts: "r.fts",
     headline_text: "r.name || ' — ' || r.url",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "r.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
     synced_at: "r.updated_at",
     path: "case when ra.path_text = '' then ra.name else ra.path_text || ' / ' || ra.name end",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     // A route's parent is the asset exposing it (ADR-0014): it is beneath
     // whatever that asset is beneath, and beneath the asset itself (#600).
     under: Some(concat!("r.asset_id in ", estate_subtree!())),
     // Knobas' own rows carry none of a ticket's fields.
+    fields: &[],
+};
+
+/// A saved ticket view (#2422, `knobas.ticket_view`, migration `0035`): the
+/// launcher's kind `view`, found by its name (weight A, so *Titles* finds it)
+/// and by its group and its conditions (weight B). Its path line is the group
+/// and the conditions as saved, `Team · #t status:open`, the group alone for a
+/// view of every ticket; the row's key cell reads the group off its front.
+///
+/// The `tsvector` is computed in the relation and not stored: the table holds
+/// a reader's views, tens of rows, and a column would be a migration for a
+/// scan of a page. A view is no entity (`0035`: nothing links to one), so its
+/// id is its own, the slug its address `#/tickets/<id>` carries.
+pub const VIEW: Corpus = Corpus {
+    relation: "(select tv.id, tv.name, tv.view_group, tv.query, tv.updated_at, \
+               setweight(to_tsvector('english', tv.name), 'A') || \
+               setweight(to_tsvector('english', tv.view_group), 'B') || \
+               setweight(to_tsvector('english', tv.query), 'B') as fts \
+               from knobas.ticket_view tv) v",
+    entity_id: "v.id",
+    kind: "'view'",
+    source_id: "'view'",
+    title: "v.name",
+    named: None,
+    fts: "v.fts",
+    headline_text: "v.name || ' — ' || v.view_group || ' — ' || v.query",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
+    author: None,
+    updated_at: "v.updated_at",
+    synced_at: "v.updated_at",
+    path: "v.view_group || coalesce(' · ' || nullif(btrim(v.query), ''), '')",
+    state: "null::jsonb",
+    cell: "null::text",
+    scope: None,
+    under: None,
+    fields: &[],
+};
+
+/// A link set (#2422, `knobas.link_set`, migration `0039`): the launcher's
+/// kind `set`, found by its name (weight A) and its description (weight B).
+/// Its path line counts what it is: its fixed members, its patterns, and the
+/// live tickets its rules apply to now, `2 items · 1 pattern · 4 tickets`,
+/// the count the Sets page's *Tickets now* column draws, by the same walk
+/// (`knobas_core::link_set_rule_tickets!`). The walk runs for the rows a page
+/// shows and no others, since `path` is read in the detail stage.
+///
+/// Computed in the relation for [`VIEW`]'s reason; a set is no entity either,
+/// and its id is the slug its address `#/sets/<id>` carries.
+pub const SET: Corpus = Corpus {
+    relation: "(select ls.id, ls.name, ls.description, ls.updated_at, \
+               setweight(to_tsvector('english', ls.name), 'A') || \
+               setweight(to_tsvector('english', ls.description), 'B') as fts \
+               from knobas.link_set ls) s",
+    entity_id: "s.id",
+    kind: "'set'",
+    source_id: "'set'",
+    title: "s.name",
+    named: None,
+    fts: "s.fts",
+    headline_text: "s.name || ' — ' || s.description",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
+    author: None,
+    updated_at: "s.updated_at",
+    synced_at: "s.updated_at",
+    path: concat!(
+        "(select concat_ws(' · ', ",
+        "c.items || case when c.items = 1 then ' item' else ' items' end, ",
+        "c.patterns || case when c.patterns = 1 then ' pattern' else ' patterns' end, ",
+        "c.tickets || case when c.tickets = 1 then ' ticket' else ' tickets' end) ",
+        "from (select ",
+        "(select count(*) from knobas.link_set_member lm \
+          where lm.set_id = s.id and lm.entity_id is not null) as items, ",
+        "(select count(*) from knobas.link_set_member lm \
+          where lm.set_id = s.id and lm.query is not null) as patterns, ",
+        "(with recursive rules(n, rule, kind, value) as (",
+        "select 0, lr.position, lr.kind, lr.value from knobas.link_set_rule lr \
+         where lr.set_id = s.id), ",
+        knobas_core::link_set_rule_tickets!(),
+        " select count(distinct li.entity_id) from rule_ticket rt \
+          join sync.live_item li on li.entity_id = rt.id and li.kind = 'ticket') as tickets",
+        ") c)"
+    ),
+    state: "null::jsonb",
+    cell: "null::text",
+    scope: None,
+    under: None,
+    fields: &[],
+};
+
+/// The lists a reader saved (#2423, spec #2419 story 13), as kind `list`:
+/// what `#l` answers.
+///
+/// A list is no entity -- it has no `knobas.entity` row and no address -- so
+/// its id is the slug `rename_smart_list` and `delete_smart_list` take, and the
+/// kind tells it from anything else's id. Its **path line is its own text**,
+/// the query Enter puts back into the box; `state` is filled after the
+/// statement, by `Searcher::search`, for a text today's grammar refuses
+/// (`saved::plan`).
+///
+/// No migration and no index: `fts` is computed in the derived table, the
+/// name at weight A (what *Titles* reads) and the text at B, because the
+/// table holds at most [`crate::saved::MAX_SAVED_LISTS`] rows.
+pub const SAVED_LIST: Corpus = Corpus {
+    relation: "(select s.id, s.label, s.query, s.updated_at, \
+                setweight(to_tsvector('english', s.label), 'A') || \
+                setweight(to_tsvector('english', s.query), 'B') as fts \
+                from knobas.smart_list s) l",
+    entity_id: "l.id",
+    kind: "'list'",
+    source_id: "'list'",
+    title: "l.label",
+    named: None,
+    fts: "l.fts",
+    headline_text: "l.label || ' — ' || l.query",
+    // The reader's own, as a note is.
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
+    drawn_as_mirror: false,
+    author: None,
+    updated_at: "l.updated_at",
+    synced_at: "l.updated_at",
+    path: "l.query",
+    state: "null::jsonb",
+    cell: "null::text",
+    scope: None,
+    under: None,
     fields: &[],
 };
 
@@ -711,16 +1004,110 @@ pub const ROUTE: Corpus = Corpus {
 /// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
 /// with no author column outright. So the union is always both branches and the
 /// answer is always the right one.
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE];
+/// A pipeline found by its latest run log (#2431, spec #2419): the words a
+/// build printed answer the pipeline, never the run (#2422 keeps runs out of
+/// the launcher). One row per pipeline in `sync.pipeline_log` (migration
+/// `0067`, written by `knobas_sync::pipeline_logs`), joined to the pipeline's
+/// live row, so the hit is the pipeline as [`LIVE_ITEM`] draws it: its name,
+/// its chain of groups, its newest run's state.
+///
+/// **One hit per pipeline.** A pipeline whose own row matches is
+/// [`LIVE_ITEM`]'s, and this corpus leaves it out (`unless`); its excerpts
+/// are still the log's, because [`LIVE_ITEM`]'s `excerpt` reads the stored
+/// log first. **Never under *Titles*:** the log is lexed with no weight, so
+/// the weight-A filter matches nothing here.
+pub const PIPELINE_LOG: Corpus = Corpus {
+    relation: "sync.pipeline_log pl join sync.live_item i on i.entity_id = pl.pipeline_id",
+    entity_id: "i.entity_id",
+    kind: "i.kind",
+    source_id: "i.source_id",
+    title: "i.title",
+    // Its own row did not match (`unless`), so it is not named what was typed.
+    named: Some("false"),
+    fts: "pl.fts",
+    headline_text: "i.title || ' — ' || pl.body",
+    excerpt: "pl.body",
+    excerpt_line: "pl.first_line",
+    unless: Some("i.fts"),
+    drawn_as_mirror: true,
+    author: Some("i.author"),
+    updated_at: "i.item_updated_at",
+    synced_at: "i.synced_at",
+    path: mirror_path!("pd.d"),
+    state: mirror_state!("pd.d"),
+    cell: LIVE_ITEM.cell,
+    scope: None,
+    under: LIVE_ITEM.under,
+    fields: LIVE_ITEM_FIELDS,
+};
+
+pub const ALL: &[&Corpus] = &[
+    &LIVE_ITEM,
+    &NOTE,
+    &ASSET,
+    &ROUTE,
+    &VIEW,
+    &SET,
+    &SAVED_LIST,
+    &PIPELINE_LOG,
+];
 
 /// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
 /// quick capture* is off (#940, R-13a.6). The note data and commands stay
 /// (D10); only the search leaves them out.
-pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE];
+pub const WITHOUT_NOTES: &[&Corpus] = &[
+    &LIVE_ITEM,
+    &ASSET,
+    &ROUTE,
+    &VIEW,
+    &SET,
+    &SAVED_LIST,
+    &PIPELINE_LOG,
+];
+
+/// The corpora a launcher search unions: `corpora`, less [`PIPELINE_LOG`]
+/// under *Titles* (#2431), where a run log, never on screen, can match
+/// nothing and would only cost the statement a branch. Compared by relation:
+/// a `const` has no one address, so `std::ptr::eq` would miss it.
+#[must_use]
+pub fn searched(corpora: &[&'static Corpus], titles: bool) -> Vec<&'static Corpus> {
+    corpora
+        .iter()
+        .copied()
+        .filter(|c| !(titles && c.relation == PIPELINE_LOG.relation))
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_leaves_the_run_logs_out_and_everything_keeps_them() {
+        let has_logs =
+            |corpora: &[&Corpus]| corpora.iter().any(|c| c.relation == PIPELINE_LOG.relation);
+        assert!(has_logs(&searched(ALL, false)));
+        assert!(has_logs(&searched(WITHOUT_NOTES, false)));
+        assert!(!has_logs(&searched(ALL, true)));
+        assert!(!has_logs(&searched(WITHOUT_NOTES, true)));
+        assert_eq!(searched(ALL, true).len(), ALL.len() - 1);
+    }
+
+    /// Migration `0068` stores the key cell through `sync.key_cell_of`, which
+    /// pastes [`key_cell!`]'s expansion over `d.decl` (#2451). This holds the
+    /// pasted text to the macro and the macros it is built of, so a change to
+    /// any of them fails here until a new migration restates the function --
+    /// the way `tests/it/item_parent.rs` holds `0028`'s walk.
+    #[test]
+    fn the_stored_key_cell_is_this_expansion() {
+        let migration =
+            include_str!("../../knobas-db/migrations/0068_a_row_is_found_by_where_it_sits.sql");
+        assert!(
+            migration.contains(key_cell!("d.decl")),
+            "0068 no longer holds key_cell!(\"d.decl\"):\n{}",
+            key_cell!("d.decl")
+        );
+    }
 
     /// A kind knobas owns is searchable, or "notes are a first-class
     /// searchable kind" is a claim with nothing behind it.

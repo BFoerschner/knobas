@@ -37,9 +37,12 @@
 
 pub mod corpus;
 pub(crate) mod coverage;
+pub mod excerpt;
+pub mod favourites;
+pub mod frames;
 pub mod group;
 pub mod home;
-pub mod lists;
+pub mod keys;
 pub mod query;
 pub mod saved;
 pub mod snippet;
@@ -56,18 +59,21 @@ use std::time::Instant;
 
 use sqlx::PgPool;
 
+pub use favourites::FavouriteTarget;
 pub use group::RawHit;
 pub use home::LauncherBoard;
-pub use lists::{BuiltinList, SmartListSummary};
+pub use keys::{ActionKey, Keys, ListKey};
 pub use query::{
-    EffectiveFilters, FieldFilter, FieldKey, Parsed, Pattern, merge, parse, pattern_of,
+    EffectiveFilters, FieldFilter, FieldKey, KIND_LETTERS, Parsed, Pattern, merge, parse,
+    pattern_of,
 };
-pub use saved::{Refusal, SavedList};
+pub use saved::{Refusal, SavedList, SmartListSummary};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions,
-    KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters,
-    SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
+    EntityRow, Excerpt, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension,
+    FilterSuggestions, KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix,
+    ResultGroup, SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
+    SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -304,7 +310,7 @@ impl Searcher {
     }
 
     /// Read `raw` as a link-set pattern (#868, R-7.2) with this
-    /// installation's vocabulary (`/alias` and `source:` resolved), or say why
+    /// installation's vocabulary (`source:` and `in:` resolved), or say why
     /// it is not one: [`query::pattern_of`].
     ///
     /// # Errors
@@ -343,27 +349,19 @@ impl Searcher {
         // and it is said before the echo is built so the greyed-out token
         // rides back with everything else the parse reported.
         under::report_unknown(&self.pool, &mut parsed).await?;
-        let filters = query::merge(&parsed, &query.filters);
+        // Pipelines under the shell's word, and no runs or commits (#2422).
+        let frames = frames::LauncherFrames::of(&vocab.declarations);
+        let filters = EffectiveFilters {
+            titles: query.titles,
+            excerpts: !query.titles,
+            pipeline_kinds: frames.pipelines,
+            hidden_kinds: frames.left_out,
+            ..query::merge(&parsed, &query.filters)
+        };
         let interpreted = ParsedQuery {
             filters: filters.echo(),
             ..parsed.query.clone()
         };
-
-        if let Some(list) = parsed.list_id.clone() {
-            // A reader typing `list:mine` passes through `list:m` and `list:mi`;
-            // like every other half-typed state, an id nobody ships answers
-            // with nothing and is echoed as an unknown token, never an error.
-            // (`smart_list_items` is a command, not typing, and still errors.)
-            let mut echoed = interpreted.clone();
-            echoed.unknown_tokens.push(format!("list:{list}"));
-            return match self
-                .list_response(&list, query.limit, &vocab, interpreted, started)
-                .await
-            {
-                Err(SearchError::UnknownList(_)) => Ok(empty(echoed, started)),
-                other => other,
-            };
-        }
 
         let text = (!parsed.query.text.is_empty()).then_some(parsed.query.text.as_str());
 
@@ -379,8 +377,9 @@ impl Searcher {
             return Ok(empty(interpreted, started));
         }
 
+        let corpora = corpus::searched(self.corpora(), filters.titles);
         let built = sql::search_sql(
-            self.corpora(),
+            &corpora,
             text,
             parsed.prefix_last_term,
             &filters,
@@ -388,7 +387,12 @@ impl Searcher {
             query.limit,
         );
         let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
-        let groups = group::group(rows, &vocab.kinds);
+        let mut groups = if filters.excerpts {
+            group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
+        } else {
+            group::group(rows, &vocab.kinds)
+        };
+        flag_lists_needing_attention(&mut groups, &vocab);
 
         // A second round trip, and only for a query that filtered by author
         // (issue #141) or by parent (#595). It answers a question the statement above structurally
@@ -447,6 +451,7 @@ impl Searcher {
         kind: &str,
     ) -> Result<Option<Vec<String>>, SearchError> {
         let query = validate(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 1,
             filters: SearchFilters::default(),
@@ -494,6 +499,7 @@ impl Searcher {
         const PAGE: &str = "page";
         let started = Instant::now();
         let query = validate(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit,
             filters: SearchFilters::default(),
@@ -575,6 +581,7 @@ impl Searcher {
             Vec::new();
         for raw in raws {
             if let Err(error) = validate(SearchQuery {
+                titles: false,
                 raw: (*raw).to_owned(),
                 limit: 1,
                 filters: SearchFilters::default(),
@@ -624,23 +631,54 @@ impl Searcher {
             .collect())
     }
 
-    /// What an empty box answers with: the smart lists and the newest items.
+    /// What an empty box answers with: the favourites, then the newest items.
     ///
     /// Spec §4's board. Deliberately not a search: a query with no text and no
-    /// filter would scan the whole mirror to return nothing, and the two reads
-    /// here are index-backed instead.
+    /// filter would scan the whole mirror to return nothing, and the read here
+    /// is index-backed instead. No lists since #2423: a saved list is found
+    /// behind `#l`, and the built-in ones are gone.
     ///
     /// # Errors
     ///
-    /// [`SearchError::Db`] if either half cannot be read.
+    /// [`SearchError::Db`] if the read fails.
     pub async fn launcher_board(&self) -> Result<LauncherBoard, SearchError> {
-        // One vocabulary for both halves: the lists need its identity, and the
-        // newest rows its declarations, which their path line reads (#596).
+        // The newest rows' path line reads the declarations (#596).
         let vocab = self.vocabulary().await?;
         Ok(LauncherBoard {
-            smart_lists: self.smart_lists_of(&vocab).await?,
+            favourites: favourites::list(&self.pool, &vocab).await?,
             recent: home::recent(&self.pool, home::RECENT_LIMIT, &vocab.declarations).await?,
         })
+    }
+
+    /// Every favourite, in the order they were favourited (#2428): what the
+    /// board draws above the recent items. See [`favourites::list`].
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if a read fails.
+    pub async fn favourites(&self) -> Result<Vec<EntityRow>, SearchError> {
+        let vocab = self.vocabulary().await?;
+        favourites::list(&self.pool, &vocab).await
+    }
+
+    /// Favourite an entity or a saved list, last in the block (#2428).
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::UnknownList`] for a list nobody saved,
+    /// [`SearchError::Db`] if the write fails.
+    pub async fn add_favourite(&self, target: &FavouriteTarget) -> Result<(), SearchError> {
+        favourites::add(&self.pool, target).await
+    }
+
+    /// Unfavourite an entity or a saved list (#2428); not a favourite is no
+    /// error.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the delete fails.
+    pub async fn remove_favourite(&self, target: &FavouriteTarget) -> Result<(), SearchError> {
+        favourites::remove(&self.pool, target).await
     }
 
     /// The values the query box suggests after `kind:`, `source:` and
@@ -692,48 +730,19 @@ impl Searcher {
         home::explain_recent(&self.pool, home::RECENT_LIMIT).await
     }
 
-    /// Every smart list, with its count and its change badge -- the built-ins
-    /// and then the ones a reader saved (#506).
+    /// Every list a reader saved (#506), in the order they were saved, each
+    /// with its count, or the reason it needs attention.
     ///
-    /// **One list, not two**, which is the shape story 57 asks for: saved and
-    /// built-in behave as one kind, and `SmartListSummary::saved` is all that
-    /// tells the rail which controls a row carries. The built-ins come first
-    /// because they are the ones that are always there.
-    ///
-    /// Three round trips with nothing saved: the vocabulary (for the identity
-    /// behind `@me`, which every search loads anyway), one statement carrying
-    /// the built-ins' counts, freshness stamps and seen-stamps together, and
-    /// one small select over `knobas.smart_list`, the last two at once. Two
-    /// more once something is saved -- see [`saved::summaries`], which is
-    /// where that cost is stated -- after the select and still beside the
-    /// built-ins' statement (#1855).
+    /// Two round trips: the vocabulary, then [`saved::summaries`]. Not on the
+    /// `⌘K` path since #2423: the board draws no lists, and `#l` finds them
+    /// through [`Self::search`].
     ///
     /// # Errors
     ///
     /// [`SearchError::Db`] if the summary cannot be read.
     pub async fn smart_lists(&self) -> Result<Vec<SmartListSummary>, SearchError> {
         let vocab = self.vocabulary().await?;
-        self.smart_lists_of(&vocab).await
-    }
-
-    /// [`Self::smart_lists`] over a vocabulary the caller already loaded.
-    ///
-    /// **The two halves are read at once**, each on a connection of its own
-    /// (#1855): neither reads what the other answers, and in turn they were
-    /// the sum of the built-ins' scan of the mirror and every saved list's
-    /// count, about 65 ms and 45 ms at the cap over 100,000 items, against a
-    /// 100 ms budget. At once they cost the longer of the two. The work is
-    /// the same; the latency is what ⌘K pays.
-    async fn smart_lists_of(
-        &self,
-        vocab: &Vocabulary,
-    ) -> Result<Vec<SmartListSummary>, SearchError> {
-        let (mut out, saved) = tokio::try_join!(
-            lists::summaries(&self.pool, &vocab.identity),
-            saved::summaries(&self.pool, vocab, self.corpora()),
-        )?;
-        out.extend(saved);
-        Ok(out)
+        saved::summaries(&self.pool, &vocab, self.corpora()).await
     }
 
     /// Save the launcher's current query as a smart list (story 56).
@@ -781,117 +790,26 @@ impl Searcher {
     pub async fn delete_list(&self, id: &str) -> Result<(), SearchError> {
         saved::delete(&self.pool, id).await
     }
+}
 
-    /// The rows of one built-in smart list, shaped exactly like a search.
-    ///
-    /// Same grouping, same DTO, `rank = 0` and no snippet -- which is why the
-    /// launcher renders a list with the code it renders results with, and why
-    /// typing `list:mine` in the box needs no second path.
-    ///
-    /// Opening a list is also what **clears its badge**: the seen-stamp is
-    /// written here, so a list the user has looked at stops claiming to be new.
-    ///
-    /// # Errors
-    ///
-    /// [`SearchError::UnknownList`] if nobody ships a list by that id,
-    /// [`SearchError::Db`] if the statement fails.
-    pub async fn smart_list_items(
-        &self,
-        id: &str,
-        limit: u32,
-    ) -> Result<SearchResponse, SearchError> {
-        let started = Instant::now();
-        let vocab = self.vocabulary().await?;
-        let interpreted = ParsedQuery {
-            text: String::new(),
-            prefix: Some(Prefix::List),
-            filters: SearchFilters::default(),
-            unknown_tokens: Vec::new(),
-        };
-        self.list_response(id, limit, &vocab, interpreted, started)
-            .await
-    }
-
-    /// One list's rows, whoever ships it.
-    ///
-    /// **`list:<id>` has one meaning, and this is where that is true**: a
-    /// built-in is looked up in the compiled-in registry, and anything else is
-    /// looked for in `knobas.smart_list` before the id is called unknown. The
-    /// two arms answer with the same `SearchResponse` and both clear the
-    /// badge, which is what lets the launcher open either one by typing its
-    /// id.
-    async fn list_response(
-        &self,
-        id: &str,
-        limit: u32,
-        vocab: &Vocabulary,
-        interpreted: ParsedQuery,
-        started: Instant,
-    ) -> Result<SearchResponse, SearchError> {
-        let limit = limit.clamp(1, MAX_LIMIT);
-        if let Some(list) = lists::find(id) {
-            let rows = lists::rows(
-                &self.pool,
-                list,
-                &vocab.identity,
-                limit,
-                &vocab.declarations,
-            )
-            .await?;
-            let groups = group::group(rows, &vocab.kinds);
-            lists::mark_seen(&self.pool, list.id).await?;
-            return Ok(SearchResponse {
-                interpreted,
-                total: groups.iter().map(|g| g.total).sum(),
-                groups,
-                // A built-in list is not a filter the user wrote, so there is
-                // no author question of theirs to report on -- `list:mine`
-                // narrows by the identity `lists::rows` resolves, and a
-                // coverage row for it would explain a query nobody typed.
-                coverage: Vec::new(),
-                took_ms: took_ms(started),
-            });
+/// A saved list whose text today's grammar refuses says so (#2423): its
+/// state is the refusal, in the warning tone, so the row is coloured by it and
+/// the launcher refuses to apply it with the reason. Read here and not in the
+/// corpus's SQL because the grammar is this crate's Rust ([`saved::plan`]),
+/// and a list hit's path line is the text it plans.
+fn flag_lists_needing_attention(groups: &mut [ResultGroup], vocab: &Vocabulary) {
+    for group in groups.iter_mut().filter(|group| group.kind == "list") {
+        for hit in &mut group.hits {
+            let Some(text) = hit.row.path.as_deref() else {
+                continue;
+            };
+            if let Err(refusal) = saved::plan(text, vocab) {
+                hit.row.state = Some(knobas_core::payload::StateChip {
+                    text: refusal.description(),
+                    tone: knobas_core::tone::Tone::Warn,
+                });
+            }
         }
-
-        let saved = saved::find(&self.pool, id)
-            .await?
-            .ok_or_else(|| SearchError::UnknownList(id.to_owned()))?;
-        // A list the rail is drawing as *needs attention* answers with the
-        // reason rather than with an empty page: the row is not openable, so
-        // reaching here means somebody typed `list:<id>` for one, and telling
-        // them "no rows" would be the launcher hiding a broken saved query.
-        let runnable = saved::plan(&saved.query, vocab)
-            .map_err(|refusal| SearchError::Invalid(refusal.description()))?;
-
-        let built = sql::search_sql(
-            self.corpora(),
-            runnable.text.as_deref(),
-            // A saved query is not being typed, so its last word is finished.
-            // `sep` saved as a list means `sep`, not "anything starting sep".
-            false,
-            &runnable.filters,
-            PER_GROUP,
-            limit,
-        );
-        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
-        let groups = group::group(rows, &vocab.kinds);
-        // **Unlike the built-in arm**, and for that arm's own stated reason
-        // read the other way: a saved list *is* a filter the user wrote, so an
-        // empty `author:` in it has the same two meanings issue #141 exists to
-        // tell apart.
-        let coverage = coverage::report(&self.pool, vocab, &runnable.filters).await?;
-        lists::mark_seen(&self.pool, &saved.id).await?;
-
-        Ok(SearchResponse {
-            // The **saved query's** interpretation and not the `list:<id>` the
-            // reader typed to get here -- story 56's "keeping its text, chips
-            // and prefixes" is what the chip row above the results draws.
-            interpreted: runnable.interpreted,
-            total: groups.iter().map(|g| g.total).sum(),
-            groups,
-            coverage,
-            took_ms: took_ms(started),
-        })
     }
 }
 
@@ -983,6 +901,7 @@ mod tests {
 
     fn query(raw: &str) -> SearchQuery {
         SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 30,
             filters: SearchFilters::default(),
@@ -997,6 +916,7 @@ mod tests {
     fn the_limit_is_clamped_rather_than_refused() {
         assert_eq!(
             validate(SearchQuery {
+                titles: false,
                 limit: 0,
                 ..query("sepa")
             })
@@ -1006,6 +926,7 @@ mod tests {
         );
         assert_eq!(
             validate(SearchQuery {
+                titles: false,
                 limit: 10_000,
                 ..query("sepa")
             })
@@ -1015,6 +936,7 @@ mod tests {
         );
         assert_eq!(
             validate(SearchQuery {
+                titles: false,
                 limit: 30,
                 ..query("sepa")
             })
@@ -1055,6 +977,7 @@ mod tests {
             },
         ] {
             let refused = validate(SearchQuery {
+                titles: false,
                 filters,
                 ..query("sepa")
             });
@@ -1063,6 +986,7 @@ mod tests {
         let at_cap: Vec<String> = (0..MAX_FILTER_VALUES).map(|n| n.to_string()).collect();
         assert!(
             validate(SearchQuery {
+                titles: false,
                 filters: SearchFilters {
                     sources: at_cap,
                     ..SearchFilters::default()
@@ -1094,20 +1018,14 @@ mod tests {
             match prefix {
                 Prefix::Asset => Some("'asset'"),
                 Prefix::Note => Some("'note'"),
-                Prefix::Action
-                | Prefix::Ticket
-                | Prefix::Person
-                | Prefix::Source
-                | Prefix::Time
-                | Prefix::List
-                | Prefix::Help => None,
+                Prefix::Action | Prefix::Person | Prefix::Source | Prefix::Time | Prefix::Help => {
+                    None
+                }
             }
         }
         for prefix in [
-            Prefix::Ticket,
             Prefix::Person,
             Prefix::Source,
-            Prefix::List,
             // #46 for notes, #436 for the estate: both left the list the same
             // way, once the launcher could draw what the corpus already held.
             Prefix::Note,

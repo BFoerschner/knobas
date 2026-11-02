@@ -10,46 +10,42 @@
  * Pure, and separate from the session that owns the data, so the selection
  * rules can be tested without a fake IPC bridge.
  */
-import type { LauncherHome, ResultGroup, SearchHit, SearchResponse, SmartListSummary } from "../ipc";
+import type { LauncherHome, ResultGroup, SearchHit, SearchResponse } from "../ipc";
 import type { EntityRow, InboxItem } from "../ipc/entity";
-import type { DayFigures } from "../tf/time/day-view";
 import type { LauncherAction } from "./actions";
 import type { SyntaxEntry } from "./syntax";
 
 /**
- * The inbox as the board previews it (#1418): the count the top bar reads and
- * the stream's newest items, newest first. The shell's live inbox store is the
- * one source of both; the board shows at most {@link INBOX_PREVIEW} of them.
+ * The shell's live inbox (#1418): the count the top bar reads and the stream's
+ * items, newest first. Handed in by the shell rather than carried on
+ * `launcher_home`; the empty box no longer draws it (#2421), and `#i`
+ * answers from it (#2423).
  */
 export interface InboxPreview {
   count: number;
   items: InboxItem[];
 }
 
-export const INBOX_PREVIEW = 3;
-
-/** Today's time as the board gives it (#1418): two of the Day view's figures, in whole minutes. */
-export type TodayTime = Pick<DayFigures, "tracked" | "toLog">;
-
-/**
- * What the board draws beside `LauncherHome`, handed in by the shell rather
- * than carried on `launcher_home` (#1418): both already have a live read in
- * the shell, and a field on the frozen board type would be a second one.
- */
+/** What the shell hands in beside `LauncherHome`. */
 export interface BoardExtras {
   inbox: InboxPreview | null;
-  today: TodayTime | null;
 }
 
 /** One selectable line. */
 export type LauncherRow =
   | { kind: "hit"; id: string; group: ResultGroup; hit: SearchHit }
   | { kind: "recent"; id: string; row: EntityRow }
-  | { kind: "list"; id: string; list: SmartListSummary }
+  /**
+   * One of the board's favourites (#2428): an entity, or a saved list drawn
+   * as its `#l` hit is (kind and source `list`, its text as `path`).
+   */
+  | { kind: "favourite"; id: string; row: EntityRow }
+  /** A line of the shell's inbox, behind `#i` (#2423): not an entity, a row of the inbox store. */
   | { kind: "inbox"; id: string; item: InboxItem }
-  | { kind: "today"; id: string; today: TodayTime }
   | { kind: "action"; id: string; action: LauncherAction }
-  | { kind: "syntax"; id: string; entry: SyntaxEntry };
+  | { kind: "syntax"; id: string; entry: SyntaxEntry }
+  /** *Search Docs for …* at the end of a `#d` answer (#2425): the Docs area, searching `words`. */
+  | { kind: "docs"; id: string; words: string };
 
 /**
  * Which panel the body draws.
@@ -95,6 +91,8 @@ export function flatten(input: {
   actions: LauncherAction[];
   syntax: readonly SyntaxEntry[];
   extras?: BoardExtras;
+  /** *Titles* rather than *Everything* (the query's `titles` flag): `#i` matches a line's title alone. */
+  titles?: boolean;
 }): LauncherRow[] {
   switch (input.mode) {
     // A pasted link is not a list: the entity it names is opened, and a link
@@ -116,28 +114,20 @@ export function flatten(input: {
     case "board": {
       const home = input.home;
       if (!home) return [];
-      // In the order the board draws them (spec §4): the lists, the inbox,
-      // today's time, the recent items. A block with nothing to show has no
-      // rows, so the board draws no heading over nothing.
-      const inbox = input.extras?.inbox;
-      const today = input.extras?.today;
+      // The favourites in their order (#2428), then the recent items
+      // (#2421): no smart lists, no inbox, no time. A favourite that is also
+      // recent is in both, under its own id in each.
       return [
-        ...home.smart_lists.map(
-          (list): LauncherRow => ({ kind: "list", id: `list:${list.id}`, list }),
+        ...home.favourites.map(
+          (row): LauncherRow => ({ kind: "favourite", id: `favourite:${row.kind === "list" ? "list" : "entity"}:${row.entity_id}`, row }),
         ),
-        ...(inbox && inbox.count > 0 ? inbox.items.slice(0, INBOX_PREVIEW) : []).map(
-          (item): LauncherRow => ({ kind: "inbox", id: `inbox:${item.key}`, item }),
-        ),
-        ...(today && today.tracked > 0 ? [{ kind: "today" as const, id: "today", today }] : []),
-        ...home.recent.map(
-          (row): LauncherRow => ({ kind: "recent", id: `recent:${row.entity_id}`, row }),
-        ),
+        ...home.recent.map((row): LauncherRow => ({ kind: "recent", id: `recent:${row.entity_id}`, row })),
       ];
     }
     case "results": {
       const response = input.response;
       if (!response) return [];
-      return response.groups.flatMap((group) =>
+      const hits = response.groups.flatMap((group) =>
         group.hits.map(
           (hit): LauncherRow => ({
             kind: "hit",
@@ -147,6 +137,61 @@ export function flatten(input: {
           }),
         ),
       );
+      return [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
     }
   }
+}
+
+/**
+ * The inbox's lines (#2423, spec #2419 story 15): an answer the engine read
+ * as `#i` (kind `inbox`, which nothing in the index emits) draws the shell's
+ * inbox store, newest first, narrowed by the parse's words. A line is kept
+ * when every word is in its title, ignoring case; under *Everything*
+ * (`titles` off) its reason and its category count too, as a body does
+ * (story 51): `#i review` finds the review requests either way. The kind is
+ * read off the backend's parse, never the box (ruling P2); the words are the
+ * store's to match, since an inbox line is no entity the index holds (ruled
+ * on the review of spec #2419, S4).
+ */
+function inboxRows(response: SearchResponse, inbox: InboxPreview | null, titles: boolean): LauncherRow[] {
+  if (!inbox || !response.interpreted.filters.kinds.includes("inbox")) return [];
+  const words = response.interpreted.text.toLowerCase().split(/\s+/u).filter(Boolean);
+  const holds = (item: InboxItem) => {
+    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.category.replaceAll("_", " ")}`).toLowerCase();
+    return words.every((word) => text.includes(word));
+  };
+  return inbox.items
+    .filter(holds)
+    .slice()
+    .sort((a, b) => Date.parse(b.occurred_at) - Date.parse(a.occurred_at))
+    .map((item) => ({ kind: "inbox", id: `inbox:${item.key}`, item }));
+}
+
+/**
+ * The *Search Docs for …* row (#2425): last in an answer the engine read as
+ * `#d` (kind `page`) with words, whose search the Docs area runs with its own
+ * outline and hits. Read off the backend's parse, never the box (ruling P2).
+ */
+function docsRow(response: SearchResponse): LauncherRow[] {
+  const words = response.interpreted.text.trim();
+  if (words === "" || !response.interpreted.filters.kinds.includes("page")) return [];
+  return [{ kind: "docs", id: "docs", words }];
+}
+
+/** ↓ is one row on, ↑ one back; any other key `0`. */
+export function stepOf(event: Pick<KeyboardEvent, "key">): -1 | 0 | 1 {
+  return event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+}
+
+/**
+ * ↓ or ↑ over a list of `count` rows from `selected`: the row it lands on,
+ * held at the ends, the key's default prevented; any other key `null`. The
+ * one walk the box's panels share (the suggestions, the overlay, the sheet
+ * and its flows; the results walk through `session.move`).
+ */
+export function walk(event: Pick<KeyboardEvent, "key" | "preventDefault">, selected: number, count: number): number | null {
+  const step = stepOf(event);
+  if (step === 0) return null;
+  event.preventDefault();
+  return step === 1 ? Math.min(count - 1, selected + 1) : Math.max(0, selected - 1);
 }

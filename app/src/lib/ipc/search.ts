@@ -7,8 +7,11 @@
  * {@link noFilters} stay hand-written.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { EntityRow } from "./generated/entity";
 import type {
+  FavouriteTarget,
   FilterSuggestions,
+  Keys,
   LauncherHome,
   QueryTranslation,
   SearchFilters,
@@ -21,16 +24,20 @@ import type {
 } from "./generated/search";
 
 export type {
+  ActionKey,
   CardField,
+  FavouriteTarget,
   FieldSuggestion,
   FilterAnswer,
   FilterCoverage,
   FilterDimension,
   FilterSuggestions,
+  Keys,
   KindSuggestion,
   LauncherHome,
   LeftOut,
   ListColumn,
+  ListKey,
   ListSort,
   ParentSuggestion,
   ParsedQuery,
@@ -41,6 +48,7 @@ export type {
   ResultGroup,
   SavedViewSource,
   SearchFilters,
+  Excerpt,
   SearchHit,
   SearchQuery,
   SearchResponse,
@@ -101,6 +109,41 @@ export function renameSmartList(id: string, label: string): Promise<void> {
 /** Forget a saved smart list. */
 export function deleteSmartList(id: string): Promise<void> {
   return invoke<void>("delete_smart_list", { id });
+}
+
+/**
+ * Every favourite (#2428), in the order they were favourited: the block the
+ * empty box draws above the recent items, which `launcher_home` also carries.
+ * A saved list's row is its `#l` hit's: kind and source `list`, its text as
+ * `path`, the refusal as `state`.
+ */
+export function favourites(): Promise<EntityRow[]> {
+  return invoke<EntityRow[]>("favourites");
+}
+
+/** *Favourite* an entity or a saved list, last in the block (#2428). */
+export function addFavourite(target: FavouriteTarget): Promise<void> {
+  return invoke<void>("add_favourite", { target });
+}
+
+/** *Unfavourite* an entity or a saved list (#2428); not a favourite is no error. */
+export function removeFavourite(target: FavouriteTarget): Promise<void> {
+  return invoke<void>("remove_favourite", { target });
+}
+
+/** Every key bound (#2429): the saved lists' chords, each with its list's name and text, and the actions' chords per kind. */
+export function keys(): Promise<Keys> {
+  return invoke<Keys>("keys");
+}
+
+/** Give a saved list a chord that opens it from anywhere, or take it away with `null` (#2429). */
+export function bindListKey(listId: string, chord: string | null): Promise<void> {
+  return invoke<void>("bind_list_key", { listId, chord });
+}
+
+/** Give the Tab sheet's action `actionId` a chord on `kind`, or take it away with `null` (#2429). */
+export function bindActionKey(kind: string, actionId: string, chord: string | null): Promise<void> {
+  return invoke<void>("bind_action_key", { kind, actionId, chord });
 }
 
 /**

@@ -86,16 +86,18 @@ async fn item(
     id
 }
 
-/// A commit in `owner/name`, stored the way the Gitea adapter stores one.
-async fn commit(pool: &sqlx::PgPool, source: &str, owner: &str, name: &str) -> String {
+/// A branch in `owner/name`, stored the way the Gitea adapter stores one. A
+/// branch and not a commit: a commit is in no launcher answer (#2422), and
+/// every value offered here has to lead somewhere.
+async fn branch(pool: &sqlx::PgPool, source: &str, owner: &str, name: &str) -> String {
     let sha = uuid::Uuid::new_v4().simple().to_string();
     item(
         pool,
         source,
-        "commit",
-        &format!("{owner}/{name}@{sha}"),
+        "branch",
+        &format!("{owner}/{name}@refs/heads/{sha}"),
         serde_json::json!({
-            "sha": sha,
+            "commit": { "id": sha },
             "repository": { "full_name": format!("{owner}/{name}"), "name": name },
         }),
     )
@@ -132,6 +134,7 @@ fn parent(name: &str, kind: &str) -> ParentSuggestion {
 async fn leads_somewhere(searcher: &Searcher, raw: &str) {
     let response = searcher
         .search(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 30,
             filters: SearchFilters::default(),
@@ -196,11 +199,11 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
         serde_json::json!({ "full_name": format!("{owner}/{name}"), "name": name }),
     )
     .await;
-    commit(&pool, "gitea", &owner, &name).await;
+    branch(&pool, "gitea", &owner, &name).await;
     // A parent whose names have a space in them, so the probe below runs the
     // quoted spelling the box completes such a name with.
     let spaced = format!("Payout Desk {t}");
-    commit(&pool, "gitea", &owner, &spaced).await;
+    branch(&pool, "gitea", &owner, &spaced).await;
     // A mirrored repo nothing sits in yet: no child declares it, and it is
     // still a parent `under:` reaches -- it answers to its own names.
     let lonely = format!("lonely-{t}");
@@ -230,7 +233,7 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
         serde_json::json!({}),
     )
     .await;
-    commit(
+    branch(
         &pool,
         "gitea-off",
         &format!("ghost{t}"),
@@ -254,7 +257,7 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     .await;
 
     let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
-    for kind in ["commit", "monitor", "repo"] {
+    for kind in ["branch", "monitor", "repo"] {
         assert!(kinds.contains(&kind), "{kind} has live rows: {kinds:?}");
     }
     assert!(
@@ -293,7 +296,7 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     // Probed: the kinds this test seeded. Not every kind offered: a sibling
     // test's kind is offered while its row is live and withdrawn before the
     // probe runs (#782).
-    for kind in ["commit", "monitor", "repo"] {
+    for kind in ["branch", "monitor", "repo"] {
         leads_somewhere(&searcher(&pool).await, &format!("kind:{kind}")).await;
     }
 }
@@ -307,7 +310,7 @@ async fn a_parent_only_its_children_name_is_still_offered() {
     let t = token();
     let owner = format!("elsewhere{t}");
     let name = format!("unmirrored-{t}");
-    commit(&pool, "gitea", &owner, &name).await;
+    branch(&pool, "gitea", &owner, &name).await;
 
     let parents = parents_of(&searcher(&pool).await, &[owner.clone(), name.clone()], &t).await;
 
@@ -610,7 +613,7 @@ async fn the_parents_alone_are_the_parents_of_the_full_read_without_its_lists() 
     let pool = pool().await;
     let t = token();
     let name = format!("alone-{t}");
-    commit(&pool, "gitea", "tidewater", &name).await;
+    branch(&pool, "gitea", "tidewater", &name).await;
 
     let searcher = searcher(&pool).await;
     let full = searcher.filter_suggestions(&name).await.unwrap();
@@ -632,6 +635,7 @@ async fn the_parents_alone_are_the_parents_of_the_full_read_without_its_lists() 
 async fn under_knows(searcher: &Searcher, name: &str) -> bool {
     searcher
         .search(SearchQuery {
+            titles: false,
             raw: typed_under(name),
             limit: 1,
             filters: SearchFilters::default(),
@@ -657,9 +661,9 @@ async fn under_knows_exactly_the_names_the_box_offers() {
     let pool = pool().await;
     let t = token();
     let owner = format!("Harbour{t}");
-    // A parent only its children name: a commit in a repo the mirror lacks.
+    // A parent only its children name: a branch in a repo the mirror lacks.
     let unmirrored = format!("Unmirrored Ledger {t}");
-    commit(&pool, "gitea", &owner, &unmirrored).await;
+    branch(&pool, "gitea", &owner, &unmirrored).await;
     // A mirrored parent nothing sits in.
     let lonely = format!("lonely-{t}");
     item(
@@ -880,6 +884,7 @@ async fn under_scopes_to_a_parent_whose_name_lowercases_differently_in_rust() {
 
     let response = searcher
         .search(SearchQuery {
+            titles: false,
             raw: typed_under(&name),
             limit: 30,
             filters: SearchFilters::default(),
