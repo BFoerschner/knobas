@@ -428,6 +428,18 @@ test("a match in a collapsible's title does not open it; stepping to a match ins
   location.hash = "";
 });
 
+test("a collapsible opened on one page is closed on the next page that holds one in the same place (spec #2432)", async () => {
+  const docsPage = vi.fn(async (id: string) => ({ ...PAGE, entity_id: id, blocks: [collapsible(`Steps on ${id}`, [para("In.")])] }));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  collapsibles()[0]!.open = true;
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(collapsibles()[0]!.querySelector(":scope > summary")?.textContent).toBe("Steps on confluence:1");
+  expect(collapsibles()[0]!.open).toBe(false);
+});
+
 test("Copy copies the code, and the placeholder and Open in Confluence open the page", async () => {
   const io = await draw(["confluence:2"]);
   const copy = [...target.querySelectorAll("button")].find((b) => b.textContent === "Copy")!;

@@ -109,11 +109,14 @@
       <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
     </div>
   {:else if block.type === "collapsible"}
-    <!-- Closed, as the source draws it (spec #2432); the find bar opens it when it steps to a match inside (`revealMatch`). -->
-    <details class="tf-collapse">
-      <summary><TfMarked text={block.title} {stems} /></summary>
-      <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
-    </details>
+    <!-- Closed, as the source draws it (spec #2432); the find bar opens it when it steps to a match inside (`revealMatch`).
+         Keyed by the page, so one opened here is not still open where the next page draws one. -->
+    {#key entityId}
+      <details class="tf-collapse">
+        <summary><TfMarked text={block.title} {stems} /></summary>
+        <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
+      </details>
+    {/key}
   {:else if block.type === "placeholder"}
     <div class="tf-macro">
       <span>This part is a {sourceName} <b>{block.name}</b> macro, which knobas does not draw.</span>
