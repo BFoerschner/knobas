@@ -27,16 +27,16 @@ export interface Cells {
   title: string;
 }
 
-/** What a row is made of: the fields a search hit and a mirror row share. */
+/**
+ * What a row is made of: the fields a search hit and a mirror row share,
+ * `cell` the engine's key cell (#2452), absent where it resolved none.
+ */
 export interface CellSource {
   kind: string;
-  entityId: string;
+  entity_id: string;
   title: string;
   path: string | null;
-  /** The engine's key cell (#2452), absent where it resolved none. */
-  cell?: string | undefined;
-  /** The kind's word, singular: *Pull request*. Drawn lower-case. */
-  kindWord: string;
+  cell?: string | null | undefined;
 }
 
 const parts = (path: string, sep: string) =>
@@ -45,8 +45,10 @@ const parts = (path: string, sep: string) =>
     .map((part) => part.trim())
     .filter(Boolean);
 
-export function cellsOf({ kind, entityId, title, path, cell, kindWord }: CellSource): Cells {
-  const word: Cells = { cell: kindWord.toLowerCase(), mono: false, title };
+/** The row's cells; `singular` is its kind's word, *Pull request*, drawn lower-case where nothing better is known. */
+export function cellsOf(row: CellSource, singular: string): Cells {
+  const { kind, entity_id: entityId, title, path, cell } = row;
+  const word: Cells = { cell: singular.toLowerCase(), mono: false, title };
   const sent = cell?.trim();
   if (sent && kind !== "ticket" && kind !== "repo") return { cell: sent, mono: false, title };
   const at = (pick: (all: string[]) => string | undefined, sep: string): Cells => {

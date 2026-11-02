@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { cellsOf } from "./cells";
 
 const of = (kind: string, path: string | null, title = "Retry payouts") =>
-  cellsOf({ kind, entityId: `src:${kind}:1`, title, path, kindWord: "Pull request" });
+  cellsOf({ kind, entity_id: `src:${kind}:1`, title, path }, "Pull request");
 
 describe("cellsOf misses toward the kind's word", () => {
   it.each(["pr", "branch", "commit", "pipeline", "build_config", "page", "view", "monitor"])(
@@ -31,7 +31,7 @@ describe("cellsOf misses toward the kind's word", () => {
 
 describe("cellsOf reads the engine's key cell first (#2452)", () => {
   const withCell = (kind: string, cell: string | undefined, path: string | null = null) =>
-    cellsOf({ kind, entityId: "src:PAY-7", title: "owner/name", path, kindWord: "Thing", cell });
+    cellsOf({ kind, entity_id: "src:PAY-7", title: "owner/name", path, cell }, "Thing");
 
   it.each(["pr", "page", "pipeline", "monitor", "note"])("a %s with a cell draws it", (kind) => {
     expect(withCell(kind, "http", "Handbook › Payments")).toEqual({ cell: "http", mono: false, title: "owner/name" });

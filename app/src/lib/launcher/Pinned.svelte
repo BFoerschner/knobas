@@ -22,7 +22,7 @@
     const info = row.kind === "hit" ? null : kindRegistry.info(item.kind);
     const word = row.kind === "hit" ? row.group.label : kindSingular(item.kind, info);
     const monogram = row.kind === "hit" ? row.group.monogram : kindMonogram(item.kind, info);
-    const cells = cellsOf({ kind: item.kind, entityId: item.entity_id, title: item.title, path: item.path, cell: item.cell, kindWord: word });
+    const cells = cellsOf(item, word);
     return {
       monogram,
       tone: item.state?.tone ?? null,

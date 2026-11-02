@@ -41,7 +41,7 @@
     {@const item = row.row}
     {@const info = kindRegistry.info(item.kind)}
     {@const word = kindSingular(item.kind, info)}
-    {@const cells = cellsOf({ kind: item.kind, entityId: item.entity_id, title: item.title, path: item.path, cell: item.cell, kindWord: word })}
+    {@const cells = cellsOf(item, word)}
     {#if index === 0 && row.kind === "favourite"}
       <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span></div>
     {/if}
