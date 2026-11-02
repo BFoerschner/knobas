@@ -1,6 +1,6 @@
 <!--
-  PROTOTYPE: the board as round 4 wants it (Björn, 2026-11-02): the recent
-  items and nothing else. `launcher/Board.svelte` draws the smart lists, the
+  PROTOTYPE: the board as rounds 4 and 6 want it (Björn, 2026-11-02): the
+  favourite lists, the favourites, the recent items, and nothing else. `launcher/Board.svelte` draws the smart lists, the
   inbox, today's time and the source strip too; every one of them is gone here.
 -->
 <script lang="ts">
@@ -37,6 +37,23 @@
   const shares = $derived(sharesKey(home.recent));
 </script>
 
+{#if home.smart_lists.length > 0}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Favourite lists</span><span class="tf-ln-n">{home.smart_lists.length}</span></div>
+  {#each home.smart_lists as list, i (list.id)}
+    {@const row = rows[i]}
+    <div class="tf-ln-slrow" class:tf-ln-on={i === selected} role="presentation" onmouseenter={() => onhover(i)}>
+      <button id={optionId(i)} class="tf-ln-sl" role="option" aria-selected={i === selected} disabled={list.needs_attention} onclick={() => row && onopen(row)}>
+        <span class="tf-ln-nm">
+          {list.label}
+          <small class:tf-ln-att={list.needs_attention}>{list.description}</small>
+        </span>
+        <span class="tf-ln-c" class:tf-ln-chg={list.changed}>
+          {#if list.needs_attention}<span class="tf-ln-att">Needs attention</span>{:else}{list.count}{/if}
+        </span>
+      </button>
+    </div>
+  {/each}
+{/if}
 {#if favourites > 0}
   <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span><span class="tf-ln-n">{favourites}</span></div>
 {/if}

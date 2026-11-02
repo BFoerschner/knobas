@@ -52,6 +52,10 @@
   Favourites and keys live in `localStorage` here; the real change is a
   table each.
 
+  Round 6b: a label in front of the box names what it asks for (Name, New
+  name, Keys, Filter, a flow's step), highlighted and not part of the text;
+  a saved list can be a favourite too, listed first in the empty box.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -163,6 +167,8 @@
   }
   /** The favourites, newest first; each an entity row as the board draws one. */
   let favourites = $state<EntityRow[]>(kept(KEPT.favourites, []));
+  /** The favourite saved lists, by id, newest first; drawn first in the empty box. */
+  let favouriteLists = $state<string[]>(kept("knobas.prototype.favourite-lists", []));
   /** A saved list's key: list id → chord, such as `⌘1`. */
   let listKeys = $state<Record<string, string>>(kept(KEPT.listKeys, {}));
   /** An action's key, per kind: kind → chord → the action's id in its sheet. */
@@ -188,6 +194,17 @@
     sheet = null;
     push({ text: isFavourite(row.entity_id) ? `${row.title} is a favourite` : `${row.title} is no favourite any more` });
     await session.loadHome();
+    box?.focus();
+  }
+
+  async function toggleFavouriteList(id: string, label: string) {
+    const starred = favouriteLists.includes(id);
+    favouriteLists = starred ? favouriteLists.filter((had) => had !== id) : [id, ...favouriteLists];
+    keep("knobas.prototype.favourite-lists", favouriteLists);
+    sheet = null;
+    push({ text: starred ? `${label} is no favourite any more` : `${label} is a favourite` });
+    await session.loadHome();
+    session.set(session.raw);
     box?.focus();
   }
 
@@ -242,7 +259,8 @@
     lists = home.smart_lists.filter((list) => list.saved);
     listsLoaded = true;
     const starred = new Set(favourites.map((row) => row.entity_id));
-    return { ...home, smart_lists: [], recent: [...favourites, ...home.recent.filter((row) => !starred.has(row.entity_id))] };
+    const starredLists = favouriteLists.map((id) => lists.find((list) => list.id === id)).filter((list): list is SmartListSummary => list !== undefined);
+    return { ...home, smart_lists: starredLists, recent: [...favourites, ...home.recent.filter((row) => !starred.has(row.entity_id))] };
   }
 
   const BLANK = { updated_at: null, state: null, rank: 1, snippet: [] as SearchHit["snippet"] };
@@ -621,6 +639,7 @@
     const entity = entityOf(row);
     if (entity) return entity.kind === "ticket" ? keyOf(entity.entityId) : entity.title;
     if (row.kind === "hit") return row.hit.title;
+    if (row.kind === "list") return row.list.label;
     return "";
   }
 
@@ -776,9 +795,18 @@
   }
 
   /** The sheet's rows for `row`, in the order they are drawn. Empty: no sheet. */
+  /** A saved list's id and name, from a result row or a board row; `null` for anything else. */
+  function listOf(row: LauncherRow): { id: string; label: string } | null {
+    if (row.kind === "hit" && row.hit.kind === "list") return { id: keyOf(row.hit.entity_id), label: row.hit.title };
+    if (row.kind === "list") return { id: row.list.id, label: row.list.label };
+    return null;
+  }
+
   function itemsFor(row: LauncherRow): SheetItem[] {
-    if (row.kind === "hit" && row.hit.kind === "list") {
-      const id = keyOf(row.hit.entity_id);
+    const list = listOf(row);
+    if (list) {
+      const { id, label } = list;
+      const starred = favouriteLists.includes(id);
       return [
         { id: "apply", label: "Apply", detail: "Its filters in the box, as Enter does", run: () => activate(row) },
         {
@@ -786,10 +814,11 @@
           label: "Rename",
           detail: "The box takes the new name; Enter keeps it",
           run: () => {
-            if (sheet) sheet = { ...sheet, level: "rename", filter: row.hit.title };
+            if (sheet) sheet = { ...sheet, level: "rename", filter: label };
             void tick().then(() => box?.focus({ select: true }));
           },
         },
+        { id: "fav", label: starred ? "Unfavourite" : "Favourite", detail: starred ? "Leaves the top of the empty box" : "First in the empty box", run: () => toggleFavouriteList(id, label) },
         { id: "delete", label: "Delete", detail: "The saved query is gone; there is no undo", run: () => deleteList(id) },
         {
           id: "key",
@@ -1138,6 +1167,7 @@
     }
     if (row.kind === "list") {
       if (row.list.needs_attention) return;
+      sheet = null;
       session.set(`list:${row.list.id}`);
       box?.focus();
       return;
@@ -1164,7 +1194,7 @@
     return true;
   }
 
-  const listId = $derived(sheet?.row.kind === "hit" && sheet.row.hit.kind === "list" ? keyOf(sheet.row.hit.entity_id) : null);
+  const listId = $derived(sheet ? (listOf(sheet.row)?.id ?? null) : null);
 
   /** A list's chord opens it; an action's chord runs it on the selected row. `true` when the keys were a chord that did something. */
   function chordKey(event: KeyboardEvent): boolean {
@@ -1377,22 +1407,38 @@
     }
   }
 
+  /** The highlighted word in front of the box: what it is asking for. Nothing while it is the search. */
+  const mode = $derived(
+    naming !== null
+      ? "Name"
+      : help
+        ? "Filter"
+        : sheet
+          ? sheet.level === "bind" || sheet.level === "bind-list"
+            ? "Keys"
+            : sheet.level === "rename"
+              ? "New name"
+              : sheet.level === "flow"
+                ? (step?.title ?? "Pick")
+                : "Actions"
+          : null,
+  );
   const placeholder = $derived(
     naming !== null
-      ? "Name the list"
+      ? "the list's name"
       : help
-      ? "Pick a filter"
-      : sheet
-      ? sheet.level === "bind"
-        ? `Press the keys for ${shown[sheet.selected]?.label ?? "the action"}`
-        : sheet.level === "bind-list"
-          ? "Press the keys that open this list"
-      : sheet.level === "rename"
-        ? "The list's new name"
-        : sheet.level === "flow"
-          ? (step?.title ?? "")
-          : `Narrow the actions on ${sheet.title}`
-      : "⌘? for help",
+        ? "narrow the filters"
+        : sheet
+          ? sheet.level === "bind"
+            ? `press the keys for ${shown[sheet.selected]?.label ?? "the action"}`
+            : sheet.level === "bind-list"
+              ? "press the keys that open this list"
+              : sheet.level === "rename"
+                ? ""
+                : sheet.level === "flow"
+                  ? "narrow the choices"
+                  : `narrow the actions on ${sheet.title}`
+          : "⌘? for help",
   );
   const interpreted = $derived(session.response?.interpreted ?? null);
   const pinnedHit = $derived.by(() => {
@@ -1411,6 +1457,9 @@
 {#if open}
   <TfDialog title="Search and actions" className="tf-launch" onclose={close}>
     {#snippet body()}
+      <!-- The label is its own element in front of the box: highlighted, never part of the text, never deletable. -->
+      <div class="boxrow" class:labelled={mode !== null}>
+        {#if mode !== null}<span class="mode">{mode}</span>{/if}
       <QueryBox
         bind:this={box}
         value={naming !== null ? naming : help ? help.filter : sheet ? sheet.filter : session.raw}
@@ -1428,6 +1477,7 @@
         {onkeydown}
         onclose={close}
       />
+      </div>
 
       {#if sheet}
         <!-- The row the sheet acts on, lifted under the box; the box keeps its words aside. -->
@@ -1668,6 +1718,14 @@
   /* PROTOTYPE rules. The shipped ones are `tf/css/launcher.css`; these would join them. */
   /* The box's own ⌘K badge is gone (Björn, round 4); `QueryBox.svelte` would lose the element. */
   :global(.tf-launch .tf-ln-q > kbd) { display: none; }
+  .boxrow { display: flex; align-items: center; flex: none; border-bottom: 1px solid var(--rule); }
+  .boxrow :global(.tf-ln-q) { flex: 1; min-width: 0; border-bottom: 0; }
+  .mode {
+    flex: none; margin-left: 15px; padding: 2px 8px; border-radius: 4px; background: var(--ink); color: var(--sheet);
+    font-size: var(--t-sm); font-weight: 600; line-height: 1.4; user-select: none;
+  }
+  .labelled :global(.tf-ln-q input) { padding-left: 10px; }
+  .labelled :global(.tf-ln-caret) { display: none; }
   .pinned { flex: none; border-bottom: 1px solid var(--rule); }
   .lead { padding: 10px 18px; font-size: var(--t-sm); color: var(--ink); }
   .sheet { flex: 1; min-height: 0; overflow: auto; padding: 0 0 4px; outline: none; }
