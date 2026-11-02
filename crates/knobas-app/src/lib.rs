@@ -697,6 +697,10 @@ pub fn run() {
             commands::search::favourites,
             commands::search::add_favourite,
             commands::search::remove_favourite,
+            // #2429's keys, appended at the foot (§10.8).
+            commands::search::keys,
+            commands::search::bind_list_key,
+            commands::search::bind_action_key,
         ])
         .build(context)
         .expect("build the tauri application")

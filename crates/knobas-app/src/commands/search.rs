@@ -242,6 +242,53 @@ pub async fn remove_favourite(
     remove_favourite_inner(&lifecycle.pool()?, lifecycle.registry(), &target).await
 }
 
+/// Every key bound (#2429, spec #2419 stories 43 to 47): the saved lists'
+/// chords, each with the list's name and text, and the actions' chords per
+/// kind. See [`knobas_search::keys`].
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn keys(lifecycle: State<'_, Lifecycle>) -> Result<knobas_search::Keys, IpcError> {
+    keys_inner(&lifecycle.pool()?).await
+}
+
+/// Give a saved list a chord that opens it from anywhere (#2429, story 43),
+/// or take its chord away with `chord: null`. A chord another list held moves
+/// to this one.
+///
+/// # Errors
+///
+/// `invalid` for a chord that is none, `not_found` for a list nobody saved,
+/// `not_ready` before the database is up, `internal` if the write fails.
+#[tauri::command]
+pub async fn bind_list_key(
+    lifecycle: State<'_, Lifecycle>,
+    list_id: String,
+    chord: Option<String>,
+) -> Result<(), IpcError> {
+    bind_list_key_inner(&lifecycle.pool()?, &list_id, chord.as_deref()).await
+}
+
+/// Give an action a chord on one kind (#2429, stories 44 and 45), or take
+/// it away with `chord: null`. `action_id` is the Tab sheet's stable id. A
+/// chord another action of the kind held moves to this one.
+///
+/// # Errors
+///
+/// `invalid` for a chord that is none, `not_ready` before the database is
+/// up, `internal` if the write fails.
+#[tauri::command]
+pub async fn bind_action_key(
+    lifecycle: State<'_, Lifecycle>,
+    kind: String,
+    action_id: String,
+    chord: Option<String>,
+) -> Result<(), IpcError> {
+    bind_action_key_inner(&lifecycle.pool()?, &kind, &action_id, chord.as_deref()).await
+}
+
 /// Every ticket view (#812, R-3.2, R-3.3), in list order, each with its count
 /// or the part of its text today's grammar could not read. See
 /// [`crate::ticket_views`].
@@ -586,6 +633,42 @@ pub async fn remove_favourite_inner(
         .await?
         .remove_favourite(target)
         .await?)
+}
+
+/// [`keys`], against a pool.
+///
+/// # Errors
+///
+/// See [`keys`].
+pub async fn keys_inner(pool: &PgPool) -> Result<knobas_search::Keys, IpcError> {
+    Ok(knobas_search::keys::read(pool).await?)
+}
+
+/// [`bind_list_key`], against a pool.
+///
+/// # Errors
+///
+/// See [`bind_list_key`].
+pub async fn bind_list_key_inner(
+    pool: &PgPool,
+    list_id: &str,
+    chord: Option<&str>,
+) -> Result<(), IpcError> {
+    Ok(knobas_search::keys::bind_list(pool, list_id, chord).await?)
+}
+
+/// [`bind_action_key`], against a pool.
+///
+/// # Errors
+///
+/// See [`bind_action_key`].
+pub async fn bind_action_key_inner(
+    pool: &PgPool,
+    kind: &str,
+    action_id: &str,
+    chord: Option<&str>,
+) -> Result<(), IpcError> {
+    Ok(knobas_search::keys::bind_action(pool, kind, action_id, chord).await?)
 }
 
 #[cfg(test)]

@@ -42,6 +42,7 @@ pub mod favourites;
 pub mod frames;
 pub mod group;
 pub mod home;
+pub mod keys;
 pub mod query;
 pub mod saved;
 pub mod snippet;
@@ -61,6 +62,7 @@ use sqlx::PgPool;
 pub use favourites::FavouriteTarget;
 pub use group::RawHit;
 pub use home::LauncherBoard;
+pub use keys::{ActionKey, Keys, ListKey};
 pub use query::{
     EffectiveFilters, FieldFilter, FieldKey, KIND_LETTERS, Parsed, Pattern, merge, parse,
     pattern_of,

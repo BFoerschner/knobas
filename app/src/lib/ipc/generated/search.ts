@@ -3,6 +3,12 @@ import type { EntityRow, StateChip } from "./entity";
 import type { CredentialHealth } from "./sources";
 
 /**
+ * An action's chord on one kind: the action is the Tab sheet's row with
+ * that stable id (`launcher/sheet.ts`).
+ */
+export type ActionKey = { kind: string, chord: string, action_id: string, };
+
+/**
  * [`CARD_FIELDS`]: what a card can show (R-3.16).
  */
 export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | "labels";
@@ -166,6 +172,11 @@ parents: Array<ParentSuggestion>,
 fields: Array<FieldSuggestion>, };
 
 /**
+ * Every key bound: the lists' by chord, the actions' by kind then chord.
+ */
+export type Keys = { lists: Array<ListKey>, actions: Array<ActionKey>, };
+
+/**
  * One kind `kind:` can name.
  */
 export type KindSuggestion = { 
@@ -257,6 +268,12 @@ reason: string, };
  * [`LIST_COLUMNS`]: the list's columns (R-3.16); `key` is always one.
  */
 export type ListColumn = "key" | "summary" | "status" | "priority" | "signals" | "assignee" | "updated" | "epic" | "labels";
+
+/**
+ * A saved list's chord, with what opening it needs: the list's name and its
+ * text as saved.
+ */
+export type ListKey = { list_id: string, chord: string, label: string, text: string, };
 
 /**
  * The list's header sort (R-3.6).

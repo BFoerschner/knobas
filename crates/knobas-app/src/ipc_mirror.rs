@@ -307,6 +307,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_search::SmartListSummary::export_all(cfg)?;
     // What `add_favourite` and `remove_favourite` take (#2428).
     knobas_search::FavouriteTarget::export_all(cfg)?;
+    // What `keys` answers (#2429).
+    knobas_search::Keys::export_all(cfg)?;
     knobas_search::FilterSuggestions::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;
     crate::ticket_views::TicketView::export_all(cfg)?;

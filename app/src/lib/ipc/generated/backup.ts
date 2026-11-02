@@ -138,8 +138,10 @@ sources: boolean,
  * 49, "beside the saved lists"): a list favourite references its list,
  * so the two cannot come apart, and an entity favourite names an id with
  * no foreign key, resolving once the colleague's address book or sync
- * holds it. The dialog offers the toggle once a saved list or a
- * favourite exists.
+ * holds it. The keys ride here as well (#2429): `knobas.list_key`
+ * references its list, and `knobas.action_key` is the reader's own
+ * chords per kind. The dialog offers the toggle once a saved list, a
+ * favourite or a key exists.
  */
 smart_lists: boolean, 
 /**

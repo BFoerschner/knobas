@@ -11,6 +11,7 @@ import type { EntityRow } from "./generated/entity";
 import type {
   FavouriteTarget,
   FilterSuggestions,
+  Keys,
   LauncherHome,
   QueryTranslation,
   SearchFilters,
@@ -23,6 +24,7 @@ import type {
 } from "./generated/search";
 
 export type {
+  ActionKey,
   CardField,
   FavouriteTarget,
   FieldSuggestion,
@@ -30,10 +32,12 @@ export type {
   FilterCoverage,
   FilterDimension,
   FilterSuggestions,
+  Keys,
   KindSuggestion,
   LauncherHome,
   LeftOut,
   ListColumn,
+  ListKey,
   ListSort,
   ParentSuggestion,
   ParsedQuery,
@@ -125,6 +129,21 @@ export function addFavourite(target: FavouriteTarget): Promise<void> {
 /** *Unfavourite* an entity or a saved list (#2428); not a favourite is no error. */
 export function removeFavourite(target: FavouriteTarget): Promise<void> {
   return invoke<void>("remove_favourite", { target });
+}
+
+/** Every key bound (#2429): the saved lists' chords, each with its list's name and text, and the actions' chords per kind. */
+export function keys(): Promise<Keys> {
+  return invoke<Keys>("keys");
+}
+
+/** Give a saved list a chord that opens it from anywhere, or take it away with `null` (#2429). */
+export function bindListKey(listId: string, chord: string | null): Promise<void> {
+  return invoke<void>("bind_list_key", { listId, chord });
+}
+
+/** Give the Tab sheet's action `actionId` a chord on `kind`, or take it away with `null` (#2429). */
+export function bindActionKey(kind: string, actionId: string, chord: string | null): Promise<void> {
+  return invoke<void>("bind_action_key", { kind, actionId, chord });
 }
 
 /**
