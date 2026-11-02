@@ -1622,8 +1622,8 @@
               {/if}
             </div>
             {#if panel.refused}<p class="tf-ln-bind-refused" role="alert">{panel.refused}</p>{/if}
+            <!-- The Controls order: the extra action (Clear) first, then a ghost Cancel, then the primary. -->
             <div class="tf-ln-bind-btns">
-              <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void keepKey()}>OK</button>
               <button
                 type="button"
                 class="tf-btn tf-sm"
@@ -1633,7 +1633,8 @@
                   box?.focus();
                 }}>Clear</button
               >
-              <button type="button" class="tf-btn tf-sm" onclick={leaveKeyPanel}>Cancel</button>
+              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={leaveKeyPanel}>Cancel</button>
+              <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void keepKey()}>OK</button>
             </div>
             <p class="tf-ln-bind-hint">Enter keeps the keys, Backspace clears them, Esc leaves things as they were.</p>
           </div>
