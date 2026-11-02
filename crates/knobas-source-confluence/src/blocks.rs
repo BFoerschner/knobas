@@ -1070,7 +1070,9 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     #[test]
     fn an_empty_html_macro_is_a_placeholder() {
         assert_eq!(
-            blocks(r#"<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[  ]]></ac:plain-text-body></ac:structured-macro>"#),
+            blocks(
+                r#"<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[  ]]></ac:plain-text-body></ac:structured-macro>"#
+            ),
             vec![DocBlock::Placeholder {
                 name: "html".into()
             }]

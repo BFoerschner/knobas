@@ -780,10 +780,12 @@ pub fn run_embeds_key(source_id: &str) -> String {
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
 pub async fn run_embedded_html(pool: &PgPool, source_id: &str) -> Result<bool, IpcError> {
-    Ok(crate::settings::read_value(pool, &run_embeds_key(source_id))
-        .await?
-        .and_then(|value| value.as_bool())
-        .unwrap_or(true))
+    Ok(
+        crate::settings::read_value(pool, &run_embeds_key(source_id))
+            .await?
+            .and_then(|value| value.as_bool())
+            .unwrap_or(true),
+    )
 }
 
 /// Store *Run embedded HTML* for `source_id` and answer what is now stored.
@@ -796,8 +798,12 @@ pub async fn set_run_embedded_html(
     source_id: &str,
     on: bool,
 ) -> Result<bool, IpcError> {
-    crate::settings::write_value(pool, &run_embeds_key(source_id), &serde_json::Value::Bool(on))
-        .await?;
+    crate::settings::write_value(
+        pool,
+        &run_embeds_key(source_id),
+        &serde_json::Value::Bool(on),
+    )
+    .await?;
     Ok(on)
 }
 

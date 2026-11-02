@@ -668,20 +668,41 @@ async fn an_html_macro_reads_as_an_embed_and_its_source_says_whether_it_runs() {
     );
     assert!(doc.run_embeds, "embeds run until the reader says otherwise");
 
-    assert!(!knobas_app::docs::set_run_embedded_html(&pool, &src, false).await.unwrap());
-    assert!(!knobas_app::docs::run_embedded_html(&pool, &src).await.unwrap());
+    assert!(
+        !knobas_app::docs::set_run_embedded_html(&pool, &src, false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !knobas_app::docs::run_embedded_html(&pool, &src)
+            .await
+            .unwrap()
+    );
     let doc = read(api.clone()).await;
     assert!(!doc.run_embeds, "turned off for its source");
     assert_eq!(doc.blocks.len(), 2, "the embed is still there to say so");
-    assert!(read(elsewhere).await.run_embeds, "another source still runs its embeds");
+    assert!(
+        read(elsewhere).await.run_embeds,
+        "another source still runs its embeds"
+    );
 
-    assert!(knobas_app::docs::set_run_embedded_html(&pool, &src, true).await.unwrap());
+    assert!(
+        knobas_app::docs::set_run_embedded_html(&pool, &src, true)
+            .await
+            .unwrap()
+    );
     assert!(read(api).await.run_embeds);
 
-    knobas_app::docs::set_run_embedded_html(&pool, &other, false).await.unwrap();
-    knobas_app::docs::forget_run_embedded_html(&pool, &other).await.unwrap();
+    knobas_app::docs::set_run_embedded_html(&pool, &other, false)
+        .await
+        .unwrap();
+    knobas_app::docs::forget_run_embedded_html(&pool, &other)
+        .await
+        .unwrap();
     assert!(
-        knobas_app::docs::run_embedded_html(&pool, &other).await.unwrap(),
+        knobas_app::docs::run_embedded_html(&pool, &other)
+            .await
+            .unwrap(),
         "a source deleted with embeds off does not hand that to the next one under its id"
     );
 }
@@ -816,7 +837,10 @@ async fn a_word_in_a_table_cell_is_found_in_its_section() {
         .unwrap()
         .unwrap();
     assert_eq!(found.total, 1, "an html macro's shown words are found");
-    assert_eq!(found.hits[0].snippet.section.as_deref(), Some("Rate limits"));
+    assert_eq!(
+        found.hits[0].snippet.section.as_deref(),
+        Some("Rate limits")
+    );
     for unseen in [param, script] {
         let found = docs_search_inner(&pool, &Registry::for_process(), &unseen, None)
             .await

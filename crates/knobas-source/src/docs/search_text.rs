@@ -35,8 +35,8 @@
 //! The three mark characters never come from the page: one in the source's
 //! own text is read as a space, so no page can forge a section.
 
-use super::indexed::{comment_line, is_mark, link_line, section_line};
 use super::html::{Hook, Hooked, Node, Reading};
+use super::indexed::{comment_line, is_mark, link_line, section_line};
 use super::{DocBlock, DocContent, EmbedContent, Inline};
 
 /// The reader's hook for an embed's HTML (#2440): an element it does not

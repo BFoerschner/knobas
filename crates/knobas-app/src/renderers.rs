@@ -833,17 +833,28 @@ mod tests {
             ["'unsafe-inline'", "'unsafe-eval'", "http:", "https:"]
         );
         for name in ["style-src"] {
-            assert_eq!(directive(name), ["'unsafe-inline'", "http:", "https:"], "{name}");
+            assert_eq!(
+                directive(name),
+                ["'unsafe-inline'", "http:", "https:"],
+                "{name}"
+            );
         }
         for name in ["img-src", "font-src", "media-src"] {
-            assert_eq!(directive(name), ["data:", "blob:", "http:", "https:"], "{name}");
+            assert_eq!(
+                directive(name),
+                ["data:", "blob:", "http:", "https:"],
+                "{name}"
+            );
         }
         for name in ["frame-src", "connect-src", "form-action"] {
             assert_eq!(directive(name), ["http:", "https:"], "{name}");
         }
         assert_eq!(directive("object-src"), ["'none'"]);
         // Nothing names the app's own IPC or this scheme.
-        assert!(!policy.contains("ipc") && !policy.contains("knobas-render"), "{policy}");
+        assert!(
+            !policy.contains("ipc") && !policy.contains("knobas-render"),
+            "{policy}"
+        );
 
         for bad in ["/embed.", "/embed.not base64!", "/embed.%2F"] {
             let refused = frame_response(bad, |_| None);

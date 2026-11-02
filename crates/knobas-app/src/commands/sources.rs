@@ -920,7 +920,10 @@ mod tests {
         let keys = crate::commands::mirror::keys(set);
         assert!(keys.contains(&"id") && keys.contains(&"on"), "{set}");
         let read = crate::commands::mirror::invocation(MIRROR, "run_embedded_html");
-        assert!(crate::commands::mirror::keys(read).contains(&"id"), "{read}");
+        assert!(
+            crate::commands::mirror::keys(read).contains(&"id"),
+            "{read}"
+        );
     }
 
     /// No command in this file takes `State<'_, SourcesState>`.
