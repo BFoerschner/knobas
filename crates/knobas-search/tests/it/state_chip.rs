@@ -217,6 +217,7 @@ async fn a_tickets_hit_carries_its_declared_status_tone() {
     let response = searcher(&pool)
         .await
         .search(SearchQuery {
+            titles: false,
             raw: t.clone(),
             limit: 30,
             filters: SearchFilters::default(),
