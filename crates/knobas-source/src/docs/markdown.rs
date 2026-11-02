@@ -246,9 +246,7 @@ fn table_cell(text: &str) -> String {
         backslashes = if ch == '\\' { backslashes + 1 } else { 0 };
         out.push(ch);
     }
-    out.lines()
-        .collect::<Vec<_>>()
-        .join("<br>")
+    out.lines().collect::<Vec<_>>().join("<br>")
 }
 
 fn panel(kind: PanelKind, title: Option<&str>, blocks: &[DocBlock]) -> String {
