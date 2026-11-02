@@ -70,7 +70,7 @@ export interface Previews {
   watch(node: Element, id: string): () => void;
   /** *Try again*: forget every failure and ask again for what failed. */
   retry(): void;
-  /** The page closed: forget everything, and keep no answer still on its way. */
+  /** The page closed: forget everything, keep no answer still on its way, and ask nothing more. */
   drop(): void;
 }
 
@@ -112,6 +112,8 @@ export function createAttachmentPreviews({
   const states = new SvelteMap<string, Preview>();
   /** Bumped by `drop` and `retry`: an answer for an older round is not kept. */
   let round = 0;
+  /** The page closed (`drop`): a watch or a click that comes after asks nothing. */
+  let dropped = false;
   let attempt = $state(0);
   const waiting = new Map<string, ((preview: Preview) => void)[]>();
 
@@ -148,7 +150,7 @@ export function createAttachmentPreviews({
     },
     of: (id) => states.get(id) ?? NONE,
     fetch(id) {
-      if (peek(id).state !== "none") return;
+      if (dropped || peek(id).state !== "none") return;
       const file = files.find((candidate) => candidate.id === id);
       if (!file) return;
       if (file.size !== null && file.size > PREVIEW_CAP) {
@@ -210,6 +212,7 @@ export function createAttachmentPreviews({
       for (const id of [...failed, ...loading]) previews.fetch(id);
     },
     drop() {
+      dropped = true;
       round += 1;
       states.clear();
       waiting.clear();

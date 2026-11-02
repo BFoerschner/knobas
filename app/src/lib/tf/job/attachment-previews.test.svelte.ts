@@ -120,6 +120,18 @@ describe("attachment previews", () => {
     expect(previews.of("1")).toEqual({ state: "none" });
   });
 
+  test("once the page dropped its previews, nothing more is asked: a watch that fires late reads nothing (#2415)", async () => {
+    const { asked, read } = hand();
+    const previews = createAttachmentPreviews({ entityId: "jira:PAY-231", files: FILES, source: "Tidewater Jira", read });
+    previews.drop();
+    previews.fetch("1");
+    previews.fetchImages();
+    previews.retry();
+    await settle();
+    expect(asked).toEqual([]);
+    expect(previews.of("1")).toEqual({ state: "none" });
+  });
+
   test("watch asks once the node is in view, and at once where nothing can tell", () => {
     const { asked, read } = hand();
     const seen: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
