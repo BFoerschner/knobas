@@ -9,7 +9,6 @@
  * `reason` and `title`.
  */
 import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
-import { matchesAll } from "../filter/filter";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
 import { ticketHash } from "../route";
@@ -156,15 +155,13 @@ export interface InboxFilter {
   job: string | null;
   /** The kind chips on; none keeps every kind. */
   kinds: readonly string[];
-  text: string;
 }
 
 /** The rows the filter keeps, in the stream's order (newest first). */
 export function visible(entries: readonly InboxEntry[], filter: InboxFilter, index: JobIndex): InboxEntry[] {
   return entries.filter(({ item }) => {
     if (filter.scope === "job" && (filter.job === null || !index.holds(filter.job, item))) return false;
-    if (filter.kinds.length > 0 && !filter.kinds.includes(kindOf(item.category))) return false;
-    return matchesAll(`${sentence(item)} ${index.jobOf(item) ?? ""}`, filter.text);
+    return filter.kinds.length === 0 || filter.kinds.includes(kindOf(item.category));
   });
 }
 
