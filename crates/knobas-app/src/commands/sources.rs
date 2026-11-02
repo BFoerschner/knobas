@@ -301,6 +301,39 @@ pub async fn update_source<R: tauri::Runtime>(
     Ok(summary)
 }
 
+/// *Run embedded HTML* for one source (#2440): whether the Docs reader runs
+/// its pages' embeds. On until set (`crate::docs::run_embedded_html`).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn run_embedded_html(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::run_embedded_html(&pool, &id).await
+}
+
+/// Store *Run embedded HTML* for one source and answer what is now stored,
+/// so its switch draws what the database holds.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_run_embedded_html(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+    on: bool,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::docs::set_run_embedded_html(&pool, &id, on).await
+}
+
 /// Delete a source: its configuration row, its keychain item, and -- because
 /// this is the one place a source stops existing -- the scheduler's memory of
 /// it.
@@ -878,6 +911,17 @@ fn emit<R: tauri::Runtime, T: serde::Serialize>(
 mod tests {
     /// The frontend mirror of this module's commands, read at compile time.
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/sources.ts");
+
+    /// The mirror sends the source's `id` and `on`, the arguments' names
+    /// (#2440): a mirror sending anything else arrives with a value missing.
+    #[test]
+    fn the_mirror_sends_which_source_runs_embedded_html() {
+        let set = crate::commands::mirror::invocation(MIRROR, "set_run_embedded_html");
+        let keys = crate::commands::mirror::keys(set);
+        assert!(keys.contains(&"id") && keys.contains(&"on"), "{set}");
+        let read = crate::commands::mirror::invocation(MIRROR, "run_embedded_html");
+        assert!(crate::commands::mirror::keys(read).contains(&"id"), "{read}");
+    }
 
     /// No command in this file takes `State<'_, SourcesState>`.
     ///

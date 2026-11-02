@@ -135,6 +135,10 @@ pub struct DocPage {
     /// page writes) writes the source's markup (#862).
     #[ts(as = "Vec<DocWrite>")]
     pub writes: Vec<String>,
+    /// Whether this page's source runs its embeds: *Run embedded HTML*, on
+    /// until the reader turns it off for the source ([`run_embedded_html`],
+    /// #2440). Off, the shell draws each embed as a placeholder.
+    pub run_embeds: bool,
 }
 
 /// A comment write knobas sent to a page, and the id the source gave the
@@ -726,6 +730,7 @@ pub async fn page(
         Vec::new()
     };
 
+    let run_embeds = run_embedded_html(pool, &source_id).await?;
     Ok(DocPage {
         sent_comments,
         writes: if readable {
@@ -753,7 +758,61 @@ pub async fn page(
         blocks: content.blocks,
         comments: content.comments,
         me: me.to_vec(),
+        run_embeds,
     })
+}
+
+// -- *Run embedded HTML* (#2440) ----------------------------------------------
+
+/// The `knobas.setting` key holding *Run embedded HTML* for one source: a
+/// row per source, so turning one off is one write and never a
+/// read-modify-write of a list another save could race. No migration, as
+/// the renderers' rows have none.
+#[must_use]
+pub fn run_embeds_key(source_id: &str) -> String {
+    format!("docs.run_embedded_html.{source_id}")
+}
+
+/// *Run embedded HTML* for `source_id` as stored: on until set, and a row
+/// that is not a boolean reads as on (spec #2432: on by default).
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn run_embedded_html(pool: &PgPool, source_id: &str) -> Result<bool, IpcError> {
+    Ok(crate::settings::read_value(pool, &run_embeds_key(source_id))
+        .await?
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true))
+}
+
+/// Store *Run embedded HTML* for `source_id` and answer what is now stored.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_run_embedded_html(
+    pool: &PgPool,
+    source_id: &str,
+    on: bool,
+) -> Result<bool, IpcError> {
+    crate::settings::write_value(pool, &run_embeds_key(source_id), &serde_json::Value::Bool(on))
+        .await?;
+    Ok(on)
+}
+
+/// Drop `source_id`'s row, when the source is deleted: a source added again
+/// under its id starts with embeds on, as every new source does.
+///
+/// # Errors
+///
+/// The database's error if the delete fails.
+pub async fn forget_run_embedded_html(pool: &PgPool, source_id: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("delete from knobas.setting where key = $1")
+        .bind(run_embeds_key(source_id))
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 // -- the Docs search (#860) -------------------------------------------------

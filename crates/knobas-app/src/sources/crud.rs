@@ -504,6 +504,8 @@ pub async fn delete(
     }
     // Dropped once the row is gone, so no read builds it again in between.
     live.forget(id);
+    // Settings that hang off the id go with it (#2440).
+    crate::docs::forget_run_embedded_html(pool, id).await?;
     knobas_secrets::spawn::delete(secrets, &knobas_secrets::KeychainAccount::source(id)).await?;
     Ok(())
 }
