@@ -1363,6 +1363,15 @@ other stray. Adding it takes this Jira's whole status list
 (`GET /rest/api/2/status`) from four to nine, which is what lets `PAY`'s own
 reads witness that the answer is a *subset* rather than a copy.
 
+**Two attachments on `OPS-77`** (issue #2410). The fixture has none, so the
+seed uploads the two files in `testenv/jira-attachments/` (a PNG and a PDF)
+through `POST /rest/api/2/issue/OPS-77/attachments`, skipping a name the issue
+already carries, and fails unless each is there once at its own size. They are
+on an `OPS` issue because `OPS` is the project the adapter suite narrows to ask
+as a user who may not browse it. `jira.attachments` records the issue and the
+ids and `content` addresses Jira gave them. The adapter suite reads both back
+byte for byte against the files on disk.
+
 **Epic membership is in the Epic Link custom field, and only there.** `PAY`
 and `OPS` are *classic* Data Center projects, so `fields.parent` — the
 spelling a next-gen or a recent company-managed project uses — is **absent

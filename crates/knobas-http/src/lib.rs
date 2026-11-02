@@ -899,6 +899,13 @@ pub struct StreamedBody {
 }
 
 impl StreamedBody {
+    /// The response's headers, read before the body (#2410: Jira's
+    /// attachment servlet says only there whether it sent the file).
+    #[must_use]
+    pub fn headers(&self) -> &reqwest::header::HeaderMap {
+        self.response.headers()
+    }
+
     /// The next bytes of the body, `None` at its end.
     ///
     /// # Errors

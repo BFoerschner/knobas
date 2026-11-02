@@ -264,6 +264,18 @@
 //!     seeded step reports that test and no other, and no `testOccurrences`
 //!     on a build that ran none. The log's own `41 passed` is the story's
 //!     line, not what either server counts.
+//! 20. **Attachments are served loosely (#2405), measured against the real
+//!     servlet in #2410.** mockd makes the bytes up at the listed size, sends
+//!     no `Content-Disposition`, and serves the file itself as its thumbnail
+//!     at `/secure/thumbnail/{id}/{name}`. Jira 10.3 sends every file with a
+//!     disposition, has a re-encoded thumbnail at
+//!     `/secure/thumbnail/{id}/_thumb_{id}.png` for an image and none for a
+//!     PDF, and answers a user who may not browse the project with **200** and
+//!     its HTML *Access Denied* page rather than a 403. The adapter's reading
+//!     of that page is pinned by `tests/it/attachment_denied.rs` in
+//!     `knobas-source-jira`, and the rest by `live_jira_seeded`. Because the
+//!     adapter reads `text/html` without a disposition as that page, an HTML
+//!     file in mockd's fixture would read as refused; none is listed.
 //!
 //! ## The shared credentials
 //!

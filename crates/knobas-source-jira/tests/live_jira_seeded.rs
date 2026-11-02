@@ -65,6 +65,12 @@
 //!   and a source configured from *that* answer -- never from
 //!   `seed-state.json` -- mirrors PAY-219's membership of PAY-200. mockd
 //!   serves no field table at all, so this endpoint has no other witness.
+//! * **Attachments as Jira serves them** (#2410): the two real files the seed
+//!   uploads to OPS-77 are listed with their sizes and
+//!   `/secure/attachment/{id}/{name}` addresses, read back byte for byte,
+//!   refused under a small cap at the announced size, downloaded whole, and
+//!   refused with a 403 to a user who may not browse OPS. mockd makes its
+//!   bytes up at the listed size.
 //!
 //! Every divergence from mockd that this file found is written down in
 //! `knobas-mockd`'s *Documented deviations* list, where the next reader of
@@ -206,6 +212,28 @@ struct Seed {
     /// (#877). `None` in a `seed-state.json` written before the seed made them.
     #[serde(default)]
     views: Option<SeededViews>,
+    /// The two files the seed attached to one issue (#2410). `None` in a
+    /// `seed-state.json` written before the seed attached them.
+    #[serde(default)]
+    attachments: Option<SeededAttachments>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededAttachments {
+    /// The issue the files are on.
+    issue: String,
+    /// The directory under `testenv/` the seed uploaded them from.
+    dir: String,
+    files: Vec<SeededAttachment>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededAttachment {
+    id: String,
+    filename: String,
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    size: u64,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -245,6 +273,13 @@ struct SeededSprint {
 }
 
 impl Seed {
+    fn attachments(&self) -> &SeededAttachments {
+        self.attachments.as_ref().expect(
+            "seed-state.json records no attachments: it was written before the seed attached \
+             them (#2410). Re-run `./seed-atlassian-content.sh jira`.",
+        )
+    }
+
     fn sprint(&self) -> &SeededSprint {
         self.sprint.as_ref().expect(
             "seed-state.json records no sprint: it was written before the seed made one \
@@ -4316,8 +4351,11 @@ const MINTED: &str = "knobas-live-2052";
 const MINTED_PASSWORD: &str = "knobas-live-2052-Pw";
 /// The copy of OPS's permission scheme it puts OPS on.
 const NARROWED_SCHEME: &str = "knobas live suite: narrowed (#2052)";
-/// The permissions the copy gives `jira-administrators` alone.
+/// The permissions the copy gives `jira-administrators` alone, for #2052's
+/// writes.
 const NARROWED: [&str; 3] = ["ADD_COMMENTS", "WORK_ON_ISSUES", "CREATE_ISSUES"];
+/// The same for #2410's attachment read: the minted user may not see OPS.
+const UNBROWSABLE: [&str; 1] = ["BROWSE_PROJECTS"];
 
 /// One admin request for [`Narrowed`]'s cleanup, which runs outside the test's
 /// runtime: the status and the body, or what failed.
@@ -4461,8 +4499,9 @@ async fn unnarrow(
     Ok(())
 }
 
-/// OPS on a copy of its scheme that refuses [`NARROWED`] to everyone but
-/// `jira-administrators`, and [`MINTED`] a user; both taken back by `Drop`.
+/// OPS on a copy of its scheme that refuses `permissions` ([`NARROWED`],
+/// [`UNBROWSABLE`]) to everyone but `jira-administrators`, and [`MINTED`] a
+/// user; both taken back by `Drop`.
 struct Narrowed {
     url: String,
     user: String,
@@ -4471,7 +4510,7 @@ struct Narrowed {
 }
 
 impl Narrowed {
-    async fn new(seeded: &Seeded) -> Narrowed {
+    async fn new(seeded: &Seeded, permissions: &[&str]) -> Narrowed {
         let login = (
             seeded.url.as_str(),
             seeded.user.as_str(),
@@ -4502,7 +4541,7 @@ impl Narrowed {
         let mut grants: Vec<serde_json::Value> = Vec::new();
         for grant in own["permissions"].as_array().expect("a scheme's grants") {
             let permission = grant["permission"].as_str().expect("a grant's permission");
-            let holder = if NARROWED.contains(&permission) {
+            let holder = if permissions.contains(&permission) {
                 admins.clone()
             } else {
                 let mut holder = serde_json::json!({ "type": grant["holder"]["type"] });
@@ -4522,7 +4561,10 @@ impl Narrowed {
                 "rest/api/2/permissionscheme",
                 Some(serde_json::json!({
                     "name": NARROWED_SCHEME,
-                    "description": "knobas live suite (#2052): OPS without comments, worklogs and creates",
+                    "description": format!(
+                        "knobas live suite: OPS with {} for administrators alone",
+                        permissions.join(", ")
+                    ),
                     "permissions": grants,
                 })),
             )
@@ -4627,7 +4669,7 @@ async fn narrow_marks(seeded: &Seeded, ticket: &str) -> serde_json::Value {
 async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothing_is_written() {
     use knobas_source::grants::{RefusedWrite, WriteAsk};
     let seeded = seeded();
-    let narrowed = Narrowed::new(&seeded).await;
+    let narrowed = Narrowed::new(&seeded, &NARROWED).await;
     let ticket = seeded
         .seed
         .issues
@@ -4701,5 +4743,284 @@ async fn a_user_the_permission_scheme_refuses_is_refused_those_writes_and_nothin
         "asking wrote nothing to {ticket} or OPS"
     );
     println!("SEEDED mypermissions: {MINTED} refused {minted:?}; the administrator nothing");
+    drop(narrowed);
+}
+
+// ---- attachments, as the real Jira serves them (#2410) ----
+
+/// What a download is streamed into: the name the adapter suggested and every
+/// byte, in order.
+#[derive(Default)]
+struct Kept {
+    name: Option<String>,
+    bytes: Vec<u8>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::run::DownloadSink for Kept {
+    async fn start(&mut self, file_name: &str) -> Result<(), SourceError> {
+        self.name = Some(file_name.to_owned());
+        Ok(())
+    }
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), SourceError> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+/// The seeded file `name`, as it is on disk under `testenv/`, its content
+/// address on this Jira, and the id Jira gave it. The address is built here rather than read
+/// from `seed-state.json`, so the list's `content` is checked against where
+/// Data Center serves a file and not against itself.
+fn seeded_file(seeded: &Seeded, name: &str) -> (Vec<u8>, String, String) {
+    let attachments = seeded.seed.attachments();
+    let file = attachments
+        .files
+        .iter()
+        .find(|f| f.filename == name)
+        .unwrap_or_else(|| panic!("the seed attached no {name}: {attachments:?}"));
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testenv")
+        .join(&attachments.dir)
+        .join(name);
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    (
+        bytes,
+        format!("{}/secure/attachment/{}/{name}", seeded.url, file.id),
+        file.id.clone(),
+    )
+}
+
+const SEEDED_PNG: &str = "oncall-dashboard.png";
+const SEEDED_PDF: &str = "runbook-draft.pdf";
+
+/// **The attachment list, the preview's read and the download against the
+/// real Jira** (#2410, ADR-0013): until this test the three had knobas-mockd
+/// alone as a witness, which makes the bytes up at the listed size. The seed
+/// uploads two real files to one issue; a full sync lists both through the
+/// descriptor's own `attachments` declaration with the size, type and
+/// `/secure/attachment/{id}/{name}` address Jira gave them; `attachment_bytes`
+/// answers the PNG byte for byte and, under a cap smaller than the file, its
+/// size from the announced length; `download_attachment` streams the PDF
+/// whole under the listed name.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_them() {
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    let seeded = seeded();
+    let attachments = seeded.seed.attachments();
+    let entity = format!("jira:{}", attachments.issue);
+    let (png, png_url, png_id) = seeded_file(&seeded, SEEDED_PNG);
+    let (pdf, pdf_url, _) = seeded_file(&seeded, SEEDED_PDF);
+
+    let source = seeded.source(serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+    let declared = source
+        .descriptor()
+        .payload_paths
+        .into_iter()
+        .find(|p| p.kind == "ticket")
+        .expect("a ticket declares its paths")
+        .attachments;
+    let files = knobas_core::payload::resolve_attachments(
+        &item(&items, &attachments.issue).payload,
+        &declared,
+    );
+    let mut listed: Vec<_> = files
+        .iter()
+        .map(|a| {
+            (
+                a.name.clone(),
+                a.size,
+                a.mime.clone(),
+                a.content_url.clone(),
+            )
+        })
+        .collect();
+    listed.sort();
+    let png_len = u64::try_from(png.len()).expect("a small file");
+    let pdf_len = u64::try_from(pdf.len()).expect("a small file");
+    assert_eq!(
+        listed,
+        vec![
+            (
+                SEEDED_PNG.to_owned(),
+                Some(png_len),
+                Some("image/png".to_owned()),
+                png_url.clone(),
+            ),
+            (
+                SEEDED_PDF.to_owned(),
+                Some(pdf_len),
+                Some("application/pdf".to_owned()),
+                pdf_url.clone(),
+            ),
+        ],
+        "{} lists the two seeded files as the seed recorded them: {:?}",
+        attachments.issue,
+        attachments.files
+    );
+    assert!(
+        files
+            .iter()
+            .all(|a| a.author.is_some() && a.created.is_some()),
+        "Jira names who attached each file and when: {files:?}"
+    );
+    // The thumbnail is a file of its own, `_thumb_{id}.png`, and a PDF has
+    // none. mockd serves the file itself at `/secure/thumbnail/{id}/{name}`.
+    let thumbnail = |name: &str| {
+        files
+            .iter()
+            .find(|a| a.name == name)
+            .and_then(|a| a.thumbnail_url.clone())
+    };
+    let png_thumbnail = format!(
+        "{}/secure/thumbnail/{png_id}/_thumb_{png_id}.png",
+        seeded.url
+    );
+    assert_eq!(
+        (thumbnail(SEEDED_PNG), thumbnail(SEEDED_PDF)),
+        (Some(png_thumbnail.clone()), None)
+    );
+    for seeded_file in &attachments.files {
+        assert!(
+            files
+                .iter()
+                .any(|a| a.id == seeded_file.id && a.size == Some(seeded_file.size)),
+            "the listed ids are the ones the seed got: {seeded_file:?}"
+        );
+        assert!(!seeded_file.mime_type.is_empty());
+    }
+
+    let read = source
+        .attachment_bytes(&entity, &png_url, ATTACHMENT_CAP)
+        .await
+        .expect("the PNG reads")
+        .expect("Jira reads attachments");
+    assert!(
+        read == FileBytes::Read(png.clone()),
+        "the PNG comes back byte for byte ({png_len} bytes): {}",
+        match &read {
+            FileBytes::Read(b) => format!("{} bytes read", b.len()),
+            FileBytes::TooLarge { size } => format!("TooLarge {{ size: {size} }}"),
+        }
+    );
+
+    let thumb = source
+        .attachment_bytes(&entity, &png_thumbnail, ATTACHMENT_CAP)
+        .await
+        .expect("the thumbnail reads");
+    let thumb_len = match &thumb {
+        Some(FileBytes::Read(bytes)) if bytes.starts_with(b"\x89PNG\r\n\x1a\n") => bytes.len(),
+        other => panic!("the thumbnail is a PNG of its own: {other:?}"),
+    };
+
+    let capped = source
+        .attachment_bytes(&entity, &png_url, 1024)
+        .await
+        .expect("a capped read is an answer");
+    assert_eq!(
+        capped,
+        Some(FileBytes::TooLarge { size: png_len }),
+        "under a 1 KiB cap the PNG is refused at its announced size"
+    );
+
+    let mut kept = Kept::default();
+    let streamed = source
+        .download_attachment(&entity, &pdf_url, SEEDED_PDF, &mut kept)
+        .await
+        .expect("the PDF downloads");
+    assert!(streamed, "Jira downloads attachments");
+    assert_eq!(kept.name.as_deref(), Some(SEEDED_PDF));
+    assert!(
+        kept.bytes == pdf,
+        "the PDF arrives whole: {} of {pdf_len} bytes",
+        kept.bytes.len()
+    );
+    println!(
+        "SEEDED attachments on {}: listed 2; {SEEDED_PNG} read {png_len} bytes, its thumbnail \
+         {thumb_len} bytes, refused at TooLarge {{ size: {png_len} }} under 1 KiB; {SEEDED_PDF} \
+         downloaded {pdf_len} bytes",
+        attachments.issue
+    );
+}
+
+/// Whether `answer` is the refusal a file this account may not read gets.
+fn is_403<T>(answer: &Result<T, SourceError>) -> bool {
+    matches!(answer, Err(SourceError::Unauthorized { status: Some(403) }))
+}
+
+/// **A file the account may not see** (#2410): a user minted with Jira
+/// Software access, on OPS narrowed so that only administrators may browse
+/// it, asks for the seeded PNG with the address the mirror lists. Jira's
+/// attachment servlet does not answer 403: it answers **200 with its Access
+/// Denied page**, `text/html` and no `Content-Disposition`. The adapter reads
+/// that page as the refusal it is, `Unauthorized { status: Some(403) }`,
+/// for the preview and the download alike, and hands the sink nothing. The
+/// administrator still reads the file.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn an_attachment_on_a_project_the_account_may_not_browse_is_a_403() {
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    let seeded = seeded();
+    let attachments = seeded.seed.attachments();
+    assert!(
+        attachments.issue.starts_with("OPS-"),
+        "the narrowing is of OPS, so the files must be on an OPS issue: {}",
+        attachments.issue
+    );
+    let entity = format!("jira:{}", attachments.issue);
+    let (png, png_url, _) = seeded_file(&seeded, SEEDED_PNG);
+    let narrowed = Narrowed::new(&seeded, &UNBROWSABLE).await;
+    // What Jira itself answers, measured on 10.3.24: not a 403 but a 200 with
+    // its Access Denied page, at the file's own address and with no
+    // disposition, which the adapter has to recognise.
+    let raw = client()
+        .get(&png_url)
+        .basic_auth(MINTED, Some(MINTED_PASSWORD))
+        .send()
+        .await
+        .expect("the servlet answers");
+    let header = |name: &str| {
+        raw.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let raw_answer = (
+        raw.status().as_u16(),
+        header("content-type").is_some_and(|t| t.starts_with("text/html")),
+        header("content-disposition"),
+        raw.url().as_str() == png_url,
+    );
+    assert_eq!(
+        raw_answer,
+        (200, true, None, true),
+        "Jira's answer to {MINTED} for {png_url}: status, HTML, disposition, not redirected"
+    );
+
+    let refused = narrowed
+        .source()
+        .attachment_bytes(&entity, &png_url, ATTACHMENT_CAP)
+        .await;
+    assert!(is_403(&refused), "{MINTED} may not browse OPS: {refused:?}");
+    let mut kept = Kept::default();
+    let refused_download = narrowed
+        .source()
+        .download_attachment(&entity, &png_url, SEEDED_PNG, &mut kept)
+        .await;
+    assert!(
+        is_403(&refused_download),
+        "{MINTED} may not download from OPS: {refused_download:?}"
+    );
+    assert!(kept.name.is_none(), "nothing reached the sink");
+
+    let administrator = seeded
+        .source(serde_json::json!({}))
+        .attachment_bytes(&entity, &png_url, ATTACHMENT_CAP)
+        .await
+        .expect("the administrator reads it");
+    assert!(administrator == Some(FileBytes::Read(png)));
+    println!("SEEDED attachment refusal: {MINTED} -> {refused:?}; the administrator reads it");
     drop(narrowed);
 }

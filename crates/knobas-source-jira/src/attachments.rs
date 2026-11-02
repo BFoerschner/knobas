@@ -9,6 +9,7 @@
 //! and `.` segments are resolved, so a path that climbs out of
 //! `/secure/attachment/` is seen for where it lands.
 
+use knobas_http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderMap};
 use knobas_http::{HttpClient, Method, Url};
 use knobas_source::SourceError;
 use knobas_source::run::DownloadSink;
@@ -66,6 +67,28 @@ pub(crate) fn path_on(base_url: &str, url: &str) -> Result<String, SourceError> 
     Ok(path.to_owned())
 }
 
+/// Whether a 200 from the attachment servlet is Jira's *Access Denied* page
+/// rather than the file (#2410). Jira Data Center answers a signed-in user
+/// who may not browse the issue's project with **200**, `text/html` and that
+/// page, at the file's own address. Every file it does send carries
+/// `Content-Disposition` (`inline` for an image, `attachment` for the rest, an
+/// HTML file included), and the page carries none. Measured on 10.3.24.
+/// The refusal it stands for is `Unauthorized { status: Some(403) }`, which
+/// the app reads as "this account may not read the file", never as a
+/// credential to re-enter.
+fn access_denied(headers: &HeaderMap) -> bool {
+    let html = headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .trim_start()
+                .to_ascii_lowercase()
+                .starts_with("text/html")
+        });
+    html && !headers.contains_key(CONTENT_DISPOSITION)
+}
+
 /// The file at `path` (from [`path_on`]), whole, or refused with its size
 /// where it is longer than `cap`: the length Jira announces is believed
 /// before a byte is read, and a body that runs past the cap without one is
@@ -73,14 +96,18 @@ pub(crate) fn path_on(base_url: &str, url: &str) -> Result<String, SourceError> 
 ///
 /// # Errors
 ///
-/// The transport's, as [`HttpClient::send`] classifies them; a body that
-/// breaks off is [`SourceError::Unreachable`].
+/// The transport's, as [`HttpClient::send`] classifies them; Jira's
+/// access-denied page ([`access_denied`]) is `Unauthorized { status:
+/// Some(403) }`; a body that breaks off is [`SourceError::Unreachable`].
 pub(crate) async fn bytes(
     http: &HttpClient,
     path: &str,
     cap: u64,
 ) -> Result<FileBytes, SourceError> {
     let mut response = http.send(http.request(Method::GET, path)).await?;
+    if access_denied(response.headers()) {
+        return Err(SourceError::Unauthorized { status: Some(403) });
+    }
     if let Some(size) = response.content_length().filter(|size| *size > cap) {
         return Ok(FileBytes::TooLarge { size });
     }
@@ -107,7 +134,8 @@ pub(crate) async fn bytes(
 ///
 /// # Errors
 ///
-/// As [`bytes`], and the sink's own.
+/// As [`bytes`], and the sink's own; the access-denied page is refused before
+/// the sink is started.
 pub(crate) async fn download(
     http: &HttpClient,
     path: &str,
@@ -117,6 +145,9 @@ pub(crate) async fn download(
     let mut body = http
         .send_streaming(http.request(Method::GET, path), knobas_http::STALL_TIMEOUT)
         .await?;
+    if access_denied(body.headers()) {
+        return Err(SourceError::Unauthorized { status: Some(403) });
+    }
     sink.start(name).await?;
     while let Some(chunk) = body.chunk().await.map_err(|error| {
         SourceError::Unreachable(format!("jira: the download of {name} broke off: {error}"))
