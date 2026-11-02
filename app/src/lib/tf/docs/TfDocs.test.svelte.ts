@@ -409,6 +409,29 @@ test("arriving on a search hit inside a collapsible opens it and leaves the othe
   location.hash = "";
 });
 
+test("a hit picked from another page opens the page with the collapsible around the match open (spec #2432, story 25)", async () => {
+  const blocks: DocPage["blocks"] = [para("Intro."), collapsible("Steps", [para("Post to the ledger.")]), collapsible("Other", [para("Nothing here.")])];
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:2" ? { ...PAGE, blocks } : { ...PAGE, entity_id: id, title: "Ops home", blocks: [para("Home.")] }));
+  // The router hands TfDocs the address's rest, as `page.ts` does.
+  const props = $state({ ready: true, rest: ["confluence:1"], job: null, ports: ports({ docsPage, docsSearch: vi.fn(async () => HITS) }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(collapsibles().map((d) => d.open)).toEqual([]);
+  type("ledger");
+  await settle();
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  expect(location.hash).toBe("#/page/confluence%3A2");
+  props.rest = ["confluence:2"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  expect(target.querySelector(".tf-rd-page mark.tf-cur")?.textContent).toBe("ledger");
+  expect(collapsibles().map((d) => [d.querySelector(":scope > summary")?.textContent, d.open])).toEqual([
+    ["Steps", true],
+    ["Other", false],
+  ]);
+  location.hash = "";
+});
+
 test("a match in a collapsible's title does not open it; stepping to a match inside it does (spec #2432)", async () => {
   const blocks: DocPage["blocks"] = [para("The ledger."), collapsible("Ledger rules", [para("Close the ledger daily.")])];
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
