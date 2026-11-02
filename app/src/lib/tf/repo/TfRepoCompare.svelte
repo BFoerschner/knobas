@@ -1,6 +1,8 @@
 <!--
   The compare page (#840, R-8.11 to R-8.14), prototype-6's `renderCompare`:
-  `#/repo/<repo entity id>/compare/<branch>` under the *Pull requests* tab.
+  `#/repo/<repo entity id>/compare/<branch>` under the *Pull requests* tab,
+  or `compare/<base>...<branch>` with *Into* named too (#2427, the
+  launcher's *Create pull request…*).
 
   - **The form**: *Into* (the default branch first) and *From* (changing it
     changes the address, so the page reads the other branch); *Title*
@@ -59,6 +61,7 @@
     repoId,
     branches,
     head,
+    base: named = null,
     defaultBranch,
     refreshed = 0,
   }: {
@@ -69,6 +72,8 @@
     branches: readonly BranchOption[];
     /** The branch proposed, from the address. */
     head: string | null;
+    /** *Into*, where the address names it; one the repository does not list proposes the default branch. */
+    base?: string | null;
     defaultBranch: string | null;
     /** The page's refreshes (#2135): each reads the branch's standing and diff again over what the page drew. */
     refreshed?: number;
@@ -92,7 +97,13 @@
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
   let failed = $state<string | null>(null);
   /** *Into*, the default branch proposed once: a new *From* keeps what the reader picked. */
-  let base = $state(untrack(() => into));
+  const addressed = $derived(named !== null && branches.some((option) => option.name === named) ? named : null);
+  let base = $state(untrack(() => addressed ?? into));
+  // An address that names another base (the launcher, while this page is open) moves *Into* to it.
+  $effect.pre(() => {
+    const asked = addressed;
+    if (asked !== null) untrack(() => (base = asked));
+  });
   let title = $state("");
   let body = $state("");
   /** The ticket the branch's key names, and that key: what *Link the PR to <key>* links to (#984). */
@@ -259,7 +270,7 @@
         <select
           id="tf-cmp-from"
           value={head ?? ""}
-          onchange={(event) => (location.hash = compareHash(repoId, (event.currentTarget as HTMLSelectElement).value))}
+          onchange={(event) => (location.hash = compareHash(repoId, (event.currentTarget as HTMLSelectElement).value, base === into ? null : base))}
         >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
