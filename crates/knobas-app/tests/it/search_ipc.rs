@@ -1177,7 +1177,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
     // way, a paste, and a query whose every token the parser no longer keeps.
     for (id, label, query) in [
         ("legacy-palette", "Palette", "> palette".to_owned()),
-        ("legacy-alias", "Alias", "list:mine".to_owned()),
+        ("legacy-alias", "Alias", "list:payouts".to_owned()),
         ("legacy-slash", "Slash", format!("/jira {t}")),
         ("legacy-paste", "Paste", "x".repeat(600)),
         // A source the reader has since deleted: the alias resolves to
@@ -1344,7 +1344,7 @@ async fn creating_refuses_a_query_it_cannot_run() {
     let mut refusals: Vec<String> = Vec::new();
     for (why, label, query) in [
         ("a prefix that is not a search", "Palette", "> palette"),
-        ("a list of a list", "Alias", "list:mine"),
+        ("a list of a list", "Alias", "list:payouts"),
         ("a source named the old way", "Slash", "/jira sepa"),
         ("the help card", "Help", "?"),
         ("nothing to search for", "Nothing", "   "),

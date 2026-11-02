@@ -25,7 +25,7 @@ async fn saving_a_query_that_cannot_be_a_list_names_the_rule_and_offers_no_delet
     let pool = pool().await;
     let s = Searcher::new(pool.clone());
     for (query, sentence) in [
-        ("list:mine", "A saved list cannot open another list."),
+        ("list:payouts", "A saved list cannot open another list."),
         ("t today", "`t` is not a search."),
     ] {
         let refused = s.save_list("Refused", query).await.expect_err(query);

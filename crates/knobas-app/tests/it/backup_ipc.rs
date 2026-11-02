@@ -1330,7 +1330,7 @@ async fn switching_the_saved_lists_part_off_leaves_the_list_table_behind() {
 #[tokio::test]
 async fn a_saved_query_crosses_an_archive_exactly_as_it_was_written() {
     /// A query today's grammar refuses: a saved list may not name another one.
-    const REFUSED_QUERY: &str = "list:mine";
+    const REFUSED_QUERY: &str = "list:payouts";
     const REFUSED_ID: &str = "was-a-list";
 
     let (sharer, sharer_dir) = service("sharelistverbatim").await;

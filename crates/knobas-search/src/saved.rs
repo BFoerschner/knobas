@@ -104,8 +104,8 @@ pub const NEEDS_ATTENTION: &str = "Needs attention";
 /// Longest id [`create`] will generate.
 ///
 /// A saved list's default label is the query itself, so an id derived from it
-/// can be as long as the box: 512 characters is not a name, and `list:` has to
-/// stay typeable.
+/// can be as long as the box: 512 characters is not a name, and an id is held
+/// by favourites and keys (spec #2419).
 const MAX_ID_CHARS: usize = 48;
 
 /// How many saved lists one installation may keep.
@@ -481,10 +481,9 @@ pub async fn find(pool: &PgPool, id: &str) -> Result<Option<SavedList>, SearchEr
 
 /// Save a launcher query as a list.
 ///
-/// The id is **generated**, never supplied: it is what `list:<id>` names, it
-/// shares one namespace with the built-ins, and a caller that could choose it
-/// could shadow *My items*. [`slug`] derives it from the label and
-/// [`free_id`] walks past whatever is taken.
+/// The id is **generated**, never supplied: it is the `list` hit's entity id,
+/// and a caller that could choose it could take another list's. [`slug`]
+/// derives it from the label and [`free_id`] walks past whatever is taken.
 ///
 /// # Errors
 ///
@@ -674,8 +673,8 @@ pub async fn summaries(
         .collect())
 }
 
-/// The id a label becomes: lower case, one hyphen between runs of what
-/// `list:` can carry, and nothing on either end.
+/// The id a label becomes: lower case, one hyphen between runs of letters and
+/// digits, and nothing on either end.
 ///
 /// The character class is migration `0025`'s own check constraint, which is
 /// what stops a row the launcher cannot address from reaching the table by
@@ -706,9 +705,6 @@ fn slug(label: &str) -> String {
 /// The first id in the `<slug>`, `<slug>-2`, `<slug>-3` sequence that nobody
 /// holds.
 ///
-/// **The built-ins are checked as well as the table**, because `list:<id>` has
-/// one meaning: a saved list called *My items* must not shadow the built-in
-/// that answers `list:mine`, and the id is the only thing that could.
 async fn free_id(pool: &PgPool, slug: &str) -> Result<String, SearchError> {
     let taken: Vec<String> =
         sqlx::query_scalar("select id from knobas.smart_list where id = $1 or id like $2")
@@ -729,7 +725,7 @@ async fn free_id(pool: &PgPool, slug: &str) -> Result<String, SearchError> {
 mod tests {
     use super::*;
 
-    /// The ids this makes are ids `list:` can name and migration `0025` will
+    /// The ids this makes are ids migration `0025` will
     /// accept -- the constraint is `^[a-z0-9]+(-[a-z0-9]+)*$`.
     #[test]
     fn a_slug_is_addressable_whatever_the_label_was() {
@@ -783,11 +779,11 @@ mod tests {
     fn a_list_saved_under_the_old_grammar_needs_attention() {
         let v = Vocabulary::fixture();
         assert_eq!(
-            plan("list:mine", &v).unwrap_err(),
+            plan("list:payouts", &v).unwrap_err(),
             Refusal::NamesAnotherList
         );
         assert_eq!(
-            plan("  LIST:mine sepa", &v).unwrap_err(),
+            plan("  LIST:payouts sepa", &v).unwrap_err(),
             Refusal::NamesAnotherList
         );
         assert_eq!(
