@@ -197,7 +197,8 @@ pub struct DocComment {
 ///   `content` what runs. The shell draws it in an isolated frame, never in
 ///   its own document.
 ///
-/// Source text, never markup.
+/// Source text, never markup, but for an embed's `html`, which is markup to
+/// run and never to draw.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
