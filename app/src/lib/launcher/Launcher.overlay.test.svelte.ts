@@ -376,3 +376,24 @@ test("the label is its own element in front of the box, not part of its text", a
   press("Backspace");
   expect(label()).toBeNull();
 });
+
+test("closing the launcher in a mode reopens it on the search, its words intact", async () => {
+  open();
+  await settle();
+  await type("sepa");
+
+  for (const enter of [() => helpChord(), () => press("s", { metaKey: true })]) {
+    enter();
+    await settle();
+    expect(label()).not.toBeNull();
+    target.querySelector<HTMLButtonElement>("button.tf-ln-x")!.click();
+    flushSync();
+    expect(target.querySelector(".tf-launch")).toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+    flushSync();
+    await settle();
+    expect(label(), "the mode ended with the close").toBeNull();
+    expect(input().value).toBe("sepa");
+  }
+});

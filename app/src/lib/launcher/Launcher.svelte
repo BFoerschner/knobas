@@ -281,6 +281,17 @@
   let naming = $state<string | null>(null);
 
   /**
+   * A close ends the mode: the launcher stays mounted and keeps its query, so
+   * without this the next ⌘K would reopen on the overlay or the prompt.
+   */
+  $effect.pre(() => {
+    if (!open) {
+      overlay = null;
+      naming = null;
+    }
+  });
+
+  /**
    * What the box asks for, drawn as the label in front of it: its own
    * element, never part of the text. `null` while the box is the search.
    * Later modes (the sheet's Actions, Keys, New name, a flow's step) join here.
