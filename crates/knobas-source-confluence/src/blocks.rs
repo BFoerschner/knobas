@@ -180,9 +180,7 @@ fn headings<'a>(nodes: &'a [Node], top: bool, out: &mut Vec<(&'a Node, bool)>) {
             Some(name) if is_heading(name) => out.push((node, top)),
             Some(name) if is_transparent(name) => headings(node.children(), false, out),
             // A drawn excerpt's headings are the page's (spec #2432).
-            Some("ac:structured-macro" | "ac:macro")
-                if macro_name(node) == "excerpt" && !is_hidden(node) =>
-            {
+            Some(_) if is_macro(node) && macro_name(node) == "excerpt" && !is_hidden(node) => {
                 headings(node.children(), false, out);
             }
             _ => {}
@@ -198,19 +196,13 @@ fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
     };
     // The editor's text has no collapsible (spec #2432): an expand is the
     // reason, whatever it holds.
-    if matches!(name.as_str(), "ac:structured-macro" | "ac:macro")
-        && node
-            .attr("ac:name")
-            .is_some_and(|n| n.eq_ignore_ascii_case("expand"))
-    {
+    if is_macro(node) && macro_name(node) == "expand" {
         return Some(SectionRefusal::Macro);
     }
     let own = match name.as_str() {
         "table" => Some(SectionRefusal::Table),
         "pre" => Some(SectionRefusal::Code),
-        "ac:structured-macro" | "ac:macro"
-            if matches!(node.attr("ac:name"), Some("code" | "noformat")) =>
-        {
+        _ if is_macro(node) && matches!(macro_name(node).as_str(), "code" | "noformat") => {
             Some(SectionRefusal::Code)
         }
         // The editor's text has no checkbox (spec #2432). A task's own
@@ -666,7 +658,12 @@ struct Storage<'a> {
     excerpt: RefCell<Option<Vec<DocBlock>>>,
 }
 
-/// A macro's name as storage format spells it, lower case.
+/// A macro, in either of the two elements storage format spells one with.
+fn is_macro(node: &Node) -> bool {
+    matches!(node.name(), Some("ac:structured-macro" | "ac:macro"))
+}
+
+/// A macro's name, lower case: the reader reads it whatever its case.
 fn macro_name(node: &Node) -> String {
     node.attr("ac:name")
         .unwrap_or_default()
@@ -714,7 +711,7 @@ fn included_page(node: &Node) -> Option<(String, Option<String>)> {
 impl Hook for Storage<'_> {
     fn element(&self, node: &Node, reading: &Reading<'_>) -> Hooked {
         match node.name().unwrap_or_default() {
-            "ac:structured-macro" | "ac:macro" => match macro_name(node).as_str() {
+            _ if is_macro(node) => match macro_name(node).as_str() {
                 name @ ("include" | "excerpt-include") => {
                     Hooked::Blocks(vec![match included_page(node) {
                         Some((title, space)) => {
@@ -1883,6 +1880,17 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (10, Some("- a b".to_owned()), None),
             ]
         );
+    }
+
+    /// A macro's name is read as the reader reads it, whatever its case: a
+    /// `Code` macro draws as code, so its section refuses as code.
+    #[test]
+    fn a_macro_named_in_any_case_refuses_as_the_reader_draws_it() {
+        let code = "<h2>Code</h2><ac:structured-macro ac:name=\"Code\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>";
+        assert!(matches!(blocks(code)[1], DocBlock::Code { .. }));
+        assert_eq!(sections(code)[0].refusal, Some(SectionRefusal::Code));
+        let noformat = "<h2>Plain</h2><ac:macro ac:name=\"NoFormat\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:macro>";
+        assert_eq!(sections(noformat)[0].refusal, Some(SectionRefusal::Code));
     }
 
     /// A heading inside any wrapper the reader reads through (`article`,
