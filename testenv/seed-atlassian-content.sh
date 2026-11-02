@@ -1001,17 +1001,18 @@ html_macro_renders() {
 if html_macro_renders; then
   skip "the html macro enabled"
 else
-  UPM_MODULE=/rest/plugins/1.0/confluence.macros.html-key/modules/html-key
-  conf GET "$UPM_MODULE"
-  if [ "$API_STATUS" = "200" ]; then
-    _module=$(printf '%s' "$API_BODY" | jq -c '.enabled = true')
-    curl -sS -o /dev/null -u "$ADMIN" -X PUT \
-         -H 'Content-Type: application/vnd.atl.plugins.plugin.module+json' \
-         -d "$_module" "$CONF_URL$UPM_MODULE" || true
-  fi
+  # The plugin manager answers a module only in its own media type; storage
+  # format's macro is `html-xhtml`, the wiki markup one `html`.
+  UPM_TYPE=application/vnd.atl.plugins.plugin.module+json
+  for _m in html-xhtml-key html-key; do
+    _path=/rest/plugins/1.0/confluence.macros.html-key/modules/$_m
+    _module=$(curl -sS -u "$ADMIN" -H "Accept: $UPM_TYPE" "$CONF_URL$_path" | jq -c '.enabled = true' 2>/dev/null) || _module=
+    [ -n "$_module" ] || continue
+    curl -sS -o /dev/null -u "$ADMIN" -X PUT -H "Content-Type: $UPM_TYPE" -d "$_module" "$CONF_URL$_path" || true
+  done
   html_macro_renders || die "Confluence's html macro is disabled, and the knobas embed suite needs it
-  (#2440). Enable it as an administrator: Manage apps > System > Confluence HTML Macros > the
-  'html' module, then seed again."
+  (#2440); turning it on through the plugin manager did not take. Enable it as an administrator:
+  Manage apps > System > Confluence HTML Macros > the 'html' modules, then seed again."
   created "the html macro enabled"
 fi
 
