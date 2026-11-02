@@ -500,6 +500,11 @@
   const suggestedRepo = $derived(
     [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
   );
+
+  /** The card column's width, through the CSSOM: the app's CSP refuses `style:` in markup, not this. Re-runs as the width changes. */
+  const cardSide = (node: HTMLElement) => {
+    node.style.setProperty("--tk-side", `${cardWidth.px}px`);
+  };
 </script>
 
 {#if detail === undefined && failure === null}
@@ -523,7 +528,7 @@
   {@const key = keyOf(detail.row.entity_id)}
   <div class="tf-full tf-ticketpage">
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
-  <div class="tf-ws" style:--tk-side="{cardWidth.px}px">
+  <div class="tf-ws" {@attach cardSide}>
     <TfJobCard
       {detail}
       others={reader.others}

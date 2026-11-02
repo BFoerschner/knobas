@@ -183,7 +183,7 @@ test("no inline style attributes or directives (CSP style-src 'self')", () => {
       const markup = markupOf(text);
       return (
         /\sstyle\s*=\s*["'{]/.test(markup) ||
-        /\sstyle:[a-z][a-z0-9-]*/.test(markup) ||
+        /\sstyle:(--)?[a-z][a-z0-9-]*/.test(markup) ||
         /setAttribute\(\s*["']style["']/.test(text)
       );
     }),
