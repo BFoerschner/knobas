@@ -42,7 +42,7 @@
   {#each group.hits as hit, h (hit.entity_id)}
     {@const index = (offsets[g] ?? 0) + h}
     {@const row = rows[index]}
-    {@const cell = cellOf(hit.kind, hit.entity_id, group.label)}
+    {@const cell = cellOf(hit.kind, hit.entity_id, hit.title, hit.path, group.label)}
     {#if row}
       <RowNext
         monogram={group.monogram}
@@ -50,7 +50,7 @@
         kindName={hit.state ? `${group.label}: ${hit.state.text}` : group.label}
         cell={cell.cell}
         mono={cell.mono}
-        title={hit.title}
+        title={cell.title}
         id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}

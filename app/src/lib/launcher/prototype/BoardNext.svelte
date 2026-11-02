@@ -65,14 +65,14 @@
     <div class="tf-ln-h"><span class="tf-ln-lab">Recent</span></div>
   {/if}
   {#if row}
-    {@const cell = cellOf(item.kind, item.entity_id, kindSingular(item.kind))}
+    {@const cell = cellOf(item.kind, item.entity_id, item.title, item.path, kindSingular(item.kind))}
     <RowNext
       monogram={kindMonogram(item.kind)}
       tone={item.state?.tone ?? null}
       kindName={item.state ? `${kindSingular(item.kind)}: ${item.state.text}` : kindSingular(item.kind)}
       cell={cell.cell}
       mono={cell.mono}
-      title={item.title}
+      title={cell.title}
       id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}

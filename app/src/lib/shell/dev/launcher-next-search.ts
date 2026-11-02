@@ -104,13 +104,26 @@ function excerpt(text: string, words: string[]): Segment[] {
 
 type Candidate = Omit<SearchHit, "rank" | "snippet"> & { haystack: string; body: string };
 
+/** Done is green, in progress blue, closed grey, to do uncoloured (Björn, round 10). */
+function ticketState(status: string): SearchHit["state"] {
+  const word = status.toLowerCase();
+  if (word === "done" || word === "resolved") return { text: status, tone: "ok" };
+  if (word.includes("progress") || word.includes("review")) return { text: status, tone: "info" };
+  if (word.includes("closed") || word.includes("won't") || word.includes("cancel")) return { text: status, tone: "muted" };
+  return null;
+}
+
 function candidates(): Candidate[] {
   const pages = fakeDocPages();
   const pageIds = new Set(pages.map((page) => page.id));
   const fromCorpus: Candidate[] = CORPUS.filter((entry) => entry.deleted_at === null && !pageIds.has(entry.entity_id)).map(
     (entry) => {
       const body = payloadText(entry.payload);
-      return { ...mirrorRow(entry), haystack: `${entry.title} ${body}`.toLowerCase(), body };
+      const row = mirrorRow(entry);
+      // A ticket's status as a state (round 10): the real chip is the adapter's declared status with its tone.
+      const status = typeof entry.payload["status"] === "string" ? entry.payload["status"] : null;
+      const state = row.state ?? (entry.kind === "ticket" && status ? ticketState(status) : null);
+      return { ...row, state, haystack: `${entry.title} ${body}`.toLowerCase(), body };
     },
   );
   const fromDocs: Candidate[] = pages.map((page) => {

@@ -26,7 +26,7 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | Empty box | The recent items, nothing else. The box says only "⌘? for help". |
 | ⌘? | From any search: the box empties and narrows the filters (one word each), Enter adds the picked one to the search that was there, the keys sit at the bottom. `#r` then `#l` becomes `#rl`. |
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
-| `#t`, `#p`, `#r`, `#b`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests, repositories, pipelines, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
+| `#t`, `#c`, `#r`, `#p`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests (c for changes), repositories, pipelines, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
 | Tab on a row | The row lifts under the box, the box empties and the panel becomes its actions. Typing in the box narrows them (fuzzy, in order of the letters). Esc, Tab or Backspace on the empty box go back to the results with the search words back in the box. Never out of the dialog. The footer says just "Tab actions". |
 | ⌘K while open | Gives the box its focus back, wherever a click left it. Nothing else: Tab is the one way into the actions. |
 | An action that asks something | A **flow**: the sheet shows the step's choices, the box narrows them, Enter picks, the next step follows, the last pick runs the action. Esc or Backspace on the empty box step back. |
@@ -79,7 +79,8 @@ shape.
 
 - Three cells like a table: the kind's monogram, a key column, the title.
 - The monogram is coloured by the state's tone, the same tones the chips use: a merged pull request, a failed pipeline, a monitor that is down are told by colour alone. No chip, no state word.
-- The key column is an identifier where a person reads one (a ticket's key, a pull request's number, an inbox line's time), in the mono face; otherwise the kind's word.
+- The key column is something a person reads: a ticket's key in the mono face; otherwise where the thing sits, a pull request's repository, a repository's owner (its own name is the title), a page's space, a pipeline's project, a monitor's type, a view's group, an inbox line's time; the kind's word when nothing better is known.
+- Tickets are coloured by status too: done green, in progress or in review blue, closed grey, to do plain. The ⌘? card ends with a legend per kind.
 - No second line, no provenance, no "no secret", no counts on the headings or in the footer. What a second line said is in the title or not worth the row's height; a repository's path is its name.
 - Builds are their configurations: `#b` finds pipelines, coloured by their last run. Runs and commits are not in the answer at all; they are reached from the pipeline and the repository.
 

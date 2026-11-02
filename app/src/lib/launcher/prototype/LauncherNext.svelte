@@ -73,6 +73,13 @@
   configurations (pipelines), and builds and commits are left out of the
   answer altogether. `RowNext.svelte` and `ResultsNext.svelte` draw it.
 
+  Round 10 (Björn, 2026-11-02): tickets coloured by status (done green, in
+  progress blue, closed grey); a colour legend per kind in the ⌘? card;
+  `#p` is pipelines and `#c` pull requests; the key column is something a
+  person reads (a pull request's repository, a repository's owner, a
+  monitor's type, a page's space, a pipeline's project); the caret bar on
+  the box is gone.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -384,9 +391,9 @@
   const realSearch = ports?.search ?? defaultSearch;
 
   /** `#x`: letters after the hash are kinds, and they combine (`#rl`); the backend filters on six, two are answered here. */
-  const KIND_OF: Record<string, string> = { t: "ticket", p: "pr", r: "repo", b: "pipeline", m: "monitor", d: "page" };
+  const KIND_OF: Record<string, string> = { t: "ticket", c: "pr", r: "repo", p: "pipeline", m: "monitor", d: "page" };
   const LOCAL = new Set(["l", "i"]);
-  const TOKEN = /^#([tprbmdli]+)$/i;
+  const TOKEN = /^#([tcrpmdli]+)$/i;
 
   /** The search port with the prototype's grammar read first and its groups layered over the real answer. */
   async function searchNext(query: SearchQuery): Promise<SearchResponse> {
@@ -467,9 +474,9 @@
   }
   const HELP: HelpEntry[] = [
     { token: "#t", insert: "#t", summary: "tickets" },
-    { token: "#p", insert: "#p", summary: "pull requests" },
+    { token: "#c", insert: "#c", summary: "pull requests" },
     { token: "#r", insert: "#r", summary: "repositories" },
-    { token: "#b", insert: "#b", summary: "pipelines" },
+    { token: "#p", insert: "#p", summary: "pipelines" },
     { token: "#m", insert: "#m", summary: "monitors" },
     { token: "#d", insert: "#d", summary: "pages" },
     { token: "#l", insert: "#l", summary: "lists" },
@@ -477,6 +484,13 @@
     { token: ">", insert: "> ", summary: "go to" },
     { token: "@me", insert: "@me ", summary: "mine" },
     { token: "t", insert: "t ", summary: "time" },
+  ];
+  /** The colour legend, per kind: what the monogram's colour says. The tones are the adapters' own. */
+  const LEGEND: { kind: string; monogram: string; tones: [string, string][] }[] = [
+    { kind: "tickets", monogram: "TK", tones: [["ok", "done"], ["info", "in progress"], ["muted", "closed"]] },
+    { kind: "pull requests", monogram: "PR", tones: [["info", "open"], ["ok", "merged"], ["muted", "closed"]] },
+    { kind: "pipelines", monogram: "PL", tones: [["ok", "last run passed"], ["err", "last run failed"], ["info", "running"]] },
+    { kind: "monitors", monogram: "MO", tones: [["ok", "up"], ["err", "down"], ["muted", "paused"]] },
   ];
   const KEYS: [string, string][] = [
     ["↵", "open"],
@@ -1547,14 +1561,14 @@
         <!-- The row the sheet acts on, lifted under the box; the box keeps its words aside. -->
         <div class="pinned">
           {#if pinnedHit}
-            {@const cell = cellOf(pinnedHit.kind, pinnedHit.entity_id, sheet.row.kind === "hit" ? sheet.row.group.label : kindSingular(pinnedHit.kind))}
+            {@const cell = cellOf(pinnedHit.kind, pinnedHit.entity_id, pinnedHit.title, pinnedHit.path, sheet.row.kind === "hit" ? sheet.row.group.label : kindSingular(pinnedHit.kind))}
             <RowNext
               monogram={sheet.row.kind === "hit" ? sheet.row.group.monogram : kindMonogram(pinnedHit.kind)}
               tone={pinnedHit.state?.tone ?? null}
               kindName={kindSingular(pinnedHit.kind)}
               cell={cell.cell}
               mono={cell.mono}
-              title={pinnedHit.title}
+              title={cell.title}
               id={`${uid}-pinned`}
               selected={false}
               onopen={() => {}}
@@ -1683,6 +1697,17 @@
               <p class="tf-ln-none">No filter matches “{help.filter}”.</p>
             {/if}
           </div>
+          <div class="tf-ln-h"><span class="tf-ln-lab">Colours</span><span class="tf-ln-n">what a monogram's colour says</span></div>
+          <div class="legend">
+            {#each LEGEND as entry (entry.kind)}
+              <div class="legendrow">
+                <span class="legendkind">{entry.kind}</span>
+                {#each entry.tones as [tone, meaning] (tone)}
+                  <span class="legenditem"><span class="mg toned" data-tone={tone}>{entry.monogram}</span>{meaning}</span>
+                {/each}
+              </div>
+            {/each}
+          </div>
           <div class="keys">
             {#each KEYS as [key, what] (key)}
               <span><kbd>{key}</kbd> {what}</span>
@@ -1803,7 +1828,20 @@
     font-size: var(--t-sm); font-weight: 600; line-height: 1.4; user-select: none;
   }
   .labelled :global(.tf-ln-q input) { padding-left: 10px; }
-  .labelled :global(.tf-ln-caret) { display: none; }
+  :global(.tf-launch .tf-ln-caret) { display: none; }
+  .boxrow :global(.tf-ln-q input) { padding-left: 18px; }
+  .legend { display: flex; flex-direction: column; gap: 6px; padding: 4px 18px 10px; }
+  .legendrow { display: flex; align-items: center; gap: 14px; font-size: var(--t-xs); color: var(--ink-2); }
+  .legendkind { width: 100px; color: var(--ink); }
+  .legenditem { display: inline-flex; align-items: center; gap: 6px; }
+  .mg {
+    display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 18px; border: 1px solid var(--rule);
+    border-radius: 3px; font-size: var(--t-2xs); font-weight: 600; letter-spacing: .04em; color: var(--ink-2);
+  }
+  .mg.toned[data-tone="ok"] { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+  .mg.toned[data-tone="err"] { color: var(--err); background: var(--err-bg); border-color: transparent; }
+  .mg.toned[data-tone="info"] { color: var(--info); background: var(--info-bg); border-color: transparent; }
+  .mg.toned[data-tone="muted"] { color: var(--muted); background: var(--muted-bg); border-color: transparent; }
   .pinned { flex: none; border-bottom: 1px solid var(--rule); }
   .lead { padding: 10px 18px; font-size: var(--t-sm); color: var(--ink); }
   .sheet { flex: 1; min-height: 0; overflow: auto; padding: 0 0 4px; outline: none; }
