@@ -1902,8 +1902,6 @@ mod tests {
         assert!(built.sql.contains("from picked p"), "{}", built.sql);
     }
 
-    /// The mirror is read through the view migration 0002 added, and `fts` is
-    /// matched against rather than selected (interfaces §1).
     /// A run log's hits are live pipelines, drawn by the mirror's detail
     /// branch (#2431): the statement plans one detail branch fewer than it
     /// has corpora, and the log branch's matches carry the mirror's index.
@@ -1941,6 +1939,8 @@ mod tests {
         );
     }
 
+    /// The mirror is read through the view migration 0002 added, and `fts` is
+    /// matched against rather than selected (interfaces §1).
     #[test]
     fn the_corpus_is_the_live_view_and_fts_is_never_selected() {
         let built = search_sql(
