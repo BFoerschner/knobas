@@ -284,7 +284,7 @@ test("the keys the box answers sit at the bottom of the card", async () => {
   const keys = target.querySelector('[aria-label="Keys"]');
   expect(keys).not.toBeNull();
   const named = [...keys!.querySelectorAll("kbd")].map((kbd) => kbd.textContent?.trim());
-  expect(named).toEqual(["↵", "Tab", "⌘S", "⌘?", "⌘D", "Esc"]);
+  expect(named).toEqual(["↵", "Tab", "⌘B", "⌘S", "⌘?", "⌘D", "Esc"]);
   // Last in the card: after every filter row.
   const list = target.querySelector('[aria-label="Results"]')!;
   expect(list.lastElementChild).toBe(keys);

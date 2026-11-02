@@ -47,6 +47,18 @@
   Backspace on the empty box step back one step, and from the first back to
   the actions; the row stays pinned throughout.
 
+  ## Keys (#2429)
+
+  ⌘B on a selected action, or *Assign key…* on a saved list, opens the key
+  panel in the sheet (the box labelled *Keys*): every press is drawn at once,
+  the modifiers while held; Enter or OK keeps the chord, Backspace clears it,
+  Esc and Cancel leave things as they were. The box's own chords, the
+  shell's and the system's are refused there with a message (`keys.ts`). A
+  bound action chord runs that action on the selected row of its kind
+  (`runChord`), opening the sheet first only for a flow, a rename, the panel
+  or the link; a list chord puts the list's text in the box. With the
+  launcher closed the shell answers a list chord (`TfShell`).
+
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
@@ -102,6 +114,8 @@
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
   import { addFilter, narrowFilters, overlayFilters } from "./syntax";
+  import { chordOf, heldOf, kindOf, kindWord, refusalOf } from "./keys";
+  import { type KeyStore, launcherKeys } from "./keys.svelte";
   import { push } from "../shell/toasts.svelte";
 
   let {
@@ -120,6 +134,7 @@
     sheetPorts,
     openExternal = realOpenExternal,
     scope = launcherScope,
+    keys = launcherKeys,
   }: {
     open?: boolean;
     /**
@@ -196,6 +211,8 @@
      * its own and read it back as a restart would.
      */
     scope?: ScopeChoice;
+    /** The keys bound (#2429): the window's store, which the shell reads too; injectable for a test. */
+    keys?: KeyStore;
     /**
      * How *Open in browser* on an unresolved paste reaches the OS. Injectable
      * for the same reason `AssetsView`'s is: the assertion is that the button
@@ -284,7 +301,21 @@
     relation: number;
     renaming: string | null;
     flow: Flow | null;
+    binding: Binding | null;
   } | null>(null);
+
+  /**
+   * The key panel (#2429): what the keys will bind, the chord it had, the
+   * chord pressed so far (`null` once cleared), the modifiers held now, and
+   * why the last press was refused.
+   */
+  interface Binding {
+    target: { kind: "list"; id: string; label: string } | { kind: "action"; on: string; actionId: string; label: string };
+    had: string | null;
+    chord: string | null;
+    held: string[];
+    refused: string | null;
+  }
 
   /**
    * A flow in the sheet: `id` tells one flow's late answer from another's,
@@ -308,11 +339,13 @@
    */
   let applications = $state<{ id: string; name: string }[]>([]);
   let applicationsRead = false;
+  /** The applications' read in flight, which a chord on *Open in ⟨app⟩* waits for (#2429). */
+  let applicationsReading: Promise<unknown> = Promise.resolve();
   function readApplications() {
     if (applicationsRead) return;
     applicationsRead = true;
     readLinkSets();
-    void io.checkoutSettings().then(
+    applicationsReading = io.checkoutSettings().then(
       (settings) => (applications = menuOrder(settings).map(({ app }) => ({ id: app.id, name: app.name }))),
       () => (applications = []),
     );
@@ -331,12 +364,14 @@
 
   /** The declared merge of the pull request the sheet opened on, read once per sheet: *Merge…* follows it. */
   let merge = $state<{ prId: string; action: ViewAction | null } | null>(null);
+  /** The merge's read in flight, which a chord on *Merge…* waits for (#2429). */
+  let mergeReading: Promise<unknown> = Promise.resolve();
   function readMerge(subject: SheetSubject) {
     if (subject.kind !== "entity" || subject.entityKind !== "pr") return;
     const prId = subject.entityId;
     if (merge?.prId === prId) return;
     merge = { prId, action: null };
-    void io.mergeAction(prId).then(
+    mergeReading = io.mergeAction(prId).then(
       (action) => {
         if (merge?.prId === prId) merge = { prId, action };
       },
@@ -433,7 +468,9 @@
       : overlay
         ? "Filter"
         : sheet
-          ? sheet.renaming !== null
+          ? sheet.binding
+            ? "Keys"
+            : sheet.renaming !== null
             ? "New name"
             : sheet.flow
               ? (flowStep?.title ?? "Pick")
@@ -446,7 +483,9 @@
       : overlay
         ? "narrow the filters"
         : sheet
-          ? sheet.renaming !== null
+          ? sheet.binding
+            ? "press the keys"
+            : sheet.renaming !== null
             ? "the list's new name"
             : sheet.flow
               ? "narrow the choices"
@@ -616,6 +655,8 @@
   $effect(() => {
     if (open) {
       void session.loadHome();
+      // A share import or another window may have bound keys since.
+      void keys.load();
       // Every opening starts on what the opener asked for (#2425): empty for
       // ⌘K, never the last query (that was #1480's, reversed by spec #2419),
       // and a section's filter for its keys, with the caret after it. Read
@@ -834,7 +875,7 @@
     const row = session.current;
     const subject = row ? subjectOf(row, inboxOps) : null;
     if (!row || !subject || sheetActions(subject, sheetContext).length === 0) return;
-    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null };
+    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, binding: null };
     readApplications();
     readMerge(subject);
     box?.focus();
@@ -863,10 +904,14 @@
     carry(action.does);
   }
 
-  /** Carry out what an action, or a flow's last pick, does: the one reader of `SheetEffect`. */
-  function carry(does: SheetEffect) {
-    if (!sheet) return;
-    const { subject, relation } = sheet;
+  /**
+   * Carry out what an action, or a flow's last pick, does: the one reader of
+   * `SheetEffect`. On the open sheet's row, or on `at` when a chord runs an
+   * action that needs no sheet (#2429).
+   */
+  function carry(does: SheetEffect, at: { subject: SheetSubject; relation: number } | null = sheet) {
+    if (!at) return;
+    const { subject, relation } = at;
     const go = (hash: string) => {
       close();
       onnavigate(hash);
@@ -926,7 +971,7 @@
         box?.focus();
         return;
       case "rename":
-        if (subject.kind !== "list") return;
+        if (subject.kind !== "list" || !sheet) return;
         sheet.renaming = subject.label;
         void tick().then(() => box?.focus({ select: true }));
         return;
@@ -950,6 +995,14 @@
       }
       case "flow":
         return startFlow(does.steps, does.finish);
+      case "bind": {
+        // *Assign key…*: the panel, on the chord the list has now.
+        if (subject.kind !== "list" || !sheet) return;
+        const had = keys.chordOfList(subject.id);
+        sheet.binding = { target: { kind: "list", id: subject.id, label: subject.label }, had, chord: had, held: [], refused: null };
+        box?.focus();
+        return;
+      }
       case "save-set":
         return void settled(() => io.saveLinkSet(does.draft), () => does.said);
       case "snooze":
@@ -1145,6 +1198,172 @@
     }
   }
 
+  /** ⌘B (Ctrl+B off the Mac), with no other modifier: the key panel for the selected action. */
+  function isBindChord(event: KeyboardEvent): boolean {
+    return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && (event.code === "KeyB" || event.key.toLowerCase() === "b");
+  }
+
+  /** ⌘B on a selected action: the panel, on the chord the action has on this kind now. */
+  function startBinding(current: NonNullable<typeof sheet>) {
+    const action = sheetShown[current.selected];
+    if (!action || current.flow || current.renaming !== null) return;
+    // ⌘B on *Assign key…* is that row's own panel.
+    if (action.does.kind === "bind") return carry(action.does);
+    const on = kindOf(current.subject);
+    const had = keys.chordOfAction(on, action.id);
+    current.binding = { target: { kind: "action", on, actionId: action.id, label: action.label }, had, chord: had, held: [], refused: null };
+    box?.focus();
+  }
+
+  /** Esc or Cancel: back to the actions, nothing written. */
+  function leaveBinding() {
+    if (sheet) sheet.binding = null;
+    box?.focus();
+  }
+
+  /** Enter or OK: the chord in the panel, kept; no chord takes the key away. Back to the actions either way. */
+  async function keepBinding() {
+    const binding = sheet?.binding;
+    if (!sheet || !binding) return;
+    sheet.binding = null;
+    box?.focus();
+    const { target, chord, had } = binding;
+    if (chord === had) return;
+    try {
+      if (target.kind === "list") {
+        await keys.bindList(target.id, chord);
+        push({ text: chord ? `${chord} opens ${target.label}` : `Key removed from ${target.label}` });
+      } else {
+        await keys.bindAction(target.on, target.actionId, chord);
+        push({ text: chord ? `${chord} runs ${target.label} on any ${kindWord(target.on)}` : `Key removed from ${target.label}` });
+      }
+    } catch (cause) {
+      push({ text: ipcErrorMessage(cause), tone: "err" });
+    }
+  }
+
+  /** A chord the other table holds, said as the panel says it: a list's chord is no action's, on any kind. */
+  function clashOf(target: Binding["target"], chord: string): string | null {
+    if (target.kind === "list") {
+      const action = keys.actions.find((key) => key.chord === chord);
+      return action ? `${chord} runs an action on a ${kindWord(action.kind)}` : null;
+    }
+    const list = keys.listOf(chord);
+    return list ? `${chord} opens ${list.label}` : null;
+  }
+
+  /**
+   * The panel's keys. Every press is drawn: the modifiers while held, a full
+   * chord once pressed. Nothing reaches the box, the dialog or the shell: a
+   * refused ⌘D does not switch the scope, a refused ⌘T starts no timer.
+   */
+  function bindKey(event: KeyboardEvent, binding: Binding) {
+    event.stopPropagation();
+    binding.held = heldOf(event);
+    const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      return leaveBinding();
+    }
+    if (event.key === "Enter" && plain) {
+      event.preventDefault();
+      return void keepBinding();
+    }
+    event.preventDefault();
+    if (event.key === "Backspace" && plain) {
+      binding.chord = null;
+      binding.refused = null;
+      return;
+    }
+    const refusal = refusalOf(event);
+    const chord = chordOf(event);
+    const refused = refusal ?? (chord === null ? null : clashOf(binding.target, chord));
+    if (refused !== null) {
+      binding.refused = refused;
+      binding.held = [];
+      return;
+    }
+    if (chord === null) return;
+    binding.chord = chord;
+    binding.refused = null;
+  }
+
+  // The panel draws the modifiers as they are let go, too.
+  $effect(() => {
+    if (!sheet?.binding) return;
+    const up = (event: KeyboardEvent) => {
+      if (sheet?.binding) sheet.binding.held = heldOf(event);
+    };
+    window.addEventListener("keyup", up);
+    return () => window.removeEventListener("keyup", up);
+  });
+
+  /**
+   * A bound chord, from the results or the sheet's actions: a list's applies
+   * it, an action's runs on the selected row when it is bound on that row's
+   * kind. `true` when the chord was one; every other key goes on as before.
+   */
+  function runChord(event: KeyboardEvent): boolean {
+    if (refusalOf(event) !== null) return false;
+    const chord = chordOf(event);
+    if (chord === null) return false;
+    const list = keys.listOf(chord);
+    if (list) {
+      event.preventDefault();
+      sheet = null;
+      session.set(`${list.text} `);
+      box?.focus();
+      return true;
+    }
+    const row = sheet?.row ?? session.current;
+    const subject = row ? subjectOf(row, inboxOps) : null;
+    if (!row || !subject) return false;
+    const id = keys.actionOf(kindOf(subject), chord);
+    if (id === null) return false;
+    event.preventDefault();
+    void runAction(row, subject, id, chord);
+    return true;
+  }
+
+  /**
+   * Run action `id` on `row`. An action the reads add (*Open in ⟨app⟩*,
+   * *Merge…*) waits for them. A flow, a rename, the panel and the link need
+   * the sheet under them, so it opens on the row first; the rest run as
+   * Enter on the row would, the sheet never drawn.
+   */
+  async function runAction(row: LauncherRow, subject: SheetSubject, id: string, chord: string) {
+    readApplications();
+    readMerge(subject);
+    const find = () =>
+      sheetActions(subject, {
+        ...sheetContext,
+        merge: subject.kind === "entity" && merge?.prId === subject.entityId ? merge.action : null,
+      }).find((action) => action.id === id);
+    let action = find();
+    if (!action) {
+      await Promise.all([applicationsReading, mergeReading]);
+      // The row the chord was pressed on is no longer the one selected: nothing runs.
+      if ((sheet?.row ?? session.current)?.id !== row.id) return;
+      action = find();
+    }
+    if (!action) {
+      push({ text: `${chord} runs nothing on ${nameOf(subject)} now` });
+      return;
+    }
+    if (!["flow", "rename", "bind", "link"].includes(action.does.kind)) return carry(action.does, { subject, relation: 0 });
+    if (!sheet || sheet.rowId !== row.id) {
+      sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, binding: null };
+    }
+    if (action.does.kind === "link") {
+      // The relation is picked on the row with ← →; Enter writes it.
+      sheet.filter = "";
+      sheet.selected = Math.max(0, sheetShown.findIndex((shown) => shown.id === id));
+      box?.focus();
+      return;
+    }
+    carry(action.does);
+  }
+
   function activate(row: LauncherRow) {
     if (row.kind === "favourite" && isListRow(row.row)) {
       // A favourite list applies as its `#l` hit does, below.
@@ -1182,6 +1401,8 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    // The key panel takes every key first: its chords are what is being bound.
+    if (sheet?.binding) return bindKey(event, sheet.binding);
     if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "d") {
       // Before the webview's own ⌘D (a bookmark) and anything else the box does.
       event.preventDefault();
@@ -1194,10 +1415,15 @@
       else namingKey(event, naming);
       return;
     }
+    // A bound chord (#2429), from the results or the sheet's actions; never in a flow, a rename or the filters.
+    if (!overlay && !(sheet && (sheet.flow || sheet.renaming !== null)) && runChord(event)) return;
     if (sheet) {
       // The box's own chords are not the sheet's: ⌘S and ⌘? do nothing here.
       if (isSaveChord(event) || isHelpChord(event)) event.preventDefault();
-      else sheetKey(event, sheet);
+      else if (isBindChord(event)) {
+        event.preventDefault();
+        startBinding(sheet);
+      } else sheetKey(event, sheet);
       return;
     }
     if (isHelpChord(event)) {
@@ -1260,10 +1486,24 @@
     }
   }
 
+  /** The chord drawn on an action row: the list's own on *Assign key…*, else the action's on the subject's kind. */
+  function boundTo(subject: SheetSubject, action: SheetAction): string | null {
+    if (action.does.kind === "bind" && subject.kind === "list") return keys.chordOfList(subject.id);
+    return keys.chordOfAction(kindOf(subject), action.id);
+  }
+
+  /** The chord drawn on a saved list's row in the results and on the board. */
+  function listChord(row: LauncherRow): string | null {
+    if (row.kind === "hit" && row.hit.kind === "list") return keys.chordOfList(row.hit.entity_id);
+    if (row.kind === "favourite" && isListRow(row.row)) return keys.chordOfList(row.row.entity_id);
+    return null;
+  }
+
   /** The keys the box answers, at the bottom of the ⌘? overlay. */
-  const keys: [string, string][] = [
+  const boxKeys: [string, string][] = [
     ["↵", "open"],
     ["Tab", "actions"],
+    ["⌘B", "bind a key to the action"],
     ["⌘S", "save as list"],
     ["⌘?", "filters"],
     // #2430, joined in the merge with #2424: the box answers it too.
@@ -1295,12 +1535,13 @@
         {#if boxLabel !== null}<span class="tf-ln-mode">{boxLabel}</span>{/if}
         <QueryBox
           bind:this={box}
-          value={naming !== null ? naming : overlay ? overlay.filter : sheet ? (sheet.renaming ?? sheet.filter) : session.raw}
+          value={naming !== null ? naming : overlay ? overlay.filter : sheet ? (sheet.binding ? "" : (sheet.renaming ?? sheet.filter)) : session.raw}
           {placeholder}
           pending={session.pending}
           controls={controlled.list}
           active={controlled.option}
           oninput={(value) => {
+            if (sheet?.binding) return;
             if (naming !== null) naming = value;
             else if (overlay) overlay = { filter: value, selected: 0 };
             else if (sheet?.renaming != null) sheet.renaming = value;
@@ -1359,6 +1600,43 @@
         <Pinned row={current.row} id={`${uid}-pinned`} {now} />
         {#if current.renaming !== null}
           <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
+        {:else if current.binding}
+          {@const binding = current.binding}
+          <!-- The key panel (#2429): the keys large as they are pressed; the box's keys go to `bindKey`. -->
+          <div class="tf-ln-bind" role="group" aria-label="Bind keys">
+            <p class="tf-ln-bind-what">
+              {#if binding.target.kind === "list"}
+                The keys that open <strong>{binding.target.label}</strong> from anywhere
+              {:else}
+                The keys that run <strong>{binding.target.label}</strong> on any {kindWord(binding.target.on)} you have selected
+              {/if}
+            </p>
+            <div class="tf-ln-bind-keys" aria-live="polite">
+              {#if binding.chord}
+                {#each [...binding.chord] as glyph, i (i)}<kbd class="tf-ln-bigkey">{glyph}</kbd>{/each}
+              {:else if binding.held.length > 0}
+                {#each binding.held as glyph, i (i)}<kbd class="tf-ln-bigkey tf-ln-held">{glyph}</kbd>{/each}
+                <span class="tf-ln-bind-hint">… and a letter or digit</span>
+              {:else}
+                <span class="tf-ln-bind-hint">Press a modifier and a letter or digit, such as ⌘⇧O</span>
+              {/if}
+            </div>
+            {#if binding.refused}<p class="tf-ln-bind-refused" role="alert">{binding.refused}</p>{/if}
+            <div class="tf-ln-bind-btns">
+              <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void keepBinding()}>OK</button>
+              <button
+                type="button"
+                class="tf-btn tf-sm"
+                onclick={() => {
+                  binding.chord = null;
+                  binding.refused = null;
+                  box?.focus();
+                }}>Clear</button
+              >
+              <button type="button" class="tf-btn tf-sm" onclick={leaveBinding}>Cancel</button>
+            </div>
+            <p class="tf-ln-bind-hint">Enter keeps the keys, Backspace clears them, Esc leaves things as they were.</p>
+          </div>
         {:else}
           <!--
             Keys from a clicked chip or row land here, so Esc goes back to the
@@ -1402,6 +1680,7 @@
               {/if}
             {/if}
             {#each sheetShown as action, index (action.id)}
+              {@const bound = boundTo(current.subject, action)}
               {#if action.does.kind === "link"}
                 <!-- Not a button: the relation chips inside it are buttons of their own. -->
                 <div
@@ -1424,6 +1703,7 @@
                       >
                     {/each}
                   </span>
+                  {#if bound}<kbd class="tf-ln-chord" title="Its key">{bound}</kbd>{/if}
                 </div>
               {:else}
                 <button
@@ -1437,6 +1717,7 @@
                 >
                   <span class="tf-ln-nm">{action.label}</span>
                   <span class="tf-ln-s">{action.detail}</span>
+                  {#if bound}<kbd class="tf-ln-chord" title="Its key">{bound}</kbd>{/if}
                 </button>
               {/if}
             {/each}
@@ -1453,7 +1734,7 @@
             rows={overlayRows}
             selected={overlay.selected}
             heading="Filters"
-            {keys}
+            keys={boxKeys}
             {optionId}
             onopen={pickFilter}
             onhover={(index) => overlay && (overlay.selected = index)}
@@ -1494,6 +1775,7 @@
             <Board
               home={session.home}
               rows={session.rows}
+              chordOf={listChord}
               selected={session.selected}
               {optionId}
               onopen={activate}
@@ -1535,6 +1817,7 @@
           <Results
             response={session.response}
             rows={session.rows}
+            chordOf={listChord}
             selected={session.selected}
             {optionId}
             {now}
@@ -1561,6 +1844,7 @@
       <span><kbd>↑↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
       {#if tabOpens}<span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>{/if}
+      {#if sheet && !sheet.flow && sheet.renaming === null && !sheet.binding}<span><kbd>⌘B</kbd> bind a key</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
       {#if session.canSave}

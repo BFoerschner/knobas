@@ -23,6 +23,7 @@
     cell,
     mono = false,
     title,
+    chord = null,
     id,
     selected,
     onopen,
@@ -38,6 +39,8 @@
     /** Whether the key cell is an identifier, drawn in the mono face. */
     mono?: boolean;
     title: string;
+    /** The chord bound to the row (#2429): a saved list's, which opens it from anywhere. */
+    chord?: string | null;
     /** The option's element id, which the listbox names while it is active (#1411). */
     id: string;
     selected: boolean;
@@ -58,4 +61,5 @@
   <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{monogram}</span>
   <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>
   <span class="tf-ln-t">{title}</span>
+  {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}
 </button>

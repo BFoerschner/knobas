@@ -207,7 +207,7 @@ test("a saved list found by its words is favourited as a list, and sits in the b
   await type("list");
   press("Tab");
   await settle();
-  expect(sheetLabels()).toEqual(["Apply", "Rename", "Delete", "Favourite"]);
+  expect(sheetLabels()).toEqual(["Apply", "Rename", "Delete", "Favourite", "Assign key…"]);
   narrow("fav");
   press("Enter");
   await settle();
@@ -217,7 +217,7 @@ test("a saved list found by its words is favourited as a list, and sits in the b
   // Tab on it in the block offers Unfavourite among the list's own actions.
   press("Tab");
   await settle();
-  expect(sheetLabels()).toEqual(["Apply", "Rename", "Delete", "Unfavourite"]);
+  expect(sheetLabels()).toEqual(["Apply", "Rename", "Delete", "Unfavourite", "Assign key…"]);
 });
 
 test("Enter on a favourite list applies its text; on a favourite entity it opens it", async () => {

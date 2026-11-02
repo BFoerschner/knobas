@@ -544,7 +544,7 @@ test("a saved list applies its text, renames in the box and deletes", async () =
   const calls = mountIt();
   await settle();
   await sheetOn("list");
-  expect(labels()).toEqual(["Apply", "Rename", "Delete", "Favourite"]);
+  expect(labels()).toEqual(["Apply", "Rename", "Delete", "Favourite", "Assign key…"]);
   press("ArrowDown");
   press("Enter");
   await settle();

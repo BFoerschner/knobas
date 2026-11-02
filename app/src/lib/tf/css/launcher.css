@@ -90,6 +90,29 @@
 /* *Link to ⟨job⟩*: its name, then the relation as the Controls' pill toggles, one pressed. */
 .tf .tf-ln-opt.tf-ln-link { display: flex; gap: 12px; align-items: center; }
 
+/* A bound chord (#2429), at the end of its action or list row: the footer's keycap, quiet. */
+.tf-ln-chord {
+  justify-self: end; padding: 0 6px; border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet-2);
+  font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap;
+}
+.tf .tf-ln-opt:has(> .tf-ln-chord) { grid-template-columns: 240px 1fr auto; }
+.tf .tf-ln-res:has(> .tf-ln-chord) { grid-template-columns: 28px 118px minmax(0, 1fr) auto; }
+
+/* The key panel (#2429): what the keys bind, the keys large as they are pressed, the buttons, the hint. */
+.tf-ln-bind { display: grid; gap: 14px; justify-items: center; padding: 22px 18px 18px; text-align: center; }
+.tf-ln-bind-what { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-ln-bind-what strong { color: var(--ink); font-weight: 600; }
+.tf-ln-bind-keys { display: flex; gap: 8px; align-items: center; justify-content: center; min-height: 64px; }
+.tf-ln-bigkey {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 56px; height: 56px; padding: 0 12px;
+  border: 1px solid var(--rule); border-bottom-width: 3px; border-radius: 6px; background: var(--sheet-2);
+  font-size: var(--t-xl); font-weight: 600; color: var(--ink);
+}
+.tf-ln-bigkey.tf-ln-held { color: var(--ink-2); border-style: dashed; border-bottom-width: 1px; }
+.tf-ln-bind-hint { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ln-bind-refused { font-size: var(--t-sm); color: var(--err); }
+.tf-ln-bind-btns { display: flex; gap: var(--control-gap); }
+
 /* The chips: what the backend read the query as. */
 .tf-ln-fbar { display: flex; flex-wrap: wrap; gap: 5px 4px; align-items: center; padding: 8px 18px; border-bottom: 1px solid var(--rule); flex: none; }
 .tf-ln-fchip { flex: none; white-space: nowrap; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px; border-radius: 3px; border: 1px solid transparent; }

@@ -20,6 +20,7 @@
     rows,
     selected,
     optionId,
+    chordOf = () => null,
     now,
     onopen,
     onhover,
@@ -32,6 +33,8 @@
     selected: number;
     /** The element id of the option at a flat-list index (#1411). */
     optionId: (index: number) => string;
+    /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
+    chordOf?: (row: LauncherRow) => string | null;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
@@ -100,6 +103,7 @@
         cell={cells.cell}
         mono={cells.mono}
         title={cells.title}
+        chord={chordOf(row)}
         id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}

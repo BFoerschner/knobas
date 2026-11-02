@@ -89,7 +89,9 @@ export type SheetEffect =
   /** The inbox page's own writes on the line. */
   | { kind: "inbox"; op: "ack" | "done" | "rerun" }
   /** *Favourite* (`on`) or *Unfavourite* the subject (#2428); the empty box redraws. */
-  | { kind: "favourite"; target: FavouriteTarget; on: boolean };
+  | { kind: "favourite"; target: FavouriteTarget; on: boolean }
+  /** *Assign key…* on a saved list (#2429): the panel that binds the chord which opens it from anywhere. */
+  | { kind: "bind" };
 
 export interface SheetAction {
   /** Stable per kind: what an action key (#2429) is kept under. */
@@ -214,6 +216,7 @@ export function sheetActions(subject: SheetSubject, ctx: SheetContext): SheetAct
         { id: "rename", label: "Rename", detail: "The box takes the new name; Enter keeps it", does: { kind: "rename" } },
         { id: "delete", label: "Delete", detail: "The saved search is gone", does: { kind: "delete" } },
         favouriteAction({ list: subject.id }, ctx),
+        { id: "key", label: "Assign key…", detail: "A chord that opens this list from anywhere", does: { kind: "bind" } },
       ];
     case "view": {
       const hash = entityAddress("view", subject.id, subject.title);

@@ -90,7 +90,7 @@ test("a page, an asset or anything else: the pair and Copy title", () => {
   expect(ids(entity("page", "confluence:ENG:SEPA"))).toEqual(["link", "fav", "copy"]);
 });
 
-test("a view opens and copies its address; a set opens; a saved list applies, renames and deletes", () => {
+test("a view opens and copies its address; a set opens; a saved list applies, renames, deletes and takes a key", () => {
   const view = sheetActions({ kind: "view", id: "my-open", title: "My open" }, CTX);
   expect(view.map((a) => a.label)).toEqual(["Open", "Copy address"]);
   expect(view[1]?.does).toMatchObject({ kind: "copy", text: "#/tickets/my-open" });
@@ -100,7 +100,13 @@ test("a view opens and copies its address; a set opens; a saved list applies, re
     "rename",
     "delete",
     "fav",
+    "key",
   ]);
+  // The panel that binds the chord (#2429).
+  expect(sheetActions({ kind: "list", id: "sepa", label: "sepa payouts", text: "sepa payouts", refusal: null }, CTX).at(-1)).toMatchObject({
+    label: "Assign key…",
+    does: { kind: "bind" },
+  });
 });
 
 const LINE: InboxItem = {
