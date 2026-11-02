@@ -36,13 +36,13 @@ use crate::{IpcError, Lifecycle};
 /// stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
 /// depends on none of those crates.
 ///
+/// No lists since #2423 (spec #2419): a saved list is a `list` hit behind
+/// `#l`, and the built-in ones are gone.
+///
 /// [`LauncherBoard`]: knobas_search::LauncherBoard
 /// [`CredentialHealth`]: knobas_sync::CredentialHealth
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
-///
-/// No lists since #2423 (spec #2419): a saved list is a `list` hit behind
-/// `#l`, and the built-in ones are gone.
 pub struct LauncherHome {
     /// `knobas_search::EntityRow`, a *different Rust struct* from
     /// `knobas_core::entity_list::EntityRow` with the same eight fields on
