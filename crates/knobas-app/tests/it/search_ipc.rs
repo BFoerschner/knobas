@@ -2294,7 +2294,11 @@ async fn views_sets_and_pipelines_are_kinds_on_the_wire_and_runs_are_not() {
         .await
         .unwrap();
     let wire = serde_json::to_value(&response).unwrap();
-    let groups: Vec<(String, String, Vec<(String, Option<String>, Option<String>)>)> = wire["groups"]
+    let groups: Vec<(
+        String,
+        String,
+        Vec<(String, Option<String>, Option<String>)>,
+    )> = wire["groups"]
         .as_array()
         .unwrap()
         .iter()
@@ -2323,17 +2327,29 @@ async fn views_sets_and_pipelines_are_kinds_on_the_wire_and_runs_are_not() {
             (
                 "view".to_owned(),
                 "VW".to_owned(),
-                vec![(format!("{t}-view"), Some("Team · #t status:open".to_owned()), None)]
+                vec![(
+                    format!("{t}-view"),
+                    Some("Team · #t status:open".to_owned()),
+                    None
+                )]
             ),
             (
                 "set".to_owned(),
                 "LS".to_owned(),
-                vec![(format!("{t}-set"), Some("0 items · 0 patterns · 0 tickets".to_owned()), None)]
+                vec![(
+                    format!("{t}-set"),
+                    Some("0 items · 0 patterns · 0 tickets".to_owned()),
+                    None
+                )]
             ),
             (
                 "pipeline".to_owned(),
                 "PL".to_owned(),
-                vec![(format!("teamcity:{config}"), Some("Payouts".to_owned()), Some("ok".to_owned()))]
+                vec![(
+                    format!("teamcity:{config}"),
+                    Some("Payouts".to_owned()),
+                    Some("ok".to_owned())
+                )]
             ),
         ]
     );

@@ -200,8 +200,20 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
     // set named for it against one whose description does; the body match
     // is the newer of each pair.
     for (id, name, group, query, days) in [
-        (format!("{t}-title-view"), format!("{t} board"), "Team", String::new(), 30),
-        (format!("{t}-body-view"), "Payouts".to_owned(), "Team", format!("#t {t}"), 1),
+        (
+            format!("{t}-title-view"),
+            format!("{t} board"),
+            "Team",
+            String::new(),
+            30,
+        ),
+        (
+            format!("{t}-body-view"),
+            "Payouts".to_owned(),
+            "Team",
+            format!("#t {t}"),
+            1,
+        ),
     ] {
         sqlx::query(
             "insert into knobas.ticket_view (id, name, view_group, position, query, updated_at)
@@ -217,8 +229,18 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
         .unwrap();
     }
     for (id, name, description, days) in [
-        (format!("{t}-title-set"), format!("{t} stack"), String::new(), 30),
-        (format!("{t}-body-set"), "Payout stack".to_owned(), format!("For the {t} work"), 1),
+        (
+            format!("{t}-title-set"),
+            format!("{t} stack"),
+            String::new(),
+            30,
+        ),
+        (
+            format!("{t}-body-set"),
+            "Payout stack".to_owned(),
+            format!("For the {t} work"),
+            1,
+        ),
     ] {
         sqlx::query(
             "insert into knobas.link_set (id, name, description, updated_at)

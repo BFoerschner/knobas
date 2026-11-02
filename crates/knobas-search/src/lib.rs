@@ -36,8 +36,8 @@
 //! spells it out.
 
 pub mod corpus;
-pub mod frames;
 pub(crate) mod coverage;
+pub mod frames;
 pub mod group;
 pub mod home;
 pub mod lists;

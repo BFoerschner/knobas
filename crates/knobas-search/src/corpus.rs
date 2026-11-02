@@ -475,7 +475,11 @@ macro_rules! estate_subtree {
 /// null; `$decl` holds the declarations and the row is `i`.
 macro_rules! mirror_frame {
     ($decl:literal) => {
-        concat!("(", $decl, "::jsonb #>> array[i.source_id, i.kind, 'frame'])")
+        concat!(
+            "(",
+            $decl,
+            "::jsonb #>> array[i.source_id, i.kind, 'frame'])"
+        )
     };
 }
 

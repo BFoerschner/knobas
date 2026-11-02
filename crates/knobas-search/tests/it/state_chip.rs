@@ -177,7 +177,10 @@ fn without_the_run(ids: &[String; 4]) -> (Vec<String>, Vec<Option<StateChip>>) {
     let keep = |at: &usize| *at != 2;
     (
         (0..4).filter(keep).map(|at| ids[at].clone()).collect(),
-        (0..4).filter(keep).map(|at| expected()[at].clone()).collect(),
+        (0..4)
+            .filter(keep)
+            .map(|at| expected()[at].clone())
+            .collect(),
     )
 }
 
@@ -197,8 +200,16 @@ async fn a_search_hit_carries_its_state_chip() {
         })
         .await
         .unwrap();
-    let hits: Vec<_> = response.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row).collect();
-    assert!(hits.iter().all(|row| row.entity_id != ids[2]), "a run is in no answer");
+    let hits: Vec<_> = response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| &h.row)
+        .collect();
+    assert!(
+        hits.iter().all(|row| row.entity_id != ids[2]),
+        "a run is in no answer"
+    );
     let (ids, want) = without_the_run(&ids);
     assert_eq!(states(hits, &ids), want);
 }
@@ -275,7 +286,10 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
     let at = newest.unwrap_or_else(Utc::now).max(Utc::now()) + chrono::Duration::seconds(1);
     let ids = four(&pool, &t, at).await;
     let board = searcher(&pool).await.launcher_board().await.unwrap();
-    assert!(board.recent.iter().all(|row| row.entity_id != ids[2]), "a run is not on the board");
+    assert!(
+        board.recent.iter().all(|row| row.entity_id != ids[2]),
+        "a run is not on the board"
+    );
     let (ids, want) = without_the_run(&ids);
     assert_eq!(states(&board.recent, &ids), want);
 }

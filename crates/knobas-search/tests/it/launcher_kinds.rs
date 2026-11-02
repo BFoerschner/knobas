@@ -144,7 +144,11 @@ async fn a_view_is_found_by_its_name_its_group_and_its_conditions() {
     }
     let group = &search(&pool, &format!("{t}name"), false).await.groups[0];
     assert_eq!(
-        (group.label.as_str(), group.plural.as_str(), group.monogram.as_str()),
+        (
+            group.label.as_str(),
+            group.plural.as_str(),
+            group.monogram.as_str()
+        ),
         ("Ticket view", "Ticket views", "VW")
     );
 }
@@ -156,7 +160,11 @@ async fn a_view_with_no_conditions_has_its_group_for_a_path_line() {
     view(&pool, &format!("{t}-all"), &format!("All {t}"), "Mine", "").await;
     assert_eq!(
         hits(&search(&pool, &t, false).await),
-        vec![("view".to_owned(), format!("{t}-all"), Some("Mine".to_owned()))]
+        vec![(
+            "view".to_owned(),
+            format!("{t}-all"),
+            Some("Mine".to_owned())
+        )]
     );
 }
 
@@ -164,7 +172,14 @@ async fn a_view_with_no_conditions_has_its_group_for_a_path_line() {
 async fn under_titles_a_view_is_found_by_its_name_alone() {
     let pool = pool().await;
     let t = token();
-    view(&pool, &format!("{t}-v"), &format!("{t}name"), &format!("{t}group"), "").await;
+    view(
+        &pool,
+        &format!("{t}-v"),
+        &format!("{t}name"),
+        &format!("{t}group"),
+        "",
+    )
+    .await;
     assert_eq!(
         ids(&search(&pool, &format!("{t}name"), true).await),
         vec![format!("{t}-v")]
@@ -182,7 +197,13 @@ async fn link_set(pool: &sqlx::PgPool, id: &str, name: &str, description: &str) 
         .unwrap();
 }
 
-async fn member(pool: &sqlx::PgPool, set: &str, kind: &str, entity: Option<&str>, query: Option<&str>) {
+async fn member(
+    pool: &sqlx::PgPool,
+    set: &str,
+    kind: &str,
+    entity: Option<&str>,
+    query: Option<&str>,
+) {
     sqlx::query(
         "insert into knobas.link_set_member (set_id, kind, entity_id, query, pattern, position)
          values ($1, $2, $3, $4, case when $4::text is null then null else '{}'::jsonb end, 0)",
@@ -248,14 +269,45 @@ async fn a_set_is_found_by_its_name_and_its_description_with_its_counts() {
     let pool = pool().await;
     let t = token();
     let id = format!("{t}-stack");
-    link_set(&pool, &id, &format!("Payout {t}name"), &format!("What {t}desc needs")).await;
-    member(&pool, &id, "repo", Some("gitea:tidewater/payout-service"), None).await;
+    link_set(
+        &pool,
+        &id,
+        &format!("Payout {t}name"),
+        &format!("What {t}desc needs"),
+    )
+    .await;
+    member(
+        &pool,
+        &id,
+        "repo",
+        Some("gitea:tidewater/payout-service"),
+        None,
+    )
+    .await;
     member(&pool, &id, "page", Some("confluence:123"), None).await;
     member(&pool, &id, "pipeline", None, Some("project:Payouts")).await;
     // Two live tickets by hand, and one rule naming no ticket the mirror holds.
     let now = Utc::now();
-    let one = item(&pool, "jira", "ticket", &format!("{t}-1"), "one", serde_json::json!({}), now).await;
-    let two = item(&pool, "jira", "ticket", &format!("{t}-2"), "two", serde_json::json!({}), now).await;
+    let one = item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{t}-1"),
+        "one",
+        serde_json::json!({}),
+        now,
+    )
+    .await;
+    let two = item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{t}-2"),
+        "two",
+        serde_json::json!({}),
+        now,
+    )
+    .await;
     rule(&pool, &id, "manual", &one).await;
     rule(&pool, &id, "manual", &two).await;
     rule(&pool, &id, "manual", "jira:GONE-1").await;
@@ -278,7 +330,11 @@ async fn a_set_is_found_by_its_name_and_its_description_with_its_counts() {
     let response = search(&pool, &format!("{t}name"), false).await;
     let group = response.groups.iter().find(|g| g.kind == "set").unwrap();
     assert_eq!(
-        (group.label.as_str(), group.plural.as_str(), group.monogram.as_str()),
+        (
+            group.label.as_str(),
+            group.plural.as_str(),
+            group.monogram.as_str()
+        ),
         ("Link set", "Link sets", "LS")
     );
 }
@@ -292,7 +348,11 @@ async fn an_empty_set_counts_nothing_in_the_singular_and_plural_it_reads() {
     member(&pool, &id, "repo", Some("gitea:tidewater/x"), None).await;
     assert_eq!(
         hits(&search(&pool, &t, false).await),
-        vec![("set".to_owned(), id, Some("1 item · 0 patterns · 0 tickets".to_owned()))]
+        vec![(
+            "set".to_owned(),
+            id,
+            Some("1 item · 0 patterns · 0 tickets".to_owned())
+        )]
     );
 }
 
@@ -358,7 +418,11 @@ async fn hash_b_answers_a_configuration_as_a_pipeline_coloured_by_its_newest_run
     );
     let group = &response.groups[0];
     assert_eq!(
-        (group.label.as_str(), group.plural.as_str(), group.monogram.as_str()),
+        (
+            group.label.as_str(),
+            group.plural.as_str(),
+            group.monogram.as_str()
+        ),
         ("Pipeline", "Pipelines", "PL")
     );
     assert_eq!(
@@ -428,7 +492,16 @@ async fn combined_letters_answer_tickets_and_pipelines() {
 /// beside the configuration and a ticket that hold it too.
 async fn everything(pool: &sqlx::PgPool, t: &str, at: DateTime<Utc>) -> (Vec<String>, Vec<String>) {
     let (config, runs) = pipeline(pool, t, at).await;
-    let ticket = item(pool, "jira", "ticket", &format!("{t}-1"), &format!("Fix {t}"), serde_json::json!({}), at).await;
+    let ticket = item(
+        pool,
+        "jira",
+        "ticket",
+        &format!("{t}-1"),
+        &format!("Fix {t}"),
+        serde_json::json!({}),
+        at,
+    )
+    .await;
     let commit = item(
         pool,
         "gitea",
@@ -495,11 +568,21 @@ async fn runs_commits_and_jira_boards_are_not_among_the_boards_newest_rows() {
         .map(|row| (row.kind.as_str(), row.entity_id.as_str()))
         .collect();
     for id in &left_out {
-        assert!(recent.iter().all(|(_, r)| r != id), "{id} is among {recent:?}");
+        assert!(
+            recent.iter().all(|(_, r)| r != id),
+            "{id} is among {recent:?}"
+        );
     }
-    assert!(recent.contains(&("pipeline", kept[0].as_str())), "{recent:?}");
+    assert!(
+        recent.contains(&("pipeline", kept[0].as_str())),
+        "{recent:?}"
+    );
     assert!(recent.contains(&("ticket", kept[1].as_str())), "{recent:?}");
-    let config = board.recent.iter().find(|row| row.entity_id == kept[0]).unwrap();
+    let config = board
+        .recent
+        .iter()
+        .find(|row| row.entity_id == kept[0])
+        .unwrap();
     assert_eq!(config.path.as_deref(), Some("Root › Payouts"));
     assert_eq!(config.state.as_ref().map(|s| s.tone), Some(Tone::Err));
 }
@@ -532,6 +615,9 @@ async fn kind_suggestions_offer_the_launchers_kinds_and_none_it_leaves_out() {
         assert!(kinds.contains(&wanted), "{wanted:?} among {kinds:?}");
     }
     for left_out in ["build", "build_config", "commit", "jira_view"] {
-        assert!(kinds.iter().all(|(k, _)| *k != left_out), "{left_out} among {kinds:?}");
+        assert!(
+            kinds.iter().all(|(k, _)| *k != left_out),
+            "{left_out} among {kinds:?}"
+        );
     }
 }
