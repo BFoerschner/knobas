@@ -21,7 +21,10 @@
 //!   [`page_file_name`], so a folder of exported pages links up;
 //! * a ticket chip is its key, a mention `@` and a first name;
 //! * a placeholder is an HTML comment naming it, so the reader sees where
-//!   something was without knobas inventing its content.
+//!   something was without knobas inventing its content;
+//! * a filled include is the blocks it holds after an HTML comment naming the
+//!   page they are from, an unfilled one a comment naming the page (spec
+//!   #2432).
 //!
 //! A note is a page whose body is already Markdown ([`page_from_markdown`]):
 //! the body goes through as typed, so a `[[ref]]` stays text.
@@ -127,11 +130,29 @@ fn block(block: &DocBlock) -> String {
             blocks,
         } => panel(*kind, title.as_deref(), blocks),
         DocBlock::Collapsible { title, blocks } => collapsible(title, blocks),
-        DocBlock::Placeholder { name } => {
-            // `--` inside a comment ends it early in some readers.
-            format!("<!-- macro: {} -->", name.replace("--", "- -"))
-        }
+        DocBlock::Include {
+            title,
+            blocks,
+            unfilled,
+            ..
+        } => match unfilled {
+            None => [
+                format!("<!-- from: {} -->", comment_safe(title)),
+                join_blocks(blocks),
+            ]
+            .into_iter()
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+            Some(_) => format!("<!-- include: {} -->", comment_safe(title)),
+        },
+        DocBlock::Placeholder { name } => format!("<!-- macro: {} -->", comment_safe(name)),
     }
+}
+
+/// `--` inside a comment ends it early in some readers.
+fn comment_safe(text: &str) -> String {
+    text.replace("--", "- -")
 }
 
 fn list(ordered: bool, items: &[ListItem]) -> String {

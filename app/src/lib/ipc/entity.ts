@@ -268,6 +268,7 @@ export type {
   TreeRead,
   TreeSections,
   UncommittedDiff,
+  Unfilled,
   UrlMatch,
   ViewAction,
   ViewBlock,
