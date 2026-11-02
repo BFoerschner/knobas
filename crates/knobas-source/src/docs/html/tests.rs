@@ -124,13 +124,14 @@ fn pre_is_code_and_script_and_style_say_nothing() {
 fn broken_markup_reads_as_the_text_it_holds() {
     assert_eq!(
         plain("<p>One</em> and <b>two<ul><li>three"),
-        vec![
-            DocBlock::Paragraph {
-                text: vec![Inline::text("One and "), strong("twothree")]
-            }
-        ]
+        vec![DocBlock::Paragraph {
+            text: vec![Inline::text("One and "), strong("twothree")]
+        }]
     );
-    assert_eq!(plain("a < b and <p class=\"x"), vec![para("a < b and <p class=\"x")]);
+    assert_eq!(
+        plain("a < b and <p class=\"x"),
+        vec![para("a < b and <p class=\"x")]
+    );
     assert_eq!(plain(""), vec![]);
 }
 
