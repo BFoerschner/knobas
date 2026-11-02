@@ -11,7 +11,8 @@
  *   frame, style or class of the author's. The classes the fragment carries
  *   are set after the sanitizer, from markers only this module writes and the
  *   sanitizer lets through (`data-md-fence`, `data-md-task`, `data-md-attachment`); an author who
- *   writes a marker by hand gets a fence or a task box, nothing more.
+ *   writes a marker by hand gets a fence, a task box, or a link to the surface's preview of an
+ *   attachment it already holds, nothing more.
  * - **Links** are classified by {@link resolveLink}: repository-relative ones
  *   resolve against the file's directory and take the href the surface gives
  *   (`fileLink`), or draw as text where it gives none; `http(s)` ones are

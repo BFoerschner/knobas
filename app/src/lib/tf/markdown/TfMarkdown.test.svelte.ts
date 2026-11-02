@@ -444,7 +444,7 @@ test("an attachment link and an attachment image open the surface's preview of t
   expect(opened).toEqual([]);
 });
 
-test("an image that cannot be fetched still opens the preview, which says why; its source link stays the source's (#2415)", async () => {
+test("an image that cannot be fetched is the placeholder that says why, not a link to the preview; its source link stays the source's (#2415)", async () => {
   const shown: string[] = [];
   draw("![psp-409-trace.png](attachment:50000)", { attachments: { ...attachmentRead({}), open: (id: string) => void shown.push(id) } });
   await settle();
