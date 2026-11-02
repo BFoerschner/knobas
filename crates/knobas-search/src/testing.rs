@@ -492,6 +492,75 @@ const ESTATE_SHAPE: [i64; 3] = [3, 100, 10];
 /// than that file, which is again the point of an upper bound.
 const ROUTES_PER: i64 = 2;
 
+/// A reader's saved ticket views and link sets (#2422), `rows` of each: the
+/// launcher's [`crate::corpus::VIEW`] and [`crate::corpus::SET`] branches. A
+/// set holds two members, a pattern and a project rule, so its path line's
+/// counts and its rule walk run over rows.
+///
+/// Idempotent: every id is `bench-<n>`, so two calls insert once.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if any statement fails.
+pub async fn seed_views_and_sets(pool: &PgPool, rows: i64) -> Result<(), SearchError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        r"
+        insert into knobas.ticket_view (id, name, view_group, position, query)
+        select 'bench-' || g, 'Ledger view ' || g, 'Team ' || (g % 5), g::int,
+               'project:PAY status:open ledger'
+          from generate_series(1, $1) g
+        on conflict (id) do nothing",
+    )
+    .bind(rows)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r"
+        insert into knobas.link_set (id, name, description)
+        select 'bench-' || g, 'Ledger stack ' || g, 'What the ledger path touches'
+          from generate_series(1, $1) g
+        on conflict (id) do nothing",
+    )
+    .bind(rows)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r"
+        insert into knobas.link_set_member (set_id, kind, entity_id, query, pattern, position)
+        select 'bench-' || g, m.kind, m.entity_id, m.query,
+               case when m.query is null then null else '{}'::jsonb end, m.position
+          from generate_series(1, $1) g
+         cross join (values ('repo', 'bench:repo-1', null, 0),
+                            ('page', 'bench:page-1', null, 1),
+                            ('pipeline', null, 'project:Ledger', 2)) as m(kind, entity_id, query, position)
+         where not exists (select 1 from knobas.link_set_member x where x.set_id = 'bench-' || g)",
+    )
+    .bind(rows)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        r"
+        insert into knobas.link_set_rule (set_id, kind, value, position)
+        select 'bench-' || g, 'project', 'bench:PAY', 0
+          from generate_series(1, $1) g
+        on conflict do nothing",
+    )
+    .bind(rows)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    for analyze in [
+        "analyze knobas.ticket_view",
+        "analyze knobas.link_set",
+        "analyze knobas.link_set_member",
+        "analyze knobas.link_set_rule",
+    ] {
+        sqlx::query(analyze).execute(pool).await?;
+    }
+    Ok(())
+}
+
 /// Fill the estate with a deterministic tree of assets and the routes they
 /// expose, and make it measurable.
 ///

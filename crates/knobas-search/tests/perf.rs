@@ -898,7 +898,7 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
 /// the report's and nothing else's: a reordered `corpus::ALL` would print the
 /// wrong names beside the right numbers, and every assertion below is per branch
 /// either way.
-const BRANCHES: [&str; 4] = ["mirror", "notes", "assets", "routes"];
+const BRANCHES: [&str; 6] = ["mirror", "notes", "assets", "routes", "views", "sets"];
 
 /// Every branch the launcher unions holds rows, read through the launcher's own
 /// statement -- and how many of them the pinned query matches, printed.
@@ -1036,6 +1036,7 @@ async fn the_match_set_is_not_joined_row_by_row() {
     // tag of its own would put a second estate beside the first and make the
     // other test's report a reading of two.
     testing::seed_estate(&pool, "bench").await.unwrap();
+    testing::seed_views_and_sets(&pool, 30).await.unwrap();
     assert_every_branch_has_rows(&pool, "ledger").await;
 
     let built = sql::search_sql(
