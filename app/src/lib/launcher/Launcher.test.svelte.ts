@@ -25,7 +25,7 @@ import type { InboxItem } from "../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
-import { createScope, launcherScope } from "./scope.svelte";
+import { createScope } from "./scope.svelte";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -230,8 +230,6 @@ afterEach(() => {
   app = undefined;
   vi.useRealTimers();
   target.remove();
-  // The app's one Titles/Everything choice lives as long as the module: back to Titles.
-  launcherScope.reset();
   // `recordScrolls()` stubs it; jsdom has none of its own.
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
