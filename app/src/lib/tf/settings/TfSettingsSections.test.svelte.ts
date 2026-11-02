@@ -108,7 +108,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     setBackupSchedule: vi.fn((schedule) => Promise.resolve({ ...status(), schedule })),
     shareExport: vi.fn(() => Promise.resolve({ taken_at: NOW.toISOString(), file: "knobas-share-new.knobas", bytes: 1024 })),
     restoreBackup: vi.fn(() => Promise.resolve()),
-    smartLists: vi.fn(() => Promise.resolve([{ saved: false }])),
+    smartLists: vi.fn(() => Promise.resolve([])),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
@@ -362,7 +362,7 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
 });
 
 test("a saved smart list draws its tick, on by default", async () => {
-  const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ saved: true }])) }));
+  const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ id: "sepa" }])) }));
   expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Smart lists");
   button("Export…").click();
   await settle();

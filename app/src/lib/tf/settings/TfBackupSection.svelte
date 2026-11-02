@@ -115,7 +115,7 @@
     void ports
       .smartLists()
       .then((lists) => {
-        savedLists = lists.some((list) => list.saved);
+        savedLists = lists.length > 0;
         parts = { ...parts, smart_lists: savedLists };
       })
       // Not knowing is the safe half: no tick, and the part goes off.

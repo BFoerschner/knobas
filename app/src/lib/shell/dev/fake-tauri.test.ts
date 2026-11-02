@@ -20,7 +20,6 @@ import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
 import type { ProposalEvidence, SuggestionPage } from "../../ipc/entity";
 import { demoHandlers } from "./fake-tauri";
-import { FAKE_CONTEXTS } from "./fake/corpus";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
 test("the three suggestion commands are answered", () => {
@@ -620,130 +619,39 @@ test("the fixture's ack leaves the alert open and refuses a monitor with none", 
 });
 
 /**
- * The launcher board's rail under `?fake-ipc` (#504).
- *
- * What a walk in a browser needs to be able to see, and what a fixture can get
- * wrong without anybody noticing: the rail is the **seven built-ins in the
- * registry's order followed by the saved lists** (#506), the three estate lists
- * carry the counts the fixture's own estate implies, and the rows one of them
- * answers with are **assets** — because a row of any other kind opens a room
- * detail instead of the Tree, which is the whole of #504's criterion 2.
- *
- * The four mirror lists reading 0 is asserted rather than tolerated: this
- * fixture's corpus is frozen at `SYNCED_AT` and no source in it carries a
- * username, so a non-zero count there would be this file inventing a mirror.
+ * The launcher under `?fake-ipc` (#2423): the board is the recent items and
+ * no lists, and `#l` answers the saved lists as kind `list`, each with its
+ * text as the path line and the broken one with its reason as its state, so
+ * the walk can see a list applied and one refused.
  */
-test("the fixture's launcher board draws the seven built-ins, with the estate's three counted", () => {
+test("the fixture's board has no lists and hash l answers the saved ones", () => {
   const handlers = demoHandlers();
-  const board = handlers["launcher_home"]!({}) as {
-    smart_lists: {
-      id: string;
-      label: string;
-      count: number;
-      changed: boolean;
-      description: string;
-      saved: boolean;
-    }[];
-    recent: unknown[];
-    sources: unknown[];
-    pending_writes: number;
-    notes_shown: boolean;
-  };
-
-  expect(board.notes_shown).toBe(false);
-  expect(board.smart_lists.filter((list) => !list.saved).map((list) => list.id)).toEqual([
-    "changed-today",
-    "mine",
-    "mine-stale",
-    "just-synced",
-    "not-monitored",
-    "alerts-in-context",
-    "certs-expiring",
-  ]);
-  // The built-ins come first and the saved ones after, which is the order
-  // `Searcher::smart_lists` builds and the order the rail draws.
-  const savedFrom = board.smart_lists.findIndex((list) => list.saved);
-  expect(savedFrom).toBe(7);
-  expect(board.smart_lists.slice(savedFrom).every((list) => list.saved)).toBe(true);
-  const count = (id: string) => board.smart_lists.find((list) => list.id === id)!.count;
-  for (const id of ["changed-today", "mine", "mine-stale", "just-synced"]) {
-    expect(count(id), `${id} has no mirror here to count`).toBe(0);
-  }
-  // Every estate list has something in it, or the walk has nothing to open.
-  for (const id of ["not-monitored", "alerts-in-context", "certs-expiring"]) {
-    expect(count(id), `${id} is empty and cannot be walked`).toBeGreaterThan(0);
-  }
-  // #1503: the sixth list is named for the reader's jobs, and its count is the
-  // alerted assets an unarchived fake context holds -- one, the TeamCity asset
-  // PAY-231 holds -- and falls to nothing when that context is archived.
-  expect(board.smart_lists.find((list) => list.id === "alerts-in-context")!.label).toBe(
-    "Open alerts on my jobs",
-  );
-  expect(count("alerts-in-context")).toBe(1);
-  const jobs = FAKE_CONTEXTS.filter((context) => context.archived_at === null);
-  jobs.forEach((context) => (context.archived_at = "2026-10-21T00:00:00Z"));
-  try {
-    const archived = handlers["smart_lists"]!({}) as { id: string; count: number }[];
-    expect(archived.find((list) => list.id === "alerts-in-context")!.count).toBe(0);
-  } finally {
-    jobs.forEach((context) => (context.archived_at = null));
-  }
-  // A badge is a comparison against a stamp this fixture cannot keep.
-  expect(board.smart_lists.every((list) => list.changed === false)).toBe(true);
+  const board = handlers["launcher_home"]!({}) as Record<string, unknown> & { recent: unknown[] };
+  expect(board).not.toHaveProperty("smart_lists");
   expect(board.recent.length).toBeGreaterThan(0);
-  expect(board.sources.length).toBeGreaterThan(0);
 
-  // And the rows behind the counts: assets, with the count the rail promised.
-  for (const id of ["not-monitored", "alerts-in-context", "certs-expiring"]) {
-    const response = handlers["search"]!({ query: { raw: `list:${id}`, filters: {} } }) as {
-      total: number;
-      groups: { kind: string; total: number; hits: { entity_id: string; kind: string }[] }[];
-    };
-    expect(response.total, `${id}'s rows and its count are one answer`).toBe(count(id));
-    expect(response.groups.map((group) => group.kind)).toEqual(["asset"]);
-    for (const hit of response.groups[0]!.hits) {
-      expect(hit.kind).toBe("asset");
-      expect(hit.entity_id.startsWith("asset:")).toBe(true);
-    }
-  }
-
-  // A list nobody ships is refused, not answered with nothing.
-  expect(() => handlers["search"]!({ query: { raw: "list:nope", filters: {} } })).toThrow();
-});
-
-/**
- * The fixture's *Certificates expiring* is the roster's own certificate, and
- * the roster invents exactly one — nine days.
- *
- * Both directions, the `unmonitored_assets` test's rule: the asset the
- * certificate is on is in, and every asset whose monitor has no certificate is
- * out. A handler answering the whole estate would pass a one-sided check.
- */
-test("the fixture's expiring certificates are the roster rows under thirty days", () => {
-  const handlers = demoHandlers();
-  const roster = handlers["monitor_roster"]!({}) as {
-    cert_days_remaining: number | null;
-    assets: { id: string }[];
-  }[];
-  const expiring = new Set(
-    roster
-      .filter((row) => row.cert_days_remaining !== null && row.cert_days_remaining < 30)
-      .flatMap((row) => row.assets.map((asset) => asset.id)),
-  );
-  expect(expiring.size, "a roster with no certificate cannot show this list").toBeGreaterThan(0);
-
-  const rows = handlers["search"]!({ query: { raw: "list:certs-expiring", filters: {} } }) as {
-    groups: { hits: { entity_id: string }[] }[];
+  const lists = handlers["search"]!({ query: { raw: "#l", filters: {} } }) as {
+    interpreted: { filters: { kinds: string[] } };
+    groups: { kind: string; hits: { entity_id: string; path: string | null; state: { tone: string } | null }[] }[];
   };
-  expect(new Set(rows.groups[0]!.hits.map((hit) => hit.entity_id))).toEqual(expiring);
-  // And nothing whose monitor watches no certificate at all.
-  const noCert = roster
-    .filter((row) => row.cert_days_remaining === null)
-    .flatMap((row) => row.assets.map((asset) => asset.id));
-  expect(noCert.length).toBeGreaterThan(0);
-  for (const id of noCert) {
-    expect(expiring.has(id), `${id} has no certificate and is on the list`).toBe(false);
-  }
+  expect(lists.interpreted.filters.kinds).toEqual(["list"]);
+  expect(lists.groups.map((group) => group.kind)).toEqual(["list"]);
+  const hits = lists.groups[0]!.hits;
+  expect(hits.every((hit) => hit.path !== null)).toBe(true);
+  expect(hits.filter((hit) => hit.state?.tone === "warn").map((hit) => hit.entity_id)).toEqual(["old-gitea"]);
+
+  const narrowed = handlers["search"]!({ query: { raw: "#l sepa", filters: {} } }) as typeof lists;
+  expect(narrowed.groups[0]!.hits.map((hit) => hit.entity_id)).toEqual(["sepa-tickets"]);
+
+  const inbox = handlers["search"]!({ query: { raw: "#i review", filters: {} } }) as typeof lists & {
+    interpreted: { text: string };
+  };
+  expect(inbox.interpreted.filters.kinds).toEqual(["inbox"]);
+  expect(inbox.interpreted.text).toBe("review");
+  expect(inbox.groups).toEqual([]);
+
+  // `list:` is retired: no list opens by it.
+  expect(() => handlers["search"]!({ query: { raw: "list:sepa-tickets", filters: {} } })).toThrow();
 });
 
 /**

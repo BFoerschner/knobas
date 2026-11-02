@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
+  import { clockLabel } from "../time/format";
   import Row from "./Row.svelte";
   import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
@@ -19,10 +20,13 @@
     rows,
     selected,
     optionId,
+    now,
     onopen,
     onhover,
   }: {
     response: SearchResponse;
+    /** The clock an inbox line's time cell is read against (#2423). */
+    now?: Date | undefined;
     /** The flat selectable list, so an index means the same thing everywhere. */
     rows: LauncherRow[];
     selected: number;
@@ -105,6 +109,30 @@
   {/each}
 {/each}
 
+<!--
+  The inbox's lines behind `#i` (#2423): after the engine's groups, under
+  their own heading, the time as the key cell. `rows` holds them only for an
+  answer the engine read as `#i`.
+-->
+{#if rows.some((row) => row.kind === "inbox")}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Inbox</span></div>
+{/if}
+{#each rows as row, index (row.id)}
+  {#if row.kind === "inbox"}
+    <Row
+      monogram="IN"
+      kindName="Inbox line"
+      cell={clockLabel(row.item.occurred_at, now ?? new Date(), true)}
+      mono
+      title={row.item.title}
+      id={optionId(index)}
+      selected={index === selected}
+      onopen={() => onopen(row)}
+      onhover={() => onhover(index)}
+    />
+  {/if}
+{/each}
+
 <!-- *Search Docs for …* (#2425): last, after every group; `rows` holds it only for a `#d` answer with words. -->
 {#each rows as row, index (row.id)}
   {#if row.kind === "docs"}
@@ -123,7 +151,7 @@
   {/if}
 {/each}
 
-{#if response.groups.length === 0}
+{#if response.groups.length === 0 && !rows.some((row) => row.kind === "inbox")}
   <p class="tf-ln-none">
     Nothing in the mirror matches
     <strong>{response.interpreted.text || "these filters"}</strong>.

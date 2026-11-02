@@ -396,16 +396,6 @@ function row(
  * walked); *Promote* adds to it. */
 export const FAKE_CONTEXTS: ContextRow[] = [];
 
-/**
- * The estate assets a context holds, by the context's anchor (#1503). The
- * fixture has no link graph, so this one table is all the asset membership
- * there is; `smart-lists.ts` reads it for *Open alerts on my jobs*. PAY-231
- * holds the TeamCity asset, which is the one the fixture's acked alert watches.
- */
-export const FAKE_CONTEXT_ASSETS: Record<string, string[]> = {
-  "mock:PAY-231": ["asset:knobas-teamcity"],
-};
-
 let nextContext = 1;
 export function fakeContext(kind: ContextKind, title: string, anchor_id: string | null): ContextRow {
   return {

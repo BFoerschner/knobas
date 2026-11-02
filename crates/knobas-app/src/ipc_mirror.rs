@@ -302,6 +302,9 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_search::SearchQuery::export_all(cfg)?;
     knobas_search::SearchResponse::export_all(cfg)?;
     crate::commands::search::LauncherHome::export_all(cfg)?;
+    // No longer reached through `LauncherHome` (#2423); `smart_lists` and
+    // `create_smart_list` still answer it.
+    knobas_search::SmartListSummary::export_all(cfg)?;
     knobas_search::FilterSuggestions::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;
     crate::ticket_views::TicketView::export_all(cfg)?;

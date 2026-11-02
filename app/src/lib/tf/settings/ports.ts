@@ -199,7 +199,8 @@ export interface SectionPorts {
   setBackupSchedule: (schedule: BackupSchedule) => Promise<BackupStatus>;
   shareExport: (parts: ShareParts) => Promise<BackupRecord>;
   restoreBackup: (file: string) => Promise<void>;
-  smartLists: () => Promise<Pick<SmartListSummary, "saved">[]>;
+  /** Whether any saved list exists, for the share export's tick (#507). */
+  smartLists: () => Promise<Pick<SmartListSummary, "id">[]>;
   /** Whether any ticket view exists, for the share export's tick (#812). */
   ticketViews: () => Promise<Pick<TicketViewRow, "id">[]>;
   /** Whether any link set exists, for the share export's tick (#870). */

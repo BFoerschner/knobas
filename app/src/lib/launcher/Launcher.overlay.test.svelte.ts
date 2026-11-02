@@ -56,7 +56,6 @@ function response(raw: string): SearchResponse {
 }
 
 const HOME: LauncherHome = {
-  smart_lists: [],
   recent: [],
   sources: [],
   pending_writes: 0,

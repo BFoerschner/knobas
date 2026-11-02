@@ -343,7 +343,7 @@ test("on a ticket page, Link to targets that ticket, not the chosen job", async 
   await openOn("#/job/mock%3APAY-231", "Retry failed SEPA payouts");
   location.hash = "#/ticket/mock%3APAY-240";
   await pageOf("PAY-240");
-  await search("list:not-monitored");
+  await search("PAY-231");
   inLauncher("Tab");
   const rows = [...target.querySelectorAll('[aria-label="Actions on the selected result"] .tf-ln-chain-a')].map((row) => row.textContent?.trim());
   expect(rows[0]).toBe("Link to PAY-240");

@@ -553,6 +553,37 @@ coverage: Array<FilterCoverage>, };
 export type Segment = { text: string, hit: boolean, };
 
 /**
+ * One saved list as `smart_lists` and `create_smart_list` answer it
+ * (interfaces §2.4): Settings reads whether any exist, and *Save as list*
+ * reads back the row it made.
+ *
+ * One kind of list since #2423: the built-in ones are gone, so nothing tells
+ * a saved list from another, and nothing badges one (`changed` and `saved`
+ * went with them). In the launcher a list is a `list` hit, found behind `#l`.
+ */
+export type SmartListSummary = { 
+/**
+ * The slug [`create`] made; what rename and delete take, and the `list`
+ * hit's entity id.
+ */
+id: string, label: string, 
+/**
+ * How many items the list answers with right now.
+ */
+count: number, 
+/**
+ * The query the list stands for, or the reason it needs attention.
+ */
+description: string, 
+/**
+ * The saved query cannot be run by today's grammar (#506, story 60).
+ * [`Self::count`] is `0` on such a row -- nothing was asked -- and
+ * [`Self::description`] carries [`NEEDS_ATTENTION`] and the rule that
+ * refused it.
+ */
+needs_attention: boolean, };
+
+/**
  * One source, and what it could do with the dimension it is listed under.
  */
 export type SourceAnswer = { 
