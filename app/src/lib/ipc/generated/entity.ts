@@ -884,7 +884,8 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  *   `content` what runs. The shell draws it in an isolated frame, never in
  *   its own document.
  *
- * Source text, never markup.
+ * Source text, never markup, but for an embed's `html`, which is markup to
+ * run and never to draw.
  */
 export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, } | { "type": "embed", name: string, content: DocEmbedContent, };
 
