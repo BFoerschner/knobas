@@ -406,11 +406,13 @@ fn a_spinning_projection_stops_at_its_own_deadline_not_the_adapters() {
     spins["spin"] = true.into();
     let started = Instant::now();
     let (sent, answer) = std::sync::mpsc::channel();
-    std::thread::spawn(move || sent.send(adapter.project("page", &spins)));
-    let drawn = answer
+    std::thread::spawn(move || {
+        let _ = sent.send(adapter.project("page", &spins).is_none());
+    });
+    let none = answer
         .recv_timeout(limits::PROJECTION_DEADLINE * 3)
         .expect("the projection is stopped well before the adapter's deadline");
-    assert_eq!(drawn, None);
+    assert!(none, "a stopped projection is no content");
     let took = started.elapsed();
     assert!(
         took >= limits::PROJECTION_DEADLINE,
