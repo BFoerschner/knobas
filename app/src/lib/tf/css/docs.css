@@ -108,6 +108,13 @@
 .tf-callout.tf-muted { background: var(--sheet-2); border-color: var(--ink-2); }
 .tf-callout.tf-ok { background: var(--ok-bg); border-color: var(--ok); }
 .tf-callout .tf-lbl { font-weight: 700; white-space: nowrap; }
+.tf-collapse { margin: 0 0 18px; border: 1px solid var(--rule); border-radius: 6px; }
+.tf-collapse > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); padding: 0 12px; font-family: var(--sans); font-size: var(--t-lg); font-weight: 600; }
+.tf-collapse > summary::-webkit-details-marker { display: none; }
+.tf-collapse > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
+.tf-collapse[open] > summary::before { content: "▾"; }
+.tf-collapse > div { padding: 4px 14px 0 30px; }
+.tf-collapse > div > :last-child { margin-bottom: 14px; }
 .tf-macro {
   border: 1px dashed var(--ink-2); border-radius: 6px; padding: 10px 14px; font-family: var(--sans); font-size: var(--t-md);
   color: var(--ink-2); margin: 0 0 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;

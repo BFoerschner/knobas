@@ -184,6 +184,8 @@ type Proto =
   | { info: string }
   | { warn: string }
   | { note: string }
+  /** A collapsible (spec #2432), Confluence's `expand`: its title and its blocks. */
+  | { fold: string; blocks: Proto[] }
   /** An include (spec #2432): another page's body, or its excerpt, filled as the real read fills it. */
   | { include: string; excerpt?: boolean }
   | { macro: string }
@@ -282,6 +284,13 @@ const BODIES: Record<string, Body> = {
       { p: "Every code the PSP returns on a batch or a single payout, and what payout-service does with it. Keep this table in step with `psp::errors` in payout-service." },
       { h: "Codes" },
       { table: [["Code", "Meaning", "What we do"], ["TEMP_UNAVAILABLE", "The PSP is overloaded or in maintenance", "retry with backoff"], ["RATE_LIMITED", "Too many requests from our key", "stop, send to manual review"], ["INVALID_IBAN", "Checksum or length is wrong", "fail, tell the customer"], ["DUPLICATE", "The idempotency key was seen before", "treat as sent"], ["TIMEOUT", "No answer within 60 s", "retry with backoff"]] },
+      {
+        fold: "Codes the PSP retired in 2025",
+        blocks: [
+          { p: "Batches from before the 2025 API still carry these. payout-service reads them as their successors." },
+          { ul: ["`BUSY` reads as TEMP_UNAVAILABLE.", "`THROTTLED` reads as RATE_LIMITED."] },
+        ],
+      },
       { h: "Transient or permanent" },
       { p: "Only TEMP_UNAVAILABLE and TIMEOUT are transient. Everything else is permanent and is never retried automatically. See {{page:SEPA payout retry design}} for the backoff." },
       { note: "The PSP sandbox returns TEMP_UNAVAILABLE on purpose for IBANs ending in 0503. Use those in integration tests." },
@@ -481,6 +490,7 @@ function block(b: Proto): DocBlock {
   if ("info" in b) return { type: "panel", kind: "info", title: null, blocks: [para(b.info)] };
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
+  if ("fold" in b) return { type: "collapsible", title: b.fold, blocks: b.blocks.map(block) };
   if ("html" in b) return { type: "embed", name: "html", content: { kind: "html", html: b.html } };
   if ("include" in b) return include(b.include, b.excerpt ?? false);
   return { type: "placeholder", name: b.macro };
@@ -566,7 +576,7 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
     for (const b of list) {
       if (b.type === "table") note("table");
       else if (b.type === "code") note("code");
-      else if (b.type === "placeholder" || b.type === "embed" || b.type === "include" || (b.type === "panel" && inPanel)) note("macro");
+      else if (b.type === "placeholder" || b.type === "collapsible" || b.type === "embed" || b.type === "include" || (b.type === "panel" && inPanel)) note("macro");
       else if (b.type === "panel") visit(b.blocks, true);
       else if (b.type === "paragraph") inlines(b.text);
       else if (b.type === "list") {
@@ -623,7 +633,7 @@ function work(blocks: DocBlock[]): DocPage["work"] {
   const visit = (b: DocBlock) => {
     if (b.type === "heading" || b.type === "paragraph") walk(b.text);
     else if (b.type === "list") b.items.flatMap((item) => item.blocks).forEach(visit);
-    else if (b.type === "panel") b.blocks.forEach(visit);
+    else if (b.type === "panel" || b.type === "collapsible") b.blocks.forEach(visit);
     else if (b.type === "table") b.rows.flat().forEach((c) => c.blocks.forEach(visit));
   };
   blocks.forEach(visit);

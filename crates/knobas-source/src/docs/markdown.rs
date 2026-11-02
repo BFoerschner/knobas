@@ -16,6 +16,7 @@
 //!   at its first place with the places it covers empty;
 //! * a panel is a quote that opens with its kind in bold (the spelling
 //!   [`DocSection::text`](super::DocSection::text) edits, #975);
+//! * a collapsible is a `<details>` block, its title the `<summary>`;
 //! * a link to another page is a relative `.md` link, named by
 //!   [`page_file_name`], so a folder of exported pages links up;
 //! * a ticket chip is its key, a mention `@` and a first name;
@@ -128,6 +129,7 @@ fn block(block: &DocBlock) -> String {
             title,
             blocks,
         } => panel(*kind, title.as_deref(), blocks),
+        DocBlock::Collapsible { title, blocks } => collapsible(title, blocks),
         DocBlock::Include {
             title,
             blocks,
@@ -295,6 +297,20 @@ fn panel(kind: PanelKind, title: Option<&str>, blocks: &[DocBlock]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// A collapsible as GitHub's `<details>`: the title is HTML text in the
+/// summary, the blocks Markdown after a blank line.
+fn collapsible(title: &str, blocks: &[DocBlock]) -> String {
+    let summary = one_line(title)
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let body = join_blocks(blocks);
+    if body.is_empty() {
+        return format!("<details>\n<summary>{summary}</summary>\n\n</details>");
+    }
+    format!("<details>\n<summary>{summary}</summary>\n\n{body}\n\n</details>")
 }
 
 /// The word a panel's quote opens with.

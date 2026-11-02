@@ -876,6 +876,9 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `table`: A table, row by row; a header cell says so, and a cell holds
  *   blocks and may span columns and rows.
  * - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+ * - `collapsible`: A titled part the reader draws closed, with the blocks
+ *   inside it, opened when the reader arrives on a search hit inside it
+ *   (spec #2432). Confluence's `expand` is one; its words are the page's.
  * - `include`: Another page of the source drawn in place (spec #2432): the
  *   page by `title` and `space` as a page link names one, and whether only
  *   its `excerpt` is wanted. The adapter leaves the rest empty; knobas fills
@@ -893,7 +896,7 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * Source text, never markup, but for an embed's `html`, which is markup to
  * run and never to draw.
  */
-export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "include", title: string, space: string | null, excerpt: boolean, entity_id: string | null, blocks: Array<DocBlock>, unfilled: Unfilled | null, } | { "type": "placeholder", name: string, } | { "type": "embed", name: string, content: DocEmbedContent, };
+export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "collapsible", title: string, blocks: Array<DocBlock>, } | { "type": "include", title: string, space: string | null, excerpt: boolean, entity_id: string | null, blocks: Array<DocBlock>, unfilled: Unfilled | null, } | { "type": "placeholder", name: string, } | { "type": "embed", name: string, content: DocEmbedContent, };
 
 /**
  * One comment on a page.

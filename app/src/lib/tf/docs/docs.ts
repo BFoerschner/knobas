@@ -204,12 +204,26 @@ export function blockWords(block: DocBlock): string {
         .join(" ");
     case "panel":
       return block.blocks.map(blockWords).join(" ");
+    case "collapsible":
+      return [block.title, ...block.blocks.map(blockWords)].join(" ");
     // An include's words are the included page's, as in search (spec #2432).
     case "include":
     case "placeholder":
     // What an embed shows is in its frame, not in the reader's words.
     case "embed":
       return "";
+  }
+}
+
+/**
+ * Open every collapsible (`details.tf-collapse`) that hides `match`, so the
+ * find bar's current match is on screen (spec #2432). A match in a
+ * collapsible's own title is drawn while it is closed and opens nothing.
+ */
+export function revealMatch(match: Element): void {
+  for (let fold = match.parentElement?.closest("details.tf-collapse"); fold; fold = fold.parentElement?.closest("details.tf-collapse")) {
+    const title = fold.querySelector(":scope > summary");
+    if (!title?.contains(match)) (fold as HTMLDetailsElement).open = true;
   }
 }
 
