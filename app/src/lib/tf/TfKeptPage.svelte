@@ -52,7 +52,7 @@
    * the shell hands every page. Per page, so a hidden page of another
    * section keeps the chosen job and reads nothing again.
    */
-  const held = $derived(scopedTicket.viewJob(sectionOf(route), null));
+  const held = $derived(scopedTicket.viewJob(sectionOf(route)));
   const pageCtx = $derived<TfPageContext>(
     held === null ? { ...ctx, route, visible } : { ...ctx, route, visible, job: held.key, jobAt: held.entityId },
   );

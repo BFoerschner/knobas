@@ -43,8 +43,8 @@ export const scopedTicket = {
   clear(): void {
     held = null;
   },
-  /** The ticket a view in `section` names *This job*: the held one in its section, else `chosen`. */
-  viewJob(section: Section | null, chosen: TicketRef | null): TicketRef | null {
-    return held !== null && held.section === section ? ticketRef(held.entityId) : chosen;
+  /** The ticket a view in `section` names *This job* in place of the chosen one: the held one in its section, else `null`. */
+  viewJob(section: Section | null): TicketRef | null {
+    return held !== null && held.section === section ? ticketRef(held.entityId) : null;
   },
 };
