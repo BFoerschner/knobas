@@ -876,13 +876,16 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `table`: A table, row by row; a header cell says so, and a cell holds
  *   blocks and may span columns and rows.
  * - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+ * - `collapsible`: A titled part the reader draws closed, with the blocks
+ *   inside it, opened when the reader arrives on a search hit inside it
+ *   (spec #2432). Confluence's `expand` is one; its words are the page's.
  * - `placeholder`: Something the source has that the reader does not draw: the
  *   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
  *   so a page with a part knobas cannot draw says so (story 134).
  *
  * Source text, never markup.
  */
-export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
+export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "collapsible", title: string, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
 
 /**
  * One comment on a page.

@@ -485,6 +485,116 @@ async fn a_task_list_reads_with_each_item_checked_or_not() {
     );
 }
 
+/// Spec #2432, stories 24, 26 and 34: an `expand` reads as a collapsible
+/// titled as Confluence titles it, the list, table and panel inside it
+/// drawn as they are anywhere, the mirror filled in inside it, and its
+/// section refuses its edit with `macro`.
+#[tokio::test]
+async fn an_expand_reads_as_a_collapsible_and_its_section_refuses_as_a_macro() {
+    use knobas_source::docs::{PanelKind, SectionRefusal, TableCell};
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let storage = "<h2>Rollout</h2>\
+        <ac:structured-macro ac:name=\"expand\"><ac:parameter ac:name=\"title\">Rollback</ac:parameter><ac:rich-text-body>\
+        <ul><li>Ask <ac:link><ri:user ri:username=\"mara\" /></ac:link></li></ul>\
+        <table><tr><th>Region</th><td>eu-1</td></tr></table>\
+        <ac:structured-macro ac:name=\"note\"><ac:rich-text-body><p>Slow.</p></ac:rich-text-body></ac:structured-macro>\
+        </ac:rich-text-body></ac:structured-macro>\
+        <h2>Later</h2><ac:structured-macro ac:name=\"expand\"><ac:rich-text-body><p>Hidden.</p></ac:rich-text-body></ac:structured-macro>";
+    let id = page(&pool, &src, "1", "Deploy", "OPS", &[], storage).await;
+
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    let para = |text: Vec<Inline>| DocBlock::Paragraph { text };
+    let heading = |words: &str| DocBlock::Heading {
+        level: 2,
+        text: vec![Inline::text(words)],
+    };
+    assert_eq!(
+        doc.blocks,
+        vec![
+            heading("Rollout"),
+            DocBlock::Collapsible {
+                title: "Rollback".into(),
+                blocks: vec![
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![ListItem::new(vec![para(vec![
+                            Inline::text("Ask "),
+                            Inline::Mention {
+                                user: Some("mara".into()),
+                                name: None,
+                                me: true,
+                            },
+                        ])])],
+                    },
+                    DocBlock::Table {
+                        rows: vec![vec![
+                            TableCell::new(true, vec![para(vec![Inline::text("Region")])]),
+                            TableCell::new(false, vec![para(vec![Inline::text("eu-1")])]),
+                        ]],
+                    },
+                    DocBlock::Panel {
+                        kind: PanelKind::Note,
+                        title: None,
+                        blocks: vec![para(vec![Inline::text("Slow.")])],
+                    },
+                ],
+            },
+            heading("Later"),
+            DocBlock::Collapsible {
+                title: "Click here to expand...".into(),
+                blocks: vec![para(vec![Inline::text("Hidden.")])],
+            },
+        ]
+    );
+    let refusals: Vec<_> = doc.sections.iter().map(|s| (s.number, s.refusal)).collect();
+    assert_eq!(
+        refusals,
+        vec![
+            (1, Some(SectionRefusal::Macro)),
+            (2, Some(SectionRefusal::Macro))
+        ]
+    );
+}
+
+/// Spec #2432, story 33: a word only an expand holds is found, its snippet
+/// in the section the expand sits in, though the reader draws it closed.
+#[tokio::test]
+async fn a_word_only_an_expand_holds_is_found_in_its_section() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let storage = format!(
+        "<p>Intro.</p><h2>Rollback</h2>\
+         <ac:structured-macro ac:name=\"expand\"><ac:rich-text-body>\
+         <ul><li>revert the {w} flag</li></ul></ac:rich-text-body></ac:structured-macro>"
+    );
+    let id = page(&pool, &src, "1", "Deploy steps", "ENG", &[], &storage).await;
+    let content =
+        knobas_source_confluence::doc_content("page", &page_payload("ENG", &[], &storage))
+            .expect("a page projects");
+    let body = knobas_source::docs::search_text("Deploy steps", "ENG", &content);
+    indexed(&pool, &id, &[body], "tomasz", 1).await;
+
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .expect("a word is a query");
+    assert_eq!(found.total, 1);
+    let hit = &found.hits[0];
+    assert_eq!(hit.entity_id, id);
+    assert_eq!(hit.snippet.section.as_deref(), Some("Rollback"));
+    let text: String = hit
+        .snippet
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
+    assert!(text.contains(&format!("revert the {w} flag")), "{text:?}");
+}
+
 /// A ticket chip for a ticket the mirror does not hold keeps its key and
 /// nothing else; a page link to an unsynced page names no page.
 #[tokio::test]
