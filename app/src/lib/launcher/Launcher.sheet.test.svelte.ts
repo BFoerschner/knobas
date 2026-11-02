@@ -25,7 +25,7 @@ const HITS: Record<string, Partial<SearchHit> & { kind: string; entity_id: strin
   repo: { kind: "repo", entity_id: "gitea:acme/svc", title: "acme/svc", source_id: "gitea" },
   branch: { kind: "branch", entity_id: "gitea:acme/svc@main", title: "main", source_id: "gitea", path: "acme/svc" },
   pipeline: { kind: "pipeline", entity_id: "teamcity:Pay_Build", title: "Pay build", source_id: "teamcity" },
-  monitor: { kind: "monitor", entity_id: "kuma:7", title: "payout-api", source_id: "kuma" },
+  monitor: { kind: "monitor", entity_id: "kuma:7", title: "payout-api", source_id: "kuma", cell: "http" },
   page: { kind: "page", entity_id: "confluence:ENG:SEPA", title: "SEPA design", source_id: "confluence" },
   view: { kind: "view", entity_id: "my-open", title: "My open", source_id: "view" },
   set: { kind: "set", entity_id: "payments", title: "Payments", source_id: "set" },
@@ -216,6 +216,15 @@ test("Tab lifts the row under the box, labels the box Actions and empties it; th
   expect(pinned?.querySelector(".tf-ln-t")?.textContent).toBe("svc");
   expect(pinned?.querySelector(".tf-ln-k")?.textContent).toBe("acme");
   expect(labels()).toEqual(["Link to PAY-999", "Pull requests", "Branches", "Open in VS Code", "Open in IntelliJ", "Clone", "Copy title"]);
+});
+
+test("the pinned row draws the key cell the engine sends (#2452)", async () => {
+  mountIt();
+  await settle();
+  await sheetOn("monitor");
+  const pinned = target.querySelector(".tf-ln-pinned .tf-ln-res");
+  expect(pinned?.querySelector(".tf-ln-k")?.textContent).toBe("http");
+  expect(pinned?.querySelector(".tf-ln-t")?.textContent).toBe("payout-api");
 });
 
 test("a row with no actions keeps the sheet shut and the footer says nothing about Tab", async () => {
