@@ -353,7 +353,8 @@ pub trait Adapter: Sized + 'static {
     /// text (1.5.0, #2443), a built-in adapter's `DocWrites::body_from_text`:
     /// `## ` starts a section, `- ` a list item, a blank line a paragraph.
     /// Queued as a `WriteOp::CreatePage`. Called as [`Self::project`] is.
-    /// The default is the text as it is.
+    /// The default is the text as it is, escaping nothing, so an adapter
+    /// that declares `create_page` overrides it.
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
     fn body_from_text(text: &str) -> String {
         text.to_owned()

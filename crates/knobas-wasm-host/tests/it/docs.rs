@@ -23,7 +23,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// in the fixture).
 const SENT: &str = "unindexed words the fixture sent for this page";
 
-fn instance() -> SourceInstance {
+pub(crate) fn instance() -> SourceInstance {
     SourceInstance {
         id: "harbour".to_owned(),
         kind: "wasm-fixture".to_owned(),
@@ -306,7 +306,7 @@ async fn a_pages_search_text_is_built_by_the_host_from_the_projection() {
 
 /// A local server that answers every request `200` and counts the
 /// connections it accepted.
-async fn counting_server() -> (String, Arc<AtomicUsize>) {
+pub(crate) async fn counting_server() -> (String, Arc<AtomicUsize>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let accepted = Arc::new(AtomicUsize::new(0));

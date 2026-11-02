@@ -3,12 +3,15 @@
 //! own markup, refuses a section for each reason a built-in adapter does,
 //! and makes them under the projection's terms: no way out, its deadline.
 
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use knobas_source::docs::{EditRefused, SectionEdit, SectionRefusal};
 use knobas_wasm_host::limits::Limits;
 use knobas_wasm_host::load_fixture;
 use serde_json::{Value, json};
+
+use crate::docs::{counting_server, instance};
 
 /// A page payload whose body is `body`, at version 3, as the fixture emits
 /// one.
@@ -131,4 +134,41 @@ fn a_section_edit_that_traps_or_spins_makes_nothing() {
         adapter.edit_section("page", &payload(SECTIONS), 1, "x"),
         Some(Ok(_))
     ));
+}
+
+/// The section edit has no HTTP capability, as the projection has none: an
+/// edit that sends a request to a host the adapter's manifest declares, and
+/// which the adapter's own calls reach, is refused before it leaves, so it
+/// traps and makes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_section_edit_reaches_no_host_even_one_its_manifest_declares() {
+    let (address, accepted) = counting_server().await;
+    let adapter = load_fixture().with_hosts(vec![
+        knobas_wasm_host::allow::HostPattern::parse(&address).unwrap(),
+    ]);
+    let url = format!("http://{address}/page");
+    // The adapter's own call reaches the host: the direction a refusal
+    // could otherwise hide.
+    let mut fetching = instance();
+    fetching.config = json!({ "fetch": url });
+    adapter
+        .build(fetching)
+        .unwrap()
+        .test_connection()
+        .await
+        .expect("the declared host answers the adapter's own call");
+    assert_eq!(accepted.load(Ordering::SeqCst), 1);
+
+    let mut asks = payload(SECTIONS);
+    asks["fetch"] = url.into();
+    let editing = adapter.clone();
+    let edit = tokio::task::spawn_blocking(move || editing.edit_section("page", &asks, 1, "x"))
+        .await
+        .unwrap();
+    assert_eq!(edit, None, "the refused request trapped the edit");
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        1,
+        "nothing reached the host"
+    );
 }
