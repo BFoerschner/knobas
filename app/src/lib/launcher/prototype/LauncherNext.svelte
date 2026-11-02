@@ -56,6 +56,11 @@
   name, Keys, Filter, a flow's step), highlighted and not part of the text;
   a saved list can be a favourite too, listed first in the empty box.
 
+  Round 7 (Björn, 2026-11-02): a saved list applies by putting its own text
+  back into the box (filters and words) and running it, never `list:<id>`;
+  binding a key is a panel that shows the keys as they are pressed, until
+  Enter or OK keeps them.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -597,6 +602,42 @@
     flow: Flow | null;
     /** What the box holds while the sheet is open: the filter, a pick's filter, or the new name. The search words wait in `session.raw`. */
     filter: string;
+    /** While binding: the chord pressed so far, `null` before the first full one. */
+    chord?: string | null;
+  }
+
+  /** The modifiers held right now, for the panel to show while a chord is being pressed. */
+  let held = $state<string[]>([]);
+  function heldOf(event: KeyboardEvent): string[] {
+    const out: string[] = [];
+    if (event.ctrlKey) out.push("⌃");
+    if (event.altKey) out.push("⌥");
+    if (event.shiftKey) out.push("⇧");
+    if (event.metaKey) out.push("⌘");
+    return out;
+  }
+  /** A chord split into the chips the panel draws: `⌘⇧O` is ⌘, ⇧, O. */
+  function chipsOf(chord: string): string[] {
+    return [...chord];
+  }
+
+  /** Keep the chord shown in the panel: on the action, or on the list. */
+  function confirmBind(current: Sheet) {
+    const chord = current.chord ?? null;
+    const kind = kindOfRow(current.row);
+    if (current.level === "bind-list" && listId !== null) {
+      bindList(listId, chord);
+      push({ text: chord ? `${chord} opens ${current.title}` : "Key removed" });
+      sheet = { ...current, level: "root", chord: null };
+      session.set(session.raw);
+      return;
+    }
+    const target = shown[current.selected];
+    if (target) {
+      bindAction(kind, target.id, chord);
+      push({ text: chord ? `${chord} runs ${target.label} on ${kind === "pr" ? "pull requests" : `${kind}s`}` : `Key removed from ${target.label}` });
+    }
+    sheet = { ...current, level: "root", chord: null };
   }
 
   let sheet = $state<Sheet | null>(null);
@@ -795,11 +836,23 @@
   }
 
   /** The sheet's rows for `row`, in the order they are drawn. Empty: no sheet. */
-  /** A saved list's id and name, from a result row or a board row; `null` for anything else. */
-  function listOf(row: LauncherRow): { id: string; label: string } | null {
-    if (row.kind === "hit" && row.hit.kind === "list") return { id: keyOf(row.hit.entity_id), label: row.hit.title };
-    if (row.kind === "list") return { id: row.list.id, label: row.list.label };
-    return null;
+  /** A saved list's id, name and the text it keeps, from a result row or a board row; `null` for anything else. */
+  function listOf(row: LauncherRow): { id: string; label: string; query: string | null } | null {
+    const summary = row.kind === "hit" && row.hit.kind === "list" ? lists.find((list) => list.id === keyOf(row.hit.entity_id)) : row.kind === "list" ? row.list : undefined;
+    if (!summary) return null;
+    // A saved list's description is the text it was saved with (`saved.rs`); a refused one carries the refusal instead.
+    return { id: summary.id, label: summary.label, query: summary.needs_attention ? null : summary.description };
+  }
+
+  /** Apply a saved list: its own text back in the box, filters and words, and the search run again. */
+  function applyList(list: { query: string | null; label: string }) {
+    sheet = null;
+    if (list.query === null) {
+      push({ text: `${list.label} needs attention; its text cannot run`, tone: "err" });
+      return;
+    }
+    session.set(list.query);
+    box?.focus();
   }
 
   function itemsFor(row: LauncherRow): SheetItem[] {
@@ -808,7 +861,7 @@
       const { id, label } = list;
       const starred = favouriteLists.includes(id);
       return [
-        { id: "apply", label: "Apply", detail: "Its filters in the box, as Enter does", run: () => activate(row) },
+        { id: "apply", label: "Apply", detail: list.query ? `${list.query} in the box, as Enter does` : "It needs attention; nothing to apply", run: () => applyList(list) },
         {
           id: "rename",
           label: "Rename",
@@ -824,7 +877,7 @@
           id: "key",
           label: listKeys[id] ? `Key: ${listKeys[id]}` : "Assign key…",
           detail: listKeys[id] ? "Press new keys, or Backspace to remove them" : "A chord that opens this list from anywhere",
-          run: () => { if (sheet) sheet = { ...sheet, level: "bind-list", filter: "" }; },
+          run: () => { if (sheet) sheet = { ...sheet, level: "bind-list", filter: "", chord: listKeys[id] ?? null }; },
         },
       ];
     }
@@ -1105,10 +1158,16 @@
       if (list) {
         event.preventDefault();
         open = true;
-        void tick().then(() => session.set(`list:${list}`));
+        void tick().then(async () => {
+          if (!listsLoaded) await homeNext();
+          const summary = lists.find((candidate) => candidate.id === list);
+          if (summary) applyList({ query: summary.needs_attention ? null : summary.description, label: summary.label });
+        });
       }
     }
     window.addEventListener("keydown", onkeydown);
+    const onkeyup = () => { if (held.length > 0) held = []; };
+    window.addEventListener("keyup", onkeyup);
     const preset = params.get("launcher-open");
     if (preset !== null) {
       open = true;
@@ -1116,6 +1175,7 @@
     }
     return () => {
       window.removeEventListener("keydown", onkeydown);
+      window.removeEventListener("keyup", onkeyup);
       session.dispose();
     };
   });
@@ -1158,18 +1218,10 @@
   }
 
   function activate(row: LauncherRow) {
-    // A saved list applies its filters in the box and keeps the reader here.
-    if (row.kind === "hit" && row.hit.kind === "list") {
-      sheet = null;
-      session.set(`list:${keyOf(row.hit.entity_id)}`);
-      box?.focus();
-      return;
-    }
-    if (row.kind === "list") {
-      if (row.list.needs_attention) return;
-      sheet = null;
-      session.set(`list:${row.list.id}`);
-      box?.focus();
+    // A saved list applies its own text in the box and keeps the reader here.
+    const list = listOf(row);
+    if (list) {
+      applyList(list);
       return;
     }
     if (row.kind === "syntax") {
@@ -1206,7 +1258,8 @@
       sheet = null;
       help = null;
       naming = null;
-      session.set(`list:${list}`);
+      const summary = lists.find((candidate) => candidate.id === list);
+      if (summary) applyList({ query: summary.needs_attention ? null : summary.description, label: summary.label });
       return true;
     }
     if (help || naming) return false;
@@ -1223,48 +1276,35 @@
     return true;
   }
 
-  /** Waiting for keys: the next chord binds, Backspace unbinds, Esc leaves it as it was. */
+  /** The panel's keys: every press is shown; a full chord is kept in the panel, Enter or OK keeps it for good, Backspace clears it, Esc leaves things as they were. */
   function bindKey(event: KeyboardEvent, current: Sheet): void {
+    held = heldOf(event);
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
-      sheet = { ...current, level: "root" };
+      held = [];
+      sheet = { ...current, level: "root", chord: null };
       return;
     }
-    const kind = kindOfRow(current.row);
-    const target = current.level === "bind-list" ? null : shown[current.selected];
-    if (event.key === "Backspace") {
+    if (event.key === "Enter" && !event.metaKey && !event.ctrlKey && !event.altKey) {
       event.preventDefault();
-      if (current.level === "bind-list" && listId !== null) {
-        bindList(listId, null);
-        push({ text: "Key removed" });
-      } else if (target) {
-        bindAction(kind, target.id, null);
-        push({ text: `Key removed from ${target.label}` });
-      }
-      sheet = { ...current, level: "root" };
-      if (current.level === "bind-list") session.set(session.raw);
+      held = [];
+      confirmBind(current);
       return;
     }
+    if (event.key === "Backspace" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      event.preventDefault();
+      sheet = { ...current, chord: null };
+      return;
+    }
+    event.preventDefault();
     const chord = chordOf(event);
     if (!chord) return;
-    event.preventDefault();
     if (RESERVED.has(chord)) {
       push({ text: `${chord} is the launcher's own`, tone: "err" });
       return;
     }
-    if (current.level === "bind-list" && listId !== null) {
-      bindList(listId, chord);
-      push({ text: `${chord} opens ${current.title}` });
-      sheet = { ...current, level: "root" };
-      session.set(session.raw);
-      return;
-    }
-    if (target) {
-      bindAction(kind, target.id, chord);
-      push({ text: `${chord} runs ${target.label} on ${kind === "pr" ? "pull requests" : `${kind}s`}` });
-    }
-    sheet = { ...current, level: "root" };
+    sheet = { ...current, chord };
   }
 
   /** ⌘S: the box takes the list's name; Enter saves. `null` when not naming. */
@@ -1291,7 +1331,7 @@
     }
     if (current.level === "root" && chordOf(event) === "⌘B" && shown[current.selected] && !shown[current.selected]?.link) {
       event.preventDefault();
-      sheet = { ...current, level: "bind" };
+      sheet = { ...current, level: "bind", chord: chordFor(kindOfRow(current.row), shown[current.selected]!.id) };
       return;
     }
     if (current.level === "rename") {
@@ -1504,13 +1544,33 @@
         </div>
         {#if sheet.level === "rename"}
           <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
-        {:else if sheet.level === "bind"}
-          <p class="tf-ln-none">
-            Press a modifier and a letter or digit, such as ⌘⇧O. It will run <strong>{shown[sheet.selected]?.label ?? ""}</strong> on any {kindOfRow(sheet.row)} you have selected, without opening the actions.
-            Backspace removes the key, Esc leaves it as it is.
-          </p>
-        {:else if sheet.level === "bind-list"}
-          <p class="tf-ln-none">Press a modifier and a letter or digit, such as ⌘1. It will open this list from anywhere. Backspace removes the key, Esc leaves it as it is.</p>
+        {:else if sheet.level === "bind" || sheet.level === "bind-list"}
+          {@const current = sheet}
+          <div class="bindpanel" role="group" aria-label="Keys">
+            <p class="bindwhat">
+              {#if current.level === "bind-list"}
+                The keys that open <strong>{current.title}</strong> from anywhere
+              {:else}
+                The keys that run <strong>{shown[current.selected]?.label ?? ""}</strong> on any {kindOfRow(current.row) === "pr" ? "pull request" : kindOfRow(current.row)} you have selected
+              {/if}
+            </p>
+            <div class="bindkeys" aria-live="polite">
+              {#if current.chord}
+                {#each chipsOf(current.chord) as chip, i (i)}<kbd class="bigkey">{chip}</kbd>{/each}
+              {:else if held.length > 0}
+                {#each held as chip, i (i)}<kbd class="bigkey dim">{chip}</kbd>{/each}
+                <span class="bindhint">… and a letter or digit</span>
+              {:else}
+                <span class="bindhint">Press a modifier and a letter or digit, such as ⌘⇧O</span>
+              {/if}
+            </div>
+            <div class="bindbtns">
+              <button type="button" class="tf-btn tf-primary" onclick={() => confirmBind(current)}>{current.chord ? "OK" : "Remove the key"}</button>
+              <button type="button" class="tf-btn" onclick={() => { sheet = { ...current, chord: null }; box?.focus(); }}>Clear</button>
+              <button type="button" class="tf-btn" onclick={() => { sheet = { ...current, level: "root", chord: null }; box?.focus(); }}>Cancel</button>
+            </div>
+            <p class="bindhint">Enter keeps the keys, Backspace clears them, Esc leaves things as they were.</p>
+          </div>
         {:else}
           <!-- Keys from a clicked chip land here first, so Esc never reaches the dialog; a click gives the box its focus back. -->
           <div id={sheetId} class="sheet" role="listbox" tabindex="-1" aria-label="Actions on {sheet.title}" {onkeydown} onclick={() => box?.focus()}>
@@ -1744,6 +1804,18 @@
   }
   .rel button:hover { border-color: var(--ink-2); color: var(--ink); }
   .rel .pick, .rel .pick:hover { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+  .bindpanel { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 28px 18px; }
+  .bindwhat { font-size: var(--t-sm); color: var(--ink-2); text-align: center; }
+  .bindwhat strong { color: var(--ink); }
+  .bindkeys { display: flex; align-items: center; gap: 8px; min-height: 48px; }
+  .bigkey {
+    display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 44px; padding: 0 12px;
+    border: 1px solid var(--rule); border-bottom-width: 3px; border-radius: 6px; background: var(--sheet-2);
+    font: 600 var(--t-2xl)/1 var(--sans); color: var(--ink);
+  }
+  .bigkey.dim { color: var(--ink-2); }
+  .bindhint { font-size: var(--t-xs); color: var(--ink-2); }
+  .bindbtns { display: flex; gap: var(--control-gap); }
   .bound { font-size: var(--t-2xs); padding: 0 4px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink); margin-left: 4px; }
   .keys { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 18px; margin-top: 6px; border-top: 1px solid var(--rule); font-size: var(--t-xs); color: var(--ink-2); }
 </style>
