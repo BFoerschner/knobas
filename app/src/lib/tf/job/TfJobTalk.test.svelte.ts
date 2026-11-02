@@ -171,7 +171,7 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
     },
     roomSuggestions: () => Promise.resolve({ rows: [PROPOSAL, ELSEWHERE], total: 2, more: [] }),
     search: () => Promise.reject(new Error("not in this test")),
-    launcherHome: () => Promise.resolve({ recent: [], stale_sources: [] } as never),
+    launcherHome: () => Promise.resolve({ recent: [], favourites: [], stale_sources: [] } as never),
     jobReach: () => Promise.resolve([]),
     jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
     hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
