@@ -36,7 +36,10 @@
 //!
 //! The markup is read into a small element tree ([`parse`]): an unmatched
 //! close tag closes up to its opener or is ignored, an unclosed element ends
-//! with the document, a `<` that never closes is text. It never fails: broken
+//! with the document, a `<` that never closes is text. HTML's implied end
+//! tags are read as a browser reads them (`<p>a<p>b` is two paragraphs,
+//! `<li>a<li>b` two items; likewise `dt`/`dd`, `tr`, `td`/`th`, `option`),
+//! and elements past [`MAX_DEPTH`] read as the text they hold. It never fails: broken
 //! markup reads as the text it holds. Pure, synchronous, no dependency beyond
 //! `std`, so it compiles for `wasm32-wasip2` and the adapter SDK can carry it.
 
@@ -115,6 +118,12 @@ fn is_void(name: &str) -> bool {
         "br" | "hr" | "img" | "col" | "input" | "meta" | "link" | "wbr" | "source" | "area"
     )
 }
+
+/// How deep [`parse`] nests elements. Past it a start tag is dropped and
+/// what it holds reads as text in the innermost element, so the tree, the
+/// reader's walks over it and a hook's [`Reading::blocks`] stay bounded.
+/// Real pages, Confluence macros in layouts included, nest a few dozen deep.
+pub const MAX_DEPTH: usize = 128;
 
 /// One open element on the parse stack: name, tag, children, start offset.
 type Open = (String, String, Vec<Node>, usize);
@@ -239,6 +248,13 @@ pub fn parse(markup: &str) -> Vec<Node> {
                 }
             }
         }
+        if stack.len() > MAX_DEPTH {
+            // Past the depth the tag is dropped and its contents join the
+            // innermost open element: every walk over the tree recurses
+            // once per level, and markup anyone can author must not
+            // overflow the stack. Its close tag finds no opener.
+            continue;
+        }
         stack.push((name, tag.to_owned(), vec![], start));
     }
     let end = at(rest);
@@ -316,8 +332,8 @@ fn implied_ends(name: &str) -> impl Iterator<Item = Rule> {
         "li" => Some((
             &["li"],
             &[
-                "ul", "ol", "menu", "table", "td", "th", "caption", "template", "button",
-                "object", "select",
+                "ul", "ol", "menu", "table", "td", "th", "caption", "template", "button", "object",
+                "select",
             ],
         )),
         "dt" | "dd" => Some((

@@ -370,7 +370,9 @@ fn list_items_and_cells_left_open_end_at_their_next_sibling() {
         }]
     );
     assert_eq!(
-        shape(&parse("<table><tr><th>h<td>a<tr><td>b<td><p>c<td>d</table>")),
+        shape(&parse(
+            "<table><tr><th>h<td>a<tr><td>b<td><p>c<td>d</table>"
+        )),
         "table[tr[th[] td[]] tr[td[] td[p[]] td[]]]"
     );
     assert_eq!(
@@ -414,4 +416,39 @@ fn an_implied_end_ends_where_the_next_tag_starts() {
         })
         .collect();
     assert_eq!(spans, vec![(0, 5), (5, 14)]);
+}
+
+/// Markup anyone can author nests as deep as it likes; the reader must not
+/// overflow the stack on it (#2449).
+#[test]
+fn nesting_past_the_depth_reads_as_the_text_it_holds() {
+    let deep = 100_000;
+    let markup = format!(
+        "{}words{}<p>after</p>",
+        "<div><span><b>".repeat(deep / 3),
+        "</b></span></div>".repeat(deep / 3)
+    );
+    assert_eq!(
+        plain(&markup),
+        vec![
+            DocBlock::Paragraph {
+                text: vec![strong("words")]
+            },
+            para("after")
+        ]
+    );
+}
+
+/// The deepest stack a source builds: a hook that reads its children back
+/// through the reader inside a sentence, nested past the depth.
+#[test]
+fn a_hook_reading_back_through_the_reader_stays_bounded_too() {
+    let deep = 100_000;
+    let markup = format!(
+        "{}words{}",
+        "<x-note><p><b>".repeat(deep / 3),
+        "</b></p></x-note>".repeat(deep / 3)
+    );
+    let blocks = to_blocks(&markup, &Wiki);
+    assert!(format!("{blocks:?}").contains("\"words\""), "{blocks:?}");
 }
