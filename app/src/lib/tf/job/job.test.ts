@@ -83,6 +83,12 @@ test("the Logged row: spent of the estimate over a meter, the time past the esti
     { author: "lena", seconds: 6 * 3600 },
   ]);
   expect(loggedRow(over, "mara")?.meter).toEqual({ mine: (1 / 7) * 100, others: (5 / 7) * 100, past: (1 / 7) * 100 });
+  // Mine alone past the estimate: mine fills the estimate, the others' have no room in it.
+  const mostlyMine = logged(7 * 3600, 6 * 3600, [
+    { author: "mara", seconds: 6.5 * 3600 },
+    { author: "lena", seconds: 0.5 * 3600 },
+  ]);
+  expect(loggedRow(mostlyMine, "mara")?.meter).toEqual({ mine: (6 / 7) * 100, others: 0, past: (1 / 7) * 100 });
 });
 
 test("the Logged row tells my share only when somebody else has logged too", () => {
