@@ -80,11 +80,14 @@ fn run(config: &str, number: u32, running: bool) -> serde_json::Value {
 }
 
 /// A TeamCity that answers every run's log with `lines[run]`, starting at
-/// line 101, and counts the reads.
+/// line 101, and counts the reads. With a `gate`, a read answers only once
+/// the gate has a permit for it.
+#[derive(Clone)]
 struct Logs {
     id: String,
     lines: Vec<(String, Vec<String>)>,
     reads: Arc<Mutex<Vec<String>>>,
+    gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 #[async_trait::async_trait]
@@ -134,6 +137,9 @@ impl Source for Logs {
         assert_eq!(from, None, "the tail is asked for");
         assert_eq!(count, knobas_sync::pipeline_logs::TAIL_LINES);
         self.reads.lock().unwrap().push(entity.to_owned());
+        if let Some(gate) = &self.gate {
+            gate.acquire().await.unwrap().forget();
+        }
         let (_, lines) = self
             .lines
             .iter()
@@ -258,6 +264,7 @@ async fn the_newest_finished_runs_log_is_stored_once_and_found_by_everything() {
             ),
         ],
         reads: Arc::clone(&reads),
+        gate: None,
     };
 
     let stored = knobas_sync::pipeline_logs::refresh(&pool, &source, &logs)
@@ -357,6 +364,7 @@ async fn a_newer_finished_run_replaces_the_stored_log() {
         id: source.clone(),
         lines,
         reads: Arc::clone(&reads),
+        gate: None,
     };
     knobas_sync::pipeline_logs::refresh(&pool, &source, &logs(lines.clone()))
         .await
@@ -387,4 +395,157 @@ async fn a_newer_finished_run_replaces_the_stored_log() {
             .collect::<Vec<_>>(),
         vec![pipeline]
     );
+}
+
+/// A registry that builds [`Logs`] for every source.
+struct Builds(Logs);
+
+impl knobas_sync::scheduler::AdapterRegistry for Builds {
+    fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
+        Registry::for_process().descriptors()
+    }
+    fn build(
+        &self,
+        _instance: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn Source>, SourceError> {
+        Ok(Box::new(self.0.clone()))
+    }
+}
+
+struct Quiet;
+
+impl knobas_sync::scheduler::SyncEvents for Quiet {
+    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
+    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+}
+
+struct Connections(knobas_db::embedded::Connector);
+
+#[async_trait::async_trait]
+impl knobas_sync::scheduler::RunConnections for Connections {
+    async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
+        self.0.connect().await
+    }
+}
+
+/// Resolves when the run it watches ends.
+struct Ending(Mutex<Option<tokio::sync::oneshot::Sender<()>>>);
+
+impl knobas_sync::progress::ProgressSink for Ending {
+    fn report(&self, progress: knobas_sync::progress::SyncProgress) {
+        use knobas_sync::progress::SyncPhase;
+        if matches!(progress.phase, SyncPhase::Finished | SyncPhase::Failed)
+            && let Some(done) = self.0.lock().unwrap().take()
+        {
+            let _ = done.send(());
+        }
+    }
+}
+
+/// A sync run ends before the logs that follow it are read: a log that is
+/// slow to come holds neither the run's verdict nor the source, and is stored
+/// once it comes.
+#[tokio::test]
+async fn a_sync_run_ends_before_its_pipelines_logs_are_read() {
+    let connector = knobas_db::test_util::scratch_database("pipeline_logs").await;
+    let pool = connector.pool(4).await.unwrap();
+    let t = token();
+    let source = format!("tc{}", &t[..8]);
+    crate::support::source_config(
+        &pool,
+        &source,
+        "teamcity",
+        "TeamCity",
+        &serde_json::json!({}),
+    )
+    .await;
+    let secrets = Arc::new(knobas_secrets::MemoryStore::new());
+    knobas_secrets::SecretStore::put(
+        secrets.as_ref(),
+        &knobas_secrets::KeychainAccount::source(&source),
+        &knobas_secrets::Secret::just(knobas_source::AuthMethod::Pat, "token"),
+    )
+    .unwrap();
+    everything(&pool, "warmup", false).await;
+    let config = format!("{t}_Deploy");
+    let pipeline = item(
+        &pool,
+        &source,
+        "build_config",
+        &config,
+        "Deploy",
+        serde_json::json!({ "id": config, "name": "Deploy" }),
+        5,
+    )
+    .await;
+    let run = item(
+        &pool,
+        &source,
+        "build",
+        "1",
+        "Deploy #1",
+        run(&config, 1, false),
+        1,
+    )
+    .await;
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let reads = Arc::new(Mutex::new(Vec::new()));
+    let scheduler =
+        knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
+            pool: pool.clone(),
+            connections: Arc::new(Connections(connector)),
+            registry: Arc::new(Builds(Logs {
+                id: source.clone(),
+                lines: vec![(run.clone(), vec![format!("slow{t} to come")])],
+                reads: Arc::clone(&reads),
+                gate: Some(Arc::clone(&gate)),
+            })),
+            secrets,
+            events: Arc::new(Quiet),
+            timing: knobas_sync::scheduler::SchedulerTiming::default(),
+            quit: knobas_sync::scheduler::Quit::default(),
+        })
+        .await
+        .unwrap();
+
+    let (done, ended) = tokio::sync::oneshot::channel();
+    scheduler
+        .trigger(
+            &source,
+            knobas_sync::SyncTrigger::Manual,
+            Some(Arc::new(Ending(Mutex::new(Some(done))))),
+        )
+        .await
+        .unwrap();
+    // Well inside `pipeline_logs::BUDGET`, which a run that waited on the
+    // held read would take before it ended.
+    tokio::time::timeout(std::time::Duration::from_secs(8), ended)
+        .await
+        .expect("the run ends while its pipeline's log is still coming")
+        .unwrap();
+
+    gate.add_permits(1);
+    let stored = async {
+        loop {
+            let run_id: Option<String> =
+                sqlx::query_scalar("select run_id from sync.pipeline_log where pipeline_id = $1")
+                    .bind(&pipeline)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap();
+            if let Some(run_id) = run_id {
+                return run_id;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    };
+    assert_eq!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), stored)
+            .await
+            .expect("the log is stored once it comes"),
+        run
+    );
+    assert_eq!(*reads.lock().unwrap(), vec![run]);
+    scheduler.shutdown().await;
 }
