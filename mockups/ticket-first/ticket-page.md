@@ -4,6 +4,16 @@
 the result and a short record of what was tried. The mockup links the app's own stylesheets
 (`app/src/lib/tf/css/`) and the vendored fonts, so what it shows is what the port draws.
 
+**Shipped.** Spec #2396 built this page (integration branch `spec-2396`, PR #2409). The page is
+`app/src/lib/tf/job/TfJob.svelte` with its card `TfJobCard.svelte`, styled in `tf/css/job.css`;
+`?fake-ipc` draws it at `#/ticket/<id>` (PAY-231 has every row). Since then this mockup is a
+record: where the app and the mockup differ, the app and the docs decide (CONTEXT.md, **Ticket
+page** and **Job**; the design system's Controls, Colour and Layout; the shell conventions'
+address lines; `docs/decisions/2026-11-02-ticket-page-and-job-one-page.md`). Known differences:
+the reporter is the source's username, as the assignee is (the fake keeps *Lena Hoffmann*); an
+unassigned ticket's Assignee row reads *Unassigned* rather than going; *Try again* is a small
+button, not a link; the width handle also takes ←/→ (16 px) and Enter to fit.
+
 ## What was wrong
 
 The ticket page (#2332, spec #2227) put the Tickets preview's component on a 640px yellow card left
@@ -39,8 +49,7 @@ job.css). What changes between a ticket you read and the ticket you are on is th
   timer, *Stop and log* or *Start timer*, plain: the running time is the top bar's chip, which
   the card does not repeat. The nav has no Job entry any more: Tickets is the one entry, home
   (`#/job`) draws the pinned ticket's page, and the timer chip, the Tickets view and home all
-  reach it. The Job nav entry
-  names it and the timer chip runs on it. No hole, no 64px key, no status select, no *Time this
+  reach it. No hole, no 64px key, no status select, no *Time this
   week* (Time has it); a status move is the view's or the source's.
 
 So yellow means exactly what the design system says, and nothing else gets it.
