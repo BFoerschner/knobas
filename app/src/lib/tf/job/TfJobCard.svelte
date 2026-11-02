@@ -251,11 +251,11 @@
       <dd>
         <span>{line}</span>
         {#if logged.meter !== null}
-          <span class="tf-tkmeter" class:tf-tkover={logged.meter.over} role="img" aria-label="{logged.text} logged{logged.yours === null ? '' : `, ${logged.yours}`}"
+          <span class="tf-tkmeter" class:tf-tkover={logged.meter.past > 0} role="img" aria-label="{logged.text} logged{logged.yours === null ? '' : `, ${logged.yours}`}"
             >{#if logged.meter.mine > 0}<i class="tf-tkme" {@attach width(logged.meter.mine)}></i>{/if}{#if logged.meter.others > 0}<i
                 class="tf-tkothers"
                 {@attach width(logged.meter.others)}
-              ></i>{/if}</span
+              ></i>{/if}{#if logged.meter.past > 0}<i class="tf-tkpast" {@attach width(logged.meter.past)}></i>{/if}</span
           >
         {/if}
       </dd>

@@ -587,6 +587,22 @@ test("PAY-231's meter splits the logged time against the estimate: mine in full 
   expect(page.querySelector("dl.tf-facts .tf-tkmeter")?.getAttribute("aria-label")).toBe("2h 10m of 6h logged, 1h 40m yours");
 });
 
+test("a ticket past its estimate draws the time past it as the meter's last segment, in the error tint", async () => {
+  await openOn("#/ticket/mock%3APAY-244", "Refund webhooks retry");
+  const page = await pageOf("PAY-244");
+  await until(() => meter(page) !== null, "no meter drawn");
+  // 5h 30m is the track: 1h of it mine, 3h of the others' up to the 4h estimate, 1h 30m past it.
+  expect(meter(page)).toEqual({
+    segments: [
+      ["tf-tkme", "18.2%"],
+      ["tf-tkothers", "54.5%"],
+      ["tf-tkpast", "27.3%"],
+    ],
+    over: true,
+  });
+  expect(page.querySelector("dl.tf-facts .tf-tkmeter")?.getAttribute("aria-label")).toBe("5h 30m of 4h logged, 1h yours");
+});
+
 test("a ticket with no estimate draws the time alone and no meter; my own report is in full ink", async () => {
   await openOn("#/ticket/mock%3APAY-228", "Idempotency key on the payout endpoint");
   const page = await pageOf("PAY-228");

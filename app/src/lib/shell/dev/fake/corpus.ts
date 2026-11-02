@@ -197,6 +197,10 @@ export const CORPUS: {
       ...(key === "PAY-240" ? { labels: ["finance"] } : {}),
       // An estimate and nothing logged yet (#2403): *0m of 2h*.
       ...(key === "PAY-240" ? { reporter: "Priya Nair", estimate_h: 2 } : {}),
+      // Spent past the estimate (spec #2396): 5h 30m of 4h, 1h of it mara's.
+      ...(key === "PAY-244"
+        ? { estimate_h: 4, time_spent_seconds: 19800, worklogs: [{ who: "priya", seconds: 16200 }, { who: "mara", seconds: 3600 }] }
+        : {}),
       description: `${title}. Finance asked for this; scope is the stage environment first.`,
     }),
   ),

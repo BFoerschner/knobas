@@ -62,7 +62,9 @@
 .tf-sheetcard .tf-tkmeter { background: var(--rule-2); }
 .tf-sheetcard .tf-tkmeter .tf-tkme { background: var(--ink); }
 .tf-sheetcard .tf-tkmeter .tf-tkothers { background: var(--ink-2); }
-.tf-tkmeter.tf-tkover { background: var(--err-bg); }
+/* Spent past the estimate: the track is the time spent, and the part past the estimate is its last segment, in the
+   error tint (spec #2396), on the yellow and on the sheet alike. */
+.tf-tkmeter .tf-tkpast { background: var(--err); }
 .tf-ticketcard .tf-facts dd .tf-tkmeter { flex: 1 0 100%; margin: -2px 0 4px; }
 .tf-ticketcard .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
 .tf-sheetcard .tf-lab { border-color: var(--rule); color: var(--ink-2); }

@@ -68,15 +68,21 @@ const logged = (
   ...(logged_by === undefined ? {} : { logged_by }),
 });
 
-test("the Logged row: spent of the estimate over a meter, the track's error tint once spent passes it", () => {
+test("the Logged row: spent of the estimate over a meter, the time past the estimate its own segment in the error tint", () => {
   expect(loggedRow(logged(7800, 6 * 3600), "mara")).toEqual({
     text: "2h 10m of 6h",
     yours: null,
-    meter: { mine: 0, others: (7800 / 21600) * 100, over: false },
+    meter: { mine: 0, others: (7800 / 21600) * 100, past: 0 },
   });
-  // 7h against 6h: the track is the 7h, the estimate passed.
-  expect(loggedRow(logged(7 * 3600, 6 * 3600), "mara")?.meter).toEqual({ mine: 0, others: 100, over: true });
-  expect(loggedRow(logged(6 * 3600, 6 * 3600), "mara")?.meter?.over, "exactly the estimate is not over it").toBe(false);
+  // 7h against 6h: the track is the 7h, the estimate's 6h fill it as logged, the hour past it is its own segment.
+  expect(loggedRow(logged(7 * 3600, 6 * 3600), "mara")?.meter).toEqual({ mine: 0, others: (6 / 7) * 100, past: (1 / 7) * 100 });
+  expect(loggedRow(logged(6 * 3600, 6 * 3600), "mara")?.meter?.past, "exactly the estimate is not over it").toBe(0);
+  // Mine first within the estimate, then the others' up to it; what is past it is past it, whoever logged it.
+  const over = logged(7 * 3600, 6 * 3600, [
+    { author: "mara", seconds: 3600 },
+    { author: "lena", seconds: 6 * 3600 },
+  ]);
+  expect(loggedRow(over, "mara")?.meter).toEqual({ mine: (1 / 7) * 100, others: (5 / 7) * 100, past: (1 / 7) * 100 });
 });
 
 test("the Logged row tells my share only when somebody else has logged too", () => {
@@ -87,7 +93,7 @@ test("the Logged row tells my share only when somebody else has logged too", () 
   expect(loggedRow(shared, "mara")).toEqual({
     text: "2h 10m of 6h",
     yours: "1h 40m yours",
-    meter: { mine: (6000 / 21600) * 100, others: (1800 / 21600) * 100, over: false },
+    meter: { mine: (6000 / 21600) * 100, others: (1800 / 21600) * 100, past: 0 },
   });
   // All of it mine: nothing to tell apart, one segment.
   const alone = logged(6000, 6 * 3600, [{ author: "mara", seconds: 6000 }]);
@@ -103,7 +109,7 @@ test("the Logged row: the time alone with no estimate, 0m of an estimate with no
   expect(loggedRow(logged(undefined, 2 * 3600), "mara")).toEqual({
     text: "0m of 2h",
     yours: null,
-    meter: { mine: 0, others: 0, over: false },
+    meter: { mine: 0, others: 0, past: 0 },
   });
   expect(loggedRow(logged(), "mara")).toBeNull();
 });

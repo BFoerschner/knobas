@@ -448,11 +448,12 @@ export type LoggedRow = {
   yours: string | null;
   /**
    * The meter under the line, `null` with no estimate: each segment's share
-   * of the track in percent, mine first, and whether spent passed the
-   * estimate. `mine` is 0 unless `yours` is drawn: the logged time is then
-   * one segment.
+   * of the track in percent, mine first, then the others', both within the
+   * estimate, then `past`, the time logged past the estimate (0 until spent
+   * passes it), drawn in the error tint. `mine` is 0 unless `yours` is drawn:
+   * the logged time is then one segment.
    */
-  meter: { mine: number; others: number; over: boolean } | null;
+  meter: { mine: number; others: number; past: number } | null;
 };
 
 /** Seconds as the card writes a length: whole minutes, `2h 10m`, `0m`. */
@@ -461,7 +462,8 @@ const spelled = (seconds: number) => minutesLabel(Math.floor(seconds / 60));
 /**
  * The card's *Logged* row (spec #2396): the time spent against the estimate,
  * with a meter whose track is the estimate (or the time spent, once that is
- * longer), tinted once spent passes it. Mine is the sum of the worklog's
+ * longer); the time past the estimate is the track's last segment, in the
+ * error tint. Mine is the sum of the worklog's
  * entries whose author is `me`, the source's username; it is told apart only
  * when somebody else has logged too. No estimate draws the time alone and no
  * meter, an estimate and nothing logged draws *0m of …* over an empty track,
@@ -482,10 +484,13 @@ export function loggedRow(
   if (estimate === null) return { text: spelled(logged), yours, meter: null };
   const track = Math.max(estimate, logged);
   const share = (seconds: number) => (seconds / track) * 100;
+  // Within the estimate mine comes first, then the others'; past it is one segment.
+  const within = Math.min(logged, estimate);
+  const mineWithin = split ? Math.min(mine, within) : 0;
   return {
     text: `${spelled(logged)} of ${spelled(estimate)}`,
     yours,
-    meter: { mine: split ? share(mine) : 0, others: share(split ? logged - mine : logged), over: logged > estimate },
+    meter: { mine: share(mineWithin), others: share(within - mineWithin), past: share(logged - within) },
   };
 }
 
