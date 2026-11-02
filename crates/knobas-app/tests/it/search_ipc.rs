@@ -2003,7 +2003,8 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
 /// the parent the **real** Gitea adapter declares. Without that wiring every
 /// `under:` here would match nothing and be reported as unknown -- the
 /// search crate's own tests, which pass the template by hand, could not see
-/// it go.
+/// it go. A branch, which declares its repo as a commit does: a commit is in
+/// no launcher answer (#2422).
 #[tokio::test]
 async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
     let pool = pool().await;
@@ -2016,16 +2017,16 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
     .execute(&pool)
     .await
     .unwrap();
-    let id = format!("gitea:tidewater/{t}@c90d11");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'commit','jitter')")
+    let id = format!("gitea:tidewater/{t}@refs/heads/jitter");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'branch','jitter')")
         .bind(&id)
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query(
         "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
-         values ($1, 'gitea', 'commit', 'jitter', 'jitter',
-                 jsonb_build_object('sha', 'c90d11', 'repository',
+         values ($1, 'gitea', 'branch', 'jitter', 'jitter',
+                 jsonb_build_object('name', 'jitter', 'repository',
                    jsonb_build_object('full_name', 'tidewater/' || $2, 'name', $2::text)))",
     )
     .bind(&id)
@@ -2052,8 +2053,9 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
 
 /// The query box's suggestions cross the bridge in the shape
 /// `app/src/lib/ipc/generated/search.ts` declares (#601), and through the searcher the
-/// app builds: the compiled-in adapters' declarations, so a Gitea commit's
-/// repo is offered for `under:` with its kind.
+/// app builds: the compiled-in adapters' declarations, so a Gitea branch's
+/// repo is offered for `under:` with its kind. A branch: `kind:` offers no
+/// commit since #2422.
 #[tokio::test]
 async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     let pool = pool().await;
@@ -2066,18 +2068,18 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     .execute(&pool)
     .await
     .unwrap();
-    let id = format!("gitea:o/{t}@abc");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'fix')")
+    let id = format!("gitea:o/{t}@refs/heads/fix");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'branch', 'fix')")
         .bind(&id)
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query(
         "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
-         values ($1, 'gitea', 'commit', 'fix', 'fix', $2)",
+         values ($1, 'gitea', 'branch', 'fix', 'fix', $2)",
     )
     .bind(&id)
-    .bind(serde_json::json!({ "sha": "abc", "repository": { "full_name": format!("o/{t}"), "name": t } }))
+    .bind(serde_json::json!({ "name": "fix", "repository": { "full_name": format!("o/{t}"), "name": t } }))
     .execute(&pool)
     .await
     .unwrap();
@@ -2096,8 +2098,8 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|k| k["kind"] == "commit")
-        .unwrap_or_else(|| panic!("a commit has a row: {v}"));
+        .find(|k| k["kind"] == "branch")
+        .unwrap_or_else(|| panic!("a branch has a row: {v}"));
     assert!(kind["label"].is_string(), "{v}");
     assert!(
         v["sources"]
@@ -2214,4 +2216,125 @@ fn a_query_without_the_titles_flag_reads_as_everything() {
     }))
     .unwrap();
     assert!(!decoded.titles);
+}
+
+/// The launcher's new kinds on the wire (#2422): a saved ticket view, a link
+/// set and a TeamCity configuration come back as groups `view` (VW), `set`
+/// (LS) and `pipeline` (PL), each hit with the path line its key cell reads,
+/// and the configuration's run is not among them.
+#[tokio::test]
+async fn views_sets_and_pipelines_are_kinds_on_the_wire_and_runs_are_not() {
+    let pool = pool().await;
+    let t = token("kinds");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('teamcity', 'teamcity', 'TeamCity', 'http://x', 'Pat')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into knobas.ticket_view (id, name, view_group, position, query)
+         values ($1, $2, 'Team', 0, '#t status:open')",
+    )
+    .bind(format!("{t}-view"))
+    .bind(format!("Open {t}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("insert into knobas.link_set (id, name) values ($1, $2)")
+        .bind(format!("{t}-set"))
+        .bind(format!("Stack {t}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    // The registry's declarations reach the database on the first search.
+    search_inner(&pool, &Registry::for_process(), query("warm"))
+        .await
+        .unwrap();
+    let config = format!("{t}_Deploy");
+    for (id, kind, title, payload) in [
+        (
+            format!("teamcity:{config}"),
+            "build_config",
+            format!("Deploy {t}"),
+            serde_json::json!({ "id": config, "name": format!("Deploy {t}"),
+                                "projectPath": [{ "id": "P", "name": "Payouts" }] }),
+        ),
+        (
+            format!("teamcity:{t}-1"),
+            "build",
+            format!("Deploy {t} #1"),
+            serde_json::json!({ "buildTypeId": config, "state": "finished", "status": "SUCCESS" }),
+        ),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
+            .bind(&id)
+            .bind(kind)
+            .bind(&title)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, item_updated_at,
+                                    synced_at, payload)
+             values ($1, 'teamcity', $2, $3, '', now(), now(), $4)",
+        )
+        .bind(&id)
+        .bind(kind)
+        .bind(&title)
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let response = search_inner(&pool, &Registry::for_process(), query(&t))
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&response).unwrap();
+    let groups: Vec<(String, String, Vec<(String, Option<String>, Option<String>)>)> = wire["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| {
+            (
+                g["kind"].as_str().unwrap().to_owned(),
+                g["monogram"].as_str().unwrap().to_owned(),
+                g["hits"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|h| {
+                        (
+                            h["entity_id"].as_str().unwrap().to_owned(),
+                            h["path"].as_str().map(str::to_owned),
+                            h["state"]["tone"].as_str().map(str::to_owned),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        groups,
+        vec![
+            (
+                "view".to_owned(),
+                "VW".to_owned(),
+                vec![(format!("{t}-view"), Some("Team · #t status:open".to_owned()), None)]
+            ),
+            (
+                "set".to_owned(),
+                "LS".to_owned(),
+                vec![(format!("{t}-set"), Some("0 items · 0 patterns · 0 tickets".to_owned()), None)]
+            ),
+            (
+                "pipeline".to_owned(),
+                "PL".to_owned(),
+                vec![(format!("teamcity:{config}"), Some("Payouts".to_owned()), Some("ok".to_owned()))]
+            ),
+        ]
+    );
 }
