@@ -23,10 +23,10 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 
 | Try | What happens |
 |---|---|
-| Empty box | The recent items, nothing else. The box says only "? for help". |
-| `?` | This grammar's card: every filter inserts itself, and the keys below it. |
+| Empty box | The recent items, nothing else. The box says only "⌘? for help". |
+| ⌘? | From any search: the box empties and narrows the filters (one word each), Enter adds the picked one to the search that was there, the keys sit at the bottom. `#r` then `#l` becomes `#rl`. |
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
-| `#t`, `#p`, `#r`, `#b`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests, repositories, builds, monitors, pages, your saved lists, the inbox. They combine: `#t #l sepa` is tickets and lists. `#PAY-231` is still a ticket by key. `>` go to, `@me`, `t ` time and `?` stay; `/` for a source is gone. |
+| `#t`, `#p`, `#r`, `#b`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests, repositories, builds, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
 | Tab on a row | The row lifts under the box, the box empties and the panel becomes its actions. Typing in the box narrows them (fuzzy, in order of the letters). Esc, Tab or Backspace on the empty box go back to the results with the search words back in the box. Never out of the dialog. The footer says just "Tab actions". |
 | ⌘K while open | Gives the box its focus back, wherever a click left it. Nothing else: Tab is the one way into the actions. |
 | An action that asks something | A **flow**: the sheet shows the step's choices, the box narrows them, Enter picks, the next step follows, the last pick runs the action. Esc or Backspace on the empty box step back. |
@@ -86,7 +86,7 @@ Shortcuts, each marked `PROTOTYPE` in the code:
 | The *Search Docs for …* row stores its words in `sessionStorage` and opens `#/docs`; the Docs page ignores them. | A `#/docs?q=` form, or the search field reading a one-shot hand-off, whichever the Docs page prefers. |
 | *Create pull request…* opens the compare page with the head branch in its address and stores the base in `sessionStorage`; the page picks its own base. | `compare/<head>/<base>` in the address, or the page reading the hand-off. |
 | *Merge…* is offered on every pull request. | The row follows the source's declared `merge_pull_request` action, as the PR page's button does, and shows its `disabled` reason. |
-| `?` draws a card written in the component. | Rows in `syntax.json`, which the Rust test pins to the parser. |
+| ⌘? draws a card written in the component, as an overlay the box narrows. | Rows in `syntax.json`, which the Rust test pins to the parser; the overlay and the merge of `#` letters in `Launcher.svelte`. |
 | The sheet's actions are a fixed list per kind, in the component. | A table per kind in `launcher/actions.ts`, and adapter-declared source actions joining it. |
 | Value suggestions and pasted-URL resolving are left out. | Nothing: they stay as shipped. |
 | `BoardNext.svelte` is the recent items alone. | `Board.svelte` loses the smart lists, the inbox, today's time and the source strip; built-in smart lists go, or move behind `#l`. The box loses its ⌘K badge and its footnote. |

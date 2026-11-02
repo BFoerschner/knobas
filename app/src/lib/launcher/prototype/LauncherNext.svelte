@@ -37,6 +37,12 @@
     - the sheet's rows are a fixed list per kind, not adapter-declared;
     - `BoardNext.svelte` is the recent items alone.
 
+  Round 5 (Björn, 2026-11-02): ⌘? opens the help as an overlay from any
+  search; the box empties and narrows the filters, Enter adds the picked
+  one to the search that was there (letters merge: `#r` plus `#l` is `#rl`);
+  the summaries are one word; the keys sit at the bottom of the card and
+  the box says "⌘? for help". `#PAY-231` is gone: a key is `#t PAY-231`.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -260,27 +266,30 @@
   // svelte-ignore state_referenced_locally
   const realSearch = ports?.search ?? defaultSearch;
 
-  /** `#x`: one letter after the hash is a kind; the backend filters on six, two are answered here. */
+  /** `#x`: letters after the hash are kinds, and they combine (`#rl`); the backend filters on six, two are answered here. */
   const KIND_OF: Record<string, string> = { t: "ticket", p: "pr", r: "repo", b: "build", m: "monitor", d: "page" };
   const LOCAL = new Set(["l", "i"]);
-  const TOKEN = /^#([a-z])$/i;
+  const TOKEN = /^#([tprbmdli]+)$/i;
 
   /** The search port with the prototype's grammar read first and its groups layered over the real answer. */
   async function searchNext(query: SearchQuery): Promise<SearchResponse> {
     const raw = query.raw.trim();
     const at = (now ?? new Date()).toISOString();
-    if (raw.startsWith("?")) {
-      return { interpreted: { text: "", prefix: "help", filters: NO_FILTERS, unknown_tokens: [] }, groups: [], total: 0, took_ms: 0, coverage: [] };
-    }
     // PROTOTYPE: the frontend reads grammar here, against ruling P2.
     const kinds: string[] = [];
     const local: string[] = [];
     const rest: string[] = [];
     for (const token of raw.split(/\s+/).filter(Boolean)) {
-      const letter = TOKEN.exec(token)?.[1]?.toLowerCase();
-      if (letter && KIND_OF[letter]) kinds.push(KIND_OF[letter]);
-      else if (letter && LOCAL.has(letter)) local.push(letter);
-      else rest.push(token);
+      const letters = TOKEN.exec(token)?.[1]?.toLowerCase();
+      if (letters) {
+        for (const letter of new Set(letters)) {
+          if (KIND_OF[letter]) kinds.push(KIND_OF[letter]);
+          else if (LOCAL.has(letter)) local.push(letter);
+        }
+      } else {
+        // `#PAY-231` is no lookup any more: the hash is dropped and the key is a word (`#t PAY-231`).
+        rest.push(token.replace(/^#/, ""));
+      }
     }
     const text = rest.join(" ");
     const needle = text.toLowerCase();
@@ -331,7 +340,7 @@
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
 
-  // ---- the `?` card: this grammar, written here --------------------------
+  // ---- the ⌘? card: this grammar, written here, as an overlay the box narrows ----
 
   interface HelpEntry {
     token: string;
@@ -339,29 +348,113 @@
     summary: string;
   }
   const HELP: HelpEntry[] = [
-    { token: "#t", insert: "#t ", summary: "tickets · #t sepa" },
-    { token: "#p", insert: "#p ", summary: "pull requests" },
-    { token: "#r", insert: "#r ", summary: "repositories" },
-    { token: "#b", insert: "#b ", summary: "builds" },
-    { token: "#m", insert: "#m ", summary: "monitors" },
-    { token: "#d", insert: "#d ", summary: "pages, with a last row that searches the Docs area" },
-    { token: "#l", insert: "#l ", summary: "your saved lists; Enter applies one's filters here" },
-    { token: "#i", insert: "#i ", summary: "the inbox, newest first" },
-    { token: "#t #l", insert: "#t #l ", summary: "any of them together · #t #l sepa" },
-    { token: "#PAY-231", insert: "#", summary: "a ticket by its key" },
-    { token: ">", insert: "> ", summary: "go to a page of the app" },
-    { token: "@me", insert: "@me ", summary: "what your accounts wrote · @jonas for one person" },
-    { token: "t", insert: "t ", summary: "time: worklogs and the day" },
-    { token: "?", insert: "?", summary: "this card" },
+    { token: "#t", insert: "#t", summary: "tickets" },
+    { token: "#p", insert: "#p", summary: "pull requests" },
+    { token: "#r", insert: "#r", summary: "repositories" },
+    { token: "#b", insert: "#b", summary: "builds" },
+    { token: "#m", insert: "#m", summary: "monitors" },
+    { token: "#d", insert: "#d", summary: "pages" },
+    { token: "#l", insert: "#l", summary: "lists" },
+    { token: "#i", insert: "#i", summary: "inbox" },
+    { token: ">", insert: "> ", summary: "go to" },
+    { token: "@me", insert: "@me ", summary: "mine" },
+    { token: "t", insert: "t ", summary: "time" },
   ];
   const KEYS: [string, string][] = [
-    ["↵", "open the row; a saved list applies its filters here"],
-    ["Tab", "the row's actions, narrowed by what you type; Esc brings the search back"],
-    ["⌘S", "save the search as a list"],
-    ["Esc", "clear the box, then close"],
+    ["↵", "open"],
+    ["Tab", "actions"],
+    ["⌘S", "save as list"],
+    ["⌘?", "this card; letters combine: #rl is repositories and lists"],
+    ["Esc", "back"],
   ];
-  let helpSelected = $state(0);
-  const helpMode = $derived(session.response?.interpreted.prefix === "help");
+
+  /** The help overlay: the box holds its filter; the search words wait in `session.raw`. */
+  let help = $state<{ filter: string; selected: number } | null>(null);
+
+  function fuzzyHelp(filter: string): HelpEntry[] {
+    const needle = filter.toLowerCase().replace(/\s+/g, "");
+    if (needle === "") return HELP;
+    return HELP.filter((entry) => {
+      const hay = `${entry.token} ${entry.summary}`.toLowerCase();
+      let at = -1;
+      for (const char of needle) {
+        at = hay.indexOf(char, at + 1);
+        if (at < 0) return false;
+      }
+      return true;
+    });
+  }
+  const helpShown = $derived(help ? fuzzyHelp(help.filter) : []);
+
+  /** Put a picked filter into the search: a `#` token merges its letters into one already there, the rest go first. */
+  function withFilter(raw: string, insert: string): string {
+    const base = raw.trim();
+    if (insert.startsWith("#")) {
+      const letter = insert.slice(1);
+      const tokens = base === "" ? [] : base.split(/\s+/);
+      const at = tokens.findIndex((token) => TOKEN.test(token));
+      if (at >= 0) {
+        const have = tokens[at]!.slice(1).toLowerCase();
+        tokens[at] = have.includes(letter) ? tokens[at]! : `#${have}${letter}`;
+        return `${tokens.join(" ")} `;
+      }
+      return `${insert} ${base}`.trim() + " ";
+    }
+    return `${insert}${base}`;
+  }
+
+  function openHelp() {
+    help = { filter: "", selected: 0 };
+    void tick().then(() => box?.focus());
+  }
+
+  function leaveHelp() {
+    help = null;
+    box?.focus();
+  }
+
+  function helpKey(event: KeyboardEvent, current: { filter: string; selected: number }): void {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        current.selected = Math.min(helpShown.length - 1, current.selected + 1);
+        return;
+      case "ArrowUp":
+        event.preventDefault();
+        current.selected = Math.max(0, current.selected - 1);
+        return;
+      case "Enter": {
+        event.preventDefault();
+        const entry = helpShown[current.selected];
+        help = null;
+        if (entry) session.set(withFilter(session.raw, entry.insert));
+        box?.focus();
+        return;
+      }
+      case "Escape":
+        event.preventDefault();
+        event.stopPropagation();
+        leaveHelp();
+        return;
+      case "Backspace":
+        if (current.filter === "") {
+          event.preventDefault();
+          leaveHelp();
+        }
+        return;
+      default:
+    }
+  }
+
+  /** ⌘? (⌘⇧/ on most keyboards): the card, from any search; pressed again, back to it. */
+  function helpChord(event: KeyboardEvent): boolean {
+    if (!(event.metaKey || event.ctrlKey) || !(event.key === "?" || (event.key === "/" && event.shiftKey))) return false;
+    event.preventDefault();
+    if (sheet) return true;
+    if (help) leaveHelp();
+    else openHelp();
+    return true;
+  }
 
   // ---- the sheet: what Tab opens -----------------------------------------
 
@@ -803,13 +896,19 @@
   const resultsId = `${uid}-results`;
   const sheetId = `${uid}-sheet`;
 
+  const helpId = `${uid}-help`;
   const activeOption = $derived.by(() => {
-    if (helpMode) return helpOptionId(helpSelected);
     const row = session.current;
     if (!row || session.error) return undefined;
     return optionId(session.selected);
   });
-  const controlled = $derived(sheet ? { list: sheetId, option: sheetOptionId(sheet.selected) } : { list: resultsId, option: activeOption });
+  const controlled = $derived(
+    help
+      ? { list: helpId, option: helpOptionId(help.selected) }
+      : sheet
+        ? { list: sheetId, option: sheetOptionId(sheet.selected) }
+        : { list: resultsId, option: activeOption },
+  );
 
   $effect(() => {
     void session.rows;
@@ -1020,35 +1119,17 @@
     }
   }
 
-  function helpKey(event: KeyboardEvent): boolean {
-    if (!helpMode) return false;
-    switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        helpSelected = Math.min(HELP.length - 1, helpSelected + 1);
-        return true;
-      case "ArrowUp":
-        event.preventDefault();
-        helpSelected = Math.max(0, helpSelected - 1);
-        return true;
-      case "Enter": {
-        event.preventDefault();
-        const entry = HELP[helpSelected];
-        if (entry) session.set(entry.insert);
-        return true;
-      }
-      default:
-        return false;
-    }
-  }
-
   function onkeydown(event: KeyboardEvent) {
+    if (helpChord(event)) return;
     if (saveKey(event)) return;
+    if (help) {
+      helpKey(event, help);
+      return;
+    }
     if (sheet) {
       sheetKey(event, sheet);
       return;
     }
-    if (helpKey(event)) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -1079,13 +1160,15 @@
   }
 
   const placeholder = $derived(
-    sheet
+    help
+      ? "Pick a filter"
+      : sheet
       ? sheet.level === "rename"
         ? "The list's new name"
         : sheet.level === "flow"
           ? (step?.title ?? "")
           : `Narrow the actions on ${sheet.title}`
-      : "? for help",
+      : "⌘? for help",
   );
   const interpreted = $derived(session.response?.interpreted ?? null);
   const pinnedHit = $derived.by(() => {
@@ -1097,7 +1180,7 @@
   /** What the footer says Tab would open: the word alone, as asked, once a row with actions is under the cursor. */
   const tabHint = $derived.by(() => {
     const row = session.current;
-    return row !== null && !sheet && !helpMode && itemsFor(row).length > 0;
+    return row !== null && !sheet && !help && itemsFor(row).length > 0;
   });
 </script>
 
@@ -1106,14 +1189,15 @@
     {#snippet body()}
       <QueryBox
         bind:this={box}
-        value={sheet ? sheet.filter : session.raw}
+        value={help ? help.filter : sheet ? sheet.filter : session.raw}
         {placeholder}
         pending={session.pending}
         footnote=""
         controls={controlled.list}
         active={controlled.option}
         oninput={(value) => {
-          if (sheet) sheet = { ...sheet, filter: value, selected: 0 };
+          if (help) help = { filter: value, selected: 0 };
+          else if (sheet) sheet = { ...sheet, filter: value, selected: 0 };
           else session.type(value);
         }}
         {onkeydown}
@@ -1213,29 +1297,31 @@
             {/if}
           </div>
         {/if}
-      {:else if helpMode}
-        <div class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Help">
-          <div class="tf-ln-h"><span class="tf-ln-lab">Narrow the search</span><span class="tf-ln-n">a row inserts itself</span></div>
+      {:else if help}
+        <div id={helpId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Filters" {onkeydown} onclick={() => box?.focus()}>
+          <div class="tf-ln-h"><span class="tf-ln-lab">Filters</span><span class="tf-ln-n">Enter adds one to the search</span></div>
           <div class="tf-ln-help">
-            {#each HELP as entry, i (entry.token)}
+            {#each helpShown as entry, i (entry.token)}
               <button
                 id={helpOptionId(i)}
                 class="tf-ln-opt tf-ln-syn"
-                class:tf-ln-on={i === helpSelected}
+                class:tf-ln-on={i === help.selected}
                 role="option"
-                aria-selected={i === helpSelected}
-                onclick={() => { session.set(entry.insert); box?.focus(); }}
-                onmouseenter={() => (helpSelected = i)}
+                aria-selected={i === help.selected}
+                onclick={() => { help = null; session.set(withFilter(session.raw, entry.insert)); box?.focus(); }}
+                onmouseenter={() => help && (help.selected = i)}
               >
                 <span class="tf-ln-tok">{entry.token}</span>
                 <span class="tf-ln-s">{entry.summary}</span>
               </button>
             {/each}
+            {#if helpShown.length === 0}
+              <p class="tf-ln-none">No filter matches “{help.filter}”.</p>
+            {/if}
           </div>
-          <div class="tf-ln-h"><span class="tf-ln-lab">Keys</span></div>
-          <div class="tf-ln-help">
+          <div class="keys">
             {#each KEYS as [key, what] (key)}
-              <p class="tf-ln-opt tf-ln-syn keyrow"><kbd>{key}</kbd><span class="tf-ln-s">{what}</span></p>
+              <span><kbd>{key}</kbd> {what}</span>
             {/each}
           </div>
         </div>
@@ -1310,7 +1396,11 @@
     {/snippet}
 
     {#snippet footer()}
-      {#if sheet}
+      {#if help}
+        <span><kbd>↑↓</kbd> move</span>
+        <span><kbd>↵</kbd> add the filter</span>
+        <span><kbd>Esc</kbd> back to the search</span>
+      {:else if sheet}
         <span><kbd>↑↓</kbd> move</span>
         {#if shown[sheet.selected]?.link}<span><kbd>←→</kbd> relation</span>{/if}
         <span><kbd>↵</kbd> {shown[sheet.selected]?.link ? "link" : sheet.level === "flow" ? "pick" : "do it"}</span>
@@ -1326,9 +1416,10 @@
         {#if session.canSave}
           <span><kbd>⌘S</kbd> {session.savedId === null ? "save as list" : "saved as list"}</span>
         {/if}
+        <span><kbd>⌘?</kbd> help</span>
         <span><kbd>Esc</kbd> back one step</span>
         <span class="tf-spacer"></span>
-        {#if session.response && !helpMode}
+        {#if session.response}
           <span class="tf-ln-took">{session.response.total} matches · {session.response.took_ms} ms</span>
         {/if}
       {/if}
@@ -1358,6 +1449,5 @@
   }
   .rel button:hover { border-color: var(--ink-2); color: var(--ink); }
   .rel .pick, .rel .pick:hover { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
-  .keyrow { cursor: default; }
-  .keyrow kbd { justify-self: center; }
+  .keys { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 18px; margin-top: 6px; border-top: 1px solid var(--rule); font-size: var(--t-xs); color: var(--ink-2); }
 </style>
