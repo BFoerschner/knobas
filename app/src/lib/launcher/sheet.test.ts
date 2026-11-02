@@ -124,6 +124,8 @@ test("the narrowing keeps every typed letter in order, the tightest match first"
   // "br" is tight in "Branches", looser in "Open in IntelliJ"'s neighbours or nowhere at all.
   expect(narrowActions(actions, "br")[0]?.id).toBe("branches");
   expect(narrowActions(actions, "cln")[0]?.id).toBe("clone");
+  // The tightest span wins over the earliest start: "co" is one letter apart in "Copy", two in "Clone".
+  expect(narrowActions(actions, "co").map((a) => a.id).slice(0, 2)).toEqual(["copy", "open-code"]);
   expect(narrowActions(actions, "zzz")).toEqual([]);
   expect(narrowActions(actions, "O I").map((a) => a.id)).toContain("open-idea");
 });
