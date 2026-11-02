@@ -287,13 +287,16 @@ interface FakePage {
 }
 
 /**
- * The pages other modules name by id: the one read last, and PAY-231's two
- * pages, which `job-reach.ts` lists in what the job reaches (#863).
+ * The pages other modules name by id: the one read last, PAY-231's two
+ * pages, which `job-reach.ts` lists in what the job reaches (#863), and the
+ * one holding an embed (#2440).
  */
 const NAMED: Record<string, string> = {
   "SEPA payout retry design": "confluence:sepa",
   "Manual review queue": "confluence:manual-review",
   "PSP error codes": "confluence:psp-codes",
+  // Its embed is the one the shots and `scripts/embed-witness.mjs` open (#2440).
+  "Payments architecture overview": "confluence:architecture",
 };
 
 const PAGES: FakePage[] = [];
@@ -726,13 +729,45 @@ function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrit
   };
 }
 
+/**
+ * `?fake-embed-host=<origin>` (#2440, `scripts/embed-witness.mjs`): every
+ * embed's HTML is the witness's probe instead. It loads `<origin>/lib.js`,
+ * fetches `<origin>/spec.json`, a host other than the app's, and tries to
+ * reach the app: its window, its document, its storage, Tauri's globals and
+ * the `ipc:` scheme. It writes what happened into `#knobas-witness` as JSON,
+ * for the witness to read from the frame.
+ */
+function witnessed(doc: DocPage, host: string | null): DocPage {
+  if (host === null) return doc;
+  const probe = `<p id="knobas-witness">running</p>
+<script src="${host}/lib.js"></script>
+<script>
+(async function () {
+  var out = { script: typeof window.witnessLib === "string" ? window.witnessLib : null };
+  try { out.spec = (await (await fetch("${host}/spec.json")).json()).openapi; } catch (e) { out.spec = "refused: " + e; }
+  var tryIt = function (name, f) { try { var v = f(); out[name] = v === undefined || v === null ? "unreachable" : "REACHED"; } catch (e) { out[name] = "refused"; } };
+  tryIt("parentTauri", function () { return parent.__TAURI_INTERNALS__; });
+  tryIt("topTauri", function () { return top.__TAURI_INTERNALS__; });
+  tryIt("ownTauri", function () { return window.__TAURI_INTERNALS__; });
+  tryIt("parentDocument", function () { return parent.document.title; });
+  tryIt("storage", function () { return localStorage.length; });
+  try { parent.__TAURI_INTERNALS__.invoke("docs_page", { entityId: "confluence:sepa" }); out.invoke = "CALLED"; } catch (e) { out.invoke = "refused"; }
+  try { await fetch("ipc://localhost/docs_page"); out.ipcScheme = "REACHED"; } catch (e) { out.ipcScheme = "refused"; }
+  document.getElementById("knobas-witness").textContent = JSON.stringify(out);
+})();
+</script>`;
+  const swap = (blocks: DocBlock[]): DocBlock[] =>
+    blocks.map((b) => (b.type === "embed" ? { ...b, content: { kind: "html", html: probe } } : b));
+  return { ...doc, blocks: swap(doc.blocks) };
+}
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
   const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
-    docs_page: (args) => page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0),
+    docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
       const found = [...PAGES, ...bulk].find((p) => p.id === String(args["entityId"] ?? ""));
