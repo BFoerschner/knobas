@@ -13,6 +13,8 @@
  * tokens and reset (`tf.css`), and the rules the window's not-yet-ported
  * markup draws with (`unported.css`).
  */
+import "./lib/shell/own-frame-guard";
+
 import { mount } from "svelte";
 
 import CaptureWindow from "./lib/capture/CaptureWindow.svelte";

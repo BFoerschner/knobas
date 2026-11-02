@@ -10,6 +10,8 @@
  * `DiagramMessage` in, a `DiagramReply` out, and a hello once it listens.
  * Only its parent is heard. D2 loads on the first diagram.
  */
+import "../shell/own-frame-guard";
+
 import type { DiagramAnswer, DiagramMessage, DiagramReply, FrameHello } from "./port";
 
 const parent = window.parent;

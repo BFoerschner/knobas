@@ -145,7 +145,7 @@ test("a URL embed of the app's own origin, or any that could share it, is never 
     "http://127.0.0.1:1420/",
     // Loopback by other spellings, and a host behind userinfo. Spelled from the host part:
     // the house rule's network scan reads them as real hosts.
-    ...["LOCALHOST.", "[::1]:1420", "evil.example@tauri.localhost", "0.0.0.0:1420", "2130706433:1420", "127.1", "[::ffff:127.0.0.1]"].map((host) => ["http:", host].join("//") + "/"),
+    ...["LOCALHOST.", "tauri.localhost..", "[::1]:1420", "evil.example@tauri.localhost", "0.0.0.0:1420", "2130706433:1420", "127.1", "[::ffff:127.0.0.1]"].map((host) => ["http:", host].join("//") + "/"),
   ]) {
     expect(embedUrl(own, dev), own).toBeNull();
   }

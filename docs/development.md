@@ -287,8 +287,12 @@ breaks only in a bundled build: `tauri dev` loads the Vite server over
   URL embed can be framed (#2441), and an HTML embed runs from the
   `knobas-render` scheme under its own policy, `EMBED_CSP` in
   `crates/knobas-app/src/renderers.rs`, which lets its scripts load and
-  connect over `http(s)` (#2440). Both frames are sandboxed with no same
-  origin (`app/src/lib/render/embed.ts`), so neither reaches the app.
+  connect over `http(s)` (#2440). Both frames are sandboxed
+  (`app/src/lib/render/embed.ts`): an HTML embed has no origin of its own, and
+  a URL embed keeps its page's origin, which is never the app's (#2460).
+  The app's own documents load in no frame (`frame-ancestors 'none'`, and
+  `app/src/lib/shell/own-frame.ts` for the dev server, #2461), so neither
+  reaches the app.
 - Every `listen()` is cleaned up, including when the component unmounts before
   the promise resolves. `lib/shell/residue.test.svelte.ts` mounts each
   component with an effect twice and fails on leftovers.

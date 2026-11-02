@@ -29,7 +29,10 @@
  * names `http:` and `https:`). The page is another origin's: knobas puts
  * nothing in it, so it reports no height and hands no link up. It keeps that
  * origin and gets a referrer ({@link EMBED_URL_SANDBOX}, #2460); the app's
- * own origin is never framed that way.
+ * own origin is never framed that way: {@link embedUrl} refuses its address,
+ * and a page that navigates there later finds the app's policy refusing it
+ * (`frame-src` without `'self'`, `frame-ancestors 'none'`) and the app
+ * refusing to run (`shell/own-frame.ts`, #2461).
  */
 import { base64Of } from "./bytes";
 import { FRAME_SCHEME, type FrameBridge } from "./frame";
@@ -125,8 +128,9 @@ export const EMBED_URL_REFERRER = "strict-origin";
 /**
  * Hosts that are, or could be, the app's own origin under some webview:
  * `tauri.localhost`, `ipc.localhost` and `knobas-render.localhost` (WebView2
- * and Android), the dev server's `localhost`, and loopback by any spelling.
- * `tauri:`, `ipc:` and `knobas-render:` themselves fall to the scheme check.
+ * and Android), the dev server's `localhost`, and loopback by any spelling,
+ * tested with every trailing dot gone. `tauri:`, `ipc:` and `knobas-render:`
+ * themselves fall to the scheme check.
  */
 const OWN_HOST = /^(?:localhost|.+\.localhost|127(?:\.\d+){3}|0\.0\.0\.0|\[::1?\]|\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\])$/i;
 
@@ -146,7 +150,7 @@ export function embedUrl(url: string, own: string = window.location.origin): { s
   } catch {
     return null;
   }
-  if (parsed.origin === own || OWN_HOST.test(parsed.hostname.replace(/\.$/, ""))) return null;
+  if (parsed.origin === own || OWN_HOST.test(parsed.hostname.replace(/\.+$/, ""))) return null;
   return { src: url };
 }
 
