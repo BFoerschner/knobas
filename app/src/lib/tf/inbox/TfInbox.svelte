@@ -1,7 +1,7 @@
 <!--
   The Inbox (#834, R-12.1 to R-12.3): `#/inbox`.
 
-  The filter bar (text, *This job / All*, the kind chips), then a row per item
+  The filter bar (*This job / All*, the kind chips; its search is the launcher's `#i`, #2425), then a row per item
   newest first: the time, the item as one sentence (an err dot for a failure),
   its actions, and a second line with its kind and the job it belongs to as a
   link. The snoozed shelf is one line under the list, with return dates.
@@ -41,7 +41,6 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
-  import Marked from "../filter/Marked.svelte";
   import type { SourceFacts } from "../job/job";
   import { ticketHash } from "../route";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
@@ -97,6 +96,8 @@
   const config = $derived<FilterConfig>({
     id: "inbox",
     placeholder: "Filter by text or ticket key",
+    // The Inbox's search is the launcher's, `#i` (#2425): `/` opens it.
+    search: false,
     noun: "items",
     one: "item",
     scopes: [
@@ -111,7 +112,7 @@
   const scope = $derived<"job" | "all">(job !== null && filter.scope === "job" ? "job" : "all");
 
   const rows = $derived(
-    visible(inbox.stream, { scope, job, kinds: filter.chips["kind"] ?? [], text: filter.text }, index),
+    visible(inbox.stream, { scope, job, kinds: filter.chips["kind"] ?? [] }, index),
   );
   const shelf = $derived(snoozedLine(inbox.snoozed));
   /** Thousands of rows draw only those near the viewport (#2209); `.tf-ib` is 63 px, 84 wrapped, 6 apart. */
@@ -245,7 +246,7 @@
       <div class="tf-ib" {@attach win.row(item.key)}>
         <time datetime={item.occurred_at}>{clockLabel(item.occurred_at, now, true)}</time>
         <div class="tf-what">
-          {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}<Marked text={sentence(item)} typed={filter.text} />
+          {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}{sentence(item)}
         </div>
         <div class="tf-acts">
           {#if open !== null}

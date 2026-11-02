@@ -5,9 +5,8 @@
   once, as the header line over its pipelines.
 
   - **Left**, the pipeline list: with a job current, *This job <key> / All*
-    (#850, *This job* by default); the filter field (`/` focuses it, `Esc`
-    clears it through the shell's ladder, which finds it by `data-filter`)
-    and the *Failing* and *Running* chips. *All* draws *Pinned* first
+    (#850, *This job* by default) and the *Failing* and *Running* chips; the
+    page's search is the launcher's `#b`, which `/` opens (#2425). *All* draws *Pinned* first
     (knobas-local, #849), then each source's project tree as deep as it goes
     (folds with their count and *N failing*, own pipelines before
     subgroups, a chain of single children as one row, a fold open on a
@@ -59,7 +58,7 @@
 
 <script lang="ts">
   import TfBareHeader from "../TfBareHeader.svelte";
-  import { flushSync, onMount, tick, untrack } from "svelte";
+  import { flushSync, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -72,10 +71,8 @@
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { resolveTicket } from "../job/job";
-  import { inTextField } from "../../shell/keys";
   import { Windowed } from "../../shell/windowed.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
-  import Marked from "../filter/Marked.svelte";
   import type { EscTarget } from "../escape";
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfPipeline from "./TfPipeline.svelte";
@@ -102,7 +99,6 @@
     type Fold,
     type Scope,
   } from "./builds";
-  import { pageVisible } from "../kept-pages.svelte";
 
   let {
     ready,
@@ -203,7 +199,7 @@
     all === null || scope !== "job" || reasons === null ? [] : all.filter((p) => reasons!.has(p.entity_id)),
   );
   const kept = $derived(
-    all === null ? [] : keptPipelines(scope === "job" ? onJob : all, filter.text, chips),
+    all === null ? [] : keptPipelines(scope === "job" ? onJob : all, chips),
   );
   /** The pipeline on the right: the one the list picks, or on a run's address the run's own. */
   function selectedOf(list: PipelineRow[]): PipelineRow | null {
@@ -237,7 +233,7 @@
   const pinned = $derived(scope === "job" ? [] : pinnedOf(kept));
   const trees = $derived(treeOf(kept));
   /** Whether anything narrows the list, which opens every fold. */
-  const narrowed = $derived(filter.text.trim() !== "" || chips.length > 0 || scope === "job");
+  const narrowed = $derived(chips.length > 0 || scope === "job");
   /** What the list draws, flattened: the windowed list's rows. */
   const rows = $derived(
     listRows(
@@ -285,7 +281,6 @@
     return String(error);
   }
 
-  let field: HTMLInputElement | undefined = $state();
   let list: HTMLElement | undefined = $state();
 
   function toggle(chip: string) {
@@ -304,20 +299,6 @@
     });
   });
 
-  const pageShown = pageVisible();
-  onMount(() => {
-    const onkey = (event: KeyboardEvent) => {
-      // A page keep-alive holds hidden (#2247) takes no keys.
-      if (!pageShown()) return;
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
-      const at = document.activeElement;
-      if (at instanceof HTMLElement && inTextField(at)) return;
-      event.preventDefault();
-      field?.focus();
-    };
-    window.addEventListener("keydown", onkey);
-    return () => window.removeEventListener("keydown", onkey);
-  });
 
   function stateText(run: RunRow): string {
     return run.state?.text ?? "";
@@ -343,7 +324,7 @@
     title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
     {@attach win.row(key)}
   >
-    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}><Marked text={pipeline.name} typed={filter.text} /></span>
+    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}>{pipeline.name}</span>
     <span class="tf-pi-when">{latestTime(pipeline)}</span>
     <span
       class="tf-strip"
@@ -379,19 +360,6 @@
           <button type="button" aria-pressed={scope === "all"} onclick={() => setScope("all")}>All</button>
         </div>
       {/if}
-      <label class="tf-fsearch">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
-          ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-        >
-        <input
-          bind:this={field}
-          bind:value={filter.text}
-          data-filter
-          placeholder={all !== null ? `Filter ${all.length} pipelines` : "Filter pipelines"}
-          aria-label="Filter pipelines"
-        />
-        <kbd>/</kbd>
-      </label>
       <div class="tf-fchips" role="group" aria-label="Show only">
         {#each CHIPS as chip (chip)}
           <button type="button" aria-pressed={chips.includes(chip)} onclick={() => toggle(chip)}>{chip}</button>

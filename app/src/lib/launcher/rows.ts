@@ -38,7 +38,9 @@ export type LauncherRow =
   | { kind: "list"; id: string; list: SmartListSummary }
   | { kind: "inbox"; id: string; item: InboxItem }
   | { kind: "action"; id: string; action: LauncherAction }
-  | { kind: "syntax"; id: string; entry: SyntaxEntry };
+  | { kind: "syntax"; id: string; entry: SyntaxEntry }
+  /** *Search Docs for …* at the end of a `#d` answer (#2425): the Docs area, searching `words`. */
+  | { kind: "docs"; id: string; words: string };
 
 /**
  * Which panel the body draws.
@@ -113,7 +115,7 @@ export function flatten(input: {
     case "results": {
       const response = input.response;
       if (!response) return [];
-      return response.groups.flatMap((group) =>
+      const hits = response.groups.flatMap((group) =>
         group.hits.map(
           (hit): LauncherRow => ({
             kind: "hit",
@@ -123,6 +125,18 @@ export function flatten(input: {
           }),
         ),
       );
+      return [...hits, ...docsRow(response)];
     }
   }
+}
+
+/**
+ * The *Search Docs for …* row (#2425): last in an answer the engine read as
+ * `#d` (kind `page`) with words, whose search the Docs area runs with its own
+ * outline and hits. Read off the backend's parse, never the box (ruling P2).
+ */
+function docsRow(response: SearchResponse): LauncherRow[] {
+  const words = response.interpreted.text.trim();
+  if (words === "" || !response.interpreted.filters.kinds.includes("page")) return [];
+  return [{ kind: "docs", id: "docs", words }];
 }

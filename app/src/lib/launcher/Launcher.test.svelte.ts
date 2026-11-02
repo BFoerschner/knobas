@@ -2191,7 +2191,7 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
   }
 });
 
-// ── Reopening selects the kept query (#1480) ───────────────────────────────
+// ── ⌘K always opens empty; a section's keys open with its filter (#2425) ──
 
 /** Close by the ×, which leaves the session's query in place (Esc empties it first). */
 function closeByX() {
@@ -2206,8 +2206,9 @@ async function reopen() {
   await settle();
 }
 
-test("⌘K reopens on the kept query with the whole of it selected", async () => {
-  open();
+test("⌘K opens with an empty box every time, never the last query (#2425)", async () => {
+  const searched: string[] = [];
+  open({ ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME } });
   await settle();
   await search("PAY-231");
   closeByX();
@@ -2215,27 +2216,83 @@ test("⌘K reopens on the kept query with the whole of it selected", async () =>
   await reopen();
 
   const input = target.querySelector("input")!;
-  expect(input.value, "the session keeps what was searched for").toBe("PAY-231");
+  expect(input.value).toBe("");
   expect(document.activeElement).toBe(input);
-  expect(input.selectionStart).toBe(0);
-  expect(input.selectionEnd).toBe("PAY-231".length);
-});
+  expect(target.textContent, "the board, not the last answer").not.toContain("Retry failed SEPA payouts");
 
-test("typing after a reopen replaces the kept query instead of appending to it", async () => {
-  open();
-  await settle();
-  await search("PAY-231");
+  await search("ledger");
   closeByX();
   await reopen();
+  expect(target.querySelector("input")!.value, "and again on the next opening").toBe("");
+  expect(searched).toEqual(["PAY-231", "ledger"]);
+});
 
-  // Typing replaces whatever is selected; jsdom does not insert text for a
-  // keydown, so the test does what the WebView does with a keystroke.
+test("opened with a section's filter, the box starts with it, the caret after it, and asks for it (#2425)", async () => {
+  const searched: string[] = [];
+  open({
+    query: "#b ",
+    ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME },
+  });
+  await settle();
+  await debounced();
   const input = target.querySelector("input")!;
-  input.setRangeText("x", input.selectionStart!, input.selectionEnd!, "end");
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
+  expect(input.value).toBe("#b ");
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart, "typing goes after the filter, not over it").toBe(3);
+  expect(input.selectionEnd).toBe(3);
+  expect(searched).toEqual(["#b "]);
 
-  expect(input.value).toBe("x");
+  // ⌘K after that is the global search: empty, whatever the last opening held.
+  closeByX();
+  await reopen();
+  expect(target.querySelector("input")!.value).toBe("");
+});
+
+/** A `#d` answer: pages only, as the engine sends it for `#d ledger retry`. */
+function pagesAnswer(kinds: string[]): SearchResponse {
+  return response({
+    interpreted: {
+      text: "ledger retry",
+      prefix: null,
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [
+      {
+        kind: "page",
+        label: "Page",
+        plural: "Pages",
+        monogram: "PG",
+        total: 1,
+        hits: [hit({ entity_id: "confluence:7", kind: "page", title: "Ledger retries", source_id: "confluence" })],
+      },
+    ],
+    total: 1,
+  });
+}
+
+test("a #d answer ends with Search Docs for its words, which opens the Docs area searching them (#2425)", async () => {
+  const onnavigate = vi.fn();
+  open({ onnavigate, ports: { search: async () => pagesAnswer(["page"]), launcherHome: async () => HOME } });
+  await settle();
+  await search("#d ledger retry");
+  const rows = [...target.querySelectorAll('[role="option"]')];
+  expect(rows.at(-1)?.textContent).toContain("Search Docs for “ledger retry”");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/docs/search/ledger%20retry");
+});
+
+test("an answer that is not #d, or #d with no words, has no Search Docs row (#2425)", async () => {
+  let answer = pagesAnswer([]);
+  open({ ports: { search: async () => answer, launcherHome: async () => HOME } });
+  await settle();
+  await search("ledger retry");
+  expect(target.textContent).not.toContain("Search Docs for");
+  answer = { ...pagesAnswer(["page"]), interpreted: { ...pagesAnswer(["page"]).interpreted, text: "" } };
+  await search("#d ");
+  expect(target.textContent).not.toContain("Search Docs for");
 });
 
 test("an empty box opens with the caret in it and nothing to select", async () => {

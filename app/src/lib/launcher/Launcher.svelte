@@ -49,7 +49,7 @@
   11), and the shell is where the stop, and #280's draft, belong.
 -->
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import {
     createSmartList as defaultCreateSmartList,
@@ -68,6 +68,7 @@
   import type { LinkTarget } from "../tf/job/current.svelte";
   import { canBeTarget } from "../shell/timer";
   import TfDialog from "../tf/settings/TfDialog.svelte";
+  import { docsSearchHash } from "../tf/docs/docs";
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
@@ -83,6 +84,7 @@
 
   let {
     open = $bindable(false),
+    query = $bindable(""),
     sources,
     sourcesRead,
     inbox,
@@ -96,6 +98,13 @@
     openExternal = realOpenExternal,
   }: {
     open?: boolean;
+    /**
+     * What the box holds when it opens (#2425): a section's filter (`#b `)
+     * when the shell opened it with `/`, ⌘/ or the top bar's button, and
+     * nothing for ⌘K, which writes `""` here itself before it opens. Read once
+     * per opening; typing never writes it back.
+     */
+    query?: string;
     /**
      * Credential health from a shell that subscribes to `source:health`.
      *
@@ -255,8 +264,9 @@
   let naming = $state<string | null>(null);
 
   /**
-   * A close ends the mode: the launcher stays mounted and keeps its query, so
-   * without this the next ⌘K would reopen on the overlay or the prompt.
+   * A close ends the mode: the launcher stays mounted, so without this the
+   * next opening would reopen on the overlay or the prompt. The box's words
+   * are the opener's (#2425): empty for ⌘K, a section's filter for `/`.
    */
   $effect.pre(() => {
     if (!open) {
@@ -360,6 +370,7 @@
       case "action":
       case "syntax":
       case "inbox":
+      case "docs":
         return null;
     }
   }
@@ -501,9 +512,14 @@
   $effect(() => {
     if (open) {
       void session.loadHome();
-      // Selected, not cleared: the session keeps the last query on purpose,
-      // and selecting it is what lets typing replace it (#1480).
-      void tick().then(() => box?.focus({ select: true }));
+      // Every opening starts on what the opener asked for (#2425): empty for
+      // ⌘K, never the last query (that was #1480's, reversed by spec #2419),
+      // and a section's filter for its keys, with the caret after it. Read
+      // untracked, so typing into the box does not run this again.
+      untrack(() => {
+        if (session.raw !== query) session.set(query);
+      });
+      void tick().then(() => box?.focus());
     } else {
       session.dispose();
     }
@@ -518,7 +534,9 @@
         // strip's search field calls the same handler), so on one keystroke
         // two listeners run: two idempotent "open" writes land on open, while
         // an open and a toggle land on whichever ran last. `Esc` and the × are
-        // the ways out, which is also what the round-3 mockup did.
+        // the ways out, which is also what the round-3 mockup did. Closed, it
+        // opens on an empty box (#2425); open, it leaves the box as it is.
+        if (!open) query = "";
         open = true;
       }
     }
@@ -552,6 +570,9 @@
       // that has none to open.
       case "inbox":
         return opener(row.item)?.href ?? "#/inbox";
+      // The Docs area searching the words (#2425).
+      case "docs":
+        return docsSearchHash(row.words);
       // A list and a syntax row do not navigate: they rewrite the box, which
       // is what makes them a *filter* rather than a destination.
       case "list":

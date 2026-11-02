@@ -200,18 +200,22 @@ test("All is the first scope shown; This job keeps what the job reaches", async 
   expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231", "Build, job PAY-231"]);
 });
 
-test("a kind chip keeps that kind, and the text filters the sentences", async () => {
+test("a kind chip keeps that kind", async () => {
   await open({ job: "PAY-231" });
   const chip = [...target.querySelectorAll(".tf-fchips button")].find((b) => b.textContent === "Build") as HTMLButtonElement;
   chip.click();
   flushSync();
   expect(ctxs()).toEqual(["Build, job PAY-231"]);
-  chip.click();
-  const field = target.querySelector<HTMLInputElement>(".tf-fsearch input")!;
-  field.value = "dashboard";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  expect(ctxs()).toEqual(["Assignment, job PAY-240"]);
+});
+
+test("the Inbox draws no search field and leaves / to the shell, which opens the launcher on #i (#2425)", async () => {
+  await open({ job: "PAY-231" });
+  expect(target.querySelector(".tf-fsearch")).toBeNull();
+  expect(target.querySelector(".tf-fbar input")).toBeNull();
+  expect(target.querySelectorAll(".tf-fbar .tf-seg button")).toHaveLength(2);
+  const slash = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  window.dispatchEvent(slash);
+  expect(slash.defaultPrevented, "the shell's TfShell test witnesses what / opens").toBe(false);
 });
 
 test("Re-run queues the source's write and says so", async () => {
@@ -465,11 +469,9 @@ test("a long inbox draws the rows near the viewport and keeps the room of the re
   expect(room("bottom")).toBe(`${(2004 - drawn) * 69}px`);
 
   // A filter that keeps few rows draws them all, with no room around them.
-  const field = target.querySelector<HTMLInputElement>(".tf-fsearch input")!;
-  field.value = "Bulk change 1999";
-  field.dispatchEvent(new Event("input", { bubbles: true }));
+  ([...target.querySelectorAll(".tf-fchips button")].find((b) => b.textContent === "Build") as HTMLButtonElement).click();
   await settle();
-  expect(whats()).toEqual(["jonas asked for your review: Bulk change 1999"]);
+  expect(rows()).toHaveLength(1);
   expect(room("bottom")).toBe("");
 });
 

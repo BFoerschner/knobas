@@ -52,6 +52,8 @@
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
   let launcherOpen = $state(false);
+  /** What the launcher's box opens with: a section's filter, or nothing for ⌘K (#2425). */
+  let launcherQuery = $state("");
 
   /** The address, read again on every change; the shell owns what it draws. */
   let hash = $state(location.hash);
@@ -290,7 +292,9 @@
     });
   });
 
-  function openLauncher() {
+  /** Open the launcher on `query`: `""` from ⌘K, a section's filter from `/`, ⌘/ and the top bar (#2425). */
+  function openLauncher(query: string) {
+    launcherQuery = query;
     launcherOpen = true;
   }
 
@@ -319,7 +323,7 @@
       return;
     }
     location.hash = sectionHash("tickets");
-    launcherOpen = true;
+    openLauncher("");
   }
 
   async function onRetry() {
@@ -382,6 +386,7 @@
       -->
       <Launcher
         bind:open={launcherOpen}
+        bind:query={launcherQuery}
         sources={health.all}
         sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
         inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}

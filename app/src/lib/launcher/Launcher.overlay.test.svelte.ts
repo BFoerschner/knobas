@@ -377,7 +377,7 @@ test("the label is its own element in front of the box, not part of its text", a
   expect(label()).toBeNull();
 });
 
-test("closing the launcher in a mode reopens it on the search, its words intact", async () => {
+test("closing the launcher in a mode reopens it on the search, which ⌘K opens empty (#2425)", async () => {
   open();
   await settle();
   await type("sepa");
@@ -394,6 +394,7 @@ test("closing the launcher in a mode reopens it on the search, its words intact"
     flushSync();
     await settle();
     expect(label(), "the mode ended with the close").toBeNull();
-    expect(input().value).toBe("sepa");
+    expect(input().value, "⌘K opens on an empty box, never the last words (#2425)").toBe("");
+    await type("sepa");
   }
 });

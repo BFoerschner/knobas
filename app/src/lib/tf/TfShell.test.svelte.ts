@@ -216,7 +216,7 @@ function start(
     timer?: { current: RunningTimer | null; elapsed: string | null };
     ontimer?: () => void;
     prefersDark?: () => boolean;
-    onsearch?: () => void;
+    onsearch?: (query: string) => void;
     monitorsDown?: number;
     onstarttimer?: (entityId: string, title: string) => void;
     nav?: { back: () => void; forward: () => void };
@@ -802,14 +802,75 @@ test("a timer on a ticket key keeps the mono face and its title (#1430)", async 
   expect(on.getAttribute("title")).toBe("PAY-231");
 });
 
-test("⌘K opens search and ⌘, opens Settings", async () => {
+test("⌘K opens search with an empty box and ⌘, opens Settings", async () => {
   const onsearch = vi.fn();
   start({ onsearch });
+  await at("#/builds");
   press("k", { metaKey: true });
-  expect(onsearch).toHaveBeenCalledOnce();
+  expect(onsearch.mock.calls).toEqual([[""]]);
   press(",", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/settings");
+});
+
+test("/ with no field focused opens search with the section's filter; elsewhere with an empty box (#2425)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/builds");
+  expect(press("/").defaultPrevented, "the slash is not typed anywhere").toBe(true);
+  await at("#/inbox");
+  press("/");
+  await at("#/time");
+  press("/");
+  expect(onsearch.mock.calls).toEqual([["#b "], ["#i "], [""]]);
+});
+
+test("/ in a field is typed; ⌘/ opens search with the section's filter even there (#2425)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/docs");
+  const field = filterField("");
+  expect(press("/").defaultPrevented, "a field keeps its slash").toBe(false);
+  expect(onsearch).not.toHaveBeenCalled();
+  press("/", { metaKey: true });
+  expect(document.activeElement).toBe(field);
+  expect(onsearch.mock.calls).toEqual([["#d "]]);
+});
+
+test("the slash is read by its key, not its code, so a layout that shifts for it still opens search (#2425)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/tickets");
+  // German: `/` is ⇧7, and the key labelled `/` on a US board types `-`.
+  press("/", { code: "Digit7", shiftKey: true });
+  press("-", { code: "Slash" });
+  press("/", { code: "Digit7", shiftKey: true, metaKey: true });
+  // ⌥/ types a character of its own on a Mac.
+  press("/", { altKey: true });
+  expect(onsearch.mock.calls).toEqual([["#t "], ["#t "]]);
+});
+
+test("/ and ⌘/ leave an open dialog alone (#2425)", async () => {
+  const onsearch = vi.fn();
+  const layers = createLayers();
+  start({ onsearch, layers });
+  await at("#/builds");
+  layers.add({ kind: "dialog", close: () => {} });
+  press("/");
+  press("/", { metaKey: true });
+  expect(onsearch).not.toHaveBeenCalled();
+});
+
+test("the top bar's search button opens search with the section's filter (#2425)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/code");
+  // It names ⌘/, whose search it is, not ⌘K's empty box.
+  expect(target.querySelector("button[aria-label='Search this section'] kbd")!.textContent).toBe("⌘/");
+  target.querySelector<HTMLButtonElement>("button[aria-label='Search this section']")!.click();
+  await at("#/settings");
+  target.querySelector<HTMLButtonElement>("button[aria-label='Search this section']")!.click();
+  expect(onsearch.mock.calls).toEqual([["#rp "], [""]]);
 });
 
 test("⌘[ ⌘] ⌘← ⌘→ and the mouse's back and forward buttons step through history (#693, #1086)", () => {
