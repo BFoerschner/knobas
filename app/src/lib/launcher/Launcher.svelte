@@ -16,38 +16,27 @@
   follows, and the reason it is a rule is that two handlers unwinding two
   ladders on one keystroke is indistinguishable from a bug.
 
-  ## The Tab action chain
+  ## The Tab sheet (#2426)
 
-  Two rows over the selected entity result, in this order, and nothing else
-  (#1500; the 2026-10-21 ruling on #1416 in
-  `docs/archive/2026-10-unattended-rulings.md`):
+  Tab on a row lifts it under the box (`Pinned.svelte`), and the box, labelled
+  *Actions*, empties and narrows the row's actions: every typed letter in
+  order, the tightest match first. Esc, Tab, or Backspace on the empty box
+  leave it with the search words back as they were: typing in the sheet goes
+  to its own `filter`, never to `session.raw`. ⌘K while open only gives the
+  box its focus back.
 
-  * **Link to ⟨key⟩**, only while the breadcrumb names a job (the job page, or
-    a view opened from it: 'PAY-231 › Time') and the result is not that job's
-    own ticket. Never on Tickets, Inbox or Settings. Choosing it closes the
-    launcher and the shell opens the job's own link dialog with the result
-    preset, so the relation is picked where every other link from the job is;
-    the launcher never writes a link;
-  * **Start timer on ⟨title⟩** (#278), on any result that can be a timer
-    target. A stored context cannot (`shell/timer.ts`), so the row is absent
-    there rather than offered and then refused by the backend.
+  The actions are a table, per kind, in `sheet.ts`; each is an address of the
+  app or a write it has today, carried out here by `perform`. *Link to ⟨job⟩*
+  comes first on every entity, with the relation picked inline by ← and → and
+  written on Enter through the job's own mapping (`drawn`), against the job
+  the shell names (`openEntity`: the ticket on screen, else the chosen job),
+  from any page. This reverses the 2026-10-21 ruling on #1416, which trimmed
+  the chain to two rows and handed the link to the job's dialog
+  (`docs/decisions/2026-11-02-launcher-sheet.md`).
 
-  The rest of spec §4's old chain is retired by that ruling: Change status,
-  Comment and Start work are the job page's, the "do it here" timer and
-  comment rows are ⌘T's and the job page's, and *Add to context* went with
-  contexts made by hand (CONTEXT.md, Context). There is no *Open* row: `Enter`
-  opens. A saved list (`#l`, #2423) has no chain here: `Enter` applies it, and
-  its Rename and Delete are the sheet's (#2426).
+  *Start timer* is a ticket's row alone, and the shell does the rest: it
+  stops the running timer first and makes the ticket the chosen job.
 
-  `Tab` still swallows the keystroke when the chain would be empty, because the
-  alternative is `Tab` moving focus out of the box.
-
-  The launcher acts on neither. It says *which* result the reader chose and
-  lets the shell act, for the same reason it does not navigate: the job, the
-  IPC and the toast are the shell's. For the timer that division carries a
-  rule with it: *Start timer* on another entity **stops the running one
-  first**, so the block the reader was in is closed rather than lost (story
-  11), and the shell is where the stop, and #280's draft, belong.
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
@@ -66,8 +55,6 @@
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
-  import type { LinkTarget } from "../tf/job/current.svelte";
-  import { canBeTarget } from "../shell/timer";
   import TfDialog from "../tf/settings/TfDialog.svelte";
   import { docsSearchHash } from "../tf/docs/docs";
   import Board from "./Board.svelte";
@@ -75,7 +62,14 @@
   import Help from "./Help.svelte";
   import Preview, { PREVIEW_DEBOUNCE_MS } from "./Preview.svelte";
   import QueryBox from "./QueryBox.svelte";
+  import Pinned from "./Pinned.svelte";
   import Results from "./Results.svelte";
+  import { type SheetAction, type SheetSubject, nameOf, narrowActions, sheetActions, subjectOf } from "./sheet";
+  import { type SheetPorts, realSheetPorts } from "./sheet-ports";
+  import { drawn } from "../detail/relations";
+  import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
+  import { linkFailureMessage } from "../detail/links";
+  import { argvText, menuOrder } from "../tf/openin/openin";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
   import type { InboxPreview, LauncherRow } from "./rows";
   import { opener } from "../tf/inbox/inbox";
@@ -96,9 +90,9 @@
     onnavigate,
     onclose,
     openEntity,
-    onlink,
     ontimer,
     ports,
+    sheetPorts,
     openExternal = realOpenExternal,
     scope = launcherScope,
   }: {
@@ -129,7 +123,7 @@
      * The shell's live inbox (#1418): its count and items, newest first. The
      * empty box does not draw it (#2421); `#i` answers from it (#2423).
      */
-    inbox?: InboxPreview | undefined;
+    inbox?: (InboxPreview & { actions?: Readonly<Record<string, readonly string[]>> }) | undefined;
     /** The clock an inbox line's time cell is read against; the real one when omitted. */
     now?: Date | undefined;
     /** Extras appended to `>` — things only the shell knows it can offer. */
@@ -137,36 +131,24 @@
     onnavigate: (hash: string) => void;
     onclose: () => void;
     /**
-     * The job the breadcrumb names, or `undefined` (#1500): the job page's,
-     * or the job a view opened from it names ('PAY-231 › Time'). Never on
-     * Tickets, Inbox or Settings, and never the newest open job.
-     *
-     * The presence of this is what puts *Link to <key>* in a result's `Tab`
-     * chain: the one action about the pair (the result and the job). `label`
-     * is what the row says, the job's key.
+     * The job the shell names (#1500, spec #2227): the ticket on screen on a
+     * job or ticket page, else the chosen job; `undefined` when none is
+     * chosen. The sheet's *Link to ⟨label⟩* writes against it (#2426).
      */
     openEntity?: { entityId: string; label: string } | undefined;
-    /**
-     * Link the chosen result to that job. The launcher closes and the shell
-     * opens the job's own link dialog with the result preset, where the
-     * relation is picked and the write is the dialog's.
-     */
-    onlink?: ((target: LinkTarget) => void) | undefined;
     /**
      * Start the timer on the chosen result, **stopping whatever is running
      * first** (#278, story 11).
      *
      * The stop, the start, the acknowledgement and the failure message are all
-     * the shell's, exactly as `onlink`'s write is. `undefined` — a caller with
-     * no timer to offer — leaves the row out of the chain entirely, the same
-     * distinction `onlink` draws.
+     * the shell's. `undefined` — a caller with no timer to offer — leaves the
+     * row out of the sheet entirely.
      *
      * **Required, unlike `onlink`**, and for the reason `switcherContexts`
      * records after #238: this prop is the only join between the launcher's
      * *Start timer* row and the shell that acts on it, and an optional one
      * can be dropped from `App.svelte`, type-check clean, and remove the row
-     * from the product without failing a test. `onlink` keeps its `?` because
-     * it is already witnessed at the App seam; this one was not.
+     * from the product without failing a test.
      */
     ontimer: ((targetId: string, targetTitle: string) => void) | undefined;
     /**
@@ -181,6 +163,8 @@
      * records above.
      */
     ports?: Partial<SessionPorts>;
+    /** The sheet's writes and reads (#2426), injectable as `ports` is. */
+    sheetPorts?: Partial<SheetPorts>;
     /**
      * *Titles* or *Everything* (#2430): the app's one choice, kept across
      * closing and a restart. Injectable so a test can keep it in a storage of
@@ -253,22 +237,51 @@
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
 
-  /** One row of a result's `Tab` chain. */
-  interface ChainAction {
-    id: string;
-    label: string;
-    run: () => void;
-  }
+  // svelte-ignore state_referenced_locally
+  // Read once, as the session's ports are.
+  const io: SheetPorts = { ...realSheetPorts, ...sheetPorts };
 
   /**
-   * The open action chain, or `null`.
-   *
-   * `rowId` is remembered so the chain closes when the selection moves off the
-   * row it belongs to: a chain acting on a row nobody is looking at any more
-   * is a chain that acts on the wrong thing.
+   * The open sheet, or `null` (#2426). `row` is the row it lifted, `filter`
+   * what the box holds while it is open (the search words wait in
+   * `session.raw`), `relation` the index into `JOB_LINK_RELATIONS` the link
+   * row's chips stand on, and `renaming` a saved list's new name while the
+   * box asks for it.
    */
-  let chain = $state<{ rowId: string; actions: ChainAction[]; selected: number } | null>(null);
+  let sheet = $state<{
+    rowId: string;
+    row: LauncherRow;
+    subject: SheetSubject;
+    filter: string;
+    selected: number;
+    relation: number;
+    renaming: string | null;
+  } | null>(null);
 
+  /**
+   * Settings › Checkouts, the default first: *Open in ⟨app⟩*'s rows. Read the
+   * first time a sheet opens in an opening, so a search that acts on nothing
+   * costs no read; the rows join the sheet when the answer lands.
+   */
+  let applications = $state<{ id: string; name: string }[]>([]);
+  let applicationsRead = false;
+  function readApplications() {
+    if (applicationsRead) return;
+    applicationsRead = true;
+    void io.checkoutSettings().then(
+      (settings) => (applications = menuOrder(settings).map(({ app }) => ({ id: app.id, name: app.name }))),
+      () => (applications = []),
+    );
+  }
+
+  const sheetContext = $derived({ job: openEntity ?? null, canTime: ontimer !== undefined, apps: applications });
+  const inboxOps = (key: string) => inbox?.actions?.[key] ?? [];
+  /** The actions of `row`, in the table's order; empty for a row nothing can be done to. */
+  function actionsOf(row: LauncherRow | null): SheetAction[] {
+    const subject = row ? subjectOf(row, inboxOps) : null;
+    return subject ? sheetActions(subject, sheetContext) : [];
+  }
+  const sheetShown = $derived(sheet ? narrowActions(sheetActions(sheet.subject, sheetContext), sheet.filter) : []);
 
   /**
    * The ⌘? overlay (#2424), or `null`: the box holds `filter`, which narrows
@@ -287,13 +300,16 @@
    */
   let naming = $state<string | null>(null);
 
+  /** Whether Tab has something to open on the selected row: the footer says so only then. */
+  const tabOpens = $derived(!overlay && naming === null && !sheet && actionsOf(session.current).length > 0);
+
   /**
    * *Everything* with a preview (#2431): the dialog grows, and over a search
    * the body splits, the results at the left and the selected row's
    * excerpts at the right. Titles is the one list at the usual size.
    */
   const deep = $derived(scope.titles === false);
-  const split = $derived(deep && overlay === null && naming === null && session.mode === "results");
+  const split = $derived(deep && overlay === null && naming === null && sheet === null && session.mode === "results");
 
   /**
    * The row the pane draws: the selection, once it has rested for
@@ -318,6 +334,8 @@
     if (!open) {
       overlay = null;
       naming = null;
+      sheet = null;
+      applicationsRead = false;
     }
   });
 
@@ -326,9 +344,19 @@
    * element, never part of the text. `null` while the box is the search.
    * Later modes (the sheet's Actions, Keys, New name, a flow's step) join here.
    */
-  const boxLabel = $derived(naming !== null ? "Name" : overlay ? "Filter" : null);
+  const boxLabel = $derived(
+    naming !== null ? "Name" : overlay ? "Filter" : sheet ? (sheet.renaming !== null ? "New name" : "Actions") : null,
+  );
   const placeholder = $derived(
-    naming !== null ? "the list's name" : overlay ? "narrow the filters" : "⌘? for help",
+    naming !== null
+      ? "the list's name"
+      : overlay
+        ? "narrow the filters"
+        : sheet
+          ? sheet.renaming !== null
+            ? "the list's new name"
+            : "narrow the actions"
+          : "⌘? for help",
   );
 
   /**
@@ -343,7 +371,7 @@
   let dismissedAt = $state<string | null>(null);
   let suggestionPicked = $state(0);
   const offer = $derived<Suggestion[]>(
-    typing && session.suggestions && session.raw !== dismissedAt && !overlay && naming === null
+    typing && session.suggestions && session.raw !== dismissedAt && !overlay && naming === null && !sheet
       ? suggest(typing, session.suggestions)
       : [],
   );
@@ -401,75 +429,9 @@
     }
   }
 
-  /** The entity a row stands for, if it stands for one. */
-  function entityOf(row: LauncherRow): { entityId: string; title: string; kind: string } | null {
-    switch (row.kind) {
-      // A saved list (#2423) is a hit and no entity: nothing to link.
-      case "hit":
-        return row.hit.kind === "list" ? null : { entityId: row.hit.entity_id, title: row.hit.title, kind: row.hit.kind };
-      case "recent":
-        return { entityId: row.row.entity_id, title: row.row.title, kind: row.row.kind };
-      // A syntax card and a navigation action are not entities, so there is
-      // nothing to link. An inbox line is *about* an entity but is not one (a
-      // credential expiry or an alert has none): it opens, and has no chain.
-      case "action":
-      case "syntax":
-      case "inbox":
-      case "docs":
-        return null;
-    }
-  }
-
-  /**
-   * What can be done to `row` right now.
-   *
-   * Empty, and therefore no chain at all, when the row is not an entity and
-   * nothing can be done to it. *Link to <key>* is left out on the job's own
-   * ticket: an entity cannot be linked to itself, and the backend refuses it,
-   * so offering the row would be offering an error.
-   */
-  function chainFor(row: LauncherRow): ChainAction[] {
-    const entity = entityOf(row);
-    if (!entity) return [];
-    const actions: ChainAction[] = [];
-
-    const open = openEntity;
-    if (open && onlink && entity.entityId !== open.entityId) {
-      const link = onlink;
-      actions.push({
-        id: "link",
-        label: `Link to ${open.label}`,
-        // The relation is picked in the job's dialog, which the shell opens
-        // over the job, so the launcher steps out of its way.
-        run: () => {
-          chain = null;
-          close();
-          link({ entity_id: entity.entityId, title: entity.title, kind: entity.kind });
-        },
-      });
-    }
-
-    // Refused rather than absent: a context is a row in `knobas.entity` and
-    // reaches this list like anything else, so the row has to be taken *out*
-    // — see `shell/timer.ts`. Offering it would offer a row whose only
-    // outcome is the backend's `invalid`.
-    if (ontimer && canBeTarget({ entityId: entity.entityId })) {
-      const start = ontimer;
-      actions.push({
-        id: "timer",
-        label: `Start timer on ${entity.title}`,
-        run: () => {
-          start(entity.entityId, entity.title);
-          chain = null;
-        },
-      });
-    }
-    return actions;
-  }
-
-  // The chain belongs to one row. Moving the cursor abandons it.
+  // The sheet belongs to one row: a new answer that moves the selection off it closes it.
   $effect(() => {
-    if (chain && session.current?.id !== chain.rowId) chain = null;
+    if (sheet && session.current?.id !== sheet.rowId) sheet = null;
   });
 
   /**
@@ -482,11 +444,11 @@
    */
   const uid = $props.id();
   const optionId = (index: number) => `${uid}-opt-${index}`;
-  const chainOptionId = (index: number) => `${uid}-chain-${index}`;
+  const sheetOptionId = (index: number) => `${uid}-act-${index}`;
   const suggestionId = (index: number) => `${uid}-sug-${index}`;
   /** The three listboxes, which the box names as the one it controls (#1665). */
   const resultsId = `${uid}-results`;
-  const chainId = `${uid}-actions`;
+  const sheetId = `${uid}-actions`;
   const suggestionsId = `${uid}-suggestions`;
 
   /**
@@ -499,17 +461,17 @@
     if (!row || session.error) return undefined;
     return optionId(session.selected);
   });
-  const activeChainOption = $derived(chain ? chainOptionId(chain.selected) : undefined);
+  const activeSheetOption = $derived(sheet && sheet.renaming === null && sheetShown.length > 0 ? sheetOptionId(sheet.selected) : undefined);
 
   /**
    * The list the box controls and the option it names: whichever list the
    * arrows walk, in the order `onkeydown` asks -- the value suggestions while
-   * they are open, then the Tab chain, then the results.
+   * they are open, then the Tab sheet, then the results.
    */
   const controlled = $derived.by(() => {
     if (overlay) return { list: resultsId, option: overlayRows.length > 0 ? optionId(overlay.selected) : undefined };
     if (offer.length > 0) return { list: suggestionsId, option: suggestionId(suggestionPicked) };
-    if (chain) return { list: chainId, option: activeChainOption };
+    if (sheet) return { list: sheetId, option: activeSheetOption };
     return { list: resultsId, option: activeOption };
   });
 
@@ -527,7 +489,7 @@
     if (activeOption) scrollToOption(activeOption);
   });
   $effect(() => {
-    if (activeChainOption) scrollToOption(activeChainOption);
+    if (activeSheetOption) scrollToOption(activeSheetOption);
   });
 
   function scrollToOption(id: string) {
@@ -581,7 +543,13 @@
         // an open and a toggle land on whichever ran last. `Esc` and the × are
         // the ways out, which is also what the round-3 mockup did. Closed, it
         // opens on an empty box (#2425); open, it leaves the box as it is.
-        if (!open) query = "";
+        // While open it only gives the box its focus back (#2426), wherever a
+        // click left it: Tab is the one way into the actions.
+        if (open) {
+          box?.focus();
+          return;
+        }
+        query = "";
         open = true;
       }
     }
@@ -672,8 +640,7 @@
    * No second dialog over this one; Esc goes back to the search.
    */
   function startNaming() {
-    if (!session.canSave || session.savedId !== null) return;
-    chain = null;
+    if (!session.canSave || session.savedId !== null || sheet) return;
     naming = session.raw.trim();
     void tick().then(() => box?.focus({ select: true }));
   }
@@ -698,7 +665,6 @@
   }
 
   function openOverlay() {
-    chain = null;
     overlay = { filter: "", selected: 0 };
     box?.focus();
   }
@@ -763,6 +729,187 @@
     return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "s";
   }
 
+  /** Tab on a row with actions: the sheet, the box emptied and labelled Actions. */
+  function openSheet() {
+    const row = session.current;
+    const subject = row ? subjectOf(row, inboxOps) : null;
+    if (!row || !subject || sheetActions(subject, sheetContext).length === 0) return;
+    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null };
+    readApplications();
+    box?.focus();
+  }
+
+  /** Back to the results, the search words in the box as they were. */
+  function leaveSheet() {
+    sheet = null;
+    box?.focus();
+  }
+
+  /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
+  async function settled(work: () => Promise<unknown>, said: () => string) {
+    try {
+      await work();
+      push({ text: said() });
+      close();
+    } catch (cause) {
+      push({ text: ipcErrorMessage(cause), tone: "err" });
+      box?.focus();
+    }
+  }
+
+  /** Carry out one action of the open sheet: the one reader of `SheetEffect`. */
+  function perform(action: SheetAction) {
+    if (!sheet) return;
+    const { subject, relation } = sheet;
+    const does = action.does;
+    const go = (hash: string) => {
+      close();
+      onnavigate(hash);
+    };
+    switch (does.kind) {
+      case "go":
+        return go(does.hash);
+      case "copy":
+        return void settled(() => io.copyText(does.text), () => does.said);
+      case "write":
+        return void settled(() => io.submitWrite(does.payload), () => does.said);
+      case "ack":
+        return void settled(() => io.ackAlert(does.monitorId), () => does.said);
+      case "link": {
+        const job = openEntity;
+        if (!job || subject.kind !== "entity") return;
+        const picked = JOB_LINK_RELATIONS[relation] ?? JOB_LINK_RELATIONS[0]!;
+        // The job's own mapping (`TfLinkTo`): drawn from the job to the row.
+        const row = drawn(picked.id, job.entityId, subject.entityId);
+        void io.createLink(row.fromId, row.toId, row.relation).then(
+          () => {
+            push({ text: `Linked ${nameOf(subject)} to ${job.label} as ${picked.label}` });
+            close();
+          },
+          (cause: unknown) => {
+            push({ text: linkFailureMessage(cause), tone: "err" });
+            box?.focus();
+          },
+        );
+        return;
+      }
+      case "timer":
+        if (subject.kind !== "entity" || !ontimer) return;
+        ontimer(subject.entityId, subject.title);
+        return close();
+      case "open-in": {
+        if (subject.kind !== "entity") return;
+        let argv: string[] = [];
+        return void settled(
+          async () => {
+            const where = subject.entityKind === "pr" ? await io.repoOf({ sourceId: subject.sourceId, path: subject.path }) : subject.entityId;
+            if (where === null) throw new Error(`The mirror holds no repository for ${subject.title}.`);
+            argv = await io.openCheckout(where, { application: does.application });
+          },
+          () => `Started ${does.name}: ${argvText(argv)}`,
+        );
+      }
+      case "clone":
+        if (subject.kind !== "entity") return;
+        return void settled(() => io.clone({ entityId: subject.entityId, title: subject.title }), () => `Cloning ${subject.title}`);
+      case "apply":
+        if (subject.kind !== "list") return;
+        sheet = null;
+        // As Enter on the list does (#2423): its text back in the box, or why it cannot be.
+        if (subject.refusal !== null) push({ text: subject.refusal });
+        else session.set(`${subject.text} `);
+        box?.focus();
+        return;
+      case "rename":
+        if (subject.kind !== "list") return;
+        sheet.renaming = subject.label;
+        void tick().then(() => box?.focus({ select: true }));
+        return;
+      case "delete":
+        if (subject.kind !== "list") return;
+        sheet = null;
+        box?.focus();
+        void session.deleteList(subject.id).then((done) => done && push({ text: `Deleted ${subject.label}` }));
+        return;
+      case "inbox": {
+        if (subject.kind !== "inbox") return;
+        const { item } = subject;
+        if (does.op === "rerun") {
+          return void settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
+        }
+        if (does.op === "ack") {
+          return void settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.");
+        }
+        return void settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
+      }
+    }
+  }
+
+  /** The new name's keys: Enter keeps it, Esc goes back to the list's actions. */
+  function renamingKey(event: KeyboardEvent, current: NonNullable<typeof sheet>, name: string) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const label = name.trim();
+      if (label === "" || current.subject.kind !== "list") return;
+      const { id } = current.subject;
+      sheet = null;
+      box?.focus();
+      void session.renameList(id, label).then((done) => done && push({ text: `Renamed to ${label}` }));
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      current.renaming = null;
+      current.filter = "";
+      box?.focus();
+    }
+  }
+
+  /** The sheet's keys: the arrows walk, ← → pick the link's relation, Enter acts, Esc, Tab or Backspace on the empty box go back. */
+  function sheetKey(event: KeyboardEvent, current: NonNullable<typeof sheet>) {
+    if (current.renaming !== null) return renamingKey(event, current, current.renaming);
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        current.selected = Math.min(sheetShown.length - 1, current.selected + 1);
+        return;
+      case "ArrowUp":
+        event.preventDefault();
+        current.selected = Math.max(0, current.selected - 1);
+        return;
+      case "ArrowLeft":
+      case "ArrowRight":
+        if (sheetShown[current.selected]?.does.kind === "link") {
+          event.preventDefault();
+          const step = event.key === "ArrowRight" ? 1 : -1;
+          current.relation = (current.relation + step + JOB_LINK_RELATIONS.length) % JOB_LINK_RELATIONS.length;
+        }
+        return;
+      case "Enter": {
+        event.preventDefault();
+        const chosen = sheetShown[current.selected];
+        if (chosen) perform(chosen);
+        return;
+      }
+      case "Tab":
+        event.preventDefault();
+        leaveSheet();
+        return;
+      case "Escape":
+        // Never the dialog's: the sheet goes back to the results.
+        event.preventDefault();
+        event.stopPropagation();
+        leaveSheet();
+        return;
+      case "Backspace":
+        if (current.filter === "") {
+          event.preventDefault();
+          leaveSheet();
+        }
+        return;
+      default:
+    }
+  }
+
   function activate(row: LauncherRow) {
     if (row.kind === "hit" && row.hit.kind === "list") {
       // A saved list applies by its own text (#2423, spec #2419 story 14):
@@ -802,6 +949,12 @@
       else namingKey(event, naming);
       return;
     }
+    if (sheet) {
+      // The box's own chords are not the sheet's: ⌘S and ⌘? do nothing here.
+      if (isSaveChord(event) || isHelpChord(event)) event.preventDefault();
+      else sheetKey(event, sheet);
+      return;
+    }
     if (isHelpChord(event)) {
       event.preventDefault();
       if (overlay) leaveOverlay();
@@ -822,29 +975,14 @@
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
-        // While a chain is open the arrows walk *it*: it is the thing in front
-        // of the reader, and moving the result selection underneath would pull
-        // the chain out from under its own row.
-        if (chain) {
-          chain.selected = Math.min(chain.actions.length - 1, chain.selected + 1);
-        } else {
-          session.move(1);
-        }
+        session.move(1);
         return;
       case "ArrowUp":
         event.preventDefault();
-        if (chain) {
-          chain.selected = Math.max(0, chain.selected - 1);
-        } else {
-          session.move(-1);
-        }
+        session.move(-1);
         return;
       case "Enter": {
         event.preventDefault();
-        if (chain) {
-          chain.actions[chain.selected]?.run();
-          return;
-        }
         // A miss has one thing to do and no row to do it from, so the key
         // that opens everything else opens it too -- otherwise a paste that
         // missed would be the one state in this box the keyboard cannot leave.
@@ -857,30 +995,17 @@
         if (row) activate(row);
         return;
       }
-      case "Tab": {
+      case "Tab":
         // Swallowed either way, never forwarded: the default would move focus
-        // out of the box.
+        // out of the box. A row with no actions opens nothing.
         event.preventDefault();
-        if (chain) {
-          chain = null;
-          return;
-        }
-        const row = session.current;
-        if (!row) return;
-        const actions = chainFor(row);
-        // No chain rather than an empty one: a strip with nothing in it says
-        // there is something here.
-        if (actions.length === 0) return;
-        chain = { rowId: row.id, actions, selected: 0 };
+        openSheet();
         return;
-      }
       case "Escape":
         // One rung per press, and the key never reaches the shell's ladder.
         event.preventDefault();
         event.stopPropagation();
-        if (chain) {
-          chain = null;
-        } else if (session.raw !== "") {
+        if (session.raw !== "") {
           session.set("");
         } else {
           close();
@@ -912,7 +1037,7 @@
     inside, and registers the launcher on the shell's layer stack. Its title
     names the dialog for a screen reader; the prototype draws no header, so
     `tf/css/launcher.css` hides it from sight only. `TfDialog` leaves `Tab`
-    alone here: the box takes it for the action chain and says so with
+    alone here: the box takes it for the action sheet and says so with
     `preventDefault`.
   -->
   <TfDialog title="Search and actions" className={deep ? "tf-launch tf-launch-deep" : "tf-launch"} onclose={close}>
@@ -925,7 +1050,7 @@
         {#if boxLabel !== null}<span class="tf-ln-mode">{boxLabel}</span>{/if}
         <QueryBox
           bind:this={box}
-          value={naming !== null ? naming : overlay ? overlay.filter : session.raw}
+          value={naming !== null ? naming : overlay ? overlay.filter : sheet ? (sheet.renaming ?? sheet.filter) : session.raw}
           {placeholder}
           pending={session.pending}
           controls={controlled.list}
@@ -933,7 +1058,11 @@
           oninput={(value) => {
             if (naming !== null) naming = value;
             else if (overlay) overlay = { filter: value, selected: 0 };
-            else session.type(value);
+            else if (sheet?.renaming != null) sheet.renaming = value;
+            else if (sheet) {
+              sheet.filter = value;
+              sheet.selected = 0;
+            } else session.type(value);
           }}
           {onkeydown}
           onclose={close}
@@ -975,10 +1104,76 @@
         </div>
       {/if}
 
-      {#if interpreted && !overlay}
+      {#if interpreted && !overlay && !sheet}
         <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
+      {#if sheet}
+        {@const current = sheet}
+        <!-- The row the sheet acts on, lifted under the box; the box keeps the search words aside. -->
+        <Pinned row={current.row} id={`${uid}-pinned`} {now} />
+        {#if current.renaming !== null}
+          <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
+        {:else}
+          <!--
+            Keys from a clicked chip or row land here, so Esc goes back to the
+            results and never reaches the dialog; a click gives the box its
+            focus back.
+          -->
+          <div
+            id={sheetId}
+            class="tf-ln-list tf-ln-sheet"
+            role="listbox"
+            tabindex="-1"
+            aria-label="Actions on the selected result"
+            {onkeydown}
+            onclick={() => box?.focus()}
+          >
+            {#each sheetShown as action, index (action.id)}
+              {#if action.does.kind === "link"}
+                <!-- Not a button: the relation chips inside it are buttons of their own. -->
+                <div
+                  id={sheetOptionId(index)}
+                  class="tf-ln-opt tf-ln-link"
+                  class:tf-ln-on={index === current.selected}
+                  role="option"
+                  tabindex="-1"
+                  aria-selected={index === current.selected}
+                  onmouseenter={() => (current.selected = index)}
+                >
+                  <button type="button" class="tf-ln-nm" onclick={() => perform(action)}>{action.label}</button>
+                  <span class="tf-fchips" role="group" aria-label="Relation">
+                    {#each JOB_LINK_RELATIONS as relation, r (relation.id)}
+                      <button
+                        type="button"
+                        tabindex="-1"
+                        aria-pressed={r === current.relation}
+                        onclick={() => (current.relation = r)}>{relation.label}</button
+                      >
+                    {/each}
+                  </span>
+                </div>
+              {:else}
+                <button
+                  id={sheetOptionId(index)}
+                  class="tf-ln-opt"
+                  class:tf-ln-on={index === current.selected}
+                  role="option"
+                  aria-selected={index === current.selected}
+                  onclick={() => perform(action)}
+                  onmouseenter={() => (current.selected = index)}
+                >
+                  <span class="tf-ln-nm">{action.label}</span>
+                  <span class="tf-ln-s">{action.detail}</span>
+                </button>
+              {/if}
+            {/each}
+            {#if sheetShown.length === 0}
+              <p class="tf-ln-none">No action matches “{current.filter}”.</p>
+            {/if}
+          </div>
+        {/if}
+      {:else}
       <div class="tf-ln-split" class:tf-ln-two={split}>
       <div id={resultsId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Results">
         {#if overlay}
@@ -1087,35 +1282,13 @@
       {/if}
       </div>
 
-      {#if chain}
-        <div
-          id={chainId}
-          class="tf-ln-chain"
-          role="listbox"
-          tabindex="-1"
-          aria-label="Actions on the selected result"
-        >
-          {#each chain.actions as action, index (action.id)}
-            <button
-              id={chainOptionId(index)}
-              class="tf-ln-opt tf-ln-chain-a"
-              class:tf-ln-on={index === chain.selected}
-              role="option"
-              aria-selected={index === chain.selected}
-              onclick={() => action.run()}
-              onmouseenter={() => chain && (chain.selected = index)}
-            >
-              <span class="tf-ln-nm">{action.label}</span>
-            </button>
-          {/each}
-        </div>
       {/if}
     {/snippet}
 
     {#snippet footer()}
       <span><kbd>↑↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
-      <span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>
+      {#if tabOpens}<span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
       {#if session.canSave}

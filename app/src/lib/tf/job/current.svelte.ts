@@ -41,34 +41,9 @@ export const breadcrumbJob = {
   },
 };
 
-/** The other end of a link the launcher asked the job's dialog for. */
+/** The other end of a link the job's *Link to…* dialog picked. */
 export interface LinkTarget {
   entity_id: string;
   title: string;
   kind: string;
 }
-
-let asked = $state<{ key: string; target: LinkTarget } | null>(null);
-
-/**
- * *Link to <key>* from the launcher (#1500): the launcher never writes the
- * link. It asks here, and the job page with that key opens its own link
- * dialog with the result preset, so the relation is picked where every other
- * link from the job is.
- */
-export const linkRequest = {
-  ask(key: string, target: LinkTarget): void {
-    asked = { key, target };
-  },
-  /** The target asked for `key`, handed over once; `null` when none waits. */
-  take(key: string): LinkTarget | null {
-    if (asked === null || asked.key !== key) return null;
-    const { target } = asked;
-    asked = null;
-    return target;
-  },
-  /** Forget a request nobody took: the reader left before the job drew. */
-  drop(): void {
-    asked = null;
-  },
-};

@@ -26,9 +26,9 @@
   import { chosenJob } from "./lib/tf/job/chosen.svelte";
   import { entityAddress } from "./lib/tf/address";
   import { homeIfBlank } from "./lib/tf/home";
-  import { breadcrumbJob, currentJob, linkRequest, type LinkTarget } from "./lib/tf/job/current.svelte";
+  import { breadcrumbJob, currentJob } from "./lib/tf/job/current.svelte";
   import { foregroundOf } from "./lib/tf/foreground";
-  import { jobHash, parseTfHash, sectionHash } from "./lib/tf/route";
+  import { parseTfHash, sectionHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
@@ -163,19 +163,6 @@
   /** *Start timer* on a ticket: the running ticket's draft first (R-13.2). */
   function startTimerOn(entityId: string, title: string) {
     void drafts.switchTo({ kind: "entity", entity_id: entityId }, title);
-  }
-
-  /**
-   * The launcher's *Link to <key>* (#1500): the job's own link dialog, the
-   * result preset. On the job page it opens there; from a view opened from
-   * the job, the job page is opened first, where its Connections drawer shows
-   * the link once it is made.
-   */
-  function linkToJob(target: LinkTarget) {
-    const job = breadcrumbJob.job;
-    if (job === null) return;
-    linkRequest.ask(job.key, target);
-    if (currentJob.entityId !== job.entityId) location.hash = jobHash(job.entityId);
   }
 
   // ⌘T with nothing in front starts on the page's job (#1435): on the Job page the job on screen, else the chosen job (spec #2227);
@@ -381,17 +368,17 @@
         The ⌘K launcher is a ticket-first dialog (#1422), drawn inside `.tf`,
         last so it sits over the others. `sources` is supplied so the launcher's rows and chips read the live
         `source:health` store; an empty list means *watching, nothing to complain
-        about* (#36). `openEntity` is the page's job (`breadcrumbJob`), which *Link to
-        <key>* needs as its other end (#1500).
+        about* (#36). `openEntity` is the page's job (`breadcrumbJob`), which the
+        sheet's *Link to <key>* writes against (#2426); `inbox.actions` are the
+        source ops each line offers, for its *Re-run*.
       -->
       <Launcher
         bind:open={launcherOpen}
         bind:query={launcherQuery}
         sources={health.all}
         sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
-        inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
+        inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item), actions: Object.fromEntries(inbox.stream.map((entry) => [entry.item.key, entry.actions])) }}
         openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
-        onlink={linkToJob}
         ontimer={startTimerOn}
         onnavigate={navigate}
         onclose={() => {}}
