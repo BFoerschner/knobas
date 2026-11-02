@@ -1450,11 +1450,11 @@
     if (open) {
       void session.loadHome();
       void loadLocal();
-      // Opened by a page's own search keys: the section's filter, as the page's field would have had it. ⌘K opens as it was.
+      // Opened by a page's own search keys: the section's filter, as the page's field would have had it. ⌘K opens empty (Björn, round 12): never the last query.
       const filter = openWithSection ? sectionFilter() : "";
       openWithSection = false;
-      if (filter !== "") session.set(filter);
-      void tick().then(() => box?.focus({ select: filter === "" }));
+      if (session.raw !== filter && !(filter === "" && session.raw === "")) session.set(filter);
+      void tick().then(() => box?.focus());
     } else {
       sheet = null;
       session.dispose();
