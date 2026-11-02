@@ -80,6 +80,8 @@
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { sectionFilter } from "../launcher/section";
+  import { chordOf, refusalOf } from "../launcher/keys";
+  import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
   import { sourceRoles } from "./roles.svelte";
@@ -130,6 +132,7 @@
     ontimechanged,
     nav = { back: () => history.back(), forward: () => history.forward() },
     kept = sharedKeptPages,
+    keys = launcherKeys,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /**
@@ -171,6 +174,8 @@
     nav?: { back: () => void; forward: () => void };
     /** *Pages kept open* (#2247), which the page host reads; the window's when omitted. */
     kept?: KeptPagesSetting;
+    /** The keys bound (#2429), whose saved lists' chords open search on the list; the window's when omitted. */
+    keys?: KeyStore;
   } = $props();
 
   let hash = $state(location.hash);
@@ -336,6 +341,8 @@
   const ready = () => lifecycle.ready;
   // *Pages kept open* as stored (#2247): until it answers, the default holds.
   onReady(ready, () => ports.pagesKeptOpen, (count) => kept.set(count));
+  // The saved lists' chords (#2429), read once the database answers; the launcher reads them again on each opening.
+  onReady(ready, () => keys.load, () => {});
   // The command renderers (#2262): until they answer, the built-ins draw everything.
   onReady(ready, () => ports.userRenderers, (saved) => installCommands(saved));
   // The default renderer per file pattern (#2263): until it answers, the registry's order decides.
@@ -476,6 +483,19 @@
       event.preventDefault();
       go("#/settings");
       return;
+    }
+    // A saved list's chord (#2429): search on the list, from any page and in
+    // a field too, as ⌘K is. After the shell's own keys, which win; never a
+    // chord the panel refuses; a dialog, the open launcher's included, owns
+    // the keyboard (the launcher answers it there itself).
+    const chord = chordOf(event);
+    if (chord !== null && !event.defaultPrevented && refusalOf(event) === null && !dialogOpen()) {
+      const list = keys.listOf(chord);
+      if (list) {
+        event.preventDefault();
+        onsearch(`${list.text} `);
+        return;
+      }
     }
     if (event.key !== "Escape" || event.defaultPrevented) return;
 
