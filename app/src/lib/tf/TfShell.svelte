@@ -79,6 +79,7 @@
   import { provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { parseTfHash, sectionOf } from "./route";
+  import { sectionFilter } from "../launcher/section";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
   import { sourceRoles } from "./roles.svelte";
@@ -131,8 +132,11 @@
     kept = sharedKeptPages,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
-    /** Open the launcher. */
-    onsearch: () => void;
+    /**
+     * Open the launcher with `query` in its box (#2425): `""` for ⌘K, the
+     * section's filter (`sectionFilter`) for `/`, ⌘/ and the top bar's button.
+     */
+    onsearch: (query: string) => void;
     /** The timer verb: stop into the worklog draft, or start. Required, as in `TopStrip`. */
     ontimer: (() => void) | undefined;
     timer?: Pick<Timer, "current" | "elapsed">;
@@ -454,8 +458,19 @@
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
-      onsearch();
+      onsearch("");
       return;
+    }
+    // `/` outside a field, and ⌘/ anywhere, are the section's search (#2425):
+    // the launcher with the section's filter, the pages having no field of
+    // their own. Read by the key, not the code: on a German board `/` is ⇧7.
+    // A dialog owns the keyboard, the launcher's own included.
+    if (event.key === "/" && !event.altKey && !event.defaultPrevented && !dialogOpen()) {
+      if (mod || focusedField() === null) {
+        event.preventDefault();
+        onsearch(sectionFilter(route));
+        return;
+      }
     }
     if (mod && event.key.toLowerCase() === "t") {
       event.preventDefault();
@@ -543,7 +558,7 @@
     {inbox}
     {badges}
     {timer}
-    {onsearch}
+    onsearch={() => onsearch(sectionFilter(route))}
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
   />

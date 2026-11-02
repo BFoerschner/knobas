@@ -203,17 +203,13 @@ describe("the filter", () => {
   const keys = (list: InboxEntry[]) => list.map((row) => row.item.key);
 
   test("All with nothing set keeps every row", () => {
-    expect(keys(visible(rows, { scope: "all", job: null, kinds: [], text: "" }, index))).toEqual(["a", "b", "c"]);
+    expect(keys(visible(rows, { scope: "all", job: null, kinds: [] }, index))).toEqual(["a", "b", "c"]);
   });
   test("This job keeps what the job holds", () => {
-    expect(keys(visible(rows, { scope: "job", job: "PAY-231", kinds: [], text: "" }, index))).toEqual(["a"]);
+    expect(keys(visible(rows, { scope: "job", job: "PAY-231", kinds: [] }, index))).toEqual(["a"]);
   });
   test("kind chips mean any of them", () => {
-    expect(keys(visible(rows, { scope: "all", job: null, kinds: ["Build", "Mention"], text: "" }, index))).toEqual(["b", "c"]);
-  });
-  test("text matches the sentence and the job key", () => {
-    expect(keys(visible(rows, { scope: "all", job: null, kinds: [], text: "ledger" }, index))).toEqual(["c"]);
-    expect(keys(visible(rows, { scope: "all", job: null, kinds: [], text: "pay-231" }, index))).toEqual(["a"]);
+    expect(keys(visible(rows, { scope: "all", job: null, kinds: ["Build", "Mention"] }, index))).toEqual(["b", "c"]);
   });
 });
 

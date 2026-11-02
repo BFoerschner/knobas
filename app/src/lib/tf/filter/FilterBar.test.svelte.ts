@@ -99,22 +99,23 @@ test("typing several characters keeps focus and the caret where they were typed"
   expect(input.selectionEnd).toBe(4);
 });
 
-test("/ focuses the field from outside a text field, and types nothing", () => {
+test("the bar claims no / and draws no / hint: / is the shell's, and opens the launcher with the section's filter (#2425)", () => {
   mountBar(sessionFilter(config.id));
   const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
   document.body.dispatchEvent(event);
-  expect(document.activeElement).toBe(field());
-  expect(event.defaultPrevented).toBe(true);
+  expect(document.activeElement).not.toBe(field());
+  expect(event.defaultPrevented).toBe(false);
+  expect(target.querySelector("kbd")).toBeNull();
+});
 
-  // Inside another text field `/` is a character.
-  const other = document.createElement("textarea");
-  document.body.appendChild(other);
-  other.focus();
-  const typed = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
-  other.dispatchEvent(typed);
-  expect(typed.defaultPrevented).toBe(false);
-  expect(document.activeElement).toBe(other);
-  other.remove();
+test("with search off the bar draws no text field, and keeps its chips and scope (#2425)", () => {
+  const quiet: FilterConfig = { ...config, id: "tickets-quiet", search: false };
+  bar = mount(FilterBar, { target, props: { config: quiet, filter: sessionFilter(quiet.id), shown: 1, total: 1 } });
+  flushSync();
+  expect(target.querySelector("input")).toBeNull();
+  expect(target.querySelector(".tf-fsearch")).toBeNull();
+  expect(target.querySelectorAll('[aria-label="Scope"] button')).toHaveLength(2);
+  expect(target.querySelectorAll('[aria-label="Type"] button').length).toBeGreaterThan(0);
 });
 
 test("the field is the one the Esc ladder clears, and the clear button empties it in place", () => {
@@ -129,7 +130,6 @@ test("the field is the one the Esc ladder clears, and the clear button empties i
   expect(state.text).toBe("");
   expect(input.value).toBe("");
   expect(document.activeElement).toBe(input);
-  expect(target.querySelector("kbd")!.textContent).toBe("/");
 });
 
 test("chips, a dropdown and the scope write the state the view's query is built from", () => {
@@ -172,20 +172,4 @@ test("a view's filter is kept for the session: a second bar for it opens where t
   mountBar(sessionFilter(config.id));
   expect(field().value).toBe("p");
   expect(sessionFilter("tickets-other").text).toBe("");
-});
-
-test("with the hint off the bar draws no / hint and does not claim the key (#1453)", () => {
-  const quiet: FilterConfig = { ...config, id: "tickets-quiet", hint: false };
-  bar = mount(FilterBar, { target, props: { config: quiet, filter: sessionFilter(quiet.id), shown: 1, total: 1 } });
-  flushSync();
-  expect(target.querySelector("kbd")).toBeNull();
-  const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
-  document.body.dispatchEvent(event);
-  expect(document.activeElement).not.toBe(field());
-  expect(event.defaultPrevented).toBe(false);
-});
-
-test("the default config draws the / hint (#1453)", () => {
-  mountBar(sessionFilter(config.id));
-  expect(target.querySelector("kbd")!.textContent).toBe("/");
 });

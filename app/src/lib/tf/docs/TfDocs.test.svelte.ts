@@ -142,8 +142,13 @@ async function settle(): Promise<void> {
   flushSync();
 }
 
+/** The props the last draw mounted with, live, so a test can move the address as the router does. */
+let shown: { rest: string[] } | null = null;
+
 async function draw(rest: string[], io = ports(), follower?: WriteFollower): Promise<DocsPorts> {
-  view = mount(TfDocs, { target, props: { ready: true, rest, job: null, ports: io, ...(follower ? { follower } : {}) } });
+  const props = $state({ ready: true, rest, job: null, ports: io, ...(follower ? { follower } : {}) });
+  shown = props;
+  view = mount(TfDocs, { target, props });
   await settle();
   return io;
 }
@@ -411,26 +416,38 @@ const HITS: DocsHits = {
   ],
 };
 
-function type(value: string): HTMLInputElement {
-  const input = target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
-  input.value = value;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  return input;
+/** Search as the launcher's *Search Docs for …* row does (#2425): the words in the address. */
+function search(words: string): void {
+  shown!.rest = ["search", words];
+  flushSync();
 }
+
+/** The search's words as Docs draws them over the hits, or `null` while none is on. */
+const searched = () => target.querySelector(".tf-dl-q b")?.textContent ?? null;
 
 const button = (label: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
 
-test("the search names its scope, searches in the picker's space and lists the hits", async () => {
+test("Docs draws no search field and leaves / to the shell, which opens the launcher on #d (#2425)", async () => {
+  await draw(["confluence:2"]);
+  expect(target.querySelector("nav[aria-label='Docs'] input")).toBeNull();
+  expect(target.querySelector(".tf-fsearch")).toBeNull();
+  expect(target.querySelector(".tf-dl-q"), "no search is on").toBeNull();
+  const slash = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+  window.dispatchEvent(slash);
+  expect(slash.defaultPrevented, "the shell's TfShell test witnesses what / opens").toBe(false);
+});
+
+test("the words in the address search every space and list the hits; the picker narrows them to a space (#2425)", async () => {
   const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
-  const input = target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
-  expect(input.placeholder).toBe("Search Operations");
-  expect(target.querySelector(".tf-dl-hint")?.textContent).toBe('"…" phrase, -word leave out, by: updated:7d');
-  type("ledger");
+  search("ledger");
   await settle();
-  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", { source_id: "confluence", key: "OPS" });
-  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("2 pages in Operations, 3 ms. Search all spaces");
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
+  expect(searched()).toBe("ledger");
+  // Every space's hits name their space.
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("2 pages in all spaces, 3 ms");
   const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
-  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["Ops home", "top level"]);
+  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["OPS › Ops home", "OPS › top level"]);
   expect(hits[0]!.querySelector(".tf-sn")?.textContent).toBe("Ledger: The ledger");
   expect(hits[0]!.querySelector(".tf-sn mark")?.textContent).toBe("ledger");
   expect(hits[1]!.querySelector(".tf-sn b")?.textContent).toBe("Comment by Priya:");
@@ -439,9 +456,11 @@ test("the search names its scope, searches in the picker's space and lists the h
   expect(hits[0]!.getAttribute("aria-current")).toBe("true");
   expect(target.querySelector("nav[aria-label='Docs'] details")).toBeNull();
 
-  button("Search all spaces")!.click();
+  const picker = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  picker.value = "confluence/OPS";
+  picker.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
-  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", { source_id: "confluence", key: "OPS" });
 });
 
 test("the search waits for a pause in typing and asks once, for what was typed last (#2200)", async () => {
@@ -451,16 +470,16 @@ test("the search waits for a pause in typing and asks once, for what was typed l
     const { searchPause: _immediate, ...paused } = ports({ docsSearch: vi.fn(async () => HITS) });
     const io = await draw(["confluence:2"], paused);
     for (const typed of ["l", "le", "led", "ledg"]) {
-      type(typed);
+      search(typed);
       await settle();
       vi.advanceTimersByTime(SEARCH_PAUSE_MS - 10);
     }
     expect(io.docsSearch).not.toHaveBeenCalled();
-    type("ledger");
+    search("ledger");
     await settle();
     vi.advanceTimersByTime(SEARCH_PAUSE_MS);
     await settle();
-    expect(vi.mocked(io.docsSearch).mock.calls).toEqual([["ledger", { source_id: "confluence", key: "OPS" }]]);
+    expect(vi.mocked(io.docsSearch).mock.calls).toEqual([["ledger", null]]);
     expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
   } finally {
     vi.useRealTimers();
@@ -471,9 +490,9 @@ test("an answer to an older keystroke than the last is dropped", async () => {
   const answers: Record<string, (hits: typeof HITS) => void> = {};
   const docsSearch = vi.fn((query: string) => new Promise<typeof HITS>((resolve) => (answers[query] = resolve)));
   await draw(["confluence:2"], ports({ docsSearch }));
-  type("led");
+  search("led");
   await settle();
-  type("ledger");
+  search("ledger");
   await settle();
   answers["ledger"]!({ ...HITS, hits: HITS.hits.slice(0, 1), total: 1 });
   await settle();
@@ -482,28 +501,33 @@ test("an answer to an older keystroke than the last is dropped", async () => {
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(1);
 });
 
-test("no hit explains the AND rule; an empty field brings the tree back", async () => {
+test("no hit explains the AND rule; Clear brings the tree back and leaves the search's address for the page's (#2425)", async () => {
   await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => ({ ...HITS, total: 0, hits: [] })) }));
-  type("zzz");
+  search("zzz");
   await settle();
   expect(target.querySelector(".tf-dl-body")?.textContent).toContain(
     "No page matches. Every word has to appear in the page or its comments.",
   );
-  type("");
+  location.hash = "#/docs/search/zzz";
+  button("Clear")!.click();
   await settle();
+  expect(searched()).toBeNull();
   expect(target.querySelector("nav[aria-label='Docs'] details")).not.toBeNull();
+  expect(location.hash).toBe("#/page/confluence%3A2");
+  location.hash = "";
 });
 
-test("/ focuses the search, and arrows open the next hit with every match marked and the find bar", async () => {
+test("a hit opens with every match marked and the find bar, and the search stays on (#2425)", async () => {
   await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
-  window.dispatchEvent(new KeyboardEvent("keydown", { key: "/" }));
-  expect(document.activeElement?.getAttribute("aria-label")).toBe("Search pages");
-  const input = type("ledger");
+  search("ledger");
   await settle();
   location.hash = "";
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")[1]!.click();
   await settle();
   expect(location.hash).toBe("#/page/confluence%3A1");
+  shown!.rest = ["confluence:1"];
+  await settle();
+  expect(searched(), "opening a hit keeps the search").toBe("ledger");
   // The page drawn is still the handbook (the ports answer one page): it is
   // the query that is carried, and the handbook holds "Ledger" twice.
   const bar = target.querySelector(".tf-findbar")!;
@@ -597,9 +621,9 @@ const outlineOf = (root: Element) =>
 
 /** Opens the handbook from a search for `word`, so the find bar is open on it. */
 async function findOnPage(word: string): Promise<void> {
-  const input = type(word);
+  search(word);
   await settle();
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")[1]!.click();
   await settle();
   expect(target.querySelector(".tf-findbar input")).not.toBeNull();
 }
@@ -682,7 +706,6 @@ test("the outline moves between the margin and the fold as the window crosses 12
 const tree = () => target.querySelector<HTMLElement>("nav[aria-label='Docs']")!;
 const pages = () => target.querySelector<HTMLButtonElement>(".tf-rd-crumbrow button.tf-rd-pages");
 const drawerOpen = () => target.querySelector(".tf-rd")!.classList.contains("tf-rd-drawer");
-const searchField = () => target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
 
 test("below 900px a Pages button starts the breadcrumb row, naming the tree it opens; at 900px there is none (#2084)", async () => {
   windowWidth(899);
@@ -701,7 +724,7 @@ test("below 900px a Pages button starts the breadcrumb row, naming the tree it o
   expect(button.getAttribute("aria-expanded")).toBe("true");
   expect(drawerOpen()).toBe(true);
   expect(target.querySelector(".tf-rd-backdrop")).not.toBeNull();
-  expect(document.activeElement).toBe(searchField());
+  expect(document.activeElement, "focus is in the drawer").toBe(tree());
 
   if (view) unmount(view);
   media?.mockRestore();
@@ -727,7 +750,7 @@ test("Esc, a click on the backdrop and a page picked close the drawer, and focus
 
   await open();
   const esc = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-  searchField().dispatchEvent(esc);
+  tree().dispatchEvent(esc);
   await settle();
   expect(esc.defaultPrevented, "the shell's Esc ladder goes no further").toBe(true);
   expect(drawerOpen()).toBe(false);
@@ -770,27 +793,17 @@ test("the open drawer is a layer of the shell's, so Esc closes it with focus any
   expect(document.activeElement).toBe(pages());
 });
 
-test("below 900px / opens the drawer with the cursor in the search, and a field still keeps its /; focus goes back on Esc (#2084)", async () => {
-  windowWidth(800);
-  await draw(["confluence:2"]);
-  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']");
-  const typing = box ?? searchField();
-  typing.focus();
-  expect(press("/", typing)).toBe(true);
-  await settle();
-  expect(drawerOpen()).toBe(false);
-
-  const more = button("More")!;
-  more.focus();
-  expect(press("/")).toBe(false);
-  await settle();
-  expect(drawerOpen()).toBe(true);
-  expect(pages()!.getAttribute("aria-expanded")).toBe("true");
-  expect(document.activeElement).toBe(searchField());
-  press("Escape", searchField());
-  await settle();
-  expect(drawerOpen()).toBe(false);
-  expect(document.activeElement).toBe(more);
+test("at any width Docs leaves / alone: it is the shell's, and opens the launcher on #d (#2425)", async () => {
+  for (const width of [800, 1300]) {
+    windowWidth(width);
+    await redraw(["confluence:2"]);
+    const more = button("More")!;
+    more.focus();
+    expect(press("/"), "not claimed").toBe(true);
+    await settle();
+    expect(drawerOpen()).toBe(false);
+    expect(document.activeElement).toBe(more);
+  }
 });
 
 test("below 900px a label chip opens the drawer with the label in the search; Esc gives the chip focus back (#2084)", async () => {
@@ -801,8 +814,8 @@ test("below 900px a label chip opens the drawer with the label in the search; Es
   chip.click();
   await settle();
   expect(drawerOpen()).toBe(true);
-  expect(searchField().value).toBe("on-call");
-  expect(document.activeElement).toBe(searchField());
+  expect(searched()).toBe("on-call");
+  expect(document.activeElement).toBe(tree());
   expect(io.docsSearch).toHaveBeenLastCalledWith("on-call", { source_id: "confluence", key: "OPS" });
   // A hit picked in the drawer is a page picked.
   tree().querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
@@ -812,17 +825,17 @@ test("below 900px a label chip opens the drawer with the label in the search; Es
   location.hash = "";
 });
 
-test("at 900px and wider, / and a label chip focus the search as before, with no drawer (#2084)", async () => {
+test("at 900px and wider a label chip searches for itself in the tree's column, with no drawer (#2084, #2425)", async () => {
   windowWidth(900);
   const layers = createLayers();
   view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), layers } });
   await settle();
-  expect(press("/")).toBe(false);
-  expect(document.activeElement).toBe(searchField());
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-chip")].find((c) => c.textContent === "ops")!.click();
+  const chip = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-chip")].find((c) => c.textContent === "ops")!;
+  chip.focus();
+  chip.click();
   await settle();
-  expect(searchField().value).toBe("ops");
-  expect(document.activeElement).toBe(searchField());
+  expect(searched()).toBe("ops");
+  expect(document.activeElement).toBe(chip);
   expect(drawerOpen()).toBe(false);
   expect(target.querySelector(".tf-rd-backdrop")).toBeNull();
   expect(layers.open).toEqual([]);
@@ -1223,10 +1236,9 @@ function linkPorts() {
 }
 
 async function drawJob(rest: string[], links?: unknown, io = ports({ jobReach: vi.fn(async () => REACH) })): Promise<DocsPorts> {
-  view = mount(TfDocs, {
-    target,
-    props: { ready: true, rest, job: "PAY-231", ports: io, linkPorts: (links ?? linkPorts()) as never },
-  });
+  const props = $state({ ready: true, rest, job: "PAY-231", ports: io, linkPorts: (links ?? linkPorts()) as never });
+  shown = props;
+  view = mount(TfDocs, { target, props });
   await settle();
   return io;
 }
@@ -1252,14 +1264,13 @@ test("This job is off by default; on, it lists the job's pages by reason and hid
   ]);
   expect(groups[0]!.querySelector("a")?.getAttribute("aria-current")).toBe("true");
   expect(groups[1]!.querySelector("a")?.textContent).toBe("Eng homeENG");
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")?.placeholder).toBe("Search PAY-231's pages");
 });
 
 test("with This job on, the search reads every space and keeps the job's pages, with Search all pages", async () => {
   const io = await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsSearch: vi.fn(async () => HITS) }));
   scope()[0]!.click();
   await settle();
-  type("ledger");
+  search("ledger");
   await settle();
   expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
   expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("1 page in PAY-231's pages, 3 ms. Search all pages");
@@ -1269,7 +1280,8 @@ test("with This job on, the search reads every space and keeps the job's pages, 
   button("Search all pages")!.click();
   await settle();
   expect(scope()[1]!.getAttribute("aria-pressed")).toBe("true");
-  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", { source_id: "confluence", key: "OPS" });
+  // The address's search was over every space, and stays so.
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
 });
 
@@ -1476,7 +1488,7 @@ test("Docs draws the search hits as read, the read being the wiki's (#1296)", as
   const answer: DocsHits = { ...HITS, total: HITS.hits.length + 1, hits: [...HITS.hits, onNotes] };
   await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree), docsSearch: vi.fn(async () => answer) }));
 
-  type("ledger");
+  search("ledger");
   await settle();
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(answer.hits.length);
 });
@@ -1763,10 +1775,12 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
   const sync = syncEvents();
   const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), listen: sync.listen });
   await draw(["confluence:2"], io);
+  search("ledger");
+  await settle();
+  // A space picked after the search started narrows it, and the re-read keeps the pick.
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
-  select.value = "*";
+  select.value = "confluence/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
-  type("ledger");
   await settle();
   button("Edit section")!.click();
   await settle();
@@ -1779,8 +1793,8 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
   await sync.ended();
   expect(io.docsTree).toHaveBeenCalledTimes(2);
   expect(io.docsPage).toHaveBeenCalledTimes(2);
-  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
+  expect(searched()).toBe("ledger");
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
   expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
@@ -1793,9 +1807,9 @@ test("a sync run's re-read of the open page keeps the find bar on the match the 
   const sync = syncEvents();
   const twice: DocPage = { ...RICH, blocks: [{ type: "paragraph", text: [text("The ledger, and the ledger again.")] }] };
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => twice), docsSearch: vi.fn(async () => HITS), listen: sync.listen }));
-  const input = type("ledger");
+  search("ledger");
   await settle();
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
   await settle();
   const bar = () => target.querySelector(".tf-findbar")!;
   expect(bar().textContent).toContain("1 of 2");
@@ -2018,10 +2032,12 @@ test("the refresh event's re-read keeps the picked space, the search, an open se
   const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 44 })), listen: sync.listen });
   await draw(["confluence:2"], io);
   await sendComment("Done.");
+  search("ledger");
+  await settle();
+  // A space picked after the search started narrows it, and the re-read keeps the pick.
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
-  select.value = "*";
+  select.value = "confluence/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
-  type("ledger");
   await settle();
   button("Edit section")!.click();
   await settle();
@@ -2033,8 +2049,8 @@ test("the refresh event's re-read keeps the picked space, the search, an open se
   await sync.refreshed("confluence:2", 44);
   expect(io.docsTree).toHaveBeenCalledTimes(2);
   expect(io.docsPage).toHaveBeenCalledTimes(2);
-  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
+  expect(searched()).toBe("ledger");
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
   expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
@@ -2066,10 +2082,12 @@ test("Refresh ends the header actions, reads the page from its source, then the 
   expect(getEntity).toHaveBeenCalledWith("confluence:2");
   expect(actions().at(-1)).toBe("Refresh");
 
+  search("ledger");
+  await settle();
+  // A space picked after the search started narrows it, and the re-read keeps the pick.
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
-  select.value = "*";
+  select.value = "confluence/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
-  type("ledger");
   await settle();
   button("Edit section")!.click();
   await settle();
@@ -2086,8 +2104,8 @@ test("Refresh ends the header actions, reads the page from its source, then the 
   expect(getEntity).toHaveBeenCalledTimes(2);
   expect(refreshButton()?.textContent).toBe("Refresh");
   expect(target.querySelector("h1")?.textContent).toBe(RICH.title);
-  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!.value).toBe("ledger");
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
+  expect(searched()).toBe("ledger");
   expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");

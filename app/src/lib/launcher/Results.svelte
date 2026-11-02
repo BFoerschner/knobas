@@ -124,6 +124,24 @@
   {/each}
 {/each}
 
+<!-- *Search Docs for …* (#2425): last, after every group; `rows` holds it only for a `#d` answer with words. -->
+{#each rows as row, index (row.id)}
+  {#if row.kind === "docs"}
+    <button
+      id={optionId(index)}
+      class="tf-ln-opt"
+      class:tf-ln-on={index === selected}
+      role="option"
+      aria-selected={index === selected}
+      onclick={() => onopen(row)}
+      onmouseenter={() => onhover(index)}
+    >
+      <span class="tf-ln-nm">Search Docs for “{row.words}”</span>
+      <span class="tf-ln-s">Every space, in the Docs area</span>
+    </button>
+  {/if}
+{/each}
+
 {#if response.groups.length === 0}
   <p class="tf-ln-none">
     Nothing in the mirror matches

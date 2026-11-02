@@ -37,7 +37,7 @@ function withTicketSearch(handlers: Record<string, Handler>): Record<string, Han
         snippet: [],
       };
       const groups = [{ kind: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", total: 1, hits: [hit] }];
-      const interpreted = { prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] };
+      const interpreted = { text: "", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] };
       return { interpreted, groups, total: 1, took_ms: 1, coverage: [] };
     },
   };

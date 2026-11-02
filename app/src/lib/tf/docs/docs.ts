@@ -30,18 +30,22 @@ import { isDone } from "../tickets/tickets";
 export type DocsPlace =
   | { kind: "last" }
   | { kind: "space"; source: string | null; key: string }
-  | { kind: "page"; id: string; section: number | null };
+  | { kind: "page"; id: string; section: number | null }
+  | { kind: "search"; words: string };
 
 /**
  * Read the rest of a Docs address. The route keeps what follows the first
  * segment, and both `#/docs/…` and `#/page/…` arrive here: `space` names a
- * space, and anything else is a page's entity id (which always holds a `:`).
+ * space, `search` carries a search's words, and anything else is a page's
+ * entity id (which always holds a `:`).
  * A space segment holding a `:` names its source before the first one, as an
  * entity id does (a source id holds no `:`).
  */
 export function placeOf(rest: string[]): DocsPlace {
   const [head, next] = rest;
   if (head === undefined || head === "") return { kind: "last" };
+  // `#/docs/search/<words>` (#2425): the launcher's *Search Docs for …* row.
+  if (head === "search") return next ? { kind: "search", words: next } : { kind: "last" };
   if (head === "space") {
     if (!next) return { kind: "last" };
     const colon = next.indexOf(":");
@@ -51,6 +55,15 @@ export function placeOf(rest: string[]): DocsPlace {
   }
   const section = next !== undefined && /^\d+$/.test(next) ? Number(next) : null;
   return { kind: "page", id: head, section };
+}
+
+/**
+ * The Docs area searching for `words` (#2425): what the launcher's *Search
+ * Docs for …* row opens. The page under the hits is the one read last, as
+ * `#/docs`'s is.
+ */
+export function docsSearchHash(words: string): string {
+  return `#/docs/search/${encodeURIComponent(words)}`;
 }
 
 /** The address of a page, or of one of its sections. */
