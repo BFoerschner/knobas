@@ -1,6 +1,6 @@
 //! The docs contract (#2444, ADR-0040, spec #2432 story 50): what
-//! `knobas adapter check` runs on a component that claims the wiki role or
-//! exports `docs`, beside the contract battery.
+//! `knobas adapter check` would run (#2029, not built) on a component that
+//! claims the wiki role or exports `docs`, beside the contract battery.
 //!
 //! The battery holds a [`Source`](knobas_source::Source); the docs exports
 //! are no part of one (a projection takes no instance), so this holds them
@@ -54,7 +54,7 @@ pub enum Check {
 }
 
 impl Check {
-    /// The check's name, as `knobas adapter check` prints it.
+    /// The check's name, as a breach prints it.
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {

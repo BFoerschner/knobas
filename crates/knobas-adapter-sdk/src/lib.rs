@@ -92,8 +92,8 @@
 //!   ```
 //!
 //! * **The docs contract** holds the projection and the writes together
-//!   (`knobas_wasm_host::docs_contract`, run by `knobas adapter check` on a
-//!   component that claims the wiki role or exports `docs`): every `page`
+//!   (`knobas_wasm_host::docs_contract`, held on a component that claims the
+//!   wiki role or exports `docs`): every `page`
 //!   the sync emits is drawn, no other kind is, sections are numbered from
 //!   1, a section the projection refuses the edit refuses for the same
 //!   reason, an editable one is edited against the version drawn, a section

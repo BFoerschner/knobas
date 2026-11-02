@@ -49,7 +49,7 @@
 //!   five items they always did; a test byte-patches this build's `docs`
 //!   export away for a wiki claim without the export.
 //!   **`"docs_breach": "<how>"`** has the pages break the docs contract
-//!   (#2444) that way, for `knobas adapter check`'s ([`docs`] names them).
+//!   (#2444) that way, for the docs contract's tests ([`docs`] names them).
 //! * **The refresh** (1.4.0, #2101, ADR-0031): `refresh` reads one item by
 //!   id as the sync emits it, every kind, and the older run `older_runs`
 //!   answers; an id of this source it does not hold is *gone*.
