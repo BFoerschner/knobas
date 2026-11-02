@@ -362,8 +362,6 @@ mod tests {
         );
     }
 
-    /// A mention is the `@account` the inbox's mention rule reads, never run
-    /// into the word after it; a ticket is its key; a break is a new line.
     /// Spec #2432, story 22: included text is found on the page it belongs
     /// to, so an include writes no words and no link, filled or not.
     #[test]
@@ -397,6 +395,8 @@ mod tests {
         assert_eq!(text, "Payouts\n\nBefore.");
     }
 
+    /// A mention is the `@account` the inbox's mention rule reads, never run
+    /// into the word after it; a ticket is its key; a break is a new line.
     #[test]
     fn inlines_draw_as_the_reader_names_them() {
         let page = content(
