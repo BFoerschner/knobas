@@ -25,6 +25,7 @@ import type { InboxItem } from "../ipc/entity";
 import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
+import { createScope, launcherScope } from "./scope.svelte";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -229,6 +230,8 @@ afterEach(() => {
   app = undefined;
   vi.useRealTimers();
   target.remove();
+  // The app's one Titles/Everything choice lives as long as the module: back to Titles.
+  launcherScope.reset();
   // `recordScrolls()` stubs it; jsdom has none of its own.
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
 });
@@ -3152,4 +3155,109 @@ test("a click on a row re-focuses the box without selecting its text", async () 
   expect(input.value).toBe("   ");
   expect(input.selectionStart).toBe(1);
   expect(input.selectionEnd).toBe(1);
+});
+
+/** A storage that outlives a launcher, as the webview's does a restart. */
+function memoryStorage() {
+  const kept = new Map<string, string>();
+  return {
+    getItem: (key: string) => kept.get(key) ?? null,
+    setItem: (key: string, value: string) => void kept.set(key, value),
+    removeItem: (key: string) => void kept.delete(key),
+  };
+}
+
+/** Words typed and the debounced search they send, settled. */
+async function asked(text: string) {
+  await typeInto(text);
+  await debounced();
+}
+
+const chip = () => target.querySelector<HTMLButtonElement>(".tf-ln-scope button");
+const footer = () => target.querySelector("footer")?.textContent ?? "";
+
+test("Titles is the first choice, and the search says so with the titles flag", async () => {
+  const sent: SearchQuery[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => (sent.push(query), response()),
+    },
+  });
+  await settle();
+  await asked("pay-210");
+
+  expect(sent.at(-1)).toMatchObject({ raw: "pay-210", titles: true });
+  expect(chip()?.textContent?.trim()).toBe("Titles");
+  // The footer names the other mode, the one ⌘D goes to.
+  expect(footer()).toContain("⌘D everything");
+});
+
+test("⌘D flips to Everything and asks again at once, and flips back", async () => {
+  const sent: SearchQuery[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => (sent.push(query), response()),
+    },
+  });
+  await settle();
+  await asked("sepa");
+  const before = sent.length;
+
+  const event = press("d", { metaKey: true });
+  await settle();
+  // The webview's own ⌘D (a bookmark) never runs.
+  expect(event.defaultPrevented).toBe(true);
+  expect(sent).toHaveLength(before + 1);
+  expect(sent.at(-1)).toMatchObject({ raw: "sepa", titles: false });
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+  expect(footer()).toContain("⌘D titles only");
+
+  press("d", { metaKey: true });
+  await settle();
+  expect(sent.at(-1)).toMatchObject({ raw: "sepa", titles: true });
+  expect(chip()?.textContent?.trim()).toBe("Titles");
+});
+
+test("⌘D on an empty box flips the choice and sends nothing", async () => {
+  const search = vi.fn(async () => response());
+  open({ ports: { launcherHome: async () => HOME, search } });
+  await settle();
+
+  press("d", { metaKey: true });
+  await settle();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+  expect(search).not.toHaveBeenCalled();
+});
+
+test("the chip flips it too, and the choice survives closing, reopening and a restart", async () => {
+  const storage = memoryStorage();
+  const scope = createScope(() => storage);
+  open({ scope });
+  await settle();
+  chip()!.click();
+  flushSync();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+
+  // Closed and opened again, in the same run.
+  unmount(app!);
+  open({ scope });
+  await settle();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+
+  // A restart: a new choice read from what the webview kept.
+  unmount(app!);
+  const sent: SearchQuery[] = [];
+  open({
+    scope: createScope(() => storage),
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => (sent.push(query), response()),
+    },
+  });
+  await settle();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+  await asked("sepa");
+  expect(sent.at(-1)).toMatchObject({ titles: false });
 });

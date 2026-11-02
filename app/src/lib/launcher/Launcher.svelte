@@ -78,6 +78,7 @@
   import type { InboxPreview, LauncherRow, TodayTime } from "./rows";
   import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
+  import { type ScopeChoice, launcherScope } from "./scope.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
 
   let {
@@ -96,6 +97,7 @@
     ports,
     now,
     openExternal = realOpenExternal,
+    scope = launcherScope,
   }: {
     open?: boolean;
     /**
@@ -179,6 +181,12 @@
      * records above.
      */
     ports?: Partial<SessionPorts>;
+    /**
+     * *Titles* or *Everything* (#2430): the app's one choice, kept across
+     * closing and a restart. Injectable so a test can keep it in a storage of
+     * its own and read it back as a restart would.
+     */
+    scope?: ScopeChoice;
     /** Injectable clock, so the age column is testable. */
     now?: Date | undefined;
     /**
@@ -203,7 +211,18 @@
     deleteSmartList: defaultDeleteSmartList,
     filterSuggestions: defaultFilterSuggestions,
     ...ports,
+    titles: () => scope.titles,
   });
+
+  /**
+   * ⌘D or the chip: Titles or Everything, and the words in the box asked
+   * again at once under the other mode. An empty box is the board, which the
+   * choice does not change, so nothing is sent for it.
+   */
+  function toggleScope() {
+    scope.toggle();
+    if (session.raw.trim() !== "") session.set(session.raw);
+  }
 
   /**
    * The credential health the chips and the result rows are drawn from.
@@ -663,6 +682,12 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "d") {
+      // Before the webview's own ⌘D (a bookmark) and anything else the box does.
+      event.preventDefault();
+      toggleScope();
+      return;
+    }
     if (suggestionKey(event)) return;
     switch (event.key) {
       case "ArrowDown":
@@ -768,7 +793,18 @@
         oninput={(value) => session.type(value)}
         {onkeydown}
         onclose={close}
-      />
+      >
+        {#snippet trailing()}
+          <!-- A pill toggle (Controls): its words are the mode in force; ⌘D and the footer name the other. -->
+          <span class="tf-fchips tf-ln-scope">
+            <button
+              type="button"
+              title={scope.titles ? "Titles and keys only. ⌘D searches everything" : "Bodies too. ⌘D searches titles only"}
+              onclick={toggleScope}>{scope.titles ? "Titles" : "Everything"}</button
+            >
+          </span>
+        {/snippet}
+      </QueryBox>
 
       {#if offer.length > 0}
         <!--
@@ -927,6 +963,7 @@
       <span><kbd>↵</kbd> open</span>
       <span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>
       <span><kbd>Esc</kbd> back one step</span>
+      <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
       {#if session.canSave}
         <!--
           On a query and never on the board: an empty box is the board, and

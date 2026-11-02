@@ -595,3 +595,25 @@ test("Save as list waits for an answer and is never offered on a list or a time 
 
   session.dispose();
 });
+
+/**
+ * *Titles* (#2430) is read as each query is sent, so a flip between two
+ * queries reaches the second; a session given no reader (the link pickers)
+ * searches everything, as it always has.
+ */
+test("the titles flag is read when each query is sent, and is off without a reader", async () => {
+  const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
+  let titles = true;
+  const session = new Session({ ...ports(search), titles: () => titles });
+  session.set("pay-210");
+  await vi.advanceTimersByTimeAsync(0);
+  titles = false;
+  session.set("pay-210");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(search.mock.calls.map(([q]) => q.titles)).toEqual([true, false]);
+
+  const picker = vi.fn(async (q: SearchQuery) => answer(q.raw));
+  new Session(ports(picker)).set("pay-210");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(picker.mock.calls[0]?.[0]?.titles).toBe(false);
+});

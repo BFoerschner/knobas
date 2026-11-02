@@ -87,11 +87,18 @@ export interface SessionPorts {
 export interface SessionOptions extends SessionPorts {
   actions?: LauncherAction[];
   debounceMs?: number;
+  /**
+   * Whether each query asks for *Titles* (#2430), read when it is sent. The
+   * launcher passes the reader's choice; the link pickers built on this class
+   * pass none and search everything, as they always have.
+   */
+  titles?: () => boolean;
 }
 
 export class Session {
   #ports: SessionPorts;
   #debounceMs: number;
+  #titles: () => boolean;
   #timer: ReturnType<typeof setTimeout> | undefined;
 
   /**
@@ -174,6 +181,7 @@ export class Session {
   constructor(options: SessionOptions) {
     this.#ports = options;
     this.#debounceMs = options.debounceMs ?? DEBOUNCE_MS;
+    this.#titles = options.titles ?? (() => false);
     this.actions = options.actions ?? [];
   }
 
@@ -406,6 +414,7 @@ export class Session {
         // `noFilters()` rather than the literal: the shape is the bridge's, so
         // a dimension added to `SearchFilters` is one edit there and none here.
         filters: noFilters(),
+        titles: this.#titles(),
       });
       // The whole point of the counter. A stale answer is dropped *silently*:
       // a newer one is already on screen and there is nothing to report.

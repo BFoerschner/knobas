@@ -15,6 +15,8 @@
   is.
 -->
 <script lang="ts">
+  import type { Snippet } from "svelte";
+
   let {
     value,
     placeholder,
@@ -25,6 +27,7 @@
     oninput,
     onkeydown,
     onclose,
+    trailing,
   }: {
     value: string;
     placeholder: string;
@@ -39,6 +42,8 @@
     oninput: (value: string) => void;
     onkeydown: (event: KeyboardEvent) => void;
     onclose: () => void;
+    /** Drawn at the right of the box, before the close: the Titles / Everything chip (#2430). */
+    trailing?: Snippet;
   } = $props();
 
   let input = $state<HTMLInputElement | null>(null);
@@ -84,6 +89,7 @@
     {onkeydown}
   />
   <span class="tf-ln-foot">{footnote}</span>
+  {@render trailing?.()}
   <kbd>⌘K</kbd>
   <button class="tf-ln-x" aria-label="Close" onclick={onclose}>
     <svg viewBox="0 0 16 16" aria-hidden="true">
