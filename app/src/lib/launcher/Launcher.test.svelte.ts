@@ -21,7 +21,8 @@ import type {
   SearchResponse,
   Segment,
 } from "../ipc";
-import type { StateChip } from "../ipc/entity";
+import type { InboxItem, StateChip } from "../ipc/entity";
+import { toasts } from "../shell/toasts.svelte";
 import { kindRegistry } from "../shell/kind-registry.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
@@ -107,26 +108,6 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
 }
 
 const HOME: LauncherHome = {
-  smart_lists: [
-    {
-      id: "mine",
-      label: "My items",
-      count: 3,
-      changed: true,
-      description: "Yours.",
-      saved: false,
-      needs_attention: false,
-    },
-    {
-      id: "just-synced",
-      label: "Just synced",
-      count: 9,
-      changed: false,
-      description: "New.",
-      saved: false,
-      needs_attention: false,
-    },
-  ],
   recent: [
     {
       entity_id: "jira:PAY-240",
@@ -1427,43 +1408,200 @@ test("the launcher's own default resolver is what a paste reaches", async () => 
 });
 
 // ---------------------------------------------------------------------------
-// Saved smart lists (#506)
+// Saved lists (#506, #2423)
 // ---------------------------------------------------------------------------
 
-/** A board carrying one built-in, one saved list, and one that needs attention. */
-const SAVED_HOME: LauncherHome = {
-  ...HOME,
-  smart_lists: [
-    {
-      id: "mine",
-      label: "My items",
-      count: 3,
-      changed: true,
-      description: "Yours.",
-      saved: false,
-      needs_attention: false,
+/** What `create_smart_list` answers with for the query saved below. */
+const SAVED = {
+  id: "sepa-retries",
+  label: "SEPA retries",
+  count: 12,
+  description: "sepa retries",
+  needs_attention: false,
+};
+
+/** A list hit, as the engine answers `#l` with one (kind `list`, the text as its path line). */
+function listHit(id: string, title: string, text: string, state: StateChip | null = null) {
+  return hit({ entity_id: id, kind: "list", source_id: "list", title, path: text, state });
+}
+
+/** `#l`'s answer: the saved lists, one needing attention. */
+function listsAnswer(): SearchResponse {
+  return response({
+    interpreted: {
+      text: "",
+      prefix: null,
+      filters: { sources: [], kinds: ["list"], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
     },
-    {
-      id: "sepa-retries",
-      label: "SEPA retries",
-      count: 12,
-      changed: true,
-      description: "#sepa @me",
-      saved: true,
-      needs_attention: false,
+    groups: [
+      {
+        kind: "list",
+        label: "List",
+        plural: "Lists",
+        monogram: "LI",
+        total: 2,
+        hits: [
+          listHit("sepa-tickets", "SEPA tickets", "#t sepa @me"),
+          listHit("old-gitea", "Old Gitea search", "/gitea payout", {
+            text: "Needs attention: the saved query names a source as `/gitea`. Delete it and save the search again.",
+            tone: "warn",
+          }),
+        ],
+      },
+    ],
+    total: 2,
+  });
+}
+
+/**
+ * Enter on a saved list puts its own text back into the box, filters and
+ * words, and runs it; the reader stays in the box (#2423, spec #2419 story
+ * 14). The row's key cell is the kind's word and its monogram `LI`.
+ */
+test("enter on a saved list applies its text in the box and stays", async () => {
+  const onnavigate = vi.fn();
+  const asked: string[] = [];
+  open({
+    onnavigate,
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        asked.push(query.raw);
+        return query.raw.startsWith("#l") ? listsAnswer() : response();
+      },
     },
-    {
-      id: "legacy-palette",
-      label: "Palette",
-      count: 0,
-      changed: false,
-      description:
-        "Needs attention: the saved query starts with a prefix that is not a search. Delete it and save the search again.",
-      saved: true,
-      needs_attention: true,
+  });
+  await settle();
+  await search("#l");
+  const row = target.querySelector(".tf-ln-res");
+  expect(row?.querySelector(".tf-ln-mg")?.textContent).toBe("LI");
+  expect(row?.querySelector(".tf-ln-k")?.textContent).toBe("list");
+  expect(row?.querySelector(".tf-ln-t")?.textContent).toBe("SEPA tickets");
+
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("#t sepa @me ");
+  expect(asked.at(-1)).toBe("#t sepa @me ");
+  expect(onnavigate, "a list is applied, not opened somewhere").not.toHaveBeenCalled();
+  expect(target.querySelector("input"), "the launcher stays open").not.toBeNull();
+});
+
+/**
+ * A list whose text today's grammar refuses says so and does not apply: its
+ * row is in the warning tone with the reason as its name, and Enter raises the
+ * reason instead of putting the text into the box.
+ */
+test("a saved list that needs attention says why and does not apply", async () => {
+  toasts.items.splice(0);
+  const asked: string[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        asked.push(query.raw);
+        return listsAnswer();
+      },
     },
+  });
+  await settle();
+  await search("#l");
+  const broken = target.querySelectorAll(".tf-ln-res")[1]!;
+  expect(broken.querySelector(".tf-ln-mg")?.getAttribute("data-tone")).toBe("warn");
+  expect(broken.querySelector(".tf-ln-mg")?.getAttribute("title")).toContain("Needs attention");
+
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("#l");
+  expect(asked).toEqual(["#l"]);
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "Needs attention: the saved query names a source as `/gitea`. Delete it and save the search again.",
+  ]);
+  toasts.items.splice(0);
+});
+
+/** Three inbox lines, out of order, so "newest first" is the launcher's doing. */
+const INBOX = {
+  count: 3,
+  items: [
+    inboxItem("a", "review_request", "Review: SEPA backoff", "2026-08-25T09:15:00Z", "gitea:tidewater/payout-service#142", "pr"),
+    inboxItem("b", "failed_build", "Build #1187 failed", "2026-08-25T11:40:00Z", "teamcity:1187", "build"),
+    inboxItem("c", "new_assignment", "Assigned: reconcile mandates", "2026-08-24T16:05:00Z", "jira:PAY-240", "ticket"),
   ],
 };
+
+function inboxItem(
+  key: string,
+  category: InboxItem["category"],
+  title: string,
+  occurred_at: string,
+  entity_id: string,
+  kind: string,
+): InboxItem {
+  return {
+    key: `${category}:${key}`,
+    category,
+    source_id: entity_id.split(":")[0]!,
+    entity_id,
+    kind,
+    title,
+    reason: "",
+    occurred_at,
+    web_url: null,
+    snoozed_until: null,
+  };
+}
+
+/** `#i`'s answer: no groups (nothing in the index is an inbox line), kind `inbox`. */
+function inboxAnswer(text: string): SearchResponse {
+  return response({
+    interpreted: {
+      text,
+      prefix: null,
+      filters: { sources: [], kinds: ["inbox"], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [],
+    total: 0,
+  });
+}
+
+/**
+ * `#i` answers the inbox store's lines newest first, the time as the key
+ * cell; `#i review` narrows them; Enter opens the line's opener (#2423, spec
+ * #2419 story 15).
+ */
+test("hash i lists the inbox lines newest first and enter opens one", async () => {
+  const onnavigate = vi.fn();
+  open({
+    inbox: INBOX,
+    onnavigate,
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => inboxAnswer(query.raw.replace(/^#i\s*/u, "").trim()),
+    },
+  });
+  await settle();
+  await search("#i");
+  const rows = [...target.querySelectorAll(".tf-ln-res")];
+  expect(rows.map((row) => row.querySelector(".tf-ln-t")?.textContent)).toEqual([
+    "Build #1187 failed",
+    "Review: SEPA backoff",
+    "Assigned: reconcile mandates",
+  ]);
+  const times = rows.map((row) => row.querySelector(".tf-ln-k")?.textContent ?? "");
+  expect(times[0]).toMatch(/^\d\d:\d\d$/u);
+  expect(times[2]).toMatch(/^yesterday \d\d:\d\d$/u);
+  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+
+  await search("#i review");
+  const narrowed = [...target.querySelectorAll(".tf-ln-res")];
+  expect(narrowed.map((row) => row.querySelector(".tf-ln-t")?.textContent)).toEqual(["Review: SEPA backoff"]);
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
+});
 
 /**
  * *Save as list* is offered on a query and not on the board (story 56).
@@ -1472,10 +1610,10 @@ const SAVED_HOME: LauncherHome = {
  * board, and a board has nothing to save.
  */
 test("save as list is offered on a query, never on an empty box", async () => {
-  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
-  const home = vi.fn(async () => SAVED_HOME);
+  const created = vi.fn(async () => SAVED);
+  const searched = vi.fn(async () => response());
   open({
-    ports: { launcherHome: home, search: async () => response(), createSmartList: created },
+    ports: { launcherHome: async () => HOME, search: searched, createSmartList: created },
   });
   await settle();
   expect(target.querySelector("button.tf-ln-save"), "an empty box is the board").toBeNull();
@@ -1484,7 +1622,6 @@ test("save as list is offered on a query, never on an empty box", async () => {
   const button = target.querySelector<HTMLButtonElement>("button.tf-ln-save");
   expect(button?.textContent?.trim()).toBe("Save as list");
 
-  const before = home.mock.calls.length;
   button!.click();
   await settle();
 
@@ -1496,9 +1633,9 @@ test("save as list is offered on a query, never on an empty box", async () => {
   expect(created).toHaveBeenCalledWith("sepa retries", "sepa retries");
   expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Saved as list");
   expect(
-    home.mock.calls.length,
-    "the rail is re-read rather than patched in place",
-  ).toBeGreaterThan(before);
+    searched.mock.calls.length,
+    "the query is asked again rather than the answer patched in place",
+  ).toBeGreaterThan(1);
 
   // And the next keystroke is a different query, so the control comes back.
   await search("sepa retries and more");
@@ -1515,11 +1652,11 @@ test("save as list is offered on a query, never on an empty box", async () => {
  * grammar deciding and not a copy of the prefix table on this side.
  */
 test("save as list is off the palette and the help card", async () => {
-  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  const created = vi.fn(async () => SAVED);
   for (const prefix of ["action", "help"] as const) {
     open({
       ports: {
-        launcherHome: async () => SAVED_HOME,
+        launcherHome: async () => HOME,
         search: async () =>
           response({ interpreted: { ...response().interpreted, prefix }, groups: [] }),
         createSmartList: created,
@@ -1535,27 +1672,25 @@ test("save as list is off the palette and the help card", async () => {
 });
 
 /**
- * The control is off the two queries that answer as results and that the
- * backend still refuses to save, and off a search that failed (#1413).
+ * The control is off the query that answers as results and that the backend
+ * still refuses to save, and off a search that failed (#1413).
  *
- * An opened list (`list:`) would be a list of a list, `t ` is a worklog query
- * and not a search, and a failed search leaves an error line with no answer
- * under it. All three read as *results* to the mode helper, so the gate is the
+ * `t ` is a worklog query and not a search, and a failed search leaves an
+ * error line with no answer under it. Both read as *results* to the mode helper, so the gate is the
  * backend's `interpreted.prefix` and the presence of an answer. The plain
  * query at the end is the positive control: without it a launcher that never
  * drew the control would pass.
  */
-test("save as list is off an opened list, a time query and a failed search", async () => {
-  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+test("save as list is off a time query and a failed search", async () => {
+  const created = vi.fn(async () => SAVED);
   const cases = [
-    { raw: "list:not-monitored", prefix: "list" as const, fails: false },
     { raw: "t today", prefix: "time" as const, fails: false },
     { raw: "sepa retries", prefix: null, fails: true },
   ];
   for (const { raw, prefix, fails } of cases) {
     open({
       ports: {
-        launcherHome: async () => SAVED_HOME,
+        launcherHome: async () => HOME,
         search: async () => {
           if (fails) throw { code: "internal", message: "the engine is down" };
           return response({ interpreted: { ...response().interpreted, prefix } });
@@ -1574,7 +1709,7 @@ test("save as list is off an opened list, a time query and a failed search", asy
 
   open({
     ports: {
-      launcherHome: async () => SAVED_HOME,
+      launcherHome: async () => HOME,
       search: async () => response(),
       createSmartList: created,
     },
@@ -2039,7 +2174,7 @@ test("the box is a combobox that names the active result, and names nothing with
   app = undefined;
   open({
     ports: {
-      launcherHome: async () => ({ ...HOME, smart_lists: [], recent: [] }),
+      launcherHome: async () => ({ ...HOME, recent: [] }),
       search: async () => response(),
     },
   });

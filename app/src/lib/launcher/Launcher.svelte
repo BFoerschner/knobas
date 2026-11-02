@@ -36,7 +36,8 @@
   Comment and Start work are the job page's, the "do it here" timer and
   comment rows are ⌘T's and the job page's, and *Add to context* went with
   contexts made by hand (CONTEXT.md, Context). There is no *Open* row: `Enter`
-  opens. A saved smart list keeps its own two rows, Rename and Delete (#506).
+  opens. A saved list (`#l`, #2423) has no chain here: `Enter` applies it, and
+  its Rename and Delete are the sheet's (#2426).
 
   `Tab` still swallows the keystroke when the chain would be empty, because the
   alternative is `Tab` moving focus out of the box.
@@ -89,6 +90,7 @@
     sources,
     sourcesRead,
     inbox,
+    now,
     actions = [],
     onnavigate,
     onclose,
@@ -127,6 +129,8 @@
      * empty box does not draw it (#2421); `#i` answers from it (#2423).
      */
     inbox?: InboxPreview | undefined;
+    /** The clock an inbox line's time cell is read against; the real one when omitted. */
+    now?: Date | undefined;
     /** Extras appended to `>` — things only the shell knows it can offer. */
     actions?: LauncherAction[];
     onnavigate: (hash: string) => void;
@@ -377,15 +381,14 @@
   /** The entity a row stands for, if it stands for one. */
   function entityOf(row: LauncherRow): { entityId: string; title: string; kind: string } | null {
     switch (row.kind) {
+      // A saved list (#2423) is a hit and no entity: nothing to link.
       case "hit":
-        return { entityId: row.hit.entity_id, title: row.hit.title, kind: row.hit.kind };
+        return row.hit.kind === "list" ? null : { entityId: row.hit.entity_id, title: row.hit.title, kind: row.hit.kind };
       case "recent":
         return { entityId: row.row.entity_id, title: row.row.title, kind: row.row.kind };
-      // A list, a syntax card and a navigation action are not entities, so
-      // there is nothing to link. An inbox line is *about* an entity but is
-      // not one (a credential expiry or an alert has none), and the day is a
-      // view: both open, and neither has a chain.
-      case "list":
+      // A syntax card and a navigation action are not entities, so there is
+      // nothing to link. An inbox line is *about* an entity but is not one (a
+      // credential expiry or an alert has none): it opens, and has no chain.
       case "action":
       case "syntax":
       case "inbox":
@@ -579,8 +582,9 @@
   function addressOf(row: LauncherRow): string | null {
     switch (row.kind) {
       // A ticket opens by its entity id, which names its source (#1476, #1977).
+      // A saved list does not navigate: it is applied in the box (#2423).
       case "hit":
-        return entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
+        return row.hit.kind === "list" ? null : entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
       case "recent":
         return entityAddress(row.row.kind, row.row.entity_id, row.row.title);
       case "action":
@@ -592,9 +596,8 @@
       // The Docs area searching the words (#2425).
       case "docs":
         return docsSearchHash(row.words);
-      // A list and a syntax row do not navigate: they rewrite the box, which
-      // is what makes them a *filter* rather than a destination.
-      case "list":
+      // A syntax row does not navigate: it rewrites the box, which is what
+      // makes it a *filter* rather than a destination.
       case "syntax":
         return null;
     }
@@ -738,13 +741,17 @@
   }
 
   function activate(row: LauncherRow) {
-    if (row.kind === "list") {
-      // A list whose saved query today's grammar cannot run has no rows to
-      // show, and the reason is already on the row. Opening it would put the
-      // backend's refusal in the error line as though the reader had done
-      // something wrong.
-      if (row.list.needs_attention) return;
-      session.set(`list:${row.list.id}`);
+    if (row.kind === "hit" && row.hit.kind === "list") {
+      // A saved list applies by its own text (#2423, spec #2419 story 14):
+      // the filters and words go back into the box, with the space after
+      // them, and run; the reader stays in the box to see and change them.
+      // One whose text today's grammar refuses carries the reason as its
+      // state (`saved::plan`), and says it instead of applying.
+      if (row.hit.state) {
+        push({ text: row.hit.state.text });
+        return;
+      }
+      session.set(`${row.hit.path ?? ""} `);
       box?.focus();
       return;
     }
@@ -1039,6 +1046,7 @@
             rows={session.rows}
             selected={session.selected}
             {optionId}
+            {now}
             onopen={activate}
             onhover={(index) => (session.selected = index)}
           />

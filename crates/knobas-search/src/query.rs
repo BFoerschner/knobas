@@ -1,7 +1,7 @@
 //! The launcher's query grammar (spec §4), as one pure function.
 //!
 //! Everything the `⌘K` box understands is parsed **here, in the backend**
-//! (ruling P2): the leading prefixes (`>` `?` `t ` `note:` `list:` `asset:`),
+//! (ruling P2): the leading prefixes (`>` `?` `t ` `note:` `asset:`),
 //! the token markers (`@person`, and `#` with filter letters: `#t`, `#rl`) and
 //! the inline `key:value` filters. One grammar, one implementation -- the frontend
 //! renders the chips this returns instead of parsing the same string a second
@@ -47,7 +47,6 @@ const LEADING: &[(&str, Prefix)] = &[
     ("assets:", Prefix::Asset),
     ("asset:", Prefix::Asset),
     ("note:", Prefix::Note),
-    ("list:", Prefix::List),
     (">", Prefix::Action),
     ("?", Prefix::Help),
 ];
@@ -161,8 +160,6 @@ pub struct Parsed {
     /// Whether the last word is still being typed, and should therefore match
     /// as a prefix (`sep` finds `sepa`).
     pub prefix_last_term: bool,
-    /// The smart list named by `list:<id>`, lowercased.
-    pub list_id: Option<String>,
     /// The identity `@me` stands for, carried over from the vocabulary so
     /// [`merge`] can resolve `mine` -- including when `mine` came from a chip
     /// and the text never mentioned it.
@@ -387,13 +384,6 @@ pub fn parse(raw: &str, vocab: &Vocabulary) -> Parsed {
     match parsed.query.prefix {
         Some(Prefix::Note) => parsed.query.filters.kinds.push("note".to_owned()),
         Some(Prefix::Asset) => parsed.query.filters.kinds.push("asset".to_owned()),
-        Some(Prefix::List) => {
-            let id = rest.trim().to_lowercase();
-            // An empty id is someone who has typed `list:` and nothing else,
-            // not a request for the list called "".
-            parsed.list_id = (!id.is_empty()).then_some(id);
-            return parsed;
-        }
         _ => {}
     }
 
@@ -518,7 +508,6 @@ impl Parsed {
                 unknown_tokens: Vec::new(),
             },
             prefix_last_term: false,
-            list_id: None,
             identity: vocab.identity.clone(),
             under: Vec::new(),
             reach: Vec::new(),
@@ -1115,7 +1104,6 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
     // `source:` claims `Prefix::Source` when it comes first,
     // and they are a pattern's own key; every other prefix is foreign.
     let foreign = query.prefix.is_some_and(|prefix| prefix != Prefix::Source)
-        || parsed.list_id.is_some()
         || !filters.kinds.is_empty()
         || filters.updated_within_days.is_some()
         || filters.mine
@@ -1171,7 +1159,8 @@ mod tests {
             ("t", Some(Prefix::Time), ""),
             ("t worklog", Some(Prefix::Time), "worklog"),
             ("note: sepa", Some(Prefix::Note), "sepa"),
-            ("list:failing", Some(Prefix::List), ""),
+            // Retired with #2423: a saved list is applied by its own text.
+            ("list:failing", None, "list:failing"),
             ("asset: pve-02", Some(Prefix::Asset), "pve-02"),
             ("assets: pve-02", Some(Prefix::Asset), "pve-02"),
             ("sepa retry", None, "sepa retry"),
@@ -1188,18 +1177,6 @@ mod tests {
         // needs no mode.
         assert_eq!(parse("note: x", &v).query.filters.kinds, ["note"]);
         assert_eq!(parse("asset: x", &v).query.filters.kinds, ["asset"]);
-        assert_eq!(
-            parse("list:failing", &v).list_id.as_deref(),
-            Some("failing")
-        );
-        assert_eq!(
-            parse("list:FAILING", &v).list_id.as_deref(),
-            Some("failing")
-        );
-        // Someone who has typed the marker and nothing else has not named a
-        // list called "".
-        assert_eq!(parse("list:", &v).list_id, None);
-        assert_eq!(parse("list:", &v).query.prefix, Some(Prefix::List));
     }
 
     #[test]

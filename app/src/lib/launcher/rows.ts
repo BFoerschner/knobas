@@ -10,7 +10,7 @@
  * Pure, and separate from the session that owns the data, so the selection
  * rules can be tested without a fake IPC bridge.
  */
-import type { LauncherHome, ResultGroup, SearchHit, SearchResponse, SmartListSummary } from "../ipc";
+import type { LauncherHome, ResultGroup, SearchHit, SearchResponse } from "../ipc";
 import type { EntityRow, InboxItem } from "../ipc/entity";
 import type { LauncherAction } from "./actions";
 import type { SyntaxEntry } from "./syntax";
@@ -35,7 +35,7 @@ export interface BoardExtras {
 export type LauncherRow =
   | { kind: "hit"; id: string; group: ResultGroup; hit: SearchHit }
   | { kind: "recent"; id: string; row: EntityRow }
-  | { kind: "list"; id: string; list: SmartListSummary }
+  /** A line of the shell's inbox, behind `#i` (#2423): not an entity, a row of the inbox store. */
   | { kind: "inbox"; id: string; item: InboxItem }
   | { kind: "action"; id: string; action: LauncherAction }
   | { kind: "syntax"; id: string; entry: SyntaxEntry }
@@ -125,9 +125,32 @@ export function flatten(input: {
           }),
         ),
       );
-      return [...hits, ...docsRow(response)];
+      return [...hits, ...inboxRows(response, input.extras?.inbox ?? null), ...docsRow(response)];
     }
   }
+}
+
+/**
+ * The inbox's lines (#2423, spec #2419 story 15): an answer the engine read
+ * as `#i` (kind `inbox`, which nothing in the index emits) draws the shell's
+ * inbox store, newest first, narrowed by the parse's words. A line is kept
+ * when every word is in its title, its reason or its category, ignoring
+ * case: `#i review` finds the review requests. The kind is read off the
+ * backend's parse, never the box (ruling P2); the words are the store's to
+ * match, since an inbox line is no entity the index holds.
+ */
+function inboxRows(response: SearchResponse, inbox: InboxPreview | null): LauncherRow[] {
+  if (!inbox || !response.interpreted.filters.kinds.includes("inbox")) return [];
+  const words = response.interpreted.text.toLowerCase().split(/\s+/u).filter(Boolean);
+  const holds = (item: InboxItem) => {
+    const text = `${item.title} ${item.reason} ${item.category.replaceAll("_", " ")}`.toLowerCase();
+    return words.every((word) => text.includes(word));
+  };
+  return inbox.items
+    .filter(holds)
+    .slice()
+    .sort((a, b) => Date.parse(b.occurred_at) - Date.parse(a.occurred_at))
+    .map((item) => ({ kind: "inbox", id: `inbox:${item.key}`, item }));
 }
 
 /**

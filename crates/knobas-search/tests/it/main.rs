@@ -18,7 +18,6 @@ mod home;
 mod item_parent;
 mod launcher_kinds;
 mod lists;
-mod lists_no_identity;
 mod name_glob;
 mod parent_key_pin;
 mod path_line;

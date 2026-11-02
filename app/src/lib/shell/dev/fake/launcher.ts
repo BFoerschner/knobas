@@ -9,7 +9,7 @@ import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeLinkSetLines } from "./link-sets";
-import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
+import { fakeListSearch } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
@@ -81,13 +81,10 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
     raw?: string;
     filters?: { kinds?: string[] };
   };
-  // `list:<id>` routes to the list and not to the corpus, which is what
-  // `Searcher::search` does with a `Prefix::List` -- and it is the only way a
-  // smart list is ever opened, because `Launcher.svelte` opens one by typing
-  // its id into the box. Without this branch the rail draws but every row on
-  // it answers with the refusal below.
-  const listed = /^list:([a-z0-9-]+)$/.exec((query.raw ?? "").trim());
-  if (listed) return fakeSmartListItems({ id: listed[1]!, limit: 50 });
+  // `#l` and `#i` (#2423): the saved lists, and the kind the launcher
+  // answers from the shell's inbox store.
+  const listed = fakeListSearch(query.raw ?? "");
+  if (listed !== null) return listed;
   const palette = actionPalette((query.raw ?? "").trim());
   if (palette !== null) return palette;
   const help = helpCard((query.raw ?? "").trim());
@@ -165,7 +162,7 @@ function helpCard(raw: string): SearchResponse | null {
 }
 
 /** `knobas_search::group`'s order, unknown kinds last. */
-const GROUP_ORDER = ["view", "set", "ticket", "asset", "repo", "pr", "pipeline", "build_config", "build", "page", "note", "commit", "branch", "route", "monitor"];
+const GROUP_ORDER = ["view", "set", "ticket", "asset", "repo", "pr", "pipeline", "build_config", "build", "page", "note", "commit", "branch", "route", "monitor", "list"];
 
 /** What the engine leaves out of the answer (#2422, `knobas_search::frames`): runs, commits, a Jira view's mirror row. */
 const LEFT_OUT = new Set(["build", "commit", "jira_view"]);
@@ -260,18 +257,10 @@ function wordSearch(raw: string): SearchResponse | null {
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
-    // The launcher board (#504). Until now `launcher_home` had no handler at
-    // all, so `⌘K` under `?fake-ipc` drew a red "command not found" over the
-    // whole board -- which is why the three estate lists this ticket adds
-    // could not be looked at in a browser.
-    //
-    // **Everything here is fixture-only** and none of it certifies the bridge.
-    // What it is for is the walk: that the rail draws a row per list with its
-    // count, and that Enter on an estate row hands the shell the Tree's
-    // address. The rules themselves are witnessed at the IPC seam over a real
-    // PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
+    // The launcher board (#504): the recent items alone since #2421 and
+    // #2423. **Fixture-only**; the rules are witnessed at the IPC seam over a
+    // real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
     launcher_home: () => ({
-      smart_lists: fakeSmartLists(),
       // The newest of the fixture's corpus, in the shape `list_entities`
       // answers in -- the board draws recent rows with the same component.
       recent: CORPUS.filter((entry) => entry.deleted_at === null && !LEFT_OUT.has(entry.kind))

@@ -135,7 +135,6 @@ fn every_prefix_the_grammar_has_is_documented() {
         Prefix::Source,
         Prefix::Time,
         Prefix::Note,
-        Prefix::List,
         Prefix::Asset,
         Prefix::Help,
     ];
@@ -147,7 +146,6 @@ fn every_prefix_the_grammar_has_is_documented() {
             | Prefix::Source
             | Prefix::Time
             | Prefix::Note
-            | Prefix::List
             | Prefix::Asset
             | Prefix::Help => {}
         }

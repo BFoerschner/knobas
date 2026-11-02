@@ -393,9 +393,10 @@ async fn a_saved_list_holding_under_runs_it() {
         "the rail counts the repo and its three children"
     );
 
+    // Applied the way the launcher applies one: its own text, searched.
     let opened = searcher(&pool)
         .await
-        .smart_list_items(&saved.id, 30)
+        .search(q(&format!("under:{name}")))
         .await
         .unwrap();
     assert_eq!(ids(&opened), sorted(ours));

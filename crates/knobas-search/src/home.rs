@@ -1,7 +1,7 @@
 //! What the launcher shows before anything is typed.
 //!
-//! Spec §4: an empty box is a **board**, not a query -- the smart lists with
-//! their counts, and the newest items across every kind. Answering it with the
+//! Spec §4: an empty box is a **board**, not a query -- the newest items
+//! across every kind (no lists since #2423, spec #2419). Answering it with the
 //! search statement would be a full-corpus scan that returns nothing, which is
 //! why [`crate::Searcher::search`] refuses a query with neither text nor a
 //! filter and points here instead.
@@ -22,13 +22,11 @@
 //! promise every kind a slot: a kind that genuinely holds the twenty newest
 //! items owns the board, because that is what "recent" means. Fetching `limit`
 //! rows *per kind* is what makes the read index-backed and bounded, not a
-//! fairness device -- the per-kind rail the round-3 mockup draws is the smart
-//! lists, which have their own counts.
+//! fairness device.
 
 use chrono::{DateTime, Utc};
 
 use crate::SearchError;
-use crate::lists::SmartListSummary;
 use crate::types::EntityRow;
 
 /// How many items the board shows.
@@ -160,7 +158,6 @@ const EXPLAIN_RECENT_KINDS_SQL: &str = recent_kinds_sql!("explain (analyze false
 /// this crate's to read.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LauncherBoard {
-    pub smart_lists: Vec<SmartListSummary>,
     pub recent: Vec<EntityRow>,
 }
 

@@ -53,7 +53,6 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
 }
 
 const EMPTY_HOME: LauncherHome = {
-  smart_lists: [],
   recent: [],
   sources: [],
   pending_writes: 0,
@@ -286,7 +285,7 @@ test("the ? card drops the note: row exactly while notes are hidden", async () =
   expect(await help(true)).toContain("note:");
   const hidden = await help(false);
   expect(hidden).not.toContain("note:");
-  expect(hidden).toContain("list:");
+  expect(hidden).toContain("asset:");
 });
 
 // -- a pasted link (#496) ----------------------------------------------------
@@ -548,13 +547,13 @@ test("a parents-only read keeps the opening's ticket-key values (#811)", async (
 /**
  * *Save as list* is offered only on a query the backend can save (#1413).
  *
- * An opened list and a `t ` query both answer as results, and the backend
- * refuses to save either; a search that failed has no answer at all. The gate
+ * A `t ` query answers as results, and the backend refuses to save it; a
+ * search that failed has no answer at all. The gate
  * reads the backend's own `interpreted.prefix` (ruling P2), so the test hands
  * it responses carrying each prefix.
  */
-test("Save as list waits for an answer and is never offered on a list or a time query", async () => {
-  let prefix: "list" | "time" | null = null;
+test("Save as list waits for an answer and is never offered on a time query", async () => {
+  let prefix: "time" | null = null;
   let fail = false;
   const session = new Session({
     ...ports(async (q) => {
@@ -572,12 +571,6 @@ test("Save as list waits for an answer and is never offered on a list or a time 
   expect(session.canSave).toBe(false);
   await vi.advanceTimersByTimeAsync(200);
   expect(session.canSave).toBe(true);
-
-  prefix = "list";
-  session.type("list:not-monitored");
-  await vi.advanceTimersByTimeAsync(200);
-  expect(session.response?.interpreted.prefix).toBe("list");
-  expect(session.canSave).toBe(false);
 
   prefix = "time";
   session.type("t today");
@@ -640,7 +633,9 @@ test("asking again under the other mode keeps a list just saved as saved", async
   titles = false;
   session.rerun();
   await vi.advanceTimersByTimeAsync(0);
+  // The save asks the box again (#2423), then the flip does.
   expect(search.mock.calls.map(([q]) => [q.raw, q.titles])).toEqual([
+    ["payments", true],
     ["payments", true],
     ["payments", false],
   ]);

@@ -54,14 +54,14 @@ export interface SessionPorts {
    */
   resolveUrl?(url: string): Promise<UrlMatch | null>;
   /**
-   * Save the box's current query as a smart list, and the two writes that keep
-   * the rail tidy afterwards — `create_smart_list`, `rename_smart_list`,
+   * Save the box's current query as a list, and the two writes that keep the
+   * lists tidy afterwards — `create_smart_list`, `rename_smart_list`,
    * `delete_smart_list` (#506).
    *
    * **Optional as a group, and their absence is the switch**, exactly as
    * {@link SessionPorts.resolveUrl}'s is: the two link pickers built on this
    * class (`detail/LinkDialog.svelte`, `notes/NoteView.svelte`) are choosing a
-   * target from the corpus and have no rail to save anything to, so they pass
+   * target from the corpus and have no lists to save anything to, so they pass
    * none and {@link Session.canSave} is false there. The launcher passes all
    * three, and it is the launcher that draws the controls.
    */
@@ -251,23 +251,23 @@ export class Session {
   }
 
   /**
-   * Whether this session can save what is in the box as a smart list.
+   * Whether this session can save what is in the box as a list.
    *
    * Four things: a caller that supplied the write, a query to save, an answer
    * to it, and an answer the backend could save. Without an answer there is
    * nothing to save — nothing has answered yet, or the search failed and the
    * box shows its error line. The mode is what keeps the control off the `>`
    * palette, the `?` card and a pasted link. The prefix check keeps it off the
-   * two that draw as results and that `saved::create` still refuses: an opened
-   * list (`list:`, a list of a list) and a worklog query (`t `), #1413.
+   * one that draws as results and that `saved::create` still refuses: a
+   * worklog query (`t `), #1413. (`list:` was the other until #2423 retired
+   * it; a saved list is applied by its own text now.)
    *
    * **Ruling P2 holds for the parse, not for the rule.** Both the mode and the
    * prefix are read off the *backend's own interpretation* of the query (the
    * same field `modeOf` reads for `?` and `>`), so no prefix is recognised
-   * here. The rule that a list or a worklog query cannot be saved is
-   * `saved::plan`'s, and these two names are the cases of it the box can
-   * reach; a prefix `plan` starts refusing is refused by name until it is
-   * added here.
+   * here. The rule that a worklog query cannot be saved is `saved::plan`'s,
+   * and this name is the case of it the box can reach; a prefix `plan` starts
+   * refusing is refused by name until it is added here.
    */
   get canSave(): boolean {
     const prefix = this.response?.interpreted.prefix;
@@ -276,13 +276,12 @@ export class Session {
       this.raw.trim() !== "" &&
       this.response !== null &&
       this.mode === "results" &&
-      prefix !== "list" &&
       prefix !== "time"
     );
   }
 
   /**
-   * Save what is in the box, under `label`, and redraw the rail.
+   * Save what is in the box, under `label`, and ask the box again.
    *
    * The id the backend generated is remembered in {@link Session.savedId} so
    * the control can say it worked; the next keystroke clears it, because it is
@@ -296,14 +295,14 @@ export class Session {
     });
   }
 
-  /** Rename a saved list and redraw the rail. */
+  /** Rename a saved list and ask the box again. */
   async renameList(id: string, label: string): Promise<void> {
     const rename = this.#ports.renameSmartList;
     if (!rename) return;
     await this.#write(() => rename(id, label));
   }
 
-  /** Delete a saved list and redraw the rail. */
+  /** Delete a saved list and ask the box again. */
   async deleteList(id: string): Promise<void> {
     const remove = this.#ports.deleteSmartList;
     if (!remove) return;
@@ -314,11 +313,12 @@ export class Session {
   }
 
   /**
-   * One write to the rail, then a **re-read** of the board.
+   * One write to the lists, then a **re-read** of what the box shows: the
+   * query in it asked again (a `#l` answer draws the renamed or deleted list
+   * as the backend now has it), or the board for an empty box.
    *
-   * Never a patch of `home` in place: the count and the badge of a list this
-   * write did not touch are still the backend's answer, and a hand-patched
-   * array is a second opinion about them. The re-read is one round trip on a
+   * Never a patch of the answer in place: a hand-patched array is a second
+   * opinion about what the backend holds. The re-read is one round trip on a
    * gesture a reader makes by hand, which is not the ⌘K budget.
    */
   async #write(write: () => Promise<void>): Promise<void> {
@@ -329,7 +329,8 @@ export class Session {
       this.error = ipcErrorMessage(cause);
       return;
     }
-    await this.loadHome();
+    if (this.raw.trim() === "") await this.loadHome();
+    else await this.run();
   }
 
   /**

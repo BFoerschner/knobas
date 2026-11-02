@@ -115,14 +115,6 @@
     "expect": "recognised"
   },
   {
-    "token": "list:",
-    "insert": "list:",
-    "summary": "open a smart list — list:mine",
-    "probe": "list:mine",
-    "prefix": "list",
-    "expect": "recognised"
-  },
-  {
     "token": "asset:",
     "insert": "asset:",
     "summary": "the estate — a container by name, or the host it sits on",

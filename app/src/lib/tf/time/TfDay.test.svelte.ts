@@ -143,7 +143,7 @@ function render(
           searches.push(query.raw);
           return Promise.resolve(found());
         },
-        launcherHome: () => Promise.resolve({ recent: RECENT, smart_lists: [], stale_sources: [] } as never),
+        launcherHome: () => Promise.resolve({ recent: RECENT, stale_sources: [] } as never),
         ...(over.refusedWrites ? { refusedWrites: over.refusedWrites } : {}),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
