@@ -122,6 +122,13 @@ impl Lines {
                     self.block(inner, false);
                 }
             }
+            DocBlock::Collapsible { title, blocks } => {
+                // Drawn closed, but its words are the page's (spec #2432).
+                self.push(title);
+                for inner in blocks {
+                    self.block(inner, false);
+                }
+            }
             DocBlock::Placeholder { .. } => {}
         }
     }
@@ -319,6 +326,41 @@ mod tests {
         assert_eq!(
             read.runs[1].text,
             "Queue\nCap\npayouts\n40 per minute\nBurst\nsee backoff"
+        );
+        assert_eq!(read.links, vec![("OPS".to_owned(), "Backoff".to_owned())]);
+    }
+
+    /// A collapsible's title and every word inside it are the page's, in the
+    /// section it sits in, though the reader draws it closed (spec #2432,
+    /// story 33). A heading inside it starts no section; a page link inside
+    /// it is a link line.
+    #[test]
+    fn a_collapsibles_title_and_words_are_in_its_section() {
+        let page = content(
+            vec![
+                heading("Rollout"),
+                DocBlock::Collapsible {
+                    title: "Rollback steps".into(),
+                    blocks: vec![
+                        heading("Inside"),
+                        DocBlock::List {
+                            ordered: true,
+                            items: vec![ListItem::new(vec![para(vec![Inline::text(
+                                "revert the flag",
+                            )])])],
+                        },
+                        para(vec![page_link("then backoff", "Backoff", None)]),
+                    ],
+                },
+                heading("After"),
+            ],
+            vec![],
+        );
+        let read = read(&search_text("Deploy", "OPS", &page));
+        assert_eq!(read.runs[1].part, Part::Section("Rollout".into()));
+        assert_eq!(
+            read.runs[1].text,
+            "Rollback steps\nInside\nrevert the flag\nthen backoff"
         );
         assert_eq!(read.links, vec![("OPS".to_owned(), "Backoff".to_owned())]);
     }

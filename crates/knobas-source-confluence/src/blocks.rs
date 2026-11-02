@@ -184,6 +184,15 @@ fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
     let Node::Element { name, children, .. } = node else {
         return None;
     };
+    // The editor's text has no collapsible (spec #2432): an expand is the
+    // reason, whatever it holds.
+    if matches!(name.as_str(), "ac:structured-macro" | "ac:macro")
+        && node
+            .attr("ac:name")
+            .is_some_and(|n| n.eq_ignore_ascii_case("expand"))
+    {
+        return Some(SectionRefusal::Macro);
+    }
     let own = match name.as_str() {
         "table" => Some(SectionRefusal::Table),
         "pre" => Some(SectionRefusal::Code),
@@ -684,6 +693,9 @@ fn task_list(node: &Node, reading: &Reading<'_>) -> DocBlock {
     }
 }
 
+/// The title Confluence draws on an `expand` that names none.
+const EXPAND_TITLE: &str = "Click here to expand...";
+
 fn r#macro(node: &Node, reading: &Reading<'_>) -> Hooked {
     let name = node
         .attr("ac:name")
@@ -705,6 +717,14 @@ fn r#macro(node: &Node, reading: &Reading<'_>) -> Hooked {
                 _ => PanelKind::Note,
             },
             title: param(node, "title"),
+            blocks: node
+                .child("ac:rich-text-body")
+                .map(|body| reading.blocks(body.children()))
+                .unwrap_or_default(),
+        },
+        // A collapsible (spec #2432), titled as Confluence titles it.
+        "expand" => DocBlock::Collapsible {
+            title: param(node, "title").unwrap_or_else(|| EXPAND_TITLE.to_owned()),
             blocks: node
                 .child("ac:rich-text-body")
                 .map(|body| reading.blocks(body.children()))
@@ -1239,6 +1259,84 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         );
     }
 
+    fn expand(title: Option<&str>, body: &str) -> String {
+        let title = title
+            .map(|t| format!("<ac:parameter ac:name=\"title\">{t}</ac:parameter>"))
+            .unwrap_or_default();
+        format!(
+            "<ac:structured-macro ac:name=\"expand\" ac:schema-version=\"1\">{title}<ac:rich-text-body>{body}</ac:rich-text-body></ac:structured-macro>"
+        )
+    }
+
+    /// Spec #2432, stories 24 and 26: an `expand` is a collapsible holding
+    /// its blocks, and what it holds reads as it would outside it.
+    #[test]
+    fn an_expand_is_a_collapsible_of_its_lists_tables_and_panels() {
+        let body = "<p>Lead.</p><ul><li>One</li><li>Two</li></ul>\
+            <table><tr><th>Day</th><td>Tue</td></tr></table>\
+            <ac:structured-macro ac:name=\"warning\"><ac:rich-text-body><p>Hot.</p></ac:rich-text-body></ac:structured-macro>";
+        assert_eq!(
+            blocks(&expand(Some("Rollout &amp; rollback"), body)),
+            vec![DocBlock::Collapsible {
+                title: "Rollout & rollback".to_owned(),
+                blocks: vec![
+                    para("Lead."),
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![
+                            ListItem::new(vec![para("One")]),
+                            ListItem::new(vec![para("Two")]),
+                        ],
+                    },
+                    DocBlock::Table {
+                        rows: vec![vec![
+                            TableCell::new(true, vec![para("Day")]),
+                            TableCell::new(false, vec![para("Tue")]),
+                        ]],
+                    },
+                    DocBlock::Panel {
+                        kind: PanelKind::Warning,
+                        title: None,
+                        blocks: vec![para("Hot.")],
+                    },
+                ],
+            }]
+        );
+    }
+
+    /// Confluence titles an expand that names none "Click here to
+    /// expand...", and so does the reader; a blank title is none.
+    #[test]
+    fn an_untitled_expand_takes_confluences_default_title() {
+        for storage in [expand(None, "<p>In.</p>"), expand(Some("  "), "<p>In.</p>")] {
+            assert_eq!(
+                blocks(&storage),
+                vec![DocBlock::Collapsible {
+                    title: "Click here to expand...".to_owned(),
+                    blocks: vec![para("In.")],
+                }]
+            );
+        }
+    }
+
+    /// Story 32: an expand in a table cell is itself, never `[expand]`.
+    #[test]
+    fn an_expand_in_a_cell_is_a_collapsible_in_its_blocks() {
+        let storage = format!("<table><tr><td>{}</td></tr></table>", expand(Some("More"), "<p>In.</p>"));
+        assert_eq!(
+            blocks(&storage),
+            vec![DocBlock::Table {
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::Collapsible {
+                        title: "More".to_owned(),
+                        blocks: vec![para("In.")],
+                    }]
+                )]],
+            }]
+        );
+    }
+
     #[test]
     fn layouts_are_transparent_and_broken_markup_still_reads() {
         assert_eq!(
@@ -1413,6 +1511,37 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 Some(SectionRefusal::Formatting),
                 Some(SectionRefusal::Formatting),
                 None
+            ]
+        );
+    }
+
+    /// Spec #2432, story 34: a section holding an expand refuses with
+    /// `macro`, whatever the expand holds: the editor's text has no
+    /// collapsible, so a table or code inside it is not the reason.
+    #[test]
+    fn a_section_holding_an_expand_refuses_as_a_macro() {
+        let storage = format!(
+            "<h2>Prose</h2><p>Lead.</p>{}\
+             <h2>Table</h2>{}\
+             <h2>Code</h2>{}\
+             <h2>Beside a table</h2>{}<table><tr><td>x</td></tr></table>",
+            expand(Some("More"), "<p>a</p><ul><li>b</li></ul>"),
+            expand(None, "<table><tr><td>x</td></tr></table>"),
+            expand(
+                None,
+                "<ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[y]]></ac:plain-text-body></ac:structured-macro>"
+            ),
+            expand(None, "<p>a</p>"),
+        );
+        let got: Vec<Option<SectionRefusal>> =
+            sections(&storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(SectionRefusal::Macro),
+                Some(SectionRefusal::Macro),
+                Some(SectionRefusal::Macro),
+                Some(SectionRefusal::Table),
             ]
         );
     }

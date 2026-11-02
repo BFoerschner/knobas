@@ -189,6 +189,9 @@ pub struct DocComment {
 /// - `table`: A table, row by row; a header cell says so, and a cell holds
 ///   blocks and may span columns and rows.
 /// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+/// - `collapsible`: A titled part the reader draws closed, with the blocks
+///   inside it, opened when the reader arrives on a search hit inside it
+///   (spec #2432). Confluence's `expand` is one; its words are the page's.
 /// - `placeholder`: Something the source has that the reader does not draw: the
 ///   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
 ///   so a page with a part knobas cannot draw says so (story 134).
@@ -219,6 +222,10 @@ pub enum DocBlock {
     Panel {
         kind: PanelKind,
         title: Option<String>,
+        blocks: Vec<DocBlock>,
+    },
+    Collapsible {
+        title: String,
         blocks: Vec<DocBlock>,
     },
     Placeholder {
@@ -403,7 +410,7 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
                 }
             }
         }
-        DocBlock::Panel { blocks, .. } => {
+        DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
             for inner in blocks {
                 collect(inner, out);
             }
