@@ -229,6 +229,16 @@ pub fn parse(markup: &str) -> Vec<Node> {
             );
             continue;
         }
+        // HTML leaves some end tags out: an open `p` ends where a block
+        // starts, an `li` at the next `li`. The element ends where this tag
+        // starts, as when an ancestor's close tag ends it.
+        for rule in implied_ends(&name) {
+            if let Some(depth) = implied_end(&stack, rule) {
+                while stack.len() > depth {
+                    close(&mut stack, start);
+                }
+            }
+        }
         stack.push((name, tag.to_owned(), vec![], start));
     }
     let end = at(rest);
@@ -239,6 +249,112 @@ pub fn parse(markup: &str) -> Vec<Node> {
         .pop()
         .map(|(_, _, nodes, _)| nodes)
         .unwrap_or_default()
+}
+
+/// Start tags that end an open `p` (HTML's *in body* rules).
+fn ends_paragraph(name: &str) -> bool {
+    matches!(
+        name,
+        "address"
+            | "article"
+            | "aside"
+            | "blockquote"
+            | "center"
+            | "details"
+            | "dialog"
+            | "dir"
+            | "div"
+            | "dl"
+            | "dd"
+            | "dt"
+            | "fieldset"
+            | "figcaption"
+            | "figure"
+            | "footer"
+            | "form"
+            | "h1"
+            | "h2"
+            | "h3"
+            | "h4"
+            | "h5"
+            | "h6"
+            | "header"
+            | "hgroup"
+            | "hr"
+            | "li"
+            | "listing"
+            | "main"
+            | "menu"
+            | "nav"
+            | "ol"
+            | "p"
+            | "pre"
+            | "search"
+            | "section"
+            | "summary"
+            | "table"
+            | "ul"
+            | "xmp"
+    )
+}
+
+/// Which open elements a start tag ends, and the open elements its search
+/// stops at: `(ends, stops)`.
+type Rule = (&'static [&'static str], &'static [&'static str]);
+
+/// The scope HTML searches for an open `p`, `li`, `dt` or `dd`: a table, a
+/// cell or a widget is a fresh start.
+const SCOPE: &[&str] = &[
+    "table", "td", "th", "caption", "template", "button", "object", "select",
+];
+
+/// The implied-end rules a start tag `name` applies, in order: an `li`
+/// first ends an open `p`, then the `li` before it.
+fn implied_ends(name: &str) -> impl Iterator<Item = Rule> {
+    let paragraph: Rule = (&["p"], SCOPE);
+    let own: Option<Rule> = match name {
+        "li" => Some((
+            &["li"],
+            &[
+                "ul", "ol", "menu", "table", "td", "th", "caption", "template", "button",
+                "object", "select",
+            ],
+        )),
+        "dt" | "dd" => Some((
+            &["dt", "dd"],
+            &[
+                "dl", "table", "td", "th", "caption", "template", "button", "object", "select",
+            ],
+        )),
+        "tr" => Some((&["tr"], &["table", "template"])),
+        "td" | "th" => Some((&["td", "th"], &["tr", "table", "template"])),
+        "option" => Some((&["option"], &["select", "datalist", "optgroup"])),
+        _ => None,
+    };
+    ends_paragraph(name)
+        .then_some(paragraph)
+        .into_iter()
+        .chain(own)
+}
+
+/// The stack index of the open element `rule` ends, `None` when there is
+/// none in scope.
+///
+/// The search runs down from the innermost open element and stops at the
+/// rule's stops (an outer list's `li` is not ended by an inner list's `li`,
+/// an outer table's cell not by an inner table's) and at any namespaced
+/// element, so a Confluence macro body (`ac:rich-text-body`) inside a
+/// paragraph keeps its own paragraphs.
+fn implied_end(stack: &[Open], (ends, stops): Rule) -> Option<usize> {
+    for (depth, (open, ..)) in stack.iter().enumerate().skip(1).rev() {
+        if ends.contains(&open.as_str()) {
+            return Some(depth);
+        }
+        if stops.contains(&open.as_str()) || open.contains(':') {
+            return None;
+        }
+    }
+    None
 }
 
 // -- tags and entities ----------------------------------------------------------

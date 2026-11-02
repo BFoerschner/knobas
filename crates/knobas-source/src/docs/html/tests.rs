@@ -189,9 +189,15 @@ fn an_empty_attribute_name_finds_nothing() {
 fn broken_markup_reads_as_the_text_it_holds() {
     assert_eq!(
         plain("<p>One</em> and <b>two<ul><li>three"),
-        vec![DocBlock::Paragraph {
-            text: vec![Inline::text("One and "), strong("twothree")]
-        }]
+        vec![
+            DocBlock::Paragraph {
+                text: vec![Inline::text("One and "), strong("two")]
+            },
+            DocBlock::List {
+                ordered: false,
+                items: vec![ListItem::new(vec![para("three")])]
+            },
+        ]
     );
     assert_eq!(
         plain("a < b and <p class=\"x"),
@@ -316,4 +322,96 @@ fn a_span_past_what_html_draws_is_cut_to_it() {
         panic!("one table")
     };
     assert_eq!((rows[0][0].colspan, rows[0][0].rowspan), (1_000, 65_534));
+}
+
+/// Plain HTML leaves end tags out where a browser implies them (#2449): an
+/// unclosed `p` ends at the next paragraph, not around it.
+#[test]
+fn an_unclosed_paragraph_ends_at_the_next_one() {
+    assert_eq!(
+        plain("<p>a<p>b<div>c</div>d"),
+        vec![para("a"), para("b"), para("c"), para("d")]
+    );
+}
+
+/// Names of a tree's elements, children in brackets: the shape a browser
+/// would build, without the spans.
+fn shape(nodes: &[Node]) -> String {
+    nodes
+        .iter()
+        .filter_map(|n| {
+            n.name()
+                .map(|name| format!("{name}[{}]", shape(n.children())))
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[test]
+fn list_items_and_cells_left_open_end_at_their_next_sibling() {
+    assert_eq!(
+        plain("<ul><li>a<li>b<ul><li>c<li>d</ul><li>e</ul>"),
+        vec![DocBlock::List {
+            ordered: false,
+            items: vec![
+                ListItem::new(vec![para("a")]),
+                ListItem::new(vec![
+                    para("b"),
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![
+                            ListItem::new(vec![para("c")]),
+                            ListItem::new(vec![para("d")]),
+                        ]
+                    }
+                ]),
+                ListItem::new(vec![para("e")]),
+            ]
+        }]
+    );
+    assert_eq!(
+        shape(&parse("<table><tr><th>h<td>a<tr><td>b<td><p>c<td>d</table>")),
+        "table[tr[th[] td[]] tr[td[] td[p[]] td[]]]"
+    );
+    assert_eq!(
+        shape(&parse("<dl><dt>a<dd>b<dt>c<dd>d</dl>")),
+        "dl[dt[] dd[] dt[] dd[]]"
+    );
+    assert_eq!(
+        shape(&parse("<select><option>a<option>b</select>")),
+        "select[option[] option[]]"
+    );
+}
+
+#[test]
+fn an_implied_end_stops_at_a_table_a_nested_list_and_a_namespaced_element() {
+    // A list item in a table's cell leaves the item round the table open; a
+    // nested table's cell leaves the outer cell open; an inner list's item
+    // leaves the outer item open.
+    assert_eq!(
+        shape(&parse("<li>a<table><tr><td><li>b<table><tr><td>c<td>d")),
+        "li[table[tr[td[li[table[tr[td[] td[]]]]]]]]"
+    );
+    // A `table` does end an open paragraph, as in a browser.
+    assert_eq!(shape(&parse("<p>a<table><tr><td>b")), "p[] table[tr[td[]]]");
+    // A Confluence macro body inside a paragraph keeps its own paragraphs.
+    assert_eq!(
+        shape(&parse(
+            "<p>x<ac:structured-macro><ac:rich-text-body><p>a</p><p>b</p></ac:rich-text-body></ac:structured-macro>y</p>"
+        )),
+        "p[ac:structured-macro[ac:rich-text-body[p[] p[]]]]"
+    );
+}
+
+#[test]
+fn an_implied_end_ends_where_the_next_tag_starts() {
+    let nodes = parse("<p>ab<p>cd</p>");
+    let spans: Vec<_> = nodes
+        .iter()
+        .map(|n| match n {
+            Node::Element { span, .. } => *span,
+            _ => (0, 0),
+        })
+        .collect();
+    assert_eq!(spans, vec![(0, 5), (5, 14)]);
 }
