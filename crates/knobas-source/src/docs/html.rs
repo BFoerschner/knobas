@@ -318,10 +318,24 @@ fn ends_paragraph(name: &str) -> bool {
 /// stops at: `(ends, stops)`.
 type Rule = (&'static [&'static str], &'static [&'static str]);
 
-/// The scope HTML searches for an open `p`, `li`, `dt` or `dd`: a table, a
-/// cell or a widget is a fresh start.
+/// The scope HTML searches for an open `p`: a table, a cell or a widget is
+/// a fresh start.
 const SCOPE: &[&str] = &[
     "table", "td", "th", "caption", "template", "button", "object", "select",
+];
+
+/// Where HTML's search for an open `li`, `dt` or `dd` stops: any of its
+/// *special* elements but `address`, `div` and `p` (the void, raw-text and
+/// never-open ones left out), so `<li>a<blockquote><li>b` nests the second
+/// item in the quote, as a browser does.
+const ITEM_STOPS: &[&str] = &[
+    "applet", "article", "aside", "blockquote", "body", "button", "caption", "center",
+    "colgroup", "details", "dir", "dl", "fieldset", "figcaption", "figure", "footer", "form",
+    "frameset", "h1", "h2", "h3", "h4", "h5", "h6", "head", "header", "hgroup", "html",
+    "iframe", "listing", "main", "marquee", "menu", "nav", "noembed", "noframes", "noscript",
+    "object", "ol", "plaintext", "pre", "search", "section", "select", "summary", "table",
+    "tbody", "td", "template", "textarea", "tfoot", "th", "thead", "title", "tr", "ul", "xmp",
+    "li", "dt", "dd",
 ];
 
 /// The implied-end rules a start tag `name` applies, in order: an `li`
@@ -329,19 +343,8 @@ const SCOPE: &[&str] = &[
 fn implied_ends(name: &str) -> impl Iterator<Item = Rule> {
     let paragraph: Rule = (&["p"], SCOPE);
     let own: Option<Rule> = match name {
-        "li" => Some((
-            &["li"],
-            &[
-                "ul", "ol", "menu", "table", "td", "th", "caption", "template", "button", "object",
-                "select",
-            ],
-        )),
-        "dt" | "dd" => Some((
-            &["dt", "dd"],
-            &[
-                "dl", "table", "td", "th", "caption", "template", "button", "object", "select",
-            ],
-        )),
+        "li" => Some((&["li"], ITEM_STOPS)),
+        "dt" | "dd" => Some((&["dt", "dd"], ITEM_STOPS)),
         "tr" => Some((&["tr"], &["table", "template"])),
         "td" | "th" => Some((&["td", "th"], &["tr", "table", "template"])),
         "option" => Some((&["option"], &["select", "datalist", "optgroup"])),

@@ -1537,6 +1537,32 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         );
     }
 
+    /// Storage anyone can author nests as deep as it likes, and so does the
+    /// plain HTML in an HTML macro: the projection, its sections and its
+    /// search text read a 100,000-deep page without overflowing the stack
+    /// (#2449), the hook reading each panel's body back through the reader.
+    #[test]
+    fn a_page_nested_past_the_readers_depth_still_projects() {
+        let deep = 100_000;
+        let panels = format!(
+            "{}deep words{}",
+            r#"<ac:structured-macro ac:name="info"><ac:rich-text-body><p>"#.repeat(deep / 3),
+            "</p></ac:rich-text-body></ac:structured-macro>".repeat(deep / 3)
+        );
+        let html = format!(
+            "{}html words{}",
+            "<ul><li><blockquote>".repeat(deep / 3),
+            "</blockquote></li></ul>".repeat(deep / 3)
+        );
+        let storage = format!(
+            r#"<h2>Deep</h2>{panels}<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[{html}]]></ac:plain-text-body></ac:structured-macro>"#
+        );
+        let content = doc_content(crate::KIND_PAGE, &page(&storage)).expect("a page projects");
+        let text = knobas_source::docs::search_text("T", "S", &content);
+        assert!(text.contains("deep words"), "{text}");
+        assert!(text.contains("html words"), "{text}");
+    }
+
     #[test]
     fn a_page_record_projects_its_version_labels_and_comments() {
         let payload = json!({
