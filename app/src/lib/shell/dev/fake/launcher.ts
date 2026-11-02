@@ -248,8 +248,8 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
 }
 
 /**
- * `search` for plain words (#2421): the corpus rows whose key, title or path
- * holds every word, grouped in the engine's order, each with its state. So a
+ * `search` for plain words (#2421): the corpus rows whose key, title, path or
+ * key cell (#2452) holds every word, grouped in the engine's order, each with its state. So a
  * free search can be looked at under `?fake-ipc`, the launcher's rows and
  * their colours with it.
  *
@@ -276,7 +276,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
     const row = mirrorRow(entry);
     const body = titles ? "" : entry.body_text;
-    const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${body}`.toLowerCase();
+    const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
     const hits = byKind.get(entry.kind) ?? [];
     const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words);

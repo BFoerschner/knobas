@@ -1615,6 +1615,127 @@ async fn titles_matches_the_title_and_the_key_and_never_the_body() {
     assert_eq!(ids(&pool, &named[..named.len() - 4], true).await, ours);
 }
 
+/// *Titles* reads the key cell of a row whose key is where it sits (#2451,
+/// spec #2419 stories 19 and 51): a pull request's repository, a page's space,
+/// a pipeline's project and a monitor's type are in the index at the title's
+/// weight, so `#p <repo>` finds the repository's pull requests although no
+/// title names it. Each hit carries that text as its `cell` (#2452), which the
+/// launcher draws in the key column. A word only the body holds is still no
+/// match.
+#[tokio::test]
+async fn titles_finds_a_row_by_its_key_cell_and_the_hit_carries_it() {
+    let pool = pool().await;
+    for (id, name) in [
+        ("gitea", "Gitea"),
+        ("confluence", "Confluence"),
+        ("teamcity", "TeamCity"),
+        ("kuma", "Uptime Kuma"),
+    ] {
+        sqlx::query(
+            "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+             values ($1, $1, $2, 'http://x', 'Pat')
+             on conflict (id) do nothing",
+        )
+        .bind(id)
+        .bind(name)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // The registry's declarations reach the database on the first search.
+    search_inner(&pool, &Registry::for_process(), query("warm"))
+        .await
+        .unwrap();
+    let repo = token("repo");
+    let space = token("space");
+    let project = token("project");
+    let monitor_type = token("type");
+    let body = token("body");
+    let rows = [
+        (
+            format!("gitea:tidewater/{repo}#7"),
+            "gitea",
+            "pr",
+            serde_json::json!({ "base": { "ref": "main", "repo": {
+                "full_name": format!("tidewater/{repo}"), "name": repo } } }),
+            repo.clone(),
+        ),
+        (
+            format!("confluence:{space}-1"),
+            "confluence",
+            "page",
+            serde_json::json!({ "space": { "key": "PAY", "name": space },
+                                "ancestors": [{ "title": "Handbook" }] }),
+            space.clone(),
+        ),
+        (
+            format!("teamcity:{project}_Deploy"),
+            "teamcity",
+            "build_config",
+            serde_json::json!({ "id": format!("{project}_Deploy"), "name": "Deploy",
+                                "projectName": project,
+                                "projectPath": [{ "id": "R", "name": "Root" },
+                                                { "id": "P", "name": project }] }),
+            project.clone(),
+        ),
+        (
+            format!("kuma:{monitor_type}-1"),
+            "kuma",
+            "monitor",
+            serde_json::json!({ "type": monitor_type, "name": "Payouts API" }),
+            monitor_type.clone(),
+        ),
+    ];
+    for (id, source, kind, payload, _) in &rows {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,'Payouts')")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, item_updated_at,
+                                    synced_at, payload)
+             values ($1, $2, $3, 'Payouts', $4, now(), now(), $5)",
+        )
+        .bind(id)
+        .bind(source)
+        .bind(kind)
+        .bind(format!("The {body} worker."))
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let answer = |raw: String| {
+        let pool = pool.clone();
+        async move {
+            let asked = SearchQuery {
+                titles: true,
+                ..query(&raw)
+            };
+            search_inner(&pool, &Registry::for_process(), asked)
+                .await
+                .unwrap()
+                .groups
+                .iter()
+                .flat_map(|g| g.hits.iter())
+                .map(|h| (h.row.entity_id.clone(), h.row.cell.clone()))
+                .collect::<Vec<_>>()
+        }
+    };
+    for ((id, _, _, _, cell), letter) in rows.iter().zip(["p", "d", "b", "m"]) {
+        assert_eq!(
+            answer(format!("#{letter} {cell}")).await,
+            [(id.clone(), Some(cell.clone()))],
+            "#{letter} {cell}"
+        );
+    }
+    // The body is still not a title.
+    assert!(answer(body.clone()).await.is_empty());
+}
+
 /// The flag is optional on the wire, as `authors` is (§10.8): a caller
 /// written before it sends none and is answered as Everything.
 #[test]

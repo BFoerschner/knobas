@@ -441,6 +441,7 @@ function ticketState(entry: (typeof CORPUS)[number]): StateChip | null {
 export function mirrorRow(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) => (typeof value === "string" ? value : null);
   const chip = (entry.payload["chip"] as StateChip | undefined) ?? ticketState(entry) ?? undefined;
+  const cell = text(entry.payload["cell"]);
   return {
     entity_id: entry.entity_id,
     kind: entry.kind,
@@ -450,6 +451,8 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
     synced_at: SYNCED_AT,
     path: text(entry.payload["path"]),
     state: chip ?? null,
+    // The engine's key cell (#2452): a monitor's type, which is on no path line.
+    ...(cell === null ? {} : { cell }),
   };
 }
 

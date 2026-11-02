@@ -40,7 +40,7 @@
     {@const item = row.row}
     {@const info = kindRegistry.info(item.kind)}
     {@const word = kindSingular(item.kind, info)}
-    {@const cells = cellsOf({ kind: item.kind, entityId: item.entity_id, title: item.title, path: item.path, kindWord: word })}
+    {@const cells = cellsOf({ kind: item.kind, entityId: item.entity_id, title: item.title, path: item.path, cell: item.cell, kindWord: word })}
     <Row
       monogram={kindMonogram(item.kind, info)}
       tone={item.state?.tone ?? null}

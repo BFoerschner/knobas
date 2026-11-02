@@ -82,22 +82,22 @@ export const JOB_ROWS = [
     source: "teamcity",
   }),
   row("mock:flows-stage", "monitor", "flows-stage", "2026-08-22T12:40:00Z", {
-    path: "HTTP",
+    cell: "HTTP",
     chip: { text: "down since 12:40", tone: "err" },
     source: "kuma",
   }),
   row("mock:payouts-stage-health", "monitor", "payouts-stage /health", "2026-08-22T12:00:00Z", {
-    path: "HTTP",
+    cell: "HTTP",
     chip: { text: "up", tone: "ok" },
     source: "kuma",
   }),
   row("mock:pg-payments-stage", "monitor", "pg-payments-stage", "2026-08-22T12:00:00Z", {
-    path: "TCP",
+    cell: "TCP",
     chip: { text: "up", tone: "ok" },
     source: "kuma",
   }),
   row("mock:vm-pay-stage-01-ping", "monitor", "vm-pay-stage-01 ping", "2026-08-22T12:00:00Z", {
-    path: "Ping",
+    cell: "Ping",
     chip: { text: "up", tone: "ok" },
     source: "kuma",
   }),
