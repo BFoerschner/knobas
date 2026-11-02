@@ -865,9 +865,11 @@ test("the top bar's search button opens search with the section's filter (#2425)
   const onsearch = vi.fn();
   start({ onsearch });
   await at("#/code");
-  target.querySelector<HTMLButtonElement>("button[aria-label='Search everything']")!.click();
+  // It names ⌘/, whose search it is, not ⌘K's empty box.
+  expect(target.querySelector("button[aria-label='Search this section'] kbd")!.textContent).toBe("⌘/");
+  target.querySelector<HTMLButtonElement>("button[aria-label='Search this section']")!.click();
   await at("#/settings");
-  target.querySelector<HTMLButtonElement>("button[aria-label='Search everything']")!.click();
+  target.querySelector<HTMLButtonElement>("button[aria-label='Search this section']")!.click();
   expect(onsearch.mock.calls).toEqual([["#rp "], [""]]);
 });
 

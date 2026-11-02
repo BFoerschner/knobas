@@ -73,11 +73,11 @@
     {/each}
   </nav>
   <span class="tf-spacer"></span>
-  <button class="tf-search" aria-label="Search everything" onclick={onsearch}>
+  <button class="tf-search" aria-label="Search this section" onclick={onsearch}>
     <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
       <circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" />
     </svg>
-    <span class="tf-label">Search</span><kbd>⌘K</kbd>
+    <span class="tf-label">Search</span><kbd>⌘/</kbd>
   </button>
   {#if clockOn !== null}
     <button
