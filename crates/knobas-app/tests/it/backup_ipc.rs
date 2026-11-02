@@ -746,6 +746,16 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
             .await
             .expect("seed a favourite");
     }
+    // ...and the keys (#2429): the list's chord and two actions' chords, one
+    // chord on two kinds, which ride in the same part.
+    knobas_app::commands::search::bind_list_key_inner(pool, &saved_list, Some("⌘1"))
+        .await
+        .expect("seed a list's chord");
+    for (kind, action) in [("repo", "open-vscode"), ("pr", "approve")] {
+        knobas_app::commands::search::bind_action_key_inner(pool, kind, action, Some("⌘⇧O"))
+            .await
+            .expect("seed an action's chord");
+    }
 
     // ...and a ticket view (#812), which is what the `ticket_views` part
     // carries, saved through the command the Tickets screen calls.
@@ -955,6 +965,8 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("source_config", 1),
         ("smart_list", 1),
         ("favourite", 2),
+        ("list_key", 1),
+        ("action_key", 2),
         ("ticket_view", 1),
         ("link_set", 1),
         ("link_set_member", 2),
@@ -1067,6 +1079,28 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
             ("ticket", estate.ticket.as_str(), "Retry failed payouts"),
         ],
         "the favourites did not cross in their order"
+    );
+
+    // **The keys arrived** (#2429): the list's chord still opens the list it
+    // was bound to, and the one chord still means two actions on two kinds.
+    let keys = knobas_app::commands::search::keys_inner(there)
+        .await
+        .expect("the colleague's keys");
+    assert_eq!(
+        keys.lists
+            .iter()
+            .map(|key| (key.list_id.as_str(), key.chord.as_str(), key.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(estate.saved_list.as_str(), "⌘1", SAVED_QUERY)],
+        "the list's chord did not cross"
+    );
+    assert_eq!(
+        keys.actions
+            .iter()
+            .map(|key| (key.kind.as_str(), key.chord.as_str(), key.action_id.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("pr", "⌘⇧O", "approve"), ("repo", "⌘⇧O", "open-vscode")],
+        "the actions' chords did not cross"
     );
 
     // **The ticket view arrived whole, its text exactly as saved** (#812): the
@@ -1191,7 +1225,7 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
                 smart_lists: true,
                 ..none
             },
-            vec!["favourite", "smart_list"],
+            vec!["action_key", "favourite", "list_key", "smart_list"],
         ),
         // Nor is a ticket view (#812).
         (
@@ -1331,6 +1365,12 @@ async fn switching_the_saved_lists_part_off_leaves_the_list_table_behind() {
         !held.contains(&"favourite".to_owned()),
         "the favourites ride with the saved lists and stayed in the archive: {held:?}"
     );
+    for key in ["list_key", "action_key"] {
+        assert!(
+            !held.contains(&key.to_owned()),
+            "the keys ride with the saved lists and {key} stayed in the archive: {held:?}"
+        );
+    }
     // ...and the rest of the defaults are still in it, so that "off" is one
     // part switched off rather than an export that fell over.
     for still in [

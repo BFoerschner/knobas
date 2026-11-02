@@ -139,8 +139,10 @@ pub struct ShareParts {
     /// 49, "beside the saved lists"): a list favourite references its list,
     /// so the two cannot come apart, and an entity favourite names an id with
     /// no foreign key, resolving once the colleague's address book or sync
-    /// holds it. The dialog offers the toggle once a saved list or a
-    /// favourite exists.
+    /// holds it. The keys ride here as well (#2429): `knobas.list_key`
+    /// references its list, and `knobas.action_key` is the reader's own
+    /// chords per kind. The dialog offers the toggle once a saved list, a
+    /// favourite or a key exists.
     pub smart_lists: bool,
     /// `knobas.ticket_view` -- the ticket views somebody made (#812, story
     /// 41). **On by default**, beside smart lists and for their reason: a view
@@ -256,6 +258,10 @@ impl ShareParts {
             // a saved list or an entity, and a list favourite without its
             // list would be a row nothing draws.
             push("favourite");
+            // And the keys (#2429): a list's chord references its list, an
+            // action's chord is the reader's own beside them.
+            push("list_key");
+            push("action_key");
         }
         if self.ticket_views {
             push("ticket_view");
@@ -316,6 +322,8 @@ mod tests {
                 "source_config",
                 "smart_list",
                 "favourite",
+                "list_key",
+                "action_key",
                 "ticket_view",
                 "link_set",
                 "link_set_member",
@@ -384,7 +392,7 @@ mod tests {
                     smart_lists: true,
                     ..ShareParts::none()
                 },
-                vec!["smart_list", "favourite"],
+                vec!["smart_list", "favourite", "list_key", "action_key"],
             ),
             // A ticket view is no entity either (#812).
             (
