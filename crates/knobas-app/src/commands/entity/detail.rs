@@ -236,6 +236,226 @@ pub async fn get_entity(
     get_entity_inner(&pool, lifecycle.registry(), &entity_id).await
 }
 
+// -- an attachment's bytes (spec #2396, #2405) -------------------------------
+
+/// What [`attachment_bytes`] answers: the file's media type and its bytes in
+/// base64, which the shell draws as a `data:` image (the webview loads
+/// nothing from the source itself).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct AttachmentBytes {
+    /// The media type the mirror's list gives the file, else
+    /// `application/octet-stream`.
+    pub mime: String,
+    /// The whole file, base64 (standard alphabet, padded).
+    pub data: String,
+}
+
+/// The attachment `attachment_id` of `entity_id` as the mirror lists it, and
+/// the entity's live source. Only a file the list holds is ever fetched, so
+/// the address the source is asked for is one it emitted itself.
+async fn listed_attachment(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    attachment_id: &str,
+) -> Result<
+    (
+        knobas_core::payload::Attachment,
+        std::sync::Arc<dyn knobas_source::Source>,
+        SourceRef,
+    ),
+    IpcError,
+> {
+    let detail = get_entity_inner(pool, registry.as_ref(), entity_id).await?;
+    let file = detail
+        .attachments
+        .unwrap_or_default()
+        .into_iter()
+        .find(|file| file.id == attachment_id)
+        .ok_or_else(|| {
+            IpcError::not_found(format!("{entity_id} lists no attachment {attachment_id}"))
+        })?;
+    let source = crate::sources::crud::run_source(pool, secrets, registry, live, entity_id)
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&detail.source.id)))?;
+    Ok((file, source, detail.source))
+}
+
+/// A source's failure on an attachment read. A 403 says the account may not
+/// read this one file, which is not what a dead credential says, so its
+/// message names the status for the page's *not permitted* (the code stays
+/// `unauthorized`, as every 401 and 403 is).
+fn attachment_failed(
+    source: &SourceRef,
+    file: &knobas_core::payload::Attachment,
+    error: knobas_source::SourceError,
+) -> IpcError {
+    match error {
+        knobas_source::SourceError::Unauthorized { status: Some(403) } => IpcError::new(
+            crate::IpcErrorCode::Unauthorized,
+            format!(
+                "{} does not permit this account to read {} (HTTP 403)",
+                source.display_name, file.name
+            ),
+        )
+        .with_source(source.id.clone()),
+        other => crate::sources::to_ipc(&other.into(), Some(&source.id)),
+    }
+}
+
+/// [`attachment_bytes`]'s body, reachable from a test.
+///
+/// # Errors
+///
+/// `invalid` for an id that is not an entity id, a file over
+/// [`ATTACHMENT_CAP`](knobas_source::view::ATTACHMENT_CAP) (its size and the
+/// cap in the message; one the mirror knows is too big is refused before the
+/// source is asked) and a source that reads no attachments; `not_found` for
+/// an entity the mirror lacks or an attachment its list does not hold;
+/// `unauthorized` (a 403 naming `HTTP 403`) and `unreachable` as the source
+/// answers.
+pub async fn attachment_bytes_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    attachment_id: &str,
+) -> Result<AttachmentBytes, IpcError> {
+    use base64::Engine as _;
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    let too_large = |name: &str, size: u64| {
+        IpcError::invalid(format!(
+            "{name} is {}; knobas previews an attachment up to {}",
+            mebibytes(size),
+            mebibytes(ATTACHMENT_CAP)
+        ))
+    };
+    let (file, source, from) =
+        listed_attachment(pool, secrets, registry, live, entity_id, attachment_id).await?;
+    if let Some(size) = file.size.filter(|size| *size > ATTACHMENT_CAP) {
+        return Err(too_large(&file.name, size));
+    }
+    let read = source
+        .attachment_bytes(entity_id, &file.content_url, ATTACHMENT_CAP)
+        .await
+        .map_err(|error| attachment_failed(&from, &file, error))?;
+    match read {
+        Some(FileBytes::Read(bytes)) => Ok(AttachmentBytes {
+            mime: file
+                .mime
+                .clone()
+                .unwrap_or_else(|| "application/octet-stream".to_owned()),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        }),
+        Some(FileBytes::TooLarge { size }) => Err(too_large(&file.name, size)),
+        None => Err(IpcError::invalid(format!(
+            "{}'s source reads no attachments",
+            from.display_name
+        ))),
+    }
+}
+
+/// One attachment's bytes, through the source's stored credential, for the
+/// ticket page's preview (spec #2396, #2405). Read live and never stored.
+///
+/// # Errors
+///
+/// See [`attachment_bytes_inner`].
+#[tauri::command]
+pub async fn attachment_bytes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    attachment_id: String,
+) -> Result<AttachmentBytes, IpcError> {
+    let state = crate::sources::state(&app)?;
+    attachment_bytes_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &attachment_id,
+    )
+    .await
+}
+
+/// [`download_attachment`]'s body, reachable from a test: the file streamed
+/// into a new file in `dir`, named as the list names it
+/// ([`crate::downloads::safe_name`]) and numbered where the name is taken, as
+/// a run's download is (#856). A download that fails leaves no file.
+///
+/// # Errors
+///
+/// As [`attachment_bytes_inner`], with no cap; a file that cannot be written
+/// is `internal`.
+pub async fn download_attachment_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    entity_id: &str,
+    attachment_id: &str,
+    dir: &std::path::Path,
+) -> Result<String, IpcError> {
+    let (file, source, from) =
+        listed_attachment(pool, secrets, registry, live, entity_id, attachment_id).await?;
+    let mut sink = crate::downloads::FileSink::new(dir);
+    let streamed = source
+        .download_attachment(entity_id, &file.content_url, &file.name, &mut sink)
+        .await;
+    let finished = match streamed {
+        Ok(true) => sink.finish().await.map(Some),
+        Ok(false) => Ok(None),
+        Err(error) => Err(error),
+    };
+    match finished {
+        Ok(Some(path)) => Ok(path.display().to_string()),
+        Ok(None) => Err(IpcError::invalid(format!(
+            "{}'s source reads no attachments",
+            from.display_name
+        ))),
+        Err(error) => {
+            sink.discard().await;
+            Err(attachment_failed(&from, &file, error))
+        }
+    }
+}
+
+/// One attachment into the downloads folder through the source's stored
+/// credential (spec #2396, #2405); answers the file's path.
+///
+/// # Errors
+///
+/// See [`download_attachment_inner`], and `internal` when the system names
+/// no downloads folder.
+#[tauri::command]
+pub async fn download_attachment<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    attachment_id: String,
+) -> Result<String, IpcError> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|error| IpcError::internal(format!("no downloads folder: {error}")))?;
+    let state = crate::sources::state(&app)?;
+    download_attachment_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &entity_id,
+        &attachment_id,
+        &dir,
+    )
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

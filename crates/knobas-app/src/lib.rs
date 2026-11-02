@@ -690,6 +690,9 @@ pub fn run() {
             commands::app::set_diff_pipelines,
             // #2319's commit diff, local-first, appended at the foot (§10.8).
             commands::entity::entity_commit_diff,
+            // #2405's attachment bytes and download, appended at the foot (§10.8).
+            commands::entity::attachment_bytes,
+            commands::entity::download_attachment,
         ])
         .build(context)
         .expect("build the tauri application")
