@@ -284,9 +284,10 @@
 
   const WORD = (text: string) => text.toLowerCase().split(/\s+/).filter((word) => word.length >= 2 && !word.startsWith("#"));
 
-  /** Whether every word is in the title: the *Titles* reading of a hit. */
-  function inTitle(title: string, words: string[]): boolean {
-    const hay = title.toLowerCase();
+  /** Whether every word is on screen for the hit: in its title or in its key column (a ticket's key, a repository's owner, a page's space). */
+  function onScreen(hit: SearchHit, kindWord: string, words: string[]): boolean {
+    const shown = cellOf(hit.kind, hit.entity_id, hit.title, hit.path, kindWord);
+    const hay = `${shown.cell} ${shown.title}`.toLowerCase();
     return words.every((word) => hay.includes(word));
   }
 
@@ -588,7 +589,7 @@
     if (!deep) {
       // Titles: only what is on screen matches. PROTOTYPE: a client-side filter; the real change is a flag on the query.
       const groups = response.groups
-        .map((group) => ({ ...group, hits: group.hits.filter((hit) => inTitle(hit.title, words)) }))
+        .map((group) => ({ ...group, hits: group.hits.filter((hit) => onScreen(hit, group.label, words)) }))
         .filter((group) => group.hits.length > 0)
         .map((group) => ({ ...group, total: group.hits.length }));
       response = { ...response, groups, total: groups.reduce((n, group) => n + group.total, 0) };

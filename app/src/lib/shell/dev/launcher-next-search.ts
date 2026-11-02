@@ -18,6 +18,7 @@
  */
 import type { ResultGroup, SearchHit, SearchResponse, Segment } from "../../ipc/search";
 import { fakePipelines } from "./fake/builds";
+import { keyOf } from "../../time/format";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./fake/corpus";
 import { fakeDocPages } from "./fake/docs";
 
@@ -123,7 +124,8 @@ function candidates(): Candidate[] {
       // A ticket's status as a state (round 10): the real chip is the adapter's declared status with its tone.
       const status = typeof entry.payload["status"] === "string" ? entry.payload["status"] : null;
       const state = row.state ?? (entry.kind === "ticket" && status ? ticketState(status) : null);
-      return { ...row, state, haystack: `${entry.title} ${body}`.toLowerCase(), body };
+      // The key is searchable too (round 12): `pay-210` finds PAY-210, as the real engine's key column does.
+      return { ...row, state, haystack: `${keyOf(entry.entity_id)} ${entry.title} ${body}`.toLowerCase(), body };
     },
   );
   const fromDocs: Candidate[] = pages.map((page) => {
