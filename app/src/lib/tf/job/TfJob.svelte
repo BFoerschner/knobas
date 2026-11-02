@@ -64,7 +64,7 @@
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
   import { alsoIn, hiddenOf, linkedOn, groupsOf, type GroupRow } from "./connections";
-  import { blockerEntries, footAction, segmentKey, isMine, keyOf, offersStartWork, type FrameKinds } from "./job";
+  import { blockerEntries, footAction, segmentKey, isMine, keyOf, offersStartWork, username, type FrameKinds } from "./job";
   import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
@@ -416,6 +416,8 @@
   });
 
   const mine = $derived(detail ? isMine(detail, sources) : false);
+  /** The reader's username in the ticket's source: the card's reporter in full ink, and the reader's share of the logged time (#2403). */
+  const me = $derived(detail ? username(sources.find((source) => source.id === detail.row.source_id)) : null);
   /**
    * The stepper shows on the chosen job (*Start work* is what chooses a
    * ticket read), and once shown it stays on this page while the ticket
@@ -503,6 +505,7 @@
       others={reader.others}
       parentTitle={reader.parentTitle}
       {mine}
+      {me}
       {pinned}
       {action}
       onaction={act}

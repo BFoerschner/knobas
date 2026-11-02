@@ -232,11 +232,13 @@ test("a key opens its ticket and promotes it once; the card shows the key and th
   expect(card.querySelector("h1"), "the title is the reading column's (#2399)").toBeNull();
   expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
   const facts = [...card.querySelectorAll("dl.tf-facts > dt")].map((term) => [term.textContent, term.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim()]);
-  // Nobody assigned: a dash for the avatar, and the row says so. The estimate is the Logged row's (#2403), not a facts line's.
+  // Nobody assigned: a dash for the avatar, and the row says so. The estimate is the Logged row's (#2403): nothing
+  // logged against 3h.
   expect(facts).toEqual([
     ["Assignee", "–Unassigned"],
     ["Type", "Story"],
     ["Priority", "High"],
+    ["Logged", "0m of 3h"],
   ]);
   expect(card.querySelector("dl.tf-facts .tf-av.tf-me")).toBeNull();
   expect(target.querySelector(".tf-tkread .tf-tkdesc")?.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");

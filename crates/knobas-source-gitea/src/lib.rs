@@ -503,6 +503,9 @@ fn payload_paths() -> Vec<KindPaths> {
 /// * **project** is the repository the issue is in: `repository.full_name`
 ///   as its key, the bare `name` as its name.
 /// * **comment count** is Gitea's `comments`, the card's *N comments*.
+/// * **reporter** is `user.login`, the issue's creator, and **created** is
+///   `created_at` (#2403). Gitea keeps no time spent and no worklog, so the
+///   card's *Logged* row is not drawn for an issue.
 ///
 /// **Done-like is `closed`** (#1501, #1593): an issue's declared status is its
 /// `state`, `open` or `closed`, and `closed` is the word for done, so a job on
@@ -528,6 +531,8 @@ fn ticket_paths() -> KindPaths {
         project_key: vec![PayloadPath::of(["repository", "full_name"])],
         project_name: vec![PayloadPath::of(["repository", "name"])],
         comment_count: vec![PayloadPath::of(["comments"])],
+        reporter: vec![PayloadPath::of(["user", "login"])],
+        created: vec![PayloadPath::of(["created_at"])],
         // The issue's body as written (#2308): Markdown, as Gitea renders it.
         description: vec![PayloadPath::of(["body"])],
         markup: knobas_source::Markup::Markdown,

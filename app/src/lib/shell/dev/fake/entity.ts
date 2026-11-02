@@ -294,6 +294,9 @@ function getEntity(args: Record<string, unknown>) {
     // The mock adapter declares `labels` on the flat record (#811); none is
     // left off, as the real command leaves an empty list off the wire (#2400).
     ...fakeLabels(entry.payload["labels"]),
+    // The reporter, created, time spent and worklog the mock adapter declares
+    // (#2403), each left off the wire on a miss as the real command does.
+    ...fakeLogged(entry.payload),
     // The attachment list (#2404), held in its wire shape on the fixture row;
     // none is left off, as the real command leaves an empty list off the wire.
     ...(Array.isArray(entry.payload["attachments"]) && entry.payload["attachments"].length > 0
@@ -320,6 +323,24 @@ function repoDeclared(payload: Record<string, unknown>): Partial<Pick<EntityDeta
 function fakeLabels(value: unknown): Pick<EntityDetail, "labels"> {
   const labels = Array.isArray(value) ? value.filter((label): label is string => typeof label === "string" && label.trim() !== "").map((label) => label.trim()) : [];
   return labels.length === 0 ? {} : { labels };
+}
+
+/** The card's Reporter and Logged facts (#2403) from the mock's flat record: the worklog summed per author, by author. */
+function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "created" | "time_spent_seconds" | "logged_by"> {
+  const reporter = fakeText(payload["reporter"]);
+  const created = fakeText(payload["created"]);
+  const spent = payload["time_spent_seconds"];
+  const entries = Array.isArray(payload["worklogs"]) ? (payload["worklogs"] as { who?: unknown; seconds?: unknown }[]) : null;
+  const byAuthor = new Map<string, number>();
+  for (const entry of entries ?? []) {
+    if (typeof entry.who === "string" && typeof entry.seconds === "number") byAuthor.set(entry.who, (byAuthor.get(entry.who) ?? 0) + entry.seconds);
+  }
+  return {
+    ...(reporter === null ? {} : { reporter }),
+    ...(created === null ? {} : { created }),
+    ...(typeof spent === "number" ? { time_spent_seconds: spent } : {}),
+    ...(entries === null ? {} : { logged_by: [...byAuthor].sort(([a], [b]) => a.localeCompare(b)).map(([author, seconds]) => ({ author, seconds })) }),
+  };
 }
 
 /** A payload value that is non-blank text, trimmed, or `null` (ADR-0007's miss). */

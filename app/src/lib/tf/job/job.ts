@@ -12,7 +12,7 @@ import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
 import type { SourceSummary } from "../../ipc/sources";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
-import { keyOf } from "../../time/format";
+import { keyOf, minutesLabel } from "../../time/format";
 import { CI } from "../roles.svelte";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
@@ -438,6 +438,55 @@ export function isMine(
 ): boolean {
   const me = username(sources.find((source) => source.id === detail.row.source_id));
   return me !== null && detail.author !== null && detail.author === me;
+}
+
+/** What the ticket page card's *Logged* row draws (#2403). */
+export type LoggedRow = {
+  /** *2h 10m of 6h*, or the time alone with no estimate. */
+  text: string;
+  /** *1h 40m yours*, only when somebody else has logged time too. */
+  yours: string | null;
+  /**
+   * The meter under the line, `null` with no estimate: each segment's share
+   * of the track in percent, mine first, and whether spent passed the
+   * estimate. `mine` is 0 unless `yours` is drawn: the logged time is then
+   * one segment.
+   */
+  meter: { mine: number; others: number; over: boolean } | null;
+};
+
+/** Seconds as the card writes a length: whole minutes, `2h 10m`, `0m`. */
+const spelled = (seconds: number) => minutesLabel(Math.floor(seconds / 60));
+
+/**
+ * The card's *Logged* row (spec #2396): the time spent against the estimate,
+ * with a meter whose track is the estimate (or the time spent, once that is
+ * longer), tinted once spent passes it. Mine is the sum of the worklog's
+ * entries whose author is `me`, the source's username; it is told apart only
+ * when somebody else has logged too. No estimate draws the time alone and no
+ * meter, an estimate and nothing logged draws *0m of …* over an empty track,
+ * and neither draws no row (`null`). A zero estimate is no track.
+ */
+export function loggedRow(
+  detail: Pick<EntityDetail, "time_spent_seconds" | "estimate_seconds" | "logged_by">,
+  me: string | null,
+): LoggedRow | null {
+  const estimate = detail.estimate_seconds !== null && detail.estimate_seconds > 0 ? detail.estimate_seconds : null;
+  const spent = detail.time_spent_seconds ?? null;
+  if (spent === null && estimate === null) return null;
+  const logged = spent ?? 0;
+  const mineSeconds = me === null ? 0 : (detail.logged_by ?? []).filter((entry) => entry.author === me).reduce((sum, entry) => sum + entry.seconds, 0);
+  const mine = Math.min(mineSeconds, logged);
+  const split = mine > 0 && logged - mine > 0;
+  const yours = split ? `${spelled(mine)} yours` : null;
+  if (estimate === null) return { text: spelled(logged), yours, meter: null };
+  const track = Math.max(estimate, logged);
+  const share = (seconds: number) => (seconds / track) * 100;
+  return {
+    text: `${spelled(logged)} of ${spelled(estimate)}`,
+    yours,
+    meter: { mine: split ? share(mine) : 0, others: share(split ? logged - mine : logged), over: logged > estimate },
+  };
 }
 
 /**

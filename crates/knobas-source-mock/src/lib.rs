@@ -70,8 +70,10 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// `v3` is #537 paying the same debt: the corpus gained the fixture's repos
 /// and branches, and a demo profile stored at `v2` has to be re-sent the
 /// corpus to get them. `v4` is #1240: the corpus gained a pipeline per build
-/// configuration, a daily protocol page and two monitors.
-const CURSOR: &str = "tidewater-v4";
+/// configuration, a daily protocol page and two monitors. `v5` is #2403: a
+/// ticket gained its reporter, its created date, its time spent and its
+/// worklog entries' seconds.
+const CURSOR: &str = "tidewater-v5";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
@@ -656,6 +658,33 @@ fn ticket_payload(t: &Ticket) -> serde_json::Value {
     if let Some(epic) = &t.epic {
         payload["parent"] = serde_json::json!({ "key": epic });
     }
+    // The card's Reporter and Logged rows (#2403), by the rule the Jira mock
+    // (`knobas-mockd`'s `state.rs`) serves the same dataset with, so the demo
+    // and the mock Jira agree: the reporter is whoever assigned the ticket,
+    // else its assignee, else priya; it was filed two weeks before its last
+    // update (30 days before the dataset's now where it has none); the time
+    // spent is its worklogs' sum in seconds, none where it has none. Each
+    // worklog entry gains its `seconds`, the unit the worklog path reads.
+    payload["reporter"] = serde_json::Value::from(
+        t.assigned_by
+            .as_deref()
+            .or(t.assignee.as_deref())
+            .unwrap_or("priya"),
+    );
+    let updated = t
+        .updated
+        .unwrap_or_else(|| fixture().today - chrono::Duration::days(30));
+    payload["created"] = serde_json::to_value(updated - chrono::Duration::days(14))
+        .expect("an instant must serialize");
+    if !t.worklogs.is_empty() {
+        let seconds: u64 = t.worklogs.iter().map(|w| u64::from(w.minutes) * 60).sum();
+        payload["time_spent_seconds"] = serde_json::Value::from(seconds);
+    }
+    if let Some(entries) = payload["worklogs"].as_array_mut() {
+        for (entry, worklog) in entries.iter_mut().zip(&t.worklogs) {
+            entry["seconds"] = serde_json::Value::from(u64::from(worklog.minutes) * 60);
+        }
+    }
     payload
 }
 
@@ -1103,6 +1132,17 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             // ticket readers draw them with the Markdown component.
             description: vec![PayloadPath::of(["description"])],
             markup: knobas_source::Markup::Markdown,
+            // What `ticket_payload` adds for the card's Reporter and Logged
+            // rows (#2403); the worklog's authors are person ids, as the
+            // assignee is.
+            reporter: vec![PayloadPath::of(["reporter"])],
+            created: vec![PayloadPath::of(["created"])],
+            time_spent: vec![PayloadPath::of(["time_spent_seconds"])],
+            worklog: vec![knobas_source::WorklogPath {
+                at: PayloadPath::of(["worklogs"]),
+                author: vec![PayloadPath::of(["who"])],
+                seconds: vec![PayloadPath::of(["seconds"])],
+            }],
             ..KindPaths::default()
         },
         KindPaths {
