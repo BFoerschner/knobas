@@ -24,7 +24,7 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | Try | What happens |
 |---|---|
 | Empty box | The recent items, nothing else. The box says only "⌘? for help". |
-| Opened on a section | ⌘K, or `/` where a page bound it, opens the box with that section's filter already in it: `#t ` on Tickets, `#rc ` on Code, `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox. Delete the token to search everything. The pages' own search fields are gone; this is their search. |
+| Opened by a page's search keys | `/` or ⌘/ opens the box with that section's filter already in it (⌘K stays the global search and opens empty): `#t ` on Tickets, `#rc ` on Code, `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox. Delete the token to search everything. The pages' own search fields are gone; this is their search. |
 | ⌘? | From any search: the box empties and narrows the filters (one word each), Enter adds the picked one to the search that was there, the keys sit at the bottom. `#r` then `#l` becomes `#rl`. |
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
 | `#t`, `#c`, `#r`, `#p`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests (c for changes), repositories, pipelines, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |

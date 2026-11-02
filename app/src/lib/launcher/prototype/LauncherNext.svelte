@@ -92,8 +92,8 @@
   the engine's answer; the real change is a flag on the query.
 
   Round 12 (Björn, 2026-11-02): the one box replaces the pages' own search
-  fields. Opened on a section (⌘K, or `/` as the pages bound it), the box
-  starts with that section's filter: `#t ` on Tickets, `#rc ` on Code,
+  fields. Opened with a page's own search keys (`/` or ⌘/), the box starts
+  with that section's filter; ⌘K stays the global search and opens empty: `#t ` on Tickets, `#rc ` on Code,
   `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox;
   the pages' own fields are hidden. PROTOTYPE: the hiding is a `:global`
   rule here; the real change removes the fields and their `/` handlers.
@@ -409,7 +409,10 @@
     return hits;
   }
 
-  /** The filter a section's own search would have applied: what the box starts with when opened there. */
+  /** Set by `/` and ⌘/: the next opening starts with the section's filter. ⌘K never does. */
+  let openWithSection = false;
+
+  /** The filter a section's own search would have applied: what the box starts with when opened by its keys. */
   function sectionFilter(): string {
     const section = sectionOf(parseTfHash(location.hash));
     switch (section) {
@@ -1447,9 +1450,10 @@
     if (open) {
       void session.loadHome();
       void loadLocal();
-      // Opened on a section with nothing in the box: the section's filter, as its own search would have had it.
-      const filter = sectionFilter();
-      if (session.raw.trim() === "" && filter !== "") session.set(filter);
+      // Opened by a page's own search keys: the section's filter, as the page's field would have had it. ⌘K opens as it was.
+      const filter = openWithSection ? sectionFilter() : "";
+      openWithSection = false;
+      if (filter !== "") session.set(filter);
       void tick().then(() => box?.focus({ select: filter === "" }));
     } else {
       sheet = null;
@@ -1500,13 +1504,14 @@
       }
     }
     window.addEventListener("keydown", onkeydown);
-    // `/` on a page opened its own search field; it opens this box with the page's filter instead. Capture phase, before the page's handler.
+    // `/` and ⌘/ on a page opened its own search field; they open this box with the page's filter instead. Capture phase, before the page's handler.
     function onslash(event: KeyboardEvent) {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || open) return;
+      if (event.key !== "/" || event.altKey || event.shiftKey || open) return;
       const target = event.target as HTMLElement | null;
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      if (!event.metaKey && !event.ctrlKey && target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       event.preventDefault();
       event.stopPropagation();
+      openWithSection = true;
       open = true;
     }
     window.addEventListener("keydown", onslash, true);
