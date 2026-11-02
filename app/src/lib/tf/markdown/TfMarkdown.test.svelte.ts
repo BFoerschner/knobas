@@ -424,6 +424,44 @@ test("an attachment read answering anything but a data: image URL is the placeho
   expect(md().querySelector(".tf-md-noimg")).not.toBeNull();
 });
 
+test("an attachment link and an attachment image open the surface's preview of that file (#2415)", async () => {
+  const shown: string[] = [];
+  draw("See [sepa-error-codes.pdf](attachment:50002) and ![psp-409-trace.png](attachment:50000)", {
+    attachments: { ...attachmentRead({ "50000": DOT }), open: (id: string) => void shown.push(id) },
+  });
+  await settle();
+  const link = [...md().querySelectorAll<HTMLAnchorElement>("a[href]")].find((a) => text(a) === "sepa-error-codes.pdf")!;
+  const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+  link.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  const img = md().querySelector<HTMLImageElement>("img.tf-md-att")!;
+  expect(img.getAttribute("src")).toBe(DOT);
+  // The image is a link a keyboard reaches, named by the file's name.
+  const holder = img.closest<HTMLAnchorElement>("a[href]")!;
+  expect(holder).not.toBeNull();
+  img.click();
+  expect(shown).toEqual(["50002", "50000"]);
+  expect(opened).toEqual([]);
+});
+
+test("an image that cannot be fetched still opens the preview, which says why; its source link stays the source's (#2415)", async () => {
+  const shown: string[] = [];
+  draw("![psp-409-trace.png](attachment:50000)", { attachments: { ...attachmentRead({}), open: (id: string) => void shown.push(id) } });
+  await settle();
+  const missing = md().querySelector(".tf-md-noimg")!;
+  expect(missing.closest("a")).toBeNull();
+  missing.querySelector<HTMLAnchorElement>("a.tf-ext")!.click();
+  expect(opened).toEqual(["https://jira.tidewater.example/browse/PAY-231"]);
+  expect(shown).toEqual([]);
+});
+
+test("without a preview, an attachment link is its name as text and goes nowhere (#2415)", async () => {
+  draw("See [a.pdf](attachment:1)", { attachments: attachmentRead({}) });
+  await settle();
+  expect(text(md().querySelector("p"))).toBe("See a.pdf");
+  expect(md().querySelector("a[href]")).toBeNull();
+});
+
 test("on a surface with no attachment read an attachment image loads nothing (#2406)", async () => {
   draw("![a.png](attachment:1)");
   await settle();

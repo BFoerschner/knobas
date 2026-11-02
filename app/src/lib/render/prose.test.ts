@@ -81,6 +81,22 @@ describe("jiraWikiToMarkdown: inline images and task boxes (#2406)", () => {
     expect(jiraWikiToMarkdown("Wow! That *works*! Yes!", files)).toBe("Wow! That **works**! Yes!");
   });
 
+  it("makes [^name] a link to the attachment by that name (#2415)", () => {
+    const listed = [...files, { id: "50002", name: "sepa_error*codes.pdf" }];
+    expect(jiraWikiToMarkdown("See [^sepa_error*codes.pdf] for the codes", listed)).toBe(
+      "See [sepa\\_error\\*codes.pdf](attachment:50002) for the codes",
+    );
+    expect(jiraWikiToMarkdown("* [^psp-409-trace.png] and !psp-409-trace.png!", listed)).toBe(
+      "- [psp-409-trace.png](attachment:50000) and ![psp-409-trace.png](attachment:50000)",
+    );
+  });
+
+  it("leaves a [^name] the attachment list does not hold as the text (#2415)", () => {
+    expect(jiraWikiToMarkdown("See [^missing.pdf] here", files)).toBe("See [^missing.pdf] here");
+    expect(jiraWikiToMarkdown("[^psp-409-trace.png]")).toBe("[^psp-409-trace.png]");
+    expect(jiraWikiToMarkdown("{{[^psp-409-trace.png]}}", files)).toBe("`[^psp-409-trace.png]`");
+  });
+
   it("keeps an image name inside {{mono}} as code", () => {
     expect(jiraWikiToMarkdown("{{!psp-409-trace.png!}}", files)).toBe("`!psp-409-trace.png!`");
   });

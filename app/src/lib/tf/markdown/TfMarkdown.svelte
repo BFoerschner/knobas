@@ -14,6 +14,9 @@
   - an attachment image (`attachment:<id>`, the Jira wiki's `!name!`, #2406)
     is drawn from the data URL `attachments` answers; one it refuses is the
     placeholder `attachments.missing` words, with its link to the opener;
+  - where the surface previews files (`attachments.open`, #2415), an
+    attachment link (the wiki's `[^name]`) and an attachment image are links
+    that open the preview; elsewhere the link is its text;
   - fences are drawn by the renderer registry, highlighted where no renderer
     claims them, and stopped when the text changes or the component goes.
 -->
@@ -84,8 +87,11 @@
   function drawAttachments(node: HTMLElement, read: AttachmentImages) {
     let live = true;
     const watches: (() => void)[] = [];
+    if (read.open) for (const link of node.querySelectorAll<HTMLAnchorElement>("a[data-md-attachment]")) link.setAttribute("href", "#");
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-attachment]")) {
       const id = img.dataset["mdAttachment"] ?? "";
+      // Where the surface previews, the image is a link to the preview, named by the image's alt (#2415).
+      const holder = read.open && img.closest("a") === null ? previewLink(img, id) : img;
       if (read.watch) watches.push(read.watch(img, id));
       const fail = (error: unknown) => {
         if (!live) return;
@@ -102,7 +108,7 @@
           link.textContent = said.link.label;
           missing.append(" ", link);
         }
-        img.replaceWith(missing);
+        holder.replaceWith(missing);
       };
       read.load(id).then((url) => {
         if (!live) return;
@@ -114,6 +120,17 @@
       live = false;
       for (const stop of watches) stop();
     };
+  }
+
+  /** Puts `img` inside a link to the preview of attachment `id`, and answers the link. */
+  function previewLink(img: HTMLImageElement, id: string): HTMLAnchorElement {
+    const link = document.createElement("a");
+    link.href = "#";
+    link.className = "tf-md-attlink";
+    link.dataset["mdAttachment"] = id;
+    img.replaceWith(link);
+    link.append(img);
+    return link;
   }
 
   /**
@@ -160,7 +177,11 @@
       const link = at?.closest<HTMLAnchorElement>("a[href]");
       if (!link || !node.contains(link)) return;
       const anchor = link.dataset["mdAnchor"];
-      if (anchor !== undefined) {
+      const file = link.dataset["mdAttachment"];
+      if (file !== undefined) {
+        event.preventDefault();
+        attachments?.open?.(file);
+      } else if (anchor !== undefined) {
         event.preventDefault();
         [...node.querySelectorAll("[id]")].find((el) => el.id === `user-content-${anchor}`)?.scrollIntoView?.({ block: "start" });
       } else if (link.classList.contains("tf-ext")) {
