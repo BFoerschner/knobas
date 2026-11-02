@@ -180,7 +180,8 @@ pub struct DocComment {
 /// - `heading`: A section heading. `level` is 1 to 6 as the source wrote it;
 ///   the reader draws every level as a section head.
 /// - `list`: A list. A nested list's items are drawn as a list inside their
-///   item.
+///   item. An item may carry a checked state: a task list is a list whose
+///   items say whether they are done ([`ListItem`]).
 /// - `code`: A code block, verbatim, with the language the source named.
 /// - `table`: A table, row by row; a header cell says so.
 /// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
@@ -202,7 +203,7 @@ pub enum DocBlock {
     },
     List {
         ordered: bool,
-        items: Vec<Vec<DocBlock>>,
+        items: Vec<ListItem>,
     },
     Code {
         code: String,
@@ -219,6 +220,40 @@ pub enum DocBlock {
     Placeholder {
         name: String,
     },
+}
+
+/// One item of a [`DocBlock::List`]: its blocks, and for a task its checked
+/// state (spec #2432, *The vocabulary is the seam*).
+///
+/// `checked` is `None` for an ordinary item, `Some(true)` for a task that is
+/// done and `Some(false)` for one that is not. The shell draws the state and
+/// never changes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "DocListItem")]
+pub struct ListItem {
+    #[serde(default)]
+    pub checked: Option<bool>,
+    pub blocks: Vec<DocBlock>,
+}
+
+impl ListItem {
+    /// An ordinary item: no checked state.
+    #[must_use]
+    pub fn new(blocks: Vec<DocBlock>) -> Self {
+        Self {
+            checked: None,
+            blocks,
+        }
+    }
+
+    /// A task item, done or not.
+    #[must_use]
+    pub fn task(checked: bool, blocks: Vec<DocBlock>) -> Self {
+        Self {
+            checked: Some(checked),
+            blocks,
+        }
+    }
 }
 
 /// One cell of a [`DocBlock::Table`].
@@ -326,7 +361,7 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
         }
         DocBlock::List { items, .. } => {
             for item in items {
-                for inner in item {
+                for inner in &mut item.blocks {
                     collect(inner, out);
                 }
             }
@@ -499,6 +534,31 @@ mod tests {
         assert_eq!(back, block);
     }
 
+    /// Spec #2432: a list item crosses as `{checked, blocks}`; an ordinary
+    /// item's `checked` is null.
+    #[test]
+    fn a_list_item_crosses_with_its_checked_state() {
+        let block = DocBlock::List {
+            ordered: false,
+            items: vec![
+                ListItem::task(true, vec![]),
+                ListItem::task(false, vec![]),
+                ListItem::new(vec![]),
+            ],
+        };
+        let wire = serde_json::to_value(&block).unwrap();
+        assert_eq!(
+            wire["items"],
+            serde_json::json!([
+                {"checked": true, "blocks": []},
+                {"checked": false, "blocks": []},
+                {"checked": null, "blocks": []},
+            ])
+        );
+        let back: DocBlock = serde_json::from_value(wire).unwrap();
+        assert_eq!(back, block);
+    }
+
     #[test]
     fn the_fill_in_pass_reaches_inlines_inside_lists_tables_and_panels() {
         let mention = || Inline::Mention {
@@ -509,9 +569,9 @@ mod tests {
         let mut blocks = vec![
             DocBlock::List {
                 ordered: false,
-                items: vec![vec![DocBlock::Paragraph {
+                items: vec![ListItem::new(vec![DocBlock::Paragraph {
                     text: vec![mention()],
-                }]],
+                }])],
             },
             DocBlock::Table {
                 rows: vec![vec![TableCell {
