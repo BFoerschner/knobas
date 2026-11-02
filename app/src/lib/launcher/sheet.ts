@@ -391,12 +391,14 @@ function snoozeFlow(item: InboxItem, now: Date): SheetEffect {
     steps: [
       {
         title: "Snooze until",
-        choices: async () => presets.map((preset) => ({ id: preset.at.toISOString(), label: preset.label, detail: untilLabel(preset.at, now) })),
+        // Keyed by label: on a Sunday *Tomorrow* and *Next Monday* are the same morning.
+        choices: async () => presets.map((preset) => ({ id: preset.label, label: preset.label, detail: untilLabel(preset.at, now) })),
       },
     ],
-    finish: ([until]) => {
-      const at = new Date(until ?? "");
-      return { kind: "snooze", key: item.key, until: at, said: `Snoozed until ${untilLabel(at, now)}` };
+    finish: ([picked]) => {
+      const preset = presets.find((one) => one.label === picked);
+      if (!preset) return { kind: "refused", said: "That preset is gone." };
+      return { kind: "snooze", key: item.key, until: preset.at, said: `Snoozed until ${untilLabel(preset.at, now)}` };
     },
   };
 }

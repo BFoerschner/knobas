@@ -677,6 +677,34 @@ test("a two-step flow: Create pull request picks the head, then the base, the bo
   expect(calls.navigate).toHaveBeenCalledWith("#/repo/gitea%3Aacme%2Fsvc/compare/release%2F2.1...feature%2FPAY-231-retry");
 });
 
+test("a step's late answer for picks since stepped back from is dropped", async () => {
+  const calls = mountIt();
+  const held: (() => void)[] = [];
+  await settle();
+  await sheetOn("repo");
+  narrow("create");
+  press("Enter");
+  await settle();
+  // From here every read waits until the test answers it.
+  calls.branches.mockImplementation(() => new Promise((resolve) => held.push(() => resolve(BRANCHES))));
+  press("Enter"); // head: main
+  await settle();
+  press("Backspace");
+  await settle();
+  press("ArrowDown");
+  press("Enter"); // head: feature/PAY-231-retry
+  await settle();
+  expect(held).toHaveLength(2);
+  // The read for head main answers first: it was asked for other picks.
+  held[0]!();
+  await settle();
+  expect(labels()).not.toContain("feature/PAY-231-retry");
+  expect(labels()).toEqual([]);
+  held[1]!();
+  await settle();
+  expect(labels()).toEqual(["main", "release/2.1"]);
+});
+
 test("Esc in a flow steps back too, and never closes the dialog", async () => {
   const onclose = vi.fn();
   mountIt({ onclose });
@@ -769,6 +797,21 @@ test("Snooze… offers the Inbox page's presets and snoozes the line until the o
   await settle();
   expect(calls.inboxSnooze).toHaveBeenCalledWith(LINE.key, new Date(2026, 7, 31, 9, 0));
   expect(lastToast()).toBe("Snoozed until Monday 09:00");
+});
+
+test("Snooze… on a Sunday: Tomorrow and Next Monday are the same morning, and both are drawn", async () => {
+  // Sunday 30 August 2026: both presets are Monday the 31st at 09:00, so a choice keyed by the time would repeat.
+  const calls = mountIt({ now: new Date(2026, 7, 30, 12, 0) });
+  await settle();
+  await sheetOn("#i");
+  narrow("snooze");
+  press("Enter");
+  await settle();
+  expect(labels()).toEqual(["Tomorrow", "Next Monday"]);
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(calls.inboxSnooze).toHaveBeenCalledWith(LINE.key, new Date(2026, 7, 31, 9, 0));
 });
 
 test("Merge… follows the source's declared merge: picks the style and queues the write with the source's other answers", async () => {

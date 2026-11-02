@@ -966,12 +966,17 @@
     const step = flow?.steps[at];
     if (!flow || !step) return;
     const picks = [...flow.picks];
+    // Still the step asked: the same flow, and the same picks (a step back and another pick reads it again).
+    const asked = () => {
+      const live = sheet?.flow;
+      return live && live.id === id && live.choices === null && live.picks.length === picks.length && live.picks.every((one, i) => one === picks[i]) ? live : null;
+    };
     try {
       const choices = await step.choices(picks);
-      const live = sheet?.flow;
-      if (live && live.id === id && live.picks.length === at && live.choices === null) live.choices = choices;
+      const live = asked();
+      if (live) live.choices = choices;
     } catch (cause) {
-      if (sheet?.flow?.id !== id) return;
+      if (!sheet || !asked()) return;
       push({ text: ipcErrorMessage(cause), tone: "err" });
       sheet.flow = null;
       sheet.filter = "";
