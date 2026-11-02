@@ -188,7 +188,10 @@ export function blockWords(block: DocBlock): string {
     case "paragraph":
       return inlineWords(block.text);
     case "list":
-      return block.items.flat().map(blockWords).join(" ");
+      return block.items
+        .flatMap((item) => item.blocks)
+        .map(blockWords)
+        .join(" ");
     case "code":
       return block.code;
     case "table":

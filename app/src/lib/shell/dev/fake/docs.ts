@@ -148,12 +148,16 @@ type Proto =
   | { p: string }
   | { ul: string[] }
   | { ol: string[] }
+  /** A task list (spec #2432): each task done or not, with the tasks nested under it. */
+  | { tasks: Task[] }
   | { code: string; lang?: string }
   | { table: string[][] }
   | { info: string }
   | { warn: string }
   | { note: string }
   | { macro: string };
+
+type Task = [done: boolean, text: string, under?: Task[]];
 
 interface Body {
   labels: string[];
@@ -202,6 +206,14 @@ const BODIES: Record<string, Body> = {
       { h: "Transient or permanent" },
       { p: "Only TEMP_UNAVAILABLE and TIMEOUT are transient. Everything else is permanent and is never retried automatically. See {{page:SEPA payout retry design}} for the backoff." },
       { note: "The PSP sandbox returns TEMP_UNAVAILABLE on purpose for IBANs ending in 0503. Use those in integration tests." },
+      { h: "Adding a code" },
+      {
+        tasks: [
+          [true, "Add it to `psp::errors` in payout-service."],
+          [false, "Add its row to the table above.", [[true, "Meaning, from the PSP's changelog"], [false, "What we do, agreed with finance"]]],
+          [false, "Tell #payments-ops which batches it can fail."],
+        ],
+      },
     ],
     comments: [["ML", "2026-08-20 09:00", "Added the sandbox IBAN trick, it makes the retry test deterministic."]],
   },
@@ -354,11 +366,20 @@ function para(s: string): DocBlock {
   return { type: "paragraph", text: inl(s) };
 }
 
+function tasks(list: Task[]): DocBlock {
+  return {
+    type: "list",
+    ordered: false,
+    items: list.map(([done, text, under]) => ({ checked: done, blocks: under ? [para(text), tasks(under)] : [para(text)] })),
+  };
+}
+
 function block(b: Proto): DocBlock {
   if ("h" in b) return { type: "heading", level: 2, text: inl(b.h) };
   if ("p" in b) return para(b.p);
-  if ("ul" in b) return { type: "list", ordered: false, items: b.ul.map((l) => [para(l)]) };
-  if ("ol" in b) return { type: "list", ordered: true, items: b.ol.map((l) => [para(l)]) };
+  if ("ul" in b) return { type: "list", ordered: false, items: b.ul.map((l) => ({ checked: null, blocks: [para(l)] })) };
+  if ("ol" in b) return { type: "list", ordered: true, items: b.ol.map((l) => ({ checked: null, blocks: [para(l)] })) };
+  if ("tasks" in b) return tasks(b.tasks);
   if ("code" in b) return { type: "code", code: b.code, language: b.lang ?? null };
   if ("table" in b) {
     return {
@@ -440,8 +461,10 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
       else if (b.type === "panel") visit(b.blocks, true);
       else if (b.type === "paragraph") inlines(b.text);
       else if (b.type === "list") {
+        // The editor's text has no checkbox: a task list is formatting (spec #2432).
+        if (b.items.some((item) => item.checked !== null)) note("formatting");
         for (const item of b.items) {
-          for (const inner of item) {
+          for (const inner of item.blocks) {
             if (inner.type === "paragraph") inlines(inner.text);
             else note("formatting");
           }
@@ -457,7 +480,7 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
 function sectionText(blocks: DocBlock[]): string {
   return blocks
     .map((b) => {
-      if (b.type === "list") return b.items.map((item) => `- ${item.map(blockWords).join(" ")}`).join("\n");
+      if (b.type === "list") return b.items.map((item) => `- ${item.blocks.map(blockWords).join(" ")}`).join("\n");
       if (b.type !== "panel") return blockWords(b);
       const head = `**${b.kind.charAt(0).toUpperCase()}${b.kind.slice(1)}**${b.title ? ` ${b.title}` : ""}`;
       const body = sectionText(b.blocks);
@@ -490,7 +513,7 @@ function work(blocks: DocBlock[]): DocPage["work"] {
   };
   const visit = (b: DocBlock) => {
     if (b.type === "heading" || b.type === "paragraph") walk(b.text);
-    else if (b.type === "list") b.items.flat().forEach(visit);
+    else if (b.type === "list") b.items.flatMap((item) => item.blocks).forEach(visit);
     else if (b.type === "panel") b.blocks.forEach(visit);
     else if (b.type === "table") b.rows.flat().forEach((c) => walk(c.text));
   };
