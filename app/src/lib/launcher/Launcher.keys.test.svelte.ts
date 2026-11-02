@@ -220,7 +220,7 @@ test("⌘B on a selected action opens the panel, labelled Keys; it shows the mod
   expect(rowChord("Open in IntelliJ")).toBeNull();
 });
 
-test("Backspace clears the keys and OK then removes the binding; Esc and Cancel leave things as they were", async () => {
+test("Backspace clears the keys and OK then removes the key; Esc and Cancel leave things as they were", async () => {
   const calls = mountIt(keyBackend([], [{ kind: "repo", chord: "⌘⇧O", action_id: "open-code" }]));
   await settle();
   await sheetOn("repo");

@@ -49,7 +49,7 @@ export function chordOf(event: Mods & Pick<KeyboardEvent, "code">): string | nul
  * Ctrl is the box's ⌘) and whatever else is held on top:
  * the launcher's own (⌘K opens it, ⌘S saves, ⌘B binds, ⌘D is Titles or
  * Everything), the shell's (⌘T the timer, ⌘R refresh), and the system's
- * editing and window chords, which a binding would take from every field.
+ * editing and window chords, which a key would take from every field.
  */
 const TAKEN: Record<string, "launcher" | "shell" | "system"> = {
   K: "launcher",

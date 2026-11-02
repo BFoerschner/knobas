@@ -301,7 +301,7 @@
     relation: number;
     renaming: string | null;
     flow: Flow | null;
-    binding: Binding | null;
+    panel: KeyPanel | null;
   } | null>(null);
 
   /**
@@ -309,7 +309,7 @@
    * chord pressed so far (`null` once cleared), the modifiers held now, and
    * why the last press was refused.
    */
-  interface Binding {
+  interface KeyPanel {
     target: { kind: "list"; id: string; label: string } | { kind: "action"; on: string; actionId: string; label: string };
     had: string | null;
     chord: string | null;
@@ -468,7 +468,7 @@
       : overlay
         ? "Filter"
         : sheet
-          ? sheet.binding
+          ? sheet.panel
             ? "Keys"
             : sheet.renaming !== null
             ? "New name"
@@ -483,7 +483,7 @@
       : overlay
         ? "narrow the filters"
         : sheet
-          ? sheet.binding
+          ? sheet.panel
             ? "press the keys"
             : sheet.renaming !== null
             ? "the list's new name"
@@ -875,7 +875,7 @@
     const row = session.current;
     const subject = row ? subjectOf(row, inboxOps) : null;
     if (!row || !subject || sheetActions(subject, sheetContext).length === 0) return;
-    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, binding: null };
+    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, panel: null };
     readApplications();
     readMerge(subject);
     box?.focus();
@@ -999,7 +999,7 @@
         // *Assign key…*: the panel, on the chord the list has now.
         if (subject.kind !== "list" || !sheet) return;
         const had = keys.chordOfList(subject.id);
-        sheet.binding = { target: { kind: "list", id: subject.id, label: subject.label }, had, chord: had, held: [], refused: null };
+        sheet.panel = { target: { kind: "list", id: subject.id, label: subject.label }, had, chord: had, held: [], refused: null };
         box?.focus();
         return;
       }
@@ -1204,30 +1204,30 @@
   }
 
   /** ⌘B on a selected action: the panel, on the chord the action has on this kind now. */
-  function startBinding(current: NonNullable<typeof sheet>) {
+  function openKeyPanel(current: NonNullable<typeof sheet>) {
     const action = sheetShown[current.selected];
     if (!action || current.flow || current.renaming !== null) return;
     // ⌘B on *Assign key…* is that row's own panel.
     if (action.does.kind === "bind") return carry(action.does);
     const on = kindOf(current.subject);
     const had = keys.chordOfAction(on, action.id);
-    current.binding = { target: { kind: "action", on, actionId: action.id, label: action.label }, had, chord: had, held: [], refused: null };
+    current.panel = { target: { kind: "action", on, actionId: action.id, label: action.label }, had, chord: had, held: [], refused: null };
     box?.focus();
   }
 
   /** Esc or Cancel: back to the actions, nothing written. */
-  function leaveBinding() {
-    if (sheet) sheet.binding = null;
+  function leaveKeyPanel() {
+    if (sheet) sheet.panel = null;
     box?.focus();
   }
 
   /** Enter or OK: the chord in the panel, kept; no chord takes the key away. Back to the actions either way. */
-  async function keepBinding() {
-    const binding = sheet?.binding;
-    if (!sheet || !binding) return;
-    sheet.binding = null;
+  async function keepKey() {
+    const panel = sheet?.panel;
+    if (!sheet || !panel) return;
+    sheet.panel = null;
     box?.focus();
-    const { target, chord, had } = binding;
+    const { target, chord, had } = panel;
     if (chord === had) return;
     try {
       if (target.kind === "list") {
@@ -1243,7 +1243,7 @@
   }
 
   /** A chord the other table holds, said as the panel says it: a list's chord is no action's, on any kind. */
-  function clashOf(target: Binding["target"], chord: string): string | null {
+  function clashOf(target: KeyPanel["target"], chord: string): string | null {
     if (target.kind === "list") {
       const action = keys.actions.find((key) => key.chord === chord);
       return action ? `${chord} runs an action on a ${kindWord(action.kind)}` : null;
@@ -1257,42 +1257,42 @@
    * chord once pressed. Nothing reaches the box, the dialog or the shell: a
    * refused ⌘D does not switch the scope, a refused ⌘T starts no timer.
    */
-  function bindKey(event: KeyboardEvent, binding: Binding) {
+  function bindKey(event: KeyboardEvent, panel: KeyPanel) {
     event.stopPropagation();
-    binding.held = heldOf(event);
+    panel.held = heldOf(event);
     const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
     if (event.key === "Escape") {
       event.preventDefault();
-      return leaveBinding();
+      return leaveKeyPanel();
     }
     if (event.key === "Enter" && plain) {
       event.preventDefault();
-      return void keepBinding();
+      return void keepKey();
     }
     event.preventDefault();
     if (event.key === "Backspace" && plain) {
-      binding.chord = null;
-      binding.refused = null;
+      panel.chord = null;
+      panel.refused = null;
       return;
     }
     const refusal = refusalOf(event);
     const chord = chordOf(event);
-    const refused = refusal ?? (chord === null ? null : clashOf(binding.target, chord));
+    const refused = refusal ?? (chord === null ? null : clashOf(panel.target, chord));
     if (refused !== null) {
-      binding.refused = refused;
-      binding.held = [];
+      panel.refused = refused;
+      panel.held = [];
       return;
     }
     if (chord === null) return;
-    binding.chord = chord;
-    binding.refused = null;
+    panel.chord = chord;
+    panel.refused = null;
   }
 
   // The panel draws the modifiers as they are let go, too.
   $effect(() => {
-    if (!sheet?.binding) return;
+    if (!sheet?.panel) return;
     const up = (event: KeyboardEvent) => {
-      if (sheet?.binding) sheet.binding.held = heldOf(event);
+      if (sheet?.panel) sheet.panel.held = heldOf(event);
     };
     window.addEventListener("keyup", up);
     return () => window.removeEventListener("keyup", up);
@@ -1352,7 +1352,7 @@
     }
     if (!["flow", "rename", "bind", "link"].includes(action.does.kind)) return carry(action.does, { subject, relation: 0 });
     if (!sheet || sheet.rowId !== row.id) {
-      sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, binding: null };
+      sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, panel: null };
     }
     if (action.does.kind === "link") {
       // The relation is picked on the row with ← →; Enter writes it.
@@ -1402,7 +1402,7 @@
 
   function onkeydown(event: KeyboardEvent) {
     // The key panel takes every key first: its chords are what is being bound.
-    if (sheet?.binding) return bindKey(event, sheet.binding);
+    if (sheet?.panel) return bindKey(event, sheet.panel);
     if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "d") {
       // Before the webview's own ⌘D (a bookmark) and anything else the box does.
       event.preventDefault();
@@ -1422,7 +1422,7 @@
       if (isSaveChord(event) || isHelpChord(event)) event.preventDefault();
       else if (isBindChord(event)) {
         event.preventDefault();
-        startBinding(sheet);
+        openKeyPanel(sheet);
       } else sheetKey(event, sheet);
       return;
     }
@@ -1535,13 +1535,13 @@
         {#if boxLabel !== null}<span class="tf-ln-mode">{boxLabel}</span>{/if}
         <QueryBox
           bind:this={box}
-          value={naming !== null ? naming : overlay ? overlay.filter : sheet ? (sheet.binding ? "" : (sheet.renaming ?? sheet.filter)) : session.raw}
+          value={naming !== null ? naming : overlay ? overlay.filter : sheet ? (sheet.panel ? "" : (sheet.renaming ?? sheet.filter)) : session.raw}
           {placeholder}
           pending={session.pending}
           controls={controlled.list}
           active={controlled.option}
           oninput={(value) => {
-            if (sheet?.binding) return;
+            if (sheet?.panel) return;
             if (naming !== null) naming = value;
             else if (overlay) overlay = { filter: value, selected: 0 };
             else if (sheet?.renaming != null) sheet.renaming = value;
@@ -1600,40 +1600,40 @@
         <Pinned row={current.row} id={`${uid}-pinned`} {now} />
         {#if current.renaming !== null}
           <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
-        {:else if current.binding}
-          {@const binding = current.binding}
+        {:else if current.panel}
+          {@const panel = current.panel}
           <!-- The key panel (#2429): the keys large as they are pressed; the box's keys go to `bindKey`. -->
           <div class="tf-ln-bind" role="group" aria-label="Bind keys">
             <p class="tf-ln-bind-what">
-              {#if binding.target.kind === "list"}
-                The keys that open <strong>{binding.target.label}</strong> from anywhere
+              {#if panel.target.kind === "list"}
+                The keys that open <strong>{panel.target.label}</strong> from anywhere
               {:else}
-                The keys that run <strong>{binding.target.label}</strong> on any {kindWord(binding.target.on)} you have selected
+                The keys that run <strong>{panel.target.label}</strong> on any {kindWord(panel.target.on)} you have selected
               {/if}
             </p>
             <div class="tf-ln-bind-keys" aria-live="polite">
-              {#if binding.chord}
-                {#each [...binding.chord] as glyph, i (i)}<kbd class="tf-ln-bigkey">{glyph}</kbd>{/each}
-              {:else if binding.held.length > 0}
-                {#each binding.held as glyph, i (i)}<kbd class="tf-ln-bigkey tf-ln-held">{glyph}</kbd>{/each}
+              {#if panel.chord}
+                {#each [...panel.chord] as glyph, i (i)}<kbd class="tf-ln-bigkey">{glyph}</kbd>{/each}
+              {:else if panel.held.length > 0}
+                {#each panel.held as glyph, i (i)}<kbd class="tf-ln-bigkey tf-ln-held">{glyph}</kbd>{/each}
                 <span class="tf-ln-bind-hint">… and a letter or digit</span>
               {:else}
                 <span class="tf-ln-bind-hint">Press a modifier and a letter or digit, such as ⌘⇧O</span>
               {/if}
             </div>
-            {#if binding.refused}<p class="tf-ln-bind-refused" role="alert">{binding.refused}</p>{/if}
+            {#if panel.refused}<p class="tf-ln-bind-refused" role="alert">{panel.refused}</p>{/if}
             <div class="tf-ln-bind-btns">
-              <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void keepBinding()}>OK</button>
+              <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void keepKey()}>OK</button>
               <button
                 type="button"
                 class="tf-btn tf-sm"
                 onclick={() => {
-                  binding.chord = null;
-                  binding.refused = null;
+                  panel.chord = null;
+                  panel.refused = null;
                   box?.focus();
                 }}>Clear</button
               >
-              <button type="button" class="tf-btn tf-sm" onclick={leaveBinding}>Cancel</button>
+              <button type="button" class="tf-btn tf-sm" onclick={leaveKeyPanel}>Cancel</button>
             </div>
             <p class="tf-ln-bind-hint">Enter keeps the keys, Backspace clears them, Esc leaves things as they were.</p>
           </div>
@@ -1844,7 +1844,7 @@
       <span><kbd>↑↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
       {#if tabOpens}<span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>{/if}
-      {#if sheet && !sheet.flow && sheet.renaming === null && !sheet.binding}<span><kbd>⌘B</kbd> bind a key</span>{/if}
+      {#if sheet && !sheet.flow && sheet.renaming === null && !sheet.panel}<span><kbd>⌘B</kbd> bind a key</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
       {#if session.canSave}
