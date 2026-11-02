@@ -87,6 +87,7 @@
   import { cardSections } from "./card-sections";
   import { cardWidth } from "./card-width.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
+  import { ticketImages } from "./attachment-image";
   import { proseMarkdown } from "../../render/prose";
   import TfLinkTo from "./TfLinkTo.svelte";
   import TfStartWork from "./TfStartWork.svelte";
@@ -174,6 +175,12 @@
   const inherited = $derived(reader.inherited);
   const sources = $derived(reader.sources);
   const repos = $derived(reader.repos);
+  /** The description's inline images (#2406): the ticket's attachments, read through the page's seam. */
+  const inlineImages = $derived(
+    detail == null
+      ? null
+      : ticketImages(detail.row.entity_id, detail.attachments ?? [], detail.source.display_name, detail.web_url ?? null),
+  );
   /** The ticket's *Refresh* or *Sync now* (#2134). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
@@ -550,8 +557,8 @@
           <section aria-label="Description">
             <div class="tf-panel tf-tkdesc">
               {#if detail.description !== null && detail.description.trim() !== ""}
-                {@const markdown = proseMarkdown(detail.description, detail.markup)}
-                {#if markdown !== null}<TfMarkdown text={markdown} />{:else}<p class="tf-asks">{detail.description}</p>{/if}
+                {@const markdown = proseMarkdown(detail.description, detail.markup, detail.attachments)}
+                {#if markdown !== null}<TfMarkdown text={markdown} attachments={inlineImages} />{:else}<p class="tf-asks">{detail.description}</p>{/if}
               {:else}
                 <p class="tf-dim">The ticket has no description.</p>
               {/if}

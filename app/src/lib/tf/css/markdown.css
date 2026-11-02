@@ -28,6 +28,9 @@
 .tf-md .tf-fence pre { font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; padding: 10px 14px; overflow: auto; margin: 0; }
 .tf-md .tf-fence pre code { font: inherit; font-variant-ligatures: none; background: none; border: 0; padding: 0; }
 .tf-md .tf-md-noimg { display: inline-block; font-size: var(--t-sm); color: var(--ink-2); border: 1px dashed var(--rule); border-radius: 3px; padding: 2px 8px; }
+/* A ticket attachment the wiki drew inline (#2406), as the ticket-page mockup's `.tf-tkfig`: at most the panel's width, nothing under it. */
+.tf-md img.tf-md-att { display: block; max-width: 100%; max-height: 280px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet-2); }
+.tf-md .tf-md-noimg.tf-md-attnone { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; }
 /* A diagram fence (#2258), as the mockup's `.fence .diagram`. */
 .tf-md .tf-fence .tf-diagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
 .tf-md .tf-fence .tf-stepfail pre { font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; padding: 8px 10px; white-space: pre-wrap; }

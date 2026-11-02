@@ -11,11 +11,21 @@
   - a relative image is read through `image` (the source's byte read) and
     drawn from a blob URL, an SVG sanitized first; one the read refuses is
     its alt text and the reason;
+  - an attachment image (`attachment:<id>`, the Jira wiki's `!name!`, #2406)
+    is drawn from the data URL `attachments` answers; one it refuses is the
+    placeholder `attachments.missing` words, with its link to the opener;
   - fences are drawn by the renderer registry, highlighted where no renderer
     claims them, and stopped when the text changes or the component goes.
 -->
 <script lang="ts">
-  import { drawFences, fenceCode, markdownFragment, type MarkdownLinks } from "../../render/markdown";
+  import {
+    drawFences,
+    fenceCode,
+    markdownFragment,
+    resolveLink,
+    type AttachmentImages,
+    type MarkdownLinks,
+  } from "../../render/markdown";
   import { imageBlob } from "../../render/image";
   import { renderPort, type RenderPort } from "../../render/port";
   import { ipcErrorMessage } from "../../ipc";
@@ -30,6 +40,7 @@
     copy = (code: string) => navigator.clipboard.writeText(code),
     render = renderPort(),
     image = null,
+    attachments = null,
   }: {
     /** The Markdown. */
     text: string;
@@ -48,6 +59,8 @@
      * and such an image loads nothing.
      */
     image?: ((path: string) => Promise<Uint8Array>) | null;
+    /** The ticket's attachments, for `attachment:<id>` images (#2406); `null` where the surface has none, and such an image loads nothing. */
+    attachments?: AttachmentImages | null;
   } = $props();
 
   /** Draws the text; again whenever it, its base, its links or its image read change. */
@@ -55,9 +68,48 @@
     node.replaceChildren(markdownFragment(text, { base, fileLink }));
     const stopFences = drawFences(node, render);
     const stopImages = image === null ? () => {} : drawImages(node, image);
+    const stopAttachments = attachments === null ? () => {} : drawAttachments(node, attachments);
     return () => {
       stopFences();
       stopImages();
+      stopAttachments();
+    };
+  }
+
+  /**
+   * Fills each attachment image from the surface's read, which must answer a
+   * `data:image/…` URL; anything else, or a refusal, makes the image the
+   * placeholder the surface words. Returns how to stop: answers after it are dropped.
+   */
+  function drawAttachments(node: HTMLElement, read: AttachmentImages) {
+    let live = true;
+    for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-attachment]")) {
+      const id = img.dataset["mdAttachment"] ?? "";
+      const fail = (error: unknown) => {
+        if (!live) return;
+        const said = read.missing(img.alt, error);
+        const missing = document.createElement("span");
+        missing.className = "tf-md-noimg tf-md-attnone";
+        missing.append(said.text);
+        const to = said.link === null ? null : resolveLink(said.link.href, "");
+        if (said.link !== null && to?.kind === "external") {
+          const link = document.createElement("a");
+          link.className = "tf-ext";
+          link.rel = "noreferrer";
+          link.href = to.url;
+          link.textContent = said.link.label;
+          missing.append(" ", link);
+        }
+        img.replaceWith(missing);
+      };
+      read.load(id).then((url) => {
+        if (!live) return;
+        if (/^data:image\//i.test(url)) img.src = url;
+        else fail(new Error("not an image"));
+      }, fail);
+    }
+    return () => {
+      live = false;
     };
   }
 
