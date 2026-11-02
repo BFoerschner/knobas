@@ -226,10 +226,21 @@ fn grid(rows: &[Vec<TableCell>]) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// A cell's text on one line: its lines joined by `<br>`, each pipe escaped.
+/// A pipe already escaped (an odd run of backslashes before it, as a nested
+/// table's cell writes it, #2436) is kept: escaping it again would make its
+/// backslash the escaped character and the pipe a column break.
 fn table_cell(text: &str) -> String {
-    text.trim()
-        .replace('|', "\\|")
-        .lines()
+    let mut out = String::with_capacity(text.len());
+    let mut backslashes = 0;
+    for ch in text.trim().chars() {
+        if ch == '|' && backslashes % 2 == 0 {
+            out.push('\\');
+        }
+        backslashes = if ch == '\\' { backslashes + 1 } else { 0 };
+        out.push(ch);
+    }
+    out.lines()
         .collect::<Vec<_>>()
         .join("<br>")
 }

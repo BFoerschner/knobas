@@ -171,6 +171,36 @@ fn a_table_is_a_pipe_table_headed_by_its_first_row() {
     assert_eq!(page("T", &[DocBlock::Table { rows: vec![] }]), "# T\n");
 }
 
+/// A pipe in a nested table's cell is escaped once, by the inner table, and
+/// stays one escaped pipe in the outer cell: escaping it again would read as
+/// an escaped backslash and a column break (#2436). A backslash in text still
+/// comes out escaped before an escaped pipe.
+#[test]
+fn a_pipe_inside_a_nested_tables_cell_breaks_no_column() {
+    let md = body(&[DocBlock::Table {
+        rows: vec![
+            vec![cell("Outer"), cell("Back")],
+            vec![
+                TableCell::new(
+                    false,
+                    vec![DocBlock::Table {
+                        rows: vec![vec![cell("a|b")]],
+                    }],
+                ),
+                cell("c\\|d"),
+            ],
+        ],
+    }]);
+    assert_eq!(
+        md,
+        concat!(
+            "| Outer | Back |\n",
+            "| --- | --- |\n",
+            "| \\| a\\|b \\|<br>\\| --- \\| | c\\\\\\|d |\n",
+        )
+    );
+}
+
 /// A pipe table has no spans and no blocks (#2436): a spanned cell keeps its
 /// place and leaves the places it covers empty, so the columns still line up,
 /// and a cell's blocks are its lines joined by `<br>`. No word is lost.
