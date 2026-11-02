@@ -456,3 +456,23 @@ async fn a_new_page_on_the_component_s_space_is_created_from_the_text() {
         )]
     );
 }
+
+/// A component built before 1.5.0 exports no `docs`: the registry gives its
+/// kind neither a projection nor the writes, so its pages draw as a source's
+/// with no docs and Docs offers no edit.
+#[test]
+fn a_component_built_before_docs_gets_neither_a_projection_nor_writes() {
+    let old = WasmAdapter::load(&knobas_wasm_host::fixture_component_v1_3()).unwrap();
+    let kind = old.kind().to_owned();
+    assert!(!old.projects());
+    let registry = Registry::with_external(vec![old]);
+    assert!(AdapterRegistry::doc_projection(&registry, &kind).is_none());
+    assert!(AdapterRegistry::doc_writes(&registry, &kind).is_none());
+    // The current fixture, the same kind, has both.
+    let registry = reaching_its_instance();
+    assert!(AdapterRegistry::doc_projection(&registry, &kind).is_some());
+    assert!(AdapterRegistry::doc_writes(&registry, &kind).is_some());
+    // A kind nothing loaded has neither.
+    assert!(AdapterRegistry::doc_projection(&registry, "harbour-elsewhere").is_none());
+    assert!(AdapterRegistry::doc_writes(&registry, "harbour-elsewhere").is_none());
+}

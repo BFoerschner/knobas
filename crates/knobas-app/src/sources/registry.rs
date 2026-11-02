@@ -341,15 +341,22 @@ impl Registry {
         if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
             return row.doc.map(knobas_sync::scheduler::Projection::from);
         }
-        let external = self.read();
-        let adapter = external
-            .loaded
-            .iter()
-            .find(|a| a.kind() == kind && a.projects())?
-            .clone();
+        let adapter = self.docs_component(kind)?;
         Some(knobas_sync::scheduler::Projection::new(
             move |kind, payload| adapter.project(kind, payload),
         ))
+    }
+
+    /// The loaded external adapter of `kind` that exports 1.5.0's `docs`
+    /// interface. The interface holds the projection and the writes
+    /// together, so [`WasmAdapter::projects`] answers for
+    /// all three.
+    fn docs_component(&self, kind: &str) -> Option<WasmAdapter> {
+        self.read()
+            .loaded
+            .iter()
+            .find(|a| a.kind() == kind && a.projects())
+            .cloned()
     }
 
     /// How the tree of `entity_kind`'s view names its sections by path, for
@@ -377,12 +384,7 @@ impl Registry {
         if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
             return row.doc_writes.map(knobas_sync::scheduler::Writes::from);
         }
-        let external = self.read();
-        let adapter = external
-            .loaded
-            .iter()
-            .find(|a| a.kind() == kind && a.projects())?
-            .clone();
+        let adapter = self.docs_component(kind)?;
         let body = adapter.clone();
         Some(knobas_sync::scheduler::Writes::new(
             move |kind, payload, number, text| adapter.edit_section(kind, payload, number, text),
