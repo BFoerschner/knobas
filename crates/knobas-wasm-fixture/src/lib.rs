@@ -178,6 +178,9 @@ pub struct Fixture {
     deleted: Option<String>,
     /// Whether the descriptor declares `Capability::Refresh` (#2101).
     declares_refresh: bool,
+    /// The instance's address, where a page write is sent (#2443).
+    #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
+    base_url: String,
 }
 
 /// The size of one message of a log flood.
@@ -341,6 +344,65 @@ impl Fixture {
         self.key(entity) == Some(builds::RUN)
     }
 
+    /// A page write sent to the instance (#2443): `UpdatePage` as `PUT
+    /// <base>/pages/<key>`, `CreatePage` as `POST <base>/pages`, the op's
+    /// fields as JSON. A `2xx` lands it; a created page's id is the
+    /// answer's body.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn send_page(&self, op: &WriteOp) -> Result<WriteReceipt, SourceError> {
+        use wasip2::http::types::Method;
+        let (method, url, sent) = match op {
+            WriteOp::UpdatePage {
+                entity,
+                base_version,
+                body,
+            } => {
+                let key = self.key(entity).ok_or_else(|| {
+                    SourceError::protocol(format!("{entity} is not a page of {}", self.id))
+                })?;
+                (
+                    Method::Put,
+                    format!("{}/pages/{key}", self.base_url),
+                    serde_json::json!({ "version": base_version + 1, "body": body }),
+                )
+            }
+            WriteOp::CreatePage {
+                parent,
+                space,
+                title,
+                body,
+            } => (
+                Method::Post,
+                format!("{}/pages", self.base_url),
+                serde_json::json!({
+                    "parent": self.key(parent),
+                    "space": space,
+                    "title": title,
+                    "body": body,
+                }),
+            ),
+            other => {
+                return Err(SourceError::protocol(format!(
+                    "{} is not a page write",
+                    other.identifier()
+                )));
+            }
+        };
+        let hop = fetch::send(&method, &url, sent.to_string().as_bytes())
+            .map_err(SourceError::Unreachable)?;
+        if !(200..300).contains(&hop.status) {
+            return Err(SourceError::protocol(format!(
+                "{url} answered {}: {}",
+                hop.status, hop.body
+            )));
+        }
+        Ok(WriteReceipt {
+            remote_id: matches!(op, WriteOp::CreatePage { .. })
+                .then(|| hop.body.trim().to_owned())
+                .filter(|id| !id.is_empty()),
+        })
+    }
+
     fn no_workflow(&self) -> SourceError {
         SourceError::protocol(format!(
             "the {KIND} adapter has no workflow: source {:?} offers no transitions",
@@ -406,6 +468,7 @@ impl Adapter for Fixture {
                 // The text the host sent, which is the value's own.
                 "config": instance.config.to_string(),
             }),
+            base_url: instance.base_url.trim_end_matches('/').to_owned(),
             id: instance.id,
             name: instance.display_name,
         }
@@ -467,7 +530,11 @@ impl Adapter for Fixture {
             auth_methods: vec![AuthMethod::Pat],
             accepts_account: false,
             min_sync_interval_secs: 60,
-            write_ops: vec![SOURCE_ACTION.into()],
+            write_ops: if cfg!(any(feature = "v1_0", feature = "v1_3")) {
+                vec![SOURCE_ACTION.into()]
+            } else {
+                vec![SOURCE_ACTION.into(), "update_page".into(), "create_page".into()]
+            },
             entity_kinds,
             config_schema: serde_json::json!({
                 "type": "object",
@@ -588,6 +655,8 @@ impl Adapter for Fixture {
             {
                 Ok(WriteReceipt { remote_id: None })
             }
+            #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+            WriteOp::UpdatePage { .. } | WriteOp::CreatePage { .. } => self.send_page(&op),
             _ => Err(refuse()),
         }
     }
@@ -750,6 +819,27 @@ impl Adapter for Fixture {
         payload: &serde_json::Value,
     ) -> Option<knobas_adapter_sdk::spi::docs::DocContent> {
         docs::project(kind, payload)
+    }
+
+    /// (#2443) A page's section edit in the fixture's markup
+    /// ([`docs::edit_section`]).
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn edit_section(
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Result<
+        knobas_adapter_sdk::spi::docs::SectionEdit,
+        knobas_adapter_sdk::spi::docs::EditRefused,
+    > {
+        docs::edit_section(kind, payload, number, text)
+    }
+
+    /// (#2443) A new page's body in the fixture's markup.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn body_from_text(text: &str) -> String {
+        docs::body_from_text(text)
     }
 
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]

@@ -370,13 +370,24 @@ impl Registry {
 
     /// The Docs writes of an adapter kind (#862): a section edit and a new
     /// page's body in its own markup. `None` for a kind knobas writes no
-    /// pages for.
+    /// pages for. A loaded external adapter that exports docs (1.5.0)
+    /// makes them through its component (#2443), as its projection draws.
     #[must_use]
-    pub fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
-        ADAPTERS
+    pub fn doc_writes(&self, kind: &str) -> Option<knobas_sync::scheduler::Writes> {
+        if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
+            return row.doc_writes.map(knobas_sync::scheduler::Writes::from);
+        }
+        let external = self.read();
+        let adapter = external
+            .loaded
             .iter()
-            .find(|a| a.kind == kind)
-            .and_then(|a| a.doc_writes)
+            .find(|a| a.kind() == kind && a.projects())?
+            .clone();
+        let body = adapter.clone();
+        Some(knobas_sync::scheduler::Writes::new(
+            move |kind, payload, number, text| adapter.edit_section(kind, payload, number, text),
+            move |text| body.body_from_text(text),
+        ))
     }
 }
 
@@ -393,7 +404,7 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
         Registry::doc_projection(self, kind)
     }
 
-    fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
+    fn doc_writes(&self, kind: &str) -> Option<knobas_sync::scheduler::Writes> {
         Registry::doc_writes(self, kind)
     }
 

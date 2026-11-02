@@ -1,6 +1,9 @@
 //! [`WasmSource`]: the `Source` trait, forwarded across the WIT boundary.
 
-use knobas_source::docs::{DocBlock, DocContent, EmbedContent, Inline, PAGE_KIND};
+use knobas_source::docs::{
+    DocBlock, DocContent, EditRefused, EmbedContent, Inline, PAGE_KIND, SectionEdit,
+    SectionRefusal,
+};
 use knobas_source::{
     Capability, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError,
     SyncItem, WriteOp, WriteReceipt, pipeline, run, view,
@@ -367,14 +370,8 @@ pub(crate) async fn project(
     payload: &serde_json::Value,
 ) -> Option<DocContent> {
     let payload = convert::to_json(payload);
-    let deadline = adapter.limits().deadline.min(limits::PROJECTION_DEADLINE);
-    let answer = limits::bounded_by(adapter, deadline, async {
-        let mut store = new_store(
-            adapter,
-            adapter.kind(),
-            SinkSlot::none(),
-            Arc::new(net::Policy::none(adapter.kind())),
-        );
+    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
+        let mut store = docs_store(adapter);
         let func = project_func(adapter, &mut store).await?;
         let (answer,) = func
             .call_async(&mut store, (kind, &payload))
@@ -383,17 +380,12 @@ pub(crate) async fn project(
         Ok(answer)
     })
     .await;
-    let text = match answer {
-        Ok(text) => text?,
-        Err(error) => {
-            tracing::warn!(
-                adapter = adapter.kind(),
-                "the docs projection of a {kind} failed, so it draws as the source's failure: \
-                 {error}"
-            );
-            return None;
-        }
-    };
+    let text = docs_answer(
+        adapter,
+        &format!("the docs projection of a {kind}"),
+        "it draws as the source's failure",
+        answer,
+    )??;
     match serde_json::from_str::<DocContent>(&text) {
         Ok(mut content) => {
             settle(&mut content);
@@ -408,6 +400,182 @@ pub(crate) async fn project(
             None
         }
     }
+}
+
+/// The store a docs call runs in (#2442, #2443): its policy allows no host,
+/// so a request the component sends is refused before a socket opens.
+fn docs_store(adapter: &WasmAdapter) -> Store<HostState> {
+    new_store(
+        adapter,
+        adapter.kind(),
+        SinkSlot::none(),
+        Arc::new(net::Policy::none(adapter.kind())),
+    )
+}
+
+/// A docs call's deadline: the adapter's, held to at most
+/// [`limits::PROJECTION_DEADLINE`].
+fn docs_deadline(adapter: &WasmAdapter) -> std::time::Duration {
+    adapter.limits().deadline.min(limits::PROJECTION_DEADLINE)
+}
+
+/// A docs call's answer, or `None` for a failure, logged as `what` failed
+/// and `so` follows.
+fn docs_answer<T>(
+    adapter: &WasmAdapter,
+    what: &str,
+    so: &str,
+    answer: Result<T, SourceError>,
+) -> Option<T> {
+    answer
+        .inspect_err(|error| {
+            tracing::warn!(adapter = adapter.kind(), "{what} failed, so {so}: {error}");
+        })
+        .ok()
+}
+
+/// `docs.edit-section`'s and `docs.body-from-text`'s types, as the host
+/// calls them (1.5.0, #2443).
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lift, Debug, Clone, Copy)]
+#[component(enum)]
+#[repr(u8)]
+#[expect(dead_code, reason = "made by the lift from the component, never here")]
+enum WitSectionRefusal {
+    #[component(name = "table")]
+    Table,
+    #[component(name = "code")]
+    Code,
+    #[component(name = "macro")]
+    Macro,
+    #[component(name = "formatting")]
+    Formatting,
+}
+
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lift, Debug)]
+#[component(variant)]
+enum WitEditRefused {
+    #[component(name = "section")]
+    Section(WitSectionRefusal),
+    #[component(name = "missing")]
+    Missing,
+}
+
+#[derive(wasmtime::component::ComponentType, wasmtime::component::Lift, Debug)]
+#[component(record)]
+struct WitSectionEdit {
+    #[component(name = "body")]
+    body: String,
+    #[component(name = "base-version")]
+    base_version: i64,
+}
+
+type EditParams<'a> = (&'a str, &'a str, u32, &'a str);
+type EditResults = (Result<WitSectionEdit, WitEditRefused>,);
+type BodyParams<'a> = (&'a str,);
+type BodyResults = (String,);
+
+async fn edit_section_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<TypedFunc<EditParams<'a>, EditResults>, SourceError> {
+    optional_func(
+        adapter,
+        store,
+        adapter.inner.edit_section.as_ref(),
+        "edit-section",
+    )
+    .await
+}
+
+async fn body_from_text_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<TypedFunc<BodyParams<'a>, BodyResults>, SourceError> {
+    optional_func(
+        adapter,
+        store,
+        adapter.inner.body_from_text.as_ref(),
+        "body-from-text",
+    )
+    .await
+}
+
+/// At load: the docs writes a component exports have the types 1.5.0 gives
+/// them.
+pub(crate) async fn check_doc_writes(adapter: &WasmAdapter) -> Result<(), String> {
+    let mut store = probe_store(adapter);
+    limits::bounded(adapter, async {
+        edit_section_func(adapter, &mut store).await?;
+        body_from_text_func(adapter, &mut store).await.map(drop)
+    })
+    .await
+    .map_err(|e| format!("its docs writes do not have the types knobas hosts: {e}"))
+}
+
+/// The docs section edit of one record (1.5.0, #2443), or `None` for every
+/// failure, which is logged. Called as [`project`] is: no host, the
+/// projection's deadline, the adapter's memory cap.
+pub(crate) async fn edit_section(
+    adapter: &WasmAdapter,
+    kind: &str,
+    payload: &serde_json::Value,
+    number: u32,
+    text: &str,
+) -> Option<Result<SectionEdit, EditRefused>> {
+    let payload = convert::to_json(payload);
+    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
+        let mut store = docs_store(adapter);
+        let func = edit_section_func(adapter, &mut store).await?;
+        let (answer,) = func
+            .call_async(&mut store, (kind, &payload, number, text))
+            .await
+            .map_err(|e| failed(adapter, &e))?;
+        Ok(answer)
+    })
+    .await;
+    let answer = docs_answer(
+        adapter,
+        &format!("the section edit of a {kind}"),
+        "it is not made",
+        answer,
+    )?;
+    Some(
+        answer
+            .map(|edit| SectionEdit {
+                body: edit.body,
+                base_version: edit.base_version,
+            })
+            .map_err(|refused| match refused {
+                WitEditRefused::Missing => EditRefused::Missing,
+                WitEditRefused::Section(refusal) => EditRefused::Section(match refusal {
+                    WitSectionRefusal::Table => SectionRefusal::Table,
+                    WitSectionRefusal::Code => SectionRefusal::Code,
+                    WitSectionRefusal::Macro => SectionRefusal::Macro,
+                    WitSectionRefusal::Formatting => SectionRefusal::Formatting,
+                }),
+            }),
+    )
+}
+
+/// A new page's body from the editor's text (1.5.0, #2443), or `None` for
+/// a failure, which is logged. Called as [`project`] is.
+pub(crate) async fn body_from_text(adapter: &WasmAdapter, text: &str) -> Option<String> {
+    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
+        let mut store = docs_store(adapter);
+        let func = body_from_text_func(adapter, &mut store).await?;
+        let (answer,) = func
+            .call_async(&mut store, (text,))
+            .await
+            .map_err(|e| failed(adapter, &e))?;
+        Ok(answer)
+    })
+    .await;
+    docs_answer(
+        adapter,
+        "the body of a new page",
+        "it is not made",
+        answer,
+    )
 }
 
 /// What a component's docs content may not say, cleared: what knobas fills

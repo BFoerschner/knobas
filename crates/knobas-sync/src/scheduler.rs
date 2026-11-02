@@ -92,6 +92,90 @@ impl std::fmt::Debug for Projection {
     }
 }
 
+/// An adapter kind's Docs writes as a write path calls them (#2443): a
+/// compiled-in adapter's plain [`DocWrites`](knobas_source::docs::DocWrites),
+/// or an external adapter's calls into its component, which may fail where
+/// a plain function cannot. Cheap to clone.
+#[derive(Clone)]
+pub struct Writes {
+    edit: Arc<EditFn>,
+    body: Arc<BodyFn>,
+}
+
+/// What [`Writes::edit_section`] calls.
+type EditFn = dyn Fn(
+        &str,
+        &serde_json::Value,
+        u32,
+        &str,
+    ) -> Option<
+        Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>,
+    > + Send
+    + Sync;
+
+/// What [`Writes::body_from_text`] calls.
+type BodyFn = dyn Fn(&str) -> Option<String> + Send + Sync;
+
+impl Writes {
+    /// Writes that call `edit` and `body`. Each answers `None` for a call
+    /// that failed, which the adapter has logged.
+    pub fn new(
+        edit: impl Fn(
+            &str,
+            &serde_json::Value,
+            u32,
+            &str,
+        ) -> Option<
+            Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>,
+        > + Send
+        + Sync
+        + 'static,
+        body: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            edit: Arc::new(edit),
+            body: Arc::new(body),
+        }
+    }
+
+    /// [`DocWrites::edit_section`](knobas_source::docs::DocWrites::edit_section),
+    /// or `None` when the call failed.
+    #[must_use]
+    pub fn edit_section(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Option<Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>> {
+        (self.edit)(kind, payload, number, text)
+    }
+
+    /// [`DocWrites::body_from_text`](knobas_source::docs::DocWrites::body_from_text),
+    /// or `None` when the call failed.
+    #[must_use]
+    pub fn body_from_text(&self, text: &str) -> Option<String> {
+        (self.body)(text)
+    }
+}
+
+impl From<knobas_source::docs::DocWrites> for Writes {
+    fn from(writes: knobas_source::docs::DocWrites) -> Self {
+        Self::new(
+            move |kind, payload, number, text| {
+                Some((writes.edit_section)(kind, payload, number, text))
+            },
+            move |text| Some((writes.body_from_text)(text)),
+        )
+    }
+}
+
+impl std::fmt::Debug for Writes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Writes")
+    }
+}
+
 /// Turns a stored configuration into a live adapter, and answers what each
 /// adapter kind declares.
 ///
@@ -117,8 +201,9 @@ pub trait AdapterRegistry: Send + Sync + 'static {
     }
 
     /// The Docs writes of an adapter kind (#862), `None` for a kind knobas
-    /// writes no pages for or that the registry does not hold.
-    fn doc_writes(&self, _kind: &str) -> Option<knobas_source::docs::DocWrites> {
+    /// writes no pages for or that the registry does not hold. An external
+    /// adapter's calls into its component (#2443).
+    fn doc_writes(&self, _kind: &str) -> Option<Writes> {
         None
     }
 

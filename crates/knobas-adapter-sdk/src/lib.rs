@@ -58,7 +58,10 @@
 //!   built-in adapter's `DocProjection` takes none, and the host calls it
 //!   with no HTTP capability. An adapter that claims the `wiki` role
 //!   answers it for its `page` kind; the host builds each page's search
-//!   text from it.
+//!   text from it. **The docs writes** beside it are
+//!   [`Adapter::edit_section`] and [`Adapter::body_from_text`] (#2443): the
+//!   markup a section edit or a new page queues, which [`Adapter::write`]
+//!   then performs as `update_page` or `create_page`.
 
 // The bindings name this crate by its own name, so that the paths they
 // write resolve in the adapter crate the export macro expands in, and here.
@@ -324,6 +327,36 @@ pub trait Adapter: Sized + 'static {
     fn project(kind: &str, payload: &serde_json::Value) -> Option<knobas_source::docs::DocContent> {
         let _ = (kind, payload);
         None
+    }
+
+    /// The docs section edit (1.5.0, #2443), a built-in adapter's
+    /// `DocWrites::edit_section`: section `number` (1 for the first
+    /// top-level heading, as [`Self::project`]'s `sections` number them) of
+    /// the record whose payload is `payload`, its body replaced with `text`
+    /// in this adapter's markup and the rest kept byte for byte, with the
+    /// version the payload holds. The host queues the answer as a
+    /// `WriteOp::UpdatePage`, which [`Self::write`] performs. Called as
+    /// [`Self::project`] is: no instance, no HTTP, at most 5 s. The default
+    /// edits nothing: [`EditRefused::Missing`](knobas_source::docs::EditRefused::Missing).
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn edit_section(
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused> {
+        let _ = (kind, payload, number, text);
+        Err(knobas_source::docs::EditRefused::Missing)
+    }
+
+    /// A new page's body in this adapter's markup from the editor's plain
+    /// text (1.5.0, #2443), a built-in adapter's `DocWrites::body_from_text`:
+    /// `## ` starts a section, `- ` a list item, a blank line a paragraph.
+    /// Queued as a `WriteOp::CreatePage`. Called as [`Self::project`] is.
+    /// The default is the text as it is.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn body_from_text(text: &str) -> String {
+        text.to_owned()
     }
 
     /// Read one item by id (ADR-0031): `entity` is an entity ref in string

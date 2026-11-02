@@ -1530,7 +1530,7 @@ select i.kind, i.source_id, i.payload, s.kind as adapter_kind
 /// does not hold, `internal` for a query failure.
 pub async fn section_edit(
     pool: &PgPool,
-    writes: impl Fn(&str) -> Option<knobas_source::docs::DocWrites>,
+    writes: impl Fn(&str) -> Option<knobas_sync::scheduler::Writes>,
     entity_id: &str,
     section: u32,
     version: Option<u64>,
@@ -1550,7 +1550,12 @@ pub async fn section_edit(
             "knobas does not edit pages of a {adapter_kind} source"
         )));
     };
-    let edit = (doc.edit_section)(&kind, &payload, section, text).map_err(|refused| {
+    let Some(edit) = doc.edit_section(&kind, &payload, section, text) else {
+        return Err(IpcError::internal(format!(
+            "the {adapter_kind} adapter failed to make the edit; its log says why"
+        )));
+    };
+    let edit = edit.map_err(|refused| {
         IpcError::invalid(match refused {
             EditRefused::Section(SectionRefusal::Table) => "This section has a table; edit it in the source.",
             EditRefused::Section(SectionRefusal::Code) => "This section has code; edit it in the source.",
@@ -1597,7 +1602,7 @@ pub struct NewPage {
 /// writes no pages; `not_found` for a parent the live mirror does not hold.
 pub async fn create_page(
     pool: &PgPool,
-    writes: impl Fn(&str) -> Option<knobas_source::docs::DocWrites>,
+    writes: impl Fn(&str) -> Option<knobas_sync::scheduler::Writes>,
     new: &NewPage,
 ) -> Result<(serde_json::Value, String), IpcError> {
     let title = new.title.trim();
@@ -1634,13 +1639,18 @@ pub async fn create_page(
             "knobas does not create pages in a {adapter_kind} source"
         )));
     };
+    let Some(body) = doc.body_from_text(&new.text) else {
+        return Err(IpcError::internal(format!(
+            "the {adapter_kind} adapter failed to make the page's body; its log says why"
+        )));
+    };
     Ok((
         serde_json::json!({
             "CreatePage": {
                 "parent": new.parent,
                 "space": space,
                 "title": title,
-                "body": (doc.body_from_text)(&new.text),
+                "body": body,
             }
         }),
         source_id,

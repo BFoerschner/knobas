@@ -30,7 +30,8 @@ use chrono::{TimeZone, Utc};
 use knobas_adapter_sdk::SyncItem;
 use knobas_adapter_sdk::spi::docs::html::{self, Hook, Hooked, Node, Reading};
 use knobas_adapter_sdk::spi::docs::{
-    DocBlock, DocComment, DocContent, EmbedContent, Inline, ListItem, PAGE_KIND, PanelKind,
+    DocBlock, DocComment, DocContent, DocSection, EditRefused, EmbedContent, Inline, ListItem,
+    PAGE_KIND, PanelKind, SectionEdit, SectionRefusal,
 };
 use knobas_adapter_sdk::spi::role::{RoleClaim, WIKI};
 use knobas_adapter_sdk::spi::{EntityRef, KindInfo, KindPaths, ParentPath, PayloadPath};
@@ -185,9 +186,194 @@ pub fn project(kind: &str, payload: &Value) -> Option<DocContent> {
         blocks,
         comments,
         excerpt,
-        sections: Vec::new(),
+        sections: sections(body),
         history: Vec::new(),
     })
+}
+
+// -- The docs writes (#2443) -------------------------------------------------
+
+/// One section of a body: the byte span of what follows its top-level
+/// heading up to the next one, and the text the editor opens it with or why
+/// it is refused.
+struct Span {
+    from: usize,
+    to: usize,
+    verdict: Result<String, SectionRefusal>,
+}
+
+fn is_heading(node: &Node) -> bool {
+    matches!(node.name(), Some("h1" | "h2" | "h3" | "h4" | "h5" | "h6"))
+}
+
+/// The body's sections, in the order of its top-level headings.
+fn spans(body: &str) -> Vec<Span> {
+    let nodes = html::parse(body);
+    let starts: Vec<(usize, usize)> = nodes
+        .iter()
+        .filter(|n| is_heading(n))
+        .filter_map(|n| match n {
+            Node::Element { span, .. } => Some(*span),
+            _ => None,
+        })
+        .collect();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(i, (_, from))| {
+            let to = starts.get(i + 1).map_or(body.len(), |(next, _)| *next);
+            Span {
+                from: *from,
+                to,
+                verdict: section_text(&html::parse(&body[*from..to])),
+            }
+        })
+        .collect()
+}
+
+/// A section's nodes as the editor's plain text: a paragraph per block, a
+/// blank line between them, `- ` per item of a flat list. The first part a
+/// text box cannot hold refuses it: a table, code, one of the fixture's
+/// own elements (a macro), or marks, links, an ordered or a nested list.
+fn section_text(nodes: &[Node]) -> Result<String, SectionRefusal> {
+    let mut blocks = Vec::new();
+    for node in nodes {
+        match node {
+            Node::Text(text) | Node::Cdata(text) => {
+                if !text.trim().is_empty() {
+                    blocks.push(html::collapse(text));
+                }
+            }
+            Node::Element { name, children, .. } => match name.as_str() {
+                "p" => blocks.push(inline_text(children)?),
+                "ul" => {
+                    let items = children
+                        .iter()
+                        .filter(|c| c.name().is_some())
+                        .map(|item| match item.name() {
+                            Some("li") => inline_text(item.children()).map(|t| format!("- {t}")),
+                            _ => Err(SectionRefusal::Formatting),
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    blocks.push(items.join("\n"));
+                }
+                other => return Err(refusal(other)),
+            },
+        }
+    }
+    Ok(blocks.join("\n\n"))
+}
+
+/// A paragraph's or an item's words, refused at the first element.
+fn inline_text(nodes: &[Node]) -> Result<String, SectionRefusal> {
+    let mut words = String::new();
+    for node in nodes {
+        match node {
+            Node::Text(text) | Node::Cdata(text) => words.push_str(text),
+            Node::Element { name, .. } => return Err(refusal(name)),
+        }
+    }
+    Ok(html::collapse(&words))
+}
+
+/// Why an element in a section refuses it.
+fn refusal(name: &str) -> SectionRefusal {
+    match name {
+        "table" => SectionRefusal::Table,
+        "pre" | "code" => SectionRefusal::Code,
+        n if n.starts_with("hb:") => SectionRefusal::Macro,
+        _ => SectionRefusal::Formatting,
+    }
+}
+
+/// The sections the projection names.
+fn sections(body: &str) -> Vec<DocSection> {
+    spans(body)
+        .into_iter()
+        .zip(1..)
+        .map(|(span, number)| DocSection {
+            number,
+            refusal: span.verdict.as_ref().err().copied(),
+            text: span.verdict.ok(),
+        })
+        .collect()
+}
+
+/// The section edit: section `number`'s body replaced with `text` in the
+/// fixture's markup, every byte around it kept, against the payload's
+/// version.
+pub fn edit_section(
+    kind: &str,
+    payload: &Value,
+    number: u32,
+    text: &str,
+) -> Result<SectionEdit, EditRefused> {
+    if kind != PAGE_KIND {
+        return Err(EditRefused::Missing);
+    }
+    misbehave(payload);
+    let body = payload["body"].as_str().ok_or(EditRefused::Missing)?;
+    let base_version = payload["version"].as_i64().ok_or(EditRefused::Missing)?;
+    let index = usize::try_from(number)
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .ok_or(EditRefused::Missing)?;
+    let span = spans(body)
+        .into_iter()
+        .nth(index)
+        .ok_or(EditRefused::Missing)?;
+    span.verdict.map_err(EditRefused::Section)?;
+    Ok(SectionEdit {
+        body: format!("{}{}{}", &body[..span.from], body_from_text(text), &body[span.to..]),
+        base_version,
+    })
+}
+
+/// A body from the editor's plain text: `## ` an `h2`, consecutive `- `
+/// lines one `ul`, other consecutive lines one `p`, a blank line between.
+pub fn body_from_text(text: &str) -> String {
+    let mut out = String::new();
+    let mut paragraph: Vec<&str> = Vec::new();
+    let mut items: Vec<&str> = Vec::new();
+    let flush = |out: &mut String, paragraph: &mut Vec<&str>, items: &mut Vec<&str>| {
+        if !paragraph.is_empty() {
+            out.push_str(&format!("<p>{}</p>", escape(&paragraph.join(" "))));
+            paragraph.clear();
+        }
+        if !items.is_empty() {
+            out.push_str("<ul>");
+            for item in items.drain(..) {
+                out.push_str(&format!("<li>{}</li>", escape(item)));
+            }
+            out.push_str("</ul>");
+        }
+    };
+    for line in text.lines().map(str::trim) {
+        if let Some(heading) = line.strip_prefix("## ") {
+            flush(&mut out, &mut paragraph, &mut items);
+            out.push_str(&format!("<h2>{}</h2>", escape(heading)));
+        } else if let Some(item) = line.strip_prefix("- ") {
+            if !paragraph.is_empty() {
+                flush(&mut out, &mut paragraph, &mut items);
+            }
+            items.push(item);
+        } else if line.is_empty() {
+            flush(&mut out, &mut paragraph, &mut items);
+        } else {
+            if !items.is_empty() {
+                flush(&mut out, &mut paragraph, &mut items);
+            }
+            paragraph.push(line);
+        }
+    }
+    flush(&mut out, &mut paragraph, &mut items);
+    out
+}
+
+fn escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// What a payload's misbehaving keys ask for, before anything is drawn.

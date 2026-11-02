@@ -295,6 +295,46 @@ interface docs {
     /// For a `page` the host builds the record's search text from this
     /// answer, and the `body-text` the adapter sent for it is ignored.
     project: func(kind: string, payload: json) -> option<json>;
+
+    /// `docs::SectionRefusal` (#2443): why a section is edited in the
+    /// source and not in knobas, as the projection's `sections` name it.
+    enum section-refusal {
+        table,
+        code,
+        %macro,
+        formatting,
+    }
+
+    /// `docs::EditRefused` (#2443).
+    variant edit-refused {
+        /// The section is one knobas does not edit.
+        section(section-refusal),
+        /// The record has no such section, no body or no version.
+        missing,
+    }
+
+    /// `docs::SectionEdit` (#2443): the record's whole new body in the
+    /// source's markup, and the version it was made against.
+    record section-edit {
+        body: string,
+        base-version: s64,
+    }
+
+    /// `docs::DocWrites::edit-section` (#2443): section `number` (1 for the
+    /// first top-level heading, as the projection's `sections` number them)
+    /// of the record of kind `kind` whose payload is `payload`, its body
+    /// replaced with `text`, the editor's plain text in the spelling of the
+    /// section's `text`, and everything else kept byte for byte. The host
+    /// queues the answer as an `update-page` write, which `adapter.write`
+    /// then performs, so this makes markup and sends nothing. Called as
+    /// `project` is: no HTTP capability, at most 5 s.
+    edit-section: func(kind: string, payload: json, number: u32, text: string) -> result<section-edit, edit-refused>;
+
+    /// `docs::DocWrites::body-from-text` (#2443): a new page's body in the
+    /// source's markup from the editor's plain text (`## ` starts a section,
+    /// `- ` a list item, a blank line a paragraph), queued as a
+    /// `create-page` write. Called as `project` is.
+    body-from-text: func(text: string) -> string;
 }
 
 /// What the host binds of every 1.x component: the 1.0.0 world, and the

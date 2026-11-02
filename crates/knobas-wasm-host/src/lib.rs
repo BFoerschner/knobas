@@ -203,6 +203,10 @@ struct Inner {
     refresh: Option<ComponentExportIndex>,
     /// `docs.project`, when the component exports it (1.5.0, #2442).
     project: Option<ComponentExportIndex>,
+    /// `docs.edit-section` and `docs.body-from-text`, which a component
+    /// that exports `docs` exports with `project` (1.5.0, #2443).
+    edit_section: Option<ComponentExportIndex>,
+    body_from_text: Option<ComponentExportIndex>,
 }
 
 impl std::fmt::Debug for WasmAdapter {
@@ -271,6 +275,8 @@ impl WasmAdapter {
         let translate_query = optional_export(&component, QUERY_EXPORT, "translate-query")?;
         let refresh = optional_export(&component, REFRESH_EXPORT, "refresh")?;
         let project = optional_export(&component, DOCS_EXPORT, "project")?;
+        let edit_section = optional_export(&component, DOCS_EXPORT, "edit-section")?;
+        let body_from_text = optional_export(&component, DOCS_EXPORT, "body-from-text")?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
@@ -281,6 +287,8 @@ impl WasmAdapter {
                 translate_query,
                 refresh,
                 project,
+                edit_section,
+                body_from_text,
             }),
             hosts: Arc::from([]),
             limits: limits::Limits::default(),
@@ -304,6 +312,7 @@ impl WasmAdapter {
         }
         if adapter.inner.project.is_some() {
             block_on(source::check_project(&adapter)).map_err(LoadError::Link)?;
+            block_on(source::check_doc_writes(&adapter)).map_err(LoadError::Link)?;
         }
         Ok(adapter)
     }
@@ -388,6 +397,42 @@ impl WasmAdapter {
     ) -> Option<knobas_source::docs::DocContent> {
         self.projects()
             .then(|| block_on(source::project(self, kind, payload)))
+            .flatten()
+    }
+
+    /// The docs section edit (1.5.0, #2443), a built-in adapter's
+    /// `DocWrites::edit_section` made by the component: section `number` of
+    /// the record whose mirrored payload is `payload`, its body replaced
+    /// with `text` in the source's markup, or why the section is refused.
+    /// The answer is queued as an `UpdatePage`, which [`Source::write`]
+    /// performs.
+    ///
+    /// `None` for a component that exports no docs, and for a call that
+    /// fails, as [`Self::project`] does: a trap, the deadline, the memory
+    /// cap. The failure is logged. Called as the projection is, with no
+    /// HTTP capability and a deadline of at most
+    /// [`limits::PROJECTION_DEADLINE`], blocking on a thread of its own.
+    #[must_use]
+    pub fn edit_section(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Option<Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>> {
+        self.projects()
+            .then(|| block_on(source::edit_section(self, kind, payload, number, text)))
+            .flatten()
+    }
+
+    /// A new page's body from the editor's plain text in the source's
+    /// markup (1.5.0, #2443), a built-in adapter's
+    /// `DocWrites::body_from_text` made by the component, queued as a
+    /// `CreatePage`. `None` as [`Self::edit_section`] is.
+    #[must_use]
+    pub fn body_from_text(&self, text: &str) -> Option<String> {
+        self.projects()
+            .then(|| block_on(source::body_from_text(self, text)))
             .flatten()
     }
 

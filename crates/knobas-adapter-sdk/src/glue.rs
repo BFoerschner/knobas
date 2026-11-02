@@ -178,9 +178,43 @@ impl<A: Adapter> crate::bindings::exports::knobas::adapter::refresh::Guest for A
 /// payload that is not JSON is no content, as a kind the adapter does not
 /// draw is.
 #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
-impl<A: Adapter> crate::bindings::exports::knobas::adapter::docs::Guest for A {
+use crate::bindings::exports::knobas::adapter::docs;
+
+/// The docs writes (1.5.0, #2443) beside it, as free functions too.
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+impl<A: Adapter> docs::Guest for A {
     fn project(kind: String, payload: String) -> Option<String> {
         let payload: serde_json::Value = serde_json::from_str(&payload).ok()?;
         A::project(&kind, &payload).as_ref().map(to_json)
+    }
+
+    /// A payload that is not JSON has no section to edit.
+    fn edit_section(
+        kind: String,
+        payload: String,
+        number: u32,
+        text: String,
+    ) -> Result<docs::SectionEdit, docs::EditRefused> {
+        use knobas_source::docs::{EditRefused, SectionRefusal};
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload).map_err(|_| docs::EditRefused::Missing)?;
+        A::edit_section(&kind, &payload, number, &text)
+            .map(|edit| docs::SectionEdit {
+                body: edit.body,
+                base_version: edit.base_version,
+            })
+            .map_err(|refused| match refused {
+                EditRefused::Missing => docs::EditRefused::Missing,
+                EditRefused::Section(refusal) => docs::EditRefused::Section(match refusal {
+                    SectionRefusal::Table => docs::SectionRefusal::Table,
+                    SectionRefusal::Code => docs::SectionRefusal::Code,
+                    SectionRefusal::Macro => docs::SectionRefusal::Macro,
+                    SectionRefusal::Formatting => docs::SectionRefusal::Formatting,
+                }),
+            })
+    }
+
+    fn body_from_text(text: String) -> String {
+        A::body_from_text(&text)
     }
 }
