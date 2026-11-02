@@ -91,6 +91,13 @@
   change is an index in the backend. *Titles* is a client-side filter on
   the engine's answer; the real change is a flag on the query.
 
+  Round 12 (Björn, 2026-11-02): the one box replaces the pages' own search
+  fields. Opened on a section (⌘K, or `/` as the pages bound it), the box
+  starts with that section's filter: `#t ` on Tickets, `#rc ` on Code,
+  `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox;
+  the pages' own fields are hidden. PROTOTYPE: the hiding is a `:global`
+  rule here; the real change removes the fields and their `/` handlers.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -137,7 +144,7 @@
   import type { LinkTarget } from "../../tf/job/current.svelte";
   import { prHash } from "../../tf/pr/pr";
   import { branchOptions, compareHash, repoHash } from "../../tf/repo/repo";
-  import { jobHash } from "../../tf/route";
+  import { jobHash, parseTfHash, sectionOf } from "../../tf/route";
   import TfDialog from "../../tf/settings/TfDialog.svelte";
   import { clockLabel, keyOf } from "../../time/format";
   import Chips from "../Chips.svelte";
@@ -400,6 +407,27 @@
       });
     }
     return hits;
+  }
+
+  /** The filter a section's own search would have applied: what the box starts with when opened there. */
+  function sectionFilter(): string {
+    const section = sectionOf(parseTfHash(location.hash));
+    switch (section) {
+      case "tickets":
+        return "#t ";
+      case "inbox":
+        return "#i ";
+      case "code":
+        return "#rc ";
+      case "builds":
+        return "#p ";
+      case "docs":
+        return "#d ";
+      case "monitors":
+        return "#m ";
+      default:
+        return "";
+    }
   }
 
   // ---- PROTOTYPE: the local corpus the backend does not index yet ----------
@@ -1419,7 +1447,10 @@
     if (open) {
       void session.loadHome();
       void loadLocal();
-      void tick().then(() => box?.focus({ select: true }));
+      // Opened on a section with nothing in the box: the section's filter, as its own search would have had it.
+      const filter = sectionFilter();
+      if (session.raw.trim() === "" && filter !== "") session.set(filter);
+      void tick().then(() => box?.focus({ select: filter === "" }));
     } else {
       sheet = null;
       session.dispose();
@@ -1469,15 +1500,26 @@
       }
     }
     window.addEventListener("keydown", onkeydown);
+    // `/` on a page opened its own search field; it opens this box with the page's filter instead. Capture phase, before the page's handler.
+    function onslash(event: KeyboardEvent) {
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || open) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      open = true;
+    }
+    window.addEventListener("keydown", onslash, true);
     const onkeyup = () => { if (held.length > 0) held = []; };
     window.addEventListener("keyup", onkeyup);
     const preset = params.get("launcher-open");
     if (preset !== null) {
       open = true;
-      void tick().then(() => session.set(preset));
+      if (preset !== "") void tick().then(() => session.set(preset));
     }
     return () => {
       window.removeEventListener("keydown", onkeydown);
+      window.removeEventListener("keydown", onslash, true);
       window.removeEventListener("keyup", onkeyup);
       session.dispose();
     };
@@ -2119,6 +2161,8 @@
   :global(.tf-launch .tf-ln-h) { padding-top: 10px; }
   /* The box's own ⌘K badge is gone (Björn, round 4); `QueryBox.svelte` would lose the element. */
   :global(.tf-launch .tf-ln-q > kbd) { display: none; }
+  /* The pages' own search fields (Docs, Builds): the one box, with the page's filter, is the way in. */
+  :global(.tf main label.tf-fsearch) { display: none; }
   /* Everything on: the dialog grows and the body splits, results at the left, the preview at the right. */
   :global(.tf-dialog.tf-launch-deep) { width: min(1280px, calc(100vw - 32px)); height: min(840px, 92vh); }
   .scope {

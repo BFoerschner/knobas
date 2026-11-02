@@ -24,6 +24,7 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | Try | What happens |
 |---|---|
 | Empty box | The recent items, nothing else. The box says only "⌘? for help". |
+| Opened on a section | ⌘K, or `/` where a page bound it, opens the box with that section's filter already in it: `#t ` on Tickets, `#rc ` on Code, `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox. Delete the token to search everything. The pages' own search fields are gone; this is their search. |
 | ⌘? | From any search: the box empties and narrows the filters (one word each), Enter adds the picked one to the search that was there, the keys sit at the bottom. `#r` then `#l` becomes `#rl`. |
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
 | `#t`, `#c`, `#r`, `#p`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests (c for changes), repositories, pipelines, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
@@ -107,6 +108,7 @@ Shortcuts, each marked `PROTOTYPE` in the code:
 | The sheet's actions are a fixed list per kind, in the component. | A table per kind in `launcher/actions.ts`, and adapter-declared source actions joining it. |
 | *Titles* is a client-side filter on the engine's answer; *Everything* merges `docs_search` and reads each pipeline's latest run log through the IPC, kept in memory. | A `titles` flag on the query; run logs and page sections indexed in `knobas-search` with the match's place in the hit, so the preview is one read. |
 | The preview reads a ticket's, pull request's or note's text from its `entity_view` and marks the words itself. | The engine's `snippet` grows to every match with its section, or the view read is kept and the marking moves to the backend. |
+| The pages' own search fields are hidden by a `:global` rule and `/` is taken in the capture phase. | Remove the fields and their `/` handlers from the Docs, Builds and Inbox pages; the top bar's search button opens the box with the section's filter. |
 | Value suggestions and pasted-URL resolving are left out. | Nothing: they stay as shipped. |
 | Favourites, list keys and action keys live in `localStorage`. | A table each: a favourite is an entity id with a position; a key is a chord with a list id or a kind and an action id. The chords a list binds have to be registered with the shell's own keys so they work with the launcher closed. |
 | `BoardNext.svelte` is the recent items alone, favourites first. | `Board.svelte` loses the smart lists, the inbox, today's time and the source strip; built-in smart lists go, or move behind `#l`. The box loses its ⌘K badge and its footnote. |
