@@ -1448,12 +1448,15 @@
 
   $effect(() => {
     if (open) {
-      void session.loadHome();
-      void loadLocal();
-      // Opened by a page's own search keys: the section's filter, as the page's field would have had it. ⌘K opens empty (Björn, round 12): never the last query.
-      const filter = openWithSection ? sectionFilter() : "";
-      openWithSection = false;
-      if (session.raw !== filter && !(filter === "" && session.raw === "")) session.set(filter);
+      // Once per opening, and only on `open`: the box's text is read untracked, or its own change would run this again and clear it.
+      untrack(() => {
+        void session.loadHome();
+        void loadLocal();
+        // Opened by a page's own search keys: the section's filter, as the page's field would have had it. ⌘K opens empty (Björn, round 12): never the last query.
+        const filter = openWithSection ? sectionFilter() : "";
+        openWithSection = false;
+        if (session.raw !== filter) session.set(filter);
+      });
       void tick().then(() => box?.focus());
     } else {
       sheet = null;
