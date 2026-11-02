@@ -290,8 +290,9 @@
   let naming = $state<string | null>(null);
 
   /**
-   * A close ends the mode: the launcher stays mounted and keeps its query, so
-   * without this the next ⌘K would reopen on the overlay or the prompt.
+   * A close ends the mode: the launcher stays mounted, so without this the
+   * next opening would reopen on the overlay or the prompt. The box's words
+   * are the opener's (#2425): empty for ⌘K, a section's filter for `/`.
    */
   $effect.pre(() => {
     if (!open) {
