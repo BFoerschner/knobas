@@ -7,6 +7,12 @@
  * this table can be read and tested without a DOM, a later action key
  * (#2429) binds to an `id`, and a flow (#2427) is one more `does` kind.
  *
+ * An action that asks something is a flow (#2427): `does` is `{ kind: "flow" }`
+ * with its steps, each a title and an async source of choices given the picks
+ * so far, and a `finish` that turns the picks into one more `does`, the write
+ * or the address the last pick runs. The sheet shows the step's choices, the
+ * box narrows them, Enter picks; Esc or Backspace on the empty box step back.
+ *
  * The order is the spec's: the pair with the chosen job first (*Link to
  * ⟨job⟩*), *Start timer* on a ticket, then what the kind can do, then
  * *Favourite* (#2428), then *Copy key* or *Copy title*. This reverses the 2026-10-21 ruling on #1416 (the
@@ -17,14 +23,17 @@
  * `does` is a `write` of the op the source declares. Today's are the
  * declared ops the app already builds (`Approve`, `TriggerBuild`, `RerunBuild`).
  */
-import type { EntityRow, InboxItem } from "../ipc/entity";
+import type { EntityRow, InboxItem, LinkSetDraft, LinkSetMemberKind, LinkSetRow, ViewAction } from "../ipc/entity";
 import type { FavouriteTarget } from "../ipc/search";
 import type { WriteOpPayload } from "../ipc/sources";
 import { canBeTarget } from "../shell/timer";
 import { entityAddress } from "../tf/address";
-import { opener, rowActions } from "../tf/inbox/inbox";
+import { actionPayload, initialValues } from "../detail/view/actions";
+import { snoozePresets } from "../inbox/inbox.svelte";
+import { expiryOf, opener, rowActions, untilLabel } from "../tf/inbox/inbox";
 import { prHash } from "../tf/pr/pr";
-import { repoHash } from "../tf/repo/repo";
+import { compareHash, repoHash } from "../tf/repo/repo";
+import { draftOf, withHandRule } from "../tf/sets/apply";
 import { jobHash } from "../tf/route";
 import { keyOf } from "../time/format";
 import type { LauncherRow } from "./rows";
@@ -39,8 +48,29 @@ export type SheetSubject =
   /** An inbox line, with the source ops the backend offered on it (`InboxEntry.actions`). */
   | { kind: "inbox"; item: InboxItem; ops: readonly string[] };
 
+/** One choice of a flow's step: its `id` is the pick. */
+export interface Choice {
+  id: string;
+  label: string;
+  detail: string;
+}
+
+/** One step of a flow: what the box asks (its label), and the choices it narrows, given the picks so far. */
+export interface Step {
+  title: string;
+  choices: (picks: readonly string[]) => Promise<Choice[]>;
+}
+
 /** What choosing an action does. `Launcher.svelte`'s `perform` is the one reader. */
 export type SheetEffect =
+  /** Ask each step in turn; the last pick runs what `finish` makes of the picks. */
+  | { kind: "flow"; steps: Step[]; finish: (picks: readonly string[]) => SheetEffect }
+  /** `save_link_set` with the set as it should be stored. */
+  | { kind: "save-set"; draft: LinkSetDraft; said: string }
+  /** The inbox's own snooze of the line, until `until`. */
+  | { kind: "snooze"; key: string; until: Date; said: string }
+  /** An action the source declares disabled: its reason, said, and nothing written. */
+  | { kind: "refused"; said: string }
   | { kind: "go"; hash: string }
   /** Write the link to the chosen job with the relation picked inline. */
   | { kind: "link" }
@@ -77,6 +107,18 @@ export interface SheetContext {
   canTime: boolean;
   /** Settings › Checkouts' applications, the default first (`menuOrder`). */
   apps: readonly { id: string; name: string }[];
+  /** Every link set (`link_sets`): *Add to a set…*'s choices; none, no row. */
+  sets?: readonly LinkSetRow[];
+  /**
+   * The pull request's declared `merge_pull_request` action, read from its
+   * view when the sheet opens on it: *Merge…* follows it, as the pull request
+   * page's button does; `null` (none declared, or not read yet), no row.
+   */
+  merge?: ViewAction | null;
+  /** A repository's branches, from its Branches view: *Create pull request…*'s choices; absent, no row. */
+  branches?: (repoId: string) => Promise<readonly { name: string; isDefault: boolean }[]>;
+  /** The clock the snooze presets count from. */
+  now?: Date;
   /** What is a favourite now, as {@link favouriteKeys} reads the board's block: *Unfavourite* on those. */
   favourites: ReadonlySet<string>;
 }
@@ -190,22 +232,24 @@ export function sheetActions(subject: SheetSubject, ctx: SheetContext): SheetAct
         },
       ];
     case "inbox":
-      return inboxActions(subject.item, subject.ops);
+      return inboxActions(subject.item, subject.ops, ctx.now ?? new Date());
     case "entity":
       return entityActions(subject, ctx);
   }
 }
 
-function inboxActions(item: InboxItem, ops: readonly string[]): SheetAction[] {
+function inboxActions(item: InboxItem, ops: readonly string[], now: Date): SheetAction[] {
   const actions: SheetAction[] = [
     { id: "open", label: "Open", detail: opener(item)?.label ?? "The Inbox page", does: { kind: "go", hash: opener(item)?.href ?? "#/inbox" } },
   ];
-  // The Inbox page's own buttons for the line, in its order; *Snooze* is a flow (#2427).
+  // The Inbox page's own buttons for the line, in its order; *Snooze* is a flow over its presets (#2427).
   for (const op of rowActions({ item, actions: [...ops] })) {
     if (op === "rerun_build" && item.entity_id !== null) {
       actions.push({ id: "rerun", label: "Re-run", detail: "Queued as a write to the source", does: { kind: "inbox", op: "rerun" } });
     } else if (op === "ack") {
       actions.push({ id: "ack", label: "Acknowledge", detail: "The alert stops asking", does: { kind: "inbox", op: "ack" } });
+    } else if (op === "snooze") {
+      actions.push({ id: "snooze", label: "Snooze…", detail: "Until one of the Inbox page's presets", does: snoozeFlow(item, now) });
     } else if (op === "done") {
       actions.push({ id: "done", label: "Done", detail: "Leaves the inbox", does: { kind: "inbox", op: "done" } });
     }
@@ -221,6 +265,9 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
   if (ctx.job !== null && ctx.job.entityId !== id) {
     actions.push({ id: "link", label: `Link to ${ctx.job.label}`, detail: "← → pick the relation", does: { kind: "link" } });
   }
+  // The pair's other half: a set it joins, or on a ticket a set shown on it.
+  const set = setAction(subject, ctx.sets ?? []);
+  if (set) actions.push(set);
   if (kind === "ticket" && ctx.canTime && canBeTarget({ entityId: id, kind })) {
     actions.push({ id: "timer", label: "Start timer", detail: `Stops the running one first; ${key} becomes the job`, does: { kind: "timer" } });
   }
@@ -238,8 +285,17 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
         detail: "Queued as a write to the source",
         does: { kind: "write", payload: { Approve: { entity: id, body: "" } }, said: `Approval queued for ${title}` },
       });
+      if (ctx.merge) actions.push(mergeAction(id, title, ctx.merge));
       break;
     case "repo":
+      if (ctx.branches) {
+        actions.push({
+          id: "newpr",
+          label: "Create pull request…",
+          detail: "Pick the branch with the change, then the branch it goes into",
+          does: newPrFlow(id, ctx.branches),
+        });
+      }
       actions.push({ id: "prs", label: "Pull requests", detail: "The repository's pull requests", does: go(repoHash(id, "prs")) });
       actions.push({ id: "branches", label: "Branches", detail: "Every branch and where it stands", does: go(repoHash(id, "branches")) });
       break;
@@ -274,15 +330,129 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
   return actions;
 }
 
+/** What a set can hold as a fixed member (R-7.7's five panels); a ticket is shown a set by a manual rule instead. */
+const MEMBER_KINDS: ReadonlySet<string> = new Set<LinkSetMemberKind>(["page", "repo", "pipeline", "asset", "monitor"]);
+
+/**
+ * *Add to a set…* on what a set holds, *Show a set on ⟨key⟩…* on a ticket: a
+ * flow over every set by name; the pick re-saves that set with one fixed
+ * member, or one manual rule (`withHandRule`, the ticket page's *Apply a link
+ * set…*). Nothing else, or no sets, no row.
+ */
+function setAction(subject: Extract<SheetSubject, { kind: "entity" }>, sets: readonly LinkSetRow[]): SheetAction | null {
+  const { entityId: id, entityKind: kind, title } = subject;
+  const member = MEMBER_KINDS.has(kind) ? (kind as LinkSetMemberKind) : null;
+  if (sets.length === 0 || (member === null && kind !== "ticket")) return null;
+  const key = keyOf(id);
+  const choices = sets.map((set) => ({ id: set.id, label: set.name, detail: set.description }));
+  return {
+    id: "set",
+    label: member ? "Add to a set…" : `Show a set on ${key}…`,
+    detail: member ? "A fixed member, shown on every ticket the set applies to" : "The set's members appear on this ticket",
+    does: {
+      kind: "flow",
+      steps: [{ title: member ? "Add to" : `Show on ${key}`, choices: async () => choices }],
+      finish: ([setId]) => {
+        const set = sets.find((candidate) => candidate.id === setId);
+        if (!set) return { kind: "refused", said: "That set is gone." };
+        if (member === null) {
+          const held = set.rules.some((rule) => rule.kind === "manual" && rule.value === id);
+          return { kind: "save-set", draft: held ? draftOf(set) : withHandRule(set, id), said: `${set.name} now shows on ${key}` };
+        }
+        const draft = draftOf(set);
+        if (!draft.members.some((row) => row.kind === member && row.entity_id === id)) draft.members.push({ kind: member, entity_id: id });
+        return { kind: "save-set", draft, said: `Added ${title} to ${set.name}` };
+      },
+    },
+  };
+}
+
+/** The SPI's three styles in words; another is the source's own label. */
+const STYLES: Record<string, Choice> = {
+  merge: { id: "merge", label: "Merge commit", detail: "Keeps every commit and adds one" },
+  squash: { id: "squash", label: "Squash", detail: "One commit on the base" },
+  rebase: { id: "rebase", label: "Rebase", detail: "The commits replayed on the base" },
+};
+
+/**
+ * *Merge…*, over the source's declared `merge_pull_request`: disabled with
+ * its reason where the source draws it so (the pull request page's button),
+ * else a flow over its `style` choices that queues the write with the picked
+ * style and every other field as the source declared it.
+ */
+function mergeAction(id: string, title: string, declared: ViewAction): SheetAction {
+  const base = { id: "merge", label: "Merge…" };
+  if (declared.disabled !== null) return { ...base, detail: declared.disabled, does: { kind: "refused", said: declared.disabled } };
+  const field = declared.fields.find((one) => one.name === "style");
+  const options = field?.kind.type === "choice" ? field.kind.options : [];
+  const choices = options.length > 0 ? options.map((option) => STYLES[option.value] ?? { id: option.value, label: option.label, detail: "" }) : Object.values(STYLES);
+  return {
+    ...base,
+    detail: "Pick the style; queued as a write to the source",
+    does: {
+      kind: "flow",
+      steps: [{ title: "Merge as", choices: async () => choices }],
+      finish: ([style]) => {
+        const payload = actionPayload(declared, id, { ...initialValues(declared), style: style ?? "merge" });
+        if (payload === null) return { kind: "refused", said: `The source takes no merge of ${title} from here.` };
+        return { kind: "write", payload, said: `Merge queued for ${title}` };
+      },
+    },
+  };
+}
+
+/**
+ * *Create pull request…*: the branch with the change, then the branch it
+ * goes into (the head left out), both from the repository's branches with
+ * the default first; the compare page opens with both in its address.
+ */
+function newPrFlow(repoId: string, branches: NonNullable<SheetContext["branches"]>): SheetEffect {
+  const step = (title: string): Step => ({
+    title,
+    async choices(picks) {
+      const read = await branches(repoId);
+      const ordered = [...read.filter((one) => one.isDefault), ...read.filter((one) => !one.isDefault)];
+      return ordered
+        .filter((one) => one.name !== picks[0])
+        .map((one) => ({ id: one.name, label: one.name, detail: one.isDefault ? "The default branch" : "" }));
+    },
+  });
+  return {
+    kind: "flow",
+    steps: [step("From branch"), step("Into branch")],
+    finish: ([head, base]) => ({ kind: "go", hash: compareHash(repoId, head ?? "", base ?? null) }),
+  };
+}
+
+/** *Snooze…*: the Inbox page's own presets for the line (the day after a credential expires, where it does). */
+function snoozeFlow(item: InboxItem, now: Date): SheetEffect {
+  const presets = snoozePresets(now, expiryOf(item));
+  return {
+    kind: "flow",
+    steps: [
+      {
+        title: "Snooze until",
+        // Keyed by label: on a Sunday *Tomorrow* and *Next Monday* are the same morning.
+        choices: async () => presets.map((preset) => ({ id: preset.label, label: preset.label, detail: untilLabel(preset.at, now) })),
+      },
+    ],
+    finish: ([picked]) => {
+      const preset = presets.find((one) => one.label === picked);
+      if (!preset) return { kind: "refused", said: "That preset is gone." };
+      return { kind: "snooze", key: item.key, until: preset.at, said: `Snoozed until ${untilLabel(preset.at, now)}` };
+    },
+  };
+}
+
 /**
  * The actions holding every typed letter in order, in the label or the
  * detail, ignoring case and spaces; the tightest span first, then the
  * earliest start, then the table's order. Nothing typed: all, in order.
  */
-export function narrowActions(actions: readonly SheetAction[], typed: string): SheetAction[] {
+export function narrowActions<T extends { label: string; detail: string }>(actions: readonly T[], typed: string): T[] {
   const needle = typed.toLowerCase().replace(/\s+/gu, "");
   if (needle === "") return [...actions];
-  const scored: { action: SheetAction; span: number; start: number; at: number }[] = [];
+  const scored: { action: T; span: number; start: number; at: number }[] = [];
   actions.forEach((action, at) => {
     const best = tightest(action.label.toLowerCase(), needle) ?? tightest(`${action.label} ${action.detail}`.toLowerCase(), needle);
     if (best) scored.push({ action, ...best, at });

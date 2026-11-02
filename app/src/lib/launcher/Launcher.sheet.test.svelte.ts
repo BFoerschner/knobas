@@ -11,7 +11,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LauncherHome, SearchHit, SearchQuery, SearchResponse } from "../ipc";
-import type { CheckoutSettings, InboxItem } from "../ipc/entity";
+import type { CheckoutSettings, InboxItem, LinkSetDraft, LinkSetRow, ViewAction } from "../ipc/entity";
 import { reset as resetToasts, toasts } from "../shell/toasts.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
@@ -88,6 +88,55 @@ const LINE: InboxItem = {
 
 const JOB = { entityId: "jira:PAY-999", label: "PAY-999" };
 
+/** Two link sets, one already holding a repository and a ticket by hand. */
+const SETS = [
+  {
+    id: "payments",
+    name: "Payments",
+    description: "The payout stack",
+    members: [{ kind: "repo", entity_id: "gitea:acme/ledger", title: "acme/ledger" }],
+    patterns: [{ kind: "page", query: "SEPA", count: 2 }],
+    rules: [{ kind: "manual", value: "jira:PAY-100", title: null }],
+    tickets: 3,
+    yours: 1,
+  },
+  { id: "ops", name: "Ops", description: "On call", members: [], patterns: [], rules: [], tickets: 0, yours: 0 },
+] as unknown as LinkSetRow[];
+
+/** A source's declared merge, as Gitea's `land.rs` declares it: three styles, the branch deleted, squash's message prefilled. */
+function declaredMerge(disabled: string | null = null): ViewAction {
+  return {
+    write_op: "merge_pull_request",
+    label: "Merge…",
+    fields: [
+      {
+        name: "style",
+        label: "Style",
+        kind: { type: "choice", options: [{ value: "merge", label: "Merge" }, { value: "rebase", label: "Rebase" }, { value: "squash", label: "Squash" }] },
+        value: "merge",
+        required: true,
+        placeholder: null,
+      },
+      { name: "delete_branch", label: "Delete branch", kind: { type: "flag" }, value: "true", required: false, placeholder: null },
+      { name: "message", label: "Message", kind: { type: "long_text" }, value: "Backoff (#142)", required: false, placeholder: null },
+    ],
+    confirm: null,
+    primary: true,
+    danger: false,
+    disabled,
+    with_settings: false,
+    values: {},
+    entity: null,
+  } as unknown as ViewAction;
+}
+
+/** A repository's branches as its Branches view lists them: not the default first, so the sheet puts it there. */
+const BRANCHES = [
+  { name: "feature/PAY-231-retry", isDefault: false },
+  { name: "main", isDefault: true },
+  { name: "release/2.1", isDefault: false },
+];
+
 function mountIt(props: Record<string, unknown> = {}) {
   const calls = {
     navigate: vi.fn(),
@@ -101,6 +150,12 @@ function mountIt(props: Record<string, unknown> = {}) {
     clone: vi.fn(async () => {}),
     inboxAck: vi.fn(async () => {}),
     inboxDone: vi.fn(async () => {}),
+    branches: vi.fn(async (_repoId: string) => BRANCHES),
+    // No sets unless a test gives some: the table's other rows stay as they were.
+    linkSets: vi.fn(async (): Promise<LinkSetRow[]> => []),
+    saveLinkSet: vi.fn(async (_draft: LinkSetDraft) => ({})),
+    inboxSnooze: vi.fn(async (_key: string, _until: Date) => {}),
+    mergeAction: vi.fn(async (_prId: string): Promise<ViewAction | null> => null),
     renameSmartList: vi.fn(async (_id: string, _label: string) => {}),
     deleteSmartList: vi.fn(async (_id: string) => {}),
     searched: [] as string[],
@@ -134,6 +189,11 @@ function mountIt(props: Record<string, unknown> = {}) {
         clone: calls.clone,
         inboxAck: calls.inboxAck,
         inboxDone: calls.inboxDone,
+        branches: calls.branches,
+        linkSets: calls.linkSets,
+        saveLinkSet: calls.saveLinkSet,
+        inboxSnooze: calls.inboxSnooze,
+        mergeAction: calls.mergeAction,
       },
       ...props,
     },
@@ -174,6 +234,8 @@ const sheet = () => target.querySelector<HTMLElement>('[aria-label="Actions on t
 const labels = () => [...(sheet()?.querySelectorAll(".tf-ln-nm") ?? [])].map((el) => el.textContent?.trim());
 const modeLabel = () => target.querySelector(".tf-ln-mode")?.textContent ?? null;
 const lastToast = () => toasts.items.at(-1)?.text;
+/** The flow's step header: its title, and the picks so far. */
+const stepHead = () => target.querySelector(".tf-ln-sheet .tf-ln-h")?.textContent?.replace(/\s+/gu, " ").trim() ?? null;
 
 /** ⌘K after an action closed the launcher: open again on an empty box. */
 async function reopen() {
@@ -215,7 +277,17 @@ test("Tab lifts the row under the box, labels the box Actions and empties it; th
   const pinned = target.querySelector(".tf-ln-pinned .tf-ln-res");
   expect(pinned?.querySelector(".tf-ln-t")?.textContent).toBe("svc");
   expect(pinned?.querySelector(".tf-ln-k")?.textContent).toBe("acme");
-  expect(labels()).toEqual(["Link to PAY-999", "Pull requests", "Branches", "Open in VS Code", "Open in IntelliJ", "Clone", "Favourite", "Copy title"]);
+  expect(labels()).toEqual([
+    "Link to PAY-999",
+    "Create pull request…",
+    "Pull requests",
+    "Branches",
+    "Open in VS Code",
+    "Open in IntelliJ",
+    "Clone",
+    "Favourite",
+    "Copy title",
+  ]);
 });
 
 test("the pinned row draws the key cell the engine sends (#2452)", async () => {
@@ -533,11 +605,11 @@ test("a refused rename or delete toasts no success", async () => {
   expect(toasts.items.map((toast) => toast.text)).not.toContain("Deleted sepa payouts");
 });
 
-test("an inbox line: Open, Re-run where the source offers it, Done", async () => {
+test("an inbox line: Open, Re-run where the source offers it, Snooze…, Done", async () => {
   const calls = mountIt();
   await settle();
   await sheetOn("#i");
-  expect(labels()).toEqual(["Open", "Re-run", "Done"]);
+  expect(labels()).toEqual(["Open", "Re-run", "Snooze…", "Done"]);
   press("ArrowDown");
   press("Enter");
   await settle();
@@ -560,4 +632,225 @@ test("a failed write says why in a toast and keeps the sheet", async () => {
   await settle();
   expect(toasts.items.at(-1)?.tone).toBe("err");
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+});
+
+test("a two-step flow: Create pull request picks the head, then the base, the box narrowing each, and opens the compare page with both", async () => {
+  const calls = mountIt();
+  await settle();
+  await sheetOn("repo");
+  expect(labels()).toContain("Create pull request…");
+  narrow("create");
+  press("Enter");
+  await settle();
+  // The first step: its title on the box, the repository's branches with the default first; the row stays pinned.
+  expect(modeLabel()).toBe("From branch");
+  expect(input().value).toBe("");
+  expect(calls.branches).toHaveBeenCalledWith("gitea:acme/svc");
+  expect(labels()).toEqual(["main", "feature/PAY-231-retry", "release/2.1"]);
+  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("svc");
+  narrow("pay");
+  expect(labels()).toEqual(["feature/PAY-231-retry"]);
+  press("Enter");
+  await settle();
+  // The second step: the head picked is said and left out of the bases.
+  expect(modeLabel()).toBe("Into branch");
+  expect(input().value).toBe("");
+  expect(stepHead()).toContain("feature/PAY-231-retry");
+  expect(labels()).toEqual(["main", "release/2.1"]);
+  // Backspace on the empty box steps back one step, and once more back to the actions.
+  press("Backspace");
+  await settle();
+  expect(modeLabel()).toBe("From branch");
+  expect(labels()).toEqual(["main", "feature/PAY-231-retry", "release/2.1"]);
+  press("Backspace");
+  expect(modeLabel()).toBe("Actions");
+  expect(labels()).toContain("Create pull request…");
+  // Again, to the end: the last pick runs the action.
+  narrow("create");
+  press("Enter");
+  await settle();
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  narrow("rel");
+  press("Enter");
+  await settle();
+  expect(calls.navigate).toHaveBeenCalledWith("#/repo/gitea%3Aacme%2Fsvc/compare/release%2F2.1...feature%2FPAY-231-retry");
+});
+
+test("a step's late answer for picks since stepped back from is dropped", async () => {
+  const calls = mountIt();
+  const held: (() => void)[] = [];
+  await settle();
+  await sheetOn("repo");
+  narrow("create");
+  press("Enter");
+  await settle();
+  // From here every read waits until the test answers it.
+  calls.branches.mockImplementation(() => new Promise((resolve) => held.push(() => resolve(BRANCHES))));
+  press("Enter"); // head: main
+  await settle();
+  press("Backspace");
+  await settle();
+  press("ArrowDown");
+  press("Enter"); // head: feature/PAY-231-retry
+  await settle();
+  expect(held).toHaveLength(2);
+  // The read for head main answers first: it was asked for other picks.
+  held[0]!();
+  await settle();
+  expect(labels()).not.toContain("feature/PAY-231-retry");
+  expect(labels()).toEqual([]);
+  held[1]!();
+  await settle();
+  expect(labels()).toEqual(["main", "release/2.1"]);
+});
+
+test("Esc in a flow steps back too, and never closes the dialog", async () => {
+  const onclose = vi.fn();
+  mountIt({ onclose });
+  await settle();
+  await sheetOn("repo");
+  narrow("create");
+  press("Enter");
+  await settle();
+  press("Enter");
+  await settle();
+  expect(modeLabel()).toBe("Into branch");
+  const event = press("Escape");
+  await settle();
+  expect(modeLabel()).toBe("From branch");
+  press("Escape");
+  expect(modeLabel()).toBe("Actions");
+  expect(event.defaultPrevented).toBe(true);
+  expect(onclose).not.toHaveBeenCalled();
+});
+
+test("Add to a set… on a page picks a set and re-saves it with the page as one fixed member", async () => {
+  const calls = mountIt();
+  calls.linkSets.mockImplementation(async () => SETS);
+  await settle();
+  await sheetOn("page");
+  expect(labels().slice(0, 2)).toEqual(["Link to PAY-999", "Add to a set…"]);
+  narrow("add");
+  press("Enter");
+  await settle();
+  expect(modeLabel()).toBe("Add to");
+  expect(labels()).toEqual(["Payments", "Ops"]);
+  press("Enter");
+  await settle();
+  expect(calls.saveLinkSet).toHaveBeenCalledTimes(1);
+  // Everything the set held stays, in order; the page joins its members.
+  expect(calls.saveLinkSet.mock.calls[0]![0]).toEqual({
+    id: "payments",
+    name: "Payments",
+    description: "The payout stack",
+    members: [
+      { kind: "repo", entity_id: "gitea:acme/ledger" },
+      { kind: "page", entity_id: "confluence:ENG:SEPA" },
+    ],
+    patterns: [{ kind: "page", query: "SEPA" }],
+    rules: [{ kind: "manual", value: "jira:PAY-100" }],
+  });
+  expect(lastToast()).toBe("Added SEPA design to Payments");
+});
+
+test("Show a set on a ticket picks a set and adds one manual rule for the ticket", async () => {
+  const calls = mountIt();
+  calls.linkSets.mockImplementation(async () => SETS);
+  await settle();
+  await sheetOn("ticket");
+  narrow("show");
+  expect(labels()[0]).toBe("Show a set on PAY-231…");
+  press("Enter");
+  await settle();
+  expect(modeLabel()).toBe("Show on PAY-231");
+  narrow("ops");
+  press("Enter");
+  await settle();
+  expect(calls.saveLinkSet.mock.calls[0]![0]).toMatchObject({ id: "ops", members: [], rules: [{ kind: "manual", value: "jira:PAY-231" }] });
+  expect(lastToast()).toBe("Ops now shows on PAY-231");
+});
+
+test("no link sets, no set row; a kind a set cannot hold has none either", async () => {
+  const calls = mountIt();
+  await settle();
+  await sheetOn("page");
+  expect(labels()).not.toContain("Add to a set…");
+  await reopen();
+  calls.linkSets.mockImplementation(async () => SETS);
+  await sheetOn("pr");
+  expect(labels().some((label) => label?.includes("set"))).toBe(false);
+});
+
+test("Snooze… offers the Inbox page's presets and snoozes the line until the one picked", async () => {
+  // Tuesday 25 August 2026, noon: tomorrow is Wednesday, next Monday the 31st, both at 09:00.
+  const calls = mountIt({ now: new Date(2026, 7, 25, 12, 0) });
+  await settle();
+  await sheetOn("#i");
+  narrow("snooze");
+  press("Enter");
+  await settle();
+  expect(modeLabel()).toBe("Snooze until");
+  expect(labels()).toEqual(["Tomorrow", "Next Monday"]);
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(calls.inboxSnooze).toHaveBeenCalledWith(LINE.key, new Date(2026, 7, 31, 9, 0));
+  expect(lastToast()).toBe("Snoozed until Monday 09:00");
+});
+
+test("Snooze… on a Sunday: Tomorrow and Next Monday are the same morning, and both are drawn", async () => {
+  // Sunday 30 August 2026: both presets are Monday the 31st at 09:00, so a choice keyed by the time would repeat.
+  const calls = mountIt({ now: new Date(2026, 7, 30, 12, 0) });
+  await settle();
+  await sheetOn("#i");
+  narrow("snooze");
+  press("Enter");
+  await settle();
+  expect(labels()).toEqual(["Tomorrow", "Next Monday"]);
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(calls.inboxSnooze).toHaveBeenCalledWith(LINE.key, new Date(2026, 7, 31, 9, 0));
+});
+
+test("Merge… follows the source's declared merge: picks the style and queues the write with the source's other answers", async () => {
+  const calls = mountIt();
+  calls.mergeAction.mockImplementation(async () => declaredMerge());
+  await settle();
+  await sheetOn("pr");
+  expect(calls.mergeAction).toHaveBeenCalledWith("gitea:acme/svc#142");
+  expect(labels()).toContain("Merge…");
+  narrow("merge");
+  press("Enter");
+  await settle();
+  expect(modeLabel()).toBe("Merge as");
+  expect(labels()).toEqual(["Merge commit", "Rebase", "Squash"]);
+  narrow("squ");
+  press("Enter");
+  await settle();
+  expect(calls.submitWrite).toHaveBeenCalledWith({
+    MergePullRequest: { entity: "gitea:acme/svc#142", style: "squash", delete_branch: true, message: "Backoff (#142)" },
+  });
+  expect(lastToast()).toBe("Merge queued for Backoff");
+});
+
+test("Merge… the source draws disabled shows its reason and writes nothing; no declared merge, no row", async () => {
+  const calls = mountIt();
+  calls.mergeAction.mockImplementation(async () => declaredMerge("1 of 2 required approvals"));
+  await settle();
+  await sheetOn("pr");
+  narrow("merge");
+  const row = [...(sheet()?.querySelectorAll(".tf-ln-opt") ?? [])].find((el) => el.querySelector(".tf-ln-nm")?.textContent === "Merge…");
+  expect(row?.querySelector(".tf-ln-s")?.textContent).toBe("1 of 2 required approvals");
+  press("Enter");
+  await settle();
+  expect(calls.submitWrite).not.toHaveBeenCalled();
+  expect(lastToast()).toBe("1 of 2 required approvals");
+  expect(modeLabel()).toBe("Actions");
+  await reopen();
+  calls.mergeAction.mockImplementation(async () => null);
+  await sheetOn("pr");
+  expect(labels()).not.toContain("Merge…");
 });

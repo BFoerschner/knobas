@@ -92,10 +92,17 @@ function press(key: string): void {
   flushSync();
 }
 
-/** The `Tab` sheet's actions, in order, or `null` when no sheet is drawn. */
+/**
+ * The `Tab` sheet's actions, in order, or `null` when no sheet is drawn.
+ * *Show a set on ⟨key⟩…* (#2427) joins once the fixture's link sets have
+ * answered, which this file's timing does not fix; it is pinned in
+ * `Launcher.sheet.test.svelte.ts`, so it is left out here.
+ */
 function chain(): string[] | null {
   const strip = target.querySelector('[aria-label="Actions on the selected result"]');
-  return strip === null ? null : [...strip.querySelectorAll(".tf-ln-nm")].map((row) => row.textContent?.trim() ?? "");
+  if (strip === null) return null;
+  const labels = [...strip.querySelectorAll(".tf-ln-nm")].map((row) => row.textContent?.trim() ?? "");
+  return labels.filter((label) => !label.startsWith("Show a set on "));
 }
 
 /** A ticket's actions after the pair: the timer, the job, the key. */
