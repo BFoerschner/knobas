@@ -241,6 +241,20 @@ export const EMBED_REPORT_MS = 10_000;
  */
 export const EMBED_URL_HEIGHT = 480;
 
+/**
+ * The border of an embed's frame in CSS pixels, each side (`.tf-embed iframe`
+ * in `tf/css/docs.css`; `tf-css.test.ts` holds the two together). The frame
+ * is border-box, so its `height` holds this border twice: an HTML frame is
+ * its document's reported height plus both, or a document that fits scrolls
+ * by their width (#2459).
+ */
+export const EMBED_FRAME_BORDER = 1;
+
+/** An HTML embed's frame height: its document's height and border, up to the window's. */
+export function embedFrameHeight(documentHeight: number, viewport: number): number {
+  return Math.min(documentHeight + 2 * EMBED_FRAME_BORDER, viewport);
+}
+
 const EMBEDS = Symbol("docs-embeds");
 
 /**

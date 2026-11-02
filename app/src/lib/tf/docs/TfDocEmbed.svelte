@@ -4,8 +4,8 @@
   `knobas-render` origin, or the page a URL names, framed in the same
   sandbox (`render/embed.ts` says why neither can reach the app).
 
-  - An HTML frame is as tall as its reporter says its document is, up to the
-    window's height, as the window resizes; past that it scrolls inside
+  - An HTML frame is as tall as its reporter says its document is, plus its
+    border (`embedFrameHeight`), up to the window's height, as the window resizes; past that it scrolls inside
     itself. A URL frame reports nothing and is `EMBED_URL_HEIGHT` tall, up to
     the window's. The height is
     the frame's `height` attribute: the app's policy refuses inline styles.
@@ -25,7 +25,7 @@
   import type { DocEmbedContent } from "../../ipc/entity";
   import { tauriBridge } from "../../render/command";
   import { EMBED_SANDBOX, embedMessage, embedOpens, embedSource, embedUrl, openVerdict } from "../../render/embed";
-  import { EMBED_REPORT_MS, EMBED_URL_HEIGHT, embedsRun } from "./docs";
+  import { EMBED_REPORT_MS, EMBED_URL_HEIGHT, embedFrameHeight, embedsRun } from "./docs";
 
   let {
     content,
@@ -54,7 +54,7 @@
   let reportedHeight = $state(150);
   // The window's height, read again on every resize: the cap follows it.
   let viewport = $state(window.innerHeight);
-  const height = $derived(Math.min(framed === null ? reportedHeight : EMBED_URL_HEIGHT, viewport));
+  const height = $derived(framed === null ? embedFrameHeight(reportedHeight, viewport) : Math.min(EMBED_URL_HEIGHT, viewport));
   let reported = $state(false);
   let silent = $state(false);
   let asked = $state<string | null>(null);

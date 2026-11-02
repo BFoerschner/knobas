@@ -10,7 +10,7 @@ import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
-import { READER_DRAWER, READER_NARROW } from "./docs/docs";
+import { EMBED_FRAME_BORDER, READER_DRAWER, READER_NARROW } from "./docs/docs";
 
 const APP = process.cwd();
 /**
@@ -540,4 +540,13 @@ test("the ticket page's columns take the card's width, and below 900px they stac
   const body = narrow.slice(0, narrow.indexOf("\n}"));
   expect(body).toContain(".tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }");
   expect(body).toContain(".tf-tkhandle { display: none; }");
+});
+
+test("an embed's frame has the border its height counts, inside a border-box (#2459)", () => {
+  // TfDocEmbed adds this border to the reported document height; a border the
+  // height does not count makes a fitting document scroll.
+  const rule = block(code, ".tf-embed iframe");
+  expect(rule).toMatch(new RegExp(`(^|[;{\\s])border: ${EMBED_FRAME_BORDER}px solid `));
+  expect(rule).not.toMatch(/box-sizing|(^|[;{\s])(border-width|border-top|border-bottom|padding)\b/);
+  expect(code).toMatch(/^\* \{ box-sizing: border-box;/m);
 });
