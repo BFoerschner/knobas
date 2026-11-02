@@ -125,8 +125,10 @@ test("an embed runs in a sandboxed frame with no same origin and no top navigati
 test("the frame's height follows what its reporter says, up to the viewport", async () => {
   await draw();
   vi.spyOn(window, "innerHeight", "get").mockReturnValue(700);
+  // The report is the document's height; the frame's 1px border sits outside
+  // it (#2459), so a document that fits draws no scrollbar.
   say({ knobas: "embed", height: 312 });
-  expect(frame()!.getAttribute("height")).toBe("312");
+  expect(frame()!.getAttribute("height")).toBe("314");
   say({ knobas: "embed", height: 4000 });
   expect(frame()!.getAttribute("height")).toBe("700");
   // Another window saying the same is not the frame.
@@ -145,11 +147,11 @@ test("the frame's height follows the window as it resizes, back up to what its r
   await draw();
   resize(700);
   say({ knobas: "embed", height: 600 });
-  expect(frame()!.getAttribute("height")).toBe("600");
+  expect(frame()!.getAttribute("height")).toBe("602");
   resize(400);
   expect(frame()!.getAttribute("height")).toBe("400");
   resize(1000);
-  expect(frame()!.getAttribute("height")).toBe("600");
+  expect(frame()!.getAttribute("height")).toBe("602");
 });
 
 /** The reader's transient activation, as the browser reports it to the app's window (#2454). */
