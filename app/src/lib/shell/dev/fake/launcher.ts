@@ -4,11 +4,14 @@
  */
 import type { SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
+import { fakePipelines } from "./builds";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
+import { fakeLinkSetLines } from "./link-sets";
 import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
+import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
 import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
@@ -162,7 +165,40 @@ function helpCard(raw: string): SearchResponse | null {
 }
 
 /** `knobas_search::group`'s order, unknown kinds last. */
-const GROUP_ORDER = ["ticket", "asset", "repo", "pr", "build_config", "build", "page", "note", "commit", "branch", "route", "monitor"];
+const GROUP_ORDER = ["view", "set", "ticket", "asset", "repo", "pr", "pipeline", "build_config", "build", "page", "note", "commit", "branch", "route", "monitor"];
+
+/** What the engine leaves out of the answer (#2422, `knobas_search::frames`): runs, commits, a Jira view's mirror row. */
+const LEFT_OUT = new Set(["build", "commit", "jira_view"]);
+
+type Hit = SearchResponse["groups"][number]["hits"][number];
+
+/**
+ * The launcher's own kinds (#2422) as the fixture holds them: the ticket
+ * views, the link sets and the pipelines, each with its path line, and a
+ * pipeline in its newest run's state. Fixture-only, like the word search.
+ */
+function launcherKindHits(): { haystack: string; hit: Hit }[] {
+  const hit = (kind: string, entity_id: string, title: string, path: string, state: Hit["state"] = null): Hit => ({
+    entity_id,
+    kind,
+    source_id: kind,
+    title,
+    updated_at: SYNCED_AT,
+    synced_at: SYNCED_AT,
+    path,
+    state,
+    rank: 1,
+    snippet: [],
+  });
+  return [
+    ...fakeTicketViewLines().map((view) => ({ haystack: `${view.name} ${view.path}`, hit: hit("view", view.id, view.name, view.path) })),
+    ...fakeLinkSetLines().map((set) => ({ haystack: `${set.name} ${set.description}`, hit: hit("set", set.id, set.name, set.path) })),
+    ...fakePipelines().map((pipeline) => ({
+      haystack: `${pipeline.name} ${pipeline.path.join(" ")}`,
+      hit: { ...hit("pipeline", pipeline.entity_id, pipeline.name, pipeline.path.join(" › "), pipeline.recent[0]?.state ?? null), source_id: pipeline.source_id },
+    })),
+  ];
+}
 
 /**
  * `search` for plain words (#2421): the corpus rows whose key, title or path
@@ -181,8 +217,14 @@ function wordSearch(raw: string): SearchResponse | null {
   if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
   const words = text.toLowerCase().split(/\s+/);
   const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
+  for (const { haystack, hit } of launcherKindHits()) {
+    if (!words.every((word) => haystack.toLowerCase().includes(word))) continue;
+    const hits = byKind.get(hit.kind) ?? [];
+    hits.push({ ...hit, rank: 1 - hits.length / 100 });
+    byKind.set(hit.kind, hits);
+  }
   for (const entry of CORPUS) {
-    if (entry.deleted_at !== null) continue;
+    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
     const row = mirrorRow(entry);
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
@@ -232,7 +274,7 @@ export function handlers(): Handlers {
       smart_lists: fakeSmartLists(),
       // The newest of the fixture's corpus, in the shape `list_entities`
       // answers in -- the board draws recent rows with the same component.
-      recent: CORPUS.filter((entry) => entry.deleted_at === null)
+      recent: CORPUS.filter((entry) => entry.deleted_at === null && !LEFT_OUT.has(entry.kind))
         // `recent_sql!`'s order, because the comment above has to be true:
         // newest first, a row the source never dated last, and the id to
         // break a tie. CORPUS is in reading order, not date order.

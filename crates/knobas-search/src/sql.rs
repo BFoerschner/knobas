@@ -1892,7 +1892,17 @@ mod tests {
             50,
         );
         assert!(built.sql.contains("sync.live_item i"), "{}", built.sql);
-        assert!(!built.sql.contains("sync.item "), "{}", built.sql);
+        // The one read of `sync.item` itself is a pipeline's newest run, by
+        // the id `sync.item_pipeline`'s range gave (#2422, `mirror_state!`).
+        assert_eq!(
+            built.sql.matches("sync.item ").count(),
+            built
+                .sql
+                .matches("join sync.item i on i.entity_id = n.entity_id")
+                .count(),
+            "{}",
+            built.sql
+        );
         // `select *` over a CTE this module defined is fine -- its columns are
         // the ones `m` named. What must never happen is `select *` over the
         // mirror itself, whose `fts` is a tsvector that panics when read into a

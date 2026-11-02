@@ -1097,6 +1097,83 @@ test("Enter on a Jira view opens that view in Tickets, never Code (#1094)", asyn
   expect(onnavigate).not.toHaveBeenCalledWith("#/code");
 });
 
+/** A saved ticket view, a link set and a pipeline, as the engine groups them (#2422). */
+const OWN_KINDS = {
+  groups: [
+    {
+      kind: "view",
+      label: "Ticket view",
+      plural: "Ticket views",
+      monogram: "VW",
+      total: 1,
+      hits: [hit({ entity_id: "payments-backlog", kind: "view", source_id: "view", title: "Payments backlog", path: 'Team · project:PAY status:"To Do"' })],
+    },
+    {
+      kind: "set",
+      label: "Link set",
+      plural: "Link sets",
+      monogram: "LS",
+      total: 1,
+      hits: [hit({ entity_id: "payout-stack", kind: "set", source_id: "set", title: "Payout stack", path: "6 items · 2 patterns · 4 tickets" })],
+    },
+    {
+      kind: "pipeline",
+      label: "Pipeline",
+      plural: "Pipelines",
+      monogram: "PL",
+      total: 1,
+      hits: [
+        hit({
+          entity_id: "teamcity:buildType:Payout_Deploy",
+          kind: "pipeline",
+          source_id: "teamcity",
+          title: "Payout_Deploy",
+          path: "Tidewater › Payouts",
+          state: { text: "FAILURE", tone: "err" },
+        }),
+      ],
+    },
+  ],
+  total: 3,
+};
+
+test("a view, a set and a pipeline each draw their group and their key cell (#2422)", async () => {
+  open({ ports: { search: async () => response(OWN_KINDS), launcherHome: async () => HOME } });
+  await settle();
+  await search("pay");
+
+  const headings = [...target.querySelectorAll(".tf-ln-lab")].map((el) => el.textContent?.trim());
+  expect(headings).toEqual(["Ticket views", "Link sets", "Pipelines"]);
+  const rows = [...target.querySelectorAll(".tf-ln-res")].map((row) => [
+    row.querySelector(".tf-ln-mg")?.textContent?.trim(),
+    row.querySelector(".tf-ln-k")?.textContent?.trim(),
+    row.querySelector(".tf-ln-t")?.textContent?.trim(),
+  ]);
+  expect(rows).toEqual([
+    ["VW", "Team", "Payments backlog"],
+    ["LS", "link set", "Payout stack"],
+    ["PL", "Payouts", "Payout_Deploy"],
+  ]);
+  // A pipeline is coloured by its newest run, the engine's state.
+  expect(target.querySelectorAll(".tf-ln-mg")[2]?.getAttribute("data-tone")).toBe("err");
+});
+
+test("Enter on a view opens its Tickets page, on a set its page, on a pipeline Builds at it (#2422)", async () => {
+  const addresses = ["#/tickets/payments-backlog", "#/sets/payout-stack", "#/builds/teamcity%3AbuildType%3APayout_Deploy"];
+  for (const [at, address] of addresses.entries()) {
+    const onnavigate = vi.fn();
+    open({ onnavigate, ports: { search: async () => response(OWN_KINDS), launcherHome: async () => HOME } });
+    await settle();
+    await search("pay");
+    for (let step = 0; step < at; step += 1) press("ArrowDown");
+    press("Enter");
+    await settle();
+    expect(onnavigate, address).toHaveBeenCalledWith(address);
+    if (app) unmount(app);
+    app = undefined;
+  }
+});
+
 /**
  * #1504: while notes are shown a note hit opens its own page, and a note the
  * standup protocol rule names ("Standup 2026-09-03", the backend's own example)
