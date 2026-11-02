@@ -2,7 +2,8 @@
   An embed on a page (#2440, #2441; spec #2432 *Embeds in the shell*): the
   HTML its author wrote, run in a sandboxed frame from knobas' own
   `knobas-render` origin, or the page a URL names, framed in the same
-  sandbox (`render/embed.ts` says why neither can reach the app).
+  sandbox with its own origin and a referrer (`render/embed.ts` says why
+  neither can reach the app, #2460).
 
   - An HTML frame is as tall as its reporter says its document is, up to the
     window's height, as the window resizes; past that it scrolls inside
@@ -24,7 +25,7 @@
 
   import type { DocEmbedContent } from "../../ipc/entity";
   import { tauriBridge } from "../../render/command";
-  import { EMBED_SANDBOX, embedMessage, embedOpens, embedSource, embedUrl, openVerdict } from "../../render/embed";
+  import { EMBED_SANDBOX, EMBED_URL_REFERRER, EMBED_URL_SANDBOX, embedMessage, embedOpens, embedSource, embedUrl, openVerdict } from "../../render/embed";
   import { EMBED_REPORT_MS, EMBED_URL_HEIGHT, embedsRun } from "./docs";
 
   let {
@@ -116,8 +117,8 @@
     <iframe
       bind:this={frame}
       {title}
-      sandbox={EMBED_SANDBOX}
-      referrerpolicy="no-referrer"
+      sandbox={framed === null ? EMBED_SANDBOX : EMBED_URL_SANDBOX}
+      referrerpolicy={framed === null ? "no-referrer" : EMBED_URL_REFERRER}
       {height}
       onload={() => {
         if (framed !== null) reported = true;

@@ -8,7 +8,7 @@ import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DocPage, DocsTree } from "../../ipc/entity";
-import { EMBED_SANDBOX } from "../../render/embed";
+import { EMBED_SANDBOX, EMBED_URL_REFERRER, EMBED_URL_SANDBOX } from "../../render/embed";
 import { EMBED_REPORT_MS, EMBED_URL_HEIGHT } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
@@ -115,6 +115,7 @@ test("an embed runs in a sandboxed frame with no same origin and no top navigati
   const f = frame()!;
   expect(f.getAttribute("sandbox")).toBe(EMBED_SANDBOX);
   expect(f.getAttribute("sandbox")).not.toMatch(/allow-same-origin|allow-top-navigation/);
+  expect(f.getAttribute("referrerpolicy")).toBe("no-referrer");
   expect(f.getAttribute("title")).toBe("Embedded HTML from Confluence");
   // No bridge in a test: the document is a srcdoc, the author's HTML untouched in it.
   expect(f.getAttribute("srcdoc")).toContain(HTML);
@@ -244,7 +245,9 @@ test("a URL embed is the same sandboxed frame with the URL as its source, and of
   vi.spyOn(window, "innerHeight", "get").mockReturnValue(2000);
   const io = await draw(urlPage());
   const f = frame()!;
-  expect(f.getAttribute("sandbox")).toBe(EMBED_SANDBOX);
+  // Its own origin and a referrer (#2460): YouTube's player needs both.
+  expect(f.getAttribute("sandbox")).toBe(EMBED_URL_SANDBOX);
+  expect(f.getAttribute("referrerpolicy")).toBe(EMBED_URL_REFERRER);
   expect(f.getAttribute("src")).toBe(URL_EMBED);
   expect(f.hasAttribute("srcdoc")).toBe(false);
   expect(f.getAttribute("title")).toBe("Embedded page from grafana.example");
@@ -311,6 +314,16 @@ test("a URL embed of another scheme, from any adapter, is never framed", async (
   await draw(urlPage({}, "javascript:alert(1)"));
   expect(frame()).toBeNull();
   expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This embedded page did not load.");
+});
+
+test("a URL embed of the app's own origin is never framed: its own origin would be the app's (#2460)", async () => {
+  for (const url of [`${window.location.origin}/#/docs`, "http://tauri.localhost/", "http://ipc.localhost/"]) {
+    if (view) unmount(view);
+    target.replaceChildren();
+    await draw(urlPage({}, url));
+    expect(frame(), url).toBeNull();
+    expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This embedded page did not load.");
+  }
 });
 
 test("with Run embedded HTML off for its source, the embed is a placeholder with Open in Confluence", async () => {

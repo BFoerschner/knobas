@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { EMBED_OPEN_GAP_MS, EMBED_SANDBOX, REPORTER, embedDocument, embedMessage, embedSource, embedUrl, openVerdict } from "./embed";
+import { EMBED_OPEN_GAP_MS, EMBED_SANDBOX, EMBED_URL_REFERRER, EMBED_URL_SANDBOX, REPORTER, embedDocument, embedMessage, embedSource, embedUrl, openVerdict } from "./embed";
 
 // -- The frame (#2440, spec #2432 *Embeds in the shell*) ----------------------
 
@@ -119,6 +119,41 @@ test("a URL embed frames an absolute http(s) URL with a host as its src, and not
   for (const bad of ["javascript:alert(1)", "file:///etc/passwd", "knobas://x", "data:text/html,x", "//a.example/", "/wiki", "https://", "not a url", ""]) {
     expect(embedUrl(bad), bad).toBeNull();
   }
+});
+
+test("a URL embed's frame keeps its own origin and says where it is framed from (#2460)", () => {
+  // YouTube's player draws nothing in an opaque origin and refuses to start without a referrer
+  // (headless Chrome, #2460): a page from another origin gets its origin, an HTML embed never does.
+  expect(EMBED_URL_SANDBOX.split(" ").sort()).toEqual(["allow-forms", "allow-popups", "allow-same-origin", "allow-scripts"]);
+  expect(EMBED_URL_SANDBOX).not.toMatch(/top-navigation|popups-to-escape/);
+  expect(EMBED_URL_REFERRER).toBe("strict-origin");
+});
+
+test("a URL embed of the app's own origin, or any that could share it, is never framed (#2460)", () => {
+  const dev = "http://localhost:1420";
+  for (const own of [
+    "tauri://localhost/",
+    "http://tauri.localhost/",
+    "https://tauri.localhost/index.html",
+    "http://ipc.localhost/plugin%3Aevent%7Clisten",
+    "https://ipc.localhost/",
+    "knobas-render://localhost/embed.PGI-",
+    "http://knobas-render.localhost/embed.PGI-",
+    "https://knobas-render.localhost/",
+    "http://localhost:1420/",
+    "http://localhost:5173/",
+    "http://127.0.0.1:1420/",
+    // Loopback by other spellings, and a host behind userinfo. Spelled from the host part:
+    // the house rule's network scan reads them as real hosts.
+    ...["LOCALHOST.", "[::1]:1420", "evil.example@tauri.localhost", "0.0.0.0:1420", "2130706433:1420", "127.1", "[::ffff:127.0.0.1]"].map((host) => ["http:", host].join("//") + "/"),
+  ]) {
+    expect(embedUrl(own, dev), own).toBeNull();
+  }
+  // The window's own origin, wherever it is served from.
+  expect(embedUrl("https://app.example/#/docs", "https://app.example")).toBeNull();
+  expect(embedUrl("https://app.example/", "https://other.example")).toEqual({ src: "https://app.example/" });
+  expect(embedUrl("https://video.example/embed/aqz-KE-bpKQ", dev)).toEqual({ src: "https://video.example/embed/aqz-KE-bpKQ" });
+  expect(embedUrl("https://localhost.example/", dev)).toEqual({ src: "https://localhost.example/" });
 });
 
 test("an open from the frame runs only behind the reader's click, one per gap; any other is asked once at a time", () => {

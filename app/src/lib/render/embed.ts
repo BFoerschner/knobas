@@ -24,10 +24,12 @@
  * click only ({@link openVerdict}). The parent takes a message only from its
  * own frame ({@link embedMessage} reads it).
  *
- * A URL embed (#2441) is the same sandboxed frame with the page as its `src`
+ * A URL embed (#2441) is a sandboxed frame with the page as its `src`
  * ({@link embedUrl}), framed by the app directly (its policy's `frame-src`
  * names `http:` and `https:`). The page is another origin's: knobas puts
- * nothing in it, so it reports no height and hands no link up.
+ * nothing in it, so it reports no height and hands no link up. It keeps that
+ * origin and gets a referrer ({@link EMBED_URL_SANDBOX}, #2460); the app's
+ * own origin is never framed that way.
  */
 import { base64Of } from "./bytes";
 import { FRAME_SCHEME, type FrameBridge } from "./frame";
@@ -102,14 +104,50 @@ export function embedMessage(data: unknown): EmbedMessage | null {
 }
 
 /**
- * Where a URL embed's frame draws from (#2441): the URL itself, in the same
- * sandbox, when it is an absolute `http(s)` URL with a host; `null` for
- * anything else. The adapter already refuses other schemes
- * (`EmbedContent::url`); this holds for one that does not.
+ * A URL embed's sandbox (#2460): {@link EMBED_SANDBOX} plus `allow-same-origin`,
+ * so the framed page runs as its own origin, with its own cookies and storage.
+ * YouTube's player draws nothing in an opaque origin (headless Chrome, #2460).
+ * The page is still another origin's, so the browser keeps it off the app's
+ * window, document and storage; {@link embedUrl} refuses every address that
+ * could be the app's origin, where `allow-same-origin` with `allow-scripts`
+ * would let the frame lift its own sandbox. An HTML embed never takes this:
+ * knobas serves the author's HTML itself, so its origin stays opaque.
  */
-export function embedUrl(url: string): { src: string } | null {
+export const EMBED_URL_SANDBOX = `${EMBED_SANDBOX} allow-same-origin`;
+
+/**
+ * A URL embed's referrer (#2460): the app's origin and nothing after it.
+ * YouTube's player refuses to start without one ("Error 153"). An HTML
+ * embed's frame sends none.
+ */
+export const EMBED_URL_REFERRER = "strict-origin";
+
+/**
+ * Hosts that are, or could be, the app's own origin under some webview:
+ * `tauri.localhost`, `ipc.localhost` and `knobas-render.localhost` (WebView2
+ * and Android), the dev server's `localhost`, and loopback by any spelling.
+ * `tauri:`, `ipc:` and `knobas-render:` themselves fall to the scheme check.
+ */
+const OWN_HOST = /^(?:localhost|.+\.localhost|127(?:\.\d+){3}|0\.0\.0\.0|\[::1?\]|\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\])$/i;
+
+/**
+ * Where a URL embed's frame draws from (#2441): the URL itself, in
+ * {@link EMBED_URL_SANDBOX}, when it is an absolute `http(s)` URL with a host
+ * that cannot be the app's origin; `null` for anything else. The adapter
+ * already refuses other schemes (`EmbedContent::url`); this holds for one that
+ * does not. `own` is the app window's origin (a test passes another).
+ */
+export function embedUrl(url: string, own: string = window.location.origin): { src: string } | null {
   const match = /^https?:\/\/[^/?#\s]+/i.exec(url);
-  return match !== null && !/\s/.test(url) ? { src: url } : null;
+  if (match === null || /\s/.test(url)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.origin === own || OWN_HOST.test(parsed.hostname.replace(/\.$/, ""))) return null;
+  return { src: url };
 }
 
 /**
