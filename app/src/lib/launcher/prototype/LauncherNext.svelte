@@ -80,11 +80,22 @@
   monitor's type, a page's space, a pipeline's project); the caret bar on
   the box is gone.
 
+  Round 11 (Björn, 2026-11-02): a toggle between *Titles* (what is on
+  screen) and *Everything* (⌘D, or the chip at the right of the box). With
+  Everything on the dialog grows and splits: results at the left, and at the
+  right a preview of where the words appear in the selected row: a page's
+  own search hits (`docs_search`), a pipeline's latest run log, the text of
+  a ticket, pull request or note from its view. Words found only in a run
+  log add the pipeline to the answer. PROTOTYPE: the log search reads each
+  pipeline's latest log through the IPC and keeps it in memory; the real
+  change is an index in the backend. *Titles* is a client-side filter on
+  the engine's answer; the real change is a flag on the query.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import {
     ackAlert,
@@ -92,6 +103,10 @@
     cloneRepo,
     completeInboxItem,
     createLink,
+    docsSearch,
+    pipelineRuns,
+    pipelines as listPipelines,
+    runLog,
     createSmartList as defaultCreateSmartList,
     deleteSmartList as defaultDeleteSmartList,
     entityView,
@@ -107,7 +122,7 @@
     submitWrite,
     ticketViews,
   } from "../../ipc";
-  import type { CheckoutApplication, EntityRow, InboxItem, LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
+  import type { CheckoutApplication, EntityRow, InboxItem, LinkSetMemberKind, LinkSetRow, PipelineRow } from "../../ipc/entity";
   import type { LauncherHome, ResultGroup, SearchHit, SearchQuery, SearchResponse, SmartListSummary, TicketViewRow } from "../../ipc/search";
   import type { MergeStyle } from "../../ipc/sources";
   import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
@@ -209,7 +224,7 @@
     return `${event.ctrlKey ? "⌃" : ""}${event.altKey ? "⌥" : ""}${event.shiftKey ? "⇧" : ""}${event.metaKey ? "⌘" : ""}${key}`;
   }
   /** The launcher's own chords, never bindable. */
-  const RESERVED = new Set(["⌘K", "⌘S", "⌘B", "⌃K", "⌃S", "⌃B"]);
+  const RESERVED = new Set(["⌘K", "⌘S", "⌘B", "⌘D", "⌃K", "⌃S", "⌃B", "⌃D"]);
 
   function isFavourite(entityId: string): boolean {
     return favourites.some((row) => row.entity_id === entityId);
@@ -254,6 +269,136 @@
     if (chord) next[listId] = chord;
     listKeys = next;
     keep(KEPT.listKeys, listKeys);
+  }
+
+  // ---- PROTOTYPE: Titles or Everything (round 11) ----------------------------
+
+  /** `true`: search everything and preview where the words appear; `false`: only what is on screen, the titles. */
+  let deep = $state<boolean>(kept("knobas.prototype.deep", false));
+  function setDeep(on: boolean) {
+    deep = on;
+    keep("knobas.prototype.deep", on);
+    if (session.raw.trim() !== "") session.set(session.raw);
+    box?.focus();
+  }
+
+  const WORD = (text: string) => text.toLowerCase().split(/\s+/).filter((word) => word.length >= 2 && !word.startsWith("#"));
+
+  /** Whether every word is in the title: the *Titles* reading of a hit. */
+  function inTitle(title: string, words: string[]): boolean {
+    const hay = title.toLowerCase();
+    return words.every((word) => hay.includes(word));
+  }
+
+  /** One excerpt of a preview: text around a match, the matches marked. */
+  interface Excerpt {
+    where: string | null;
+    segments: { text: string; hit: boolean }[];
+  }
+
+  /** Every place the words appear in `text`, ±70 characters, at most `cap` of them. */
+  function excerptsOf(text: string, words: string[], where: string | null, cap = 6): Excerpt[] {
+    const flat = text.replace(/\s+/g, " ").trim();
+    const lower = flat.toLowerCase();
+    const out: Excerpt[] = [];
+    let from = 0;
+    while (out.length < cap) {
+      let at = -1;
+      let word = "";
+      for (const candidate of words) {
+        const found = lower.indexOf(candidate, from);
+        if (found >= 0 && (at < 0 || found < at)) {
+          at = found;
+          word = candidate;
+        }
+      }
+      if (at < 0) break;
+      const start = Math.max(0, at - 70);
+      const end = Math.min(flat.length, at + word.length + 90);
+      const slice = flat.slice(start, end);
+      const segments: Excerpt["segments"] = [];
+      let cursor = 0;
+      const sliceLower = slice.toLowerCase();
+      for (;;) {
+        let next = -1;
+        let hitWord = "";
+        for (const candidate of words) {
+          const found = sliceLower.indexOf(candidate, cursor);
+          if (found >= 0 && (next < 0 || found < next)) {
+            next = found;
+            hitWord = candidate;
+          }
+        }
+        if (next < 0) break;
+        if (next > cursor) segments.push({ text: slice.slice(cursor, next), hit: false });
+        segments.push({ text: slice.slice(next, next + hitWord.length), hit: true });
+        cursor = next + hitWord.length;
+      }
+      if (cursor < slice.length) segments.push({ text: slice.slice(cursor), hit: false });
+      if (start > 0) segments.unshift({ text: "…", hit: false });
+      if (end < flat.length) segments.push({ text: "…", hit: false });
+      out.push({ where, segments });
+      from = end;
+    }
+    return out;
+  }
+
+  /** Every string worth reading in a view's blocks: a prototype's reading of a page, a ticket, a pull request. */
+  function textsOf(value: unknown, out: string[] = [], depth = 0): string[] {
+    if (depth > 8 || value === null || value === undefined) return out;
+    if (typeof value === "string") {
+      if (value.length >= 12) out.push(value);
+      return out;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) textsOf(item, out, depth + 1);
+      return out;
+    }
+    if (typeof value === "object") {
+      for (const [key, inner] of Object.entries(value as Record<string, unknown>)) {
+        if (["entity_id", "id", "kind", "source_id", "url", "web_url", "href", "icon", "monogram", "tone", "updated_at", "synced_at"].includes(key)) continue;
+        textsOf(inner, out, depth + 1);
+      }
+    }
+    return out;
+  }
+
+  /** The latest run's log per pipeline, read once and kept; the real change is an index. */
+  const logs = new Map<string, { title: string; text: string; lines: { number: number; text: string }[] }>();
+  let pipelineRows: PipelineRow[] | null = null;
+  async function logOf(pipeline: PipelineRow) {
+    const had = logs.get(pipeline.entity_id);
+    if (had) return had;
+    const runs = pipeline.recent.length > 0 ? pipeline.recent : await pipelineRuns(pipeline.entity_id, 1).catch(() => []);
+    const run = runs[0];
+    const log = run ? await runLog(run.entity_id).catch(() => null) : null;
+    const lines = (log?.lines ?? []).map((line) => ({ number: line.number, text: line.text }));
+    const entry = { title: pipeline.name, text: lines.map((line) => line.text).join("\n"), lines };
+    logs.set(pipeline.entity_id, entry);
+    return entry;
+  }
+
+  /** The pipelines whose latest log holds every word, as hits. */
+  async function logHits(words: string[], at: string): Promise<SearchHit[]> {
+    if (words.length === 0) return [];
+    pipelineRows ??= await listPipelines().catch(() => []);
+    const hits: SearchHit[] = [];
+    for (const pipeline of pipelineRows) {
+      const log = await logOf(pipeline);
+      const lower = log.text.toLowerCase();
+      if (!words.every((word) => lower.includes(word))) continue;
+      hits.push({
+        ...BLANK,
+        entity_id: pipeline.entity_id,
+        kind: "pipeline",
+        source_id: pipeline.source_id,
+        title: pipeline.name,
+        synced_at: at,
+        path: pipeline.path.join(" › "),
+        state: pipeline.recent[0]?.state ?? null,
+      });
+    }
+    return hits;
   }
 
   // ---- PROTOTYPE: the local corpus the backend does not index yet ----------
@@ -439,6 +584,53 @@
     const sent = kinds.length === 0 ? query : { ...query, raw: [...kinds.map((kind) => `kind:${kind}`), text].join(" ") };
     let response = await realSearch(sent);
     response = { ...response, groups: response.groups.filter((group) => !LEFT_OUT.has(group.kind)) };
+    const words = WORD(text);
+    if (!deep) {
+      // Titles: only what is on screen matches. PROTOTYPE: a client-side filter; the real change is a flag on the query.
+      const groups = response.groups
+        .map((group) => ({ ...group, hits: group.hits.filter((hit) => inTitle(hit.title, words)) }))
+        .filter((group) => group.hits.length > 0)
+        .map((group) => ({ ...group, total: group.hits.length }));
+      response = { ...response, groups, total: groups.reduce((n, group) => n + group.total, 0) };
+    } else if (words.length > 0) {
+      // Everything: the Docs area's own search for pages, and the pipelines whose latest log holds the words.
+      const wantPages = kinds.length === 0 || kinds.includes("page");
+      const wantPipelines = kinds.length === 0 || kinds.includes("pipeline");
+      const [docs, fromLogs] = await Promise.all([
+        wantPages ? docsSearch(text, null).catch(() => null) : Promise.resolve(null),
+        wantPipelines ? logHits(words, at) : Promise.resolve([] as SearchHit[]),
+      ]);
+      const groups = response.groups.map((group) => ({ ...group, hits: [...group.hits] }));
+      const into = (kind: string, label: string, plural: string, monogram: string, hits: SearchHit[]) => {
+        if (hits.length === 0) return;
+        let group = groups.find((candidate) => candidate.kind === kind);
+        if (!group) {
+          group = { kind, label, plural, monogram, total: 0, hits: [] };
+          groups.push(group);
+        }
+        const had = new Set(group.hits.map((hit) => hit.entity_id));
+        for (const hit of hits) if (!had.has(hit.entity_id)) group.hits.push(hit);
+        group.total = group.hits.length;
+      };
+      into(
+        "page",
+        "Page",
+        "Pages",
+        "PG",
+        (docs?.hits ?? []).map((hit) => ({
+          ...BLANK,
+          entity_id: hit.entity_id,
+          kind: "page",
+          source_id: "confluence",
+          title: hit.title,
+          synced_at: at,
+          path: hit.path ?? hit.space?.name ?? null,
+          snippet: hit.snippet.segments,
+        })),
+      );
+      into("pipeline", "Pipeline", "Pipelines", "PL", fromLogs);
+      response = { ...response, groups, total: groups.reduce((n, group) => n + group.hits.length, 0) };
+    }
     if (kinds.length === 1 && kinds[0] === "page") response = docsRow(response, at);
     if (localGroups.length > 0) {
       response = { ...response, groups: [...response.groups, ...localGroups], total: response.total + localGroups.reduce((n, group) => n + group.total, 0) };
@@ -1108,6 +1300,79 @@
     if (sheet && session.current?.id !== sheet.rowId) sheet = null;
   });
 
+  // ---- the preview pane (round 11): where the words appear in the selected row ----
+
+  interface Preview {
+    rowId: string;
+    /** The words the excerpts were read for, so a new search reads again. */
+    words: string;
+    title: string;
+    kind: string;
+    excerpts: Excerpt[];
+    loading: boolean;
+  }
+  let preview = $state<Preview | null>(null);
+  let previewTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** The words of the search, for the preview to mark. */
+  const searchWords = $derived(WORD(session.response?.interpreted.text ?? session.raw.replace(/#\S+/g, "")));
+
+  async function readPreview(row: LauncherRow, words: string[]): Promise<Excerpt[]> {
+    if (row.kind === "hit" && row.hit.kind === "pipeline") {
+      pipelineRows ??= await listPipelines().catch(() => []);
+      const pipeline = pipelineRows.find((candidate) => candidate.entity_id === row.hit.entity_id);
+      if (!pipeline) return [];
+      const log = await logOf(pipeline);
+      const lines = log.lines.filter((line) => words.some((word) => line.text.toLowerCase().includes(word))).slice(0, 12);
+      return lines.flatMap((line) => excerptsOf(line.text, words, `line ${line.number}`, 1));
+    }
+    if (row.kind === "hit" && row.hit.kind === "page") {
+      const docs = await docsSearch(words.join(" "), null).catch(() => null);
+      const own = docs?.hits.filter((hit) => hit.entity_id === row.hit.entity_id) ?? [];
+      const fromDocs = own.map((hit) => ({ where: hit.snippet.section, segments: hit.snippet.segments }));
+      if (fromDocs.length > 0) return fromDocs;
+    }
+    const entity = entityOf(row);
+    if (entity) {
+      const view = await entityView(entity.entityId, null).catch(() => null);
+      const texts = view ? textsOf(view.sections) : [];
+      const seen = new Set<string>();
+      const out: Excerpt[] = [];
+      for (const text of texts) {
+        if (seen.has(text)) continue;
+        seen.add(text);
+        out.push(...excerptsOf(text, words, null, 3));
+        if (out.length >= 10) break;
+      }
+      if (out.length > 0) return out.slice(0, 10);
+    }
+    if (row.kind === "hit" && row.hit.snippet.length > 0) return [{ where: null, segments: row.hit.snippet }];
+    if (row.kind === "hit" && row.hit.path) return excerptsOf(`${row.hit.title} ${row.hit.path}`, words, null, 1);
+    return [];
+  }
+
+  // The preview follows the selection, a breath after it settles.
+  $effect(() => {
+    const row = session.current;
+    const words = searchWords;
+    const wanted = deep && !sheet && !help && session.mode === "results" && row !== null;
+    if (previewTimer) clearTimeout(previewTimer);
+    if (!wanted || !row) {
+      if (untrack(() => preview) !== null) preview = null;
+      return;
+    }
+    // Read without tracking: this effect sets `preview`, and must not follow its own write.
+    const had = untrack(() => preview);
+    if (had?.rowId === row.id && had.words === words.join(" ")) return;
+    preview = { rowId: row.id, words: words.join(" "), title: nameOf(row) || (row.kind === "hit" ? row.hit.title : ""), kind: kindOfRow(row), excerpts: [], loading: true };
+    previewTimer = setTimeout(() => {
+      void readPreview(row, words).then((excerpts) => {
+        const current = untrack(() => preview);
+        if (current?.rowId === row.id) preview = { ...current, excerpts, loading: false };
+      });
+    }, 120);
+  });
+
   // ---- ids, scrolling, the `>` palette -----------------------------------
 
   const uid = $props.id();
@@ -1437,6 +1702,11 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "d" && !event.shiftKey && !event.altKey) {
+      event.preventDefault();
+      setDeep(!deep);
+      return;
+    }
     if (naming !== null) {
       namingKey(event, naming);
       return;
@@ -1533,7 +1803,7 @@
 </script>
 
 {#if open}
-  <TfDialog title="Search and actions" className="tf-launch" onclose={close}>
+  <TfDialog title="Search and actions" className={deep ? "tf-launch tf-launch-deep" : "tf-launch"} onclose={close}>
     {#snippet body()}
       <!-- The label is its own element in front of the box: highlighted, never part of the text, never deletable. -->
       <div class="boxrow" class:labelled={mode !== null}>
@@ -1555,6 +1825,9 @@
         {onkeydown}
         onclose={close}
       />
+        <button type="button" class="scope" class:on={deep} onclick={() => setDeep(!deep)} title="⌘D">
+          {deep ? "Everything" : "Titles"}
+        </button>
       </div>
 
       {#if sheet}
@@ -1719,6 +1992,7 @@
           <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
         {/if}
 
+        <div class="split" class:two={deep && session.mode === "results"}>
         <div id={resultsId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Results">
           {#if session.error}
             <p class="tf-ln-none tf-ln-err">{session.error}</p>
@@ -1780,6 +2054,28 @@
             <p class="tf-ln-none">Searching…</p>
           {/if}
         </div>
+        {#if deep && session.mode === "results"}
+          <aside class="preview" aria-label="Where it matches">
+            {#if preview}
+              <p class="previewhead">{preview.title}</p>
+              {#if preview.loading && preview.excerpts.length === 0}
+                <p class="tf-ln-none">Reading…</p>
+              {:else if preview.excerpts.length === 0}
+                <p class="tf-ln-none">Only the title holds the words.</p>
+              {:else}
+                {#each preview.excerpts as excerpt, i (i)}
+                  <button type="button" class="excerpt" onclick={() => { const row = session.current; if (row) activate(row); }}>
+                    {#if excerpt.where}<span class="where">{excerpt.where}</span>{/if}
+                    <span class="text">{#each excerpt.segments as seg, j (j)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span>
+                  </button>
+                {/each}
+              {/if}
+            {:else}
+              <p class="tf-ln-none">Select a row to see where the words appear.</p>
+            {/if}
+          </aside>
+        {/if}
+        </div>
       {/if}
     {/snippet}
 
@@ -1809,6 +2105,7 @@
           <span><kbd>⌘S</kbd> {session.savedId === null ? "save as list" : "saved as list"}</span>
         {/if}
         <span><kbd>⌘?</kbd> help</span>
+        <span><kbd>⌘D</kbd> {deep ? "titles only" : "everything"}</span>
         <span><kbd>Esc</kbd> back one step</span>
         <span class="tf-spacer"></span>
       {/if}
@@ -1821,6 +2118,27 @@
   :global(.tf-launch .tf-ln-h) { padding-top: 10px; }
   /* The box's own ⌘K badge is gone (Björn, round 4); `QueryBox.svelte` would lose the element. */
   :global(.tf-launch .tf-ln-q > kbd) { display: none; }
+  /* Everything on: the dialog grows and the body splits, results at the left, the preview at the right. */
+  :global(.tf-dialog.tf-launch-deep) { width: min(1280px, calc(100vw - 32px)); height: min(840px, 92vh); }
+  .scope {
+    flex: none; margin-right: 12px; padding: 3px 10px; border: 1px solid var(--rule); border-radius: 4px;
+    font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); background: var(--sheet);
+  }
+  .scope:hover { color: var(--ink); border-color: var(--ink-2); }
+  .scope.on { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+  .split { flex: 1; min-height: 0; display: flex; }
+  .split > :global(.tf-ln-list) { flex: 1; min-width: 0; }
+  .split.two > :global(.tf-ln-list) { flex: 0 0 46%; border-right: 1px solid var(--rule); }
+  .preview { flex: 1; min-width: 0; overflow: auto; padding: 8px 0 12px; }
+  .previewhead { padding: 8px 18px 6px; font-size: var(--t-md); font-weight: 600; color: var(--ink); }
+  .excerpt {
+    display: block; width: 100%; text-align: left; padding: 7px 18px; font-size: var(--t-sm); line-height: 1.5; color: var(--ink-2);
+    border-bottom: 1px solid var(--rule-2);
+  }
+  .excerpt:hover { background: var(--sheet-2); }
+  .excerpt .where { display: block; font-size: var(--t-2xs); color: var(--ink-2); margin-bottom: 2px; }
+  .excerpt .text { color: var(--ink); white-space: normal; }
+  .excerpt mark { background: var(--mark); color: var(--ink); border-radius: 3px; padding: 0 1px; }
   .boxrow { display: flex; align-items: center; flex: none; border-bottom: 1px solid var(--rule); }
   .boxrow :global(.tf-ln-q) { flex: 1; min-width: 0; border-bottom: 0; }
   .mode {

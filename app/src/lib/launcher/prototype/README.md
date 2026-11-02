@@ -36,7 +36,8 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | A key on a saved list | Tab on the list, *Assign key…*: a panel shows the keys as you press them, large; Enter or OK keeps them, Backspace clears, Esc leaves things as they were. From then on that chord opens the list from anywhere, launcher closed or not. |
 | A key on an action | Tab on a row, select the action, ⌘B: the same panel, the keys shown as you press them, Enter or OK keeps them. From then on that chord runs the action on whatever row of that **kind** is selected, without opening the actions. The same chord can mean another action on another kind: ⌘⇧O is *Open in VS Code* on repositories and *Approve* on pull requests if you bind it so. The row shows its chord. |
 | *Favourite* on any entity or saved list | Puts it at the top of the empty box under one **Favourites** heading, lists and items alike, then the recents; *Unfavourite* takes it out. |
-| `#d sepa` | Pages only, path and excerpt, and a last row *Search Docs for "sepa"* that opens `#/docs`. |
+| `#d sepa` | Pages only, and a last row *Search Docs for "sepa"* that opens `#/docs`. |
+| **Titles** / **Everything** (⌘D, or the chip at the right of the box) | *Titles* finds only what is on screen: rows whose title holds the words. *Everything* searches bodies too, the dialog grows, and the body splits: results at the left, and at the right where the words appear in the selected row. A page shows the Docs area's own hits by section; a pipeline shows the lines of its latest run log; a ticket, pull request or note shows its text from its view. Words found only in a run log add the pipeline to the answer. A click on an excerpt opens the row. |
 
 ### The sheet, per kind
 
@@ -104,6 +105,8 @@ Shortcuts, each marked `PROTOTYPE` in the code:
 | *Merge…* is offered on every pull request. | The row follows the source's declared `merge_pull_request` action, as the PR page's button does, and shows its `disabled` reason. |
 | ⌘? draws a card written in the component, as an overlay the box narrows. | Rows in `syntax.json`, which the Rust test pins to the parser; the overlay and the merge of `#` letters in `Launcher.svelte`. |
 | The sheet's actions are a fixed list per kind, in the component. | A table per kind in `launcher/actions.ts`, and adapter-declared source actions joining it. |
+| *Titles* is a client-side filter on the engine's answer; *Everything* merges `docs_search` and reads each pipeline's latest run log through the IPC, kept in memory. | A `titles` flag on the query; run logs and page sections indexed in `knobas-search` with the match's place in the hit, so the preview is one read. |
+| The preview reads a ticket's, pull request's or note's text from its `entity_view` and marks the words itself. | The engine's `snippet` grows to every match with its section, or the view read is kept and the marking moves to the backend. |
 | Value suggestions and pasted-URL resolving are left out. | Nothing: they stay as shipped. |
 | Favourites, list keys and action keys live in `localStorage`. | A table each: a favourite is an entity id with a position; a key is a chord with a list id or a kind and an action id. The chords a list binds have to be registered with the shell's own keys so they work with the launcher closed. |
 | `BoardNext.svelte` is the recent items alone, favourites first. | `Board.svelte` loses the smart lists, the inbox, today's time and the source strip; built-in smart lists go, or move behind `#l`. The box loses its ⌘K badge and its footnote. |
