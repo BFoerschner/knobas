@@ -2,21 +2,29 @@
   PROTOTYPE: the ⌘K launcher rethought (clickdummy, 2026-11-02). Not production.
 
   One question: does "⌘K again opens the selected item's actions" feel right,
-  and do findable views and sets, `doc:` and an inline link close the gaps
-  Björn named? Mounted by `App.svelte` instead of `Launcher.svelte` under
+  and do findable views and lists, `d ` and `l `, and an inline link close the
+  gaps Björn named? Mounted by `App.svelte` instead of `Launcher.svelte` under
   `?launcher-next` (dev only); everything else in the shell is the real thing.
 
+  Round 2 (Björn, 2026-11-02): `d ` for pages and `l ` for saved lists, one
+  letter and a space like `t `; no mirror footnote; no lists block on the
+  board (lists are `l `, renamed and deleted from the sheet); Esc in the sheet
+  closes the sheet, never the dialog; typing in the sheet filters its actions;
+  ⌘S saves the query as a list.
+
   What is real here: `TfDialog`, `QueryBox`, `Chips`, `Results`, `Row`,
-  `Board`, `Help`, the `Session`, the `>` palette, the `?` card, Save as list,
-  and every write (`create_link`, `save_link_set`) goes through the real IPC.
+  `Help`, the `Session`, the `>` palette, the `?` card, and every write
+  (`create_link`, `save_link_set`, the list writes) goes through the real IPC.
   What is a shortcut, each marked PROTOTYPE below:
-    - `doc:` is rewritten to `kind:page` before asking (ruling P2 says the
-      backend parses; the real change is one prefix in `query.rs`);
+    - `d ` is rewritten to `kind:page` and `l ` is answered here from the
+      board's saved lists (ruling P2 says the backend parses; the real change
+      is two prefixes in `query.rs`);
     - the Views and Sets groups are built here from `ticket_views` and
       `link_sets` (the real change indexes both in `knobas-search`);
     - the "Search Docs for …" row stores its words and opens `#/docs`; the
       Docs page does not read them yet;
-    - the sheet's actions are a fixed list per kind, not adapter-declared.
+    - the sheet's actions are a fixed list per kind, not adapter-declared;
+    - `BoardNext.svelte` is `Board.svelte` without the lists block.
 
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
@@ -37,8 +45,8 @@
     search as defaultSearch,
     ticketViews,
   } from "../../ipc";
+  import type { LauncherHome, ResultGroup, SearchHit, SearchQuery, SearchResponse, SmartListSummary, TicketViewRow } from "../../ipc/search";
   import type { LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
-  import type { ResultGroup, SearchHit, SearchQuery, SearchResponse, TicketViewRow } from "../../ipc/search";
   import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
   import { drawn } from "../../detail/relations";
   import type { HealthPhase } from "../../shell/health.svelte";
@@ -51,7 +59,6 @@
   import { jobHash } from "../../tf/route";
   import TfDialog from "../../tf/settings/TfDialog.svelte";
   import { keyOf } from "../../time/format";
-  import Board from "../Board.svelte";
   import Chips from "../Chips.svelte";
   import Help from "../Help.svelte";
   import QueryBox from "../QueryBox.svelte";
@@ -60,6 +67,7 @@
   import { type LauncherAction, filterActions, navigationActions } from "../actions";
   import type { InboxPreview, LauncherRow, TodayTime } from "../rows";
   import { Session, type SessionPorts } from "../session.svelte";
+  import BoardNext from "./BoardNext.svelte";
 
   let {
     open = $bindable(false),
@@ -101,6 +109,9 @@
 
   let views: TicketViewRow[] = [];
   let sets = $state<LinkSetRow[]>([]);
+  /** The saved lists, as the board read them; the board itself no longer draws them. */
+  let lists = $state<SmartListSummary[]>([]);
+  let listsLoaded = false;
 
   async function loadLocal() {
     try {
@@ -111,14 +122,24 @@
     }
   }
 
-  const PLACEHOLDER_GROUP = { updated_at: null, state: null, rank: 1, snippet: [] as SearchHit["snippet"] };
+  // svelte-ignore state_referenced_locally
+  const realHome = ports?.launcherHome ?? defaultHome;
 
-  /** A saved ticket view as a hit: its address is the key, its conditions the path line. */
+  /** The board without lists: the saved ones are kept aside for `l `, the built-ins are gone. */
+  async function homeNext(): Promise<LauncherHome> {
+    const home = await realHome();
+    lists = home.smart_lists.filter((list) => list.saved);
+    listsLoaded = true;
+    return { ...home, smart_lists: [] };
+  }
+
+  const BLANK = { updated_at: null, state: null, rank: 1, snippet: [] as SearchHit["snippet"] };
+
   function viewGroup(needle: string, at: string): ResultGroup | null {
     const hits: SearchHit[] = views
       .filter((view) => `${view.name} ${view.group} ${view.query}`.toLowerCase().includes(needle))
       .map((view) => ({
-        ...PLACEHOLDER_GROUP,
+        ...BLANK,
         entity_id: `view:${view.id}`,
         kind: "view",
         source_id: "local",
@@ -129,12 +150,11 @@
     return hits.length === 0 ? null : { kind: "view", label: "View", plural: "Views", monogram: "VW", total: hits.length, hits };
   }
 
-  /** A link set as a hit: what it holds and where it applies, on the path line. */
   function setGroup(needle: string, at: string): ResultGroup | null {
     const hits: SearchHit[] = sets
       .filter((set) => `${set.name} ${set.description}`.toLowerCase().includes(needle))
       .map((set) => ({
-        ...PLACEHOLDER_GROUP,
+        ...BLANK,
         entity_id: `set:${set.id}`,
         kind: "set",
         source_id: "local",
@@ -145,12 +165,34 @@
     return hits.length === 0 ? null : { kind: "set", label: "Set", plural: "Sets", monogram: "LS", total: hits.length, hits };
   }
 
-  /** The last row of a `doc:` answer: the same words, in the Docs area. */
+  /** `l ⟨text⟩`: the saved lists whose name or description holds the text; `l` alone is all of them. */
+  function listsAnswer(text: string, at: string): SearchResponse {
+    const needle = text.toLowerCase();
+    const hits: SearchHit[] = lists
+      .filter((list) => `${list.label} ${list.description}`.toLowerCase().includes(needle))
+      .map((list) => ({
+        ...BLANK,
+        entity_id: `list:${list.id}`,
+        kind: "list",
+        source_id: "local",
+        title: list.label,
+        synced_at: at,
+        path: list.needs_attention ? `${list.description} · needs attention` : `${list.description} · ${counted(list.count, "item", "items")}`,
+      }));
+    return {
+      interpreted: { text, prefix: "list", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+      groups: hits.length === 0 ? [] : [{ kind: "list", label: "Saved list", plural: "Saved lists", monogram: "LI", total: hits.length, hits }],
+      total: hits.length,
+      took_ms: 0,
+      coverage: [],
+    };
+  }
+
   function docsRow(response: SearchResponse, at: string): SearchResponse {
     const text = response.interpreted.text.trim();
     if (text === "") return response;
     const hit: SearchHit = {
-      ...PLACEHOLDER_GROUP,
+      ...BLANK,
       entity_id: `docs:${text}`,
       kind: "docs",
       source_id: "local",
@@ -165,44 +207,47 @@
   // svelte-ignore state_referenced_locally
   const realSearch = ports?.search ?? defaultSearch;
 
-  /** The search port with the prototype's three additions layered over the real answer. */
+  /** The two one-letter prefixes, `t ` style: `d ` pages, `l ` saved lists. */
+  const DOCS = /^d(?:\s+|$)/i;
+  const LISTS = /^l(?:\s+|$)/i;
+
+  /** The search port with the prototype's additions layered over the real answer. */
   async function searchNext(query: SearchQuery): Promise<SearchResponse> {
-    const docs = /^doc:/i.test(query.raw.trim());
-    // PROTOTYPE: the frontend rewrites grammar here, against ruling P2.
-    const sent = docs ? { ...query, raw: query.raw.trim().replace(/^doc:\s*/i, "kind:page ") } : query;
-    const response = await realSearch(sent);
+    const raw = query.raw.trim();
     const at = (now ?? new Date()).toISOString();
+    // PROTOTYPE: the frontend reads grammar here, against ruling P2.
+    if (LISTS.test(raw)) {
+      // The board's read may still be in flight on the first keystroke.
+      if (!listsLoaded) await homeNext();
+      return listsAnswer(raw.replace(LISTS, "").trim(), at);
+    }
+    const docs = DOCS.test(raw);
+    const sent = docs ? { ...query, raw: raw.replace(DOCS, "kind:page ") } : query;
+    const response = await realSearch(sent);
     if (docs) return docsRow(response, at);
     if (response.interpreted.prefix !== null) return response;
     const needle = response.interpreted.text.trim().toLowerCase();
     if (needle === "") return response;
     const local = [viewGroup(needle, at), setGroup(needle, at)].filter((group): group is ResultGroup => group !== null);
     if (local.length === 0) return response;
-    return {
-      ...response,
-      groups: [...local, ...response.groups],
-      total: response.total + local.reduce((n, group) => n + group.total, 0),
-    };
+    return { ...response, groups: [...local, ...response.groups], total: response.total + local.reduce((n, group) => n + group.total, 0) };
   }
 
   // svelte-ignore state_referenced_locally
   const session = new Session({
-    search: searchNext,
-    launcherHome: defaultHome,
     createSmartList: defaultCreateSmartList,
     renameSmartList: defaultRenameSmartList,
     deleteSmartList: defaultDeleteSmartList,
     filterSuggestions: defaultFilterSuggestions,
     ...ports,
-    // The wrapper wins over an injected port: it wraps whatever was injected.
-    ...(ports?.search ? { search: searchNext } : {}),
+    search: searchNext,
+    launcherHome: homeNext,
   });
 
   const health = $derived(sources ?? session.home?.sources ?? []);
   const sourcesPhase = $derived(sourcesRead?.phase ?? "ready");
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
-  let renaming = $state<string | null>(null);
 
   // ---- the sheet: what the second ⌘K opens -------------------------------
 
@@ -227,12 +272,15 @@
   interface Sheet {
     rowId: string;
     row: LauncherRow;
-    /** What the heading names. */
     title: string;
     selected: number;
     relation: number;
-    /** `sets` is the second level: pick a set for *Add to a set…*. */
-    level: "root" | "sets";
+    /** `sets` picks a set; `rename` holds the field for a saved list's new name. */
+    level: "root" | "sets" | "rename";
+    /** What was typed since the sheet opened: the fuzzy filter over its actions. */
+    filter: string;
+    /** The rename field's starting text. */
+    name: string;
   }
 
   let sheet = $state<Sheet | null>(null);
@@ -243,11 +291,10 @@
     kind: string;
   }
 
-  /** The entity a row stands for; a view, a set, a list and the docs row are not one. */
   function entityOf(row: LauncherRow): Entity | null {
     switch (row.kind) {
       case "hit":
-        if (row.hit.kind === "view" || row.hit.kind === "set" || row.group.kind === "docs-search") return null;
+        if (["view", "set", "list"].includes(row.hit.kind) || row.group.kind === "docs-search") return null;
         return { entityId: row.hit.entity_id, title: row.hit.title, kind: row.hit.kind };
       case "recent":
         return { entityId: row.row.entity_id, title: row.row.title, kind: row.row.kind };
@@ -256,16 +303,13 @@
     }
   }
 
-  /** What a row is called in the footer and the sheet's heading. */
   function nameOf(row: LauncherRow): string {
     const entity = entityOf(row);
     if (entity) return entity.kind === "ticket" ? keyOf(entity.entityId) : entity.title;
     if (row.kind === "hit") return row.hit.title;
-    if (row.kind === "list") return row.list.label;
     return "";
   }
 
-  /** The set member kind an entity can be, or `null` for a kind sets do not hold. */
   function memberKindOf(kind: string): LinkSetMemberKind | null {
     switch (kind) {
       case "page":
@@ -279,10 +323,6 @@
     }
   }
 
-  function relationLabel(index: number): string {
-    return RELATIONS[index]?.label ?? "related";
-  }
-
   async function writeLink(entity: Entity, relationIndex: number) {
     const job = openEntity;
     if (!job) return;
@@ -291,7 +331,7 @@
     try {
       await createLink(link.fromId, link.toId, link.relation);
       const name = entity.kind === "ticket" ? keyOf(entity.entityId) : entity.title;
-      push({ text: `Linked ${name} to ${job.label} as ${relationLabel(relationIndex)}` });
+      push({ text: `Linked ${name} to ${job.label} as ${RELATIONS[relationIndex]?.label ?? "related"}` });
       close();
     } catch (cause) {
       sheet = null;
@@ -299,7 +339,6 @@
     }
   }
 
-  /** A fixed member for a kind sets hold; a manual rule for a ticket. */
   async function putInSet(set: LinkSetRow, entity: Entity) {
     const member = memberKindOf(entity.kind);
     const draft = {
@@ -332,13 +371,33 @@
     close();
   }
 
+  /** A saved list's rename, committed from the sheet's field: the lists are re-read and the `l ` answer redrawn. */
+  async function renameList(id: string, name: string) {
+    const label = name.trim();
+    sheet = null;
+    if (label === "") return;
+    await session.renameList(id, label);
+    await session.loadHome();
+    session.set(session.raw);
+    box?.focus();
+  }
+
+  async function deleteList(id: string) {
+    sheet = null;
+    await session.deleteList(id);
+    await session.loadHome();
+    session.set(session.raw);
+    box?.focus();
+  }
+
   /** The sheet's rows for `row`, in the order they are drawn. Empty: no sheet. */
   function itemsFor(row: LauncherRow): SheetItem[] {
-    if (row.kind === "list") {
-      if (!row.list.saved) return [];
+    if (row.kind === "hit" && row.hit.kind === "list") {
+      const id = keyOf(row.hit.entity_id);
       return [
-        { id: "rename", label: "Rename", detail: "The name becomes a field on the board", run: () => startRename(row.list.id) },
-        { id: "delete", label: "Delete", detail: "The saved query is gone; there is no undo", run: () => { sheet = null; void session.deleteList(row.list.id); } },
+        { id: "apply", label: "Apply", detail: "Its filters in the box, as Enter does", run: () => activate(row) },
+        { id: "rename", label: "Rename", detail: "Give the list a new name", run: () => { if (sheet) sheet = { ...sheet, level: "rename", name: row.hit.title }; } },
+        { id: "delete", label: "Delete", detail: "The saved query is gone; there is no undo", run: () => deleteList(id) },
       ];
     }
     if (row.kind === "hit" && row.hit.kind === "view") {
@@ -354,12 +413,7 @@
       const job = openEntity;
       const set = sets.find((candidate) => candidate.id === id);
       if (job && set) {
-        items.push({
-          id: "show",
-          label: `Show on ${job.label}`,
-          detail: "A rule for this one ticket, by hand",
-          run: () => putInSet(set, { entityId: job.entityId, title: job.label, kind: "ticket" }),
-        });
+        items.push({ id: "show", label: `Show on ${job.label}`, detail: "A rule for this one ticket, by hand", run: () => putInSet(set, { entityId: job.entityId, title: job.label, kind: "ticket" }) });
       }
       return items;
     }
@@ -368,13 +422,7 @@
     const items: SheetItem[] = [];
     const job = openEntity;
     if (job && entity.entityId !== job.entityId) {
-      items.push({
-        id: "link",
-        label: `Link to ${job.label}`,
-        detail: "",
-        link: true,
-        run: () => writeLink(entity, sheet?.relation ?? 0),
-      });
+      items.push({ id: "link", label: `Link to ${job.label}`, detail: "", link: true, run: () => writeLink(entity, sheet?.relation ?? 0) });
     }
     if (sets.length > 0) {
       const member = memberKindOf(entity.kind);
@@ -383,9 +431,7 @@
           id: "set",
           label: member ? "Add to a set…" : `Show a set on ${keyOf(entity.entityId)}…`,
           detail: member ? "A fixed member, shown on every ticket the set applies to" : "The set's members appear on this ticket",
-          run: () => {
-            if (sheet) sheet = { ...sheet, level: "sets", selected: 0 };
-          },
+          run: () => { if (sheet) sheet = { ...sheet, level: "sets", selected: 0, filter: "" }; },
         });
       }
     }
@@ -394,12 +440,7 @@
       items.push({ id: "timer", label: "Start timer", detail: "Stops the running one first", run: () => { start(entity.entityId, entity.title); close(); } });
     }
     if (entity.kind === "ticket") {
-      items.push({
-        id: "work",
-        label: "Work on this",
-        detail: `Makes ${keyOf(entity.entityId)} the job and opens its page`,
-        run: () => { close(); onnavigate(jobHash(entity.entityId)); },
-      });
+      items.push({ id: "work", label: "Work on this", detail: `Makes ${keyOf(entity.entityId)} the job and opens its page`, run: () => { close(); onnavigate(jobHash(entity.entityId)); } });
       items.push({ id: "copy", label: "Copy key", detail: keyOf(entity.entityId), run: () => void copy(keyOf(entity.entityId), `Copied ${keyOf(entity.entityId)}`) });
     } else {
       items.push({ id: "copy", label: "Copy title", detail: entity.title, run: () => void copy(entity.title, "Copied the title") });
@@ -407,31 +448,46 @@
     return items;
   }
 
-  /** The second level: one row per set. */
   const setItems = $derived.by((): SheetItem[] => {
     if (!sheet) return [];
     const entity = entityOf(sheet.row);
     if (!entity) return [];
-    return sets.map((set) => ({
-      id: `set:${set.id}`,
-      label: set.name,
-      detail: set.description,
-      run: () => putInSet(set, entity),
-    }));
+    return sets.map((set) => ({ id: `set:${set.id}`, label: set.name, detail: set.description, run: () => putInSet(set, entity) }));
   });
+
+  /**
+   * The fuzzy filter: every typed character in order, somewhere in the label
+   * or the detail; the tightest match first. Empty: everything, in order.
+   */
+  function fuzzy(items: SheetItem[], filter: string): SheetItem[] {
+    const needle = filter.toLowerCase().replace(/\s+/g, "");
+    if (needle === "") return items;
+    const scored = items.flatMap((item) => {
+      const hay = `${item.label} ${item.detail}`.toLowerCase();
+      let at = -1;
+      let first = -1;
+      for (const char of needle) {
+        at = hay.indexOf(char, at + 1);
+        if (at < 0) return [];
+        if (first < 0) first = at;
+      }
+      return [{ item, score: at - first + first / 100 }];
+    });
+    return scored.sort((left, right) => left.score - right.score).map((entry) => entry.item);
+  }
 
   /** The first level, derived live: the chosen job and the sets can arrive after the sheet opened. */
   const rootItems = $derived(sheet ? itemsFor(sheet.row) : []);
-  const shown = $derived(sheet ? (sheet.level === "sets" ? setItems : rootItems) : []);
+  const shown = $derived(sheet ? fuzzy(sheet.level === "sets" ? setItems : rootItems, sheet.filter) : []);
 
   function openSheet() {
     const row = session.current;
     if (!row) return;
     if (itemsFor(row).length === 0) return;
-    sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root" };
+    sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root", filter: "", name: "" };
   }
 
-  // The sheet belongs to one row: moving off it, or typing, closes it.
+  // The sheet belongs to one row: moving off it closes it.
   $effect(() => {
     if (sheet && session.current?.id !== sheet.rowId) sheet = null;
   });
@@ -447,7 +503,6 @@
   const activeOption = $derived.by(() => {
     const row = session.current;
     if (!row || session.error) return undefined;
-    if (row.kind === "list" && row.list.id === renaming) return undefined;
     return optionId(session.selected);
   });
   const controlled = $derived(sheet ? { list: sheetId, option: sheetOptionId(sheet.selected) } : { list: resultsId, option: activeOption });
@@ -499,6 +554,7 @@
           open = true;
         } else if (sheet) {
           sheet = null;
+          box?.focus();
         } else {
           openSheet();
         }
@@ -549,18 +605,14 @@
     }
   }
 
-  function startRename(id: string) {
-    sheet = null;
-    renaming = id;
-  }
-
-  function finishRename(id: string, label: string | null) {
-    renaming = null;
-    if (label !== null && label.trim() !== "") void session.renameList(id, label);
-    box?.focus();
-  }
-
   function activate(row: LauncherRow) {
+    // A saved list applies its filters in the box and keeps the reader here.
+    if (row.kind === "hit" && row.hit.kind === "list") {
+      sheet = null;
+      session.set(`list:${keyOf(row.hit.entity_id)}`);
+      box?.focus();
+      return;
+    }
     if (row.kind === "list") {
       if (row.list.needs_attention) return;
       session.set(`list:${row.list.id}`);
@@ -578,7 +630,28 @@
     onnavigate(hash);
   }
 
+  /** ⌘S: the query becomes a saved list, from either panel. `true` when the key was taken. */
+  function saveKey(event: KeyboardEvent): boolean {
+    if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return false;
+    event.preventDefault();
+    if (session.canSave && session.savedId === null) {
+      const label = session.raw.trim();
+      void session.saveCurrent(label).then(() => push({ text: `Saved “${label}” as a list` }));
+    }
+    return true;
+  }
+
   function sheetKey(event: KeyboardEvent, current: Sheet) {
+    if (current.level === "rename") {
+      // The field answers its own keys; Esc here is the field's too, so it never reaches the dialog.
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        sheet = { ...current, level: "root" };
+        box?.focus();
+      }
+      return;
+    }
     const items = shown;
     switch (event.key) {
       case "ArrowDown":
@@ -606,16 +679,29 @@
         sheet = null;
         return;
       case "Escape":
+        // One rung per press, and never the dialog's: the filter, then the level, then the sheet.
         event.preventDefault();
         event.stopPropagation();
-        if (current.level === "sets") sheet = { ...current, level: "root", selected: Math.max(0, rootItems.findIndex((item) => item.id === "set")) };
+        if (current.filter !== "") sheet = { ...current, filter: "", selected: 0 };
+        else if (current.level === "sets") sheet = { ...current, level: "root", selected: Math.max(0, rootItems.findIndex((item) => item.id === "set")) };
         else sheet = null;
+        box?.focus();
+        return;
+      case "Backspace":
+        event.preventDefault();
+        sheet = { ...current, filter: current.filter.slice(0, -1), selected: 0 };
         return;
       default:
+        // A printable key narrows the actions; the box keeps its words.
+        if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
+          event.preventDefault();
+          sheet = { ...current, filter: current.filter + event.key, selected: 0 };
+        }
     }
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (saveKey(event)) return;
     if (sheet) {
       sheetKey(event, sheet);
       return;
@@ -649,10 +735,14 @@
     }
   }
 
-  const placeholder = "Search everything, or type > for actions, # tickets, doc: pages, @ people, / source, ? help";
-  const footnote = $derived(`mirror · ${counted(session.home?.pending_writes ?? 0, "pending write", "pending writes")}`);
+  /** The rename field takes focus and selects the old name as it opens. */
+  function takeFocus(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  const placeholder = "Search everything, or > actions, # tickets, d pages, l lists, @ people, / source, ? help";
   const interpreted = $derived(session.response?.interpreted ?? null);
-  /** What the footer says the second ⌘K would open, or nothing when the row has no sheet. */
   const sheetHint = $derived.by(() => {
     const row = session.current;
     if (!row || sheet) return null;
@@ -665,6 +755,7 @@
     if (sheet.row.kind === "recent") return { ...sheet.row.row, snippet: [] };
     return null;
   });
+  const listId = $derived(sheet?.row.kind === "hit" && sheet.row.hit.kind === "list" ? keyOf(sheet.row.hit.entity_id) : null);
 </script>
 
 {#if open}
@@ -675,7 +766,7 @@
         value={session.raw}
         {placeholder}
         pending={session.pending}
-        {footnote}
+        footnote=""
         controls={controlled.list}
         active={controlled.option}
         oninput={(value) => { sheet = null; session.type(value); }}
@@ -684,7 +775,7 @@
       />
 
       {#if sheet}
-        <!-- The row the sheet acts on, lifted under the box; the box keeps its words, dimmed. -->
+        <!-- The row the sheet acts on, lifted under the box; the box keeps its words. -->
         <div class="pinned">
           {#if pinnedHit}
             <Row
@@ -706,58 +797,88 @@
             <p class="lead">{sheet.title}</p>
           {/if}
         </div>
-        <div id={sheetId} class="sheet" role="listbox" tabindex="-1" aria-label="Actions on {sheet.title}">
-          {#if sheet.level === "sets"}
-            <div class="tf-ln-h"><span class="tf-ln-lab">{pinned && memberKindOf(pinned.kind) ? "Add to" : "Show on this ticket"}</span></div>
-          {/if}
-          {#each shown as item, index (item.id)}
-            {#if index > 0 && sheet.level === "root" && (item.id === "timer" || item.id === "copy") && shown[index - 1]?.id !== "timer"}
-              <div class="cut"></div>
+        {#if sheet.level === "rename" && listId !== null}
+          {@const id = listId}
+          <div class="renamerow">
+            <label class="tf-ln-s" for="{uid}-rename">New name</label>
+            <input
+              id="{uid}-rename"
+              class="tf-ln-ren"
+              type="text"
+              use:takeFocus
+              value={sheet.name}
+              onkeydown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  void renameList(id, event.currentTarget.value);
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (sheet) sheet = { ...sheet, level: "root" };
+                  box?.focus();
+                }
+              }}
+            />
+          </div>
+        {:else}
+          <!-- Keys from a clicked chip land here first, so Esc never reaches the dialog; a click gives the box its focus back. -->
+          <div id={sheetId} class="sheet" role="listbox" tabindex="-1" aria-label="Actions on {sheet.title}" {onkeydown} onclick={() => box?.focus()}>
+            <p class="filter" class:empty={sheet.filter === ""}>
+              {#if sheet.filter === ""}Type to narrow the actions{:else}{sheet.filter}<span class="caret"></span>{/if}
+            </p>
+            {#if sheet.level === "sets"}
+              <div class="tf-ln-h"><span class="tf-ln-lab">{pinned && memberKindOf(pinned.kind) ? "Add to" : "Show on this ticket"}</span></div>
             {/if}
-            {#if item.link}
-              <!-- Not a button: the relation chips inside it are buttons of their own. -->
-              <div
-                id={sheetOptionId(index)}
-                class="tf-ln-opt linkrow"
-                class:tf-ln-on={index === sheet.selected}
-                role="option"
-                tabindex="-1"
-                aria-selected={index === sheet.selected}
-                onmouseenter={() => sheet && (sheet.selected = index)}
-              >
-                <button type="button" class="tf-ln-nm linkbtn" onclick={() => void item.run()}>Link to <span class="job">{openEntity?.label}</span></button>
-                <span class="rel" role="radiogroup" aria-label="Relation">
-                  {#each RELATIONS as relation, r (relation.id)}
-                    <button
-                      type="button"
-                      class:pick={r === sheet.relation}
-                      role="radio"
-                      aria-checked={r === sheet.relation}
-                      tabindex="-1"
-                      onclick={() => { if (sheet) sheet.relation = r; }}
-                    >{relation.label}</button>
-                  {/each}
-                </span>
-              </div>
-            {:else}
-              <button
-                id={sheetOptionId(index)}
-                class="tf-ln-opt"
-                class:tf-ln-on={index === sheet.selected}
-                role="option"
-                aria-selected={index === sheet.selected}
-                onclick={() => void item.run()}
-                onmouseenter={() => sheet && (sheet.selected = index)}
-              >
-                <span class="tf-ln-nm">{item.label}</span>
-                <span class="tf-ln-s">{item.detail}</span>
-              </button>
+            {#each shown as item, index (item.id)}
+              {#if index > 0 && sheet.level === "root" && sheet.filter === "" && (item.id === "timer" || item.id === "copy") && shown[index - 1]?.id !== "timer"}
+                <div class="cut"></div>
+              {/if}
+              {#if item.link}
+                <!-- Not a button: the relation chips inside it are buttons of their own. -->
+                <div
+                  id={sheetOptionId(index)}
+                  class="tf-ln-opt linkrow"
+                  class:tf-ln-on={index === sheet.selected}
+                  role="option"
+                  tabindex="-1"
+                  aria-selected={index === sheet.selected}
+                  onmouseenter={() => sheet && (sheet.selected = index)}
+                >
+                  <button type="button" class="tf-ln-nm linkbtn" onclick={() => void item.run()}>Link to <span class="job">{openEntity?.label}</span></button>
+                  <span class="rel" role="radiogroup" aria-label="Relation">
+                    {#each RELATIONS as relation, r (relation.id)}
+                      <button
+                        type="button"
+                        class:pick={r === sheet.relation}
+                        role="radio"
+                        aria-checked={r === sheet.relation}
+                        tabindex="-1"
+                        onclick={() => { if (sheet) sheet.relation = r; }}
+                      >{relation.label}</button>
+                    {/each}
+                  </span>
+                </div>
+              {:else}
+                <button
+                  id={sheetOptionId(index)}
+                  class="tf-ln-opt"
+                  class:tf-ln-on={index === sheet.selected}
+                  role="option"
+                  aria-selected={index === sheet.selected}
+                  onclick={() => void item.run()}
+                  onmouseenter={() => sheet && (sheet.selected = index)}
+                >
+                  <span class="tf-ln-nm">{item.label}</span>
+                  <span class="tf-ln-s">{item.detail}</span>
+                </button>
+              {/if}
+            {/each}
+            {#if shown.length === 0}
+              <p class="tf-ln-none">No action matches “{sheet.filter}”.</p>
             {/if}
-          {/each}
-          {#if shown.length === 0}
-            <p class="tf-ln-none">Nothing to do here.</p>
-          {/if}
-        </div>
+          </div>
+        {/if}
       {:else}
         {#if interpreted}
           <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
@@ -774,7 +895,7 @@
             {/if}
           {:else if session.mode === "board"}
             {#if session.home}
-              <Board
+              <BoardNext
                 home={session.home}
                 inboxCount={inbox?.count ?? 0}
                 sources={health}
@@ -782,14 +903,10 @@
                 reading={sourcesRead}
                 rows={session.rows}
                 selected={session.selected}
-                {renaming}
                 {optionId}
                 {now}
                 onopen={activate}
                 onhover={(index) => (session.selected = index)}
-                onstartrename={startRename}
-                onrename={finishRename}
-                ondelete={(id) => void session.deleteList(id)}
               />
             {:else}
               <p class="tf-ln-none">Reading the mirror…</p>
@@ -817,6 +934,8 @@
             {#if session.rows.length === 0}
               <p class="tf-ln-none">No action matches.</p>
             {/if}
+          {:else if session.response && session.response.interpreted.prefix === "list" && session.response.groups.length === 0}
+            <p class="tf-ln-none">{lists.length === 0 ? "No saved list yet. Search for something and press ⌘S." : "No saved list matches."}</p>
           {:else if session.response}
             <Results
               response={session.response}
@@ -840,7 +959,7 @@
         <span><kbd>↑↓</kbd> move</span>
         {#if shown[sheet.selected]?.link}<span><kbd>←→</kbd> relation</span>{/if}
         <span><kbd>↵</kbd> {shown[sheet.selected]?.link ? "link" : "do it"}</span>
-        <span><kbd>Esc</kbd> {sheet.level === "sets" ? "back" : "back to results"}</span>
+        <span><kbd>Esc</kbd> {sheet.filter !== "" ? "clear" : sheet.level === "root" ? "back to results" : "back"}</span>
         <span class="tf-spacer"></span>
         <span class="tf-ln-took">{sheet.title} · {counted(shown.length, "action", "actions")}</span>
       {:else}
@@ -849,12 +968,10 @@
         {#if sheetHint}
           <span><kbd>⌘K</kbd> actions on {sheetHint}</span>
         {/if}
-        <span><kbd>Esc</kbd> back one step</span>
         {#if session.canSave}
-          <button class="tf-btn tf-sm tf-ln-save" onclick={() => void session.saveCurrent(session.raw.trim())} disabled={session.savedId !== null}>
-            {session.savedId === null ? "Save as list" : "Saved as list"}
-          </button>
+          <span><kbd>⌘S</kbd> {session.savedId === null ? "save as list" : "saved as list"}</span>
         {/if}
+        <span><kbd>Esc</kbd> back one step</span>
         <span class="tf-spacer"></span>
         {#if session.response}
           <span class="tf-ln-took">{session.response.total} matches · {session.response.took_ms} ms</span>
@@ -868,16 +985,21 @@
   /* PROTOTYPE rules. The shipped ones are `tf/css/launcher.css`; these would join them. */
   .pinned { flex: none; border-bottom: 1px solid var(--rule); }
   .lead { padding: 10px 18px; font-size: var(--t-sm); color: var(--ink); }
-  .sheet { flex: 1; min-height: 0; overflow: auto; padding: 4px 0; }
+  .sheet { flex: 1; min-height: 0; overflow: auto; padding: 0 0 4px; outline: none; }
+  .filter { padding: 8px 18px 6px; font-size: var(--t-sm); color: var(--ink); border-bottom: 1px solid var(--rule); margin-bottom: 4px; }
+  .filter.empty { color: var(--ink-2); }
+  .caret { display: inline-block; width: 1px; height: 1em; background: var(--ink); vertical-align: -2px; margin-left: 1px; }
+  .renamerow { display: flex; align-items: center; gap: 10px; padding: 10px 18px; }
+  .renamerow input { flex: 1; margin: 0; }
   .cut { height: 1px; background: var(--rule); margin: 4px 0; }
   .job {
     display: inline-block; background: var(--card); color: var(--card-ink);
     font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); font-weight: 600;
     padding: 0 6px; border-radius: 3px;
   }
-  .rel { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .linkrow { cursor: default; }
   .linkbtn { text-align: left; padding: 0; cursor: pointer; }
+  .rel { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
   .rel button {
     font-size: var(--t-xs); padding: 1px 8px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2);
     cursor: pointer;

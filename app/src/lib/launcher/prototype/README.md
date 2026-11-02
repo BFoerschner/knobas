@@ -24,11 +24,13 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | Try | What happens |
 |---|---|
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
-| ⌘K again, or Tab, on a row | The row lifts under the box and the panel becomes its actions. Esc goes back to the results. Typing goes back too. |
+| ⌘K again, or Tab, on a row | The row lifts under the box and the panel becomes its actions. Esc goes back to the results, never out of the dialog. Typing in the sheet narrows the actions (fuzzy, in order of the letters); Esc clears that first. |
 | On a ticket, page, PR… | *Link to ⟨job⟩* with the relation picked by ←→ or a click, Enter writes it. *Add to a set…* (pages, repos, pipelines, assets, monitors) or *Show a set on ⟨key⟩…* (tickets) opens a second level listing the sets. *Start timer*, *Work on this* (tickets), *Copy key* / *Copy title*. |
 | On a view or a set | *Open*, *Copy address*; on a set with a chosen job, *Show on ⟨job⟩*. |
-| On a saved smart list (empty box) | *Rename*, *Delete*, as the shipped Tab chain. |
-| `doc:sepa` | Pages only, path and excerpt, and a last row *Search Docs for “sepa”* that opens `#/docs`. |
+| `l`, `l gitea` | Your saved lists, all of them or by name. Enter applies the list's filters in the box and keeps you there. ⌘K on one: *Apply*, *Rename* (a field in the sheet), *Delete*. |
+| ⌘S on any query | Saves it as a list; the footer says so. No button. |
+| `d sepa` | Pages only, path and excerpt, and a last row *Search Docs for "sepa"* that opens `#/docs`. |
+| Empty box | The board without the lists block: inbox, today, sources, recent. No mirror footnote in the box. |
 
 The footer always names what the second ⌘K would act on.
 
@@ -45,11 +47,12 @@ Shortcuts, each marked `PROTOTYPE` in the code:
 
 | Shortcut | The real change |
 |---|---|
-| `doc:` is rewritten to `kind:page` in the frontend (ruling P2 says the backend parses). | One `Prefix::Doc` in `crates/knobas-search/src/query.rs`, a row in `syntax.json`, a chip label in `Chips.svelte`. |
+| `d ` is rewritten to `kind:page` and `l ` is answered in the frontend from the board's saved lists (ruling P2 says the backend parses). | `Prefix::Doc` and `Prefix::Lists` in `crates/knobas-search/src/query.rs`, two rows in `syntax.json`, chip labels in `Chips.svelte`; `?` does not list them yet. |
 | Views and Sets are built from `ticket_views` and `link_sets` in the component and prepended to the answer. | `knobas-search` indexes both tables as kinds `view` and `set` with monograms `VW` and `LS`; `entityAddress` learns `#/tickets/<id>` and `#/sets/<id>`. |
 | The *Search Docs for …* row stores its words in `sessionStorage` and opens `#/docs`; the Docs page ignores them. | A `#/docs?q=` form, or the search field reading a one-shot hand-off, whichever the Docs page prefers. |
 | The sheet's actions are a fixed list per kind. | Adapter-declared source actions would join the list under a rule. |
 | Value suggestions and pasted-URL resolving are left out. | Nothing: they stay as shipped. |
+| `BoardNext.svelte` is `Board.svelte` without the lists block, the rename field and the row buttons. | Delete those from `Board.svelte`; built-in smart lists go, or move behind `l `. |
 
 ## Rulings this reverses
 
@@ -63,5 +66,6 @@ the sheet is that nothing in it does.
 ## Files
 
 - `LauncherNext.svelte`: the component, mounted by `App.svelte` under `?launcher-next` (dev only, dynamic import).
+- `BoardNext.svelte`: the board without lists.
 - `../../shell/dev/launcher-next-search.ts`: free text over the fixture, used by `fake/launcher.ts` under the same flag.
 - `../../shell/dev/fake/docs.ts`: `fakeDocPages()`, the one export added.
