@@ -1,7 +1,8 @@
 <!--
   A page body's blocks (#859, R-10.11), drawn from the fixed set and nothing
   else. A part the source has and knobas does not draw says so, with *Open
-  this part in <source>* (story 134). The page's sections and their anchors
+  this part in <source>* (story 134). An embed runs in a sandboxed frame
+  (`TfDocEmbed`, #2440). The page's sections and their anchors
   are `TfDocBody`'s; a heading here is one inside a panel or a comment.
 
   An include draws the page it includes in a light frame reading "from
@@ -15,6 +16,7 @@
 -->
 <script lang="ts">
   import Self from "./TfDocBlocks.svelte";
+  import TfDocEmbed from "./TfDocEmbed.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
   import TfMarked from "./TfMarked.svelte";
   import type { DocBlock, TableCell } from "../../ipc/entity";
@@ -144,5 +146,7 @@
         <button type="button" class="tf-btn tf-sm" onclick={() => onopen(url)}>Open this part in {sourceName}</button>
       {/if}
     </div>
+  {:else if block.type === "embed"}
+    <TfDocEmbed content={block.content} {sourceName} {webUrl} {onopen} />
   {/if}
 {/each}

@@ -542,8 +542,8 @@ mod tests {
     /// Search follows the drawing (#2435): `body_text` is the shared
     /// function over the page's own projection, so a word only a table cell
     /// holds is found in its section, and what the reader does not draw as
-    /// text -- a macro's parameters, the CDATA body of a macro it draws as a
-    /// placeholder -- is not.
+    /// text -- a macro's parameters, an embed's script -- is not. An embed's
+    /// shown words are (#2440).
     #[test]
     fn body_text_is_the_drawn_blocks_and_nothing_the_reader_does_not_draw() {
         use knobas_source::docs::indexed::{Part, read};
@@ -564,11 +564,13 @@ mod tests {
             .iter()
             .find(|r| r.part == Part::Section("Limits".into()))
             .expect("the Limits section");
+        // An `html` macro is an embed (#2440): the words it shows are the
+        // page's, its script's are not.
         assert_eq!(
             limits.text,
-            "Queue\nCap\npayouts\nforty per minute\nselect 1;"
+            "Queue\nCap\npayouts\nforty per minute\nselect 1;\nSwagger"
         );
-        for absent in ["Flagged", "Swagger", "secret", "html", "<"] {
+        for absent in ["Flagged", "secret", "script", "html", "<"] {
             assert!(
                 !item.body_text.contains(absent),
                 "{absent:?} in {:?}",

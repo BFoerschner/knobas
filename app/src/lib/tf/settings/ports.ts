@@ -58,6 +58,8 @@ import {
   listAdapters,
   listSources,
   listSyncRuns,
+  runEmbeddedHtml,
+  setRunEmbeddedHtml,
   setSourceSecret,
   syncAll,
   syncNow,
@@ -127,6 +129,9 @@ export interface SettingsPorts {
   hideSavedView: (id: string, hidden: boolean) => Promise<void>;
   /** Whether credentials live in memory for this session only (#1585): a source's credential row. */
   appStatus: () => Promise<Pick<AppStatus, "secrets_in_memory">>;
+  /** *Run embedded HTML* for a wiki source (#2440): on until set. */
+  runEmbeddedHtml: (id: string) => Promise<boolean>;
+  setRunEmbeddedHtml: (id: string, on: boolean) => Promise<boolean>;
 }
 
 /**
@@ -168,6 +173,8 @@ export const realSettingsPorts: SettingsPorts = {
   ticketViews: () => ticketViews(),
   hideSavedView: (id, hidden) => hideSavedView(id, hidden),
   appStatus: () => appStatus(),
+  runEmbeddedHtml: (id) => runEmbeddedHtml(id),
+  setRunEmbeddedHtml: (id, on) => setRunEmbeddedHtml(id, on),
 };
 
 /**

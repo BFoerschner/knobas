@@ -193,6 +193,16 @@ export function updateSource(id: string, patch: SourcePatch): Promise<SourceSumm
   return invoke<SourceSummary>("update_source", { id, patch });
 }
 
+/** *Run embedded HTML* for one source (#2440): on until set. */
+export function runEmbeddedHtml(id: string): Promise<boolean> {
+  return invoke<boolean>("run_embedded_html", { id });
+}
+
+/** Store *Run embedded HTML* for one source, and get back what is now stored. */
+export function setRunEmbeddedHtml(id: string, on: boolean): Promise<boolean> {
+  return invoke<boolean>("set_run_embedded_html", { id, on });
+}
+
 export function deleteSource(id: string, purgeItems: boolean): Promise<void> {
   return invoke<void>("delete_source", { id, purgeItems });
 }

@@ -326,6 +326,19 @@ fn a_placeholder_is_an_html_comment_naming_it() {
     assert_eq!(md, "<!-- macro: jira- -chart -->\n\n<!-- macro: toc -->\n");
 }
 
+/// An HTML embed is never pasted into the file: a viewer that renders the
+/// Markdown would run its scripts (#2440). A comment names it.
+#[test]
+fn an_html_embed_is_a_comment_naming_it_and_not_its_markup() {
+    let md = body(&[DocBlock::Embed {
+        name: "html".to_owned(),
+        content: crate::docs::EmbedContent::Html {
+            html: "<script>alert(1)</script>".to_owned(),
+        },
+    }]);
+    assert_eq!(md, "<!-- embed: html -->\n");
+}
+
 #[test]
 fn markdown_goes_through_as_it_is_refs_included() {
     assert_eq!(

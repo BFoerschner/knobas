@@ -885,10 +885,15 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `placeholder`: Something the source has that the reader does not draw: the
  *   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
  *   so a page with a part knobas cannot draw says so (story 134).
+ * - `embed`: Something the page runs rather than says (spec #2432, #2440):
+ *   `name` is the source's word for it (Confluence's `html` macro), and
+ *   `content` what runs. The shell draws it in an isolated frame, never in
+ *   its own document.
  *
- * Source text, never markup.
+ * Source text, never markup, but for an embed's `html`, which is markup to
+ * run and never to draw.
  */
-export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "include", title: string, space: string | null, excerpt: boolean, entity_id: string | null, blocks: Array<DocBlock>, unfilled: Unfilled | null, } | { "type": "placeholder", name: string, };
+export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "include", title: string, space: string | null, excerpt: boolean, entity_id: string | null, blocks: Array<DocBlock>, unfilled: Unfilled | null, } | { "type": "placeholder", name: string, } | { "type": "embed", name: string, content: DocEmbedContent, };
 
 /**
  * One comment on a page.
@@ -914,6 +919,16 @@ author_name: string | null,
  * When it was written, RFC 3339, as the source wrote it.
  */
 at: string | null, blocks: Array<DocBlock>, };
+
+/**
+ * What a [`DocBlock::Embed`] runs.
+ *
+ * - `html`: A document as its author wrote it, byte for byte, scripts
+ *   included: the shell serves it from its own origin under a policy of its
+ *   own, in a sandboxed frame (#2440). Source markup, never drawn in the
+ *   app's document.
+ */
+export type DocEmbedContent = { "kind": "html", html: string, };
 
 /**
  * What *Export as Markdown* wrote.
@@ -1068,7 +1083,13 @@ work: Array<DocWork>,
  * `create_page`, each where its adapter declares it and (for the two
  * page writes) writes the source's markup (#862).
  */
-writes: Array<DocWrite>, };
+writes: Array<DocWrite>, 
+/**
+ * Whether this page's source runs its embeds: *Run embedded HTML*, on
+ * until the reader turns it off for the source ([`run_embedded_html`],
+ * #2440). Off, the shell draws each embed as a placeholder.
+ */
+run_embeds: boolean, };
 
 /**
  * One section of a page body: a top-level heading and what follows it up to

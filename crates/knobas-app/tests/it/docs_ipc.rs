@@ -17,7 +17,7 @@ use knobas_app::commands::entity::{
 use knobas_app::docs::DocsScope;
 use knobas_app::sources::Registry;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
-use knobas_source::docs::{DocBlock, Inline, ListItem, Unfilled};
+use knobas_source::docs::{DocBlock, EmbedContent, Inline, ListItem, Unfilled};
 use serde_json::{Value, json};
 
 async fn pool() -> sqlx::PgPool {
@@ -971,6 +971,79 @@ fn scope(source: &str, key: &str) -> DocsScope {
     }
 }
 
+/// An `html` macro reads as an embed of its markup byte for byte (#2440), and
+/// the page says whether its source runs embeds: on until the reader turns
+/// *Run embedded HTML* off for that source, off for it alone, and on again
+/// for a source added again under the id of one deleted with it off.
+#[tokio::test]
+async fn an_html_macro_reads_as_an_embed_and_its_source_says_whether_it_runs() {
+    let pool = pool().await;
+    let (src, other) = (confluence(&pool).await, confluence(&pool).await);
+    let html = "<div id=\"ui\"></div>\n<script>if (a < b && c) go(\"x&amp;y\");</script>";
+    let storage = format!(
+        "<h2>API</h2><ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[{html}]]>\
+         </ac:plain-text-body></ac:structured-macro>"
+    );
+    let api = page(&pool, &src, "1", "API", "ENG", &[], &storage).await;
+    let elsewhere = page(&pool, &other, "1", "API", "ENG", &[], &storage).await;
+    let read = |id: String| {
+        let pool = pool.clone();
+        async move {
+            docs_page_inner(&pool, &Registry::for_process(), &id)
+                .await
+                .unwrap()
+        }
+    };
+
+    let doc = read(api.clone()).await;
+    assert_eq!(
+        doc.blocks[1],
+        DocBlock::Embed {
+            name: "html".into(),
+            content: EmbedContent::Html { html: html.into() },
+        }
+    );
+    assert!(doc.run_embeds, "embeds run until the reader says otherwise");
+
+    assert!(
+        !knobas_app::docs::set_run_embedded_html(&pool, &src, false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !knobas_app::docs::run_embedded_html(&pool, &src)
+            .await
+            .unwrap()
+    );
+    let doc = read(api.clone()).await;
+    assert!(!doc.run_embeds, "turned off for its source");
+    assert_eq!(doc.blocks.len(), 2, "the embed is still there to say so");
+    assert!(
+        read(elsewhere).await.run_embeds,
+        "another source still runs its embeds"
+    );
+
+    assert!(
+        knobas_app::docs::set_run_embedded_html(&pool, &src, true)
+            .await
+            .unwrap()
+    );
+    assert!(read(api).await.run_embeds);
+
+    knobas_app::docs::set_run_embedded_html(&pool, &other, false)
+        .await
+        .unwrap();
+    knobas_app::docs::forget_run_embedded_html(&pool, &other)
+        .await
+        .unwrap();
+    assert!(
+        knobas_app::docs::run_embedded_html(&pool, &other)
+            .await
+            .unwrap(),
+        "a source deleted with embeds off does not hand that to the next one under its id"
+    );
+}
+
 /// Every word must appear, the snippet is the best sentence and says its
 /// section, and a hit carries its space, path, match count and editor.
 #[tokio::test]
@@ -1055,20 +1128,22 @@ async fn a_search_finds_pages_with_every_word_and_says_where_the_snippet_is() {
 /// Search follows the drawing (#2435): a page's `body_text` is the shared
 /// search text over its projection, as the Confluence adapter writes it, so a
 /// word only a table cell holds is found and its snippet names its section,
-/// while a macro parameter and an `html` macro's CDATA, which the reader does
-/// not draw as text, are not found at all.
+/// while a macro parameter, which the reader does not draw, is not found at
+/// all. An `html` macro is an embed (#2440): the words it shows are found, its
+/// script's are not.
 #[tokio::test]
 async fn a_word_in_a_table_cell_is_found_in_its_section() {
     let pool = pool().await;
     let src = confluence(&pool).await;
-    let (w, param, cdata) = (word(), word(), word());
+    let (w, param, shown, script) = (word(), word(), word(), word());
     let storage = format!(
         "<p>Intro.</p><h2>Rate limits</h2><table><tbody>\
          <tr><th>Queue</th><th>Cap</th></tr>\
          <tr><td><p>payouts</p></td><td>forty {w} per minute</td></tr></tbody></table>\
          <ac:structured-macro ac:name=\"code\"><ac:parameter ac:name=\"title\">{param}</ac:parameter>\
          <ac:plain-text-body><![CDATA[select 1;]]></ac:plain-text-body></ac:structured-macro>\
-         <ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<b>{cdata}</b>]]>\
+         <ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<b>{shown}</b>\
+         <script>var {script} = 1;</script>]]>\
          </ac:plain-text-body></ac:structured-macro>"
     );
     let id = page(&pool, &src, "1", "Payout limits", "ENG", &[], &storage).await;
@@ -1094,12 +1169,21 @@ async fn a_word_in_a_table_cell_is_found_in_its_section() {
         .collect();
     assert!(text.contains(&format!("forty {w} per minute")), "{text:?}");
 
-    for unseen in [param, cdata] {
+    let found = docs_search_inner(&pool, &Registry::for_process(), &shown, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.total, 1, "an html macro's shown words are found");
+    assert_eq!(
+        found.hits[0].snippet.section.as_deref(),
+        Some("Rate limits")
+    );
+    for unseen in [param, script] {
         let found = docs_search_inner(&pool, &Registry::for_process(), &unseen, None)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(found.total, 0, "{unseen} is not drawn as text");
+        assert_eq!(found.total, 0, "{unseen} is not shown as text");
     }
 }
 

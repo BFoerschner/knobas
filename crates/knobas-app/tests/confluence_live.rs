@@ -1249,6 +1249,117 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     drop(state);
 }
 
+/// **The `html` macro against the real Confluence** (#2440): a page made
+/// through Confluence's REST API with one `html` macro holding a script that
+/// loads a bundle and fetches JSON from another host, and one holding plain
+/// markup, reads as two embeds of that HTML byte for byte after Confluence's
+/// own normalisation; the page's `body_text` holds the words the plain one
+/// shows and none of the script's. The seed turned the macro on
+/// (`seed-atlassian-content.sh`), so a disabled macro fails there, by name.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn html_macros_read_as_embeds_of_their_markup() {
+    use knobas_source::docs::{DocBlock, EmbedContent};
+
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+
+    let scripted = concat!(
+        "<div id=\"swagger-ui\"></div>\n",
+        "<script src=\"https://unpkg.example/swagger-ui-bundle.js\"></script>\n",
+        "<script>if (1 < 2 && true) fetch(\"http://api.example:8080/openapi.json?a=1&b=2\")",
+        ".then(r => r.json()).then(spec => SwaggerUIBundle({ spec, dom_id: \"#swagger-ui\" }));",
+        "</script>",
+    );
+    let plain = "<table><tr><td>Escalation <b>quokkaword</b></td></tr></table>";
+    let title = format!("Embedded HTML [{LITTER}]");
+    let storage = format!(
+        concat!(
+            r#"<p>The API, live:</p>"#,
+            r#"<ac:structured-macro ac:name="html" ac:schema-version="1"><ac:plain-text-body><![CDATA[{scripted}]]></ac:plain-text-body></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="html" ac:schema-version="1"><ac:plain-text-body><![CDATA[{plain}]]></ac:plain-text-body></ac:structured-macro>"#,
+        ),
+        scripted = scripted,
+        plain = plain,
+    );
+    let (status, made) = env
+        .call(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(json!({
+                "type": "page",
+                "title": title,
+                "space": { "key": env.space },
+                "ancestors": [{ "id": parent.id }],
+                "body": { "storage": { "value": storage, "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "creating the page: {made}");
+    let id = made["id"].as_str().expect("the new page's id").to_owned();
+    litter.created.push(id.clone());
+
+    let state = app("confluence_live_embeds", &env).await;
+    sync_until(&state, &id, "the page with its html macros", |payload| {
+        payload["body"]["storage"]["value"]
+            .as_str()
+            .is_some_and(|s| s.contains("quokkaword"))
+    })
+    .await;
+
+    let entity = format!("{CONFLUENCE}:{id}");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &entity,
+    )
+    .await
+    .expect("the reader reads the page");
+    let embeds: Vec<&DocBlock> = page
+        .blocks
+        .iter()
+        .filter(|b| matches!(b, DocBlock::Embed { .. }))
+        .collect();
+    assert_eq!(
+        embeds,
+        vec![
+            &DocBlock::Embed {
+                name: "html".into(),
+                content: EmbedContent::Html {
+                    html: scripted.into()
+                },
+            },
+            &DocBlock::Embed {
+                name: "html".into(),
+                content: EmbedContent::Html { html: plain.into() },
+            },
+        ],
+        "both macros are embeds of their markup as written: {:#?}",
+        page.blocks
+    );
+    assert!(
+        page.run_embeds,
+        "a source runs its embeds until told otherwise"
+    );
+
+    let body_text: String =
+        sqlx::query_scalar("select body_text from sync.item where entity_id = $1")
+            .bind(&entity)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the page's search text");
+    assert!(body_text.contains("Escalation quokkaword"), "{body_text:?}");
+    for code in ["SwaggerUIBundle", "openapi.json", "swagger-ui-bundle"] {
+        assert!(
+            !body_text.contains(code),
+            "{code} is script, not words: {body_text:?}"
+        );
+    }
+
+    drop(state);
+}
+
 /// **Includes, from pages Confluence itself stored** (spec #2432, stories
 /// 13 to 19): an `include` and an `excerpt-include` of a page in the synced
 /// space are filled from the mirror, the page's `excerpt` draws as its
