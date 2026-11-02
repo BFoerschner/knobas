@@ -1247,7 +1247,13 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         )
     };
     assert_eq!(title, "Rollback");
-    let [DocBlock::List { ordered: false, items }] = blocks.as_slice() else {
+    let [
+        DocBlock::List {
+            ordered: false,
+            items,
+        },
+    ] = blocks.as_slice()
+    else {
         panic!("the expand holds its list: {blocks:#?}")
     };
     assert_eq!(

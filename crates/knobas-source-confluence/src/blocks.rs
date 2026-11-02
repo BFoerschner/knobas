@@ -1322,7 +1322,10 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     /// Story 32: an expand in a table cell is itself, never `[expand]`.
     #[test]
     fn an_expand_in_a_cell_is_a_collapsible_in_its_blocks() {
-        let storage = format!("<table><tr><td>{}</td></tr></table>", expand(Some("More"), "<p>In.</p>"));
+        let storage = format!(
+            "<table><tr><td>{}</td></tr></table>",
+            expand(Some("More"), "<p>In.</p>")
+        );
         assert_eq!(
             blocks(&storage),
             vec![DocBlock::Table {
