@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DocPage, DocsTree } from "../../ipc/entity";
 import { EMBED_SANDBOX } from "../../render/embed";
-import { EMBED_REPORT_MS } from "./docs";
+import { EMBED_REPORT_MS, EMBED_URL_HEIGHT } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -133,8 +133,17 @@ test("the frame's height follows what its reporter says, up to the viewport", as
   expect(frame()!.getAttribute("height")).toBe("700");
 });
 
-test("a link or popup from the frame opens through the external-open path", async () => {
+/** The reader's transient activation, as the browser reports it to the app's window (#2454). */
+function clicked(active: boolean): void {
+  Object.defineProperty(navigator, "userActivation", { configurable: true, get: () => ({ isActive: active, hasBeenActive: active }) });
+}
+afterEach(() => {
+  delete (navigator as { userActivation?: unknown }).userActivation;
+});
+
+test("a link or popup from the frame, behind the reader's click, opens through the external-open path", async () => {
   const io = await draw();
+  clicked(true);
   say({ knobas: "embed", open: "https://api.example/docs" });
   await settle();
   expect(io.openExternal).toHaveBeenCalledWith("https://api.example/docs");
@@ -142,6 +151,111 @@ test("a link or popup from the frame opens through the external-open path", asyn
   say({ knobas: "embed", open: "https://evil.example/" }, window);
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(1);
+});
+
+test("an open with no click behind it opens nothing until the reader says so, and a loop asks once", async () => {
+  const io = await draw();
+  clicked(false);
+  for (let i = 0; i < 20; i++) say({ knobas: "embed", open: `https://spam.example/${i}` });
+  await settle();
+  expect(io.openExternal).not.toHaveBeenCalled();
+  const asked = target.querySelector(".tf-doc .tf-embed .tf-macro");
+  expect(asked?.textContent).toContain("wants to open https://spam.example/0");
+  expect(frame()).not.toBeNull();
+  button("Open")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledTimes(1);
+  expect(io.openExternal).toHaveBeenCalledWith("https://spam.example/0");
+  expect(target.querySelector(".tf-doc .tf-embed .tf-macro")).toBeNull();
+  // Dismissed, it opens nothing.
+  say({ knobas: "embed", open: "https://spam.example/again" });
+  button("Dismiss")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledTimes(1);
+  expect(target.querySelector(".tf-doc .tf-embed .tf-macro")).toBeNull();
+});
+
+test("one click opens one tab: a second open on it is asked", async () => {
+  const io = await draw();
+  clicked(true);
+  say({ knobas: "embed", open: "https://api.example/a" });
+  say({ knobas: "embed", open: "https://api.example/b" });
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledTimes(1);
+  expect(target.querySelector(".tf-doc .tf-embed .tf-macro")?.textContent).toContain("wants to open https://api.example/b");
+});
+
+// -- A URL embed (#2441) -------------------------------------------------------
+
+const URL_EMBED = "https://grafana.example/d/abc?orgId=1";
+const urlPage = (over: Partial<DocPage> = {}, url = URL_EMBED) =>
+  page({
+    blocks: [{ type: "embed", name: "iframe", content: { kind: "url", url } }],
+    ...over,
+  });
+
+test("a URL embed is the same sandboxed frame with the URL as its source, and offers Open in browser beside it", async () => {
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(2000);
+  const io = await draw(urlPage());
+  const f = frame()!;
+  expect(f.getAttribute("sandbox")).toBe(EMBED_SANDBOX);
+  expect(f.getAttribute("src")).toBe(URL_EMBED);
+  expect(f.hasAttribute("srcdoc")).toBe(false);
+  expect(f.getAttribute("title")).toBe("Embedded page from grafana.example");
+  expect(f.getAttribute("height")).toBe(String(EMBED_URL_HEIGHT));
+  // A site that refuses to be framed cannot be told from the app: the way out is always there.
+  button("Open in browser")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledWith(URL_EMBED);
+});
+
+test("a URL embed is no taller than the window", async () => {
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
+  await draw(urlPage());
+  expect(frame()!.getAttribute("height")).toBe("300");
+});
+
+test("a URL embed that never loads offers Open in browser for its URL; one that loaded stays", async () => {
+  vi.useFakeTimers();
+  const io = await draw(urlPage());
+  vi.advanceTimersByTime(EMBED_REPORT_MS + 1);
+  await settle();
+  expect(frame()).toBeNull();
+  expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This embedded page did not load.");
+  button("Open in browser")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledWith(URL_EMBED);
+
+  if (view) unmount(view);
+  target.replaceChildren();
+  await draw(urlPage());
+  frame()!.dispatchEvent(new Event("load"));
+  vi.advanceTimersByTime(EMBED_REPORT_MS * 3);
+  await settle();
+  expect(frame()).not.toBeNull();
+});
+
+test("with Run embedded HTML off, or offline, a URL embed is a placeholder with Open in Confluence", async () => {
+  const io = await draw(urlPage({ run_embeds: false }));
+  expect(frame()).toBeNull();
+  expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This part is an embedded page. Run embedded HTML is off for Confluence");
+  button("Open in Confluence")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/5");
+
+  if (view) unmount(view);
+  target.replaceChildren();
+  vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  await draw(urlPage());
+  expect(frame()).toBeNull();
+  expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("knobas is offline");
+  expect(button("Open in Confluence")).toBeDefined();
+});
+
+test("a URL embed of another scheme, from any adapter, is never framed", async () => {
+  await draw(urlPage({}, "javascript:alert(1)"));
+  expect(frame()).toBeNull();
+  expect(target.querySelector(".tf-doc .tf-macro")?.textContent).toContain("This embedded page did not load.");
 });
 
 test("with Run embedded HTML off for its source, the embed is a placeholder with Open in Confluence", async () => {

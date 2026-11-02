@@ -20,8 +20,14 @@
  * knobas puts {@link REPORTER} before the author's HTML. It tells the parent
  * the document's height, and hands every link the reader follows and every
  * `window.open` to the parent, which opens it through the external-open path
- * and its scheme check (`shell/open-external.ts`). The parent takes a
- * message only from its own frame ({@link embedMessage} reads it).
+ * and its scheme check (`shell/open-external.ts`), behind the reader's own
+ * click only ({@link openVerdict}). The parent takes a message only from its
+ * own frame ({@link embedMessage} reads it).
+ *
+ * A URL embed (#2441) is the same sandboxed frame with the page as its `src`
+ * ({@link embedUrl}), framed by the app directly (its policy's `frame-src`
+ * names `http:` and `https:`). The page is another origin's: knobas puts
+ * nothing in it, so it reports no height and hands no link up.
  */
 import { base64Of } from "./bytes";
 import { FRAME_SCHEME, type FrameBridge } from "./frame";
@@ -93,4 +99,35 @@ export function embedMessage(data: unknown): EmbedMessage | null {
   if (typeof m.height === "number" && Number.isFinite(m.height) && m.height >= 0) return { height: Math.ceil(m.height) };
   if (typeof m.open === "string") return { open: m.open };
   return null;
+}
+
+/**
+ * Where a URL embed's frame draws from (#2441): the URL itself, in the same
+ * sandbox, when it is an absolute `http(s)` URL with a host; `null` for
+ * anything else. The adapter already refuses other schemes
+ * (`EmbedContent::url`); this holds for one that does not.
+ */
+export function embedUrl(url: string): { src: string } | null {
+  const match = /^https?:\/\/[^/?#\s]+/i.exec(url);
+  return match !== null && !/\s/.test(url) ? { src: url } : null;
+}
+
+/** After an open the frame asked for, the next one in this window is asked of the reader (#2454). */
+export const EMBED_OPEN_GAP_MS = 1_000;
+
+/**
+ * What to do with a page the frame asks to open (#2454). The frame's script
+ * can post the message itself, so the frame's word that a link was clicked
+ * counts for nothing; the parent's own transient activation does, which a
+ * browser that passes a child frame's click up to its ancestors sets.
+ *
+ * - `open`: the reader clicked just now, and nothing opened in the last
+ *   {@link EMBED_OPEN_GAP_MS}: one tab per click.
+ * - `ask`: no click behind it (or a second open on one click): the reader is
+ *   asked, and opens it with a click of their own.
+ * - `drop`: the reader is being asked already; a loop asks once.
+ */
+export function openVerdict(at: { activated: boolean; now: number; lastOpen: number; asking: boolean }): "open" | "ask" | "drop" {
+  if (at.activated && at.now - at.lastOpen >= EMBED_OPEN_GAP_MS) return "open";
+  return at.asking ? "drop" : "ask";
 }

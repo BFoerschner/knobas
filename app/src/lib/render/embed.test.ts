@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { EMBED_SANDBOX, REPORTER, embedDocument, embedMessage, embedSource } from "./embed";
+import { EMBED_OPEN_GAP_MS, EMBED_SANDBOX, REPORTER, embedDocument, embedMessage, embedSource, embedUrl, openVerdict } from "./embed";
 
 // -- The frame (#2440, spec #2432 *Embeds in the shell*) ----------------------
 
@@ -109,4 +109,27 @@ test("the reporter says the document's height when it loads", () => {
   const { win, posted } = reporting("<p>x</p>");
   win.dispatchEvent(new win.Event("load"));
   expect(posted.some((m) => typeof (m as { height?: unknown }).height === "number")).toBe(true);
+});
+
+// -- A URL embed (#2441) and an embed's opens (#2454) ------------------------
+
+test("a URL embed frames an absolute http(s) URL with a host as its src, and nothing else", () => {
+  expect(embedUrl("https://grafana.example/d/1?a=b")).toEqual({ src: "https://grafana.example/d/1?a=b" });
+  expect(embedUrl("HTTP://a.example")).toEqual({ src: "HTTP://a.example" });
+  for (const bad of ["javascript:alert(1)", "file:///etc/passwd", "knobas://x", "data:text/html,x", "//a.example/", "/wiki", "https://", "not a url", ""]) {
+    expect(embedUrl(bad), bad).toBeNull();
+  }
+});
+
+test("an open from the frame runs only behind the reader's click, one per gap; any other is asked once at a time", () => {
+  const at = (over: Partial<Parameters<typeof openVerdict>[0]>) => openVerdict({ activated: true, now: 10_000, lastOpen: 0, asking: false, ...over });
+  expect(at({})).toBe("open");
+  // No click behind it: the reader is asked.
+  expect(at({ activated: false })).toBe("ask");
+  // A second open on the same click is asked, not opened.
+  expect(at({ lastOpen: 10_000 - EMBED_OPEN_GAP_MS + 1 })).toBe("ask");
+  expect(at({ lastOpen: 10_000 - EMBED_OPEN_GAP_MS })).toBe("open");
+  // While one is asked, the rest are dropped: a loop asks once.
+  expect(at({ activated: false, asking: true })).toBe("drop");
+  expect(at({ lastOpen: 9_999, asking: true })).toBe("drop");
 });

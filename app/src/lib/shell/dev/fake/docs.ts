@@ -187,7 +187,8 @@ type Proto =
   /** An include (spec #2432): another page's body, or its excerpt, filled as the real read fills it. */
   | { include: string; excerpt?: boolean }
   | { macro: string }
-  | { html: string };
+  | { html: string }
+  | { frame: string; name?: string };
 
 type Task = [done: boolean, text: string, under?: Task[]];
 
@@ -309,6 +310,9 @@ const BODIES: Record<string, Body> = {
       { h: "API reference" },
       { p: "The ledger API's endpoints, from the embedded explorer the platform team hosts." },
       { html: EXPLORER },
+      { h: "Status board" },
+      { p: "The payout dashboard, framed from the status host." },
+      { frame: "https://example.com/" },
     ],
     comments: [],
   },
@@ -482,6 +486,7 @@ function block(b: Proto): DocBlock {
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
   if ("html" in b) return { type: "embed", name: "html", content: { kind: "html", html: b.html } };
+  if ("frame" in b) return { type: "embed", name: b.name ?? "iframe", content: { kind: "url", url: b.frame } };
   if ("include" in b) return include(b.include, b.excerpt ?? false);
   return { type: "placeholder", name: b.macro };
 }
@@ -859,7 +864,7 @@ var call = "${call}";
 })();
 </script>`;
   const swap = (blocks: DocBlock[]): DocBlock[] =>
-    blocks.map((b) => (b.type === "embed" ? { ...b, content: { kind: "html", html: probe } } : b));
+    blocks.map((b) => (b.type === "embed" && b.content.kind === "html" ? { ...b, content: { kind: "html", html: probe } } : b));
   return { ...doc, blocks: swap(doc.blocks) };
 }
 

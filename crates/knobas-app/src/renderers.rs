@@ -777,10 +777,13 @@ mod tests {
         );
         assert_eq!(header("x-content-type-options").as_deref(), Some("nosniff"));
 
-        // The app frames that scheme and nothing else changes in its policy:
+        // The app frames that scheme, and a docs URL embed's `http(s)` page
+        // (#2441) in the embed sandbox; nothing else changes in its policy:
         // its own styles stay `'self'` only.
         let conf = include_str!("../tauri.conf.json");
-        assert!(conf.contains("frame-src 'self' knobas-render: http://knobas-render.localhost;"));
+        assert!(conf.contains(
+            "frame-src 'self' knobas-render: http://knobas-render.localhost http: https:;"
+        ));
         assert!(conf.contains("style-src 'self';") && !conf.contains("unsafe-inline"));
 
         for bad in ["/not base64!", "/", "/%2F%2F"] {

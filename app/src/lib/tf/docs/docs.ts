@@ -220,6 +220,13 @@ export function blockWords(block: DocBlock): string {
  */
 export const EMBED_REPORT_MS = 10_000;
 
+/**
+ * A URL embed's height (#2441), up to the window's: the framed page is
+ * another origin's and reports nothing, so its frame cannot follow it and
+ * scrolls inside itself. Its `load` event, not a report, says it loaded.
+ */
+export const EMBED_URL_HEIGHT = 480;
+
 const EMBEDS = Symbol("docs-embeds");
 
 /**
