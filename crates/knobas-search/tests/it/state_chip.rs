@@ -189,6 +189,59 @@ async fn a_search_hit_carries_its_state_chip() {
     assert_eq!(states(hits, &ids), expected());
 }
 
+/// A ticket's hit carries its status as a state in the tone Jira's descriptor
+/// declares for it (#2421): the launcher colours the monogram from this and
+/// reads no status name of its own.
+#[tokio::test]
+async fn a_tickets_hit_carries_its_declared_status_tone() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let t = token();
+    let at = Utc::now() - chrono::Duration::days(400);
+    let mut ids = Vec::new();
+    for (n, status) in ["Done", "In Review", "Closed", "To Do"].iter().enumerate() {
+        ids.push(
+            item(
+                &pool,
+                "jira",
+                "ticket",
+                &format!("{t}-{n}"),
+                &format!("ticket {t}"),
+                serde_json::json!({ "fields": { "status": { "name": status } } }),
+                at,
+            )
+            .await,
+        );
+    }
+    let response = searcher(&pool)
+        .await
+        .search(SearchQuery {
+            raw: t.clone(),
+            limit: 30,
+            filters: SearchFilters::default(),
+        })
+        .await
+        .unwrap();
+    let hits: Vec<_> = response.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row).collect();
+    let tone = |id: &String| {
+        hits.iter()
+            .find(|row| &row.entity_id == id)
+            .unwrap_or_else(|| panic!("{id} is among the hits"))
+            .state
+            .as_ref()
+            .map(|chip| (chip.text.clone(), chip.tone))
+    };
+    assert_eq!(
+        ids.iter().map(tone).collect::<Vec<_>>(),
+        [
+            Some(("Done".to_owned(), Tone::Ok)),
+            Some(("In Review".to_owned(), Tone::Info)),
+            Some(("Closed".to_owned(), Tone::Muted)),
+            None,
+        ]
+    );
+}
+
 #[tokio::test]
 async fn the_boards_newest_rows_carry_their_state_chip() {
     let _guard = SERIAL.lock().await;

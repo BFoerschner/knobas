@@ -7,7 +7,7 @@ import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, S
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { fills } from "../../../tf/roles.svelte";
-import { CORPUS, ROLE_CLAIMERS, SYNCED_AT } from "./corpus";
+import { CORPUS, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
 
@@ -198,6 +198,35 @@ function descriptor(declared: Declared & Partial<SourceDescriptor>): SourceDescr
   return { accepts_account: false, payload_paths: [], source_actions: [], clone_from: [], url_forms: [], ...declared };
 }
 
+/** A kind that declares no state (#2421): what the wire sends for one. */
+const NO_STATE: KindPaths["state"] = [];
+
+/** The states the fixture's adapters declare (#2421), as the real descriptors do. */
+const STATE_PATHS = {
+  ticket: { kind: "ticket", state: [{ at: ["status"], values: TICKET_STATES }] } as KindPaths,
+  pr: {
+    kind: "pr",
+    state: [
+      { at: ["merged"], values: [{ value: true, tone: "ok", text: "merged" }] },
+      { at: ["state"], values: [{ value: "open", tone: "info", text: null }, { value: "closed", tone: "muted", text: null }] },
+    ],
+  } as KindPaths,
+  build: {
+    kind: "build",
+    frame: "run",
+    state: [
+      {
+        at: ["status"],
+        values: [
+          { value: "running", tone: "info", text: null },
+          { value: "SUCCESS", tone: "ok", text: null },
+          { value: "FAILURE", tone: "err", text: null },
+        ],
+      },
+    ],
+  } as KindPaths,
+};
+
 const FIXTURE_ADAPTERS: SourceDescriptor[] = [
   descriptor({
     id: "mock",
@@ -230,7 +259,8 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     // and not the adapter's name, as the real descriptor declares (#1207, #2032).
     // Where the real adapter keeps a view's query, board type, sub-query and sprint (#2050).
     payload_paths: [
-      { kind: "jira_view", frame: "saved_view", system_name: "Jira", source_query: [["jql"]], board_type: [["type"]], sub_query: [["sub_query"]], sprint: [["sprint"]] } as KindPaths,
+      STATE_PATHS.ticket,
+      { kind: "jira_view", frame: "saved_view", state: NO_STATE, system_name: "Jira", source_query: [["jql"]], board_type: [["type"]], sub_query: [["sub_query"]], sprint: [["sprint"]] } as KindPaths,
     ],
     // The generated-form case: a select with a default, two lists, two texts.
     // The *same* transcription the form tests render, not a second copy of it.
@@ -254,6 +284,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     ],
     write_ops: [],
     entity_kinds: KIND_INFO,
+    payload_paths: [STATE_PATHS.pr],
     config_schema: GITEA_SCHEMA,
   }),
   descriptor({
@@ -275,9 +306,9 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
       { id: "build_config", label: "Build configuration", plural: "Build configurations", monogram: "BC", full_sync_exhaustive: false },
     ],
     payload_paths: [
-      // Only the two fields the frames read; the rest of a `KindPaths` is for the sync.
-      { kind: "build", frame: "run" } as KindPaths,
-      { kind: "build_config", frame: "pipeline" } as KindPaths,
+      // The fields the frames and the launcher legend read; the rest of a `KindPaths` is for the sync.
+      STATE_PATHS.build,
+      { kind: "build_config", frame: "pipeline", state: NO_STATE } as KindPaths,
     ],
     config_schema: TEAMCITY_SCHEMA,
   }),
@@ -295,7 +326,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     entity_kinds: [...KIND_INFO, { id: "kestrel_view", label: "Saved board", plural: "Saved boards", monogram: "SB", full_sync_exhaustive: false }],
     // A saved-view kind must say where its query is (#2050): Kestrel's are at `filter.text`, its layout at `layout`.
     payload_paths: [
-      { kind: "kestrel_view", frame: "saved_view", system_name: "Kestrel", source_query: [["filter", "text"]], board_type: [["layout"]] } as KindPaths,
+      { kind: "kestrel_view", frame: "saved_view", state: NO_STATE, system_name: "Kestrel", source_query: [["filter", "text"]], board_type: [["layout"]] } as KindPaths,
     ],
     config_schema: { type: "object", properties: {} },
   }),

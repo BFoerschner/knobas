@@ -4,6 +4,7 @@
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
 import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
+import type { StateValue } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { wordAlternatives } from "../../../tf/tickets/needles";
@@ -425,9 +426,31 @@ FAKE_CONTEXTS.push(fakeContext("ticket", "Retry failed SEPA payouts", "mock:PAY-
  * (#817's job rows), and `null` otherwise, as the mock adapter declares
  * neither; a row from another source names it as `source`.
  */
+/**
+ * A ticket's state as the Jira adapter declares it (#2421,
+ * `knobas-source-jira`'s `ticket_state`): the fixture's descriptors declare
+ * these (`fake/sources.ts`), and a ticket row resolves its status against
+ * them, so the launcher's colours and the `?` card's legend read one list.
+ */
+export const TICKET_STATES: StateValue[] = [
+  { value: "Done", tone: "ok", text: null },
+  { value: "Resolved", tone: "ok", text: null },
+  { value: "In Progress", tone: "info", text: null },
+  { value: "In Review", tone: "info", text: null },
+  { value: "Closed", tone: "muted", text: null },
+];
+
+/** A ticket's status as its declared state, or none: a word the list does not name is a miss. */
+function ticketState(entry: (typeof CORPUS)[number]): StateChip | null {
+  const status = entry.payload["status"];
+  if (entry.kind !== "ticket" || typeof status !== "string") return null;
+  const found = TICKET_STATES.find((value) => value.value === status.trim());
+  return found ? { text: status, tone: found.tone } : null;
+}
+
 export function mirrorRow(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) => (typeof value === "string" ? value : null);
-  const chip = entry.payload["chip"] as StateChip | undefined;
+  const chip = (entry.payload["chip"] as StateChip | undefined) ?? ticketState(entry) ?? undefined;
   return {
     entity_id: entry.entity_id,
     kind: entry.kind,

@@ -9,9 +9,13 @@
   grammar undocumented.
 
   Each row is a button that inserts itself, so the card is also how the syntax
-  is learned by using it.
+  is learned by using it. The card ends with the colour legend (#2421): what
+  a monogram's colour says, per kind, from the adapters' declared states.
 -->
 <script lang="ts">
+  import { kindRegistry } from "../shell/kind-registry.svelte";
+  import { kindLabel, kindMonogram } from "../shell/kinds";
+  import { legendOf } from "./legend";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -28,6 +32,9 @@
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
+
+  /** The colour legend (#2421): the adapters' declared states, per kind. */
+  const legend = $derived(legendOf(kindRegistry.declaredStates()));
 </script>
 
 <div class="tf-ln-h"><span class="tf-ln-lab">Prefix syntax</span></div>
@@ -51,3 +58,22 @@
     {/if}
   {/each}
 </div>
+
+{#if legend.length > 0}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Colours</span></div>
+  <div class="tf-ln-legend" role="list" aria-label="Colours">
+    {#each legend as line (line.kind)}
+      {@const info = kindRegistry.info(line.kind)}
+      <div class="tf-ln-lg" role="listitem">
+        <span class="tf-ln-lgk">{kindLabel(line.kind, info)}</span>
+        {#each line.tones as entry (entry.tone)}
+          <span class="tf-ln-lgt"
+            ><span class="tf-ln-mg" data-tone={entry.tone} aria-hidden="true">{kindMonogram(line.kind, info)}</span><span
+              >{entry.words.join(", ")}</span
+            ></span
+          >
+        {/each}
+      </div>
+    {/each}
+  </div>
+{/if}

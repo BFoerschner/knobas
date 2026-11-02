@@ -168,12 +168,33 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// second candidate (the deputy's ruling of 2026-10-12 on #598). A sub-task's
 /// direct parent comes first. On any one instance one of the two is unused,
 /// which is what clause 6's shared evidence slot tolerates (#301).
+/// A ticket's state (#2421, spec #2419): its status, in the tone the launcher
+/// colours its monogram with and the `?` card's legend explains. Done and
+/// resolved are green, in progress and in review blue, closed grey; to do,
+/// and any word a workflow adds that is not named here, is no state at all,
+/// which draws the row uncoloured. By name, as `done_statuses` is, and not by
+/// status category: knobas does not sync the category.
+fn ticket_state() -> Vec<knobas_source::StatePath> {
+    use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
+    vec![StatePath {
+        at: PayloadPath::of(["fields", "status", "name"]),
+        values: vec![
+            StateValue::of("Done", Tone::Ok),
+            StateValue::of("Resolved", Tone::Ok),
+            StateValue::of("In Progress", Tone::Info),
+            StateValue::of("In Review", Tone::Info),
+            StateValue::of("Closed", Tone::Muted),
+        ],
+    }]
+}
+
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
     vec![
         KindPaths {
             kind: crate::KIND_TICKET.to_owned(),
             status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+            state: ticket_state(),
             priority: vec![PayloadPath::of(["fields", "priority", "name"])],
             assignee: vec![
                 PayloadPath::of(["fields", "assignee", "name"]),
@@ -614,6 +635,31 @@ mod tests {
                 "{done} is in both sets"
             );
         }
+    }
+
+    /// A ticket's state is its status, in a tone (#2421): done green, in
+    /// progress or in review blue, closed grey, and to do -- or any word the
+    /// declaration does not name -- no state at all.
+    #[test]
+    fn a_ticket_declares_its_status_as_a_state_with_a_tone() {
+        use knobas_core::tone::Tone;
+        let template = descriptor_template();
+        let ticket = template
+            .payload_paths
+            .iter()
+            .find(|paths| paths.kind == crate::KIND_TICKET)
+            .expect("the ticket kind declares its paths");
+        let chip = |status: &str| {
+            let payload = serde_json::json!({ "fields": { "status": { "name": status } } });
+            knobas_core::payload::resolve_state(&payload, &ticket.state).map(|chip| (chip.text, chip.tone))
+        };
+        assert_eq!(chip("Done"), Some(("Done".to_owned(), Tone::Ok)));
+        assert_eq!(chip("Resolved"), Some(("Resolved".to_owned(), Tone::Ok)));
+        assert_eq!(chip("In Progress"), Some(("In Progress".to_owned(), Tone::Info)));
+        assert_eq!(chip("In Review"), Some(("In Review".to_owned(), Tone::Info)));
+        assert_eq!(chip("Closed"), Some(("Closed".to_owned(), Tone::Muted)));
+        assert_eq!(chip("To Do"), None);
+        assert_eq!(chip("Open"), None);
     }
 
     /// **No example field id in the help text** (#297).

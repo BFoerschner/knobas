@@ -106,3 +106,9 @@
 .tf-ln-tok { font-weight: 600; color: var(--info); text-align: center; border: 1px solid var(--rule); border-radius: 3px; padding: 0 2px; }
 /* A token the parser reports rather than honours, drawn as the chip bar draws one. */
 .tf-ln-greyed .tf-ln-tok { color: var(--ink-2); border-style: dashed; }
+/* The colour legend at the card's foot (#2421): per kind, each tone's monogram and the words that give it. */
+.tf-ln-legend { display: grid; gap: 4px; padding: 4px 18px 12px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ln-lg { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; }
+.tf-ln-lgk { width: 118px; flex: none; color: var(--ink); font-weight: 600; }
+.tf-ln-lgt { display: inline-flex; align-items: center; gap: 6px; }
+.tf-ln-lgt .tf-ln-mg { width: 28px; }

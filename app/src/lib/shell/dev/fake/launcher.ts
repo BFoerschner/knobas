@@ -11,6 +11,7 @@ import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
 
 /**
  * `search` for a ticket key the corpus holds (#1476), `PAY-231`: every
@@ -88,6 +89,8 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
   if (palette !== null) return palette;
   const byKey = ticketsByKey((query.raw ?? "").trim());
   if (byKey !== null) return byKey;
+  const words = wordSearch(query.raw ?? "");
+  if (words !== null) return words;
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
       code: "not_ready",
@@ -136,6 +139,60 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
   };
 }
 
+/** `knobas_search::group`'s order, unknown kinds last. */
+const GROUP_ORDER = ["ticket", "asset", "repo", "pr", "build_config", "build", "page", "note", "commit", "branch", "route", "monitor"];
+
+/**
+ * `search` for plain words (#2421): the corpus rows whose key, title or path
+ * holds every word, grouped in the engine's order, each with its state. So a
+ * free search can be looked at under `?fake-ipc`, the launcher's rows and
+ * their colours with it.
+ *
+ * **A substring match, fixture-only**, like the estate search below: it
+ * answers the shape and not the engine's question. The ranking, the excerpt
+ * and the grammar are the engine's, witnessed over a real PostgreSQL in
+ * `knobas-search`'s integration tests. A query with a prefix or a `:` token
+ * is not answered here.
+ */
+function wordSearch(raw: string): SearchResponse | null {
+  const text = raw.trim();
+  if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
+  const words = text.toLowerCase().split(/\s+/);
+  const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
+  for (const entry of CORPUS) {
+    if (entry.deleted_at !== null) continue;
+    const row = mirrorRow(entry);
+    const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""}`.toLowerCase();
+    if (!words.every((word) => haystack.includes(word))) continue;
+    const hits = byKind.get(entry.kind) ?? [];
+    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [] });
+    byKind.set(entry.kind, hits);
+  }
+  const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));
+  const groups = [...byKind]
+    .sort(([left], [right]) => at(left) - at(right) || left.localeCompare(right))
+    .map(([kind, hits]) => ({
+      kind,
+      label: kindSingular(kind),
+      plural: kindLabel(kind),
+      monogram: kindMonogram(kind),
+      total: hits.length,
+      hits: hits.slice(0, 8),
+    }));
+  return {
+    interpreted: {
+      text,
+      prefix: null,
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups,
+    total: groups.reduce((sum, group) => sum + group.total, 0),
+    took_ms: 3,
+    coverage: [],
+  };
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
@@ -168,12 +225,11 @@ export function handlers(): Handlers {
       pending_writes: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
       notes_shown: fakeNotesAreShown(),
     }),
-    // The Tree's search box (#430), and **only** the Tree's: a query that is
-    // not narrowed to assets is refused rather than answered from the estate,
-    // because the launcher's corpus is the mirror's and this fixture has no
-    // mirror to search. A handler that answered everything with assets would
-    // make a QA pass over the launcher look like it worked. `>` is answered
-    // (#1417) because the backend answers it without a corpus too.
+    // The Tree's search box (#430), a ticket key (#1476), `>` (#1417) and
+    // plain words over the corpus by substring (#2421). Anything else is
+    // refused rather than answered from the estate: a handler that answered
+    // everything with assets would make a QA pass over the launcher look like
+    // it worked.
     search: (args) => estateSearch(args),
     // The query box's suggestions (#601). **Fixture-only**: the kinds the
     // corpus holds and the configured sources, so `kind:` and `source:` can be

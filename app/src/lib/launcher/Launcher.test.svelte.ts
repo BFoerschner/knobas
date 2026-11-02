@@ -22,6 +22,7 @@ import type {
   Segment,
 } from "../ipc";
 import type { StateChip } from "../ipc/entity";
+import { kindRegistry } from "../shell/kind-registry.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
 
@@ -2364,4 +2365,59 @@ test("the box has no footnote, no ⌘K badge and no caret bar", async () => {
   const box = target.querySelector(".tf-ln-q")!;
   expect(box.querySelectorAll(".tf-ln-foot, kbd, .tf-ln-caret")).toHaveLength(0);
   expect(box.textContent).not.toContain("pending write");
+});
+
+/**
+ * The `?` card ends with a colour legend per kind (#2421), built from the
+ * states the adapters declare, so it cannot drift from what a row draws.
+ */
+test("the ? card ends with a legend per kind, from the adapters' declared states", async () => {
+  const declared = vi.spyOn(kindRegistry, "declaredStates").mockReturnValue([
+    {
+      kind: "ticket",
+      values: [
+        { value: "Done", tone: "ok", text: null },
+        { value: "In Progress", tone: "info", text: null },
+        { value: "Resolved", tone: "ok", text: null },
+        { value: "Closed", tone: "muted", text: null },
+      ],
+    },
+    {
+      kind: "pr",
+      values: [
+        { value: true, tone: "ok", text: "merged" },
+        { value: "open", tone: "info", text: null },
+        { value: "closed", tone: "muted", text: null },
+      ],
+    },
+  ]);
+  try {
+    open({
+      ports: {
+        launcherHome: async () => HOME,
+        search: async () =>
+          response({
+            interpreted: { text: "", prefix: "help", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+            groups: [],
+          }),
+      },
+    });
+    await settle();
+    await search("?");
+
+    const legend = target.querySelector('[aria-label="Colours"]')!;
+    expect(legend, "the legend is drawn").not.toBeNull();
+    // After the syntax rows, never among them: nothing in it is an option.
+    expect(legend.querySelectorAll('[role="option"]')).toHaveLength(0);
+    const kinds = [...legend.querySelectorAll(".tf-ln-lg")].map((line) => ({
+      kind: line.querySelector(".tf-ln-lgk")?.textContent?.trim(),
+      tones: [...line.querySelectorAll<HTMLElement>(".tf-ln-mg")].map((mg) => [mg.dataset["tone"], mg.nextElementSibling?.textContent?.trim()]),
+    }));
+    expect(kinds).toEqual([
+      { kind: "Tickets", tones: [["ok", "Done, Resolved"], ["info", "In Progress"], ["muted", "Closed"]] },
+      { kind: "Pull requests", tones: [["ok", "merged"], ["info", "open"], ["muted", "closed"]] },
+    ]);
+  } finally {
+    declared.mockRestore();
+  }
 });

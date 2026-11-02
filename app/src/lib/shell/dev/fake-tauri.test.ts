@@ -1289,11 +1289,31 @@ test("the fixture's Jira source holds PAY-231 as the mock does, each a ticket un
   expect(new Set(names).size).toBe(2);
 });
 
-test("the fixture's search answers a ticket key with every source's ticket of it, and refuses other words as before (#1476)", () => {
+test("the fixture's search answers a ticket key with every source's ticket of it (#1476)", () => {
   const handlers = demoHandlers();
   const search = (raw: string) => handlers["search"]!({ query: { raw, filters: {} } }) as { groups: { hits: { entity_id: string }[] }[] };
   expect(search("pay-231").groups[0]!.hits.map((hit) => hit.entity_id)).toEqual(["mock:PAY-231", "jira:PAY-231"]);
-  expect(() => search("sepa")).toThrow();
+});
+
+/**
+ * #2421: plain words are answered over the corpus by substring, grouped in
+ * the engine's order with each row's state, so a free search can be looked
+ * at under `?fake-ipc`. A `:` token is still refused: the fixture reads no
+ * grammar.
+ */
+test("the fixture's search answers plain words from the corpus, a ticket with its declared state", () => {
+  const handlers = demoHandlers();
+  type Answer = { groups: { kind: string; hits: { entity_id: string; title: string; state: { tone: string } | null }[] }[] };
+  const search = (raw: string) => handlers["search"]!({ query: { raw, filters: {} } }) as Answer;
+  const answer = search("sepa");
+  const kinds = answer.groups.map((group) => group.kind);
+  expect(kinds[0]).toBe("ticket");
+  for (const group of answer.groups) {
+    for (const hit of group.hits) expect(`${hit.entity_id} ${hit.title}`.toLowerCase()).toContain("sepa");
+  }
+  const inProgress = answer.groups[0]!.hits.find((hit) => hit.entity_id === "mock:PAY-231");
+  expect(inProgress?.state?.tone).toBe("info");
+  expect(() => search("sepa kind:page")).toThrow();
 });
 
 /**
@@ -1315,7 +1335,7 @@ test("the fixture's search answers > as the backend does: the text after the mar
     expect(answer.groups, raw).toEqual([]);
     expect(answer.total, raw).toBe(0);
   }
-  expect(() => search("sepa >")).toThrow();
+  expect(() => search("sepa kind:pr")).toThrow();
 });
 
 test("the fixture's resolve_url opens the SEPA page from the forms Confluence declares, not only its stored address (#1475)", () => {
