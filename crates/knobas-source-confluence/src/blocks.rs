@@ -152,19 +152,20 @@ fn history(payload: &Value) -> Vec<DocVersion> {
 
 // -- sections and their edits (#862) ------------------------------------------
 
-/// Elements the reader reads through to their children (`Blocks::node`'s
-/// transparent arm): a heading inside one is still one of the page's.
-fn is_transparent(name: &str) -> bool {
+/// Confluence's layout elements, which the hook reads through to their
+/// children (`Blocks::node`'s transparent arm).
+fn is_layout(name: &str) -> bool {
     matches!(
         name,
-        "div"
-            | "section"
-            | "blockquote"
-            | "ac:layout"
-            | "ac:layout-section"
-            | "ac:layout-cell"
-            | "ac:rich-text-body"
+        "ac:layout" | "ac:layout-section" | "ac:layout-cell" | "ac:rich-text-body"
     )
+}
+
+/// Elements the reader reads through to their children: the reader's own
+/// wrappers and the hook's layouts. A heading inside one is still one of the
+/// page's.
+fn is_transparent(name: &str) -> bool {
+    html::is_block_wrapper(name) || is_layout(name)
 }
 
 fn is_heading(name: &str) -> bool {
@@ -739,9 +740,7 @@ impl Hook for Storage<'_> {
             },
             "ac:image" => Hooked::Blocks(vec![placeholder("image")]),
             "ac:task-list" => Hooked::Blocks(vec![task_list(node, reading)]),
-            "ac:layout" | "ac:layout-section" | "ac:layout-cell" | "ac:rich-text-body" => {
-                Hooked::Blocks(reading.blocks(node.children()))
-            }
+            name if is_layout(name) => Hooked::Blocks(reading.blocks(node.children())),
             "ac:link" => Hooked::Inlines(self.link(node, reading)),
             "ac:emoticon" => Hooked::Inlines(
                 node.attr("ac:emoji-fallback")
@@ -1884,6 +1883,21 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (10, Some("- a b".to_owned()), None),
             ]
         );
+    }
+
+    /// A heading inside any wrapper the reader reads through (`article`,
+    /// `aside`, `details`…) is drawn, so it is numbered as one of the page's.
+    #[test]
+    fn a_heading_inside_any_wrapper_the_reader_reads_through_is_numbered() {
+        for wrapper in ["article", "aside", "header", "footer", "main", "nav", "figure", "details"] {
+            let storage =
+                format!("<h2>Top</h2><p>a</p><{wrapper}><h2>Inside</h2><p>b</p></{wrapper}>");
+            let drawn = blocks(&storage)
+                .iter()
+                .filter(|b| matches!(b, DocBlock::Heading { .. }))
+                .count();
+            assert_eq!(sections(&storage).len(), drawn, "{wrapper}");
+        }
     }
 
     /// Spec #2432: the editor's text has no checkbox, so a section holding a

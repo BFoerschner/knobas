@@ -656,8 +656,10 @@ pub fn blocks(nodes: &[Node], hook: &dyn Hook) -> Vec<DocBlock> {
 }
 
 /// Wrappers between blocks: the paragraph before them ends, their children
-/// are read in their place.
-fn is_block_wrapper(name: &str) -> bool {
+/// are read in their place. Public so an adapter that walks the same tree
+/// (a Confluence section's headings) reads through the same elements.
+#[must_use]
+pub fn is_block_wrapper(name: &str) -> bool {
     matches!(
         name,
         "div"
