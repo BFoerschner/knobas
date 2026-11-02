@@ -220,7 +220,8 @@ pub fn search_sql(
     // mirror rows (`Corpus::drawn_as_mirror`, #2431).
     let mirror = corpora
         .iter()
-        .position(|corpus| std::ptr::eq(*corpus, &crate::corpus::LIVE_ITEM));
+        // By relation: a `const` has no one address, so `ptr::eq` misses.
+        .position(|corpus| corpus.relation == crate::corpus::LIVE_ITEM.relation);
     let drawn_by = |index: usize, corpus: &Corpus| match mirror {
         Some(mirror) if corpus.drawn_as_mirror => mirror,
         _ => index,
@@ -1903,6 +1904,38 @@ mod tests {
 
     /// The mirror is read through the view migration 0002 added, and `fts` is
     /// matched against rather than selected (interfaces §1).
+    /// A run log's hits are live pipelines, drawn by the mirror's detail
+    /// branch (#2431): the statement plans one detail branch fewer than it
+    /// has corpora, and the log branch's matches carry the mirror's index.
+    #[test]
+    fn a_log_hit_is_drawn_by_the_mirrors_detail_branch() {
+        let built = search_sql(
+            crate::corpus::ALL,
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert_eq!(
+            built.sql.matches("    from picked p\n").count(),
+            crate::corpus::ALL.len() - 1,
+            "{}",
+            built.sql
+        );
+        assert_eq!(built.sql.matches("0 as corpus").count(), 2, "{}", built.sql);
+        // Alone, as the perf fixture runs a branch, it draws its own.
+        let alone = search_sql(
+            &[&crate::corpus::PIPELINE_LOG],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert_eq!(alone.sql.matches("    from picked p\n").count(), 1, "{}", alone.sql);
+    }
+
     #[test]
     fn the_corpus_is_the_live_view_and_fts_is_never_selected() {
         let built = search_sql(

@@ -372,13 +372,7 @@ impl Searcher {
             return Ok(empty(interpreted, started));
         }
 
-        // A run log is never on screen: Titles leaves its corpus out (#2431).
-        let corpora: Vec<&corpus::Corpus> = self
-            .corpora()
-            .iter()
-            .copied()
-            .filter(|c| !(filters.titles && std::ptr::eq(*c, &corpus::PIPELINE_LOG)))
-            .collect();
+        let corpora = corpus::searched(self.corpora(), filters.titles);
         let built = sql::search_sql(
             &corpora,
             text,

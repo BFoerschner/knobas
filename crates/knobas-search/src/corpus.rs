@@ -1004,9 +1004,32 @@ pub const WITHOUT_NOTES: &[&Corpus] = &[
     &PIPELINE_LOG,
 ];
 
+/// The corpora a launcher search unions: `corpora`, less [`PIPELINE_LOG`]
+/// under *Titles* (#2431), where a run log, never on screen, can match
+/// nothing and would only cost the statement a branch. Compared by relation:
+/// a `const` has no one address, so `std::ptr::eq` would miss it.
+#[must_use]
+pub fn searched(corpora: &[&'static Corpus], titles: bool) -> Vec<&'static Corpus> {
+    corpora
+        .iter()
+        .copied()
+        .filter(|c| !(titles && c.relation == PIPELINE_LOG.relation))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_leaves_the_run_logs_out_and_everything_keeps_them() {
+        let has_logs = |corpora: &[&Corpus]| corpora.iter().any(|c| c.relation == PIPELINE_LOG.relation);
+        assert!(has_logs(&searched(ALL, false)));
+        assert!(has_logs(&searched(WITHOUT_NOTES, false)));
+        assert!(!has_logs(&searched(ALL, true)));
+        assert!(!has_logs(&searched(WITHOUT_NOTES, true)));
+        assert_eq!(searched(ALL, true).len(), ALL.len() - 1);
+    }
 
     /// A kind knobas owns is searchable, or "notes are a first-class
     /// searchable kind" is a claim with nothing behind it.
