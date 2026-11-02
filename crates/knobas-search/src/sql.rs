@@ -286,9 +286,16 @@ pub fn search_sql(
             ),
             None => "null::text".to_owned(),
         };
+        // The text excerpts are read from (#2431): only under *Everything*
+        // with words, and only for the page, as the headline.
+        let (excerpt, excerpt_line) = if filters.excerpts && text.is_some() {
+            (corpus.excerpt, corpus.excerpt_line)
+        } else {
+            ("null::text", "null::bigint")
+        };
         let _ = writeln!(
             sql,
-            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path, {} as state,\n         {snippet} as snippet",
+            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path, {} as state,\n         {snippet} as snippet,\n         {excerpt} as excerpt_text, {excerpt_line} as excerpt_line",
             corpus.source_id, corpus.title, corpus.synced_at, corpus.path, corpus.state
         );
         let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
@@ -318,7 +325,7 @@ pub fn search_sql(
     // their kind rather than at the front of it.
     let _ = write!(
         sql,
-        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path, d.state as state,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
+        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path, d.state as state,\n       d.rank as rank, d.snippet as snippet,\n       d.excerpt_text as excerpt_text, d.excerpt_line as excerpt_line\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
         order_by("d.", ranked, true)
     );
 
@@ -668,6 +675,10 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     let mut predicates: Vec<String> = Vec::new();
     if let Some(fts) = fts {
         predicates.push(format!("{} @@ {fts}", corpus.fts));
+        if let Some(unless) = corpus.unless {
+            // The row another corpus answers for when it matches (#2431).
+            predicates.push(format!("not ({unless} @@ {fts})"));
+        }
         if bound.titles {
             // *Titles* (#2430): every corpus indexes what a row shows -- its
             // title, a ticket's key -- at weight A and its body below, so the
@@ -1936,6 +1947,9 @@ mod tests {
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus
             // rather than be quietly dropped for it.
+            excerpt: "null::text",
+            excerpt_line: "null::bigint",
+            unless: None,
             author: None,
             updated_at: "o.updated_at",
             synced_at: "o.synced_at",

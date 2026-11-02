@@ -47,6 +47,7 @@ pub mod attach;
 pub mod background;
 pub mod config;
 pub mod health;
+pub mod pipeline_logs;
 pub mod progress;
 pub mod refresh;
 pub mod role_check;

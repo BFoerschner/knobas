@@ -136,6 +136,18 @@ pub struct Corpus {
     /// and a headline over the body alone would then be an excerpt with no
     /// visible relation to what was searched for.
     pub(crate) headline_text: &'static str,
+    /// The text a hit's excerpts are read from under *Everything* (#2431,
+    /// [`crate::excerpt`]), selected for the page's rows only, or
+    /// `null::text` for a corpus with no text beyond what the row shows.
+    pub(crate) excerpt: &'static str,
+    /// The number of [`Self::excerpt`]'s first line when that text is a run
+    /// log, whose excerpts are its lines (`line <n>`), else `null::bigint`.
+    pub(crate) excerpt_line: &'static str,
+    /// The `tsvector` of the row another corpus answers for when it matches
+    /// (`i.fts`), or `None`: a corpus that adds a second way to find a row
+    /// another corpus holds, [`PIPELINE_LOG`], leaves out the rows that one
+    /// already matched, so a pipeline is one hit.
+    pub(crate) unless: Option<&'static str>,
     /// The author column, if the corpus has one. `None` means the corpus can
     /// hold nothing of anybody's, so an author filter excludes it entirely
     /// rather than silently ignoring the filter.
@@ -561,6 +573,11 @@ pub const LIVE_ITEM: Corpus = Corpus {
         "i.title || ' — ' || ",
         knobas_core::body_text_shown!("i.body_text")
     ),
+    // A pipeline's preview is its stored latest run log (#2431, `0067`),
+    // every other row's its body, the Docs marks kept for the places.
+    excerpt: "coalesce((select pl.body from sync.pipeline_log pl where pl.pipeline_id = i.entity_id), i.body_text)",
+    excerpt_line: "(select pl.first_line from sync.pipeline_log pl where pl.pipeline_id = i.entity_id)",
+    unless: None,
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
@@ -610,6 +627,9 @@ pub const NOTE: Corpus = Corpus {
     // A note is the user's own; there is no author column and no author to
     // filter by, so an author filter must exclude this corpus entirely rather
     // than be silently dropped for it.
+    excerpt: "n.body_md",
+    excerpt_line: "null::bigint",
+    unless: None,
     author: None,
     updated_at: "n.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -672,6 +692,9 @@ pub const ASSET: Corpus = Corpus {
     named: None,
     fts: "a.fts",
     headline_text: "a.name || ' — ' || a.path_text || ' — ' || a.props_text",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
     author: None,
     updated_at: "a.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -755,6 +778,9 @@ pub const ROUTE: Corpus = Corpus {
     named: None,
     fts: "r.fts",
     headline_text: "r.name || ' — ' || r.url",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
     author: None,
     updated_at: "r.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -792,6 +818,9 @@ pub const VIEW: Corpus = Corpus {
     named: None,
     fts: "v.fts",
     headline_text: "v.name || ' — ' || v.view_group || ' — ' || v.query",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
     author: None,
     updated_at: "v.updated_at",
     synced_at: "v.updated_at",
@@ -824,6 +853,9 @@ pub const SET: Corpus = Corpus {
     named: None,
     fts: "s.fts",
     headline_text: "s.name || ' — ' || s.description",
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
     author: None,
     updated_at: "s.updated_at",
     synced_at: "s.updated_at",
@@ -877,6 +909,9 @@ pub const SAVED_LIST: Corpus = Corpus {
     fts: "l.fts",
     headline_text: "l.label || ' — ' || l.query",
     // The reader's own, as a note is.
+    excerpt: "null::text",
+    excerpt_line: "null::bigint",
+    unless: None,
     author: None,
     updated_at: "l.updated_at",
     synced_at: "l.updated_at",
@@ -896,12 +931,64 @@ pub const SAVED_LIST: Corpus = Corpus {
 /// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
 /// with no author column outright. So the union is always both branches and the
 /// answer is always the right one.
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE, &VIEW, &SET, &SAVED_LIST];
+/// A pipeline found by its latest run log (#2431, spec #2419): the words a
+/// build printed answer the pipeline, never the run (#2422 keeps runs out of
+/// the launcher). One row per pipeline in `sync.pipeline_log` (migration
+/// `0067`, written by `knobas_sync::pipeline_logs`), joined to the pipeline's
+/// live row, so the hit is the pipeline as [`LIVE_ITEM`] draws it: its name,
+/// its chain of groups, its newest run's state.
+///
+/// **One hit per pipeline.** A pipeline whose own row matches is
+/// [`LIVE_ITEM`]'s, and this corpus leaves it out (`unless`); its excerpts
+/// are still the log's, because [`LIVE_ITEM`]'s `excerpt` reads the stored
+/// log first. **Never under *Titles*:** the log is lexed with no weight, so
+/// the weight-A filter matches nothing here.
+pub const PIPELINE_LOG: Corpus = Corpus {
+    relation: "sync.pipeline_log pl join sync.live_item i on i.entity_id = pl.pipeline_id",
+    entity_id: "i.entity_id",
+    kind: "i.kind",
+    source_id: "i.source_id",
+    title: "i.title",
+    // Its own row did not match (`unless`), so it is not named what was typed.
+    named: Some("false"),
+    fts: "pl.fts",
+    headline_text: "i.title || ' — ' || pl.body",
+    excerpt: "pl.body",
+    excerpt_line: "pl.first_line",
+    unless: Some("i.fts"),
+    author: Some("i.author"),
+    updated_at: "i.item_updated_at",
+    synced_at: "i.synced_at",
+    path: mirror_path!("pd.d"),
+    state: mirror_state!("pd.d"),
+    scope: None,
+    under: LIVE_ITEM.under,
+    fields: LIVE_ITEM_FIELDS,
+};
+
+pub const ALL: &[&Corpus] = &[
+    &LIVE_ITEM,
+    &NOTE,
+    &ASSET,
+    &ROUTE,
+    &VIEW,
+    &SET,
+    &SAVED_LIST,
+    &PIPELINE_LOG,
+];
 
 /// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
 /// quick capture* is off (#940, R-13a.6). The note data and commands stay
 /// (D10); only the search leaves them out.
-pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &VIEW, &SET, &SAVED_LIST];
+pub const WITHOUT_NOTES: &[&Corpus] = &[
+    &LIVE_ITEM,
+    &ASSET,
+    &ROUTE,
+    &VIEW,
+    &SET,
+    &SAVED_LIST,
+    &PIPELINE_LOG,
+];
 
 #[cfg(test)]
 mod tests {

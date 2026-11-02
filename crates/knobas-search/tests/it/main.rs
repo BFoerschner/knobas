@@ -13,6 +13,7 @@ mod bare_name;
 mod cased_identity;
 mod corpus_seam;
 mod declaring;
+mod everything;
 mod help_card;
 mod home;
 mod item_parent;

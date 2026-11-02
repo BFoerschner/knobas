@@ -492,6 +492,33 @@ const ESTATE_SHAPE: [i64; 3] = [3, 100, 10];
 /// than that file, which is again the point of an upper bound.
 const ROUTES_PER: i64 = 2;
 
+/// A latest run log (#2431, [`crate::corpus::PIPELINE_LOG`]) for each of the
+/// first `rows` mirror items by id, 200 lines each with `ledger` on every
+/// tenth: the logs' branch of the launcher. The items need not be pipelines;
+/// the branch joins any live row.
+///
+/// Idempotent: a row that has a log keeps it.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if the statement fails.
+pub async fn seed_pipeline_logs(pool: &PgPool, rows: i64) -> Result<(), SearchError> {
+    sqlx::query(
+        r"
+        insert into sync.pipeline_log (pipeline_id, run_id, first_line, body)
+        select i.entity_id, i.entity_id || ':run', 1,
+               (select string_agg(case when n % 10 = 0 then 'step ' || n || ' ledger posted'
+                                       else 'step ' || n || ' compiled ok' end, E'\n' order by n)
+                  from generate_series(1, 200) n)
+          from (select entity_id from sync.item order by entity_id limit $1) i
+        on conflict (pipeline_id) do nothing",
+    )
+    .bind(rows)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// A reader's saved ticket views and link sets (#2422), `rows` of each: the
 /// launcher's [`crate::corpus::VIEW`] and [`crate::corpus::SET`] branches. A
 /// set holds two members, a pattern and a project rule, so its path line's

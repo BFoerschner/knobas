@@ -903,8 +903,8 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
 /// the report's and nothing else's: a reordered `corpus::ALL` would print the
 /// wrong names beside the right numbers, and every assertion below is per branch
 /// either way.
-const BRANCHES: [&str; 7] = [
-    "mirror", "notes", "assets", "routes", "views", "sets", "lists",
+const BRANCHES: [&str; 8] = [
+    "mirror", "notes", "assets", "routes", "views", "sets", "lists", "logs",
 ];
 
 /// Every branch the launcher unions holds rows, read through the launcher's own
@@ -1044,6 +1044,8 @@ async fn the_match_set_is_not_joined_row_by_row() {
     // other test's report a reading of two.
     testing::seed_estate(&pool, "bench").await.unwrap();
     testing::seed_views_and_sets(&pool, 30).await.unwrap();
+    // Run logs, so the logs' branch (#2431) has rows.
+    testing::seed_pipeline_logs(&pool, 300).await.unwrap();
     // A saved list, so the lists' branch (#2423) is a relation with a row in it.
     sqlx::query(
         "insert into knobas.smart_list (id, label, query)

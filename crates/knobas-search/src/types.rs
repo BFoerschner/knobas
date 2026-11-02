@@ -315,6 +315,29 @@ pub struct SearchHit {
     pub row: EntityRow,
     pub rank: f32,
     pub snippet: Vec<Segment>,
+    /// Where the words appear in the row's text, each with its place
+    /// (#2431): what the launcher's preview draws under *Everything*, so the
+    /// preview is this list and no second read. Empty under *Titles*, for a
+    /// browse, and for a row whose text holds none of the words (a hit by its
+    /// title alone). Read from the index: a page's section and comment marks
+    /// (`knobas_source::docs::indexed`), a pipeline's stored latest run log
+    /// (migration `0067`), a ticket's, pull request's or note's text.
+    #[serde(default)]
+    pub excerpts: Vec<Excerpt>,
+}
+
+/// One place the words appear in a hit's text (#2431).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct Excerpt {
+    /// Where in the row it sits, as the reader finds it there: a page's
+    /// section heading, `Comment by <name>`, a run log's `line <n>`. `None`
+    /// for text the index keeps no place for: a page's lead, a ticket's,
+    /// pull request's or note's text.
+    pub place: Option<String>,
+    /// The text around the words, the words flagged (raw source text, as
+    /// [`Segment`] says).
+    pub segments: Vec<Segment>,
 }
 
 /// A run of excerpt text, and whether it is part of the match.

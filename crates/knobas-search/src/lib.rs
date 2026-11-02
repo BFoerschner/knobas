@@ -37,6 +37,7 @@
 
 pub mod corpus;
 pub(crate) mod coverage;
+pub mod excerpt;
 pub mod frames;
 pub mod group;
 pub mod home;
@@ -67,7 +68,7 @@ pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
     EntityRow, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions,
     KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters,
-    SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
+    Excerpt, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -347,6 +348,7 @@ impl Searcher {
         let frames = frames::LauncherFrames::of(&vocab.declarations);
         let filters = EffectiveFilters {
             titles: query.titles,
+            excerpts: !query.titles,
             pipeline_kinds: frames.pipelines,
             hidden_kinds: frames.left_out,
             ..query::merge(&parsed, &query.filters)
@@ -379,7 +381,11 @@ impl Searcher {
             query.limit,
         );
         let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
-        let mut groups = group::group(rows, &vocab.kinds);
+        let mut groups = if filters.excerpts {
+            group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
+        } else {
+            group::group(rows, &vocab.kinds)
+        };
         flag_lists_needing_attention(&mut groups, &vocab);
 
         // A second round trip, and only for a query that filtered by author

@@ -74,6 +74,11 @@ pub struct RawHit {
     state: Option<sqlx::types::Json<knobas_core::payload::StateChip>>,
     rank: Option<f32>,
     snippet: Option<String>,
+    /// The text the excerpts are read from (#2431): null but under
+    /// *Everything* with words.
+    excerpt_text: Option<String>,
+    /// The number of `excerpt_text`'s first line when it is a run log.
+    excerpt_line: Option<i64>,
 }
 
 /// Fold the flat rows into groups, ordered by [`GROUP_ORDER`].
@@ -82,6 +87,17 @@ pub struct RawHit {
 /// the statement's ordering and only the *groups* are re-sorted here.
 #[must_use]
 pub fn group(rows: Vec<RawHit>, kinds: &KindCatalog) -> Vec<ResultGroup> {
+    grouped(rows, kinds, &[])
+}
+
+/// [`group`], each hit carrying the places in its text that hold one of
+/// `needles` (#2431, [`crate::excerpt`]).
+#[must_use]
+pub fn with_excerpts(rows: Vec<RawHit>, kinds: &KindCatalog, needles: &[String]) -> Vec<ResultGroup> {
+    grouped(rows, kinds, needles)
+}
+
+fn grouped(rows: Vec<RawHit>, kinds: &KindCatalog, needles: &[String]) -> Vec<ResultGroup> {
     let mut groups: Vec<ResultGroup> = Vec::new();
     for row in rows {
         let index = match groups.iter().position(|g| g.kind == row.group_kind) {
@@ -99,7 +115,7 @@ pub fn group(rows: Vec<RawHit>, kinds: &KindCatalog) -> Vec<ResultGroup> {
                 groups.len() - 1
             }
         };
-        if let Some(hit) = hit(row) {
+        if let Some(hit) = hit(row, needles) {
             groups[index].hits.push(hit);
         }
     }
@@ -115,14 +131,21 @@ pub fn group(rows: Vec<RawHit>, kinds: &KindCatalog) -> Vec<ResultGroup> {
 /// the header of a kind the limit cut. Requiring **both** rather than one is
 /// what keeps a half-decoded row from becoming a hit with an invented
 /// timestamp.
-fn hit(row: RawHit) -> Option<SearchHit> {
+fn hit(row: RawHit, needles: &[String]) -> Option<SearchHit> {
     let (entity_id, synced_at) = row.entity_id.zip(row.synced_at)?;
+    let title = row.title.unwrap_or_default();
+    let excerpts = match &row.excerpt_text {
+        Some(text) if !needles.is_empty() => {
+            crate::excerpt::excerpts(&title, text, row.excerpt_line, needles)
+        }
+        _ => Vec::new(),
+    };
     Some(SearchHit {
         row: EntityRow {
             entity_id,
             kind: row.group_kind,
             source_id: row.source_id.unwrap_or_default(),
-            title: row.title.unwrap_or_default(),
+            title,
             updated_at: row.updated_at,
             synced_at,
             path: row.path,
@@ -134,6 +157,7 @@ fn hit(row: RawHit) -> Option<SearchHit> {
             .as_deref()
             .map(snippet::segments)
             .unwrap_or_default(),
+        excerpts,
     })
 }
 
@@ -162,6 +186,8 @@ mod tests {
             state: None,
             rank: None,
             snippet: None,
+            excerpt_text: None,
+            excerpt_line: None,
         }
     }
 
@@ -182,6 +208,8 @@ mod tests {
                 snippet::HIT_START,
                 snippet::HIT_STOP
             )),
+            excerpt_text: None,
+            excerpt_line: None,
         }
     }
 

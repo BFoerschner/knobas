@@ -241,6 +241,11 @@ pub struct EffectiveFilters {
     /// ticket's key. Not a filter [`Self::is_empty`] counts: Titles over an
     /// empty box is still the board.
     pub titles: bool,
+    /// Whether the page's rows carry the text their excerpts are read from
+    /// (#2431, [`crate::excerpt`]): the launcher's *Everything*, set by
+    /// `Searcher::search` and nothing else, so a Docs search or a saved
+    /// list's count reads no body it does not show.
+    pub excerpts: bool,
     /// The kinds declaring the Builds frame's `pipeline` (#2422,
     /// [`crate::frames`]): each is answered as kind `pipeline`, and a
     /// `pipeline` kind filter takes them in. Set by the launcher's search
@@ -492,6 +497,7 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
             .collect(),
         // The grammar has no word for it; the query sets it (`Searcher::search`).
         titles: false,
+        excerpts: false,
         // The launcher's search sets these from the declarations (#2422).
         pipeline_kinds: Vec::new(),
         hidden_kinds: Vec::new(),

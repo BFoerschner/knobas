@@ -1032,6 +1032,15 @@ async fn attempt(
     if let (Ok(_), Some(found)) = (&report, &discovered) {
         record_discovered(deps, source_id, found).await;
     }
+    // The newest finished runs' logs, into the index (#2431): after the
+    // run's transaction, best-effort and bounded, so a slow log never fails
+    // or holds the sync that found the run.
+    if report.is_ok()
+        && let Err(error) =
+            crate::pipeline_logs::refresh(&deps.pool, source_id, source.as_ref()).await
+    {
+        tracing::warn!(source_id, %error, "storing the pipelines' latest logs failed");
+    }
     // The same test as `write_queue::retryable`'s: change the two together.
     report.map_err(|error| match error {
         SyncError::Source(SourceError::Protocol { status: None, .. }) if held_on.is_some() => {
