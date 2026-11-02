@@ -161,7 +161,10 @@
       .then((on) => {
         if (!dead) embedsOn = on;
       })
-      .catch(() => {});
+      .catch((cause: unknown) => {
+        // The switch stays disabled: say why, as every other failure here does.
+        if (!dead) push({ text: `Could not read Run embedded HTML for ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      });
     return () => {
       dead = true;
     };

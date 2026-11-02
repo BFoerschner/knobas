@@ -915,6 +915,22 @@ test("a wiki's page has Run embedded HTML, on by default and saved as it changes
   expect(target.querySelector('[aria-label="Run embedded HTML"]')).toBeNull();
 });
 
+test("a wiki whose Run embedded HTML cannot be read says so, and its switch stays off limits (#2440)", async () => {
+  const wiki = summary("confluence", "Confluence", "ok", { roles: [{ role: "wiki", reads: [] }] });
+  await open(
+    ["source", "confluence"],
+    ports({
+      listSources: vi.fn(() => Promise.resolve([...SOURCES, wiki])),
+      runEmbeddedHtml: vi.fn(() => Promise.reject(new Error("database gone"))),
+    }),
+  );
+  await settle();
+  const embeds = target.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Run embedded HTML"]')!;
+  expect(embeds.disabled).toBe(true);
+  expect(toasts.items.at(-1)?.tone).toBe("err");
+  expect(toasts.items.at(-1)?.text).toMatch(/^Could not read Run embedded HTML for Confluence: /);
+});
+
 test("Backfill runs backfill_source for this source", async () => {
   const { p } = await open(["source", "jira"]);
   button("Backfill").click();
