@@ -2294,11 +2294,9 @@ async fn views_sets_and_pipelines_are_kinds_on_the_wire_and_runs_are_not() {
         .await
         .unwrap();
     let wire = serde_json::to_value(&response).unwrap();
-    let groups: Vec<(
-        String,
-        String,
-        Vec<(String, Option<String>, Option<String>)>,
-    )> = wire["groups"]
+    // A group as `(kind, monogram, hits)`, a hit as `(entity id, path, tone)`.
+    type Hit = (String, Option<String>, Option<String>);
+    let groups: Vec<(String, String, Vec<Hit>)> = wire["groups"]
         .as_array()
         .unwrap()
         .iter()
