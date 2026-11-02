@@ -259,6 +259,9 @@ async fn a_stamp_waits_for_a_declaration_change_before_it_locks_a_row() {
         .await
         .expect("the stamp holds no row lock while it waits for the key");
     change.commit().await.unwrap();
-    stamp.await.unwrap().expect("the stamp runs once the change commits");
+    stamp
+        .await
+        .unwrap()
+        .expect("the stamp runs once the change commits");
     assert_eq!(key_cell(&pool, &id).await.as_deref(), Some("recomputed"));
 }
