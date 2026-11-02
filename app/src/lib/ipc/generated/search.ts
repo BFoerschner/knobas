@@ -163,11 +163,11 @@ label: string, };
  * stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
  * depends on none of those crates.
  *
- * [`LauncherBoard`]: knobas_search::LauncherBoard
- * [`CredentialHealth`]: knobas_sync::CredentialHealth
- *
  * No lists since #2423 (spec #2419): a saved list is a `list` hit behind
  * `#l`, and the built-in ones are gone.
+ *
+ * [`LauncherBoard`]: knobas_search::LauncherBoard
+ * [`CredentialHealth`]: knobas_sync::CredentialHealth
  */
 export type LauncherHome = { 
 /**
