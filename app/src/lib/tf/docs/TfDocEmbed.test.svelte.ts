@@ -133,6 +133,24 @@ test("the frame's height follows what its reporter says, up to the viewport", as
   expect(frame()!.getAttribute("height")).toBe("700");
 });
 
+/** The window resized to `height`, as the browser reports it. */
+function resize(height: number): void {
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(height);
+  window.dispatchEvent(new Event("resize"));
+  flushSync();
+}
+
+test("the frame's height follows the window as it resizes, back up to what its reporter said", async () => {
+  await draw();
+  resize(700);
+  say({ knobas: "embed", height: 600 });
+  expect(frame()!.getAttribute("height")).toBe("600");
+  resize(400);
+  expect(frame()!.getAttribute("height")).toBe("400");
+  resize(1000);
+  expect(frame()!.getAttribute("height")).toBe("600");
+});
+
 /** The reader's transient activation, as the browser reports it to the app's window (#2454). */
 function clicked(active: boolean): void {
   Object.defineProperty(navigator, "userActivation", { configurable: true, get: () => ({ isActive: active, hasBeenActive: active }) });
@@ -241,6 +259,15 @@ test("a URL embed is no taller than the window", async () => {
   vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
   await draw(urlPage());
   expect(frame()!.getAttribute("height")).toBe("300");
+});
+
+test("a URL embed follows the window as it resizes", async () => {
+  vi.spyOn(window, "innerHeight", "get").mockReturnValue(300);
+  await draw(urlPage());
+  resize(2000);
+  expect(frame()!.getAttribute("height")).toBe(String(EMBED_URL_HEIGHT));
+  resize(250);
+  expect(frame()!.getAttribute("height")).toBe("250");
 });
 
 test("a URL embed that never loads offers Open in browser for its URL; one that loaded stays", async () => {

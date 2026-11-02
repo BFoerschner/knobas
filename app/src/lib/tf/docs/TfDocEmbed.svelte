@@ -5,8 +5,9 @@
   sandbox (`render/embed.ts` says why neither can reach the app).
 
   - An HTML frame is as tall as its reporter says its document is, up to the
-    window's height; past that it scrolls inside itself. A URL frame reports
-    nothing and is `EMBED_URL_HEIGHT` tall, up to the window's. The height is
+    window's height, as the window resizes; past that it scrolls inside
+    itself. A URL frame reports nothing and is `EMBED_URL_HEIGHT` tall, up to
+    the window's. The height is
     the frame's `height` attribute: the app's policy refuses inline styles.
   - A link or popup from an HTML frame opens through `onopen`, which is the
     external-open path and its scheme check, only behind the reader's own
@@ -51,7 +52,9 @@
 
   let frame = $state<HTMLIFrameElement | null>(null);
   let reportedHeight = $state(150);
-  const height = $derived(framed === null ? reportedHeight : Math.min(EMBED_URL_HEIGHT, window.innerHeight));
+  // The window's height, read again on every resize: the cap follows it.
+  let viewport = $state(window.innerHeight);
+  const height = $derived(Math.min(framed === null ? reportedHeight : EMBED_URL_HEIGHT, viewport));
   let reported = $state(false);
   let silent = $state(false);
   let asked = $state<string | null>(null);
@@ -75,7 +78,10 @@
     const said = embedMessage(event.data);
     if (said === null) return;
     reported = true;
-    if ("height" in said) reportedHeight = Math.min(said.height, window.innerHeight);
+    if ("height" in said) {
+      reportedHeight = said.height;
+      viewport = window.innerHeight;
+    }
     else wants(said.open);
   }
 
@@ -96,7 +102,7 @@
   }
 </script>
 
-<svelte:window onmessage={heard} ononline={() => (online = true)} onoffline={() => (online = false)} />
+<svelte:window onmessage={heard} onresize={() => (viewport = window.innerHeight)} ononline={() => (online = true)} onoffline={() => (online = false)} />
 
 {#if running && !silent && source !== null}
   <div class="tf-embed">
