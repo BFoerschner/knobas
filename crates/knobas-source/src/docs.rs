@@ -497,32 +497,43 @@ pub fn inlines_mut(blocks: &mut [DocBlock]) -> Vec<&mut Inline> {
 fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
     match block {
         DocBlock::Heading { text, .. } | DocBlock::Paragraph { text } => {
-            out.extend(text.iter_mut())
-        }
-        DocBlock::List { items, .. } => {
-            for item in items {
-                for inner in &mut item.blocks {
-                    collect(inner, out);
-                }
-            }
-        }
-        DocBlock::Table { rows } => {
-            for cell in rows.iter_mut().flatten() {
-                for inner in &mut cell.blocks {
-                    collect(inner, out);
-                }
-            }
+            out.extend(text.iter_mut());
         }
         // What knobas filled an include with is drawn here, so its links,
         // chips and mentions are filled like the page's own.
-        DocBlock::Panel { blocks, .. }
-        | DocBlock::Collapsible { blocks, .. }
-        | DocBlock::Include { blocks, .. } => {
+        DocBlock::Include { blocks, .. } => {
             for inner in blocks {
                 collect(inner, out);
             }
         }
-        DocBlock::Code { .. } | DocBlock::Placeholder { .. } | DocBlock::Embed { .. } => {}
+        _ => {
+            for inner in nested_mut(block) {
+                collect(inner, out);
+            }
+        }
+    }
+}
+
+/// The blocks the page itself nests in `block`: a list item's, a table
+/// cell's, a panel's and a collapsible's. Not an include's, which knobas
+/// fills. The match names every block, so a new one is a decision here.
+fn nested_mut(block: &mut DocBlock) -> Vec<&mut DocBlock> {
+    match block {
+        DocBlock::List { items, .. } => items.iter_mut().flat_map(|i| &mut i.blocks).collect(),
+        DocBlock::Table { rows } => rows
+            .iter_mut()
+            .flatten()
+            .flat_map(|c| &mut c.blocks)
+            .collect(),
+        DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
+            blocks.iter_mut().collect()
+        }
+        DocBlock::Heading { .. }
+        | DocBlock::Paragraph { .. }
+        | DocBlock::Include { .. }
+        | DocBlock::Code { .. }
+        | DocBlock::Placeholder { .. }
+        | DocBlock::Embed { .. } => Vec::new(),
     }
 }
 
@@ -538,32 +549,12 @@ pub fn includes_mut(blocks: &mut [DocBlock]) -> Vec<&mut DocBlock> {
 }
 
 fn includes<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut DocBlock>) {
-    match block {
-        DocBlock::Include { .. } => out.push(block),
-        DocBlock::List { items, .. } => {
-            for item in items {
-                for inner in &mut item.blocks {
-                    includes(inner, out);
-                }
-            }
-        }
-        DocBlock::Table { rows } => {
-            for cell in rows.iter_mut().flatten() {
-                for inner in &mut cell.blocks {
-                    includes(inner, out);
-                }
-            }
-        }
-        DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
-            for inner in blocks {
-                includes(inner, out);
-            }
-        }
-        DocBlock::Heading { .. }
-        | DocBlock::Paragraph { .. }
-        | DocBlock::Code { .. }
-        | DocBlock::Placeholder { .. }
-        | DocBlock::Embed { .. } => {}
+    if matches!(block, DocBlock::Include { .. }) {
+        out.push(block);
+        return;
+    }
+    for inner in nested_mut(block) {
+        includes(inner, out);
     }
 }
 
