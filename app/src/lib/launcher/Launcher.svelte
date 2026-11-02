@@ -109,7 +109,7 @@
   import { linkFailureMessage } from "../detail/links";
   import { argvText, menuOrder } from "../tf/openin/openin";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
-  import type { InboxPreview, LauncherRow } from "./rows";
+  import { type InboxPreview, type LauncherRow, stepOf, walk } from "./rows";
   import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
@@ -543,15 +543,12 @@
    */
   function suggestionKey(event: KeyboardEvent): boolean {
     if (offer.length === 0) return false;
+    const to = walk(event, suggestionPicked, offer.length);
+    if (to !== null) {
+      suggestionPicked = to;
+      return true;
+    }
     switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        suggestionPicked = Math.min(offer.length - 1, suggestionPicked + 1);
-        return true;
-      case "ArrowUp":
-        event.preventDefault();
-        suggestionPicked = Math.max(0, suggestionPicked - 1);
-        return true;
       case "Enter":
       case "Tab": {
         event.preventDefault();
@@ -831,15 +828,12 @@
 
   /** The overlay's keys: arrows walk, Enter picks, Esc or Backspace on the empty box go back. */
   function overlayKey(event: KeyboardEvent, current: { filter: string; selected: number }) {
+    const to = walk(event, current.selected, overlayRows.length);
+    if (to !== null) {
+      current.selected = to;
+      return;
+    }
     switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        current.selected = Math.min(overlayRows.length - 1, current.selected + 1);
-        return;
-      case "ArrowUp":
-        event.preventDefault();
-        current.selected = Math.max(0, current.selected - 1);
-        return;
       case "Enter": {
         event.preventDefault();
         const row = overlayRows[current.selected];
@@ -1100,15 +1094,12 @@
 
   /** A flow's keys: the arrows walk the choices, Enter picks, Esc or Backspace on the empty box step back, Tab leaves. */
   function flowKey(event: KeyboardEvent, current: NonNullable<typeof sheet>, flow: Flow) {
+    const to = walk(event, current.selected, flowShown.length);
+    if (to !== null) {
+      current.selected = to;
+      return;
+    }
     switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        current.selected = Math.min(flowShown.length - 1, current.selected + 1);
-        return;
-      case "ArrowUp":
-        event.preventDefault();
-        current.selected = Math.max(0, current.selected - 1);
-        return;
       case "Enter": {
         event.preventDefault();
         const chosen = flowShown[current.selected];
@@ -1158,15 +1149,12 @@
   function sheetKey(event: KeyboardEvent, current: NonNullable<typeof sheet>) {
     if (current.renaming !== null) return renamingKey(event, current, current.renaming);
     if (current.flow) return flowKey(event, current, current.flow);
+    const to = walk(event, current.selected, sheetShown.length);
+    if (to !== null) {
+      current.selected = to;
+      return;
+    }
     switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        current.selected = Math.min(sheetShown.length - 1, current.selected + 1);
-        return;
-      case "ArrowUp":
-        event.preventDefault();
-        current.selected = Math.max(0, current.selected - 1);
-        return;
       case "ArrowLeft":
       case "ArrowRight":
         if (sheetShown[current.selected]?.does.kind === "link") {
@@ -1433,15 +1421,13 @@
       return;
     }
     if (suggestionKey(event)) return;
+    const step = stepOf(event);
+    if (step !== 0) {
+      event.preventDefault();
+      session.move(step);
+      return;
+    }
     switch (event.key) {
-      case "ArrowDown":
-        event.preventDefault();
-        session.move(1);
-        return;
-      case "ArrowUp":
-        event.preventDefault();
-        session.move(-1);
-        return;
       case "Enter": {
         event.preventDefault();
         // A miss has one thing to do and no row to do it from, so the key

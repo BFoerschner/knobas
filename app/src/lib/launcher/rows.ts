@@ -177,3 +177,21 @@ function docsRow(response: SearchResponse): LauncherRow[] {
   if (words === "" || !response.interpreted.filters.kinds.includes("page")) return [];
   return [{ kind: "docs", id: "docs", words }];
 }
+
+/** ↓ is one row on, ↑ one back; any other key `0`. */
+export function stepOf(event: Pick<KeyboardEvent, "key">): -1 | 0 | 1 {
+  return event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+}
+
+/**
+ * ↓ or ↑ over a list of `count` rows from `selected`: the row it lands on,
+ * held at the ends, the key's default prevented; any other key `null`. The
+ * one walk the box's panels share (the suggestions, the overlay, the sheet
+ * and its flows; the results walk through `session.move`).
+ */
+export function walk(event: Pick<KeyboardEvent, "key" | "preventDefault">, selected: number, count: number): number | null {
+  const step = stepOf(event);
+  if (step === 0) return null;
+  event.preventDefault();
+  return step === 1 ? Math.min(count - 1, selected + 1) : Math.max(0, selected - 1);
+}
