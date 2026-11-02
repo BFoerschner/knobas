@@ -26,10 +26,13 @@ use crate::vocab::KindCatalog;
 /// after it, alphabetically, so a new adapter's items appear in a stable place
 /// without an entry being added anywhere (spec §3a).
 pub(crate) const GROUP_ORDER: &[&str] = &[
+    "view",
+    "set",
     "ticket",
     "asset",
     "repo",
     "pr",
+    "pipeline",
     "build_config",
     "build",
     "page",

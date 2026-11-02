@@ -711,12 +711,45 @@ pub const ROUTE: Corpus = Corpus {
 /// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
 /// with no author column outright. So the union is always both branches and the
 /// answer is always the right one.
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE];
+/// A saved ticket view (#2422, `knobas.ticket_view`, migration `0035`): the
+/// launcher's kind `view`, found by its name (weight A, so *Titles* finds it)
+/// and by its group and its conditions (weight B). Its path line is the group
+/// and the conditions as saved, `Team · #t status:open`, the group alone for a
+/// view of every ticket; the row's key cell reads the group off its front.
+///
+/// The `tsvector` is computed in the relation and not stored: the table holds
+/// a reader's views, tens of rows, and a column would be a migration for a
+/// scan of a page. A view is no entity (`0035`: nothing links to one), so its
+/// id is its own, the slug its address `#/tickets/<id>` carries.
+pub const VIEW: Corpus = Corpus {
+    relation: "(select tv.id, tv.name, tv.view_group, tv.query, tv.updated_at, \
+               setweight(to_tsvector('english', tv.name), 'A') || \
+               setweight(to_tsvector('english', tv.view_group), 'B') || \
+               setweight(to_tsvector('english', tv.query), 'B') as fts \
+               from knobas.ticket_view tv) v",
+    entity_id: "v.id",
+    kind: "'view'",
+    source_id: "'view'",
+    title: "v.name",
+    named: None,
+    fts: "v.fts",
+    headline_text: "v.name || ' — ' || v.view_group || ' — ' || v.query",
+    author: None,
+    updated_at: "v.updated_at",
+    synced_at: "v.updated_at",
+    path: "v.view_group || coalesce(' · ' || nullif(btrim(v.query), ''), '')",
+    state: "null::jsonb",
+    scope: None,
+    under: None,
+    fields: &[],
+};
+
+pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE, &VIEW];
 
 /// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
 /// quick capture* is off (#940, R-13a.6). The note data and commands stay
 /// (D10); only the search leaves them out.
-pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE];
+pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &VIEW];
 
 #[cfg(test)]
 mod tests {

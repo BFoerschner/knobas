@@ -431,8 +431,9 @@ impl KindCatalog {
     pub fn info(&self, kind: &str) -> KindInfo {
         self.owned
             .get(kind)
-            .or_else(|| self.declared.get(kind))
             .cloned()
+            .or_else(|| launcher_kind(kind))
+            .or_else(|| self.declared.get(kind).cloned())
             .unwrap_or_else(|| derive_kind_info(kind))
     }
 
@@ -449,7 +450,9 @@ impl KindCatalog {
     /// because knobas owns notes, even though no descriptor mentions them.
     #[must_use]
     pub fn is_known(&self, kind: &str) -> bool {
-        self.owned.contains_key(kind) || self.declared.contains_key(kind)
+        self.owned.contains_key(kind)
+            || launcher_kind(kind).is_some()
+            || self.declared.contains_key(kind)
     }
 
     /// Every kind a compiled-in adapter declares, in a stable order.
@@ -532,6 +535,34 @@ fn owned_kinds() -> BTreeMap<String, KindInfo> {
             )
         })
         .collect()
+}
+
+/// The kinds the launcher answers with that are neither an adapter's nor an
+/// entity knobas owns (#2422, spec #2419), `(id, label, plural, monogram)`:
+/// a saved ticket view, a link set, and the shell's word for what a CI source
+/// runs, which a hit of any kind declaring the Builds frame's `pipeline` is
+/// grouped under (ADR-0022). Not `knobas_core::entity::OWNED_KINDS`: those
+/// are entity namespaces (migration `0006`), and a view or a set is no
+/// entity. Ahead of the declared kinds in [`KindCatalog::info`], so a group
+/// says *Pipeline* whatever an adapter calls its own.
+pub const LAUNCHER_KINDS: &[(&str, &str, &str, &str)] = &[
+    ("view", "Ticket view", "Ticket views", "VW"),
+    ("set", "Link set", "Link sets", "LS"),
+    ("pipeline", "Pipeline", "Pipelines", "PL"),
+];
+
+fn launcher_kind(kind: &str) -> Option<KindInfo> {
+    LAUNCHER_KINDS
+        .iter()
+        .find(|(id, ..)| *id == kind)
+        .map(|(id, label, plural, monogram)| KindInfo {
+            id: (*id).to_owned(),
+            label: (*label).to_owned(),
+            plural: (*plural).to_owned(),
+            monogram: (*monogram).to_owned(),
+            full_sync_exhaustive: false,
+            refreshes: true,
+        })
 }
 
 /// Everything a kind's chip needs, worked out from its id alone.
