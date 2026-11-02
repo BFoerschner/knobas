@@ -131,6 +131,7 @@ export type {
   DocBacklink,
   DocBlock,
   DocComment,
+  DocEmbedContent,
   DocExport,
   DocForYou,
   DocHit,

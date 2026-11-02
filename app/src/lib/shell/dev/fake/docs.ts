@@ -566,6 +566,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
     backlinks: backlinks(found.title),
     work: work(body.blocks.map(block)),
     writes: ["comment", "update_page", "create_page"],
+    run_embeds: true,
   };
 }
 

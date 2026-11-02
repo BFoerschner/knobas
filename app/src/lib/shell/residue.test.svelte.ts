@@ -365,6 +365,7 @@ const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfOpenObject = (await import("../tf/openin/TfOpenObject.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
 const TfCommandOutput = (await import("../tf/render/TfCommandOutput.svelte")).default;
+const TfDocEmbed = (await import("../tf/docs/TfDocEmbed.svelte")).default;
 const TfPdf = (await import("../tf/render/TfPdf.svelte")).default;
 const TfPdfDiff = (await import("../tf/render/TfPdfDiff.svelte")).default;
 const TfBytesImage = (await import("../tf/render/TfBytesImage.svelte")).default;
@@ -1294,6 +1295,17 @@ const CASES: Case[] = [
           text: "<p>x</p>",
           commands: { run: () => deferred({ outcome: "drawn", output: "html", body: "<p>x</p>" }) },
         },
+      }),
+    }),
+  },
+  {
+    /** A page's embed (#2440): its frame's report timer and the window's message and network listeners. */
+    name: "TfDocEmbed",
+    source: "lib/tf/docs/TfDocEmbed.svelte",
+    open: (target) => ({
+      app: mount(TfDocEmbed, {
+        target,
+        props: { content: { kind: "html", html: "<p>x</p>" }, sourceName: "Confluence", webUrl: null, onopen: () => {} },
       }),
     }),
   },
@@ -2428,6 +2440,7 @@ const CASES: Case[] = [
                 backlinks: [],
                 work: [],
                 writes: [],
+                run_embeds: true,
               }),
             docsSearch: () => deferred(null),
             docsExportMarkdown: () => deferred({ file: "page.md", folder: "/d" }),
