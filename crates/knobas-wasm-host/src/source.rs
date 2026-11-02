@@ -1,8 +1,7 @@
 //! [`WasmSource`]: the `Source` trait, forwarded across the WIT boundary.
 
 use knobas_source::docs::{
-    DocBlock, DocContent, EditRefused, EmbedContent, Inline, PAGE_KIND, SectionEdit,
-    SectionRefusal,
+    DocBlock, DocContent, EditRefused, EmbedContent, Inline, PAGE_KIND, SectionEdit, SectionRefusal,
 };
 use knobas_source::{
     Capability, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError,
@@ -570,12 +569,7 @@ pub(crate) async fn body_from_text(adapter: &WasmAdapter, text: &str) -> Option<
         Ok(answer)
     })
     .await;
-    docs_answer(
-        adapter,
-        "the body of a new page",
-        "it is not made",
-        answer,
-    )
+    docs_answer(adapter, "the body of a new page", "it is not made", answer)
 }
 
 /// What a component's docs content may not say, cleared: what knobas fills

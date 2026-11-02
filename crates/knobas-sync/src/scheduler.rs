@@ -108,9 +108,8 @@ type EditFn = dyn Fn(
         &serde_json::Value,
         u32,
         &str,
-    ) -> Option<
-        Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>,
-    > + Send
+    ) -> Option<Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>>
+    + Send
     + Sync;
 
 /// What [`Writes::body_from_text`] calls.

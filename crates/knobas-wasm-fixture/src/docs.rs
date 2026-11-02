@@ -21,6 +21,13 @@
 //! a test patches it in the component's bytes to show that a new component
 //! redraws a mirrored page without a re-sync.
 //!
+//! **The writes** (#2443): a section is what follows a top-level heading up
+//! to the next one, refused at the first part a text box cannot hold (a
+//! table, code, an `hb:` element, marks or links), else edited as plain
+//! text: a paragraph per block and `- ` per item, which
+//! [`body_from_text`] writes back as markup. The section edit misbehaves
+//! on the same payload keys as the projection.
+//!
 //! **The misbehaving projections**, by payload key, for the host's limits:
 //! `"fetch": "<url>"` sends a request first and traps when it is refused,
 //! `"trap": true` traps, `"spin": true` never returns, `"hog": true`
@@ -324,7 +331,12 @@ pub fn edit_section(
         .ok_or(EditRefused::Missing)?;
     span.verdict.map_err(EditRefused::Section)?;
     Ok(SectionEdit {
-        body: format!("{}{}{}", &body[..span.from], body_from_text(text), &body[span.to..]),
+        body: format!(
+            "{}{}{}",
+            &body[..span.from],
+            body_from_text(text),
+            &body[span.to..]
+        ),
         base_version,
     })
 }

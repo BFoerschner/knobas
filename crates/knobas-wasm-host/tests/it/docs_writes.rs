@@ -30,7 +30,12 @@ const SECTIONS: &str = "<h2>Pilots</h2>\n<p>Board at buoy 3.</p>\n<ul><li>Ladder
 #[test]
 fn a_section_edit_is_the_whole_body_the_component_made() {
     let adapter = load_fixture();
-    let edit = adapter.edit_section("page", &payload(SECTIONS), 1, "Board at buoy 4.\n\n- Ladder\n- Line");
+    let edit = adapter.edit_section(
+        "page",
+        &payload(SECTIONS),
+        1,
+        "Board at buoy 4.\n\n- Ladder\n- Line",
+    );
     let rest = &SECTIONS[SECTIONS.find("<h2>Berths").unwrap()..];
     assert_eq!(
         edit,
@@ -100,7 +105,10 @@ fn each_refused_section_is_refused_by_the_edit_for_its_reason() {
 fn a_new_page_s_body_is_the_component_s_markup_of_the_text() {
     assert_eq!(
         load_fixture().body_from_text("Intro\nthat runs on\n\n## Steps\n- restart\n- a < b"),
-        Some("<p>Intro that runs on</p><h2>Steps</h2><ul><li>restart</li><li>a &lt; b</li></ul>".to_owned())
+        Some(
+            "<p>Intro that runs on</p><h2>Steps</h2><ul><li>restart</li><li>a &lt; b</li></ul>"
+                .to_owned()
+        )
     );
 }
 

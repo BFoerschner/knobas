@@ -31,6 +31,10 @@
 //!   view offers this one, with one field, the day. The fixture performs it
 //!   on a survey by answering a receipt and changing nothing, and refuses
 //!   every other write with a protocol error, as battery clause 11 asks.
+//!   The 1.5.0 build also writes pages (#2443): `update_page` is `PUT
+//!   <base_url>/pages/<key>` and `create_page` `POST <base_url>/pages`, the
+//!   op's fields as JSON, and a created page's id is the answer's body; the
+//!   markup they carry is the docs writes' ([`docs::edit_section`]).
 //! * **Built with `--features v1_0`** it is the same adapter against the
 //!   frozen 1.0.0 world (the SDK's `v1_0`), which has no `downloads`, `query` or
 //!   `sink.walked`: what the host's hold on 1.0.0 components is tested with.
@@ -533,7 +537,11 @@ impl Adapter for Fixture {
             write_ops: if cfg!(any(feature = "v1_0", feature = "v1_3")) {
                 vec![SOURCE_ACTION.into()]
             } else {
-                vec![SOURCE_ACTION.into(), "update_page".into(), "create_page".into()]
+                vec![
+                    SOURCE_ACTION.into(),
+                    "update_page".into(),
+                    "create_page".into(),
+                ]
             },
             entity_kinds,
             config_schema: serde_json::json!({

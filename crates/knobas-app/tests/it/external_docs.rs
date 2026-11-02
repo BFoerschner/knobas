@@ -273,10 +273,7 @@ impl knobas_sync::scheduler::SyncEvents for Quiet {
 }
 
 /// The write queue's dependencies over `pool` and `registry`.
-async fn deps(
-    pool: &PgPool,
-    registry: Registry,
-) -> knobas_sync::scheduler::SchedulerDeps {
+async fn deps(pool: &PgPool, registry: Registry) -> knobas_sync::scheduler::SchedulerDeps {
     knobas_sync::scheduler::SchedulerDeps {
         pool: pool.clone(),
         connections: std::sync::Arc::new(Runs(knobas_db::test_util::test_connector().await)),
@@ -351,7 +348,11 @@ async fn a_section_edit_on_a_component_page_lands_at_its_source_with_the_whole_b
             .await
             .expect("the component makes the edit");
     let row = submitted(&deps(&pool, registry).await, &id, payload).await;
-    assert_eq!(row.state, knobas_core::write_queue::WriteState::Sent, "{row:?}");
+    assert_eq!(
+        row.state,
+        knobas_core::write_queue::WriteState::Sent,
+        "{row:?}"
+    );
 
     let whole = SECTIONS.replacen(
         "<p>Five knots.</p>",
@@ -398,7 +399,10 @@ async fn a_refused_section_from_the_component_is_refused_as_a_confluence_one_is(
             5,
             "This section has formatting or links that a text edit would lose; edit it in the source.",
         ),
-        (6, "The page has no such section any more. Reopen it and try again."),
+        (
+            6,
+            "The page has no such section any more. Reopen it and try again.",
+        ),
     ] {
         let refused = docs_edit_section_payload(&pool, &registry, &rules, number, Some(3), "x")
             .await
@@ -425,7 +429,11 @@ async fn a_new_page_on_the_component_s_space_is_created_from_the_text() {
         .expect("the component makes the body");
     assert_eq!(source, id);
     let row = submitted(&deps(&pool, registry).await, &id, payload).await;
-    assert_eq!(row.state, knobas_core::write_queue::WriteState::Sent, "{row:?}");
+    assert_eq!(
+        row.state,
+        knobas_core::write_queue::WriteState::Sent,
+        "{row:?}"
+    );
     let (made,): (Option<String>,) =
         sqlx::query_as("select remote_id from knobas.write_queue where id = $1")
             .bind(row.id)
