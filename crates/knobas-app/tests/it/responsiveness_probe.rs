@@ -1249,18 +1249,23 @@ async fn what_the_reader_waits_on() {
         // the launcher's first choice, beside it.
         for titles in [false, true] {
             let mode = if titles { " titles" } else { "" };
-            time("search keystroke", &format!("search {raw:?}{mode}"), runs, || {
-                search_inner(
-                    pool,
-                    &registry,
-                    knobas_search::SearchQuery {
-                        titles,
-                        raw: raw.into(),
-                        limit: 50,
-                        filters: Default::default(),
-                    },
-                )
-            })
+            time(
+                "search keystroke",
+                &format!("search {raw:?}{mode}"),
+                runs,
+                || {
+                    search_inner(
+                        pool,
+                        &registry,
+                        knobas_search::SearchQuery {
+                            titles,
+                            raw: raw.into(),
+                            limit: 50,
+                            filters: Default::default(),
+                        },
+                    )
+                },
+            )
             .await;
         }
     }
