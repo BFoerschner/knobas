@@ -60,17 +60,16 @@ export interface OverlayFilter {
 }
 
 /**
- * The ⌘? overlay's filters, in the card's order: every `#` letter, then the
- * rows that carry a `word`. Read from the table, so a letter the parser gains
+ * The ⌘? overlay's filters: every `#` letter, then the rows that carry a
+ * `word`, each in the card's order. Read from the table, so a letter the parser gains
  * (pinned by `help_card.rs`) is on the overlay without an edit here.
  */
 export function overlayFilters(table: readonly SyntaxEntry[]): OverlayFilter[] {
-  const out: OverlayFilter[] = [];
-  for (const entry of table) {
-    if (entry.kind !== undefined) out.push({ entry, word: entry.summary });
-    else if (entry.word !== undefined) out.push({ entry, word: entry.word });
-  }
-  return out;
+  const letters = table.filter((entry) => entry.kind !== undefined).map((entry) => ({ entry, word: entry.summary }));
+  const others = table.flatMap((entry) =>
+    entry.kind === undefined && entry.word !== undefined ? [{ entry, word: entry.word }] : [],
+  );
+  return [...letters, ...others];
 }
 
 /**

@@ -659,12 +659,10 @@
   }
 
   /**
-   * *Save as list* (#506, story 56: *"a search I run every day is one click"*).
-   *
-   * The name is the query itself, because one click is the story and the
-   * launcher has nowhere to ask for a name that is not a second dialog over
-   * this one. *Rename* on the row is what turns it into a word — which is why
-   * the two shipped together.
+   * *Save as list*, from ⌘S or the footer's button (#2424, spec #2419 story
+   * 41): the box itself asks for the name, labelled *Name*, the query
+   * prefilled and selected, so typing replaces it and Enter on it keeps it.
+   * No second dialog over this one; Esc goes back to the search.
    */
   function startNaming() {
     if (!session.canSave || session.savedId !== null) return;
