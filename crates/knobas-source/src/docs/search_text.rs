@@ -155,11 +155,8 @@ impl Lines {
     /// Each non-blank line of `text`, its marks and runs of whitespace read as
     /// one space.
     fn push(&mut self, text: &str) {
-        self.lines.extend(
-            text.lines()
-                .map(clean)
-                .filter(|line| !line.is_empty()),
-        );
+        self.lines
+            .extend(text.lines().map(clean).filter(|line| !line.is_empty()));
     }
 }
 

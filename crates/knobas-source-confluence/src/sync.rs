@@ -118,7 +118,6 @@ use crate::cql::{Order, build_comment_cql, build_cql, build_ids_cql, build_posit
 use crate::cursor::{ConfluenceCursor, Positions, Seen};
 use crate::map;
 use crate::model::RawContent;
-use crate::storage::Account;
 use crate::users::Directory;
 use crate::walk::ContentWalk;
 
@@ -280,9 +279,6 @@ struct Window<'a> {
     /// The position the run started from, which is what recognises a record
     /// the overlap re-delivered.
     previous: Option<&'a ConfluenceCursor>,
-    /// Who the credential is, for resolving a mention's user key
-    /// ([`crate::storage::Account`]).
-    me: Option<Account<'a>>,
 }
 
 impl SyncRun<'_> {
@@ -300,7 +296,6 @@ impl SyncRun<'_> {
         // `test_connection` fills the configuration in from this same call, so
         // the two agree by construction.
         let whoami = self.api.current_user().await?;
-        let me = account(&whoami);
         // Who each mention key names, asked once per key for the whole run
         // (`crate::users`, #953).
         let mut users = Directory::new(&whoami);
@@ -404,7 +399,7 @@ impl SyncRun<'_> {
                 {
                     continue;
                 }
-                let item = self.mapped(&mut raw, me, &mut users).await?;
+                let item = self.mapped(&mut raw, &mut users).await?;
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 delivered.insert(raw.content.id.clone());
                 sent_threads.insert(raw.content.id.clone(), thread(&raw));
@@ -437,7 +432,6 @@ impl SyncRun<'_> {
                     since: comments_since,
                     offset_secs: offset,
                     previous: previous.as_ref(),
-                    me,
                 },
                 &mut delivered,
                 &sent_threads,
@@ -456,7 +450,7 @@ impl SyncRun<'_> {
                 let known = previous.as_ref().and_then(|c| c.positions.as_ref());
                 let moved = ids_to_reread(known, &swept, &delivered);
                 emitted += self
-                    .reread(&moved, me, &mut delivered, &mut users, sink)
+                    .reread(&moved, &mut delivered, &mut users, sink)
                     .await?;
                 swept
                     .into_iter()
@@ -565,7 +559,6 @@ impl SyncRun<'_> {
     async fn reread(
         &self,
         moved: &[&str],
-        me: Option<Account<'_>>,
         delivered: &mut std::collections::BTreeSet<String>,
         users: &mut Directory,
         sink: &mut (dyn Sink + Send),
@@ -580,7 +573,7 @@ impl SyncRun<'_> {
                     if !delivered.insert(raw.content.id.clone()) {
                         continue;
                     }
-                    let item = self.mapped(&mut raw, me, users).await?;
+                    let item = self.mapped(&mut raw, users).await?;
                     sink.item(item).await?;
                     emitted += 1;
                 }
@@ -670,7 +663,7 @@ impl SyncRun<'_> {
                     continue;
                 }
                 let mut target = self.api.content(&page_id, EXPAND).await?;
-                let item = self.mapped(&mut target, window.me, users).await?;
+                let item = self.mapped(&mut target, users).await?;
                 sink.item(item).await?;
                 emitted += 1;
             }
@@ -706,7 +699,6 @@ impl SyncRun<'_> {
     ) -> Result<knobas_source::RefreshAnswer, SourceError> {
         use knobas_source::RefreshAnswer;
         let whoami = self.api.current_user().await?;
-        let me = account(&whoami);
         let mut raw = match self.api.content(id, EXPAND).await {
             Ok(raw) => raw,
             Err(error) if error.status() == Some(404) => return Ok(RefreshAnswer::Gone),
@@ -727,9 +719,7 @@ impl SyncRun<'_> {
         if !current || !in_scope {
             return Ok(RefreshAnswer::Gone);
         }
-        let item = self
-            .mapped(&mut raw, me, &mut Directory::new(&whoami))
-            .await?;
+        let item = self.mapped(&mut raw, &mut Directory::new(&whoami)).await?;
         Ok(RefreshAnswer::Item(item))
     }
 
@@ -740,12 +730,11 @@ impl SyncRun<'_> {
     async fn mapped(
         &self,
         raw: &mut RawContent,
-        me: Option<Account<'_>>,
         users: &mut Directory,
     ) -> Result<knobas_source::SyncItem, SourceError> {
         self.complete(raw).await?;
         users.annotate(self.api, raw).await;
-        Ok(map::to_sync_item(self.source_id, self.base_url, raw, me))
+        Ok(map::to_sync_item(self.source_id, self.base_url, raw))
     }
 
     /// The run-start probe: the newest page in this source's scope, and the
@@ -814,15 +803,6 @@ impl SyncRun<'_> {
         raw.set_comments(all);
         Ok(())
     }
-}
-
-/// The credential's own account as a mention is resolved against it
-/// ([`Account`]), or `None` for a server that would not say its username.
-fn account(whoami: &crate::model::CurrentUser) -> Option<Account<'_>> {
-    whoami.username.as_deref().map(|username| Account {
-        username,
-        user_key: whoami.user_key.as_deref(),
-    })
 }
 
 /// Each page the page walk sent, by id, with the comments its copy carried

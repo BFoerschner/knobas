@@ -28,9 +28,8 @@
 //!
 //! # Why a tree first
 //!
-//! [`crate::storage::to_text`] is a scanner because it only needs words. Here
-//! nesting is the meaning: a panel's body, a list inside a list item, a cell
-//! inside a row. So the body is read into a small, tolerant element tree --
+//! A scanner would do for words alone. Here nesting is the meaning: a
+//! panel's body, a list inside a list item, a cell inside a row. So the body is read into a small, tolerant element tree --
 //! an unmatched close tag closes up to its opener or is ignored, an unclosed
 //! element ends with the document -- and the tree is walked. It never fails: a
 //! body that would not parse still reads as the text it holds.

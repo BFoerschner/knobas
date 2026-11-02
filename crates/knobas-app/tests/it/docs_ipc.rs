@@ -715,6 +715,57 @@ async fn a_search_finds_pages_with_every_word_and_says_where_the_snippet_is() {
     );
 }
 
+/// Search follows the drawing (#2435): a page's `body_text` is the shared
+/// search text over its projection, as the Confluence adapter writes it, so a
+/// word only a table cell holds is found and its snippet names its section,
+/// while a macro parameter and an `html` macro's CDATA, which the reader does
+/// not draw as text, are not found at all.
+#[tokio::test]
+async fn a_word_in_a_table_cell_is_found_in_its_section() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let (w, param, cdata) = (word(), word(), word());
+    let storage = format!(
+        "<p>Intro.</p><h2>Rate limits</h2><table><tbody>\
+         <tr><th>Queue</th><th>Cap</th></tr>\
+         <tr><td><p>payouts</p></td><td>forty {w} per minute</td></tr></tbody></table>\
+         <ac:structured-macro ac:name=\"code\"><ac:parameter ac:name=\"title\">{param}</ac:parameter>\
+         <ac:plain-text-body><![CDATA[select 1;]]></ac:plain-text-body></ac:structured-macro>\
+         <ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<b>{cdata}</b>]]>\
+         </ac:plain-text-body></ac:structured-macro>"
+    );
+    let id = page(&pool, &src, "1", "Payout limits", "ENG", &[], &storage).await;
+    let content =
+        knobas_source_confluence::doc_content("page", &page_payload("ENG", &[], &storage))
+            .expect("a page projects");
+    let body = knobas_source::docs::search_text("Payout limits", "ENG", &content);
+    indexed(&pool, &id, &[body], "tomasz", 1).await;
+
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .expect("a word is a query");
+    assert_eq!(found.total, 1);
+    let hit = &found.hits[0];
+    assert_eq!(hit.entity_id, id);
+    assert_eq!(hit.snippet.section.as_deref(), Some("Rate limits"));
+    let text: String = hit
+        .snippet
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
+    assert!(text.contains(&format!("forty {w} per minute")), "{text:?}");
+
+    for unseen in [param, cdata] {
+        let found = docs_search_inner(&pool, &Registry::for_process(), &unseen, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.total, 0, "{unseen} is not drawn as text");
+    }
+}
+
 /// The picker keeps the search to its space; a typed `space:` wins over it;
 /// `space:` is `project:` by another name; `-word`, `by:` and `updated:`
 /// filter; a phrase is a phrase; a query of nothing is the tree's.
