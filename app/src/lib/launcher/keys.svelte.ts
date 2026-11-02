@@ -10,11 +10,12 @@
  * each write reads the tables back, so what is held is what the backend has.
  */
 import { type ActionKey, type Keys, type ListKey, bindActionKey, bindListKey, keys } from "../ipc/search";
+import type { Chord } from "./keys";
 
 export interface KeyPorts {
   keys: () => Promise<Keys>;
-  bindListKey: (listId: string, chord: string | null) => Promise<void>;
-  bindActionKey: (kind: string, actionId: string, chord: string | null) => Promise<void>;
+  bindListKey: (listId: string, chord: Chord | null) => Promise<void>;
+  bindActionKey: (kind: string, actionId: string, chord: Chord | null) => Promise<void>;
 }
 
 export interface KeyStore {
@@ -23,17 +24,17 @@ export interface KeyStore {
   /** Read both tables; a refused read keeps what was held. */
   load(): Promise<void>;
   /** Give the list `chord`, or none; rejects with the backend's refusal. */
-  bindList(listId: string, chord: string | null): Promise<void>;
+  bindList(listId: string, chord: Chord | null): Promise<void>;
   /** Give the action `chord` on `kind`, or none; rejects with the backend's refusal. */
-  bindAction(kind: string, actionId: string, chord: string | null): Promise<void>;
+  bindAction(kind: string, actionId: string, chord: Chord | null): Promise<void>;
   /** The list a chord opens. */
-  listOf(chord: string): ListKey | undefined;
+  listOf(chord: Chord): ListKey | undefined;
   /** A list's chord, or `null`. */
-  chordOfList(listId: string): string | null;
+  chordOfList(listId: string): Chord | null;
   /** The action id a chord runs on `kind`, or `null`. */
-  actionOf(kind: string, chord: string): string | null;
+  actionOf(kind: string, chord: Chord): string | null;
   /** An action's chord on `kind`, or `null`. */
-  chordOfAction(kind: string, actionId: string): string | null;
+  chordOfAction(kind: string, actionId: string): Chord | null;
   /** Tests only: nothing held. */
   reset(): void;
 }

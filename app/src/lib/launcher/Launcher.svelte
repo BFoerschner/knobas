@@ -115,7 +115,7 @@
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
   import { addFilter, narrowFilters, overlayFilters } from "./syntax";
-  import { chordOf, heldOf, isBoxChord, isHelpPress, kindInSentence, refusalOf } from "./keys";
+  import { type Chord, chordOf, heldOf, isBoxChord, isHelpPress, kindInSentence, refusalOf } from "./keys";
   import { type KeyStore, launcherKeys } from "./keys.svelte";
   import { push } from "../shell/toasts.svelte";
 
@@ -312,8 +312,8 @@
    */
   interface KeyPanel {
     target: { kind: "list"; id: string; label: string } | { kind: "action"; on: string; actionId: string; label: string };
-    had: string | null;
-    chord: string | null;
+    had: Chord | null;
+    chord: Chord | null;
     held: string[];
     refused: string | null;
   }
@@ -1232,7 +1232,7 @@
   }
 
   /** A chord the other table holds, said as the panel says it: a list's chord is no action's, on any kind. */
-  function clashOf(target: KeyPanel["target"], chord: string): string | null {
+  function clashOf(target: KeyPanel["target"], chord: Chord): string | null {
     if (target.kind === "list") {
       const action = keys.actions.find((key) => key.chord === chord);
       return action ? `${chord} runs an action on a ${kindInSentence(action.kind)}` : null;
@@ -1320,7 +1320,7 @@
    * the sheet under them, so it opens on the row first; the rest run as
    * Enter on the row would, the sheet never drawn.
    */
-  async function runAction(row: LauncherRow, subject: SheetSubject, id: string, chord: string) {
+  async function runAction(row: LauncherRow, subject: SheetSubject, id: string, chord: Chord) {
     readApplications();
     readMerge(subject);
     const find = () =>
@@ -1463,13 +1463,13 @@
   }
 
   /** The chord drawn on an action row: the list's own on *Assign key…*, else the action's on the subject's kind. */
-  function boundTo(subject: SheetSubject, action: SheetAction): string | null {
+  function boundTo(subject: SheetSubject, action: SheetAction): Chord | null {
     if (action.does.kind === "bind" && subject.kind === "list") return keys.chordOfList(subject.id);
     return keys.chordOfAction(kindOf(subject), action.id);
   }
 
   /** The chord drawn on a saved list's row in the results and on the board. */
-  function listChord(row: LauncherRow): string | null {
+  function listChord(row: LauncherRow): Chord | null {
     const list = savedListOf(row);
     return list && keys.chordOfList(list.id);
   }

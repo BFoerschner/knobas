@@ -20,6 +20,13 @@ const MODIFIERS = [
   ["shiftKey", "⇧"],
 ] as const;
 
+/**
+ * A chord as the spec spells it, `⌘⇧O`: what {@link chordOf} makes of a press
+ * and what the two key tables keep. A name for the spelling, not a check of
+ * it; `knobas_search::keys::is_chord` checks it where it is stored.
+ */
+export type Chord = string;
+
 type Mods = Pick<KeyboardEvent, "metaKey" | "ctrlKey" | "altKey" | "shiftKey">;
 
 /** The modifiers held, spelled in the chord's order: what the panel draws while a chord is being pressed. */
@@ -36,7 +43,7 @@ function keyOfCode(code: string): string | null {
 }
 
 /** The chord a key press spells, `⌘⇧O`, or `null` when it is typing or no chord at all. */
-export function chordOf(event: Mods & Pick<KeyboardEvent, "code">): string | null {
+export function chordOf(event: Mods & Pick<KeyboardEvent, "code">): Chord | null {
   if (!(event.metaKey || event.ctrlKey || event.altKey)) return null;
   const key = keyOfCode(event.code);
   return key === null ? null : `${heldOf(event).join("")}${key}`;
