@@ -1445,6 +1445,31 @@ test("hash i lists the inbox lines newest first and enter opens one", async () =
 });
 
 /**
+ * Under *Titles* a word only in a line's reason or category finds nothing;
+ * under *Everything* it finds the line (spec #2419 story 51, the titles flag).
+ */
+test("hash i under Titles matches the line's title alone, under Everything its reason too", async () => {
+  const failed = { ...INBOX.items[1]!, reason: "Step deploy-staging exited 1" };
+  open({
+    inbox: { count: 1, items: [failed] },
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => inboxAnswer(query.raw.replace(/^#i\s*/u, "").trim()),
+    },
+  });
+  await settle();
+  const titles = () => [...target.querySelectorAll(".tf-ln-res")].map((row) => row.querySelector(".tf-ln-t")?.textContent);
+  await search("#i staging");
+  expect(titles()).toEqual([]);
+  await search("#i build");
+  expect(titles()).toEqual(["Build #1187 failed"]);
+  await search("#i staging");
+  press("d", { metaKey: true });
+  await settle();
+  expect(titles()).toEqual(["Build #1187 failed"]);
+});
+
+/**
  * *Save as list* is offered on a query and not on the board (story 56).
  *
  * Both halves, because the control's whole rule is *when*: an empty box is the

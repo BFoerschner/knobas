@@ -91,6 +91,8 @@ export function flatten(input: {
   actions: LauncherAction[];
   syntax: readonly SyntaxEntry[];
   extras?: BoardExtras;
+  /** *Titles* rather than *Everything* (the query's `titles` flag): `#i` matches a line's title alone. */
+  titles?: boolean;
 }): LauncherRow[] {
   switch (input.mode) {
     // A pasted link is not a list: the entity it names is opened, and a link
@@ -135,7 +137,7 @@ export function flatten(input: {
           }),
         ),
       );
-      return [...hits, ...inboxRows(response, input.extras?.inbox ?? null), ...docsRow(response)];
+      return [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
     }
   }
 }
@@ -144,16 +146,18 @@ export function flatten(input: {
  * The inbox's lines (#2423, spec #2419 story 15): an answer the engine read
  * as `#i` (kind `inbox`, which nothing in the index emits) draws the shell's
  * inbox store, newest first, narrowed by the parse's words. A line is kept
- * when every word is in its title, its reason or its category, ignoring
- * case: `#i review` finds the review requests. The kind is read off the
- * backend's parse, never the box (ruling P2); the words are the store's to
- * match, since an inbox line is no entity the index holds.
+ * when every word is in its title, ignoring case; under *Everything*
+ * (`titles` off) its reason and its category count too, as a body does
+ * (story 51): `#i review` finds the review requests either way. The kind is
+ * read off the backend's parse, never the box (ruling P2); the words are the
+ * store's to match, since an inbox line is no entity the index holds (ruled
+ * on the review of spec #2419, S4).
  */
-function inboxRows(response: SearchResponse, inbox: InboxPreview | null): LauncherRow[] {
+function inboxRows(response: SearchResponse, inbox: InboxPreview | null, titles: boolean): LauncherRow[] {
   if (!inbox || !response.interpreted.filters.kinds.includes("inbox")) return [];
   const words = response.interpreted.text.toLowerCase().split(/\s+/u).filter(Boolean);
   const holds = (item: InboxItem) => {
-    const text = `${item.title} ${item.reason} ${item.category.replaceAll("_", " ")}`.toLowerCase();
+    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.category.replaceAll("_", " ")}`).toLowerCase();
     return words.every((word) => text.includes(word));
   };
   return inbox.items
