@@ -832,13 +832,10 @@ mod tests {
             directive("script-src"),
             ["'unsafe-inline'", "'unsafe-eval'", "http:", "https:"]
         );
-        for name in ["style-src"] {
-            assert_eq!(
-                directive(name),
-                ["'unsafe-inline'", "http:", "https:"],
-                "{name}"
-            );
-        }
+        assert_eq!(
+            directive("style-src"),
+            ["'unsafe-inline'", "http:", "https:"]
+        );
         for name in ["img-src", "font-src", "media-src"] {
             assert_eq!(
                 directive(name),
