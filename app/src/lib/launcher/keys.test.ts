@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { chordOf, heldOf, kindOf, refusalOf } from "./keys";
+import { chordOf, heldOf, refusalOf } from "./keys";
 
 const press = (code: string, mods: Partial<Record<"metaKey" | "ctrlKey" | "altKey" | "shiftKey", boolean>> = {}, key = "") =>
   new KeyboardEvent("keydown", { code, key, ...mods });
@@ -59,10 +59,4 @@ test("a chord is refused when the character its key types is taken, as on a Germ
   expect(refusalOf(press("Digit5", { metaKey: true, altKey: true }, "["))).toBe("⌘⌥5 is the shell's own");
   expect(refusalOf(press("Digit6", { metaKey: true, altKey: true }, "]"))).toBe("⌘⌥6 is the shell's own");
   expect(refusalOf(press("Digit5", { metaKey: true, altKey: true }, "5")), "⌘⌥5 typing a digit is free").toBeNull();
-});
-
-test("a key is kept per kind: an entity's own kind, else the row's", () => {
-  expect(kindOf({ kind: "entity", entityId: "gitea:r", entityKind: "repo", title: "r", sourceId: "gitea", path: null })).toBe("repo");
-  expect(kindOf({ kind: "list", id: "l", label: "L", text: "#t", refusal: null })).toBe("list");
-  expect(kindOf({ kind: "view", id: "v", title: "V" })).toBe("view");
 });

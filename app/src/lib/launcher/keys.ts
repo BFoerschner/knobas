@@ -13,8 +13,6 @@
  * an action's chord per kind, which runs that action of the Tab sheet on the
  * selected row inside the launcher.
  */
-import type { SheetSubject } from "./sheet";
-
 const MODIFIERS = [
   ["metaKey", "⌘"],
   ["ctrlKey", "⌃"],
@@ -96,13 +94,8 @@ export function refusalOf(event: Mods & Pick<KeyboardEvent, "code" | "key">): st
   return owner ? `${chord} is the ${owner}'s own` : null;
 }
 
-/** The kind a key is kept on: an entity's own kind (`repo`, `pr`, `ticket`, ...), else the row's (`list`, `view`, `set`, `inbox`). */
-export function kindOf(subject: SheetSubject): string {
-  return subject.kind === "entity" ? subject.entityKind : subject.kind;
-}
-
-/** The kind's word in a sentence: "pull request", "repository", else the kind. */
-export function kindWord(kind: string): string {
+/** The kind's word in a sentence ("on any pull request"): "pull request", "repository", else the kind. */
+export function kindInSentence(kind: string): string {
   switch (kind) {
     case "pr":
       return "pull request";

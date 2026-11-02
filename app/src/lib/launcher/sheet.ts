@@ -189,6 +189,11 @@ export function subjectOf(row: LauncherRow, inboxOps: (key: string) => readonly 
   }
 }
 
+/** The kind a key is kept on (#2429): an entity's own kind (`repo`, `pr`, `ticket`, ...), else the row's (`list`, `view`, `set`, `inbox`). */
+export function kindOf(subject: SheetSubject): string {
+  return subject.kind === "entity" ? subject.entityKind : subject.kind;
+}
+
 /** What a subject is called in a toast: a ticket by its key, anything else by its title. */
 export function nameOf(subject: SheetSubject): string {
   switch (subject.kind) {

@@ -7,7 +7,7 @@ import { expect, test } from "vitest";
 
 import type { InboxItem } from "../ipc/entity";
 import type { LinkSetRow } from "../ipc/entity";
-import { favouriteKeys, narrowActions, sheetActions, type SheetContext, type SheetEffect, type SheetSubject } from "./sheet";
+import { favouriteKeys, kindOf, narrowActions, sheetActions, type SheetContext, type SheetEffect, type SheetSubject } from "./sheet";
 
 const JOB = { entityId: "jira:PAY-999", label: "PAY-999" };
 const CTX: SheetContext = {
@@ -224,4 +224,10 @@ test("a set: Open, then Show on the chosen job, which shows the set on the job's
   // No job chosen, or the set not read yet: Open alone.
   expect(ids(set, { ...ctx, job: null })).toEqual(["open"]);
   expect(ids(set, CTX)).toEqual(["open"]);
+});
+
+test("a key is kept per kind: an entity's own kind, else the row's", () => {
+  expect(kindOf({ kind: "entity", entityId: "gitea:r", entityKind: "repo", title: "r", sourceId: "gitea", path: null })).toBe("repo");
+  expect(kindOf({ kind: "list", id: "l", label: "L", text: "#t", refusal: null })).toBe("list");
+  expect(kindOf({ kind: "view", id: "v", title: "V" })).toBe("view");
 });

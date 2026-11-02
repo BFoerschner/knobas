@@ -95,6 +95,7 @@
     type SheetSubject,
     type Step,
     favouriteKeys,
+    kindOf,
     savedListOf,
     nameOf,
     narrowActions,
@@ -114,7 +115,7 @@
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
   import { addFilter, narrowFilters, overlayFilters } from "./syntax";
-  import { chordOf, heldOf, isBoxChord, isHelpPress, kindOf, kindWord, refusalOf } from "./keys";
+  import { chordOf, heldOf, isBoxChord, isHelpPress, kindInSentence, refusalOf } from "./keys";
   import { type KeyStore, launcherKeys } from "./keys.svelte";
   import { push } from "../shell/toasts.svelte";
 
@@ -1235,7 +1236,7 @@
         push({ text: chord ? `${chord} opens ${target.label}` : `Key removed from ${target.label}` });
       } else {
         await keys.bindAction(target.on, target.actionId, chord);
-        push({ text: chord ? `${chord} runs ${target.label} on any ${kindWord(target.on)}` : `Key removed from ${target.label}` });
+        push({ text: chord ? `${chord} runs ${target.label} on any ${kindInSentence(target.on)}` : `Key removed from ${target.label}` });
       }
     } catch (cause) {
       push({ text: ipcErrorMessage(cause), tone: "err" });
@@ -1246,7 +1247,7 @@
   function clashOf(target: KeyPanel["target"], chord: string): string | null {
     if (target.kind === "list") {
       const action = keys.actions.find((key) => key.chord === chord);
-      return action ? `${chord} runs an action on a ${kindWord(action.kind)}` : null;
+      return action ? `${chord} runs an action on a ${kindInSentence(action.kind)}` : null;
     }
     const list = keys.listOf(chord);
     return list ? `${chord} opens ${list.label}` : null;
@@ -1596,7 +1597,7 @@
               {#if panel.target.kind === "list"}
                 The keys that open <strong>{panel.target.label}</strong> from anywhere
               {:else}
-                The keys that run <strong>{panel.target.label}</strong> on any {kindWord(panel.target.on)} you have selected
+                The keys that run <strong>{panel.target.label}</strong> on any {kindInSentence(panel.target.on)} you have selected
               {/if}
             </p>
             <div class="tf-ln-bind-keys" aria-live="polite">
