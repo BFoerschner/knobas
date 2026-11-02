@@ -76,6 +76,59 @@ refused: string | null,
 update: UpdateCheck | null, };
 
 /**
+ * Where a record keeps **the files attached to it**, and where each file's
+ * facts sit inside its element (#2404): Jira's `fields.attachment`.
+ *
+ * * `at` leads to an **array of objects**, in the source's order. Anything
+ *   else is a miss.
+ * * every other field is a list of candidate paths inside one element, read
+ *   as [`KindPaths::project_key`] is: the first non-blank string wins, and
+ *   `size` the first whole number. An element with no readable `id`, `name`
+ *   or `content` is left out: a file without an address is not one a reader
+ *   can open.
+ *
+ * The list, not the bytes: the mirror holds what Jira says about each file,
+ * and the bytes come live through the source's credential.
+ */
+export type AttachmentPath = { 
+/**
+ * Where the array of attachment objects is.
+ */
+at: PayloadPath, 
+/**
+ * The source's id for the file, unique within the source.
+ */
+id: Array<PayloadPath>, 
+/**
+ * The file name.
+ */
+name: Array<PayloadPath>, 
+/**
+ * The media type the source reports (`image/png`).
+ */
+mime: Array<PayloadPath>, 
+/**
+ * The size in bytes, a whole JSON number.
+ */
+size: Array<PayloadPath>, 
+/**
+ * Who attached it, by the name a person reads.
+ */
+author: Array<PayloadPath>, 
+/**
+ * When it was attached, an ISO 8601 instant ([`parse_instant`]).
+ */
+created: Array<PayloadPath>, 
+/**
+ * The address of the file's bytes at the source.
+ */
+content: Array<PayloadPath>, 
+/**
+ * The address of a small preview the source renders, for images.
+ */
+thumbnail: Array<PayloadPath>, };
+
+/**
  * How an adapter authenticates against its remote system (spec §3).
  *
  * The descriptor declares which of these it accepts; the secret itself is
@@ -471,6 +524,35 @@ sprint_state: Array<ListPath>,
  */
 estimate: Array<PayloadPath>, 
 /**
+ * Who filed a ticket, as the source spells the account (#2403), so it
+ * can be matched against the configured username as
+ * [`assignee`](Self::assignee) is: Jira's `fields.reporter.name`,
+ * Gitea's `user.login`. The ticket page card's *Reporter*. Empty for
+ * every kind with no reporter, and a miss draws no row.
+ */
+reporter: Array<PayloadPath>, 
+/**
+ * When a ticket was filed (#2403), an ISO 8601 instant as
+ * [`started`](Self::started) is written: Jira's `fields.created`,
+ * Gitea's `created_at`. Empty for every kind with no such date.
+ */
+created: Array<PayloadPath>, 
+/**
+ * The time logged on a ticket, **in seconds** (#2403), by everyone:
+ * Jira's `fields.timespent`. A whole JSON number, read as
+ * [`estimate`](Self::estimate) is; the ticket page card's *Logged*.
+ * Empty for every kind with no time tracking (Gitea's), and a miss
+ * draws none.
+ */
+time_spent: Array<PayloadPath>, 
+/**
+ * The entries of a ticket's worklog (#2403), from which the card tells
+ * the reader's share of [`time_spent`](Self::time_spent). Candidates
+ * in declaration order, the first whose `at` leads to an array winning.
+ * Empty for every kind with no worklog.
+ */
+worklog: Array<WorklogPath>, 
+/**
  * How many comments a ticket has (#894): Jira's `fields.comment.total`.
  * A whole JSON number, read as `estimate` is; the ticket card draws
  * "N comments" above zero. Empty for every kind with no count, and a
@@ -688,7 +770,14 @@ response_time: Array<PayloadPath>,
  * it is opened from (#1227): Gitea's `base.ref`. Empty for every kind
  * that is not a proposal.
  */
-base: Array<PayloadPath>, };
+base: Array<PayloadPath>, 
+/**
+ * The files attached to a ticket (#2404): Jira's `fields.attachment`,
+ * each file's facts declared inside its element. The ticket page's
+ * Attachments section reads it. Empty for every kind with no
+ * attachments, and a miss lists none.
+ */
+attachments: Array<AttachmentPath>, };
 
 /**
  * Where a **list** of strings lives: the array, and where the string sits
@@ -1773,6 +1862,35 @@ fields: Array<PayloadPath>, };
  * type's and a field's doc but not a variant's (#1325).
  */
 export type WaitReason = "unreachable" | "unauthorized";
+
+/**
+ * Where a ticket's **worklog** is, and what each entry says (#2403): who
+ * logged it and how long, in seconds.
+ *
+ * * `at` leads to an **array of objects**, one per entry. Anything else is
+ *   a miss: no worklog, never an empty one.
+ * * `author` is where the account that logged the entry sits inside it, as
+ *   the source spells the account, so it can be matched against the
+ *   configured username as [`KindPaths::assignee`] is. Jira's
+ *   `author.name`.
+ * * `seconds` is where the time sits inside it, a whole JSON number of
+ *   seconds, read as [`KindPaths::estimate`] is. Jira's `timeSpentSeconds`.
+ *
+ * An entry whose author or time misses is left out ([`resolve_worklog`]).
+ */
+export type WorklogPath = { 
+/**
+ * Where the array of entries is.
+ */
+at: PayloadPath, 
+/**
+ * Where an entry's author sits inside it.
+ */
+author: Array<PayloadPath>, 
+/**
+ * Where an entry's time in seconds sits inside it.
+ */
+seconds: Array<PayloadPath>, };
 
 /**
  * A write knobas asks an adapter to perform on the remote system.

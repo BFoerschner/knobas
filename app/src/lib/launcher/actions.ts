@@ -60,8 +60,7 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
  * detail line is a `Record` keyed by the section, so a section the shell
  * gains does not compile until it has one here.
  *
- * *Job* is left out: its address needs a ticket key, and the palette has
- * none. *Diagnostics* has no address at all (interfaces §2.3 puts the sync
+ * *Job* has no nav entry (spec #2396), so no row either. *Diagnostics* has no address at all (interfaces §2.3 puts the sync
  * log under Settings › Logs and database, which is a row). *Reload demo data*
  * is a **write** (`demo_load`), refused outside the demo profile (ruling
  * P13), and the launcher does not know which profile it is in: it belongs in
@@ -72,9 +71,8 @@ const SETTINGS_DETAIL: Record<SettingsSection, string> = {
  * *Time* of its own, and the prefix is what `>set` finds.
  */
 export function navigationActions(): LauncherAction[] {
-  const sections = NAV.filter((section): section is Exclude<Section, "job"> => section !== "job");
   return [
-    ...[...sections, "settings" as const].map((section) => ({
+    ...[...NAV, "settings" as const].map((section) => ({
       id: section,
       label: SECTION_NAME[section],
       detail: SECTION_DETAIL[section],

@@ -229,7 +229,7 @@
   <TfDialog title="Which view opens first" onclose={() => (dialog = null)}>
     {#snippet body()}
       <div class="tf-formgrid">
-        <label for="{uid}-dt">From a ticket's Map tab</label>
+        <label for="{uid}-dt">From a ticket's page</label>
         <select id="{uid}-dt" bind:value={pickTicket}>
           {#each saved.views as view (view.id)}<option value={view.id}>{view.name}</option>{/each}
         </select>

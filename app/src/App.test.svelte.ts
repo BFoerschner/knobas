@@ -149,6 +149,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // Its pull request worktrees (#2285): none.
   pullRequestWorktrees: () => Promise.resolve([]),
   removePullRequestWorktree: () => Promise.reject(new Error("no worktree is removed in this test")),
+  // The ticket page's attachment previews and download (#2405): nothing fetched here.
+  attachmentBytes: () => Promise.reject(new Error("no attachment is read in this test")),
+  downloadAttachment: () => Promise.reject(new Error("no attachment is downloaded in this test")),
   captureShortcut: () =>
     Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
@@ -587,7 +590,8 @@ test("the window opens on the Job page at #/job, in the ticket-first shell", asy
   expect(location.hash).toBe("#/job");
   expect(history.length, "the blank address is replaced, not pushed").toBe(historyAtStart);
   expect(target.querySelector(".tf-top .tf-brand")?.textContent).toBe("knobas");
-  expect(target.querySelector('.tf-nav [aria-current="page"]')?.textContent?.trim()).toBe("Job");
+  // Home is a ticket page, under Tickets: Job has no nav entry (spec #2396).
+  expect(target.querySelector('.tf-nav [aria-current="page"]')?.textContent?.trim()).toBe("Tickets");
   expect(target.textContent).toContain("No job is chosen yet");
 });
 
@@ -841,7 +845,8 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   await until(() => location.hash === "#/tickets", `#/ctx/all stayed ${location.hash}`);
 
   location.hash = "#/start-work/mock:PAY-231";
-  await until(() => location.hash === "#/job/mock%3APAY-231", `#/start-work/… stayed ${location.hash}`);
+  // *Start work* chooses the job, whose address lands on the ticket's page (spec #2396).
+  await until(() => location.hash === "#/ticket/mock%3APAY-231", `#/start-work/… stayed ${location.hash}`);
 
   // A ticket opens its ticket page (spec #2227), not its job.
   location.hash = "#/entity/mock:PAY-231";
@@ -1217,7 +1222,7 @@ test("capture: Settings › Notes and capture lands on the section capture.sh co
   await landsOn(landing("capture", "settings-notes"));
 });
 
-test("capture: the ticket preview's job link lands on the job page capture.sh knows by its Code section", async () => {
+test("capture: the ticket preview's job link lands on the ticket page capture.sh knows by its compose box", async () => {
   // The preview's link is the job's address (`TicketPreview.svelte`); this
   // opens that address rather than the Tickets search that offers it.
   dbReady = true;

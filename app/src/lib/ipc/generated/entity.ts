@@ -137,6 +137,45 @@ text: string | null,
 truncated: boolean, };
 
 /**
+ * One file attached to an item, as [`resolve_attachments`] reads it off the
+ * record (#2404). `EntityDetail.attachments` on the wire. Every optional
+ * fact is `null` where the source did not say, never a guess.
+ */
+export type Attachment = { 
+/**
+ * The source's id for the file: what a later read of its bytes names.
+ */
+id: string, name: string, mime: string | null, 
+/**
+ * Bytes.
+ */
+size: number | null, author: string | null, created: string | null, 
+/**
+ * Where the source serves the bytes: what *Open* hands the browser.
+ */
+content_url: string, 
+/**
+ * Where the source serves a small preview, for an image.
+ */
+thumbnail_url: string | null, };
+
+/**
+ * What [`attachment_bytes`] answers: the file's media type and its bytes in
+ * base64, which the shell draws as a `data:` image (the webview loads
+ * nothing from the source itself).
+ */
+export type AttachmentBytes = { 
+/**
+ * The media type the mirror's list gives the file, else
+ * `application/octet-stream`.
+ */
+mime: string, 
+/**
+ * The whole file, base64 (standard alphabet, padded).
+ */
+data: string, };
+
+/**
  * Which of the Code tile's groups a row is drawn under (#712): what needs
  * me first. Under [`EntityOrder::Attention`], in this order.
  *
@@ -1275,9 +1314,49 @@ priority: string | null,
 /**
  * A ticket's original estimate in seconds (#816), through the declared
  * `estimate` path: a whole JSON number or nothing, never zero for a
- * miss. The job card writes it as *est. 3h*.
+ * miss. The ticket page's card draws it again on the Logged row (#2403).
  */
 estimate_seconds: number | null, 
+/**
+ * Who filed a ticket (#2403), through the declared `reporter` path, by
+ * the account's username as [`author`](Self::author) carries the
+ * assignee: the ticket page card's *Reporter*, in full ink when it is
+ * the reader. Absent on the wire on a miss (ADR-0007).
+ */
+reporter?: string, 
+/**
+ * When a ticket was filed (#2403), through the declared `created` path.
+ * Absent on the wire on a miss.
+ */
+created?: string, 
+/**
+ * The time logged on a ticket in seconds, by everyone (#2403), through
+ * the declared `time_spent` path: the card's *Logged* row, against
+ * [`estimate_seconds`](Self::estimate_seconds). Absent on a miss, never
+ * zero for one.
+ */
+time_spent_seconds?: number, 
+/**
+ * The synced worklog summed per author, ordered by author (#2403): the
+ * card's share of the logged time that is the reader's, the entries
+ * whose author is the source's username. Absent where the record
+ * carries no worklog.
+ */
+logged_by?: Array<LoggedBy>, 
+/**
+ * A ticket's labels through the declared `labels` path (#2400), the
+ * ticket page card's *Labels* row; the mini board reads them by the same
+ * rule. `None`, absent on the wire, where there are none, so the row is
+ * not drawn (ADR-0007); never an empty list.
+ */
+labels?: Array<string>, 
+/**
+ * A ticket's attachment list through the declared `attachments` path
+ * (#2404): the ticket page's Attachments section. The list, never the
+ * bytes. `None`, absent on the wire, where there are none, so no section
+ * is drawn (ADR-0007); never an empty list.
+ */
+attachments?: Array<Attachment>, 
 /**
  * A repository's default branch as its source declares it (#2307),
  * through the kind's `default_branch` path: what the repository page
@@ -2375,6 +2454,17 @@ seconds: number | null,
  * `err` when a line in it is an error, else `warn` when one is a warning.
  */
 tone: Tone | null, };
+
+/**
+ * The time one account logged on a ticket, in seconds (#2403): its entries
+ * in the declared worklog, summed.
+ */
+export type LoggedBy = { 
+/**
+ * The account, as the source spells it: matched against the configured
+ * username as the assignee is.
+ */
+author: string, seconds: number, };
 
 /**
  * One room's tickets as the mini board draws them.

@@ -484,3 +484,60 @@ test("one danger class: tf-danger-t is merged into tf-danger (#2280)", () => {
 test("the link review's decide buttons take their size from .tf-lg, not a padding of their own (#2280)", () => {
   expect(code).not.toMatch(/\.tf-decide \.tf-btn \{/);
 });
+
+test("on the Tickets board and list, yellow is the chosen job's card and row, and selection is a two-pixel ink outline with the lift (spec #2396, #2398)", () => {
+  // Every rule of the board and the list that paints with the card's yellow or floats: keyed on the chosen job's
+  // `.tf-card`, never on the selection's `.tf-sel`; and the selection's rules, never on the yellow.
+  const rules = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+    .map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }))
+    .filter(({ selector }) => /\.tf-(tcard|row)\b/.test(selector));
+  const yellow = rules.filter(({ body }) => /var\(--card(-2)?\)/.test(body)).map(({ selector }) => selector);
+  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf-row.tf-card td"]);
+  const lifted = rules.filter(({ body }) => body.includes("var(--shadow)")).map(({ selector }) => selector);
+  expect(lifted).toEqual([".tf-tcard.tf-sel", ".tf-tcard.tf-card.tf-sel"]);
+
+  // The outline is a ring, not `outline`, so the focus ring (`.tf :focus-visible`) never replaces it.
+  expect(block(code, ".tf-tcard.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card")).not.toContain("box-shadow");
+  // A row's outline is drawn inside its cells, two pixels on each edge of the row; on the yellow row, in its ink.
+  expect(block(code, ".tf-row.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--ink\);[^}]*box-shadow:\s*inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
+  expect(block(code, ".tf-row.tf-sel td:first-child")).toMatch(/box-shadow:\s*inset 2px 0 0 var\(--tf-sel-ink\), inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
+  expect(block(code, ".tf-row.tf-sel td:last-child")).toMatch(/box-shadow:\s*inset -2px 0 0 var\(--tf-sel-ink\), inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);
+  expect(block(code, ".tf-row.tf-card.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--card-ink\);/);
+});
+
+test("every yellow card is a light surface in both themes: the page card's, the board card's and the list row's dots and chips take the light tone values, the blocked chip too (spec #2396 story 56, #2400)", () => {
+  const TONES = ["--ok", "--ok-bg", "--warn", "--warn-bg", "--err", "--err-bg", "--info", "--info-bg", "--muted", "--muted-bg"];
+  // The light values are the spec's colour table's, not a copy of the stylesheet.
+  const light = new Map(COLOURS.map(([token, value]) => [token, value]));
+  expect(TONES.every((token) => light.has(token)), "the spec's table names every tone").toBe(true);
+  // The bodies of every rule whose selector list names `selector` exactly, so a grouped rule counts for each.
+  const rulesNaming = (selector: string) =>
+    [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+      .filter(([, list]) => list!.split(",").some((one) => one.trim() === selector))
+      .map(([, , body]) => body)
+      .join("\n");
+  const wrong = [".tf-ticketcard.tf-card", ".tf-tcard.tf-card", ".tf-row.tf-card"].flatMap((selector) => {
+    const card = rulesNaming(selector);
+    return TONES.filter((token) => !card.includes(`${token}: ${light.get(token)};`)).map((token) => `${selector} ${token}`);
+  });
+  expect(wrong).toEqual([]);
+  // Every dot and chip draws from these tokens, so none needs a value of its own on the card.
+  expect(block(code, ".tf-dot.tf-err")).toContain("var(--err)");
+  expect(block(code, ".tf-jobcard .tf-chip.tf-err")).toContain("var(--err)");
+  // The rule is the design system's, in its words.
+  expect(spec).toContain("The yellow card is a light surface in both themes");
+});
+
+test("a description without markup keeps its line breaks in the reading column's panel (#2399)", () => {
+  expect(block(code, ".tf-tkdesc p.tf-asks")).toMatch(/white-space:\s*pre-line;/);
+});
+
+test("the ticket page's columns take the card's width, and below 900px they stack with the handle gone (#2402)", () => {
+  expect(block(code, ".tf-ticketpage .tf-ws")).toContain("grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr)");
+  const narrow = code.slice(code.indexOf("@media (max-width: 900px) {\n  .tf-ticketpage {"));
+  const body = narrow.slice(0, narrow.indexOf("\n}"));
+  expect(body).toContain(".tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }");
+  expect(body).toContain(".tf-tkhandle { display: none; }");
+});

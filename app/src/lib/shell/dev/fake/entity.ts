@@ -2,7 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, the conversation, and the URL resolver.
  */
-import type { EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
+import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView, Thread, ViewAction, ViewSection, DiffLine } from "../../../ipc/entity";
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
@@ -285,13 +285,25 @@ function getEntity(args: Record<string, unknown>) {
     priority: fakeText(entry.payload["priority"]),
     estimate_seconds:
       typeof entry.payload["estimate_h"] === "number" ? Math.round(entry.payload["estimate_h"] * 3600) : null,
+    // The mock adapter declares `labels` on the flat record (#811); none is
+    // left off, as the real command leaves an empty list off the wire (#2400).
+    ...fakeLabels(entry.payload["labels"]),
+    // The reporter, created, time spent and worklog the mock adapter declares
+    // (#2403), each left off the wire on a miss as the real command does.
+    ...fakeLogged(entry.payload),
+    // The attachment list (#2404), held in its wire shape on the fixture row;
+    // none is left off, as the real command leaves an empty list off the wire.
+    ...(Array.isArray(entry.payload["attachments"]) && entry.payload["attachments"].length > 0
+      ? { attachments: entry.payload["attachments"] as Attachment[] }
+      : {}),
     // A repository's declared default branch and its tree's sections, as
     // Gitea declares both (#2307, #2298): the repository page's demo rows are
     // Gitea-shaped (`repoView`).
     ...(entry.kind === "repo" ? repoDeclared(entry.payload) : {}),
-    // The mock adapter declares a ticket's `description` as Markdown (#2308).
+    // The mock adapter declares a ticket's `description` as Markdown (#2308);
+    // a row may say `markup: "jira_wiki"` to draw as Jira's (#2406).
     description: entry.kind === "ticket" ? fakeText(entry.payload["description"]) : null,
-    markup: entry.kind === "ticket" ? ("markdown" as const) : ("text" as const),
+    markup: entry.kind !== "ticket" ? ("text" as const) : entry.payload["markup"] === "jira_wiki" ? ("jira_wiki" as const) : ("markdown" as const),
   };
 }
 
@@ -299,6 +311,30 @@ function getEntity(args: Record<string, unknown>) {
 function repoDeclared(payload: Record<string, unknown>): Partial<Pick<EntityDetail, "default_branch" | "tree">> {
   const named = fakeText(payload["default_branch"]);
   return { ...(named === null ? {} : { default_branch: named }), tree: { dir: "files:", file: "file:" } };
+}
+
+/** A ticket's labels as `get_entity` answers them: the non-blank ones, or no field for none (#2400). */
+function fakeLabels(value: unknown): Pick<EntityDetail, "labels"> {
+  const labels = Array.isArray(value) ? value.filter((label): label is string => typeof label === "string" && label.trim() !== "").map((label) => label.trim()) : [];
+  return labels.length === 0 ? {} : { labels };
+}
+
+/** The card's Reporter and Logged facts (#2403) from the mock's flat record: the worklog summed per author, by author. */
+function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "created" | "time_spent_seconds" | "logged_by"> {
+  const reporter = fakeText(payload["reporter"]);
+  const created = fakeText(payload["created"]);
+  const spent = payload["time_spent_seconds"];
+  const entries = Array.isArray(payload["worklogs"]) ? (payload["worklogs"] as { who?: unknown; seconds?: unknown }[]) : null;
+  const byAuthor = new Map<string, number>();
+  for (const entry of entries ?? []) {
+    if (typeof entry.who === "string" && typeof entry.seconds === "number") byAuthor.set(entry.who, (byAuthor.get(entry.who) ?? 0) + entry.seconds);
+  }
+  return {
+    ...(reporter === null ? {} : { reporter }),
+    ...(created === null ? {} : { created }),
+    ...(typeof spent === "number" ? { time_spent_seconds: spent } : {}),
+    ...(entries === null ? {} : { logged_by: [...byAuthor].sort(([a], [b]) => a.localeCompare(b)).map(([author, seconds]) => ({ author, seconds })) }),
+  };
 }
 
 /** A payload value that is non-blank text, trimmed, or `null` (ADR-0007's miss). */

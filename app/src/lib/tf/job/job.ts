@@ -1,5 +1,5 @@
 /**
- * The job's pure half (#816): what the job card and the Code section say,
+ * The ticket page's pure half (#816): what the card and its sections say,
  * computed from what the reads answered, so the rules are testable as values.
  *
  * Nothing here reads a source's payload. The card's type, priority and
@@ -9,17 +9,11 @@
  */
 import type { AssetStatus } from "../../ipc/assets";
 import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
-import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
-
-import type { Week } from "../../ipc/time";
 import type { SourceSummary } from "../../ipc/sources";
-import { signInFails } from "../../shell/health.svelte";
 import { kindRegistry, type KindRegistry } from "../../shell/kind-registry.svelte";
 import { protocolDayOf } from "../../standup/protocol";
-import { ageLabel, keyOf, minutesLabel } from "../../time/format";
-import { minutesOf } from "../../time/week";
-import { CI, claims } from "../roles.svelte";
-import { reenterWords, secretNoun } from "../settings/settings";
+import { keyOf, minutesLabel } from "../../time/format";
+import { CI } from "../roles.svelte";
 
 /** What the job reads of a `list_sources` row: the fields of the wire row it uses, all always sent. */
 export type SourceFacts = Pick<SourceSummary, "id" | "display_name" | "config" | "roles" | "auth_kind">;
@@ -156,59 +150,6 @@ export function blockerEntries(detail: Pick<EntityDetail, "row" | "links">): Blo
       title: entry.other.title,
       note: entry.link.note ?? null,
     }));
-}
-
-/** The card's facts line: `Story, High, est. 3h`, each part only where known. */
-export function factsLine(detail: Pick<EntityDetail, "issue_type" | "priority" | "estimate_seconds">): string {
-  const parts: string[] = [];
-  if (detail.issue_type) parts.push(detail.issue_type);
-  if (detail.priority) parts.push(detail.priority);
-  if (detail.estimate_seconds !== null && detail.estimate_seconds > 0) {
-    parts.push(`est. ${minutesLabel(minutesOf(detail.estimate_seconds))}`);
-  }
-  return parts.join(", ");
-}
-
-/** One weekday of *Time this week*. */
-export interface WeekDay {
-  logged: number;
-  unlogged: number;
-  today: boolean;
-}
-
-/** *Time this week* for one ticket: Monday to Friday and the two totals. */
-export interface WeekReading {
-  days: WeekDay[];
-  logged: number;
-  unlogged: number;
-}
-
-/**
- * What *Time this week* draws for `entityId`, out of `week_timesheet`.
- *
- * Logged is worklog time sent or waiting to send; *to log* is the tracked
- * time no worklog covers (`unlogged_seconds`), the week's own split. Held
- * worklogs are neither, as on the timesheet.
- */
-export function weekReading(week: Week, entityId: string, today: string): WeekReading {
-  const row = week.rows.find(
-    (candidate) => candidate.target?.kind === "entity" && candidate.target.entity_id === entityId,
-  );
-  const days = week.days.slice(0, 5).map((day, index) => {
-    const cell = row?.cells[index];
-    return { logged: cell?.logged_seconds ?? 0, unlogged: cell?.unlogged_seconds ?? 0, today: day === today };
-  });
-  const sum = (field: "logged_seconds" | "unlogged_seconds") =>
-    (row?.cells ?? []).reduce((total, cell) => total + cell[field], 0);
-  return { days, logged: sum("logged_seconds"), unlogged: sum("unlogged_seconds") };
-}
-
-/** The line under *Time this week*. */
-export function weekLine(reading: WeekReading): string {
-  const parts: string[] = [];
-  if (reading.logged >= 60) parts.push(`${minutesLabel(minutesOf(reading.logged))} logged`);
-  if (reading.unlogged >= 60) parts.push(`${minutesLabel(minutesOf(reading.unlogged))} to log`);
-  return parts.length === 0 ? "Nothing yet" : parts.join(", ");
 }
 
 /** The kinds the Code section draws, in the words of R-4.7. */
@@ -454,49 +395,28 @@ export function assetsRollup(lines: readonly AssetLine[]): Rollup {
   };
 }
 
-/** One stale-data warning on the Builds section (R-4.7). */
-export interface Staleness {
-  sourceId: string;
-  text: string;
-  /** The fix's words, in the source's noun: *Re-enter password*, *Re-enter token* (#1405). */
-  fix: string;
+/**
+ * Code's rollup (#2401): "6 items", the branches with commits not pushed
+ * (`warn`) before the open pull requests (`info`). `unpushed` holds the
+ * entity ids of the branches whose checkout on this machine is ahead of its
+ * upstream; an id that is not one of the rows' branches counts nothing.
+ */
+export function codeRollup(rows: readonly EntityRow[], unpushed: ReadonlySet<string>): Rollup {
+  const signals: Signal[] = [];
+  const notPushed = rows.filter((row) => row.kind === "branch" && unpushed.has(row.entity_id)).length;
+  if (notPushed > 0) signals.push({ tone: "warn", text: `${notPushed} not pushed` });
+  const open = openPrs(rows);
+  if (open > 0) signals.push({ tone: "info", text: `${open} open ${open === 1 ? "PR" : "PRs"}` });
+  return { lead: `${rows.length} ${rows.length === 1 ? "item" : "items"}`, signals };
 }
 
 /**
- * The Builds section's warnings (R-4.7): every source that holds builds --
- * one that claims the CI role (#1196, ADR-0029), or that a drawn row came
- * from -- whose credential the reader has to fix. "TeamCity data is 38 min
- * old: sign-in failing." The age is since the sign-in started failing, the
- * moment the status bar dates the failure from. The fix is *Re-enter
- * password* (or *token*, the source's noun), on the source's settings page.
+ * The one state a section's row on the card draws (#2401): the rollup's
+ * worst signal, or `null` when every signal is settled (`ok`, `muted`).
  */
-export function staleBuilds(
-  sources: readonly SourceFacts[],
-  health: readonly CredentialHealth[],
-  sync: readonly SourceSyncStatus[],
-  rows: readonly EntityRow[],
-  now: Date,
-): Staleness[] {
-  // A source whose claims the job was not handed claims nothing.
-  const holders = sources.filter(
-    (source) =>
-      claims({ roles: source.roles }, CI) || rows.some((row) => row.source_id === source.id),
-  );
-  const out: Staleness[] = [];
-  for (const source of holders) {
-    const state = health.find((row) => row.source_id === source.id);
-    if (!state || !signInFails(state.state)) continue;
-    const run = sync.find((row) => row.source_id === source.id);
-    const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
-    const name = source.display_name || source.id;
-    const why = state.state === "missing_secret" ? `no ${secretNoun(source.auth_kind)} stored` : "sign-in failing";
-    out.push({
-      sourceId: source.id,
-      text: since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`,
-      fix: reenterWords(source.auth_kind),
-    });
-  }
-  return out;
+export function worstSignal(rollup: Rollup): Signal | null {
+  const asking = rollup.signals.filter((signal) => RANK[signal.tone] < SETTLED);
+  return asking.reduce<Signal | null>((worst, signal) => (worst === null || RANK[signal.tone] < RANK[worst.tone] ? signal : worst), null);
 }
 
 /** The username knobas knows the reader by in a source, or `null`. */
@@ -520,12 +440,90 @@ export function isMine(
   return me !== null && detail.author !== null && detail.author === me;
 }
 
+/** What the ticket page card's *Logged* row draws (#2403). */
+export type LoggedRow = {
+  /** *2h 10m of 6h*, or the time alone with no estimate. */
+  text: string;
+  /** *1h 40m yours*, only when somebody else has logged time too. */
+  yours: string | null;
+  /**
+   * The meter under the line, `null` with no estimate: each segment's share
+   * of the track in percent, mine first, then the others', both within the
+   * estimate, then `past`, the time logged past the estimate (0 until spent
+   * passes it), drawn in the error tint. `mine` is 0 unless `yours` is drawn:
+   * the logged time is then one segment.
+   */
+  meter: { mine: number; others: number; past: number } | null;
+};
+
+/** Seconds as the card writes a length: whole minutes, `2h 10m`, `0m`. */
+const spelled = (seconds: number) => minutesLabel(Math.floor(seconds / 60));
+
+/**
+ * The card's *Logged* row (spec #2396): the time spent against the estimate,
+ * with a meter whose track is the estimate (or the time spent, once that is
+ * longer); the time past the estimate is the track's last segment, in the
+ * error tint. Mine is the sum of the worklog's
+ * entries whose author is `me`, the source's username; it is told apart only
+ * when somebody else has logged too. No estimate draws the time alone and no
+ * meter, an estimate and nothing logged draws *0m of …* over an empty track,
+ * and neither draws no row (`null`). A zero estimate is no track.
+ */
+export function loggedRow(
+  detail: Pick<EntityDetail, "time_spent_seconds" | "estimate_seconds" | "logged_by">,
+  me: string | null,
+): LoggedRow | null {
+  const estimate = detail.estimate_seconds !== null && detail.estimate_seconds > 0 ? detail.estimate_seconds : null;
+  const spent = detail.time_spent_seconds ?? null;
+  if (spent === null && estimate === null) return null;
+  const logged = spent ?? 0;
+  const mineSeconds = me === null ? 0 : (detail.logged_by ?? []).filter((entry) => entry.author === me).reduce((sum, entry) => sum + entry.seconds, 0);
+  const mine = Math.min(mineSeconds, logged);
+  const split = mine > 0 && logged - mine > 0;
+  const yours = split ? `${spelled(mine)} yours` : null;
+  if (estimate === null) return { text: spelled(logged), yours, meter: null };
+  const track = Math.max(estimate, logged);
+  const share = (seconds: number) => (seconds / track) * 100;
+  // Within the estimate mine comes first, then the others'; past it is one segment.
+  const within = Math.min(logged, estimate);
+  const mineWithin = split ? Math.min(mine, within) : 0;
+  return {
+    text: `${spelled(logged)} of ${spelled(estimate)}`,
+    yours,
+    meter: { mine: share(mineWithin), others: share(within - mineWithin), past: share(logged - within) },
+  };
+}
+
 /**
  * Whether the job offers *Start work* (R-4.9): a To Do ticket assigned to the
  * reader, the same test the Tickets preview's button makes.
  */
 export function offersStartWork(status: string | null, mine: boolean): boolean {
   return mine && (status?.toLowerCase() ?? "") === "to do";
+}
+
+/** What the card's one button does (spec #2396). */
+export type FootDoes = "start-work" | "resume" | "choose" | "stop" | "start-timer";
+
+/**
+ * The ticket page card's one button (spec #2396): while reading, the decision
+ * that pins the ticket, *Start work* on a To Do ticket of mine, *Resume work*
+ * on the rest of mine, *Work on this* on anyone else's, and none on a done
+ * ticket; once pinned, the timer, *Stop and log* while it runs on the ticket,
+ * else *Start timer*. Its label is all it says: no line goes under it.
+ */
+export function footAction(ticket: {
+  pinned: boolean;
+  status: string | null;
+  mine: boolean;
+  timerOnIt: boolean;
+}): { label: string; does: FootDoes } | null {
+  if (ticket.pinned) {
+    return ticket.timerOnIt ? { label: "Stop and log", does: "stop" } : { label: "Start timer", does: "start-timer" };
+  }
+  if ((ticket.status?.toLowerCase() ?? "") === "done") return null;
+  if (offersStartWork(ticket.status, ticket.mine)) return { label: "Start work", does: "start-work" };
+  return ticket.mine ? { label: "Resume work", does: "resume" } : { label: "Work on this", does: "choose" };
 }
 
 /** One row of a job section, whatever its kind. */

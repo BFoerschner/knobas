@@ -13,6 +13,7 @@ import type {
   ActionItemTicket,
   ArtifactEntry,
   ArtifactPreview,
+  AttachmentBytes,
   CaptureContext,
   CaptureShortcut,
   ChainStepRow,
@@ -94,6 +95,8 @@ export type {
   ActivityRow,
   ArtifactEntry,
   ArtifactPreview,
+  Attachment,
+  AttachmentBytes,
   AttentionGroup,
   CappedDiff,
   CaptureContext,
@@ -768,6 +771,33 @@ type RawBytes = ArrayBuffer | ArrayLike<number>;
 export async function entityFileBytes(entityId: string, path: string, commit: string | null): Promise<Uint8Array> {
   const answer = await invoke<RawBytes>("entity_file_bytes", { entityId, path, commit });
   return answer instanceof ArrayBuffer ? new Uint8Array(answer) : Uint8Array.from(answer);
+}
+
+/**
+ * One attachment's bytes through its source's stored credential —
+ * `knobas_app::commands::entity::attachment_bytes` (spec #2396, #2405): the
+ * ticket page's preview of a screenshot. `attachmentId` is an id from
+ * `EntityDetail.attachments`; the backend fetches only a file that list
+ * holds. Read live and never stored.
+ *
+ * Rejects with `invalid` for a file over 5 MiB (the message names its size and
+ * the cap) or a source that reads no attachments; `not_found` for an
+ * attachment the list does not hold; `unauthorized` (a 403's message names
+ * `HTTP 403`) and `unreachable` as the source answers.
+ */
+export function attachmentBytes(entityId: string, attachmentId: string): Promise<AttachmentBytes> {
+  return invoke<AttachmentBytes>("attachment_bytes", { entityId, attachmentId });
+}
+
+/**
+ * One attachment into the OS Downloads folder through its source's stored
+ * credential — `knobas_app::commands::entity::download_attachment` (spec
+ * #2396, #2405), named as the list names it and numbered where the name is
+ * taken, as a run's download is. Answers the file's path. Rejects as
+ * {@link attachmentBytes} does, with no cap.
+ */
+export function downloadAttachment(entityId: string, attachmentId: string): Promise<string> {
+  return invoke<string>("download_attachment", { entityId, attachmentId });
 }
 
 /**

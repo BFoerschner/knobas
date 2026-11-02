@@ -12,7 +12,8 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means "the ticket you are on".** It goes on the job card, the ticket page's card (`#/ticket/<id>`, spec #2227), the selected ticket on the board and list, and the running timer. Nothing else gets yellow. Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
+- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
+- **The yellow card is a light surface in both themes.** Its dots and chips take the light tone values, so a failing build reads on it in dark too: dark's `--warn` is the card's own yellow and its `--err` is pink on it. Every yellow card (the ticket page's, the Tickets board's card and the list's row) re-declares the five tones and their tints at their light values (`job.css`), so the blocked chip and every dot follow without a rule of their own (spec #2396, #2400).
 - **The width axis does the shouting, not colour or size.** Big figures (the job key, counts, durations) use Archivo at width 62 and weight 800. Page titles use width 85. Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
 - **Structure means something.** A border separates things that are different. A shadow means the thing floats above the page. Labels are sentence case and never all caps. The prototype has no `text-transform: uppercase` anywhere, and the app keeps it that way.
@@ -43,11 +44,13 @@ Tokens are the prototype's, unchanged. Light and dark come from the same names.
 | `--muted` / `--muted-bg` | `#5F6975` / `#E6E9EC` | `#94A0AC` / `#262E37` | Unknown, no data, not monitored |
 | `--shadow` | `0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25)` | `0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6)` | Floating things only |
 
+The ticket page's card has two moods and one markup (spec #2396). While the ticket is only read it sits on `--sheet` with `--ink` (`.tf-sheetcard`); once it is the chosen job it sits on `--card` with `--card-ink` (`.tf-card`), and the class is the only difference. The yellow follows the first rule above: the page card, the chosen job's card and row on the Tickets board and list, and the running timer. A selected card or row that is not the chosen job stays on `--sheet` with its outline in `--ink`.
+
 ### Contrast, measured
 
 I computed WCAG ratios for every text pair the prototype uses. All text passes 4.5:1 in both themes. The tightest are light `--muted` on `--paper` at 4.53 and on `--muted-bg` at 4.58, so no lighter grey may be added for text.
 
-One pair fails. The focus ring on the yellow card is 4.16:1 in light, which is fine for a non-text indicator, but **1.22:1 in dark**, so keyboard focus on the job card or the selected ticket is invisible there. The fix belongs in the system, not in a ticket: on any `--card` surface the focus ring is `--card-ink`. That's a change from the prototype, and the first ticket that draws a card names it in its PR.
+One pair fails. The focus ring on the yellow card is 4.16:1 in light, which is fine for a non-text indicator, but **1.22:1 in dark**, so keyboard focus on the ticket page's yellow card or the chosen job's card on the board is invisible there. The fix belongs in the system, not in a ticket: on any `--card` surface the focus ring is `--card-ink`. That's a change from the prototype, and the first ticket that draws a card names it in its PR.
 
 ## Type
 
@@ -110,7 +113,7 @@ They are on `:root` in `tokens.css`. A button takes a fixed `height` from its si
 
 - **Default** (`.tf-btn`): page headers (`.tf-acts`), dialog footers and the top bar.
 - **Small** (`.tf-btn.tf-sm`): everything inside a page body. Rows, section headings, panel toolbars, tab strips, side rails, segmented-control buttons and pill toggles.
-- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the link review's *Link them* / *Not related* / *Decide later*, the ticket preview's go button). No other button is large.
+- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the link review's *Link them* / *Not related* / *Decide later*, the ticket preview's go button, the ticket page card's foot). No other button is large.
 
 Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
 
@@ -131,7 +134,17 @@ The title block on the left and `.tf-acts` on the right, on the title line, top-
 3. "Open in <source>", always a ghost button;
 4. *Sync now* / *Refresh*, always last.
 
-A section heading that carries an action puts it on the right of the heading line at the small size. A page with no header (the job) ends the tab strip it draws with its small actions, centred on the strip.
+A section heading that carries an action puts it on the right of the heading line at the small size. The ticket page has no header: its key, status and actions are on its card ([below](#the-ticket-pages-card)), and its title heads the reading column.
+
+### The ticket page's card
+
+The card (`TfJobCard.svelte`, `job.css`) is the same markup in both moods (spec #2396).
+
+- **Two lists of rows.** Under the facts list the card holds two bordered lists in one shape (`.tf-tktable`). The first (`.tf-tksecs`) is the sections: a row per section, each a link holding the name, the count in tabular figures, at most one state with its dot (full ink for err and warn) and a chevron. The second (`.tf-tkacts`) is the card's two actions, *Open in <source>* and *Link something to it*: the same row with no count and no state. A row is a link or a button drawn as a row, not a `.tf-btn`, so it takes no size.
+- **The copy button** beside the key is `.tf-iconbtn.tf-sm`.
+- **The foot** is one `.tf-btn.tf-primary.tf-lg`, ink on the card's own surface: the decision while reading, the timer once chosen. No line under it.
+- **The width handle** is a 6 px `separator` on the card's right edge (`.tf-tkhandle`), focusable, that shows as the edge darkening under the pointer. Dragging sets the card between 240 and 720 px, ←/→ step 16 px, and a double click or Enter fits the card so nothing on it wraps. The width is browser state (`knobas.ticket.side`, default 320 px). Below 900 px the handle is gone.
+- **The fold.** The reading column's Attachments panel is a native `<details class="tf-tkfold">`, closed by default. Its summary is the heading, a count badge and a chevron (`.tf-tkmark`) that points right while closed and turns down when open, in 120 ms. An attachment row's *Open* and *Download* are `.tf-btn.tf-sm.tf-ghost`.
 
 ### Dialog footer
 
@@ -192,7 +205,9 @@ A control this section doesn't name is added by amending this section, the `#/co
 
 The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (side rails and preview panes close) and 900 px (columns stack). The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
 
-The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states and the Docs home.
+The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
+
+The ticket page is two columns that each scroll on their own (spec #2396): the card at `--tk-side` (320 px by default, 240 to 720 px by its handle) and the reading column, at most 880 px wide and centred in the space beside the card. Below 900 px they stack.
 
 ## Motion
 
@@ -221,6 +236,6 @@ These are engineering constraints the prototype doesn't have. Each UI ticket tha
 - **Two UIs live side by side until slice 5.** The new shell runs beside the rooms UI behind a setting. Their tokens collide by name (`--ok`, `--muted`, `--sans`, `--mono` exist in both with different values). The new tokens are set on the new shell's root element, not on `:root`, and that element sets its own `background: var(--paper)` and fills the window. The rooms UI's `app.css` stays untouched. When slice 5 removes the rooms UI, the tokens move to `:root` and `app.css` goes.
 - **The new stylesheet is its own file.** It doesn't append to `app.css`, whose header asks later milestones to append. That rule was for extending the Signal design, and this one replaces it.
 - **Theme.** Today's app is dark only. The new shell follows the OS, and the theme toggle and *Settings → Appearance* (R-13a.8) override it through `data-theme` on the shell root, with the same three-way selector the prototype uses (OS dark unless `data-theme="light"`, or forced `data-theme="dark"`).
-- **Not a source.** Prototype-6 still contains the retired global map (`renderMap`, `renderGlobalMap` and its `.ma-*`, `.gm-*`, `.mn`, `.minsp` selectors). The job's Map tab is Dependencies only (D11/D12). Don't port those selectors.
+- **Not a source.** Prototype-6 still contains the retired global map (`renderMap`, `renderGlobalMap` and its `.ma-*`, `.gm-*`, `.mn`, `.minsp` selectors). Dependencies is drawn from a ticket under its own nav entry (D11/D12; the job's Map tab went with spec #2396). Don't port those selectors.
 
 The conventions the first shell tickets settled (class prefix, fixtures, mounting, addresses) are in [ticket-first-shell-conventions](2026-10-15-ticket-first-shell-conventions.md).

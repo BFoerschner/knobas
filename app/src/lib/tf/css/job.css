@@ -4,46 +4,163 @@
   padding: 26px 22px 18px; overflow: auto; position: relative; display: flex; flex-direction: column; gap: 14px;
   border-right: 1px solid var(--card-2);
 }
-/* The punched hole at the top of the card. */
-.tf-jobcard::before {
-  content: ""; position: absolute; top: 10px; left: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
-  background: var(--paper); box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
-}
-.tf-jobcard .tf-back {
-  align-self: flex-start; background: rgba(0,0,0,.08); padding: 3px 9px; border-radius: 3px;
-  font-size: var(--t-sm); text-decoration: none; display: inline-flex; gap: 6px; align-items: center;
-}
 .tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
 /* Which source's ticket this is, when another source holds the same key (#1476). */
 .tf-jobcard .tf-jobsrc { font-size: var(--t-sm); margin: 6px 0 0; }
 .tf-jobcard .tf-jobsrc a { color: inherit; }
-.tf-jobtitle { font-size: var(--t-2xl); line-height: 1.2; font-weight: 600; }
 .tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.tf-jobcard select {
-  font-weight: 600; padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(0,0,0,.25);
-  background: rgba(255,255,255,.35); color: var(--card-ink);
-}
-/* A queued move (#1424): the picked status, muted and dashed, until the mirror moves. */
-.tf-jobcard select.tf-queued { color: var(--card-ink-2); font-style: italic; border-style: dashed; }
-.tf-jobcard .tf-jobdim, .tf-jobcard p { color: var(--card-ink-2); }
-.tf-jobcard p.tf-asks { white-space: pre-line; }
-.tf-jobcard section { border-top: 1px solid rgba(0,0,0,.14); padding-top: 12px; }
-.tf-jobcard h2 { font-size: var(--t-xs); font-weight: 600; color: var(--card-ink-2); margin: 0 0 6px; }
+.tf-jobcard p { color: var(--card-ink-2); }
 .tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }
 .tf-jobcard .tf-chip.tf-err { background: var(--err); color: #fff; }
-.tf-clock {
-  display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,.08); border-radius: 6px;
-  padding: 10px 12px; flex-wrap: wrap;
+/* ---------- one page for a ticket and the job (spec #2396) ---------- */
+/* The page is the job's two columns under its own breadcrumb; each column scrolls on its own, so the card's foot is in reach. */
+.tf-ticketpage { height: 100%; }
+.tf-ticketpage .tf-ws { flex: 1; min-height: 0; height: auto; grid-template-columns: var(--tk-side, 320px) minmax(0, 1fr); }
+/* The card's width is the reader's (#2402): a 6px separator on its right edge drags it between 240px and 720px
+   (`knobas.ticket.side`), a double click fits it so nothing on the card wraps. The handle shows as the card's edge
+   darkening under the pointer. Below 900px the columns stack and the handle is gone. */
+.tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
+.tf-tkhandle:hover, .tf-tkhandle:focus-visible, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); outline: 0; }
+.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle:focus-visible, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf-ticketcard.tf-tkdragging, .tf-ticketcard.tf-tkdragging * { cursor: col-resize; user-select: none; }
+@media (max-width: 900px) {
+  .tf-ticketpage { height: auto; }
+  .tf-ticketpage .tf-ws { grid-template-columns: minmax(0, 1fr); }
+  .tf-tkhandle { display: none; }
 }
-/* A duration is Archivo with tabular figures (design system, Type). */
-.tf-clock-t { font-weight: 600; font-size: var(--t-2xl); font-variant-numeric: tabular-nums; }
-.tf-clock .tf-btn { margin-left: auto; background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
-.tf-week { display: block; width: 100%; height: 34px; margin-top: 6px; }
-.tf-week .tf-week-unlogged { fill: rgba(0,0,0,.12); }
-.tf-week .tf-week-logged { fill: rgba(0,0,0,.24); }
-.tf-week .tf-today .tf-week-unlogged { fill: rgba(0,0,0,.38); }
-.tf-week .tf-today .tf-week-logged { fill: var(--card-ink); }
-.tf-weekends { display: flex; justify-content: space-between; font-size: var(--t-2xs); }
+/* No 64px key in either mood. Beside it, the copy button: one press puts the key and the title on the clipboard (#2400). */
+.tf-ticketcard .tf-jobkey { font-size: var(--t-d2); }
+.tf-tkhead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tf-ticketcard .tf-tkcopy { color: var(--card-ink-2); }
+.tf-ticketcard .tf-tkcopy:hover { background: rgba(0,0,0,.08); color: var(--card-ink); }
+.tf-sheetcard .tf-tkcopy { color: var(--ink-2); }
+.tf-sheetcard .tf-tkcopy:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-ticketcard .tf-tkcopy.tf-tkcopied { color: var(--ok); }
+/* The status as the card's chip, close under the key: the one fact that is a state. */
+.tf-ticketcard .tf-jobrow { margin-top: -4px; }
+.tf-ticketcard .tf-jobrow .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
+/* The facts list is the Tickets pane's (`dl.tf-facts`): a 68px label column, every row 20px tall whether it holds
+   text, a chip or an avatar, so the rhythm holds. */
+.tf-ticketcard .tf-facts { grid-template-columns: 68px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+.tf-ticketcard .tf-facts dt, .tf-ticketcard .tf-facts dd { line-height: 20px; min-height: 20px; }
+.tf-ticketcard .tf-facts dt { color: var(--card-ink-2); }
+.tf-sheetcard .tf-facts dt { color: var(--ink-2); }
+.tf-ticketcard .tf-facts dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.tf-ticketcard .tf-facts dd .tf-av { width: 20px; height: 20px; font-size: 9px; line-height: 1; }
+.tf-ticketcard .tf-facts dd .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
+.tf-ticketcard .tf-facts dd .tf-lab { line-height: 16px; }
+.tf-ticketcard .tf-facts .tf-av { background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.2); color: var(--card-ink); }
+.tf-ticketcard .tf-facts .tf-av.tf-me { background: var(--card-ink); border-color: var(--card-ink); color: var(--card); }
+.tf-sheetcard .tf-facts .tf-av { background: var(--sheet-2); border-color: var(--rule); color: var(--ink-2); }
+.tf-sheetcard .tf-facts .tf-av.tf-me { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+/* Under the Logged line a meter in the week chart's language (#2403): what is logged in the darker fill, the reader's
+   share in full ink, the estimate the track, the track in the error tint once logged passes the estimate. */
+.tf-tkmeter { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: rgba(0,0,0,.12); }
+.tf-tkmeter i { display: block; height: 100%; }
+.tf-tkmeter .tf-tkme { background: var(--card-ink); }
+.tf-tkmeter .tf-tkothers { background: rgba(0,0,0,.3); }
+.tf-sheetcard .tf-tkmeter { background: var(--rule-2); }
+.tf-sheetcard .tf-tkmeter .tf-tkme { background: var(--ink); }
+.tf-sheetcard .tf-tkmeter .tf-tkothers { background: var(--ink-2); }
+/* Spent past the estimate: the track is the time spent, and the part past the estimate is its last segment, in the
+   error tint (spec #2396), on the yellow and on the sheet alike. */
+.tf-tkmeter .tf-tkpast { background: var(--err); }
+.tf-ticketcard .tf-facts dd .tf-tkmeter { flex: 1 0 100%; margin: -2px 0 4px; }
+.tf-ticketcard .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
+.tf-sheetcard .tf-lab { border-color: var(--rule); color: var(--ink-2); }
+/* The epic as a chip that links: the status chip's shape, cut with an ellipsis (its whole name is its title),
+   underlined on hover so it reads as a place to go. */
+.tf-ticketcard .tf-facts a.tf-tkepicchip {
+  display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  line-height: 18px; color: var(--card-ink); text-decoration: none;
+}
+.tf-sheetcard .tf-facts a.tf-tkepicchip { color: var(--ink); }
+.tf-ticketcard .tf-facts a.tf-tkepicchip:hover { text-decoration: underline; text-underline-offset: 2px; }
+/* The yellow card is a light surface in both themes (design system, Colour), so its dots and chips take the light
+   tone values: dark's --warn is the card's own yellow and its --err pink on it. The blocked chip follows. Every
+   yellow card: the ticket page's, the Tickets board's and the list's row (spec #2396 story 56). */
+.tf-ticketcard.tf-card, .tf-tcard.tf-card, .tf-row.tf-card {
+  --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
+  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+}
+/* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
+   one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
+   two action rows under it take the same shape with the name and the chevron alone. A list of places, not buttons. */
+.tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+.tf-tktable > a, .tf-tktable > button {
+  display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
+  padding: 7px 10px; border: 0; border-top: 1px solid rgba(0,0,0,.12); background: none; font: inherit; font-size: var(--t-sm);
+  color: inherit; text-align: left; text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.tf-tktable > :first-child { border-top: 0; }
+.tf-tktable > a:hover, .tf-tktable > button:hover { background: rgba(0,0,0,.07); }
+.tf-tktable.tf-tkacts > a, .tf-tktable.tf-tkacts > button { grid-template-columns: minmax(0, 1fr) 8px; }
+.tf-tktable .tf-n { font-variant-numeric: tabular-nums; text-align: right; color: var(--card-ink-2); }
+.tf-tktable .tf-st { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--card-ink-2); }
+.tf-tktable .tf-st.tf-asks { color: var(--card-ink); }
+.tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
+.tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
+.tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
+.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
+.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
+.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
+.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
+.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
+/* The one decision at the card's foot: the card's own ink, large. */
+.tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
+.tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+/* Two moods of one card: the yellow is for the ticket you are on (`tf-card`); a ticket you are reading sits on a sheet. */
+.tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
+.tf-sheetcard p { color: var(--ink-2); }
+.tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
+.tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+/* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the
+   card at a reading width (Björn's call; the design system's left alignment stays everywhere else). */
+.tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
+.tf-tkread { max-width: 880px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+.tf-tkread > section > header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; min-height: var(--control-h-sm); }
+.tf-tkread > section > header h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+/* The page's head: the title at the page-title step (`.tf-fhead`'s type), whole; a long title wraps. */
+.tf-tkpagehead { display: flex; align-items: flex-start; gap: 16px; margin-bottom: -8px; }
+.tf-tkpagehead h1 { flex: 1; min-width: 0; font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; overflow-wrap: anywhere; }
+.tf-tkpagehead .tf-acts { flex: none; margin-top: -2px; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+/* The description: the ticket's Markdown in a resting panel at body size, filling the panel. */
+.tf-tkdesc { padding: 14px 16px; }
+.tf-tkdesc .tf-md { padding: 0; font-size: var(--t-md); }
+.tf-tkdesc p.tf-dim { font-size: var(--t-sm); }
+/* A description without markup keeps its line breaks. */
+.tf-tkdesc p.tf-asks { white-space: pre-line; overflow-wrap: anywhere; margin: 0; }
+/* The thread is the job's (`.tf-convo`, connections.css); the compose box is one line until it is used. */
+.tf-tkread .tf-convo { max-width: none; }
+.tf-tkread .tf-compose textarea { min-height: 36px; }
+.tf-tkread .tf-compose:focus-within textarea { min-height: 80px; }
+/* Attachments (#2404): the mirror's list folded to one line, a native disclosure closed by default whose summary is the
+   section heading, a count badge and a chevron (right closed, down open). Open, one row a file, the job's `.tf-r`: its
+   kind in mono, the name with who, when and how big under it, and *Open*. */
+.tf-tkread details.tf-tkfold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); margin-bottom: 10px; border-radius: 4px; }
+.tf-tkread details.tf-tkfold > summary::-webkit-details-marker { display: none; }
+.tf-tkread details.tf-tkfold > summary h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-tkread details.tf-tkfold > summary .tf-tkmark { width: 14px; height: 14px; color: var(--ink-2); transition: transform 120ms ease-out; }
+.tf-tkread details.tf-tkfold[open] > summary .tf-tkmark { transform: rotate(90deg); }
+.tf-tkread details.tf-tkfold > summary:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
+.tf-tkatt .tf-r { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; }
+.tf-tkatt .tf-rows > .tf-r:first-child { border-top: 0; }
+.tf-tkatt .tf-r .tf-rend { margin-left: 0; }
+.tf-tkatt .tf-r .tf-t { display: flex; flex-direction: column; gap: 2px; }
+.tf-tkatt .tf-rsub { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tkkind {
+  width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2);
+  display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
+}
+.tf-tkatt .tf-rend .tf-btn { color: var(--ink-2); }
+/* An image's preview (#2405): the file's bytes, fetched when the panel opens and drawn as a data image, cropped to the
+   frame. One that cannot be fetched is the same frame dashed and empty, as `.tf-md-noimg` draws a missing image. The
+   panel then leads with the stale strip and its *Try again*. */
+.tf-tkthumb { width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2); object-fit: cover; display: block; }
+.tf-tkthumb.tf-tknone { display: grid; place-items: center; border-style: dashed; background: none; color: var(--ink-2); }
+.tf-tkatt .tf-stale { margin: 10px 12px 2px; }
+.tf-tkatt .tf-stale .tf-btn { margin-left: auto; }
 
 .tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
 .tf-work > * { flex: none; }
@@ -85,10 +202,7 @@
 a.tf-r:hover { background: var(--sheet-2); }
 .tf-r .tf-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
-.tf-r .tf-rsub { display: block; font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
 .tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
-.tf-secfoot { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); flex-wrap: wrap; }
-.tf-secfoot .tf-push { margin-left: auto; }
 .tf-minif {
   display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px;
   padding: 2px 7px; flex: 1; min-width: 120px; max-width: 220px; color: var(--ink-2);
@@ -96,11 +210,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-minif svg { width: 12px; height: 12px; flex: none; }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
-/* A row from the parent or a link set names it (R-4.6). */
-.tf-via {
-  display: inline-block; font-size: var(--t-2xs); font-weight: 600; padding: 0 5px; border-radius: 3px; margin-right: 4px;
-  background: var(--sheet-2); color: var(--ink-2); border: 1px solid var(--rule);
-}
 /* Builds' stale-data warning, with its fix (R-4.7). */
 .tf-stale {
   margin: 0 12px 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--warn);

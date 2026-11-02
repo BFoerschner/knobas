@@ -57,6 +57,47 @@ describe("jiraWikiToMarkdown: what Jira draws as text stays text (#2308)", () =>
   });
 });
 
+describe("jiraWikiToMarkdown: inline images and task boxes (#2406)", () => {
+  const files = [
+    { id: "50000", name: "psp-409-trace.png" },
+    { id: "50001", name: "retry timeline [v2].png" },
+  ];
+
+  it("makes !name.ext|…! an image of the attachment by that name, where the wiki put it", () => {
+    expect(jiraWikiToMarkdown("See !psp-409-trace.png|thumbnail! here", files)).toBe(
+      "See ![psp-409-trace.png](attachment:50000) here",
+    );
+    expect(jiraWikiToMarkdown("!psp-409-trace.png!", files)).toBe("![psp-409-trace.png](attachment:50000)");
+    expect(jiraWikiToMarkdown("!retry timeline [v2].png|width=300,height=200!", files)).toBe(
+      "![retry timeline \\[v2\\].png](attachment:50001)",
+    );
+  });
+
+  it("leaves a name the attachment list does not hold as the text", () => {
+    expect(jiraWikiToMarkdown("!missing.png|thumbnail! and !https://x.example/a.png!", files)).toBe(
+      "!missing.png|thumbnail! and !https://x.example/a.png!",
+    );
+    expect(jiraWikiToMarkdown("!psp-409-trace.png!")).toBe("!psp-409-trace.png!");
+    expect(jiraWikiToMarkdown("Wow! That *works*! Yes!", files)).toBe("Wow! That **works**! Yes!");
+  });
+
+  it("keeps an image name inside {{mono}} as code", () => {
+    expect(jiraWikiToMarkdown("{{!psp-409-trace.png!}}", files)).toBe("`!psp-409-trace.png!`");
+  });
+
+  it("makes (/) and (x) at a list item's start a done and an open task box", () => {
+    expect(jiraWikiToMarkdown("* (/) Retry the transient codes\n* (x) Cap the budget\n# (/)numbered")).toBe(
+      "- [x] Retry the transient codes\n- [ ] Cap the budget\n1. [x] numbered",
+    );
+  });
+
+  it("leaves (/) and (x) mid-line, outside a list or alone as the text", () => {
+    expect(jiraWikiToMarkdown("* Retry (/) then (x)\n(/) not a list\n* (x)")).toBe(
+      "- Retry (/) then (x)\n(/) not a list\n- (x)",
+    );
+  });
+});
+
 describe("proseMarkdown (#2308)", () => {
   it("answers the Markdown to draw, or null for text", () => {
     expect(proseMarkdown("# Title", "markdown")).toBe("# Title");

@@ -152,13 +152,10 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
     },
     promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),
     listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
-    reachableTransitions: () => Promise.resolve([]),
     submitWrite: (payload) => {
       calls.writes.push(payload);
       return Promise.resolve({} as never);
     },
-    entityCheckout: () => Promise.reject(new Error("none")),
-    weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
     visitEntity: () => Promise.resolve(VISIT),
     entityThread: () => Promise.resolve(thread()),
     createLink: (from, to, relation, note) => {
@@ -178,8 +175,6 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
     jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
     hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
     getAsset: () => Promise.reject(new Error("not in this test")),
-    credentialHealth: () => Promise.resolve([]),
-    syncStatus: () => Promise.resolve([]),
     startWork: {
       flow: () => Promise.resolve([]),
       run: () => Promise.resolve([]),
@@ -191,12 +186,11 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
   };
 }
 
-function open(tab: string | null = null, over: { ports?: JobPorts; layers?: Layers; follower?: WriteFollower } = {}) {
+function open(over: { ports?: JobPorts; layers?: Layers; follower?: WriteFollower } = {}) {
   job = mount(TfJob, {
     target,
     props: {
       segment: "PAY-231",
-      tab,
       timer: { current: null, elapsed: null },
       layers: over.layers ?? createLayers(),
       ontimer: () => {},
@@ -213,44 +207,25 @@ function squash(node: Element | null | undefined): string {
   return node?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 }
 
+/** The drawer, opened as the page opens it: `L` (its row on the card comes with #2401). */
+function drawerOpen() {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true }));
+  flushSync();
+  return target.querySelector("[aria-label='Connections']")!;
+}
+
 function messages(): string[] {
   return [...target.querySelectorAll(".tf-convo .tf-msg p")].map((p) => squash(p));
 }
 
-function chip(label: string): HTMLButtonElement {
-  return [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => squash(b) === label)!;
-}
+// ---- the conversation in the reading column (R-5.2 to R-5.4, #2399) ----
 
-// ---- the card's summary (R-5.1) ----
-
-test("the card says how many comments, how many are new since the visit and how many mention you, with the latest", async () => {
+test("the thread is drawn whole with no fold and no filter, marks the last visit, edges new comments and mentions", async () => {
   open();
   await settle();
-  const card = target.querySelector("[aria-label='Job card']")!;
-  expect(squash(card)).toContain("11 comments, 2 new since 09:00, 1 mentions you");
-  expect(squash(card.querySelector(".tf-last"))).toBe("Lena, today 12:45: [~mara] will the queue get an SLA?");
-  expect(card.querySelector<HTMLAnchorElement>(".tf-cbtn")?.getAttribute("href")).toBe("#/job/jira%3APAY-231/conversation");
-  expect(squash(card.querySelector(".tf-cbtn"))).toBe("Read the conversation");
-  // The tab carries the count and the new ones.
-  const tab = [...target.querySelectorAll("[role='tab']")][2]!;
-  expect(squash(tab)).toBe("Conversation 11 2 new");
-});
-
-test("a ticket nobody commented on says so", async () => {
-  open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], me: [] }) }) });
-  await settle();
-  const card = target.querySelector("[aria-label='Job card']")!;
-  expect(squash(card)).toContain("No comments yet.");
-  expect(squash([...target.querySelectorAll("[role='tab']")][2])).toBe("Conversation");
-});
-
-// ---- the Conversation tab (R-5.2 to R-5.4) ----
-
-test("the tab folds the old part, marks the last visit, edges new comments and mentions", async () => {
-  open("conversation");
-  await settle();
-  const fold = target.querySelector<HTMLButtonElement>(".tf-fold")!;
-  expect(squash(fold)).toBe("Show 5 earlier entries, from 2026-08-12");
+  expect(target.querySelector(".tf-fold"), "no fold").toBeNull();
+  expect(target.querySelector(".tf-convo-bar, .tf-fchips"), "no filter bar").toBeNull();
+  expect(messages()).toHaveLength(11);
   expect(squash(target.querySelector(".tf-newline"))).toBe("New since your last visit, 09:00");
   // The rule sits right above the first new comment, not above the reader's own.
   expect(target.querySelector(".tf-newline + .tf-msg p")?.textContent).toBe("Left a comment on the PR.");
@@ -263,73 +238,14 @@ test("the tab folds the old part, marks the last visit, edges new comments and m
   expect(squash(target.querySelector(".tf-msg .tf-who b"))).not.toBe("");
   expect([...target.querySelectorAll(".tf-who b")].map((b) => b.textContent)).toContain("You");
 
-  fold.click();
-  flushSync();
-  expect(messages()).toHaveLength(11);
   // The conversation is the comments (#2163): every entry drawn is one.
   const drawnEntries = [...target.querySelectorAll(".tf-convo > .tf-msg")];
   expect(drawnEntries).toHaveLength(11);
   expect(drawnEntries.every((entry) => entry.tagName === "ARTICLE")).toBe(true);
 });
 
-test("a tab change is not a visit: the job records one and keeps what is new", async () => {
-  let visits = 0;
-  const props = $state({
-    segment: "PAY-231",
-    tab: null as string | null,
-    timer: { current: null, elapsed: null },
-    layers: createLayers(),
-    ontimer: () => {},
-    onstarttimer: () => {},
-    ports: ports({
-      visitEntity: () => {
-        visits += 1;
-        return Promise.resolve(VISIT);
-      },
-    }),
-    today: () => new Date(2026, 9, 15, 14, 0),
-  });
-  job = mount(TfJob, { target, props });
-  await settle();
-  props.tab = "conversation";
-  await settle();
-  expect(visits).toBe(1);
-  expect(squash(target.querySelector(".tf-newline"))).toBe("New since your last visit, 09:00");
-});
-
-test("no Include changes chip; Mentions me keeps only the mentions; the count follows", async () => {
-  open("conversation");
-  await settle();
-  const labels = [...target.querySelectorAll(".tf-fchips button")].map((b) => squash(b));
-  expect(labels).toContain("Mentions me");
-  expect(labels).not.toContain("Include changes");
-  expect(squash(target.querySelector(".tf-fcount"))).toBe("11 comments");
-
-  chip("Mentions me").click();
-  flushSync();
-  expect(messages()).toEqual(["[~mara] will the queue get an SLA?"]);
-  expect(squash(target.querySelector(".tf-fcount"))).toBe("1 of 11 comments");
-  expect(target.querySelector(".tf-fold")).toBeNull();
-  expect(target.querySelector(".tf-newline")).toBeNull();
-
-  chip("Mentions me").click();
-  chip("New since 09:00").click();
-  flushSync();
-  expect(messages()).toEqual(["Left a comment on the PR.", "[~mara] will the queue get an SLA?"]);
-});
-
-test("a person chip per commenter, by first name", async () => {
-  open("conversation");
-  await settle();
-  const people = [...target.querySelectorAll("[aria-label='People'] button")].map((b) => squash(b));
-  expect(people).toEqual(["Lena", "Priya", "Mara", "Jonas"]);
-  chip("Jonas").click();
-  flushSync();
-  expect(messages()).toEqual(["Left a comment on the PR."]);
-});
-
 test("Comment queues a Comment write and clears the box; a refused one keeps the text", async () => {
-  open("conversation");
+  open();
   await settle();
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
   const send = [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!;
@@ -345,7 +261,7 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
 
   job && unmount(job);
   job = null;
-  open("conversation", { ports: ports({ submitWrite: () => Promise.reject({ code: "invalid", message: "no", source_id: null }) }) });
+  open({ ports: ports({ submitWrite: () => Promise.reject({ code: "invalid", message: "no", source_id: null }) }) });
   await settle();
   const again = target.querySelector<HTMLTextAreaElement>("textarea")!;
   again.value = "kept";
@@ -358,7 +274,7 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
 
 test("a comment the source's credential cannot make draws Comment disabled saying why, and queues nothing (#2052)", async () => {
   const reason = "This Jira user cannot comment in PAY: it lacks the Add Comments permission";
-  open("conversation", { ports: ports({ refusedWrites: () => Promise.resolve([{ entity: ID, op: "comment", reason }]) }) });
+  open({ ports: ports({ refusedWrites: () => Promise.resolve([{ entity: ID, op: "comment", reason }]) }) });
   await settle();
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
   box.value = "Priya, can you decide the SLA?";
@@ -391,7 +307,7 @@ async function comment(words: string) {
 }
 
 test("a sent comment is drawn at the end of the thread marked queued, and goes once the conversation holds it", async () => {
-  open("conversation");
+  open();
   await settle();
   await comment("Looking at the jitter now");
   expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
@@ -399,7 +315,7 @@ test("a sent comment is drawn at the end of the thread marked queued, and goes o
 
   // Opened again before the sync: still on its way.
   unmount(job!);
-  open("conversation");
+  open();
   await settle();
   expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
 
@@ -407,7 +323,7 @@ test("a sent comment is drawn at the end of the thread marked queued, and goes o
   unmount(job!);
   const synced = thread();
   synced.comments.push({ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter\nnow", mine: true, mentions_me: false, markup: "text" });
-  open("conversation", { ports: ports({ entityThread: () => Promise.resolve(synced) }) });
+  open({ ports: ports({ entityThread: () => Promise.resolve(synced) }) });
   await settle();
   expect(queuedShown()).toEqual([]);
   expect(messages().at(-1)).toBe("Looking at the jitter now");
@@ -427,7 +343,7 @@ test("a comment the queue holds drops its echo and toasts; Edit and resend puts 
       return Promise.resolve({ id: 77 } as never);
     },
   });
-  open("conversation", { ports: numbered, follower });
+  open({ ports: numbered, follower });
   await settle();
   await comment("Looking at the jitter now");
   expect(queuedShown()).toHaveLength(1);
@@ -441,23 +357,18 @@ test("a comment the queue holds drops its echo and toasts; Edit and resend puts 
   expect(box.value).toBe("");
   toast.more!.find((action) => action.label === "Edit and resend")!.run();
   await settle();
-  expect(location.hash).toBe("#/job/jira%3APAY-231/conversation");
+  expect(location.hash).toBe("#/ticket/jira%3APAY-231");
   expect(box.value).toBe("Looking at the jitter now");
 });
 
 // ---- the Connections drawer (R-4.3, R-6.1, R-6.2) ----
 
-test("the button counts the ticket's links and its own proposals, and opens the drawer", async () => {
+test("the drawer lists the ticket's links and its own proposals; the page draws no connected count (#2399)", async () => {
   const layers = createLayers();
-  open(null, { layers });
+  open({ layers });
   await settle();
-  const button = target.querySelector<HTMLButtonElement>(".tf-conn")!;
-  expect(squash(button)).toBe("2 connected, 1 proposed L");
-  button.focus();
-  button.click();
-  flushSync();
-
-  const drawer = target.querySelector("[aria-label='Connections']")!;
+  expect(target.querySelector(".tf-conn"), "no Connections count button").toBeNull();
+  const drawer = drawerOpen();
   expect(squash(drawer.querySelector("h2"))).toBe("Connections of PAY-231");
   expect(squash(drawer.querySelector("h3"))).toBe("Linked on PAY-231 2");
   expect([...drawer.querySelectorAll(".tf-lk")].map((row) => squash(row))).toEqual([
@@ -469,13 +380,12 @@ test("the button counts the ticket's links and its own proposals, and opens the 
   expect(squash(drawer)).toContain("Links and link sets stay in knobas and are never written to a source.");
   expect(document.activeElement).toBe(drawer.querySelector("input[aria-label='Filter connections']"));
 
-  // `Esc` is the shell's: it closes the drawer layer, and focus goes back to the button.
+  // `Esc` is the shell's: it closes the drawer layer.
   expect(layers.open.map((layer) => layer.kind)).toEqual(["drawer"]);
   layers.open[0]!.close();
   flushSync();
   expect(target.querySelector("[aria-label='Connections']")).toBeNull();
   expect(layers.open).toHaveLength(0);
-  expect(document.activeElement).toBe(button);
 });
 
 test("L opens the drawer, outside a text field; a click on the scrim closes it", async () => {
@@ -500,8 +410,7 @@ test("L opens the drawer, outside a text field; a click on the scrim closes it",
 test("the drawer's filter keeps the rows it matches", async () => {
   open();
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
-  flushSync();
+  drawerOpen();
   const input = target.querySelector<HTMLInputElement>("input[aria-label='Filter connections']")!;
   input.value = "pages";
   input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -512,14 +421,13 @@ test("the drawer's filter keeps the rows it matches", async () => {
 test("a linked branch or commit opens its own address, which the repository page's redirect draws (#1440)", async () => {
   const branch = link("link:b", "gitea:tidewater/payout-service@refs/heads/feat/x", "branch", "feat/x");
   const commit = link("link:c", "gitea:tidewater/payout-service@9f2c1ab", "commit", "payout: key the retry");
-  open(null, {
+  open({
     ports: ports({
       getEntity: (id) => (id === ID ? Promise.resolve(ticket([branch, commit])) : Promise.reject({ code: "not_found", message: "", source_id: null })),
     }),
   });
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
-  flushSync();
+  drawerOpen();
   const hrefs = [...target.querySelectorAll(".tf-lk a")].map((a) => a.getAttribute("href")!);
   expect(hrefs).toEqual([
     "#/branch/gitea%3Atidewater%2Fpayout-service%40refs%2Fheads%2Ffeat%2Fx",
@@ -531,13 +439,11 @@ test("a linked branch or commit opens its own address, which the repository page
 test("Unlink withdraws the link in knobas only and Undo draws it again", async () => {
   open();
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
-  flushSync();
+  drawerOpen();
   target.querySelector<HTMLButtonElement>("button[aria-label='Unlink Idempotent retry window']")!.click();
   await settle();
   expect(calls.unlinks).toEqual(["link:1"]);
   expect([...target.querySelectorAll(".tf-lk a")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
-  expect(squash(target.querySelector(".tf-conn"))).toBe("1 connected, 1 proposed L");
   const toast = toasts.items.find((t) => t.text === "Unlinked in knobas only.")!;
   expect(toast.action?.label).toBe("Undo");
 
@@ -549,10 +455,9 @@ test("Unlink withdraws the link in knobas only and Undo draws it again", async (
 
 test("Link to… opens a dialog over the drawer that says the link stays in knobas", async () => {
   const layers = createLayers();
-  open(null, { layers });
+  open({ layers });
   await settle();
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
-  flushSync();
+  drawerOpen();
   [...target.querySelectorAll<HTMLButtonElement>(".tf-dacts button")].find((b) => squash(b) === "Link to…")!.click();
   flushSync();
   const dialog = target.querySelector("[role='dialog']")!;
@@ -567,16 +472,14 @@ test("Link to… opens a dialog over the drawer that says the link stays in knob
 });
 
 test("a ticket with nothing linked says so, and no proposals draw no box", async () => {
-  open(null, {
+  open({
     ports: ports({
       getEntity: () => Promise.resolve(ticket([])),
       roomSuggestions: () => Promise.resolve({ rows: [ELSEWHERE], total: 1, more: [] }),
     }),
   });
   await settle();
-  expect(squash(target.querySelector(".tf-conn"))).toBe("0 connected L");
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
-  flushSync();
+  drawerOpen();
   expect(squash(target.querySelector(".tf-dbody"))).toContain("Nothing linked on the ticket itself.");
   expect(target.querySelector(".tf-proposed")).toBeNull();
 });
@@ -622,34 +525,9 @@ function setPorts(hides = new Set<string>(), writes: [string, string, boolean][]
   });
 }
 
-function drawerOpen() {
-  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
-  flushSync();
-  return target.querySelector("[aria-label='Connections']")!;
-}
-
-test("Also on this job names each set that applies with its reason, then the parent; not on the Conversation tab", async () => {
-  open(null, { ports: setPorts() });
-  await settle();
-  const bar = target.querySelector(".tf-setsbar")!;
-  expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections Apply a link set…");
-  expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/ticket/jira%3APAY-230"]);
-  // Two own links and three more from the set and the parent, the page once.
-  expect(squash(target.querySelector(".tf-conn"))).toBe("5 connected, 1 proposed L");
-  if (job) unmount(job);
-  open("conversation", { ports: setPorts() });
-  await settle();
-  expect(target.querySelector(".tf-setsbar")).toBeNull();
-});
-
-test("with nothing applying the bar says so", async () => {
-  open();
-  await settle();
-  expect(squash(target.querySelector(".tf-setsbar"))).toBe("Also on this job no link sets yet Apply a link set…");
-});
 
 test("the drawer draws a group per set and the parent; a linked row says which set also holds it", async () => {
-  open(null, { ports: setPorts() });
+  open({ ports: setPorts() });
   await settle();
   const drawer = drawerOpen();
   expect([...drawer.querySelectorAll("h3")].map((h) => squash(h))).toEqual([
@@ -671,7 +549,7 @@ test("the drawer draws a group per set and the parent; a linked row says which s
 
 test("Hide here hides one member on this ticket only and never edits the set; Undo and Show again bring it back", async () => {
   const writes: [string, string, boolean][] = [];
-  open(null, { ports: setPorts(new Set(), writes) });
+  open({ ports: setPorts(new Set(), writes) });
   await settle();
   const drawer = drawerOpen();
   drawer.querySelector<HTMLButtonElement>("button[aria-label='Hide here: payout-service']")!.click();
@@ -704,7 +582,6 @@ test("Undo after moving to another job shows the member again on the ticket it w
   const other = { ...ticket(), row: { ...ticket().row, entity_id: "jira:PAY-232" } };
   const props = $state({
     segment: "PAY-231",
-    tab: null as string | null,
     timer: { current: null, elapsed: null },
     layers: createLayers(),
     ontimer: () => {},
@@ -724,10 +601,10 @@ test("Undo after moving to another job shows the member again on the ticket it w
   expect(writes.at(-1)).toEqual([ID, "gitea:tidewater/payout-service", false]);
 });
 
-test("a comment its source writes in markup is drawn as Markdown, and as text while the filter has words (#2308)", async () => {
+test("a comment its source writes in markup is drawn as Markdown (#2308)", async () => {
   const marked = thread();
   marked.comments.push({ author: "Priya Nair", at: "2026-10-15T13:00:00Z", body: "*Agreed*, see {{retry_window}}", mine: false, mentions_me: false, markup: "jira_wiki" });
-  open("conversation", { ports: ports({ entityThread: () => Promise.resolve(marked) }) });
+  open({ ports: ports({ entityThread: () => Promise.resolve(marked) }) });
   await settle();
   const last = [...target.querySelectorAll(".tf-msg")].at(-1)!;
   expect(last.querySelector("strong")?.textContent).toBe("Agreed");

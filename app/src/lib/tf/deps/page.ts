@@ -20,12 +20,12 @@ export const page = definePage({
     route.view === "full" && route.section === "deps" && (route.head === "deps" || route.head === "map"),
   component: TfDeps,
   crumbs: true,
-  props: ({ route, ready, job, navJob }) => {
+  props: ({ route, ready, job, defaultJob }) => {
     const ticket = ticketOf(route);
     return {
       ready,
       ticket,
-      ticketId: ticket !== null && navJob?.key === ticket ? navJob.entityId : null,
+      ticketId: ticket !== null && defaultJob?.key === ticket ? defaultJob.entityId : null,
       job,
     };
   },

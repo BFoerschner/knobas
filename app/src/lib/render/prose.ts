@@ -10,6 +10,10 @@
  * `----`, `*bold*`, `_italic_`, `-struck-`, `{{mono}}`, `[text|url]`,
  * `[url]`, `[~account]` (as `@account`, the mention spelling the shell marks)
  * and `\\`. `{color}` and `{panel}` tags are dropped, their text kept.
+ * `!name.ext|…!` is an image when the ticket's attachment list holds a file
+ * of that name (`attachment:<id>`, which the Markdown component fills through
+ * the surface, #2406); `(/)` and `(x)` at a list item's start are a done and
+ * an open task box.
  * Anything else stays as written. A single line break is a line break, as
  * Jira draws it, and raw HTML is text, as Jira treats it: the Markdown
  * engine would otherwise parse it.
@@ -23,15 +27,21 @@ export interface Prose {
 }
 
 /** The Markdown to draw `text` with, by its source's `markup`; `null` for text, which is drawn as it is. */
-export function proseMarkdown(text: string, markup: Markup): string | null {
+export function proseMarkdown(text: string, markup: Markup, attachments: readonly NamedFile[] = []): string | null {
   switch (markup) {
     case "markdown":
       return text;
     case "jira_wiki":
-      return jiraWikiToMarkdown(text);
+      return jiraWikiToMarkdown(text, attachments);
     case "text":
       return null;
   }
+}
+
+/** A ticket's attachment as the wiki's `!name!` resolves it (#2406): by its file name, to its id. */
+export interface NamedFile {
+  id: string;
+  name: string;
 }
 
 /** A line of the output: paragraph text gets a hard break before the next paragraph line. */
@@ -46,8 +56,12 @@ const LIST = /^\s*([*#-]+)\s+(.*)$/;
 const QUOTE_LINE = /^\s*bq\.\s+(.*)$/;
 const RULE = /^\s*-{4,}\s*$/;
 const TABLE = /^\s*\|/;
+/** `(/)` or `(x)` opening a list item's text, with more text after it. */
+const TASK = /^\((\/|x)\)\s*(?=\S)/;
 
-export function jiraWikiToMarkdown(wiki: string): string {
+export function jiraWikiToMarkdown(wiki: string, attachments: readonly NamedFile[] = []): string {
+  const files = new Map(attachments.map((file) => [file.name, file.id]));
+  const inline = (text: string) => inlineMarkup(text, files);
   const input = wiki.replace(/\r\n?/g, "\n").split("\n");
   const out: Line[] = [];
   let quoted = false;
@@ -136,7 +150,10 @@ export function jiraWikiToMarkdown(wiki: string): string {
     if (list) {
       const marks = list[1]!;
       const indent = [...marks.slice(0, -1)].map((m) => (m === "#" ? "   " : "  ")).join("");
-      push(`${indent}${marks.endsWith("#") ? "1." : "-"} ${inline(list[2]!)}`);
+      let item = list[2]!;
+      const task = TASK.exec(item);
+      if (task) item = `${task[1] === "/" ? "[x]" : "[ ]"} ${item.slice(task[0].length)}`;
+      push(`${indent}${marks.endsWith("#") ? "1." : "-"} ${inline(item)}`);
       continue;
     }
     line = literal(line).replace(/\\\\\s*/g, "  \n");
@@ -163,11 +180,32 @@ function language(params: string): string {
 }
 
 /** One line's inline markup, `{{mono}}` spans kept verbatim. */
-function inline(text: string): string {
+function inlineMarkup(text: string, files: ReadonlyMap<string, string>): string {
   return text
     .split(/(\{\{.*?\}\})/)
-    .map((part) => (part.startsWith("{{") && part.endsWith("}}") ? mono(part.slice(2, -2)) : words(part)))
+    .map((part) => (part.startsWith("{{") && part.endsWith("}}") ? mono(part.slice(2, -2)) : images(part, files)))
     .join("");
+}
+
+/** `!name!` or `!name|params!`: no space just inside either `!`. */
+const IMAGE = /!(?=[^\s!|])([^!|\n]*[^\s!|])(?:\|[^!\n]*)?!/g;
+
+/** A text's `!name!` images whose name the attachment list holds, as Markdown images; the rest, and anything else, as words. */
+function images(text: string, files: ReadonlyMap<string, string>): string {
+  let out = "";
+  let from = 0;
+  for (const match of text.matchAll(IMAGE)) {
+    const id = files.get(match[1]!);
+    if (id === undefined) continue;
+    out += words(text.slice(from, match.index)) + `![${altText(match[1]!)}](attachment:${encodeURIComponent(id)})`;
+    from = match.index + match[0].length;
+  }
+  return out + words(text.slice(from));
+}
+
+/** A file name as an image's alt text: the characters Markdown reads there escaped. */
+function altText(name: string): string {
+  return name.replace(/[\\[\]*_`<>]/g, (c) => (c === "<" ? "&lt;" : `\\${c}`));
 }
 
 function mono(code: string): string {

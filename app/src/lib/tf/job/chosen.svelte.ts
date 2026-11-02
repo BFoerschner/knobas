@@ -1,18 +1,20 @@
 /**
  * **The chosen job** (spec #2227): the ticket the reader last made the job
- * on purpose, as its entity id, which the Job page draws at the bare `#/job`
- * (home, `home.ts`). It is set in three places:
+ * on purpose, as its entity id, whose page draws at the bare `#/job` (home,
+ * `home.ts`) and on the yellow at its own `#/ticket/<id>` (spec #2396). It is
+ * set in four places, and never by reading a ticket:
  *
- * - the job page, once it has resolved a `#/job/<key or id>` address to its
- *   ticket (a bookmark, history, a link, the Tickets preview's button): the
- *   ticket page and the preview reach it by navigating there;
+ * - the ticket page, once it has resolved a `#/job/<key or id>` address to
+ *   its ticket (a bookmark, history, a link, the timer chip, the Tickets
+ *   preview's button), which then lands on the ticket's own address;
+ * - the ticket page card's foot: *Work on this*, *Resume work*, *Start work*;
  * - a timer start on a ticket (`App.svelte`, off `timer.started`);
- * - *Start work* (`TfStartWork.svelte`).
+ * - *Start work*'s run (`TfStartWork.svelte`).
  *
  * It replaces the shell's "job you were last in", which whichever job page
- * was opened last fed. The nav's Job link, the timer chip's fallback (⌘T with
- * nothing in front) and the launcher's *Link to <key>* elsewhere than on a job
- * read it (`TfShell.svelte`).
+ * was opened last fed. The timer chip's fallback (⌘T with nothing in front)
+ * and the launcher's *Link to <key>* elsewhere than on a ticket page read it
+ * (`TfShell.svelte`).
  *
  * Kept in the webview's `localStorage` (`knobas.job.chosen`), as the diff
  * layout (`knobas.diff.layout`) is: a per-machine convenience, read when the
@@ -22,11 +24,10 @@
  */
 import { untrack } from "svelte";
 
+import { keptValue, windowStorage, type KeptStorage } from "../kept-value";
 import { isEntityId } from "./job";
 
 export const CHOSEN_KEY = "knobas.job.chosen";
-
-type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
 
 export interface ChosenJob {
   /** The chosen job's entity id, or `null` when none is chosen. */
@@ -39,14 +40,11 @@ export interface ChosenJob {
   reset(): void;
 }
 
-export function createChosenJob(storage: () => Storage | null): ChosenJob {
+export function createChosenJob(storage: () => KeptStorage | null): ChosenJob {
+  const kept = keptValue(storage, CHOSEN_KEY);
   const read = (): string | null => {
-    try {
-      const kept = storage()?.getItem(CHOSEN_KEY) ?? null;
-      return kept !== null && isEntityId(kept) ? kept : null;
-    } catch {
-      return null;
-    }
+    const id = kept.read();
+    return id !== null && isEntityId(id) ? id : null;
   };
   let id = $state<string | null>(read());
   return {
@@ -58,27 +56,17 @@ export function createChosenJob(storage: () => Storage | null): ChosenJob {
       // when something else changes the choice.
       if (untrack(() => id) === next) return;
       id = next;
-      try {
-        storage()?.setItem(CHOSEN_KEY, next);
-      } catch {
-        // Kept for this run only.
-      }
+      kept.write(next);
     },
     load() {
       id = read();
     },
     reset() {
       id = null;
-      try {
-        storage()?.removeItem(CHOSEN_KEY);
-      } catch {
-        // Nothing kept to clear.
-      }
+      kept.clear();
     },
   };
 }
 
 /** The window's one chosen job, over this viewer's `localStorage` where there is one. */
-export const chosenJob: ChosenJob = createChosenJob(() =>
-  typeof window === "undefined" ? null : window.localStorage,
-);
+export const chosenJob: ChosenJob = createChosenJob(windowStorage);

@@ -60,5 +60,5 @@ test("the parent's group heading opens the parent's ticket page, not its job (sp
   const parent = { ticket: "gitea:acme/payouts#144", title: null, links: [] };
   const group = groupsOf({ sets: [], parent })[0]!;
   expect(group.href).toBe("#/ticket/gitea%3Aacme%2Fpayouts%23144");
-  expect(parseTfHash(group.href!)).toEqual({ view: "ticket", id: "gitea:acme/payouts#144" });
+  expect(parseTfHash(group.href!)).toEqual({ view: "ticket", id: "gitea:acme/payouts#144", tab: null });
 });

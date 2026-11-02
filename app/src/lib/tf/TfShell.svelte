@@ -45,7 +45,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, type Snippet } from "svelte";
+  import { onMount, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
@@ -87,6 +87,8 @@
   import { bridgePorts, type JobPorts } from "./job/ports";
   import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
+  import { scopedTicket } from "./job/scoped.svelte";
+  import { cardWidth } from "./job/card-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
@@ -252,13 +254,26 @@
   /**
    * The chosen job (spec #2227, `job/chosen.svelte.ts`), read from the
    * browser storage when the shell mounts, as a restart does. It replaces the
-   * "job you were last in" (#2230): the Job tab, the pages' *This job* and
-   * the launcher's job elsewhere than on a job page read it. `key` is what
-   * the tab names; `entityId` is where every way back to it goes, so a key
+   * "job you were last in" (#2230): `#/job`, the pages' *This job* and the
+   * launcher's job elsewhere than on a ticket page read it. `key` is what
+   * the pages name; `entityId` is where every way back to it goes, so a key
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
+  // The ticket page card's width (#2402), kept in the same storage.
+  cardWidth.load();
   const chosen = $derived(chosenJob.id === null ? null : ticketRef(chosenJob.id));
+  /**
+   * A ticket a card's sections row opened its section on (#2401,
+   * `job/scoped.svelte.ts`) is that section's pages' *This job* while it is
+   * on screen (`TfKeptPage`); leaving the section forgets it.
+   */
+  let shownSection: ReturnType<typeof sectionOf> = null;
+  $effect(() => {
+    const section = sectionOf(route);
+    if (shownSection !== null && section !== shownSection && shownSection === scopedTicket.section) untrack(() => scopedTicket.clear());
+    shownSection = section;
+  });
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
@@ -273,12 +288,12 @@
     return targetReading(target);
   });
   /**
-   * The Job tab's job (R-1.2, spec #2227): the chosen job, else the ticket a
+   * The job the shell's pages default to (R-1.2, spec #2227): the chosen job, else the ticket a
    * timer runs on that was not started here (a start chooses its ticket),
    * with its entity id, which `create_block` needs (#1027). Both are ids
    * already, so nothing is read for it.
    */
-  const navJobId = $derived.by(() => {
+  const defaultJob = $derived.by(() => {
     if (chosen !== null) return chosen;
     const target = timer.current?.target ?? null;
     return timedTicket === null || target === null || target.kind !== "entity" ? null : { key: timedTicket, entityId: target.entity_id };
@@ -300,7 +315,7 @@
   // A link asked for a job is the job page's to take; leaving for any other
   // page before it did drops it, so a later visit does not open the dialog.
   $effect(() => {
-    if (route.view !== "job") linkRequest.drop();
+    if (route.view !== "job" && route.view !== "ticket") linkRequest.drop();
   });
 
   // ---- the status bar's reads, once the database can answer ----
@@ -525,8 +540,6 @@
 <div class="tf">
   <TfTopBar
     current={sectionOf(route)}
-    job={navJobId?.key ?? null}
-    jobAt={navJobId?.entityId ?? null}
     {inbox}
     {badges}
     {timer}
@@ -544,7 +557,7 @@
         jobAt: chosen?.entityId ?? null,
         back,
         timedTicket,
-        navJob: navJobId,
+        defaultJob,
         timer,
         layers,
         theme,

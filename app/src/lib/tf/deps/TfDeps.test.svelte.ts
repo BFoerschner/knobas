@@ -431,15 +431,6 @@ test("the top bar draws everything in its own view, and This job goes back to th
   expect(location.hash).toBe("#/deps/job/PAY-231");
 });
 
-test("on the job's Map tab there is no page header, and This job stays on the tab", async () => {
-  render(READ, true, REACHES, { ticket: "PAY-231", ticketId: "jira:PAY-231", host: "job" });
-  await settle();
-  await settle();
-  expect(target.querySelector("h1")).toBeNull();
-  scopeButtons()[0]!.click();
-  expect(location.hash).toBe("#/job/jira%3APAY-231/map");
-});
-
 test("with no job open there is no scope switch on the top bar", async () => {
   render(READ, true, REACHES);
   await settle();

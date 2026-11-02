@@ -20,14 +20,12 @@ import { page as repoPage } from "./repo/page";
 import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
 import { page as setsPage } from "./sets/page";
-import { page as ticketPage } from "./ticket/page";
 import { page as ticketsPage } from "./tickets/page";
 import { page as timePage } from "./time/page";
 
 test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(ticketsPage);
   expect(PAGES).toContain(jobPage);
-  expect(PAGES).toContain(ticketPage);
   expect(PAGES).toContain(timePage);
   expect(PAGES).toContain(settingsPage);
   expect(PAGES).toContain(reviewPage);
@@ -47,7 +45,9 @@ const ADDRESSES = [
   ["#/tickets", "tickets"],
   ["", "tickets"],
   ["#/tickets/PAY-231", "tickets"],
-  ["#/ticket/jira%3APAY-231", "ticket"],
+  // One page for a ticket and the job (spec #2396).
+  ["#/ticket/jira%3APAY-231", "job"],
+  ["#/ticket/jira%3APAY-231/map", "job"],
   ["#/ticket", "tickets"],
   ["#/job/PAY-231", "job"],
   ["#/job/PAY-231/code", "job"],
@@ -92,7 +92,6 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
   const names = new Map([
     [ticketsPage, "tickets"],
     [jobPage, "job"],
-    [ticketPage, "ticket"],
     [timePage, "time"],
     [settingsPage, "settings"],
     [reviewPage, "review"],
@@ -119,16 +118,17 @@ test("no address is matched by two pages", () => {
   }
 });
 
-test("the job page hands TfJob the address's key and tab", () => {
+test("the job page hands TfJob the address's key, and no tab: the page has none (#2399)", () => {
   const route = parseTfHash("#/job/PAY-231/code");
   const props = jobPage.props({ route } as Parameters<typeof jobPage.props>[0]);
-  expect(props).toMatchObject({ segment: "PAY-231", tab: "code" });
+  expect(props).toMatchObject({ segment: "PAY-231" });
+  expect(props).not.toHaveProperty("tab");
 });
 
 test("the deps page opens from the ticket its address names, with the open job's id when it is that ticket", () => {
   type Ctx = Parameters<typeof depsPage.props>[0];
-  const props = (hash: string, navJob: Ctx["navJob"]) =>
-    depsPage.props({ route: parseTfHash(hash), ready: true, job: "PAY-231", navJob } as Ctx);
+  const props = (hash: string, defaultJob: Ctx["defaultJob"]) =>
+    depsPage.props({ route: parseTfHash(hash), ready: true, job: "PAY-231", defaultJob } as Ctx);
   const nav = { key: "PAY-231", entityId: "jira:PAY-231" };
   expect(props("#/deps/job/PAY-231", nav)).toMatchObject({ ticket: "PAY-231", ticketId: "jira:PAY-231", job: "PAY-231" });
   expect(props("#/deps/job/PAY-228", nav)).toMatchObject({ ticket: "PAY-228", ticketId: null });
@@ -151,4 +151,12 @@ test("the builds page hands TfBuilds the address's head and the pipeline's entit
     head: "build",
     rest: ["p", "r"],
   });
+});
+
+test("a ticket address and a job address of one ticket are one page, and only the job address chooses (spec #2396)", () => {
+  const props = (hash: string) => jobPage.props({ route: parseTfHash(hash), back: null } as unknown as Parameters<typeof jobPage.props>[0]);
+  expect(props("#/ticket/jira%3APAY-231/map")).toMatchObject({ segment: "jira:PAY-231", choose: false });
+  expect(props("#/job/jira%3APAY-231")).toMatchObject({ segment: "jira:PAY-231", choose: true });
+  const address = (hash: string) => jobPage.address?.(parseTfHash(hash));
+  expect(address("#/job/jira%3APAY-231")).toBe(address("#/ticket/jira%3APAY-231/conversation"));
 });

@@ -16,7 +16,6 @@
  * touches no DOM, so its race is tested on fake ports (`job-reader.test.ts`).
  */
 import type {
-  CheckoutView,
   EntityDetail,
   EntityRow,
   JobLinkSets,
@@ -24,24 +23,22 @@ import type {
   SuggestionEntry,
   Thread,
 } from "../../ipc/entity";
-import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
 import { ipcErrorMessage } from "../../ipc";
-import { dayKey } from "../../time/day";
-import { weekWindows } from "../../time/week";
 import { PROPOSAL_LIMIT, proposalsFor } from "./connections";
 import {
   assetTone,
-  byAttention,
   isMine,
+  keyOf,
   offersStartWork,
   resolveJob,
-  weekReading,
   type AssetLine,
   type FrameKinds,
   type SourceFacts,
-  type WeekReading,
 } from "./job";
-import type { JobPorts } from "./ports";
+import { bridgeTicketBoard, type JobPorts } from "./ports";
+import { entityCheckout } from "../../ipc/entity";
+import { isDone } from "../tickets/tickets";
+import { parentOf } from "../sets/apply";
 import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
 
 /** The reads the reader makes: the job's own ports, without its writes. */
@@ -51,18 +48,24 @@ export type JobReaderPorts = Pick<
   | "getEntity"
   | "promoteContext"
   | "listEntities"
-  | "reachableTransitions"
-  | "entityCheckout"
-  | "weekTimesheet"
   | "visitEntity"
   | "entityThread"
   | "roomSuggestions"
   | "jobReach"
   | "jobLinkSets"
   | "getAsset"
-  | "credentialHealth"
-  | "syncStatus"
+  | "ticketBoard"
+  | "entityCheckout"
 >;
+
+/** The ticket's sub-tasks as the card's row counts them (#2401). */
+export interface Subtasks {
+  total: number;
+  open: number;
+}
+
+/** How many of a ticket's branches have their checkout read for Code's *not pushed* (#2401). */
+export const UNPUSHED_LIMIT = 10;
 
 /** One repository *Start work*'s dropdown offers. */
 export interface RepoChoice {
@@ -71,8 +74,6 @@ export interface RepoChoice {
 }
 
 export interface JobReaderOptions {
-  /** What *Time this week* counts from. */
-  today: () => Date;
   /** The adapters' claims, loaded when the sections are read, for routing a run (#1256). */
   registry: Pick<FrameKinds, "load">;
 }
@@ -82,26 +83,27 @@ export interface JobReader {
   readonly detail: EntityDetail | null | undefined;
   /** The other sources' tickets under the same key (#1476), in list order; empty when the key is one source's. */
   readonly others: EntityDetail[];
-  /** The statuses the ticket can move to, `null` until read, `[]` when the read fails. */
-  readonly transitions: string[] | null;
-  readonly week: WeekReading | null;
+  /**
+   * The title of the ticket's direct parent, its path line's last key, read
+   * from the mirror for the card's epic chip (#2400); `null` with no parent,
+   * while it is read, or when it cannot be.
+   */
+  readonly parentTitle: string | null;
   /** Why the job could not be read, or `null`. */
   readonly failure: string | null;
   /** Every configured source, for which ticket is the person's own. */
   readonly sources: SourceFacts[];
-  /** Every source's credential and last run: the Builds section's warning. */
-  readonly health: CredentialHealth[];
-  readonly sync: SourceSyncStatus[];
   readonly code: EntityRow[] | null;
-  /** The Code section's checkout line, and the row it is the checkout of. */
-  readonly checkout: CheckoutView | null;
-  readonly checkoutOf: string | null;
   /** Every repository, for *Start work*'s dropdown; `null` until asked. */
   readonly repos: RepoChoice[] | null;
   readonly builds: EntityRow[] | null;
   readonly pages: EntityRow[] | null;
   readonly monitors: EntityRow[] | null;
   readonly assets: AssetLine[] | null;
+  /** The sub-tasks under the ticket, as the ticket system's board answers `under:<key>`; `null` until read. */
+  readonly subtasks: Subtasks | null;
+  /** The ids of the Code rows' branches whose checkout here has commits not pushed (#2401). */
+  readonly unpushed: ReadonlySet<string>;
   /** The job-reach read, by entity id: the rows' labels. */
   readonly reached: Map<string, Reached>;
   /** The link sets that apply and the parent (#867), `null` until read. */
@@ -116,23 +118,19 @@ export interface JobReader {
   /**
    * After *Hide here*, *Show again* or a link set saved: the groups, the
    * labels and the sections' rows again, since a hidden member leaves the
-   * job's reach. The checkout line stays as it was. Nothing when the job on
-   * screen is not `id`.
+   * job's reach. Nothing when the job on screen is not `id`.
    */
   rereadReach(id: string): void;
   /**
-   * After a move or a link changed: the ticket and its transitions again,
-   * keeping what else the job read. Nothing when the job on screen is not
+   * After a move or a link changed: the ticket again, keeping what else the
+   * job read. Nothing when the job on screen is not
    * `id` (by default, the one on screen).
    */
   rereadDetail(id?: string): void;
   /** After a refresh or a run brought a queued comment in (#2103): the thread again, keeping the visit it answered. */
   rereadThread(): void;
-  /** After a clone finished: the checkout line's repository read again, while it has no clone. */
-  rereadCheckout(): void;
   /**
-   * After a *Refresh* (#2134): the ticket and its transitions, its week, its
-   * thread and its reach with the sections, each over what the page drew as
+   * After a *Refresh* (#2134): the ticket, its thread and its reach with the sections, each over what the page drew as
    * `rereadDetail`, `rereadThread` and `rereadReach` read them (a failed
    * ticket or thread read keeps what it drew). Settles once those reads have
    * answered. Nothing is promoted again.
@@ -142,19 +140,13 @@ export interface JobReader {
   close(): void;
 }
 
-/** How many branches and repositories are asked for a clone before giving up. */
-const CHECKOUT_TRIES = 3;
-
 /** Every slot as it is before a job answers. */
 function fresh() {
   return {
     detail: undefined as EntityDetail | null | undefined,
     others: [] as EntityDetail[],
-    transitions: null as string[] | null,
-    week: null as WeekReading | null,
+    parentTitle: null as string | null,
     code: null as EntityRow[] | null,
-    checkout: null as CheckoutView | null,
-    checkoutOf: null as string | null,
     failure: null as string | null,
     thread: null as Thread | null,
     threadFailure: null as string | null,
@@ -167,17 +159,17 @@ function fresh() {
     monitors: null as EntityRow[] | null,
     assets: null as AssetLine[] | null,
     repos: null as RepoChoice[] | null,
+    subtasks: null as Subtasks | null,
+    unpushed: new Set<string>() as ReadonlySet<string>,
   };
 }
 
 export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions): JobReader {
-  const { today, registry } = options;
+  const { registry } = options;
   const state = $state({
     ...fresh(),
     // Kept from one job to the next: each job reads them again.
     sources: [] as SourceFacts[],
-    health: [] as CredentialHealth[],
-    sync: [] as SourceSyncStatus[],
   });
   /** The read's generation, so an answer for a ticket left behind is dropped. */
   let token = 0;
@@ -194,10 +186,9 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       state.detail = found;
       if (found === null) return;
       const id = found.row.entity_id;
-      void readWorkflow(id, mine);
-      void readWeek(id, mine);
       void readConversation(id, mine);
-      void readStale(mine);
+      void readParent(found, mine);
+      void readSubtasks(id, mine);
       void readInherited(id, mine);
       // The reach starts from the ticket's context, so the context first.
       const context = await ports.promoteContext(id);
@@ -218,8 +209,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const rows = await readSection(ports.listEntities, id, section);
       return mine === token ? rows : null;
     } catch {
-      // A section that cannot be read draws as having nothing; the Work tab's
-      // line says when the reads themselves fail.
+      // A section that cannot be read draws as having nothing.
       return mine === token ? [] : null;
     }
   }
@@ -281,17 +271,6 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     ]);
   }
 
-  /** What the Builds section's warning reads: every source's credential and last run. */
-  async function readStale(mine: number) {
-    const [credentials, runs] = await Promise.all([
-      ports.credentialHealth().catch(() => [] as CredentialHealth[]),
-      ports.syncStatus().catch(() => [] as SourceSyncStatus[]),
-    ]);
-    if (mine !== token) return;
-    state.health = credentials;
-    state.sync = runs;
-  }
-
   async function readRepos(mine: number) {
     try {
       const page = await ports.listEntities(reachFilter(null, ["repo"], "title_asc", "code-host"), SECTION_LIMIT, 0);
@@ -301,24 +280,15 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
-  async function readWorkflow(id: string, mine: number) {
+  /** The parent's title for the epic chip; a parent that cannot be read keeps the path line alone. */
+  async function readParent(ticket: EntityDetail, mine: number) {
+    const parent = parentOf(ticket.row);
+    if (parent === null) return;
     try {
-      const statuses = await ports.reachableTransitions(id);
-      if (mine === token) state.transitions = statuses;
+      const read = await ports.getEntity(parent);
+      if (mine === token) state.parentTitle = read.row.title;
     } catch {
-      // A workflow that cannot be read offers nothing: the select shows where
-      // the ticket stands, and the move waits for a read that works.
-      if (mine === token) state.transitions = [];
-    }
-  }
-
-  async function readWeek(id: string, mine: number) {
-    try {
-      const now = today();
-      const answer = await ports.weekTimesheet(weekWindows(dayKey(now)));
-      if (mine === token) state.week = weekReading(answer, id, dayKey(now));
-    } catch {
-      // *Time this week* is an extra; the line stays at its ellipsis.
+      // The chip says the key alone.
     }
   }
 
@@ -362,14 +332,17 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
   }
 
-  /** The link sets, the reach and every section again, the checkout line kept; settles once all have answered. */
+  /** The link sets, the reach, the sub-tasks and every section again; settles once all have answered. */
   async function readReachAgain(id: string, mine: number) {
     await Promise.allSettled([
       readInherited(id, mine),
+      readSubtasks(id, mine),
       readReach(id, mine),
       readSections(id, mine),
       readRows(id, SECTION_READS.code, mine).then((rows) => {
-        if (mine === token && rows) state.code = rows;
+        if (mine !== token || !rows) return;
+        state.code = rows;
+        return readUnpushed(rows, mine);
       }),
     ]);
   }
@@ -378,34 +351,47 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
     if (mine !== token) return;
     state.code = rows;
-    // A clone is looked for in the repositories Code draws: the read asked for
-    // the code host role, so they are its fillers' alone (#1298).
-    const sorted = byAttention(rows);
-    const candidates = [
-      ...sorted.filter((row) => row.kind === "branch"),
-      ...sorted.filter((row) => row.kind === "repo"),
-    ].slice(0, CHECKOUT_TRIES);
-    // The first clone found; else the first repository, which then offers
-    // *Clone* on the line (R-8.25).
-    let uncloned: { view: CheckoutView; of: string } | null = null;
-    for (const row of candidates) {
-      try {
-        const view = await ports.entityCheckout(row.entity_id);
-        if (mine !== token) return;
-        if (view.path) {
-          state.checkout = view;
-          state.checkoutOf = row.entity_id;
-          break;
-        }
-        if (uncloned === null && row.kind === "repo") uncloned = { view, of: row.entity_id };
-      } catch {
-        // A checkout that cannot be read is a checkout not shown.
-      }
+    void readUnpushed(rows, mine);
+  }
+
+  /**
+   * The sub-tasks (#2401): the ticket system's board under `under:<key>`,
+   * counted by its columns' totals, a column that is not *Done* open. A read
+   * that fails draws no Sub-tasks row.
+   */
+  async function readSubtasks(id: string, mine: number) {
+    try {
+      const board = await (ports.ticketBoard ?? bridgeTicketBoard)(`under:${keyOf(id)}`);
+      if (mine !== token) return;
+      const total = board.columns.reduce((sum, column) => sum + column.total, 0);
+      const open = board.columns.filter((column) => !isDone(column.status)).reduce((sum, column) => sum + column.total, 0);
+      state.subtasks = { total, open };
+    } catch {
+      if (mine === token) state.subtasks = { total: 0, open: 0 };
     }
-    if (state.checkout === null && uncloned !== null) {
-      state.checkout = uncloned.view;
-      state.checkoutOf = uncloned.of;
-    }
+  }
+
+  /**
+   * Code's *not pushed* (#2401): a branch counts when its checkout on this
+   * machine stands on that branch with commits ahead of its upstream. The
+   * mirror's branches are the forge's, so only the checkout knows. A branch
+   * with no checkout, or one standing elsewhere, counts nothing.
+   */
+  async function readUnpushed(rows: readonly EntityRow[], mine: number) {
+    const read = ports.entityCheckout ?? entityCheckout;
+    const branches = rows.filter((row) => row.kind === "branch").slice(0, UNPUSHED_LIMIT);
+    const answers = await Promise.allSettled(branches.map(async (row) => read(row.entity_id)));
+    if (mine !== token) return;
+    state.unpushed = new Set(
+      branches
+        .filter((row, at) => {
+          const answer = answers[at]!;
+          if (answer.status !== "fulfilled") return false;
+          const tree = answer.value.tree;
+          return tree !== null && tree.status === "read" && tree.branch === row.title && tree.ahead > 0;
+        })
+        .map((row) => row.entity_id),
+    );
   }
 
   return {
@@ -415,11 +401,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     get others() {
       return state.others;
     },
-    get transitions() {
-      return state.transitions;
-    },
-    get week() {
-      return state.week;
+    get parentTitle() {
+      return state.parentTitle;
     },
     get failure() {
       return state.failure;
@@ -427,20 +410,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     get sources() {
       return state.sources;
     },
-    get health() {
-      return state.health;
-    },
-    get sync() {
-      return state.sync;
-    },
     get code() {
       return state.code;
-    },
-    get checkout() {
-      return state.checkout;
-    },
-    get checkoutOf() {
-      return state.checkoutOf;
     },
     get repos() {
       return state.repos;
@@ -456,6 +427,12 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     get assets() {
       return state.assets;
+    },
+    get subtasks() {
+      return state.subtasks;
+    },
+    get unpushed() {
+      return state.unpushed;
     },
     get reached() {
       return state.reached;
@@ -488,7 +465,6 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       if (id === undefined || state.detail?.row.entity_id !== id) return;
       const mine = token;
       void readTicketAgain(id, mine);
-      void readWorkflow(id, mine);
     },
     rereadThread() {
       const id = state.detail?.row.entity_id;
@@ -501,23 +477,9 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const mine = token;
       await Promise.all([
         readTicketAgain(id, mine),
-        readWorkflow(id, mine),
-        readWeek(id, mine),
         readThreadAgain(id, mine),
         readReachAgain(id, mine),
       ]);
-    },
-    rereadCheckout() {
-      const of = state.checkoutOf;
-      const mine = token;
-      if (of === null || state.checkout?.path) return;
-      void ports.entityCheckout(of).then(
-        (view) => {
-          if (mine === token && of === state.checkoutOf) state.checkout = view;
-        },
-        // The line keeps what it has; the next open reads it again.
-        () => {},
-      );
     },
     close() {
       token += 1;

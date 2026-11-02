@@ -899,6 +899,206 @@ async fn a_synced_issue_carries_epic_membership_links_and_resolution() {
     jira.assert_no_violations();
 }
 
+/// **The three typed facts and the worklog** (#2403) read off a synced issue
+/// through the paths the adapter declares, the exact query the sync sends:
+/// PAY-231's reporter by username, its created date as an instant, its time
+/// spent in seconds, and its worklog summed by author. An issue nobody logged
+/// on reads no time spent and an empty worklog, never zero for a miss.
+#[tokio::test]
+async fn a_synced_issue_reads_its_reporter_created_spent_and_worklog_through_the_descriptor() {
+    use knobas_core::payload::{parse_instant, resolve_string, resolve_worklog};
+
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.unwrap();
+    let descriptor = source.descriptor();
+    let paths = descriptor
+        .payload_paths
+        .iter()
+        .find(|p| p.kind == "ticket")
+        .expect("the adapter declares its tickets");
+    let payload = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} is in the fixture"))
+            .payload
+            .clone()
+    };
+
+    let logged = payload("PAY-231");
+    assert_eq!(
+        resolve_string(&logged, &paths.reporter).as_deref(),
+        Some("mara.lindqvist")
+    );
+    let created = resolve_string(&logged, &paths.created).expect("PAY-231 has a created date");
+    assert_eq!(
+        parse_instant(&created).map(|at| at.to_rfc3339()),
+        Some("2026-08-08T11:48:00+00:00".to_owned()),
+        "{created}"
+    );
+    assert_eq!(
+        knobas_core::payload::resolve_number(&logged, &paths.time_spent),
+        Some(16_200.0)
+    );
+    assert_eq!(
+        resolve_worklog(&logged, &paths.worklog),
+        Some([("mara.lindqvist".to_owned(), 16_200)].into())
+    );
+
+    let bare = payload("PAY-240");
+    assert_eq!(
+        knobas_core::payload::resolve_number(&bare, &paths.time_spent),
+        None
+    );
+    assert_eq!(
+        resolve_worklog(&bare, &paths.worklog),
+        Some(std::collections::BTreeMap::new())
+    );
+
+    jira.assert_no_violations();
+}
+
+/// **The attachment list** (#2404): `attachment` rides in `fields=` with no
+/// violation, and PAY-231's four files read off the payload through the
+/// descriptor's own `attachments` declaration, with their names, sizes,
+/// authors, dates and URLs. A ticket with none carries an empty list.
+#[tokio::test]
+async fn a_synced_issue_carries_its_attachment_list() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.unwrap();
+    let payload = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} is in the fixture"))
+            .payload
+            .clone()
+    };
+    let declared = source
+        .descriptor()
+        .payload_paths
+        .into_iter()
+        .find(|p| p.kind == "ticket")
+        .expect("a ticket declares its paths")
+        .attachments;
+
+    let files = knobas_core::payload::resolve_attachments(&payload("PAY-231"), &declared);
+    let base = jira.base_url();
+    let base = base.trim_end_matches('/');
+    let read: Vec<_> = files
+        .iter()
+        .map(|a| {
+            (
+                a.name.as_str(),
+                a.size,
+                a.author.as_deref(),
+                a.created.map(|t| t.to_rfc3339()),
+                a.content_url.strip_prefix(base),
+                a.thumbnail_url
+                    .as_deref()
+                    .and_then(|t| t.strip_prefix(base)),
+                a.mime.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        read,
+        vec![
+            (
+                "psp-409-trace.png",
+                Some(186_368),
+                Some("Lena Hoffmann"),
+                Some("2026-08-12T09:14:00+00:00".to_owned()),
+                Some("/secure/attachment/50000/psp-409-trace.png"),
+                Some("/secure/thumbnail/50000/psp-409-trace.png"),
+                Some("image/png"),
+            ),
+            (
+                "retry-timeline.png",
+                Some(98_304),
+                Some("Mara Lindqvist"),
+                Some("2026-08-19T15:02:00+00:00".to_owned()),
+                Some("/secure/attachment/50001/retry-timeline.png"),
+                Some("/secure/thumbnail/50001/retry-timeline.png"),
+                Some("image/png"),
+            ),
+            (
+                "sepa-error-codes.pdf",
+                Some(1_258_291),
+                Some("Priya Nair"),
+                Some("2026-08-12T11:30:00+00:00".to_owned()),
+                Some("/secure/attachment/50002/sepa-error-codes.pdf"),
+                None,
+                Some("application/pdf"),
+            ),
+            (
+                "batch-13-failures.csv",
+                Some(49_152),
+                Some("Lena Hoffmann"),
+                Some("2026-08-14T08:45:00+00:00".to_owned()),
+                Some("/secure/attachment/50003/batch-13-failures.csv"),
+                None,
+                Some("text/csv"),
+            ),
+        ]
+    );
+    assert_eq!(
+        files.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(),
+        ["50000", "50001", "50002", "50003"]
+    );
+    assert_eq!(
+        payload("OPS-77")["fields"]["attachment"],
+        serde_json::json!([])
+    );
+
+    jira.assert_no_violations();
+}
+
+/// **The full re-sync the field change orders** (#2404): a cursor this
+/// adapter wrote before `attachment` joined the field list (version 4) is
+/// read as none, so the first run after the upgrade walks every issue and
+/// each one arrives with its `fields.attachment`.
+#[tokio::test]
+async fn a_cursor_from_before_the_attachment_list_orders_a_full_re_sync() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let (every, cursor) = sync_all(source.as_ref(), None).await;
+    let (idle, _) = sync_all(source.as_ref(), Some(cursor.clone())).await;
+    assert!(
+        idle.is_empty(),
+        "this build's own cursor is incremental: {idle:?}"
+    );
+
+    let mut before: serde_json::Value = serde_json::from_str(&cursor).unwrap();
+    assert_eq!(before["v"], 5);
+    before["v"] = serde_json::json!(4);
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(before.to_string()), &mut sink)
+        .await
+        .unwrap();
+
+    let mut keys: Vec<_> = sink.0.iter().map(|i| i.entity.key.clone()).collect();
+    let mut every = every;
+    keys.sort();
+    every.sort();
+    assert_eq!(
+        keys, every,
+        "the run after the upgrade walks the whole source"
+    );
+    assert!(
+        sink.0
+            .iter()
+            .all(|i| i.payload["fields"]["attachment"].is_array()),
+        "every issue carries its attachment list"
+    );
+    jira.assert_no_violations();
+}
+
 /// The same payload, through the *incremental* path.
 ///
 /// `/search` is one query and every run sends the same `fields=`, so this
@@ -925,5 +1125,153 @@ async fn an_incremental_run_delivers_the_widened_payload_for_what_it_returns() {
         "an incremental run sends the same fields= as a full one"
     );
     assert_eq!(sink.0[0].payload["fields"]["parent"]["key"], "PAY-200");
+    jira.assert_no_violations();
+}
+
+// -- the attachment bytes (#2405) --------------------------------------------
+
+/// What an attachment's bytes are recorded into for a download: the name the
+/// adapter suggested and every byte, in order.
+#[derive(Default)]
+struct Kept {
+    name: Option<String>,
+    bytes: Vec<u8>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::run::DownloadSink for Kept {
+    async fn start(&mut self, file_name: &str) -> Result<(), SourceError> {
+        self.name = Some(file_name.to_owned());
+        Ok(())
+    }
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), SourceError> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+/// PAY-231's second screenshot's content address on `jira`, as the sync
+/// emitted it into the payload.
+fn timeline_url(jira: &MockServer) -> String {
+    format!(
+        "{}/secure/attachment/50001/retry-timeline.png",
+        jira.base_url().trim_end_matches('/')
+    )
+}
+
+/// **An attachment's bytes through the credential** (#2405): the preview's
+/// read answers the whole file, a PNG of the size the list declares, and
+/// stops at a cap smaller than the file with the file's size rather than a
+/// cut file. The app asks with 5 MiB (`ATTACHMENT_CAP`); a smaller cap here
+/// holds the refusal without a fixture file over 5 MiB.
+#[tokio::test]
+async fn an_attachments_bytes_come_through_the_credential_and_stop_at_the_cap() {
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let url = timeline_url(&jira);
+
+    let read = source
+        .attachment_bytes("jira:PAY-231", &url, ATTACHMENT_CAP)
+        .await
+        .unwrap()
+        .expect("Jira reads attachments");
+    let FileBytes::Read(bytes) = read else {
+        panic!("a 96 KB file is under 5 MiB: {read:?}")
+    };
+    assert_eq!(bytes.len(), 98_304);
+    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{:?}", &bytes[..8]);
+
+    let capped = source
+        .attachment_bytes("jira:PAY-231", &url, 64 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(capped, Some(FileBytes::TooLarge { size: 98_304 }));
+    // The size is the one Jira announces, believed before a byte is read: a
+    // read cut at 1 KiB of a 182 KB file could not know it.
+    let trace = timeline_url(&jira).replace("50001/retry-timeline", "50000/psp-409-trace");
+    let announced = source
+        .attachment_bytes("jira:PAY-231", &trace, 1024)
+        .await
+        .unwrap();
+    assert_eq!(announced, Some(FileBytes::TooLarge { size: 186_368 }));
+
+    jira.assert_no_violations();
+}
+
+/// **The download** (#2405): the same file streamed into a sink under the
+/// name the mirror lists, every byte of it. The app's sink numbers the file
+/// in the Downloads folder (`crates/knobas-app/tests/it/attachments_ipc.rs`).
+#[tokio::test]
+async fn an_attachment_downloads_whole_under_its_listed_name() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut kept = Kept::default();
+    let streamed = source
+        .download_attachment(
+            "jira:PAY-231",
+            &timeline_url(&jira),
+            "retry-timeline.png",
+            &mut kept,
+        )
+        .await
+        .unwrap();
+    assert!(streamed, "Jira downloads attachments");
+    assert_eq!(kept.name.as_deref(), Some("retry-timeline.png"));
+    assert_eq!(kept.bytes.len(), 98_304);
+    assert!(kept.bytes.starts_with(b"\x89PNG"));
+    jira.assert_no_violations();
+}
+
+/// **The credential never leaves the instance** (#2405): an address on
+/// another host, or one on this host outside its attachments, is refused
+/// before anything is sent.
+#[tokio::test]
+async fn an_attachment_address_off_the_instance_is_refused_unsent() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let base = jira.base_url();
+    let base = base.trim_end_matches('/');
+    for url in [
+        "https://elsewhere.example/secure/attachment/50001/retry-timeline.png".to_owned(),
+        format!("{base}.evil.example/secure/attachment/50001/x.png"),
+        format!("{base}/rest/api/2/myself"),
+        format!("{base}/secure/attachment/../../rest/api/2/myself"),
+    ] {
+        let read = source.attachment_bytes("jira:PAY-231", &url, 1024).await;
+        assert!(
+            matches!(read, Err(SourceError::Protocol { status: None, .. })),
+            "{url}: {read:?}"
+        );
+    }
+    jira.assert_no_violations();
+}
+
+/// **Unreachable and refused** (#2405): a Jira that does not answer is
+/// `Unreachable` (the page's stale strip), and one that refuses the
+/// credential is `Unauthorized` with its status.
+#[tokio::test]
+async fn an_attachment_read_on_a_failing_jira_is_unreachable_or_unauthorized() {
+    let jira = spawn_mock_jira().await;
+    let source = source(
+        &jira.base_url(),
+        serde_json::json!({ "request_timeout_secs": 1 }),
+    );
+    let url = timeline_url(&jira);
+    jira.set_fault(MockFault::Timeout {
+        hang_ms: HANG_FOR_GOOD_MS,
+    });
+    let hung = within_the_guard(source.attachment_bytes("jira:PAY-231", &url, 1024)).await;
+    assert!(matches!(hung, Err(SourceError::Unreachable(_))), "{hung:?}");
+
+    jira.set_fault(MockFault::Unauthorized);
+    let refused = source.attachment_bytes("jira:PAY-231", &url, 1024).await;
+    assert!(
+        matches!(
+            refused,
+            Err(SourceError::Unauthorized { status: Some(401) })
+        ),
+        "{refused:?}"
+    );
     jira.assert_no_violations();
 }

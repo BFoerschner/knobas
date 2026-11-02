@@ -69,11 +69,41 @@ pub struct Detail {
     pub issue_type: Option<String>,
     pub priority: Option<String>,
     pub estimate_seconds: Option<i64>,
+    /// Who filed a ticket through the declared `reporter` path (#2403), by
+    /// the account's username as the assignee is.
+    pub reporter: Option<String>,
+    /// When a ticket was filed, through the declared `created` path (#2403);
+    /// `None` on a miss and for a value that is not an ISO 8601 instant.
+    pub created: Option<DateTime<Utc>>,
+    /// The time logged on a ticket in seconds, by everyone, through the
+    /// declared `time_spent` path (#2403).
+    pub time_spent_seconds: Option<i64>,
+    /// The declared worklog summed per author, ordered by author (#2403):
+    /// what tells the reader's share of `time_spent_seconds`. `None` where
+    /// the record carries no worklog.
+    pub logged_by: Option<Vec<LoggedBy>>,
+    /// A ticket's labels through the declared `labels` path (#2400), in the
+    /// record's order, as the mini board reads them; empty on a miss.
+    pub labels: Vec<String>,
+    /// A ticket's attachment list through the declared `attachments` path
+    /// (#2404), in the record's order; empty on a miss.
+    pub attachments: Vec<crate::payload::Attachment>,
     /// A repository's default branch through its declared `default_branch`
     /// path (#2307); `None` where nothing is declared or the record misses it.
     pub default_branch: Option<String>,
     pub description: Option<String>,
     pub markup: crate::payload::Markup,
+}
+
+/// The time one account logged on a ticket, in seconds (#2403): its entries
+/// in the declared worklog, summed.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct LoggedBy {
+    /// The account, as the source spells it: matched against the configured
+    /// username as the assignee is.
+    pub author: String,
+    pub seconds: i64,
 }
 
 /// How many history lines the detail view is given up front.
@@ -172,6 +202,18 @@ select i.entity_id, i.source_id, i.kind, i.title, "#,
     crate::declared_integer!("$2", "estimate"),
     r#" as estimate_seconds,
        "#,
+    crate::declared_string!("$2", "reporter"),
+    r#" as reporter,
+       "#,
+    crate::declared_string!("$2", "created"),
+    r#" as created,
+       "#,
+    crate::declared_integer!("$2", "time_spent"),
+    r#" as time_spent_seconds,
+       array(select l.value from "#,
+    crate::declared_list!("$2", "labels"),
+    r#" l) as labels,
+       "#,
     crate::declared_string!("$2", "default_branch"),
     r#" as default_branch,
        "#,
@@ -218,6 +260,19 @@ pub async fn read(
     let adapter_kind: Option<String> = row.get("adapter_kind");
 
     let kind: String = row.get("kind");
+    let payload: serde_json::Value = row.get("payload");
+    // The worklog is read off the payload this read already holds, not in
+    // SQL: a per-author sum over an array of objects is one fold here and a
+    // lateral join there, and nothing filters or orders by it.
+    let logged_by = declarations
+        .get(&source_id, &kind)
+        .and_then(|paths| crate::payload::resolve_worklog(&payload, &paths.worklog))
+        .map(|by_author| {
+            by_author
+                .into_iter()
+                .map(|(author, seconds)| LoggedBy { author, seconds })
+                .collect()
+        });
     // The board draws live tickets only (`sync.live_item`); the detail opens
     // withdrawn ones too, and says nothing of a status the board would not.
     let status: Option<String> = row.get("status");
@@ -243,6 +298,15 @@ pub async fn read(
         None => Vec::new(),
     };
 
+    // The attachment list (#2404) is read off the payload here rather than in
+    // the statement: its declaration is a structure of paths per element,
+    // which `resolve_attachments` walks as it does for every other reader.
+    let payload: serde_json::Value = row.get("payload");
+    let attachments = declarations
+        .get(&source_id, &kind)
+        .map(|paths| crate::payload::resolve_attachments(&payload, &paths.attachments))
+        .unwrap_or_default();
+
     Ok(Some(Detail {
         row: EntityRow {
             entity_id: row.get("entity_id"),
@@ -267,7 +331,7 @@ pub async fn read(
         configured_adapter_kind: adapter_kind,
         body_text: row.get("body_text"),
         author: row.get("author"),
-        payload: row.get("payload"),
+        payload,
         web_url: row.get("web_url"),
         deleted_at: row.get("deleted_at"),
         links: crate::link::entries_of(pool, entity).await?,
@@ -277,6 +341,15 @@ pub async fn read(
         issue_type: row.get("issue_type"),
         priority: row.get("priority"),
         estimate_seconds: row.get("estimate_seconds"),
+        reporter: row.get("reporter"),
+        created: row
+            .get::<Option<String>, _>("created")
+            .as_deref()
+            .and_then(crate::payload::parse_instant),
+        time_spent_seconds: row.get("time_spent_seconds"),
+        logged_by,
+        labels: row.get("labels"),
+        attachments,
         default_branch: row.get("default_branch"),
         description: row.get("description"),
         markup: markup_of(row.get("markup")),

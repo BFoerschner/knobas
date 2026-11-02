@@ -1,16 +1,15 @@
 /**
- * The job (#816): `#/job/<key>` resolved, promoted once, the yellow card and
- * the Code section, mounted with stand-ins for every read and write. What the
+ * The job (#816): `#/job/<key>` resolved, promoted once, the card and the
+ * reading column (#2399), mounted with stand-ins for every read and write. PAY-231
+ * is the chosen job in every test, so its page is the pinned one (spec
+ * #2396); `ticket-page.test.svelte.ts` drives both moods through the shell. What the
  * backend does with each call is `crates/knobas-app/tests/it/job_ipc.rs`'s.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AssetDetail } from "../../ipc/assets";
 import type {
-  CheckoutSettings,
   OpenAt,
-  CheckoutView,
   ContextRow,
   EntityDetail,
   EntityFilter,
@@ -19,27 +18,22 @@ import type {
   StartWorkStep,
   StateChip,
 } from "../../ipc/entity";
-import type { CredentialHealth, EntityRefresh, SourceSyncStatus, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
+import type { EntityRefresh, SourceDescriptor, WriteOpPayload } from "../../ipc/sources";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
-import type { WriteAsk } from "../../shell/refused-writes";
-import type { RunningTimer, Week } from "../../ipc/time";
+import type { RunningTimer } from "../../ipc/time";
 import { health } from "../../shell/health.svelte";
-import type { Hear, WriteFollower } from "../../shell/follow-write";
+import type { WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
-import { page as codeRowPage } from "../code-row/page";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
-import { sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
-import { createApps } from "../openin/apps.svelte";
-import { pageFor } from "../pages";
-import { parseTfHash } from "../route";
 import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
 import { createKindRegistry } from "../../shell/kind-registry.svelte";
 import type { FrameKinds } from "./job";
 import { reachTally } from "./sections";
+import { chosenJob } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
 import { sourceFacts } from "./source-facts.fixture";
 
@@ -66,6 +60,8 @@ beforeEach(() => {
   }
   calls.stop = 0;
   toasts.items.length = 0;
+  // The job: PAY-231 is the chosen job, so its page is the pinned one (spec #2396) unless a test says otherwise.
+  chosenJob.choose(ID);
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -133,60 +129,6 @@ function code(
 const PR_OPEN = code("gitea:tidewater/payout-service#142", "pr", "Idempotent retry window", "2026-10-15T10:00:00Z", { text: "open", tone: "info" });
 const BRANCH = code("gitea:tidewater/payout-service@refs/heads/feature/PAY-231", "branch", "feature/PAY-231-sepa-retry", "2026-10-15T11:00:00Z");
 const REPO = code("gitea:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-10-14T08:00:00Z", null, null);
-const PR_MERGED = code("gitea:tidewater/psp-client#9", "pr", "Classify TEMP_UNAVAILABLE", "2026-10-15T12:00:00Z", { text: "merged", tone: "ok" }, "tidewater/psp-client");
-const COMMIT_OLD = code("gitea:tidewater/payout-service@c90d11", "commit", "jitter in backoff", "2026-10-10T08:00:00Z");
-const FAILING = code("gitea:tidewater/payout-service#140", "pr", "Old attempt", "2026-10-01T08:00:00Z", { text: "conflict", tone: "err" });
-
-const CHECKOUT: CheckoutView = {
-  repo_entity_id: REPO.entity_id,
-  repo_url: null,
-  path: "~/code/payout-service",
-  found_by: "scan",
-  clones_root: "~/code",
-  clone_command: null,
-  tree: {
-    status: "read",
-    branch: "feature/PAY-231-sepa-retry",
-    head: "c90d11",
-    upstream: null,
-    ahead: 0,
-    behind: 0,
-    changed: 1,
-    untracked: 0,
-    conflicted: 0,
-  },
-};
-
-const APPS: CheckoutSettings = {
-  clones_root: "~/code",
-  git: { status: "found", path: "/usr/bin/git" },
-  default_application: "vscode",
-  applications: [
-    { id: "jetbrains", name: "IntelliJ IDEA", command: "idea {path}", file_command: null },
-    { id: "vscode", name: "VS Code", command: "code {path}", file_command: null },
-  ],
-};
-
-function week(): Week {
-  const cell = (logged: number, unlogged: number) => ({
-    tracked_seconds: logged + unlogged,
-    offered_seconds: 0,
-    logged_seconds: logged,
-    held_seconds: 0,
-    unlogged_seconds: unlogged,
-  });
-  return {
-    days: ["2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-17", "2026-10-18"],
-    rows: [
-      {
-        target: { kind: "entity", entity_id: ID },
-        title: "Retry failed SEPA payouts",
-        cells: [cell(3 * 3600, 0), cell(4.5 * 3600, 0), cell(0, 0), cell(0, 4 * 3600 + 14 * 60), cell(0, 0), cell(0, 0), cell(0, 0)],
-      },
-    ],
-    past_horizon: [false, false, false, false, false, false, false],
-  };
-}
 
 function ports(
   over: Partial<JobPorts> & { rows?: EntityRow[]; others?: EntityRow[]; reachable?: string[] | "fails" } = {},
@@ -213,17 +155,10 @@ function ports(
       );
       return Promise.resolve({ rows: kept, total: kept.length, tally: null, groups: null });
     },
-    reachableTransitions: () =>
-      over.reachable === "fails" ? Promise.reject({ code: "unreachable", message: "down", source_id: "jira" }) : Promise.resolve(over.reachable ?? ["In Review", "To Do"]),
     submitWrite: (payload) => {
       calls.writes.push(payload);
       return Promise.resolve({} as never);
     },
-    entityCheckout: (id) => {
-      calls.checkout.push(id);
-      return Promise.resolve(CHECKOUT);
-    },
-    weekTimesheet: () => Promise.resolve(week()),
     visitEntity: (id) => {
       calls.visits.push(id);
       return Promise.resolve(null);
@@ -244,8 +179,6 @@ function ports(
     jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
     hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
     getAsset: (id) => Promise.reject({ code: "not_found", message: `no asset ${id}`, source_id: null }),
-    credentialHealth: () => Promise.resolve([]),
-    syncStatus: () => Promise.resolve([]),
     startWork: {
       flow: () => Promise.resolve([]),
       run: () => Promise.resolve([]),
@@ -263,7 +196,6 @@ function open(
     ports?: JobPorts;
     timer?: { current: RunningTimer | null; elapsed: string | null };
     layers?: Layers;
-    tab?: string | null;
     registry?: FrameKinds;
     follower?: WriteFollower;
   } = {},
@@ -272,7 +204,6 @@ function open(
     target,
     props: {
       segment,
-      tab: over.tab ?? null,
       timer: over.timer ?? { current: null, elapsed: null },
       layers: over.layers ?? createLayers(),
       ontimer: () => (calls.stop += 1),
@@ -281,14 +212,6 @@ function open(
       today: () => new Date(2026, 9, 15, 14, 0),
       ...(over.registry ? { registry: over.registry } : {}),
       ...(over.follower ? { follower: over.follower } : {}),
-      apps: createApps({
-        checkoutSettings: () => Promise.resolve(APPS),
-        setCheckoutApplications: () => Promise.reject(new Error("not in this suite")),
-        openCheckout: (id, at) => {
-          calls.open.push([id, at]);
-          return Promise.resolve(["code", "~/code/payout-service"]);
-        },
-      }),
     },
   });
   flushSync();
@@ -298,11 +221,7 @@ function text(): string {
   return target.textContent?.replace(/\s+/g, " ") ?? "";
 }
 
-function codeRows(): HTMLAnchorElement[] {
-  return [...target.querySelectorAll<HTMLAnchorElement>("[aria-labelledby='tf-sec-code'] .tf-rows a")];
-}
-
-test("a key opens its ticket and promotes it once, and the card shows key, summary, type, priority and estimate", async () => {
+test("a key opens its ticket and promotes it once; the card shows the key and the facts, the reading column the title and the description", async () => {
   open();
   await settle();
 
@@ -310,21 +229,21 @@ test("a key opens its ticket and promotes it once, and the card shows key, summa
   expect(calls.promote).toEqual([ID]);
   const card = target.querySelector("[aria-label='Job card']")!;
   expect(card.querySelector(".tf-jobkey")?.textContent).toBe("PAY-231");
-  expect(card.querySelector("h1")?.textContent).toBe("Retry failed SEPA payouts");
-  expect(card.textContent).toContain("Story, High, est. 3h");
-  expect(card.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");
-  expect(target.querySelector<HTMLAnchorElement>(".tf-back")?.getAttribute("href")).toBe("#/tickets");
-  // Esc does nothing on the job's first tab (rung 6), so the way back names no key (spec #2227, story 36).
-  expect(target.querySelector(".tf-back kbd")).toBeNull();
-
-  // A move re-reads the ticket (the reader's tests hold what else it reads) and promotes nothing again.
-  calls.read.length = 0;
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  select.value = "In Review";
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
-  expect(calls.read).toEqual([ID]);
-  expect(calls.promote).toEqual([ID]);
+  expect(card.querySelector("h1"), "the title is the reading column's (#2399)").toBeNull();
+  expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
+  const facts = [...card.querySelectorAll("dl.tf-facts > dt")].map((term) => [term.textContent, term.nextElementSibling?.textContent?.replace(/\s+/g, " ").trim()]);
+  // Nobody assigned: a dash for the avatar, and the row says so. The estimate is the Logged row's (#2403): nothing
+  // logged against 3h.
+  expect(facts).toEqual([
+    ["Assignee", "–Unassigned"],
+    ["Type", "Story"],
+    ["Priority", "High"],
+    ["Logged", "0m of 3h"],
+  ]);
+  expect(card.querySelector("dl.tf-facts .tf-av.tf-me")).toBeNull();
+  expect(target.querySelector(".tf-tkread .tf-tkdesc")?.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");
+  expect(card.querySelector(".tf-chip")?.textContent, "the status is the card's chip").toBe("In Progress");
+  expect(card.querySelector("select"), "no status select on the card (spec #2396)").toBeNull();
 });
 
 test("every section reads through what the ticket reaches, each for its own kinds", async () => {
@@ -356,14 +275,14 @@ function twoHolders(): JobPorts {
   });
 }
 
-const sourceLine = () => target.querySelector("[aria-label='Job card'] .tf-jobsrc");
+const sourceLine = () => target.querySelector(".tf-ticketcard .tf-jobsrc");
 
 test("a key two sources hold: the card names its source and links the other's, and the source's address opens it (#1476)", async () => {
   open("PAY-231", { ports: twoHolders() });
   await settle();
   expect(calls.promote).toEqual(["gitea:PAY-231"]);
   expect(sourceLine()?.textContent?.replace(/\s+/g, " ").trim()).toBe("In Tidewater Gitea · also in Jira");
-  expect(sourceLine()?.querySelector("a")?.getAttribute("href")).toBe("#/job/jira%3APAY-231");
+  expect(sourceLine()?.querySelector("a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
 
   unmount(job!);
   calls.promote.length = 0;
@@ -372,22 +291,6 @@ test("a key two sources hold: the card names its source and links the other's, a
   expect(calls.promote).toEqual([ID]);
   expect(target.querySelector(".tf-jobkey")?.textContent).toBe("PAY-231");
   expect(sourceLine()?.textContent?.replace(/\s+/g, " ").trim()).toBe("In Jira · also in Tidewater Gitea");
-});
-
-test("on a job a key two sources hold, every link to the job's own tabs names its source (#1977)", async () => {
-  const hrefs = (selector: string) => [...target.querySelectorAll(selector)].map((each) => each.getAttribute("href"));
-  const said = { author: "Priya Nair", at: "2026-10-14T08:00:00Z", body: "Retry window agreed.", mine: false, mentions_me: false, markup: "text" as const };
-  open("gitea:PAY-231", { ports: twoHolders() });
-  await settle();
-  expect(hrefs(".tf-wtabs a")).toEqual(["#/job/gitea%3APAY-231", "#/job/gitea%3APAY-231/map", "#/job/gitea%3APAY-231/conversation"]);
-  expect(hrefs(".tf-cbtn")).toEqual(["#/job/gitea%3APAY-231/conversation"]);
-  expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/gitea%3APAY-231/map");
-
-  unmount(job!);
-  open("gitea:PAY-231", { ports: { ...twoHolders(), entityThread: () => Promise.resolve({ comments: [said], me: ["mara"] }) } });
-  await settle();
-  expect(target.querySelector(".tf-cbtn")?.textContent?.trim()).toBe("Read the conversation");
-  expect(hrefs(".tf-cbtn")).toEqual(["#/job/gitea%3APAY-231/conversation"]);
 });
 
 test("a key one source holds names no source on the card", async () => {
@@ -416,78 +319,7 @@ test("a read that fails for another reason than a miss says it failed, not that 
   expect(calls.promote).toEqual([]);
 });
 
-test("code rows with no repository name still roll up to a count", async () => {
-  open("PAY-231", { ports: ports({ rows: [code("gitea:x@1", "commit", "fix", "2026-10-15T10:00:00Z", null, null)] }) });
-  await settle();
-  expect(target.querySelector(".tf-roll")?.textContent?.trim()).toBe("1 connected");
-});
-
-test("the status select offers where the ticket stands and the reachable transitions only, and a pick queues it", async () => {
-  open();
-  await settle();
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  expect([...select.options].map((option) => option.value)).toEqual(["In Progress", "In Review", "To Do"]);
-
-  select.value = "In Review";
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
-  expect(calls.writes).toEqual([{ Transition: { entity: ID, status: "In Review" } }]);
-  expect(toasts.items.at(-1)?.text).toBe("Queued: PAY-231 to In Review.");
-  expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
-});
-
-test("a move while the ticket's source fails its sign-in says it waits there", async () => {
-  health.patch({ source_id: "jira", state: "unauthorized", checked_at: "2026-10-21T09:00:00Z", detail: null, secret_expires_at: null });
-  open();
-  await settle();
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  select.value = "In Review";
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
-  expect(toasts.items.at(-1)?.text).toBe("Queued: PAY-231 to In Review. Jira sign-in is failing, so it waits there.");
-});
-
-test("a workflow that cannot be read offers nothing to move to", async () => {
-  open("PAY-231", { ports: ports({ reachable: "fails" }) });
-  await settle();
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  expect([...select.options].map((option) => option.value)).toEqual(["In Progress"]);
-  expect(select.disabled).toBe(true);
-});
-
-test("a move the source's credential cannot make draws the status select disabled saying why, and queues nothing (#2052)", async () => {
-  const asked: WriteAsk[][] = [];
-  const reason = "This Jira user cannot move tickets in PAY: it lacks the Transition Issues permission";
-  open("PAY-231", {
-    ports: ports({
-      refusedWrites: (asks) => {
-        asked.push(asks);
-        return Promise.resolve([{ entity: ID, op: "transition", reason }]);
-      },
-    }),
-  });
-  await settle();
-  expect(asked).toEqual([[{ entity: ID, op: "comment" }, { entity: ID, op: "transition" }]]);
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  expect(select.getAttribute("aria-disabled")).toBe("true");
-  expect(select.title).toBe(reason);
-  // Nothing to pick: the status it stands at, and no move.
-  expect([...select.options].map((option) => option.value)).toEqual(["In Progress"]);
-  select.value = "In Review";
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
-  expect(calls.writes).toEqual([]);
-});
-
-test("a move the source refuses nothing of, or cannot tell, stays as drawn (#2052)", async () => {
-  open("PAY-231", { ports: ports({ refusedWrites: () => Promise.reject(new Error("no bridge")) }) });
-  await settle();
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  expect(select.hasAttribute("aria-disabled")).toBe(false);
-  expect([...select.options].map((option) => option.value)).toEqual(["In Progress", "In Review", "To Do"]);
-});
-
-test("the clock offers Start timer, and Stop and log while the timer runs on this ticket", async () => {
+test("the pinned card's foot offers Start timer, and Stop and log while the timer runs on this ticket, with no clock (spec #2396)", async () => {
   open();
   await settle();
   const start = [...target.querySelectorAll("button")].find((button) => button.textContent === "Start timer")!;
@@ -502,8 +334,8 @@ test("the clock offers Start timer, and Stop and log while the timer runs on thi
   };
   open("PAY-231", { timer: { current, elapsed: "12:04" } });
   await settle();
-  expect(text()).toContain("12:04");
-  expect(text()).toContain("since 13:58");
+  expect(text(), "the running time is the top bar chip's alone").not.toContain("12:04");
+  expect(text()).not.toContain("since 13:58");
   const stop = [...target.querySelectorAll("button")].find((button) => button.textContent === "Stop and log")!;
   stop.click();
   expect(calls.stop).toBe(1);
@@ -532,324 +364,22 @@ test("a confirmed blocks link to this ticket draws the blocked chip", async () =
   });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blocked) : Promise.reject({ code: "not_found" })) }) });
   await settle();
-  const chips = [...target.querySelectorAll(".tf-jobcard .tf-chip")].map((chip) => chip.textContent);
+  const chips = [...target.querySelectorAll(".tf-jobcard .tf-chip.tf-err")].map((chip) => chip.textContent);
   expect(chips).toEqual(["Blocked by OPS-77"]);
-});
-
-test("Time this week says what is logged and what is left to log, Monday to Friday", async () => {
-  open();
-  await settle();
-  const section = [...target.querySelectorAll(".tf-jobcard section")].find((s) => s.textContent?.includes("Time this week"))!;
-  expect(section.textContent).toContain("7h 30m logged, 4h 14m to log");
-  expect(section.querySelectorAll("svg g")).toHaveLength(5);
-  expect(section.querySelectorAll("svg g.tf-today")).toHaveLength(1);
-  expect(section.querySelector("a")?.getAttribute("href")).toBe("#/time/week");
-});
-
-test("the Code section rolls up repos and open PRs, sorts what asks for you first, and opens full views", async () => {
-  open("PAY-231", { ports: ports({ rows: [PR_OPEN, BRANCH, REPO, PR_MERGED] }) });
-  await settle();
-  const section = target.querySelector("[aria-labelledby='tf-sec-code']")!;
-  expect(section.querySelector(".tf-roll")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "2 repos: tidewater/payout-service, tidewater/psp-client 1 open PR",
-  );
-  const rows = codeRows();
-  // The open PR asks for you (info), then newest first among the settled.
-  expect(rows.map((row) => row.getAttribute("href"))).toEqual([
-    `#/pr/${encodeURIComponent(PR_OPEN.entity_id)}`,
-    `#/pr/${encodeURIComponent(PR_MERGED.entity_id)}`,
-    `#/branch/${encodeURIComponent(BRANCH.entity_id)}`,
-    `#/repo/${encodeURIComponent(REPO.entity_id)}`,
-  ]);
-  // The branch's address is the repository page's redirect to its Branches tab (#1440).
-  expect(pageFor(parseTfHash(rows[2]!.getAttribute("href")!))).toBe(codeRowPage);
-  expect(section.querySelector("a.tf-open")?.getAttribute("href")).toBe("#/code");
-});
-
-test("past four rows the section shows four, with a filter, Show all N and All in Code view", async () => {
-  open("PAY-231", { ports: ports({ rows: [COMMIT_OLD, PR_OPEN, BRANCH, REPO, PR_MERGED, FAILING] }) });
-  await settle();
-  let rows = codeRows();
-  expect(rows).toHaveLength(4);
-  expect(rows[0]!.getAttribute("href")).toBe(`#/pr/${encodeURIComponent(FAILING.entity_id)}`);
-
-  const showAll = [...target.querySelectorAll("button")].find((button) => button.textContent === "Show all 6")!;
-  expect(showAll).toBeTruthy();
-  expect([...target.querySelectorAll("a")].some((a) => a.textContent === "All in Code view")).toBe(true);
-  showAll.click();
-  flushSync();
-  expect(codeRows()).toHaveLength(6);
-
-  const filter = target.querySelector<HTMLInputElement>("input[aria-label='Filter Code']")!;
-  expect(filter.placeholder).toBe("Filter 6 code");
-  expect(filter.hasAttribute("data-filter")).toBe(true);
-  filter.value = "psp";
-  filter.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  rows = codeRows();
-  expect(rows.map((row) => row.getAttribute("href"))).toEqual([`#/pr/${encodeURIComponent(PR_MERGED.entity_id)}`]);
-  expect(text()).toContain("1 match");
-});
-
-test("the checkout line names the clone, its branch and changes, and Open in… runs the default application", async () => {
-  const layers = createLayers();
-  open("PAY-231", { layers });
-  await settle();
-  // Branches are asked first: a branch answers with its repository's clone.
-  expect(calls.checkout[0]).toBe(BRANCH.entity_id);
-  const line = target.querySelector(".tf-checkout")!;
-  expect(line.textContent?.replace(/\s+/g, " ")).toContain("Local ~/code/payout-service on feature/PAY-231-sepa-retry");
-  expect(line.textContent).toContain("1 changed");
-
-  line.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
-  flushSync();
-  const items = [...line.querySelectorAll<HTMLButtonElement>("[role='menuitem']")];
-  // The default first, marked, with its command filled in for this checkout.
-  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual([
-    "VS Code (default)code ~/code/payout-service",
-    "IntelliJ IDEAidea ~/code/payout-service",
-    "Add an application…",
-    "Manage applications…",
-  ]);
-  expect(layers.open).toHaveLength(1);
-  items[0]!.click();
-  await settle();
-  expect(calls.open).toEqual([[BRANCH.entity_id, { application: "vscode", file: null, line: null }]]);
-  expect(layers.open).toHaveLength(0);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started VS Code: code ~/code/payout-service");
-});
-
-test("a job with no code says nothing is connected and asks for no checkout", async () => {
-  open("PAY-231", { ports: ports({ rows: [] }) });
-  await settle();
-  expect(text()).toContain("Nothing connected.");
-  expect(calls.checkout).toEqual([]);
-  expect(target.querySelector(".tf-checkout")).toBeNull();
-});
-
-test("the Map tab hides the card and draws Dependencies in place of the sections (#874)", async () => {
-  open("PAY-231", { tab: "map" });
-  await settle();
-  const tabs = [...target.querySelectorAll("[role='tab']")];
-  expect(tabs.map((tab) => [tab.textContent?.trim(), tab.getAttribute("aria-selected")])).toEqual([
-    ["Work", "false"],
-    ["Map", "true"],
-    ["Conversation", "false"],
-  ]);
-  expect(target.querySelector(".tf-ws")!.classList.contains("tf-mapmode")).toBe(true);
-  expect(target.querySelector(".tf-wbody .tf-dp.tf-dp-job")).not.toBeNull();
-  expect(target.querySelector(".tf-setsbar")).toBeNull();
-  expect(target.querySelector("[aria-labelledby='tf-sec-code']")).toBeNull();
 });
 
 // ---- #817: the other four sections ----
 
-const PARENT = "jira:PAY-200";
-
 function build(id: string, title: string, tone: StateChip["tone"], text: string, source = "teamcity"): EntityRow {
   return { entity_id: id, kind: "build", source_id: source, title, updated_at: "2026-10-15T10:00:00Z", synced_at: "", path: "Payments › Payouts", state: { text, tone } };
 }
-const B_FAIL = build("teamcity:it#1187", "Payout_IntegrationTests #1187", "err", "failed");
-const B_RUN = build("teamcity:build#1188", "Payout_Build #1188", "info", "running");
 const B_OK = build("teamcity:lint#904", "Payout_Lint #904", "ok", "success");
-const PAGE = { ...code("confluence:ENG-1", "page", "SEPA payout retry design", "2026-10-15T10:40:00Z", { text: "mentions you", tone: "warn" } as StateChip, "ENG › Payments"), source_id: "confluence" };
-const MONITOR = { ...code("kuma:flows-stage", "monitor", "flows-stage", "2026-10-15T12:40:00Z", { text: "down", tone: "err" } as StateChip, null), source_id: "kuma" };
-const MON_OK = { ...code("kuma:payouts-stage", "monitor", "payouts-stage /health", "2026-10-15T12:00:00Z", { text: "up", tone: "ok" } as StateChip, null), source_id: "kuma" };
 
 function own(entity_id: string, kind: string): Reached {
   return { entity_id, kind, step: entity_id, origin: { kind: "own" } };
 }
 
-function section(id: string): Element {
-  return target.querySelector(`[aria-labelledby='tf-sec-${id}']`)!;
-}
-
-/** The addresses a section's rows open, in drawn order. */
-function hrefsOf(id: string): string[] {
-  return [...section(id).querySelectorAll(".tf-rows a")].map((row) => row.getAttribute("href") ?? "");
-}
-
-/** A rollup's words, one part per drawn span (the gap between them is CSS). */
-function roll(id: string): string {
-  const parts = [...section(id).querySelectorAll(".tf-roll > span")];
-  return parts.map((part) => part.textContent?.replace(/\s+/g, " ").trim()).join(" ");
-}
-
-test("Builds rolls up configurations by state, sorts the failing first, and labels a row from the parent", async () => {
-  open("PAY-231", {
-    ports: ports({
-      others: [B_OK, B_RUN, B_FAIL],
-      jobReach: () =>
-        Promise.resolve([
-          own(B_FAIL.entity_id, "build"),
-          own(B_RUN.entity_id, "build"),
-          { entity_id: B_OK.entity_id, kind: "build", step: PARENT, origin: { kind: "parent", ticket: PARENT } },
-        ]),
-    }),
-  });
-  await settle();
-  expect(roll("builds")).toBe("3 configurations: 1 failing 1 running 1 passing");
-  const rows = [...section("builds").querySelectorAll(".tf-rows a")];
-  expect(rows.map((row) => row.getAttribute("href"))).toEqual([
-    `#/build/${encodeURIComponent(B_FAIL.entity_id)}`,
-    `#/build/${encodeURIComponent(B_RUN.entity_id)}`,
-    `#/build/${encodeURIComponent(B_OK.entity_id)}`,
-  ]);
-  expect(rows[2]!.querySelector(".tf-via")?.textContent).toBe("Parent PAY-200");
-  expect(rows[0]!.querySelector(".tf-via")).toBeNull();
-  expect(section("builds").querySelector("a.tf-open")?.textContent?.trim()).toBe("Open Builds view");
-});
-
-test("Builds warns when a source that holds builds cannot sign in, with the fix", async () => {
-  const failing: CredentialHealth = { source_id: "teamcity", state: "unauthorized", checked_at: null, detail: null, secret_expires_at: null };
-  const run = {
-    source_id: "teamcity",
-    running: false,
-    run_id: 9,
-    started_at: null,
-    last_finished_at: new Date(2026, 9, 15, 13, 22).toISOString(),
-    last_outcome: "unauthorized",
-    next_run_at: null,
-    backoff_until: null,
-    last_changed: false,
-  } as SourceSyncStatus;
-  open("PAY-231", {
-    ports: ports({
-      others: [B_FAIL],
-      listSources: () => Promise.resolve([sourceFacts("teamcity", { display_name: "TeamCity" }), sourceFacts("jira")]),
-      credentialHealth: () => Promise.resolve([failing]),
-      syncStatus: () => Promise.resolve([run]),
-    }),
-  });
-  await settle();
-  const stale = section("builds").querySelector(".tf-stale")!;
-  expect(stale.textContent?.replace(/\s+/g, " ").trim()).toBe("TeamCity data is 38 min old: sign-in failing. Re-enter password");
-  expect(stale.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
-});
-
-test("a source that signs in draws no warning", async () => {
-  open("PAY-231", {
-    ports: ports({
-      others: [B_OK],
-      listSources: () => Promise.resolve([sourceFacts("teamcity", { display_name: "TeamCity" }), sourceFacts("jira")]),
-      credentialHealth: () => Promise.resolve([{ source_id: "teamcity", state: "ok", checked_at: null, detail: null, secret_expires_at: null }]),
-    }),
-  });
-  await settle();
-  expect(section("builds").querySelector(".tf-stale")).toBeNull();
-});
-
-test("Assets reads each reached asset and rolls up environments and problems", async () => {
-  const detail = (id: string, name: string, type_label: string, health: "up" | "down", env: "prod" | "stage", on: string | null) =>
-    ({
-      asset: { id, name, type_label, health } as AssetDetail["asset"],
-      effective_environment: { value: env, source_id: id, source_name: name },
-      held_by: on ? [{ name: on } as AssetDetail["asset"]] : [],
-    }) as AssetDetail;
-  const assets: Record<string, AssetDetail> = {
-    "asset:c": detail("asset:c", "payout-service", "Container", "down", "stage", "vm-pay-stage-01"),
-    "asset:vm": detail("asset:vm", "vm-pay-stage-01", "VM", "up", "stage", null),
-  };
-  open("PAY-231", {
-    ports: ports({
-      jobReach: () => Promise.resolve([own("asset:vm", "asset"), own("asset:c", "asset"), own(PR_OPEN.entity_id, "pr")]),
-      getAsset: (id) => Promise.resolve(assets[id]!),
-    }),
-  });
-  await settle();
-  expect(roll("assets")).toBe("2 assets in stage 1 with a problem");
-  const rows = [...section("assets").querySelectorAll(".tf-rows a")];
-  expect(rows.map((row) => row.getAttribute("href"))).toEqual([`#/asset/${encodeURIComponent("asset:c")}`, `#/asset/${encodeURIComponent("asset:vm")}`]);
-  expect(rows[0]!.textContent).toContain("Container, stage, on vm-pay-stage-01");
-  expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/jira%3APAY-231/map");
-});
-
-test("Monitors and Pages roll up in prototype-6's words", async () => {
-  open("PAY-231", { ports: ports({ others: [MON_OK, MONITOR, PAGE] }) });
-  await settle();
-  expect(roll("monitors")).toBe("2 watched: 1 down 1 fine");
-  expect(section("monitors").querySelector(".tf-rows a")?.getAttribute("href")).toBe("#/monitors");
-  expect(roll("pages")).toBe("1 page in ENG 1 ask something of you");
-  expect(section("pages").querySelector("a.tf-open")?.textContent?.trim()).toBe("Open Docs view");
-});
-
 // #1030: the Tickets preview's *Around this ticket* counts from the same reads.
-test("Around this ticket counts the rows the job's sections draw, a parent's build among them", async () => {
-  const healthy = (id: string) =>
-    ({ asset: { id, name: id, type_label: "VM", health: "up" }, effective_environment: null, held_by: [] }) as unknown as AssetDetail;
-  const p = ports({
-    others: [B_OK, B_RUN, B_FAIL, MON_OK, MONITOR, PAGE],
-    jobReach: () =>
-      Promise.resolve([
-        own(PR_OPEN.entity_id, "pr"),
-        own(B_FAIL.entity_id, "build"),
-        { entity_id: B_OK.entity_id, kind: "build", step: PARENT, origin: { kind: "parent", ticket: PARENT } },
-        own("asset:vm", "asset"),
-        own("asset:db", "asset"),
-      ]),
-    getAsset: (id) => Promise.resolve(healthy(id)),
-  });
-  open("PAY-231", { ports: p });
-  await settle();
-  const drawn = (id: string) => section(id).querySelectorAll(".tf-rows a").length;
-  expect(["code", "builds", "pages", "monitors", "assets"].map(drawn)).toEqual([3, 3, 1, 2, 2]);
-  expect(calls.promote).toEqual([ID]);
-
-  expect(aroundLines(await reachTally(p, ID))).toEqual([
-    { section: "Code", count: "3 items", failing: null },
-    { section: "Builds", count: "3 builds", failing: "1 failing or down" },
-    { section: "Docs", count: "1 page", failing: null },
-    { section: "Monitors", count: "2 monitors", failing: "1 failing or down" },
-    { section: "Assets", count: "2 assets", failing: null },
-  ]);
-  // Counting promotes nothing: only the job's own open did.
-  expect(calls.promote).toEqual([ID]);
-});
-
-test("Open Docs view opens Docs with This job on (R-2.5); the other sections' links leave it", async () => {
-  open("PAY-231", { ports: ports({ others: [PAGE] }) });
-  await settle();
-  expect(sessionFilter("docs").scope).toBeNull();
-  section("monitors").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
-  expect(sessionFilter("docs").scope).toBeNull();
-  sessionFilter("docs").scope = "all";
-  section("pages").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
-  expect(sessionFilter("docs").scope).toBe("job");
-});
-
-test("Open Code view opens Repositories with This job on (R-2.5), and the pick after that is kept (R-2.6)", async () => {
-  open("PAY-231", { ports: ports({ rows: [code("gitea:x@1", "commit", "fix", "2026-10-15T10:00:00Z", null, null)] }) });
-  await settle();
-  expect(sessionFilter("code-repos").scope).toBeNull();
-  section("monitors").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
-  expect(sessionFilter("code-repos").scope).toBeNull();
-  sessionFilter("code-repos").scope = "all";
-  section("code").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
-  expect(sessionFilter("code-repos").scope).toBe("job");
-  sessionFilter("code-repos").scope = "mine";
-  expect(sessionFilter("code-repos").scope).toBe("mine");
-});
-
-test("Open Monitors opens Monitors with This job on (R-2.5), and the pick after that is kept (R-2.6)", async () => {
-  open("PAY-231");
-  await settle();
-  expect(sessionFilter("monitors").scope).toBeNull();
-  section("pages").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
-  expect(sessionFilter("monitors").scope).toBeNull();
-  sessionFilter("monitors").scope = "all";
-  section("monitors").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
-  expect(sessionFilter("monitors").scope).toBe("job");
-  sessionFilter("monitors").scope = "mine";
-  expect(sessionFilter("monitors").scope).toBe("mine");
-});
-
-test("a section with nothing in it says so", async () => {
-  open();
-  await settle();
-  expect(roll("monitors")).toBe("Nothing connected.");
-  expect(section("monitors").textContent).toContain("Nothing connected yet. Use the connections drawer to link something.");
-});
-
 // ---- #818: the blocked banner and Start work ----
 
 test("a blocked ticket shows the red banner naming the blocker, with a button to open it", async () => {
@@ -920,7 +450,7 @@ function steps(): [string | undefined, string | undefined][] {
   return [...target.querySelectorAll(".tf-step")].map((row) => [row.querySelector("strong")?.textContent ?? undefined, row.querySelector(".tf-state")?.textContent ?? undefined]);
 }
 
-test("a To Do ticket of mine shows Start work, proposed in the suggested repository, in place of Code and Builds", async () => {
+test("a To Do ticket of mine shows Start work, proposed in the suggested repository, above the description", async () => {
   const asked: (string | null)[] = [];
   let stored: StartWorkStep[] = [];
   const OTHER = code("gitea:tidewater/ledger", "repo", "tidewater/ledger", "2026-10-01T08:00:00Z", null, null);
@@ -962,9 +492,8 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")?.disabled).toBe(false);
   expect(select.disabled).toBe(false);
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To Do to In Progress");
-  expect(section("code")).toBeNull();
-  expect(section("builds")).toBeNull();
-  expect(section("assets")).not.toBeNull();
+  const stepper = target.querySelector(".tf-tkread .tf-steps")!;
+  expect(stepper.compareDocumentPosition(target.querySelector(".tf-tkdesc")!) & Node.DOCUMENT_POSITION_FOLLOWING, "the steps sit above the description").toBeTruthy();
 });
 
 test("each step's state follows the flow as its writes move through the queue, and the step it stopped at can be checked again or skipped", async () => {
@@ -1214,6 +743,26 @@ test("Start work's footer is the canonical one: its note first, the primary last
   ]);
 });
 
+test("the stepper leaves once the ticket no longer offers Start work: its move landed (#2399)", async () => {
+  let status = "To Do";
+  const probe = refreshProbe();
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status, author: "mara" })) : Promise.reject({ code: "not_found" })),
+      refresh: probe.ports,
+    }),
+  });
+  await settle();
+  expect(target.querySelector(".tf-tkread .tf-steps"), "the chosen To Do ticket of mine runs the stepper").not.toBeNull();
+
+  status = "In Progress";
+  pressRefreshKey();
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  expect(target.querySelector(".tf-tkdesc"), "the description stays").not.toBeNull();
+});
+
 test("a To Do ticket of somebody else's, or mine in progress, shows no Start work", async () => {
   open("PAY-231", {
     ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "To Do", author: "jonas" })) : Promise.reject({ code: "not_found" })) }),
@@ -1227,7 +776,6 @@ test("a To Do ticket of somebody else's, or mine in progress, shows no Start wor
   });
   await settle();
   expect(target.querySelector(".tf-steps")).toBeNull();
-  expect(section("code")).not.toBeNull();
 });
 
 // ---- #1230: the sections pick by role, not by kind ----
@@ -1250,7 +798,7 @@ const RUN = { ...build("forge:run#77", "ci.yml #77", "err", "failure", "forge"),
 const MOCK_REPO = { ...code("mock:demo-repo", "repo", "demo-repo", "2026-10-15T13:00:00Z", null, null), source_id: "mock" };
 const MOCK_BUILD = build("mock:build#1", "Mock_Build #1", "err", "failed", "mock");
 
-test("a job's Builds section lists the runs of a CI source whose run kind is not build", async () => {
+test("the job's Builds read asks for the CI role, and a run of a kind that is not build counts under Builds", async () => {
   const p = ports({ others: [B_OK, RUN], jobReach: () => Promise.resolve([own(B_OK.entity_id, "build"), own(RUN.entity_id, "workflow_run")]) });
   const registry = claimsRegistry();
   open("PAY-231", { ports: p, registry });
@@ -1258,10 +806,6 @@ test("a job's Builds section lists the runs of a CI source whose run kind is not
   // The section asks for the role and names no kinds; the mirror answers both run kinds (#1295).
   const runs = calls.list.find((filter) => filter.order === "latest_per_parent")!;
   expect(runs).toMatchObject({ role: "ci", kinds: [] });
-  expect(hrefsOf("builds")).toHaveLength(2);
-  // A run of another kind opens Builds' run page, not the block view (#1256).
-  const hrefs = [...section("builds").querySelectorAll(".tf-rows a")].map((row) => decodeURIComponent(row.getAttribute("href") ?? ""));
-  expect(hrefs.filter((href) => href === `#/build/${RUN.entity_id}` || href === `#/build/${B_OK.entity_id}`)).toHaveLength(2);
 
   const tally = await reachTally(p, ID);
   expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1, section: "builds" });
@@ -1269,13 +813,10 @@ test("a job's Builds section lists the runs of a CI source whose run kind is not
   expect(aroundLines(tally).find((line) => line.section === "Builds")?.count).toBe("2 items");
 });
 
-test("a job's sections draw their rows as read and keep none by source: each read asked for its role (#1295-#1298)", async () => {
+test("the job's section reads keep none by source: each read asked for its role (#1295-#1298)", async () => {
   const p = ports({ others: [MOCK_REPO, B_OK, MOCK_BUILD] });
   open("PAY-231", { ports: p, registry: claimsRegistry() });
   await settle();
-  expect(hrefsOf("code").filter((href) => href.includes("mock"))).toHaveLength(1);
-  expect(hrefsOf("code")).toHaveLength(4);
-  expect(hrefsOf("builds").sort()).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`, `#/build/${encodeURIComponent(MOCK_BUILD.entity_id)}`].sort());
 
   const tally = await reachTally(p, ID);
   const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
@@ -1290,7 +831,6 @@ test("with no CI claim known, Builds still asks for the CI role and names no kin
   open("PAY-231", { ports: p, registry });
   await settle();
   expect(calls.list.find((filter) => filter.order === "latest_per_parent")).toMatchObject({ role: "ci", kinds: [] });
-  expect(hrefsOf("builds")).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`]);
 
   calls.list.length = 0;
   await reachTally(p, ID);
@@ -1298,147 +838,9 @@ test("with no CI claim known, Builds still asks for the CI role and names no kin
   expect(tallied).toMatchObject({ role: "ci", kinds: [], reach: ID });
 });
 
-// -- A queued move is drawn at once (#1424) ----------------------------------
-
-/** The status the select shows, whether it is drawn as queued, and the mark beside it. */
-function statusShown() {
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  const mark = target.querySelector(".tf-jobrow .tf-queued-mark");
-  return [select.value, select.classList.contains("tf-queued"), mark?.textContent?.trim() ?? null];
-}
-
-async function pick(status: string) {
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  select.value = status;
-  select.dispatchEvent(new Event("change", { bubbles: true }));
-  await settle();
-}
-
-test("a picked status is drawn muted with queued until the detail's status moves; then the mark goes", async () => {
-  let status = "In Progress";
-  const moving = () =>
-    ports({
-      getEntity: (id) => {
-        calls.read.push(id);
-        return id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" });
-      },
-    });
-  open("PAY-231", { ports: moving() });
-  await settle();
-  expect(statusShown()).toEqual(["In Progress", false, null]);
-  await pick("In Review");
-  // The move re-read the ticket, which the sync has not moved yet.
-  expect(calls.read.filter((id) => id === ID).length).toBeGreaterThan(1);
-  expect(statusShown()).toEqual(["In Review", true, "queued"]);
-
-  unmount(job!);
-  open("PAY-231", { ports: moving() });
-  await settle();
-  expect(statusShown()).toEqual(["In Review", true, "queued"]);
-
-  // The status moved, here past the picked one (somebody closed it): the mark goes.
-  unmount(job!);
-  status = "Done";
-  open("PAY-231", { ports: moving() });
-  await settle();
-  expect(statusShown()).toEqual(["Done", false, null]);
-
-  // Moved back in Jira by somebody else: the old move is not drawn again.
-  unmount(job!);
-  status = "In Progress";
-  open("PAY-231", { ports: moving() });
-  await settle();
-  expect(statusShown()).toEqual(["In Progress", false, null]);
-});
-
-/** A follower the test speaks for, and ports whose writes answer ids from 50 up. */
-function following() {
-  const hears = new Map<number, Hear>();
-  const follower: WriteFollower = {
-    follow(id, hear) {
-      hears.set(id, hear);
-      return () => hears.delete(id);
-    },
-  };
-  let next = 50;
-  const numbered = ports({
-    submitWrite: (payload) => {
-      calls.writes.push(payload);
-      return Promise.resolve({ id: next++ } as never);
-    },
-  });
-  return { follower, numbered, hear: (id: number, row: unknown) => hears.get(id)?.(row as never) };
-}
-
-test("a move the queue refuses drops the queued status and toasts; Edit and resend opens the status pick again", async () => {
-  const { follower, numbered, hear } = following();
-  open("PAY-231", { ports: numbered, follower });
-  await settle();
-  await pick("In Review");
-  expect(statusShown()).toEqual(["In Review", true, "queued"]);
-
-  hear(50, { id: 50, state: "refused", detail: "The transition needs a resolution" });
-  flushSync();
-  expect(statusShown()).toEqual(["In Progress", false, null]);
-  const toast = toasts.items.at(-1)!;
-  expect(toast.text).toBe("Move of PAY-231 to In Review was refused: The transition needs a resolution");
-  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  expect(document.activeElement).not.toBe(select);
-  toast.more!.find((action) => action.label === "Edit and resend")!.run();
-  await settle();
-  expect(location.hash).toBe("#/job/jira%3APAY-231");
-  expect(document.activeElement).toBe(select);
-  expect(select.value).toBe("In Progress");
-});
-
-// ---- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2103) ----
+// -- A queued comment is drawn at once (#1424) ----------------------------
 
 const squash = (node: Element) => (node.textContent ?? "").replace(/\s+/g, " ").trim();
-
-test("a move's echo says queued, then sent, and goes on the refresh event's read, the job not opened again (#2103)", async () => {
-  const sync = echoEvents(settle);
-  const { follower, sent } = echoFollower();
-  let status = "In Progress";
-  let next = 70;
-  const io = ports({
-    getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
-    submitWrite: () => Promise.resolve({ id: next++ } as never),
-    listen: sync.listen,
-  });
-  open("PAY-231", { ports: io, follower });
-  await settle();
-  await pick("In Review");
-  expect(statusShown()).toEqual(["In Review", true, "queued"]);
-
-  sent(70);
-  expect(statusShown()).toEqual(["In Review", true, "sent"]);
-
-  // Another ticket's refresh reads nothing that settles it.
-  await sync.refreshed("jira:PAY-9", 99);
-  expect(statusShown()).toEqual(["In Review", true, "sent"]);
-
-  status = "In Review";
-  await sync.refreshed(ID, 70);
-  expect(statusShown()).toEqual(["In Review", false, null]);
-});
-
-test("a move's echo also goes on the read a run of its source's end brings (#2103)", async () => {
-  const sync = echoEvents(settle);
-  let status = "In Progress";
-  const io = ports({
-    getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status })) : Promise.reject({ code: "not_found" })),
-    submitWrite: () => Promise.resolve({ id: 71 } as never),
-    listen: sync.listen,
-  });
-  open("PAY-231", { ports: io });
-  await settle();
-  await pick("In Review");
-  status = "In Review";
-  await sync.ended("gitea");
-  expect(statusShown()).toEqual(["In Review", true, "queued"]);
-  await sync.ended("jira");
-  expect(statusShown()).toEqual(["In Review", false, null]);
-});
 
 test("a comment's echo says queued, then sent, and goes on the refresh event's read of the thread, the job not opened again (#2103)", async () => {
   const sync = echoEvents(settle);
@@ -1449,7 +851,7 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
     submitWrite: () => Promise.resolve({ id: 72 } as never),
     listen: sync.listen,
   });
-  open("PAY-231", { ports: io, follower, tab: "conversation" });
+  open("PAY-231", { ports: io, follower });
   await settle();
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
   box.value = "Looking at the jitter now";
@@ -1468,12 +870,12 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   expect(echoed()).toEqual([]);
 });
 
-// ---- Refresh on the job page (#2134, #2107's shared pieces) ----
+// ---- Refresh on the job page (#2134, #2107's shared pieces): ⌘R's alone, no button (#2401) ----
 
-const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-wtabs .tf-refresh");
-const jobBanners = () => [...target.querySelectorAll(".tf-work > .tf-banner")].map((banner) => squash(banner));
+const refreshButton = () => target.querySelector<HTMLButtonElement>(".tf-tkpagehead .tf-refresh");
+const jobBanners = () => [...target.querySelectorAll(".tf-tkread > .tf-banner")].map((banner) => squash(banner));
 
-test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… meanwhile, and reads the job again without blanking it", async () => {
+test("⌘R reads the ticket, asks nothing again while it refreshes, and reads the job again without blanking it; no button is drawn (#2401)", async () => {
   let answer!: (value: EntityRefresh) => void;
   const probe = refreshProbe({ answer: () => new Promise((resolve) => (answer = resolve)) });
   let title = "Retry failed SEPA payouts";
@@ -1493,16 +895,17 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
   });
   open("PAY-231", { ports: io });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(refreshButton(), "no Refresh button: the keybind's alone (#2401)").toBeNull();
   calls.read.length = 0;
   threads = 0;
   reaches = 0;
 
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(probe.refreshed).toEqual([ID]);
-  expect(refreshButton()?.textContent).toBe("Refreshing…");
-  expect(refreshButton()?.disabled).toBe(true);
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed, "a second ⌘R while refreshing asks nothing").toEqual([ID]);
   expect(calls.read).toEqual([]);
 
   title = "Retry failed SEPA payouts once";
@@ -1511,35 +914,27 @@ test("Refresh sits in the job's tab bar, reads the ticket, says Refreshing… me
   answer({ outcome: "refreshed" });
   flushSync();
   // Drawn as it was until the read answers: the card never blanks.
-  expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts");
+  expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
   await settle();
-  expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts once");
+  expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts once");
   // Refreshing until every read of the job has answered, the thread's too.
-  expect(refreshButton()?.textContent).toBe("Refreshing…");
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed, "still refreshing until every read has answered").toEqual([ID]);
   releaseThread();
   await settle();
   expect(calls.read).toEqual([ID]);
   expect(threads).toBe(1);
   expect(reaches).toBe(1);
   expect(calls.promote).toEqual([ID]);
-  expect(codeRows().length).toBeGreaterThan(0);
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(target.querySelector(".tf-tkdesc"), "the reading column never blanked").not.toBeNull();
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed, "done: ⌘R refreshes again").toEqual([ID, ID]);
   expect(target.querySelector(".tf-refresh-failed")).toBeNull();
 });
 
-test("Connections and Refresh end the tab strip in its trailing group, at the small size (#2294)", async () => {
-  open("PAY-231", { ports: ports({ refresh: refreshProbe({ answer: () => Promise.resolve({ outcome: "refreshed" }) }).ports }) });
-  await settle();
-  const strip = target.querySelector(".tf-wtabs")!;
-  const trail = strip.lastElementChild!;
-  expect(trail.classList.contains("tf-trail")).toBe(true);
-  expect([...trail.children].map((each) => [squash(each).replace(/\d+/, "N"), each.className])).toEqual([
-    ["N connected L", "tf-btn tf-sm tf-conn"],
-    ["Refresh", "tf-btn tf-sm tf-refresh"],
-  ]);
-});
-
-test("a move the app could not ask about is asked again on a refresh (#2306)", async () => {
+test("a comment the app could not ask about is asked again on a refresh (#2306)", async () => {
   const reason = "knobas could not ask whether this credential may make this write (HTTP 502); it asks again when the write is drawn again";
   let down = true;
   let asked = 0;
@@ -1553,30 +948,30 @@ test("a move the app could not ask about is asked again on a refresh (#2306)", a
     }),
   });
   await settle();
-  const select = () => target.querySelector<HTMLSelectElement>("select[aria-label='Status']")!;
-  expect(select().title).toBe(reason);
+  const send = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!;
+  expect(send().title).toBe(reason);
 
   down = false;
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(asked).toBe(2);
-  expect(select().hasAttribute("aria-disabled")).toBe(false);
+  expect(send().hasAttribute("aria-disabled")).toBe(false);
 });
 
-test("a failed refresh on the job says why under the tab bar and keeps the job as it was", async () => {
+test("a failed refresh on the job says why at the top of the reading column and keeps the job as it was", async () => {
   const probe = refreshProbe({ answer: () => Promise.resolve({ outcome: "failed", reason: "connection refused" }) });
   open("PAY-231", { ports: ports({ refresh: probe.ports }) });
   await settle();
   calls.read.length = 0;
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(jobBanners()).toEqual(["Couldn't refresh: connection refused"]);
-  expect(target.querySelector("[aria-label='Job card'] h1")?.textContent).toBe("Retry failed SEPA payouts");
+  expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
   expect(calls.read).toEqual([]);
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(refreshButton()).toBeNull();
 });
 
-test("a ticket whose adapter does not read one item offers Sync now on the job, and the job is read again when the run ends", async () => {
+test("on a ticket whose adapter does not read one item ⌘R runs Sync now, and the job is read again when the run ends", async () => {
   const probe = refreshProbe();
   const io = ports({
     getEntity: (id) => (calls.read.push(id), id === ID ? Promise.resolve(ticket({ refreshes: false })) : Promise.reject({ code: "not_found" })),
@@ -1584,27 +979,32 @@ test("a ticket whose adapter does not read one item offers Sync now on the job, 
   });
   open("PAY-231", { ports: io });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(refreshButton()).toBeNull();
   calls.read.length = 0;
 
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);
   expect(probe.refreshed).toEqual([]);
-  expect(refreshButton()?.textContent).toBe("Syncing…");
+  pressRefreshKey();
+  await settle();
+  expect(probe.synced, "a second ⌘R while syncing asks nothing").toEqual(["jira"]);
 
   probe.end("jira");
   await settle();
-  expect(refreshButton()?.textContent).toBe("Sync now");
   expect(calls.read).toEqual([ID]);
 });
 
-test("a turned-off source's ticket draws no Refresh on the job, and the withdrawn and turned-off banners show under the tab bar", async () => {
+test("a turned-off source's ticket offers ⌘R nothing, and the withdrawn and turned-off banners show at the top of the reading column", async () => {
   const probe = refreshProbe();
   const off = ticket({ deleted_at: "2026-10-15T12:00:00Z", source: { ...ticket().source, enabled: false } });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(off) : Promise.reject({ code: "not_found" })), refresh: probe.ports }) });
   await settle();
   expect(refreshButton()).toBeNull();
+  pressRefreshKey();
+  await settle();
+  expect(probe.refreshed).toEqual([]);
+  expect(probe.synced).toEqual([]);
   const shown = jobBanners();
   expect(shown).toHaveLength(2);
   expect(shown[0]).toMatch(/^Withdrawn upstream, last seen .+ ago\. Kept because links and notes may point at it\.$/);
@@ -1613,7 +1013,7 @@ test("a turned-off source's ticket draws no Refresh on the job, and the withdraw
   );
 });
 
-test("a move's echo goes on a Refresh's read of the ticket, and a comment's on its read of the thread (#2103)", async () => {
+test("a comment's echo goes on a Refresh's read of the thread (#2103)", async () => {
   const probe = refreshProbe();
   let status = "In Progress";
   let said: { author: string; at: string; body: string; mine: boolean; mentions_me: boolean; markup: "text" }[] = [];
@@ -1624,9 +1024,8 @@ test("a move's echo goes on a Refresh's read of the ticket, and a comment's on i
     submitWrite: () => Promise.resolve({ id: next++ } as never),
     refresh: probe.ports,
   });
-  open("PAY-231", { ports: io, tab: "conversation" });
+  open("PAY-231", { ports: io });
   await settle();
-  await pick("In Review");
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
   box.value = "Looking at the jitter now";
   box.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1634,22 +1033,20 @@ test("a move's echo goes on a Refresh's read of the ticket, and a comment's on i
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
   await settle();
   const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
-  expect(statusShown()).toEqual(["In Review", true, "queued"]);
   expect(echoed()).toEqual(["queued"]);
 
   status = "In Review";
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];
-  refreshButton()!.click();
+  pressRefreshKey();
   await settle();
-  expect(statusShown()).toEqual(["In Review", false, null]);
   expect(echoed()).toEqual([]);
 });
 
-test("⌘R on the job runs its Refresh, as a click does, and its Sync now when that is drawn (#2156)", async () => {
+test("⌘R on the job runs its Refresh, with no button drawn (#2156, #2401)", async () => {
   const probe = refreshProbe({ answer: () => new Promise(() => {}) });
   open("PAY-231", { ports: ports({ refresh: probe.ports }) });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Refresh");
+  expect(refreshButton()).toBeNull();
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect(probe.refreshed).toEqual([ID]);
@@ -1668,21 +1065,20 @@ test("⌘R on a job whose ticket's adapter reads no one item runs its Sync now (
     }),
   });
   await settle();
-  expect(refreshButton()?.textContent).toBe("Sync now");
+  expect(refreshButton()).toBeNull();
   pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);
-  expect(refreshButton()?.textContent).toBe("Syncing…");
   pressRefreshKey();
   await settle();
   expect(probe.synced).toEqual(["jira"]);
 });
 
-test("the card draws a description its source writes in Jira's wiki markup as Markdown, and one in text as text (#2308)", async () => {
+test("the reading column draws a description its source writes in Jira's wiki markup as Markdown, and one in text as text (#2308)", async () => {
   const wiki = ticket({ description: "h2. Why\n\n# first\n# *second*", markup: "jira_wiki" });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(wiki) : Promise.reject({ code: "not_found" })) }) });
   await settle();
-  const asks = target.querySelector(".tf-jobcard .tf-asks")!;
+  const asks = target.querySelector(".tf-tkdesc")!;
   expect(asks.querySelector("h2")?.textContent).toBe("Why");
   expect([...asks.querySelectorAll("ol li")].map((li) => li.textContent)).toEqual(["first", "second"]);
   expect(asks.querySelector("ol strong")?.textContent).toBe("second");
@@ -1691,7 +1087,7 @@ test("the card draws a description its source writes in Jira's wiki markup as Ma
   const plain = ticket({ description: "h2. Why\n# first", markup: "text" });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(plain) : Promise.reject({ code: "not_found" })) }) });
   await settle();
-  const text = target.querySelector(".tf-jobcard .tf-asks")!;
+  const text = target.querySelector(".tf-tkdesc .tf-asks")!;
   expect(text.querySelector("h2")).toBeNull();
   expect(text.textContent).toBe("h2. Why\n# first");
 
@@ -1699,6 +1095,6 @@ test("the card draws a description its source writes in Jira's wiki markup as Ma
   const blank = ticket({ description: "  \n", markup: "markdown" });
   open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blank) : Promise.reject({ code: "not_found" })) }) });
   await settle();
-  expect(target.querySelector(".tf-jobcard .tf-asks")).toBeNull();
-  expect(target.querySelector(".tf-jobcard")!.textContent).toContain("The ticket has no description.");
+  expect(target.querySelector(".tf-tkdesc .tf-asks")).toBeNull();
+  expect(target.querySelector(".tf-tkdesc")!.textContent).toContain("The ticket has no description.");
 });

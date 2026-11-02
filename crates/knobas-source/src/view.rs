@@ -345,6 +345,12 @@ pub enum Block {
 /// its size ([`FileBytes::TooLarge`]), never cut.
 pub const BYTES_CAP: u64 = 50 * 1024 * 1024;
 
+/// The most of one attachment [`Source::attachment_bytes`](crate::Source::attachment_bytes)
+/// is asked for (spec #2396, #2405): 5 MiB. The ticket page previews an image
+/// at most this big; a larger file gets no preview, so it never stalls the
+/// page, and is still downloaded whole.
+pub const ATTACHMENT_CAP: u64 = 5 * 1024 * 1024;
+
 /// What [`Source::file_bytes`](crate::Source::file_bytes) answers for one
 /// file (#2256). Never on the wire as data: the app hands the bytes to the
 /// shell raw and a refusal as an error naming the size.

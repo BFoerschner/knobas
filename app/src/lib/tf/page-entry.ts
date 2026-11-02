@@ -20,8 +20,8 @@
  *
  * - **One page per address key**: the entry plus {@link TfPageEntry.address}.
  *   Two addresses with the same key are one page drawn again with new props
- *   (the job's tabs); two keys are two pages, even of one component (two
- *   repositories). A page without `address` is one page wherever it is.
+ *   (a key that leaves part of the address out); two keys are two pages, even
+ *   of one component (two repositories). A page without `address` is one page wherever it is.
  * - **`visible`** on the context is `true` for the shown page and `false` for a
  *   hidden one. A hidden page keeps the props of the address it was left at.
  *   A page that reads `visible` pauses its focus re-reads, polling and timers
@@ -51,9 +51,13 @@ export interface TfPageContext {
   visible: boolean;
   /** Whether the database answers yet: a page's reads wait for it. */
   ready: boolean;
-  /** The chosen job (spec #2227), as its key. */
+  /**
+   * The chosen job (spec #2227), as its key; on a page of the section a
+   * ticket card's sections row opened, that ticket (#2401, set per page by
+   * `TfKeptPage`).
+   */
   job: string | null;
-  /** The chosen job's entity id, which its ticket is read by (#1525: a key two sources hold reads the one chosen). */
+  /** That job's entity id, which its ticket is read by (#1525: a key two sources hold reads the one chosen). */
   jobAt: string | null;
   /**
    * Where `Esc` goes once nothing is open, and what the breadcrumb's *Back to
@@ -63,8 +67,8 @@ export interface TfPageContext {
   back: EscTarget | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
-  /** The Job tab's job (the chosen job, else the timer's ticket) with its entity id, or `null`. */
-  navJob: { key: string; entityId: string } | null;
+  /** The job the shell's pages default to (the chosen job, else the timer's ticket) with its entity id, or `null`. */
+  defaultJob: { key: string; entityId: string } | null;
   timer: Pick<Timer, "current" | "elapsed">;
   layers: Layers;
   /** The colour theme the top bar toggles and Settings › Appearance sets. */

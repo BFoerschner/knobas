@@ -173,7 +173,7 @@
   const inheritOwner = $derived((detail ? [...detail.held_by].reverse() : []).find((row) => row.owner !== null) ?? null);
   /** A linked work item's own address (the shell conventions' *Routes and addresses*). */
   const workHref = (kind: string, id: string) =>
-    `#/${{ ticket: "job", pr: "pr", build: "build", page: "page", commit: "commit" }[kind] ?? "job"}/${encodeURIComponent(id)}`;
+    `#/${{ ticket: "ticket", pr: "pr", build: "build", page: "page", commit: "commit" }[kind] ?? "item"}/${encodeURIComponent(id)}`;
   const nameOf = (id: string) => read.items.find((item) => item.id === id)?.name ?? id;
 </script>
 

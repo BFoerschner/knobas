@@ -182,6 +182,97 @@ pub struct ProjectPath {
     pub name: Vec<PayloadPath>,
 }
 
+/// Where a ticket's **worklog** is, and what each entry says (#2403): who
+/// logged it and how long, in seconds.
+///
+/// * `at` leads to an **array of objects**, one per entry. Anything else is
+///   a miss: no worklog, never an empty one.
+/// * `author` is where the account that logged the entry sits inside it, as
+///   the source spells the account, so it can be matched against the
+///   configured username as [`KindPaths::assignee`] is. Jira's
+///   `author.name`.
+/// * `seconds` is where the time sits inside it, a whole JSON number of
+///   seconds, read as [`KindPaths::estimate`] is. Jira's `timeSpentSeconds`.
+///
+/// An entry whose author or time misses is left out ([`resolve_worklog`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct WorklogPath {
+    /// Where the array of entries is.
+    pub at: PayloadPath,
+    /// Where an entry's author sits inside it.
+    #[serde(default)]
+    pub author: Vec<PayloadPath>,
+    /// Where an entry's time in seconds sits inside it.
+    #[serde(default)]
+    pub seconds: Vec<PayloadPath>,
+}
+
+/// Where a record keeps **the files attached to it**, and where each file's
+/// facts sit inside its element (#2404): Jira's `fields.attachment`.
+///
+/// * `at` leads to an **array of objects**, in the source's order. Anything
+///   else is a miss.
+/// * every other field is a list of candidate paths inside one element, read
+///   as [`KindPaths::project_key`] is: the first non-blank string wins, and
+///   `size` the first whole number. An element with no readable `id`, `name`
+///   or `content` is left out: a file without an address is not one a reader
+///   can open.
+///
+/// The list, not the bytes: the mirror holds what Jira says about each file,
+/// and the bytes come live through the source's credential.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct AttachmentPath {
+    /// Where the array of attachment objects is.
+    pub at: PayloadPath,
+    /// The source's id for the file, unique within the source.
+    #[serde(default)]
+    pub id: Vec<PayloadPath>,
+    /// The file name.
+    #[serde(default)]
+    pub name: Vec<PayloadPath>,
+    /// The media type the source reports (`image/png`).
+    #[serde(default)]
+    pub mime: Vec<PayloadPath>,
+    /// The size in bytes, a whole JSON number.
+    #[serde(default)]
+    pub size: Vec<PayloadPath>,
+    /// Who attached it, by the name a person reads.
+    #[serde(default)]
+    pub author: Vec<PayloadPath>,
+    /// When it was attached, an ISO 8601 instant ([`parse_instant`]).
+    #[serde(default)]
+    pub created: Vec<PayloadPath>,
+    /// The address of the file's bytes at the source.
+    #[serde(default)]
+    pub content: Vec<PayloadPath>,
+    /// The address of a small preview the source renders, for images.
+    #[serde(default)]
+    pub thumbnail: Vec<PayloadPath>,
+}
+
+/// One file attached to an item, as [`resolve_attachments`] reads it off the
+/// record (#2404). `EntityDetail.attachments` on the wire. Every optional
+/// fact is `null` where the source did not say, never a guess.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
+pub struct Attachment {
+    /// The source's id for the file: what a later read of its bytes names.
+    pub id: String,
+    pub name: String,
+    pub mime: Option<String>,
+    /// Bytes.
+    #[ts(type = "number | null")]
+    pub size: Option<u64>,
+    pub author: Option<String>,
+    pub created: Option<chrono::DateTime<chrono::Utc>>,
+    /// Where the source serves the bytes: what *Open* hands the browser.
+    pub content_url: String,
+    /// Where the source serves a small preview, for an image.
+    pub thumbnail_url: Option<String>,
+}
+
 /// One project of a declared chain ([`resolve_project_path`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainProject {
@@ -344,6 +435,31 @@ pub struct KindPaths {
     /// misread. Empty for every kind with no estimate, and a miss draws none.
     #[serde(default)]
     pub estimate: Vec<PayloadPath>,
+    /// Who filed a ticket, as the source spells the account (#2403), so it
+    /// can be matched against the configured username as
+    /// [`assignee`](Self::assignee) is: Jira's `fields.reporter.name`,
+    /// Gitea's `user.login`. The ticket page card's *Reporter*. Empty for
+    /// every kind with no reporter, and a miss draws no row.
+    #[serde(default)]
+    pub reporter: Vec<PayloadPath>,
+    /// When a ticket was filed (#2403), an ISO 8601 instant as
+    /// [`started`](Self::started) is written: Jira's `fields.created`,
+    /// Gitea's `created_at`. Empty for every kind with no such date.
+    #[serde(default)]
+    pub created: Vec<PayloadPath>,
+    /// The time logged on a ticket, **in seconds** (#2403), by everyone:
+    /// Jira's `fields.timespent`. A whole JSON number, read as
+    /// [`estimate`](Self::estimate) is; the ticket page card's *Logged*.
+    /// Empty for every kind with no time tracking (Gitea's), and a miss
+    /// draws none.
+    #[serde(default)]
+    pub time_spent: Vec<PayloadPath>,
+    /// The entries of a ticket's worklog (#2403), from which the card tells
+    /// the reader's share of [`time_spent`](Self::time_spent). Candidates
+    /// in declaration order, the first whose `at` leads to an array winning.
+    /// Empty for every kind with no worklog.
+    #[serde(default)]
+    pub worklog: Vec<WorklogPath>,
     /// How many comments a ticket has (#894): Jira's `fields.comment.total`.
     /// A whole JSON number, read as `estimate` is; the ticket card draws
     /// "N comments" above zero. Empty for every kind with no count, and a
@@ -532,6 +648,12 @@ pub struct KindPaths {
     /// that is not a proposal.
     #[serde(default)]
     pub base: Vec<PayloadPath>,
+    /// The files attached to a ticket (#2404): Jira's `fields.attachment`,
+    /// each file's facts declared inside its element. The ticket page's
+    /// Attachments section reads it. Empty for every kind with no
+    /// attachments, and a miss lists none.
+    #[serde(default)]
+    pub attachments: Vec<AttachmentPath>,
 }
 
 /// How a run was started, in the shell's words (#961, #1146).
@@ -630,13 +752,15 @@ pub enum Markup {
     JiraWiki,
 }
 
-/// An ISO 8601 instant in either spelling a declared time may use (#848):
-/// extended, as RFC 3339 writes it, or basic, as TeamCity does
-/// (`20260822T102000+0000`). Anything else is a miss.
+/// An ISO 8601 instant in any spelling a declared time may use (#848):
+/// extended, as RFC 3339 writes it, extended with a colonless offset, as
+/// Jira does (`2026-08-12T10:00:00.000+0200`, #2404), or basic, as TeamCity
+/// does (`20260822T102000+0000`). Anything else is a miss.
 #[must_use]
 pub fn parse_instant(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
     let raw = raw.trim();
     chrono::DateTime::parse_from_rfc3339(raw)
+        .or_else(|_| chrono::DateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.f%z"))
         .or_else(|_| chrono::DateTime::parse_from_str(raw, "%Y%m%dT%H%M%S%z"))
         .ok()
         .map(|t| t.with_timezone(&chrono::Utc))
@@ -735,6 +859,10 @@ pub mod field {
     pub const SPRINT_STATE: &str = "sprint_state";
     pub const ESTIMATE: &str = "estimate";
     pub const COMMENT_COUNT: &str = "comment_count";
+    pub const REPORTER: &str = "reporter";
+    pub const CREATED: &str = "created";
+    pub const TIME_SPENT: &str = "time_spent";
+    pub const WORKLOG: &str = "worklog";
     pub const DESCRIPTION: &str = "description";
     pub const POSITION: &str = "position";
     pub const NAME: &str = "name";
@@ -762,6 +890,7 @@ pub mod field {
     pub const BOARD_TYPE: &str = "board_type";
     pub const SUB_QUERY: &str = "sub_query";
     pub const SPRINT: &str = "sprint";
+    pub const ATTACHMENTS: &str = "attachments";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -789,6 +918,10 @@ pub mod field {
         SPRINT_STATE,
         ESTIMATE,
         COMMENT_COUNT,
+        REPORTER,
+        CREATED,
+        TIME_SPENT,
+        WORKLOG,
         DESCRIPTION,
         POSITION,
         NAME,
@@ -816,6 +949,7 @@ pub mod field {
         BOARD_TYPE,
         SUB_QUERY,
         SPRINT,
+        ATTACHMENTS,
     ];
 }
 
@@ -1041,6 +1175,41 @@ macro_rules! project_path_part {
     };
 }
 
+/// The files a record declares it carries ([`AttachmentPath`], #2404): the
+/// first candidate whose non-empty `at` leads to an array, each object
+/// element of it with a readable id, name and content address, in the
+/// record's order. Empty when nothing is declared or nothing reads.
+#[must_use]
+pub fn resolve_attachments(
+    payload: &serde_json::Value,
+    candidates: &[AttachmentPath],
+) -> Vec<Attachment> {
+    let Some((candidate, elements)) = candidates.iter().find_map(|c| {
+        if c.at.segments().is_empty() {
+            return None;
+        }
+        at(payload, &c.at)?.as_array().map(|a| (c, a))
+    }) else {
+        return Vec::new();
+    };
+    elements
+        .iter()
+        .filter(|e| e.is_object())
+        .filter_map(|e| {
+            Some(Attachment {
+                id: resolve_string(e, &candidate.id)?,
+                name: resolve_string(e, &candidate.name)?,
+                mime: resolve_string(e, &candidate.mime),
+                size: candidate.size.iter().find_map(|path| at(e, path)?.as_u64()),
+                author: resolve_string(e, &candidate.author),
+                created: resolve_string(e, &candidate.created).and_then(|t| parse_instant(&t)),
+                content_url: resolve_string(e, &candidate.content)?,
+                thumbnail_url: resolve_string(e, &candidate.thumbnail),
+            })
+        })
+        .collect()
+}
+
 /// The first candidate that lands on a usable string.
 ///
 /// Usable is the same triple refusal [`declared_string!`](crate::declared_string)
@@ -1117,6 +1286,40 @@ pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec
         }
     }
     out
+}
+
+/// The time a ticket's declared worklog holds, summed per author (#2403).
+///
+/// The first candidate whose `at` leads to an array is read; an entry counts
+/// where its author resolves as [`resolve_string`] reads one and its time is
+/// a whole JSON number of seconds, not negative. Every other entry is left
+/// out, which costs that entry and not the worklog. Ordered by author.
+/// `None` where no candidate leads to an array: no worklog, never an empty
+/// one.
+#[must_use]
+pub fn resolve_worklog(
+    payload: &serde_json::Value,
+    candidates: &[WorklogPath],
+) -> Option<BTreeMap<String, i64>> {
+    let (candidate, entries) = candidates
+        .iter()
+        .find_map(|candidate| Some((candidate, at(payload, &candidate.at)?.as_array()?)))?;
+    let mut by_author = BTreeMap::new();
+    for entry in entries {
+        let Some(author) = resolve_string(entry, &candidate.author) else {
+            continue;
+        };
+        let Some(seconds) = candidate
+            .seconds
+            .iter()
+            .find_map(|path| at(entry, path)?.as_i64())
+            .filter(|seconds| *seconds >= 0)
+        else {
+            continue;
+        };
+        *by_author.entry(author).or_insert(0) += seconds;
+    }
+    Some(by_author)
 }
 
 /// The chip a record's declared state draws, if any (#666).
@@ -1965,6 +2168,54 @@ mod tests {
         assert_eq!(resolve_trigger(&both, &two), Some(Trigger::Schedule));
     }
 
+    /// A worklog sums per author (#2403): an entry whose author or time
+    /// misses (blank, absent, a number spelled as text, negative) costs that
+    /// entry; the first candidate leading to an array wins, an empty array
+    /// is an empty worklog, and no array is none.
+    #[test]
+    fn a_worklog_sums_per_author_and_drops_the_entries_it_cannot_read() {
+        let jira = WorklogPath {
+            at: PayloadPath::of(["worklog", "worklogs"]),
+            author: vec![PayloadPath::of(["author", "name"])],
+            seconds: vec![PayloadPath::of(["timeSpentSeconds"])],
+        };
+        let payload = serde_json::json!({ "worklog": { "worklogs": [
+            { "author": { "name": "mara" }, "timeSpentSeconds": 3600 },
+            { "author": { "name": " lena " }, "timeSpentSeconds": 1800 },
+            { "author": { "name": "mara" }, "timeSpentSeconds": 2400 },
+            { "author": { "name": "" }, "timeSpentSeconds": 60 },
+            { "author": { "name": "jonas" }, "timeSpentSeconds": "60" },
+            { "author": { "name": "jonas" }, "timeSpentSeconds": -60 },
+            { "timeSpentSeconds": 60 },
+        ] } });
+        assert_eq!(
+            resolve_worklog(&payload, std::slice::from_ref(&jira)),
+            Some(BTreeMap::from([
+                ("lena".to_owned(), 1800),
+                ("mara".to_owned(), 6000)
+            ]))
+        );
+
+        let elsewhere = WorklogPath {
+            at: PayloadPath::of(["worklogs"]),
+            author: vec![PayloadPath::of(["who"])],
+            seconds: vec![PayloadPath::of(["seconds"])],
+        };
+        let flat = serde_json::json!({ "worklogs": [{ "who": "mara", "seconds": 60 }] });
+        assert_eq!(
+            resolve_worklog(&flat, &[jira.clone(), elsewhere.clone()]),
+            Some(BTreeMap::from([("mara".to_owned(), 60)]))
+        );
+        let empty = serde_json::json!({ "worklogs": [] });
+        assert_eq!(
+            resolve_worklog(&empty, std::slice::from_ref(&elsewhere)),
+            Some(BTreeMap::new())
+        );
+        let none = serde_json::json!({ "worklogs": null });
+        assert_eq!(resolve_worklog(&none, &[elsewhere]), None);
+        assert_eq!(resolve_worklog(&payload, &[]), None);
+    }
+
     /// A declared time is ISO 8601 in either spelling (#848): TeamCity's
     /// basic form and RFC 3339 read as the same instant; a date alone, a
     /// word or a blank is a miss.
@@ -1976,6 +2227,11 @@ mod tests {
         assert_eq!(parse_instant("20260822T122000+0200"), Some(expected));
         assert_eq!(parse_instant("2026-08-22T10:20:00Z"), Some(expected));
         assert_eq!(parse_instant(" 20260822T102000+0000 "), Some(expected));
+        // Jira's `created` (#2403): extended, milliseconds, a basic offset.
+        assert_eq!(
+            parse_instant("2026-08-22T12:20:00.000+0200"),
+            Some(expected)
+        );
         assert_eq!(parse_instant("2026-08-22"), None);
         assert_eq!(parse_instant("yesterday"), None);
         assert_eq!(parse_instant(""), None);
@@ -2200,6 +2456,110 @@ mod tests {
         assert_eq!(
             declarations.as_json()["jira-eu"]["ticket"]["status_name"],
             serde_json::json!([["fields", "status", "name"]])
+        );
+    }
+
+    /// Jira Data Center's `fields.attachment`, declared the way the Jira
+    /// adapter declares it (#2404).
+    fn jira_attachments() -> Vec<AttachmentPath> {
+        vec![AttachmentPath {
+            at: PayloadPath::of(["fields", "attachment"]),
+            id: vec![PayloadPath::of(["id"])],
+            name: vec![PayloadPath::of(["filename"])],
+            mime: vec![PayloadPath::of(["mimeType"])],
+            size: vec![PayloadPath::of(["size"])],
+            author: vec![
+                PayloadPath::of(["author", "displayName"]),
+                PayloadPath::of(["author", "name"]),
+            ],
+            created: vec![PayloadPath::of(["created"])],
+            content: vec![PayloadPath::of(["content"])],
+            thumbnail: vec![PayloadPath::of(["thumbnail"])],
+        }]
+    }
+
+    /// The attachment list (#2404): each element of the declared array with
+    /// an id, a name and a content address, in the record's order; Jira's
+    /// date with its colonless offset reads, a size is a whole number, a PDF
+    /// has no thumbnail, and an element missing its content address is left
+    /// out rather than drawn with a link to nowhere.
+    #[test]
+    fn the_declared_attachments_resolve_in_order_and_an_unusable_one_is_left_out() {
+        let payload = serde_json::json!({ "fields": { "attachment": [
+            { "id": "50000", "filename": "psp-409-trace.png", "mimeType": "image/png",
+              "size": 186_368, "author": { "name": "lena.hoffmann", "displayName": "Lena Hoffmann" },
+              "created": "2026-08-12T10:00:00.000+0200",
+              "content": "https://jira.example/secure/attachment/50000/psp-409-trace.png",
+              "thumbnail": "https://jira.example/secure/thumbnail/50000/psp-409-trace.png" },
+            { "id": "50001", "filename": "broken.bin" },
+            { "id": "50002", "filename": "sepa-error-codes.pdf", "mimeType": "application/pdf",
+              "size": "big", "author": { "name": "priya.nair" },
+              "created": "yesterday",
+              "content": "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf" },
+            "not an object"
+        ] } });
+
+        let list = resolve_attachments(&payload, &jira_attachments());
+
+        assert_eq!(
+            list,
+            vec![
+                Attachment {
+                    id: "50000".to_owned(),
+                    name: "psp-409-trace.png".to_owned(),
+                    mime: Some("image/png".to_owned()),
+                    size: Some(186_368),
+                    author: Some("Lena Hoffmann".to_owned()),
+                    created: Some("2026-08-12T08:00:00Z".parse().unwrap()),
+                    content_url: "https://jira.example/secure/attachment/50000/psp-409-trace.png"
+                        .to_owned(),
+                    thumbnail_url: Some(
+                        "https://jira.example/secure/thumbnail/50000/psp-409-trace.png".to_owned()
+                    ),
+                },
+                Attachment {
+                    id: "50002".to_owned(),
+                    name: "sepa-error-codes.pdf".to_owned(),
+                    mime: Some("application/pdf".to_owned()),
+                    size: None,
+                    author: Some("priya.nair".to_owned()),
+                    created: None,
+                    content_url:
+                        "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf"
+                            .to_owned(),
+                    thumbnail_url: None,
+                },
+            ]
+        );
+    }
+
+    /// A miss is a miss (ADR-0007): no declaration, a declaration whose
+    /// array is absent or null, and a value that is not an array all give no
+    /// attachments, never an error.
+    #[test]
+    fn no_declaration_and_no_array_give_no_attachments() {
+        let with = serde_json::json!({ "fields": { "attachment": [
+            { "id": "1", "filename": "a.txt", "content": "https://x/a.txt" } ] } });
+        assert!(resolve_attachments(&with, &[]).is_empty());
+        for payload in [
+            serde_json::json!({ "fields": {} }),
+            serde_json::json!({ "fields": { "attachment": null } }),
+            serde_json::json!({ "fields": { "attachment": { "id": "1" } } }),
+        ] {
+            assert!(
+                resolve_attachments(&payload, &jira_attachments()).is_empty(),
+                "{payload}"
+            );
+        }
+    }
+
+    /// Jira writes its instants as `2026-08-12T10:00:00.000+0200`, an offset
+    /// without its colon, which RFC 3339 refuses (#2404).
+    #[test]
+    fn a_jira_instant_with_a_colonless_offset_parses() {
+        assert_eq!(
+            parse_instant("2026-08-12T10:00:00.000+0200"),
+            Some("2026-08-12T08:00:00Z".parse().unwrap())
         );
     }
 }

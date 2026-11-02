@@ -89,8 +89,8 @@
     </header>
     <div class="tf-empty">
       <p>
-        No job is chosen yet. A ticket becomes the job when you open its job from Tickets, start the timer on it, or run
-        Start work on it.
+        No job is chosen yet. A ticket becomes the job when you press Work on this, Resume work or Start work on its
+        page, or start the timer on it.
       </p>
       <a class="tf-btn" href="#/tickets">All tickets</a>
     </div>

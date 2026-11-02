@@ -181,8 +181,3 @@ export function alsoIn(read: JobLinkSets | null, entityId: string): string[] {
 export function filterRows(rows: readonly GroupRow[], text: string): GroupRow[] {
   return rows.filter((row) => matchesAll(`${row.title} ${row.section}`, text));
 }
-
-/** What the *Connections* button counts (R-4.3): every entity the drawer lists, once, hidden rows aside. */
-export function connectedCount(links: readonly LinkEntry[], groups: readonly JobGroup[]): number {
-  return new Set([...links.map((entry) => entry.other.entity_id), ...groups.flatMap((group) => group.rows.map((row) => row.id))]).size;
-}

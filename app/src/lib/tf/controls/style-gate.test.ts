@@ -629,3 +629,35 @@ test("an entry in a file that names no ticket fails, and lets nothing through", 
     "(a) lib/tf/css/pr.css `.tf-pr-head .tf-btn` sets padding on a control outside lib/tf/css/chrome.css. See docs/specs/2026-10-15-ticket-first-design-system.md, section Controls.",
   ]);
 });
+
+test("the ticket page card's copy button and foot button keep the three sizes: the copy small, the foot large, no stylesheet sizing either (spec #2396)", () => {
+  const card = readFileSync(join(ROOT, "lib/tf/job/TfJobCard.svelte"), "utf8").replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/g, "");
+  /** The class words on the first element whose class attribute matches `marker`. */
+  const classesOf = (marker: RegExp) => {
+    const value = [...card.matchAll(/\bclass="([^"]*)"/g)].map(([, words]) => words!.split(/\s+/)).find((words) => words.some((word) => marker.test(word)));
+    expect(value, `no element with a class matching ${marker}`).toBeDefined();
+    return value!;
+  };
+  expect(classesOf(/^tf-tkcopy$/)).toEqual(expect.arrayContaining(["tf-iconbtn", "tf-sm"]));
+  // The foot is the one button inside `.tf-go`.
+  const foot = card.match(/<div class="tf-go">\s*<button[^>]*\bclass="([^"]*)"/);
+  expect(foot, "no button inside the card's .tf-go").not.toBeNull();
+  expect(foot![1]!.split(/\s+/)).toEqual(expect.arrayContaining(["tf-btn", "tf-lg"]));
+  // Their own classes name no control, so (a) does not see them: no rule whose subject is the copy button, or a
+  // button in the card's foot, sizes it either.
+  const sized = files(ROOT).flatMap((file) =>
+    rules(stylesheet(file, readFileSync(join(ROOT, file), "utf8"))).flatMap(({ selectors, decls }) =>
+      selectors
+        .filter((selector) => {
+          const parts = compounds(selector);
+          const subject = parts.at(-1) ?? "";
+          return /\.tf-tkcopy(?![\w-])/.test(subject) || (parts.slice(0, -1).some((part) => /\.tf-go(?![\w-])/.test(part)) && /\.tf-btn|^button/.test(subject));
+        })
+        .filter(() => decls.some(([prop]) => SIZING.test(prop)))
+        .map((selector) => `${file} ${selector}`),
+    ),
+  );
+  expect(sized).toEqual([]);
+  // The two lists of rows (`.tf-tksecs`, `.tf-tkacts`) are links and buttons drawn as rows, not `.tf-btn`: they take
+  // no control size, so the gate does not size them (design system, *The ticket page's card*).
+});

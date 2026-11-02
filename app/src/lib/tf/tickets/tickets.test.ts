@@ -90,14 +90,16 @@ test("initials are the account's two parts, or its first two letters, or a dash 
 test("the preview's button: Start work, Resume work or Open job by the ticket's state", () => {
   const mine = (status: string) => ({ assignee: "mara", mine: true, status });
   const theirs = { assignee: "jonas.becker", mine: false, status: "To Do" };
-  expect(previewAction(mine("To Do"), false).label).toBe("Start work");
+  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: true });
   expect(previewAction(mine("In Progress"), false)).toEqual({
     label: "Resume work",
     note: "Starts the timer on this ticket.",
+    chooses: true,
   });
   expect(previewAction(mine("In Progress"), true).note).toBe("Your timer is running on this ticket.");
-  expect(previewAction(mine("Done"), false).label).toBe("Open job");
-  expect(previewAction(theirs, false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker." });
+  // *Open job* only reads (spec #2396): it goes to the ticket's page and chooses nothing.
+  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open job", chooses: false });
+  expect(previewAction(theirs, false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker.", chooses: false });
   expect(previewAction({ assignee: null, mine: false, status: "To Do" }, false).note).toBe("Unassigned.");
 });
 

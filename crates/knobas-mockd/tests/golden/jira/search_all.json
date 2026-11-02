@@ -19,6 +19,106 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "attachment": [
+          {
+            "author": {
+              "active": true,
+              "avatarUrls": {
+                "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=lena.hoffmann",
+                "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=lena.hoffmann",
+                "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=lena.hoffmann",
+                "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=lena.hoffmann"
+              },
+              "displayName": "Lena Hoffmann",
+              "emailAddress": "lena.hoffmann@tidewater.example",
+              "key": "JIRAUSER10104",
+              "name": "lena.hoffmann",
+              "self": "http://mockd.test/rest/api/2/user?username=lena.hoffmann",
+              "timeZone": "Europe/Berlin"
+            },
+            "content": "http://mockd.test/secure/attachment/50000/psp-409-trace.png",
+            "created": "2026-08-12T11:14:00.000+0200",
+            "filename": "psp-409-trace.png",
+            "id": "50000",
+            "mimeType": "image/png",
+            "self": "http://mockd.test/rest/api/2/attachment/50000",
+            "size": 186368,
+            "thumbnail": "http://mockd.test/secure/thumbnail/50000/psp-409-trace.png"
+          },
+          {
+            "author": {
+              "active": true,
+              "avatarUrls": {
+                "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=mara.lindqvist",
+                "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=mara.lindqvist",
+                "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=mara.lindqvist",
+                "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=mara.lindqvist"
+              },
+              "displayName": "Mara Lindqvist",
+              "emailAddress": "mara.lindqvist@tidewater.example",
+              "key": "JIRAUSER10100",
+              "name": "mara.lindqvist",
+              "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
+              "timeZone": "Europe/Berlin"
+            },
+            "content": "http://mockd.test/secure/attachment/50001/retry-timeline.png",
+            "created": "2026-08-19T17:02:00.000+0200",
+            "filename": "retry-timeline.png",
+            "id": "50001",
+            "mimeType": "image/png",
+            "self": "http://mockd.test/rest/api/2/attachment/50001",
+            "size": 98304,
+            "thumbnail": "http://mockd.test/secure/thumbnail/50001/retry-timeline.png"
+          },
+          {
+            "author": {
+              "active": true,
+              "avatarUrls": {
+                "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=priya.nair",
+                "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=priya.nair",
+                "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=priya.nair",
+                "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=priya.nair"
+              },
+              "displayName": "Priya Nair",
+              "emailAddress": "priya.nair@tidewater.example",
+              "key": "JIRAUSER10102",
+              "name": "priya.nair",
+              "self": "http://mockd.test/rest/api/2/user?username=priya.nair",
+              "timeZone": "Europe/Berlin"
+            },
+            "content": "http://mockd.test/secure/attachment/50002/sepa-error-codes.pdf",
+            "created": "2026-08-12T13:30:00.000+0200",
+            "filename": "sepa-error-codes.pdf",
+            "id": "50002",
+            "mimeType": "application/pdf",
+            "self": "http://mockd.test/rest/api/2/attachment/50002",
+            "size": 1258291
+          },
+          {
+            "author": {
+              "active": true,
+              "avatarUrls": {
+                "16x16": "http://mockd.test/secure/useravatar?size=16&ownerId=lena.hoffmann",
+                "24x24": "http://mockd.test/secure/useravatar?size=24&ownerId=lena.hoffmann",
+                "32x32": "http://mockd.test/secure/useravatar?size=32&ownerId=lena.hoffmann",
+                "48x48": "http://mockd.test/secure/useravatar?size=48&ownerId=lena.hoffmann"
+              },
+              "displayName": "Lena Hoffmann",
+              "emailAddress": "lena.hoffmann@tidewater.example",
+              "key": "JIRAUSER10104",
+              "name": "lena.hoffmann",
+              "self": "http://mockd.test/rest/api/2/user?username=lena.hoffmann",
+              "timeZone": "Europe/Berlin"
+            },
+            "content": "http://mockd.test/secure/attachment/50003/batch-13-failures.csv",
+            "created": "2026-08-14T10:45:00.000+0200",
+            "filename": "batch-13-failures.csv",
+            "id": "50003",
+            "mimeType": "text/csv",
+            "self": "http://mockd.test/rest/api/2/attachment/50003",
+            "size": 49152
+          }
+        ],
         "comment": {
           "comments": [
             {
@@ -236,6 +336,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "attachment": [],
         "comment": {
           "comments": [],
           "maxResults": 0,
@@ -336,6 +437,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "attachment": [],
         "comment": {
           "comments": [],
           "maxResults": 0,
@@ -512,6 +614,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=jonas.becker",
           "timeZone": "Europe/Berlin"
         },
+        "attachment": [],
         "comment": {
           "comments": [],
           "maxResults": 0,
@@ -612,6 +715,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=tomasz.wojcik",
           "timeZone": "Europe/Berlin"
         },
+        "attachment": [],
         "comment": {
           "comments": [],
           "maxResults": 0,
@@ -725,6 +829,7 @@
           "self": "http://mockd.test/rest/api/2/user?username=mara.lindqvist",
           "timeZone": "Europe/Berlin"
         },
+        "attachment": [],
         "comment": {
           "comments": [],
           "maxResults": 0,
@@ -814,6 +919,7 @@
       "expand": "",
       "fields": {
         "assignee": null,
+        "attachment": [],
         "comment": {
           "comments": [],
           "maxResults": 0,

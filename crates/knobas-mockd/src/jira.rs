@@ -60,6 +60,10 @@ pub fn router(state: Arc<MockState>) -> Router {
             "/rest/api/2/issue/{issueIdOrKey}/transitions",
             get(issue_transitions).merge(post(do_transition)),
         )
+        // #2405: an attachment's bytes, from the servlets Jira serves them
+        // from (not REST, so not in the WADL; the guard admits these two).
+        .route("/secure/attachment/{id}/{name}", get(attachment_bytes))
+        .route("/secure/thumbnail/{id}/{name}", get(attachment_bytes))
         .fallback(unimplemented)
         // A verb the WADL declares on a path mockd *does* serve (`POST
         // /search`, `PUT /myself`, `PUT`/`DELETE /issue/{key}`, `POST
@@ -233,6 +237,8 @@ const NAVIGABLE: &[&str] = &[
     "issuelinks",
     "timeoriginalestimate",
     "timespent",
+    // #2404: the attachment list, served from the fixture's `attachments`.
+    "attachment",
     EPIC_LINK_FIELD,
 ];
 const NON_NAVIGABLE: &[&str] = &["comment", "worklog"];
@@ -442,6 +448,64 @@ pub(crate) fn comments_envelope(
     })
 }
 
+/// One `fields.attachment` entry in the Data Center shape (#2404). A
+/// thumbnail only for an image, as Jira renders one for images alone.
+fn attachment_json(base: &str, a: &crate::state::JiraAttachment, off: FixedOffset) -> Value {
+    let mut out = json!({
+        "self": format!("{base}/rest/api/2/attachment/{}", a.id),
+        "id": a.id.to_string(),
+        "filename": a.filename,
+        "author": user_json(base, &a.author),
+        "created": jira_date(a.created, off),
+        "size": a.size,
+        "mimeType": a.mime,
+        "content": format!("{base}/secure/attachment/{}/{}", a.id, a.filename),
+    });
+    if a.mime.starts_with("image/") {
+        out["thumbnail"] = json!(format!("{base}/secure/thumbnail/{}/{}", a.id, a.filename));
+    }
+    out
+}
+
+/// Whether `path` is under one of the attachment servlets (#2405), which the
+/// guard admits outside `/rest/`.
+pub(crate) fn is_attachment_path(path: &str) -> bool {
+    path.starts_with("/secure/attachment/") || path.starts_with("/secure/thumbnail/")
+}
+
+/// `GET /secure/attachment/{id}/{name}` (#2405): the file's bytes, made up
+/// deterministically at the size the list declares, behind the magic number
+/// of its type so a reader that sniffs one finds it. The name must be the
+/// listed one, as Jira's servlet checks it. The thumbnail answers the same
+/// bytes: mockd draws no thumbnails.
+async fn attachment_bytes(
+    State(state): State<Arc<MockState>>,
+    Path((id, name)): Path<(String, String)>,
+) -> Response {
+    let found = state.issues().into_iter().find_map(|issue| {
+        issue
+            .attachments
+            .into_iter()
+            .find(|a| a.id.to_string() == id && a.filename == name)
+    });
+    let Some(file) = found else {
+        return jira_error(StatusCode::NOT_FOUND, format!("No attachment {id}/{name}"));
+    };
+    let magic: &[u8] = match file.mime.as_str() {
+        "image/png" => b"\x89PNG\r\n\x1a\n",
+        "application/pdf" => b"%PDF-1.7\n",
+        _ => b"",
+    };
+    let size = usize::try_from(file.size).unwrap_or(usize::MAX);
+    let mut body: Vec<u8> = magic.iter().copied().take(size).collect();
+    body.extend((body.len()..size).map(|at| (at % 251) as u8));
+    (
+        [(axum::http::header::CONTENT_TYPE, file.mime.clone())],
+        body,
+    )
+        .into_response()
+}
+
 /// The worklog collection. The endpoint takes no pagination parameters (the
 /// WADL declares none), but the response schema is still the paginated
 /// envelope — Jira's own quirk, reproduced rather than tidied up.
@@ -571,6 +635,18 @@ pub(crate) fn issue_json(
         f.insert(
             "timespent".into(),
             issue.time_spent_secs().map_or(Value::Null, |s| json!(s)),
+        );
+    }
+    if fields.has("attachment") {
+        f.insert(
+            "attachment".into(),
+            Value::Array(
+                issue
+                    .attachments
+                    .iter()
+                    .map(|a| attachment_json(base, a, off))
+                    .collect(),
+            ),
         );
     }
     if fields.has("comment") {

@@ -21,6 +21,7 @@
 //! recorded violation, so an invented endpoint fails this crate's own suite.
 
 mod api;
+mod attachments;
 mod config;
 mod cursor;
 mod descriptor;

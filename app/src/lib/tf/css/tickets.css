@@ -34,8 +34,12 @@
   border-radius: 6px; padding: 8px 10px; cursor: pointer;
 }
 .tf-tcard:hover { border-color: var(--ink-2); }
-/* The selected card is the yellow card, and the one card that floats. */
-.tf-tcard.tf-card { border-color: var(--card-2); box-shadow: var(--shadow); }
+/* Yellow is the chosen job's card, selected or not (spec #2396, #2398). The selected card carries a two-pixel ink
+   outline and is the one card that floats; on the yellow the outline is the card's ink. A ring, not `outline`, so
+   the focus ring never replaces it. */
+.tf-tcard.tf-card { border-color: var(--card-2); }
+.tf-tcard.tf-sel { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
+.tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
 .tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tkind { font-size: var(--t-xs); margin-left: 4px; }
@@ -67,6 +71,11 @@
 .tf-row:hover td { background: var(--sheet-2); }
 .tf-row.tf-card td { background: var(--card); color: var(--card-ink); }
 .tf-row.tf-card .tf-dim, .tf-row.tf-card .tf-sub { color: var(--card-ink-2); }
+/* The selected row's outline, two pixels inside each edge of the row: its cells draw it, as a row cannot. */
+.tf-row.tf-sel td { --tf-sel-ink: var(--ink); box-shadow: inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
+.tf-row.tf-card.tf-sel td { --tf-sel-ink: var(--card-ink); }
+.tf-row.tf-sel td:first-child { box-shadow: inset 2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
+.tf-row.tf-sel td:last-child { box-shadow: inset -2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }
@@ -75,7 +84,7 @@
   display: flex; flex-direction: column; gap: 14px; min-height: 0;
 }
 .tf-preview .tf-k { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
-/* The ticket's title: the preview's `h2` and the ticket page's `h1` (spec #2227). */
+/* The ticket's title: the preview's `h2` (spec #2227). */
 .tf-preview .tf-ticket-title { font-size: var(--t-2xl); line-height: 1.2; margin: 2px 0 0; font-weight: 600; font-variation-settings: "wdth" 90; }
 .tf-preview p { color: var(--ink-2); }
 p.tf-desc { white-space: pre-line; }
@@ -95,14 +104,6 @@ p.tf-desc { white-space: pre-line; }
 .tf-go { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; }
 .tf-go .tf-btn { justify-content: center; }
 .tf-go small { color: var(--ink-2); text-align: center; }
-/* The ticket page (spec #2227): the preview's content on the ticket-yellow card, as the job card is. */
-.tf-ticketpage .tf-ticketcard {
-  align-self: flex-start; width: min(640px, calc(100% - 48px)); margin: 0 24px 24px; padding: 22px;
-  border: 1px solid var(--card-2); border-radius: 6px; overflow: visible;
-}
-.tf-ticketcard .tf-k, .tf-ticketcard p, .tf-ticketcard .tf-facts dt, .tf-ticketcard .tf-pane-h,
-.tf-ticketcard .tf-rollup b, .tf-ticketcard .tf-go small { color: var(--card-ink-2); }
-.tf-ticketcard .tf-rollup, .tf-ticketcard .tf-rollup div { border-color: var(--card-2); }
 @media (max-width: 1240px) {
   .tf-tickets { grid-template-columns: 200px minmax(0, 1fr); }
   .tf-tickets .tf-preview { display: none; }

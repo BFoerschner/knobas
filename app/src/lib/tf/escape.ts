@@ -6,11 +6,13 @@
  * 2. a drawer is open           → close it;
  * 3. a filter field has text    → clear it, focus stays;
  * 4. a text field has focus     → blur it;
- * 5. a job's sub-tab is open    → the job's first tab;
- * 6. a top page                 → nothing;
- * 7. an opener is known         → go to the opener;
- * 8. a structural parent exists → go to it;
- * 9. otherwise                  → nothing.
+ * 5. a top page                 → nothing;
+ * 6. an opener is known         → go to the opener;
+ * 7. a structural parent exists → go to it;
+ * 8. otherwise                  → nothing.
+ *
+ * The ticket page has no tabs (#2399), so it has no rung of its own: an old
+ * `/map` or `/conversation` address is the page, and `Esc` leaves it.
  *
  * A top page is a section's own page, the address its nav entry or the
  * Settings cog links to (`isTopPage` in `route.ts`): `Esc` never jumps from
@@ -26,11 +28,11 @@
  * Builds, a pull request's or a repository's Code, a commit's its
  * repository's page, a doc page's Docs, an asset's or a route's
  * Dependencies, a ticket page's Tickets, and anything else inside a section that section's top page.
- * An item's page and a note's page have no parent, so rung 9 leaves them
+ * An item's page and a note's page have no parent, so rung 8 leaves them
  * where they are. `Esc` never reads "the job you were last in" (#2228); a
  * key that sometimes does nothing is what makes the others safe to press.
  *
- * Rungs 5 to 9 are {@link escTarget}, which the breadcrumb's *Back to <name>*
+ * Rungs 5 to 8 are {@link escTarget}, which the breadcrumb's *Back to <name>*
  * reads too, so the hint and the key cannot disagree.
  *
  * Pure: the shell describes what is open and acts on the answer. Every dialog
@@ -40,7 +42,7 @@
  * shell.
  */
 import { segmentKey } from "./job/job";
-import { HEAD_NAME, isTopPage, jobHash, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
+import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
 /** What `Esc` can see when it is pressed. */
 export interface EscState {
@@ -68,7 +70,7 @@ export interface EscTarget {
   name: string;
 }
 
-/** An {@link EscTarget}, and whether it is the entry's opener (rung 7) rather than a job's first tab or a structural parent. */
+/** An {@link EscTarget}, and whether it is the entry's opener (rung 6) rather than a structural parent. */
 export type EscTargetOf = EscTarget & { opened: boolean };
 
 export function escStep(state: EscState): EscStep {
@@ -85,13 +87,10 @@ export function escStep(state: EscState): EscStep {
 }
 
 /**
- * Rungs 5 to 9: where `Esc` goes from `route` once nothing is open, or `null`
+ * Rungs 5 to 8: where `Esc` goes from `route` once nothing is open, or `null`
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  */
 export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf | null {
-  if (route.view === "job" && route.key !== null && route.tab !== null) {
-    return { hash: jobHash(route.key), name: segmentKey(route.key), opened: false };
-  }
   if (isTopPage(route)) return null;
   if (opener !== null) return { ...opener, opened: true };
   const parent = parentOf(route);
@@ -100,7 +99,8 @@ export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf
 
 /**
  * What the breadcrumb calls an opener (#2229): a section's name for a
- * section's own page, the Job page and Tickets (*Back to Job*); otherwise the
+ * section's own page and Tickets; the key a ticket page or home's job page
+ * named itself (*Back to PAY-231*), else *Job* for home; otherwise the
  * name the page gave itself (`own`, `page-name.svelte.ts`) when it was left,
  * a bare number under its kind's {@link HEAD_NAME} (*Back to Run #4811*),
  * else what {@link HEAD_NAME} calls the address, else the section's name.
@@ -113,6 +113,8 @@ export function openerName(route: TfRoute, own: string | null): string {
   if (route.view === "item" || route.view === "note") return own || (route.view === "item" ? "Item" : "Note");
   // A ticket page (spec #2227) is named by its ticket's key, as its breadcrumb names it.
   if (route.view === "ticket") return own || segmentKey(route.id);
+  // Home draws the chosen job's page (spec #2396), which names itself by its key.
+  if (route.view === "job") return own || SECTION_NAME.job;
   return placeName(route) || "the last page";
 }
 

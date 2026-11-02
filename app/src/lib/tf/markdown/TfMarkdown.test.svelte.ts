@@ -375,6 +375,61 @@ test("on a surface with no byte read a relative image loads nothing", async () =
   expect(md().querySelector("img")!.hasAttribute("src")).toBe(false);
 });
 
+const DOT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+/** An attachment read over `files` (id to data URL): a missing id is refused, as an unreachable source refuses it. */
+function attachmentRead(files: Record<string, string>, asked: string[] = []) {
+  return {
+    load: async (id: string) => {
+      asked.push(id);
+      const url = files[id];
+      if (url === undefined) throw new Error("unreachable");
+      return url;
+    },
+    missing: (name: string) => ({
+      text: `${name}, not reachable in Tidewater Jira right now.`,
+      link: { href: "https://jira.tidewater.example/browse/PAY-231", label: "Open in Tidewater Jira" },
+    }),
+  };
+}
+
+test("an attachment image draws where the text put it, from the surface's data URL, its name the alt (#2406)", async () => {
+  const asked: string[] = [];
+  draw("Before ![psp-409-trace.png](attachment:50000) after", { attachments: attachmentRead({ "50000": DOT }, asked) });
+  await settle();
+  const img = md().querySelector("p > img")!;
+  expect(asked).toEqual(["50000"]);
+  expect(img.getAttribute("src")).toBe(DOT);
+  expect(img.getAttribute("alt")).toBe("psp-409-trace.png");
+  expect(img.classList.contains("tf-md-att")).toBe(true);
+  expect(text(md().querySelector("p"))).toBe("Before after");
+});
+
+test("an attachment image that cannot be fetched is the placeholder with its name and a link to the ticket in the source (#2406)", async () => {
+  draw("![psp-409-trace.png](attachment:50000)", { attachments: attachmentRead({}) });
+  await settle();
+  expect(md().querySelector("img")).toBeNull();
+  const missing = md().querySelector(".tf-md-noimg")!;
+  expect(text(missing)).toBe("psp-409-trace.png, not reachable in Tidewater Jira right now. Open in Tidewater Jira");
+  const link = missing.querySelector<HTMLAnchorElement>("a.tf-ext")!;
+  expect(link.getAttribute("href")).toBe("https://jira.tidewater.example/browse/PAY-231");
+  link.click();
+  expect(opened).toEqual(["https://jira.tidewater.example/browse/PAY-231"]);
+});
+
+test("an attachment read answering anything but a data: image URL is the placeholder, and loads nothing (#2406)", async () => {
+  draw("![a.png](attachment:1)", { attachments: attachmentRead({ "1": "https://jira.tidewater.example/a.png" }) });
+  await settle();
+  expect(md().querySelector("img")).toBeNull();
+  expect(md().querySelector(".tf-md-noimg")).not.toBeNull();
+});
+
+test("on a surface with no attachment read an attachment image loads nothing (#2406)", async () => {
+  draw("![a.png](attachment:1)");
+  await settle();
+  expect(md().querySelector("img")!.hasAttribute("src")).toBe(false);
+});
+
 /** A diagram engine that draws each diagram as one text naming its palette and code, and fails on `BROKEN`. */
 function diagramPort(asked: DiagramRequest[] = []): RenderPort {
   return {

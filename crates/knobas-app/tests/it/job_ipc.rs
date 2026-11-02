@@ -95,6 +95,145 @@ async fn a_tickets_detail_carries_its_type_priority_and_estimate() {
     assert_eq!(detail.estimate_seconds, Some(10800));
 }
 
+/// **The card's labels** (#2400) come with the detail, through the
+/// `labels` path the Jira adapter declares, in the record's order; a ticket
+/// with none, or with a blank one, carries none of those, and the wire leaves
+/// the field out when the list is empty.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_labels_and_leaves_them_off_the_wire_when_there_are_none() {
+    let pool = pool().await;
+    let labelled = issue(
+        &pool,
+        &key(),
+        serde_json::json!({ "labels": ["sepa", " ", "psp"] }),
+    )
+    .await;
+    let bare = issue(&pool, &key(), serde_json::json!({ "labels": [] })).await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &labelled)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.labels.as_deref(),
+        Some(&["sepa".to_owned(), "psp".to_owned()][..])
+    );
+    let none = get_entity_inner(&pool, &Registry::for_process(), &bare)
+        .await
+        .unwrap();
+    assert_eq!(none.labels, None);
+    let wire = serde_json::to_value(&none).unwrap();
+    assert!(wire.get("labels").is_none(), "{wire}");
+}
+
+/// **The card's Reporter and Logged rows** (#2403) come with the detail,
+/// through the paths the Jira adapter declares: the reporter by username as
+/// the assignee is, `created`, `timespent` in seconds, and the synced
+/// worklog summed per author, so the card can tell the reader's share. A
+/// ticket that carries none of them leaves all four off the wire.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_reporter_created_spent_and_worklog_by_author() {
+    let pool = pool().await;
+    let id = issue(
+        &pool,
+        &key(),
+        serde_json::json!({
+            "reporter": { "name": "lena", "key": "JIRAUSER1", "displayName": "Lena Hoffmann" },
+            "created": "2026-08-12T09:30:00.000+0200",
+            "timespent": 7800,
+            "worklog": { "startAt": 0, "maxResults": 20, "total": 3, "worklogs": [
+                { "author": { "name": "mara" }, "timeSpentSeconds": 3600 },
+                { "author": { "name": "lena" }, "timeSpentSeconds": 1800 },
+                { "author": { "name": "mara" }, "timeSpentSeconds": 2400 },
+            ] },
+        }),
+    )
+    .await;
+    let bare = issue(&pool, &key(), serde_json::json!({ "timespent": null })).await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(detail.reporter.as_deref(), Some("lena"));
+    assert_eq!(
+        detail.created.map(|at| at.to_rfc3339()),
+        Some("2026-08-12T07:30:00+00:00".to_owned())
+    );
+    assert_eq!(detail.time_spent_seconds, Some(7800));
+    let logged: Vec<(String, i64)> = detail
+        .logged_by
+        .unwrap()
+        .into_iter()
+        .map(|l| (l.author, l.seconds))
+        .collect();
+    assert_eq!(
+        logged,
+        vec![("lena".to_owned(), 1800), ("mara".to_owned(), 6000)]
+    );
+
+    let none = get_entity_inner(&pool, &Registry::for_process(), &bare)
+        .await
+        .unwrap();
+    assert_eq!(none.reporter, None);
+    assert_eq!(none.created, None);
+    assert_eq!(none.time_spent_seconds, None);
+    assert_eq!(none.logged_by, None);
+    let wire = serde_json::to_value(&none).unwrap();
+    for field in ["reporter", "created", "time_spent_seconds", "logged_by"] {
+        assert!(wire.get(field).is_none(), "{field}: {wire}");
+    }
+}
+
+/// **The ticket page's attachment list** (#2404) comes with the detail,
+/// through the `attachments` declaration the Jira adapter makes, in the
+/// record's order with each file's name, size, author, date and addresses; a
+/// ticket with none leaves the field off the wire.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_attachments_and_leaves_them_off_the_wire_when_there_are_none()
+{
+    let pool = pool().await;
+    let attached = issue(
+        &pool,
+        &key(),
+        serde_json::json!({ "attachment": [
+            { "id": "50000", "filename": "psp-409-trace.png", "mimeType": "image/png",
+              "size": 186_368, "author": { "name": "lena.hoffmann", "displayName": "Lena Hoffmann" },
+              "created": "2026-08-12T11:14:00.000+0200",
+              "content": "https://jira.example/secure/attachment/50000/psp-409-trace.png",
+              "thumbnail": "https://jira.example/secure/thumbnail/50000/psp-409-trace.png" },
+            { "id": "50002", "filename": "sepa-error-codes.pdf", "mimeType": "application/pdf",
+              "size": 1_258_291, "author": { "name": "priya.nair", "displayName": "Priya Nair" },
+              "created": "2026-08-12T13:30:00.000+0200",
+              "content": "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf" }
+        ] }),
+    )
+    .await;
+    let bare = issue(&pool, &key(), serde_json::json!({ "attachment": [] })).await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &attached)
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&detail).unwrap();
+    assert_eq!(
+        wire["attachments"],
+        serde_json::json!([
+            { "id": "50000", "name": "psp-409-trace.png", "mime": "image/png", "size": 186_368,
+              "author": "Lena Hoffmann", "created": "2026-08-12T09:14:00Z",
+              "content_url": "https://jira.example/secure/attachment/50000/psp-409-trace.png",
+              "thumbnail_url": "https://jira.example/secure/thumbnail/50000/psp-409-trace.png" },
+            { "id": "50002", "name": "sepa-error-codes.pdf", "mime": "application/pdf",
+              "size": 1_258_291, "author": "Priya Nair", "created": "2026-08-12T11:30:00Z",
+              "content_url": "https://jira.example/secure/attachment/50002/sepa-error-codes.pdf",
+              "thumbnail_url": null }
+        ])
+    );
+    let none = get_entity_inner(&pool, &Registry::for_process(), &bare)
+        .await
+        .unwrap();
+    assert_eq!(none.attachments, None);
+    let wire = serde_json::to_value(&none).unwrap();
+    assert!(wire.get("attachments").is_none(), "{wire}");
+}
+
 /// A miss is a miss (ADR-0007): no estimate, an estimate Jira wrote as `null`
 /// and one that is not a number all read as none, never as zero.
 #[tokio::test]

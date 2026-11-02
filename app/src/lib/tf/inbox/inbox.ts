@@ -12,7 +12,7 @@ import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
-import { jobHash } from "../route";
+import { ticketHash } from "../route";
 
 /** The word each category reads as: the kind chips' and the second line's. */
 const KIND: Record<InboxCategory, string> = {
@@ -130,7 +130,7 @@ export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" |
     default:
       break;
   }
-  if (kind === "ticket") return { label: "Open conversation", href: `${jobHash(item.entity_id)}/conversation` };
+  if (kind === "ticket") return { label: "Open conversation", href: ticketHash(item.entity_id) };
   if (kind === "pr") return { label: "Open PR", href };
   if (kind === "page") return { label: "Open page", href };
   return { label: "Open", href };

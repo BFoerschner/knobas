@@ -43,6 +43,12 @@
       ],
       "worklogs": [
         { "who": "mara", "date": "2026-08-21", "minutes": 270, "text": "Retry loop implementation" }
+      ],
+      "attachments": [
+        { "name": "psp-409-trace.png", "mime": "image/png", "bytes": 186368, "who": "lena", "when": "2026-08-12T09:14:00Z" },
+        { "name": "retry-timeline.png", "mime": "image/png", "bytes": 98304, "who": "mara", "when": "2026-08-19T15:02:00Z" },
+        { "name": "sepa-error-codes.pdf", "mime": "application/pdf", "bytes": 1258291, "who": "priya", "when": "2026-08-12T11:30:00Z" },
+        { "name": "batch-13-failures.csv", "mime": "text/csv", "bytes": 49152, "who": "lena", "when": "2026-08-14T08:45:00Z" }
       ]
     },
     {

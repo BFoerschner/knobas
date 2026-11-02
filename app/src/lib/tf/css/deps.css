@@ -1,8 +1,5 @@
 /* ---------- Dependencies (#871, R-11.11 to R-11.14) ---------- */
 .tf-dp { padding: 0 22px 40px; }
-.tf-dp.tf-dp-job { padding: 0; }
-.tf-ws.tf-mapmode { grid-template-columns: minmax(0, 1fr); }
-.tf-ws.tf-mapmode > .tf-jobcard { display: none; }
 .tf-dp-fail { color: var(--err); font-size: var(--t-sm); }
 .tf-dp-grid { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 20px; align-items: start; }
 @media (max-width: 900px) { .tf-dp-grid { grid-template-columns: minmax(0, 1fr); } .tf-dp-rail { position: static; } }

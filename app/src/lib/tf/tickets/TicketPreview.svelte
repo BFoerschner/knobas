@@ -3,21 +3,20 @@
   the description, *Around this ticket* one line a section, and one primary
   button whose label follows the ticket's state (`previewAction`).
 
-  Drawn twice from this one component, so neither copies the other: the
-  Tickets view's preview of the selected card, and the ticket page
-  (`#/ticket/<id>`, `page`), whose card is the ticket-yellow, as the job card
-  is. *Around this ticket* lines are counts, not links: opening a section's
-  rows means opening the job, and that is the button's.
+  The Tickets view's preview of the selected card. The ticket's own page is
+  the job page in its reading mood (spec #2396, `job/TfJob.svelte`); this
+  keeps its own drawing. *Around this ticket* lines are counts, not links.
 
-  The button goes to the job's address by the ticket's entity id, which opens
-  the job and makes it the chosen job (`job/chosen.svelte.ts`); what *Start
-  work* does there is #818's.
+  The button goes by the ticket's entity id: *Start work* and *Resume work*
+  to the job's address, which makes it the chosen job (`job/chosen.svelte.ts`)
+  and lands on its page; *Open job* only reads, so it goes to the ticket's
+  page and chooses nothing (spec #2396).
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
   import { proseMarkdown, type Prose } from "../../render/prose";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
-  import { jobHash } from "../route";
+  import { jobHash, ticketHash } from "../route";
   import { columnName, epicLine, previewAction, type AroundLine, type TicketFacts } from "./tickets";
 
   let {
@@ -25,7 +24,6 @@
     description,
     around,
     timerOnIt,
-    page = false,
   }: {
     /** The ticket; its status is its own, whatever column it stands in (#1423). */
     card: TicketFacts;
@@ -35,8 +33,6 @@
     around: AroundLine[] | null;
     /** Whether the timer runs on this ticket. */
     timerOnIt: boolean;
-    /** The ticket page's yellow card, rather than the Tickets view's preview pane. */
-    page?: boolean;
   } = $props();
 
   const action = $derived(previewAction(card, timerOnIt));
@@ -44,14 +40,10 @@
   const markdown = $derived(description === null ? null : proseMarkdown(description.text, description.markup));
 </script>
 
-<svelte:element
-  this={page ? "article" : "aside"}
-  class={page ? "tf-preview tf-ticketcard tf-card" : "tf-preview"}
-  aria-label={page ? "Ticket" : "Selected ticket"}
->
+<aside class="tf-preview" aria-label="Selected ticket">
   <div>
     <span class="tf-k">{card.key}</span>
-    <svelte:element this={page ? "h1" : "h2"} class="tf-ticket-title">{card.title}</svelte:element>
+    <h2 class="tf-ticket-title">{card.title}</h2>
   </div>
   <dl class="tf-facts">
     <dt>Status</dt>
@@ -84,7 +76,7 @@
     {/if}
   </div>
   <div class="tf-go">
-    <a class="tf-btn tf-primary tf-lg" href={jobHash(card.entity_id)}>{action.label}</a>
+    <a class="tf-btn tf-primary tf-lg" href={action.chooses ? jobHash(card.entity_id) : ticketHash(card.entity_id)}>{action.label}</a>
     <small>{action.note}</small>
   </div>
-</svelte:element>
+</aside>

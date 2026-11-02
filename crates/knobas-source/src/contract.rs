@@ -1183,7 +1183,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 37] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 40] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -1197,6 +1197,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
             (field::ESTIMATE, &paths.estimate, Wanted::Integer),
             (field::COMMENT_COUNT, &paths.comment_count, Wanted::Integer),
+            (field::REPORTER, &paths.reporter, Wanted::Text),
+            (field::CREATED, &paths.created, Wanted::Instant),
+            (field::TIME_SPENT, &paths.time_spent, Wanted::Integer),
             (field::DESCRIPTION, &paths.description, Wanted::Text),
             (field::POSITION, &paths.position, Wanted::Integer),
             (field::NAME, &paths.name, Wanted::Text),
@@ -1405,6 +1408,45 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 }
             }
         }
+        // The worklog (#2403): `at` leads to an array of objects or to
+        // nothing, and each entry's author (text) and seconds (a whole
+        // number) are weighed in slots of their own, so a resolving `at`
+        // excuses neither. A ticket nobody logged on carries an empty array,
+        // which is evidence for `at` and none for the entries.
+        for candidate in &paths.worklog {
+            let seen = evidence.entry((&item.kind, field::WORKLOG)).or_default();
+            let found = at(&item.payload, &candidate.at);
+            if let Some(value) = found {
+                assert!(
+                    value
+                        .as_array()
+                        .is_some_and(|entries| entries.iter().all(serde_json::Value::is_object)),
+                    "descriptor.payload_paths declares worklog of kind {:?} at {:?}, which does \
+                     not lead to an array of objects on this adapter's own item {} -- a worklog \
+                     must be one, or nothing at all. Payload: {}",
+                    item.kind,
+                    candidate.at.segments(),
+                    item.entity,
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+            let entries = found
+                .and_then(serde_json::Value::as_array)
+                .map_or(&[][..], Vec::as_slice);
+            for (slot, paths_in, wanted) in [
+                ("worklog authors", &candidate.author, Wanted::Text),
+                ("worklog seconds", &candidate.seconds, Wanted::Integer),
+            ] {
+                let seen = evidence.entry((&item.kind, slot)).or_default();
+                for entry in entries {
+                    for path in paths_in {
+                        weigh(seen, slot, entry, path, wanted, "in a worklog entry of");
+                    }
+                }
+            }
+        }
         // The chain of projects (#1019): `at` leads to an array of objects or
         // to nothing, and each key and name inside an element is a text path,
         // weighed in slots of their own so a resolving `at` excuses neither.
@@ -1443,6 +1485,60 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                     }
                 }
             }
+        }
+        // The attachment list (#2404): `at` leads to an array of objects or
+        // to nothing, as a chain of projects does, and each fact inside an
+        // element is weighed in a slot of its own.
+        for candidate in &paths.attachments {
+            let seen = evidence
+                .entry((&item.kind, field::ATTACHMENTS))
+                .or_default();
+            let found = at(&item.payload, &candidate.at);
+            if let Some(value) = found {
+                assert!(
+                    value
+                        .as_array()
+                        .is_some_and(|files| files.iter().all(serde_json::Value::is_object)),
+                    "descriptor.payload_paths declares attachments of kind {:?} at {:?}, which \
+                     does not lead to an array of objects on this adapter's own item {} -- an \
+                     attachment list must be one, or nothing at all. Payload: {}",
+                    item.kind,
+                    candidate.at.segments(),
+                    item.entity,
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+            let elements = found
+                .and_then(serde_json::Value::as_array)
+                .map_or(&[][..], Vec::as_slice);
+            for (slot, paths_in, wanted) in [
+                ("attachment ids", &candidate.id, Wanted::Text),
+                ("attachment names", &candidate.name, Wanted::Text),
+                ("attachment mimes", &candidate.mime, Wanted::Text),
+                ("attachment sizes", &candidate.size, Wanted::Integer),
+                ("attachment authors", &candidate.author, Wanted::Text),
+                ("attachment times", &candidate.created, Wanted::Instant),
+                ("attachment contents", &candidate.content, Wanted::Text),
+                ("attachment thumbnails", &candidate.thumbnail, Wanted::Text),
+            ] {
+                let seen = evidence.entry((&item.kind, slot)).or_default();
+                for element in elements {
+                    for path in paths_in {
+                        weigh(seen, slot, element, path, wanted, "in an attachment of");
+                    }
+                }
+            }
+        }
+        if paths.attachments.is_empty() {
+            assert!(
+                knobas_spi_types::payload::resolve_attachments(&item.payload, &paths.attachments)
+                    .is_empty(),
+                "kind {:?} declares no attachments, so every reader must miss on item {}",
+                item.kind,
+                item.entity
+            );
         }
         if paths.project_path.is_empty() {
             assert!(
@@ -1797,6 +1893,8 @@ mod tests {
         /// Declares a saved view's sprint at the ticket's `key`, a string: a
         /// sprint is an object.
         SprintThatIsNoObject,
+        /// Declares its attachment list at the key, a string (#2404).
+        AttachmentsThatAreNoList,
         /// Declares what a run is doing now at a key its records do not
         /// have (`stage`), on records with no `started`: runs not in flight,
         /// so the absent key is the source saying nothing (#1004).
@@ -2248,6 +2346,13 @@ mod tests {
                         }],
                         Behavior::SprintThatIsNoObject => vec![KindPaths {
                             sprint: vec![PayloadPath::of(["key"])],
+                            ..good
+                        }],
+                        Behavior::AttachmentsThatAreNoList => vec![KindPaths {
+                            attachments: vec![knobas_spi_types::payload::AttachmentPath {
+                                at: PayloadPath::of(["key"]),
+                                ..Default::default()
+                            }],
                             ..good
                         }],
                         Behavior::AgentAtAMissingKey => vec![KindPaths {
@@ -3107,6 +3212,16 @@ mod tests {
         rejects(
             Behavior::SprintThatIsNoObject,
             "declares sprint of kind \"ticket\" at [\"key\"], which leads to a string",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_attachment_list_that_is_no_array_of_objects() {
+        rejects(
+            Behavior::AttachmentsThatAreNoList,
+            "declares attachments of kind \"ticket\" at [\"key\"], which does not lead to an \
+             array of objects",
         )
         .await;
     }
