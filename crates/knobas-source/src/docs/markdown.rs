@@ -127,6 +127,11 @@ fn block(block: &DocBlock) -> String {
             // `--` inside a comment ends it early in some readers.
             format!("<!-- macro: {} -->", name.replace("--", "- -"))
         }
+        // Markup that runs has no Markdown spelling, and pasting its scripts
+        // into a file the reader opens elsewhere would run them there (#2440).
+        DocBlock::Embed { name, .. } => {
+            format!("<!-- embed: {} -->", name.replace("--", "- -"))
+        }
     }
 }
 

@@ -190,6 +190,10 @@ pub struct DocComment {
 /// - `placeholder`: Something the source has that the reader does not draw: the
 ///   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
 ///   so a page with a part knobas cannot draw says so (story 134).
+/// - `embed`: Something the page runs rather than says (spec #2432, #2440):
+///   `name` is the source's word for it (Confluence's `html` macro), and
+///   `content` what runs. The shell draws it in an isolated frame, never in
+///   its own document.
 ///
 /// Source text, never markup.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -222,6 +226,23 @@ pub enum DocBlock {
     Placeholder {
         name: String,
     },
+    Embed {
+        name: String,
+        content: EmbedContent,
+    },
+}
+
+/// What a [`DocBlock::Embed`] runs.
+///
+/// - `html`: A document as its author wrote it, byte for byte, scripts
+///   included: the shell serves it from its own origin under a policy of its
+///   own, in a sandboxed frame (#2440). Source markup, never drawn in the
+///   app's document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "DocEmbedContent")]
+pub enum EmbedContent {
+    Html { html: String },
 }
 
 /// One cell of a [`DocBlock::Table`].
@@ -344,7 +365,7 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
                 collect(inner, out);
             }
         }
-        DocBlock::Code { .. } | DocBlock::Placeholder { .. } => {}
+        DocBlock::Code { .. } | DocBlock::Placeholder { .. } | DocBlock::Embed { .. } => {}
     }
 }
 

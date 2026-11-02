@@ -772,7 +772,7 @@ fn block_words(block: &DocBlock) -> String {
             })
             .collect(),
         DocBlock::Table { .. } => String::new(),
-        DocBlock::Placeholder { name } => format!("[{name}]"),
+        DocBlock::Placeholder { name } | DocBlock::Embed { name, .. } => format!("[{name}]"),
     }
 }
 
