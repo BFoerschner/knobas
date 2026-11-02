@@ -12,6 +12,7 @@
 
   let {
     home,
+    favourites = 0,
     sources,
     rows,
     selected,
@@ -21,6 +22,8 @@
     onhover,
   }: {
     home: LauncherHome;
+    /** How many of `home.recent` are favourites, drawn under their own heading first. */
+    favourites?: number;
     sources: CredentialHealth[];
     rows: LauncherRow[];
     selected: number;
@@ -34,10 +37,15 @@
   const shares = $derived(sharesKey(home.recent));
 </script>
 
-<div class="tf-ln-h"><span class="tf-ln-lab">Recent</span><span class="tf-ln-n">{home.recent.length}</span></div>
+{#if favourites > 0}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span><span class="tf-ln-n">{favourites}</span></div>
+{/if}
 {#each home.recent as item, i (item.entity_id)}
   {@const index = recentFrom + i}
   {@const row = rows[index]}
+  {#if i === favourites}
+    <div class="tf-ln-h"><span class="tf-ln-lab">Recent</span><span class="tf-ln-n">{home.recent.length - favourites}</span></div>
+  {/if}
   {#if row}
     <Row
       entityId={item.entity_id}

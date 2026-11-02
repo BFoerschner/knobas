@@ -32,7 +32,10 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | An action that asks something | A **flow**: the sheet shows the step's choices, the box narrows them, Enter picks, the next step follows, the last pick runs the action. Esc or Backspace on the empty box step back. |
 | `#l`, `#l gitea` | Your saved lists. Enter applies the list's filters in the box and keeps you there. Tab on one: *Apply*, *Rename* (the box takes the new name, Enter keeps it), *Delete*. |
 | `#i`, `#i review` | The inbox, newest first. Enter opens what the line is about. Tab: *Re-run* (a failed build), *Acknowledge* (an alert), *Snooze…* (a flow: tomorrow or next Monday), *Done*. |
-| ⌘S on any query | Saves it as a list; the footer says so. No button. |
+| ⌘S on any query | The box asks for the list's name, the query prefilled; Enter saves, Esc keeps searching. |
+| A key on a saved list | Tab on the list, *Assign key…*, press a modifier and a letter or digit (⌘1). From then on that chord opens the list from anywhere, launcher closed or not. Backspace in the same place removes it. |
+| A key on an action | Tab on a row, select the action, ⌘B, press the keys (⌘⇧O). From then on that chord runs the action on whatever row of that **kind** is selected, without opening the actions. The same chord can mean another action on another kind: ⌘⇧O is *Open in VS Code* on repositories and *Approve* on pull requests if you bind it so. The row shows its chord. |
+| *Favourite* on any entity | Puts it above the recents in the empty box, under its own heading; *Unfavourite* takes it out. |
 | `#d sepa` | Pages only, path and excerpt, and a last row *Search Docs for "sepa"* that opens `#/docs`. |
 
 ### The sheet, per kind
@@ -89,7 +92,8 @@ Shortcuts, each marked `PROTOTYPE` in the code:
 | ⌘? draws a card written in the component, as an overlay the box narrows. | Rows in `syntax.json`, which the Rust test pins to the parser; the overlay and the merge of `#` letters in `Launcher.svelte`. |
 | The sheet's actions are a fixed list per kind, in the component. | A table per kind in `launcher/actions.ts`, and adapter-declared source actions joining it. |
 | Value suggestions and pasted-URL resolving are left out. | Nothing: they stay as shipped. |
-| `BoardNext.svelte` is the recent items alone. | `Board.svelte` loses the smart lists, the inbox, today's time and the source strip; built-in smart lists go, or move behind `#l`. The box loses its ⌘K badge and its footnote. |
+| Favourites, list keys and action keys live in `localStorage`. | A table each: a favourite is an entity id with a position; a key is a chord with a list id or a kind and an action id. The chords a list binds have to be registered with the shell's own keys so they work with the launcher closed. |
+| `BoardNext.svelte` is the recent items alone, favourites first. | `Board.svelte` loses the smart lists, the inbox, today's time and the source strip; built-in smart lists go, or move behind `#l`. The box loses its ⌘K badge and its footnote. |
 
 ## Rulings this reverses
 

@@ -43,6 +43,15 @@
   the summaries are one word; the keys sit at the bottom of the card and
   the box says "⌘? for help". `#PAY-231` is gone: a key is `#t PAY-231`.
 
+  Round 6 (Björn, 2026-11-02): ⌘S asks for the list's name in the box; a
+  saved list can be given a key (*Assign key…* in its sheet) that opens it
+  from anywhere; an action can be given a key (select it in the sheet, ⌘B,
+  press the keys) that runs it on the selected row, kept per kind, so one
+  chord means different things on a repository and on a pull request;
+  *Favourite* on any entity puts it above the recents on the empty board.
+  Favourites and keys live in `localStorage` here; the real change is a
+  table each.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -70,7 +79,7 @@
     submitWrite,
     ticketViews,
   } from "../../ipc";
-  import type { CheckoutApplication, InboxItem, LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
+  import type { CheckoutApplication, EntityRow, InboxItem, LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
   import type { LauncherHome, ResultGroup, SearchHit, SearchQuery, SearchResponse, SmartListSummary, TicketViewRow } from "../../ipc/search";
   import type { MergeStyle } from "../../ipc/sources";
   import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
@@ -138,6 +147,71 @@
   // svelte-ignore state_referenced_locally
   void today;
 
+  // ---- PROTOTYPE: favourites and keys, kept in localStorage; the real change is a table each ----
+
+  const KEPT = { favourites: "knobas.prototype.favourites", listKeys: "knobas.prototype.list-keys", actionKeys: "knobas.prototype.action-keys" };
+  function kept<T>(key: string, fallback: T): T {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? (JSON.parse(raw) as T) : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  function keep(key: string, value: unknown) {
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+  /** The favourites, newest first; each an entity row as the board draws one. */
+  let favourites = $state<EntityRow[]>(kept(KEPT.favourites, []));
+  /** A saved list's key: list id → chord, such as `⌘1`. */
+  let listKeys = $state<Record<string, string>>(kept(KEPT.listKeys, {}));
+  /** An action's key, per kind: kind → chord → the action's id in its sheet. */
+  let actionKeys = $state<Record<string, Record<string, string>>>(kept(KEPT.actionKeys, {}));
+
+  /** The chord a key event spells, `⌘⇧O`, or `null` when it is plain typing: a modifier and one letter or digit. */
+  function chordOf(event: KeyboardEvent): string | null {
+    if (!(event.metaKey || event.ctrlKey || event.altKey)) return null;
+    const key = event.code.startsWith("Key") ? event.code.slice(3) : event.code.startsWith("Digit") ? event.code.slice(5) : null;
+    if (!key) return null;
+    return `${event.ctrlKey ? "⌃" : ""}${event.altKey ? "⌥" : ""}${event.shiftKey ? "⇧" : ""}${event.metaKey ? "⌘" : ""}${key}`;
+  }
+  /** The launcher's own chords, never bindable. */
+  const RESERVED = new Set(["⌘K", "⌘S", "⌘B", "⌃K", "⌃S", "⌃B"]);
+
+  function isFavourite(entityId: string): boolean {
+    return favourites.some((row) => row.entity_id === entityId);
+  }
+
+  async function toggleFavourite(row: EntityRow) {
+    favourites = isFavourite(row.entity_id) ? favourites.filter((fav) => fav.entity_id !== row.entity_id) : [row, ...favourites];
+    keep(KEPT.favourites, favourites);
+    sheet = null;
+    push({ text: isFavourite(row.entity_id) ? `${row.title} is a favourite` : `${row.title} is no favourite any more` });
+    await session.loadHome();
+    box?.focus();
+  }
+
+  /** The chord bound to `actionId` on `kind`, or `null`. */
+  function chordFor(kind: string, actionId: string): string | null {
+    return Object.entries(actionKeys[kind] ?? {}).find(([, id]) => id === actionId)?.[0] ?? null;
+  }
+
+  function bindAction(kind: string, actionId: string, chord: string | null) {
+    const forKind = { ...(actionKeys[kind] ?? {}) };
+    for (const [had, id] of Object.entries(forKind)) if (id === actionId) delete forKind[had];
+    if (chord) forKind[chord] = actionId;
+    actionKeys = { ...actionKeys, [kind]: forKind };
+    keep(KEPT.actionKeys, actionKeys);
+  }
+
+  function bindList(listId: string, chord: string | null) {
+    const next = { ...listKeys };
+    for (const [id, had] of Object.entries(next)) if (had === chord || id === listId) delete next[id];
+    if (chord) next[listId] = chord;
+    listKeys = next;
+    keep(KEPT.listKeys, listKeys);
+  }
+
   // ---- PROTOTYPE: the local corpus the backend does not index yet ----------
 
   let views: TicketViewRow[] = [];
@@ -167,7 +241,8 @@
     const home = await realHome();
     lists = home.smart_lists.filter((list) => list.saved);
     listsLoaded = true;
-    return { ...home, smart_lists: [] };
+    const starred = new Set(favourites.map((row) => row.entity_id));
+    return { ...home, smart_lists: [], recent: [...favourites, ...home.recent.filter((row) => !starred.has(row.entity_id))] };
   }
 
   const BLANK = { updated_at: null, state: null, rank: 1, snippet: [] as SearchHit["snippet"] };
@@ -214,7 +289,7 @@
         source_id: "local",
         title: list.label,
         synced_at: at,
-        path: list.needs_attention ? `${list.description} · needs attention` : `${list.description} · ${counted(list.count, "item", "items")}`,
+        path: `${listKeys[list.id] ? `${listKeys[list.id]} · ` : ""}${list.needs_attention ? `${list.description} · needs attention` : `${list.description} · ${counted(list.count, "item", "items")}`}`,
       }));
     return hits.length === 0 ? null : { kind: "list", label: "Saved list", plural: "Saved lists", monogram: "LI", total: hits.length, hits };
   }
@@ -499,8 +574,8 @@
     title: string;
     selected: number;
     relation: number;
-    /** `flow` asks the box for a pick; `rename` for a saved list's new name. */
-    level: "root" | "flow" | "rename";
+    /** `flow` asks the box for a pick; `rename` for a saved list's new name; `bind` waits for the keys of the selected action, `bind-list` for the list's. */
+    level: "root" | "flow" | "rename" | "bind" | "bind-list";
     flow: Flow | null;
     /** What the box holds while the sheet is open: the filter, a pick's filter, or the new name. The search words wait in `session.raw`. */
     filter: string;
@@ -524,6 +599,22 @@
       default:
         return null;
     }
+  }
+
+  /** What an action key is kept under: the entity's kind, or the row's own. */
+  function kindOfRow(row: LauncherRow): string {
+    const entity = entityOf(row);
+    if (entity) return entity.kind;
+    if (row.kind === "hit") return row.group.kind === "docs-search" ? "docs" : row.hit.kind;
+    return row.kind;
+  }
+
+  /** The entity row a hit or a recent line stands for, as the board draws one. */
+  function entityRowOf(row: LauncherRow): EntityRow | null {
+    if (row.kind === "recent") return row.row;
+    if (row.kind !== "hit" || !entityOf(row)) return null;
+    const { entity_id, kind, source_id, title, updated_at, synced_at, path, state } = row.hit;
+    return { entity_id, kind, source_id, title, updated_at, synced_at, path, state };
   }
 
   function nameOf(row: LauncherRow): string {
@@ -700,6 +791,12 @@
           },
         },
         { id: "delete", label: "Delete", detail: "The saved query is gone; there is no undo", run: () => deleteList(id) },
+        {
+          id: "key",
+          label: listKeys[id] ? `Key: ${listKeys[id]}` : "Assign key…",
+          detail: listKeys[id] ? "Press new keys, or Backspace to remove them" : "A chord that opens this list from anywhere",
+          run: () => { if (sheet) sheet = { ...sheet, level: "bind-list", filter: "" }; },
+        },
       ];
     }
     if (row.kind === "hit" && row.hit.kind === "view") {
@@ -838,6 +935,11 @@
         break;
       default:
     }
+    const asRow = entityRowOf(row);
+    if (asRow) {
+      const starred = isFavourite(id);
+      items.push({ id: "fav", label: starred ? "Unfavourite" : "Favourite", detail: starred ? "Leaves the top of the empty box" : "Above the recents in the empty box", run: () => toggleFavourite(asRow) });
+    }
     if (entity.kind === "ticket") items.push({ id: "copy", label: "Copy key", detail: key, run: () => void copy(key, `Copied ${key}`) });
     else items.push({ id: "copy", label: "Copy title", detail: entity.title, run: () => void copy(entity.title, "Copied the title") });
     return items;
@@ -965,6 +1067,16 @@
         // Opens; while open it only gives the box its focus back, wherever a click left it.
         if (!open) open = true;
         else box?.focus();
+        return;
+      }
+      // A saved list's chord opens the launcher on that list, from anywhere; while open the box answers it.
+      if (open) return;
+      const chord = chordOf(event);
+      const list = chord ? Object.entries(listKeys).find(([, had]) => had === chord)?.[0] : undefined;
+      if (list) {
+        event.preventDefault();
+        open = true;
+        void tick().then(() => session.set(`list:${list}`));
       }
     }
     window.addEventListener("keydown", onkeydown);
@@ -1041,20 +1153,117 @@
     onnavigate(hash);
   }
 
-  /** ⌘S: the query becomes a saved list. `true` when the key was taken. */
+  /** ⌘S: the box asks for the list's name, the query prefilled. `true` when the key was taken. */
   function saveKey(event: KeyboardEvent): boolean {
     if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return false;
     event.preventDefault();
-    if (session.canSave && session.savedId === null) {
-      const label = session.raw.trim();
-      void session.saveCurrent(label).then(() => push({ text: `Saved “${label}” as a list` }));
+    if (session.canSave && session.savedId === null && !sheet && !help) {
+      naming = session.raw.trim();
+      void tick().then(() => box?.focus({ select: true }));
     }
     return true;
   }
 
   const listId = $derived(sheet?.row.kind === "hit" && sheet.row.hit.kind === "list" ? keyOf(sheet.row.hit.entity_id) : null);
 
+  /** A list's chord opens it; an action's chord runs it on the selected row. `true` when the keys were a chord that did something. */
+  function chordKey(event: KeyboardEvent): boolean {
+    const chord = chordOf(event);
+    if (!chord || RESERVED.has(chord)) return false;
+    const list = Object.entries(listKeys).find(([, had]) => had === chord)?.[0];
+    if (list) {
+      event.preventDefault();
+      sheet = null;
+      help = null;
+      naming = null;
+      session.set(`list:${list}`);
+      return true;
+    }
+    if (help || naming) return false;
+    const row = sheet?.row ?? session.current;
+    if (!row) return false;
+    const id = actionKeys[kindOfRow(row)]?.[chord];
+    if (!id) return false;
+    const item = itemsFor(row).find((candidate) => candidate.id === id);
+    if (!item) return false;
+    event.preventDefault();
+    // A flow and the link need the sheet under them.
+    if (!sheet || sheet.rowId !== row.id) sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root", flow: null, filter: "" };
+    void item.run();
+    return true;
+  }
+
+  /** Waiting for keys: the next chord binds, Backspace unbinds, Esc leaves it as it was. */
+  function bindKey(event: KeyboardEvent, current: Sheet): void {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      sheet = { ...current, level: "root" };
+      return;
+    }
+    const kind = kindOfRow(current.row);
+    const target = current.level === "bind-list" ? null : shown[current.selected];
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      if (current.level === "bind-list" && listId !== null) {
+        bindList(listId, null);
+        push({ text: "Key removed" });
+      } else if (target) {
+        bindAction(kind, target.id, null);
+        push({ text: `Key removed from ${target.label}` });
+      }
+      sheet = { ...current, level: "root" };
+      if (current.level === "bind-list") session.set(session.raw);
+      return;
+    }
+    const chord = chordOf(event);
+    if (!chord) return;
+    event.preventDefault();
+    if (RESERVED.has(chord)) {
+      push({ text: `${chord} is the launcher's own`, tone: "err" });
+      return;
+    }
+    if (current.level === "bind-list" && listId !== null) {
+      bindList(listId, chord);
+      push({ text: `${chord} opens ${current.title}` });
+      sheet = { ...current, level: "root" };
+      session.set(session.raw);
+      return;
+    }
+    if (target) {
+      bindAction(kind, target.id, chord);
+      push({ text: `${chord} runs ${target.label} on ${kind === "pr" ? "pull requests" : `${kind}s`}` });
+    }
+    sheet = { ...current, level: "root" };
+  }
+
+  /** ⌘S: the box takes the list's name; Enter saves. `null` when not naming. */
+  let naming = $state<string | null>(null);
+
+  function namingKey(event: KeyboardEvent, name: string): void {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const label = name.trim();
+      naming = null;
+      if (label === "") return;
+      void session.saveCurrent(label).then(() => push({ text: `Saved as ${label}` }));
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      naming = null;
+    }
+  }
+
   function sheetKey(event: KeyboardEvent, current: Sheet) {
+    if (current.level === "bind" || current.level === "bind-list") {
+      bindKey(event, current);
+      return;
+    }
+    if (current.level === "root" && chordOf(event) === "⌘B" && shown[current.selected] && !shown[current.selected]?.link) {
+      event.preventDefault();
+      sheet = { ...current, level: "bind" };
+      return;
+    }
     if (current.level === "rename") {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1120,8 +1329,17 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (naming !== null) {
+      namingKey(event, naming);
+      return;
+    }
+    if (sheet?.level === "bind" || sheet?.level === "bind-list") {
+      bindKey(event, sheet);
+      return;
+    }
     if (helpChord(event)) return;
     if (saveKey(event)) return;
+    if (chordKey(event)) return;
     if (help) {
       helpKey(event, help);
       return;
@@ -1160,10 +1378,16 @@
   }
 
   const placeholder = $derived(
-    help
+    naming !== null
+      ? "Name the list"
+      : help
       ? "Pick a filter"
       : sheet
-      ? sheet.level === "rename"
+      ? sheet.level === "bind"
+        ? `Press the keys for ${shown[sheet.selected]?.label ?? "the action"}`
+        : sheet.level === "bind-list"
+          ? "Press the keys that open this list"
+      : sheet.level === "rename"
         ? "The list's new name"
         : sheet.level === "flow"
           ? (step?.title ?? "")
@@ -1189,14 +1413,15 @@
     {#snippet body()}
       <QueryBox
         bind:this={box}
-        value={help ? help.filter : sheet ? sheet.filter : session.raw}
+        value={naming !== null ? naming : help ? help.filter : sheet ? sheet.filter : session.raw}
         {placeholder}
         pending={session.pending}
         footnote=""
         controls={controlled.list}
         active={controlled.option}
         oninput={(value) => {
-          if (help) help = { filter: value, selected: 0 };
+          if (naming !== null) naming = value;
+          else if (help) help = { filter: value, selected: 0 };
           else if (sheet) sheet = { ...sheet, filter: value, selected: 0 };
           else session.type(value);
         }}
@@ -1229,6 +1454,13 @@
         </div>
         {#if sheet.level === "rename"}
           <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
+        {:else if sheet.level === "bind"}
+          <p class="tf-ln-none">
+            Press a modifier and a letter or digit, such as ⌘⇧O. It will run <strong>{shown[sheet.selected]?.label ?? ""}</strong> on any {kindOfRow(sheet.row)} you have selected, without opening the actions.
+            Backspace removes the key, Esc leaves it as it is.
+          </p>
+        {:else if sheet.level === "bind-list"}
+          <p class="tf-ln-none">Press a modifier and a letter or digit, such as ⌘1. It will open this list from anywhere. Backspace removes the key, Esc leaves it as it is.</p>
         {:else}
           <!-- Keys from a clicked chip land here first, so Esc never reaches the dialog; a click gives the box its focus back. -->
           <div id={sheetId} class="sheet" role="listbox" tabindex="-1" aria-label="Actions on {sheet.title}" {onkeydown} onclick={() => box?.focus()}>
@@ -1288,7 +1520,7 @@
                   onmouseenter={() => sheet && (sheet.selected = index)}
                 >
                   <span class="tf-ln-nm">{item.label}</span>
-                  <span class="tf-ln-s">{item.detail}</span>
+                  <span class="tf-ln-s">{item.detail}{#if sheet.level === "root" && chordFor(kindOfRow(sheet.row), item.id)}{" "}<kbd class="bound">{chordFor(kindOfRow(sheet.row), item.id)}</kbd>{/if}</span>
                 </button>
               {/if}
             {/each}
@@ -1343,6 +1575,7 @@
             {#if session.home}
               <BoardNext
                 home={session.home}
+                favourites={favourites.length}
                 sources={health}
                 rows={session.rows}
                 selected={session.selected}
@@ -1396,7 +1629,10 @@
     {/snippet}
 
     {#snippet footer()}
-      {#if help}
+      {#if naming !== null}
+        <span><kbd>↵</kbd> save the list</span>
+        <span><kbd>Esc</kbd> keep searching</span>
+      {:else if help}
         <span><kbd>↑↓</kbd> move</span>
         <span><kbd>↵</kbd> add the filter</span>
         <span><kbd>Esc</kbd> back to the search</span>
@@ -1404,6 +1640,7 @@
         <span><kbd>↑↓</kbd> move</span>
         {#if shown[sheet.selected]?.link}<span><kbd>←→</kbd> relation</span>{/if}
         <span><kbd>↵</kbd> {shown[sheet.selected]?.link ? "link" : sheet.level === "flow" ? "pick" : "do it"}</span>
+        {#if sheet.level === "root" && !shown[sheet.selected]?.link}<span><kbd>⌘B</kbd> bind a key</span>{/if}
         <span><kbd>Esc</kbd> {sheet.level === "root" ? "back to the search" : "back"}</span>
         <span class="tf-spacer"></span>
         <span class="tf-ln-took">{sheet.title}{#if sheet.level === "flow"} · {step?.title ?? ""}{:else} · {counted(shown.length, "action", "actions")}{/if}</span>
@@ -1449,5 +1686,6 @@
   }
   .rel button:hover { border-color: var(--ink-2); color: var(--ink); }
   .rel .pick, .rel .pick:hover { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+  .bound { font-size: var(--t-2xs); padding: 0 4px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink); margin-left: 4px; }
   .keys { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 10px 18px; margin-top: 6px; border-top: 1px solid var(--rule); font-size: var(--t-xs); color: var(--ink-2); }
 </style>
