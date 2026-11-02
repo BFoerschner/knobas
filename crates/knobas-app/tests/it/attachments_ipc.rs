@@ -139,8 +139,14 @@ impl Source for Answers {
 /// a 96 KB screenshot (`50001`) and a 6 MiB one (`50009`) in its list.
 async fn ticket(pool: &sqlx::PgPool) -> (String, String) {
     let source = format!("jr{}", &uuid::Uuid::new_v4().simple().to_string()[..10]);
-    crate::support::source_config(pool, &source, "jira", "Tidewater Jira", &serde_json::json!({}))
-        .await;
+    crate::support::source_config(
+        pool,
+        &source,
+        "jira",
+        "Tidewater Jira",
+        &serde_json::json!({}),
+    )
+    .await;
     let id = format!("{source}:PAY-231");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $1)")
         .bind(&id)
@@ -301,10 +307,16 @@ async fn a_download_lands_under_its_name_and_the_next_one_is_numbered() {
 
     let first = download(fake(Answer::Bytes).0).await.unwrap();
     let second = download(fake(Answer::Bytes).0).await.unwrap();
-    assert_eq!(first, dir.path().join("retry-timeline.png").display().to_string());
+    assert_eq!(
+        first,
+        dir.path().join("retry-timeline.png").display().to_string()
+    );
     assert_eq!(
         second,
-        dir.path().join("retry-timeline (1).png").display().to_string()
+        dir.path()
+            .join("retry-timeline (1).png")
+            .display()
+            .to_string()
     );
     assert_eq!(std::fs::read(&second).unwrap(), BYTES);
 

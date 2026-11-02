@@ -1267,7 +1267,10 @@ async fn an_attachment_read_on_a_failing_jira_is_unreachable_or_unauthorized() {
     jira.set_fault(MockFault::Unauthorized);
     let refused = source.attachment_bytes("jira:PAY-231", &url, 1024).await;
     assert!(
-        matches!(refused, Err(SourceError::Unauthorized { status: Some(401) })),
+        matches!(
+            refused,
+            Err(SourceError::Unauthorized { status: Some(401) })
+        ),
         "{refused:?}"
     );
     jira.assert_no_violations();

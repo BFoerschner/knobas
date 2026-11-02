@@ -168,7 +168,10 @@ pub(crate) async fn jira_guard(
                 ViolationKind::UnknownMethod,
                 "an attachment servlet answers a GET with no query".to_owned(),
             );
-            return jira_error(StatusCode::METHOD_NOT_ALLOWED, format!("{method} {path}?{query}"));
+            return jira_error(
+                StatusCode::METHOD_NOT_ALLOWED,
+                format!("{method} {path}?{query}"),
+            );
         }
         return match credential_and_fault(&state, &authorization(&req), &record).await {
             Some(refused) => refused,
@@ -279,14 +282,18 @@ async fn credential_and_fault(
             ViolationKind::MissingHeader,
             "no Authorization: Bearer/Basic header".to_owned(),
         );
-        return Some(seraph_401("You do not have the permission to see the specified issue."));
+        return Some(seraph_401(
+            "You do not have the permission to see the specified issue.",
+        ));
     }
 
     // 5. The injected fault, if any.
     match state.fault() {
         MockFault::None => {}
         MockFault::Unauthorized => {
-            return Some(seraph_401("You do not have the permission to see the specified issue."));
+            return Some(seraph_401(
+                "You do not have the permission to see the specified issue.",
+            ));
         }
         MockFault::ServerError => {
             return Some(jira_error(

@@ -59,7 +59,9 @@ pub(crate) fn path_on(base_url: &str, url: &str) -> Result<String, SourceError> 
         path.strip_prefix(servlet)
             .is_some_and(|rest| !rest.is_empty())
     }) {
-        return Err(refuse("not under /secure/attachment/ or /secure/thumbnail/"));
+        return Err(refuse(
+            "not under /secure/attachment/ or /secure/thumbnail/",
+        ));
     }
     Ok(path.to_owned())
 }
