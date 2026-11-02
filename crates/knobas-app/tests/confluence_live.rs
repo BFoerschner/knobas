@@ -1012,15 +1012,32 @@ async fn showcase_app(name: &str, env: &Env) -> SourcesState {
 }
 
 /// One showcase page as the Docs reader reads it.
+///
+/// With `KNOBAS_DOCS_SNAPSHOT_DIR` set, the page is also written there as
+/// `<slug>.json`, the very `DocPage` the reader's IPC call would answer: what
+/// the PR's screenshots draw (#2456).
 async fn showcase_page(state: &SourcesState, env: &Env, slug: &str) -> knobas_app::docs::DocPage {
     let page = env.showcase(slug);
-    knobas_app::commands::entity::docs_page_inner(
+    let read = knobas_app::commands::entity::docs_page_inner(
         &state.pool,
         &Registry::for_process(),
         &format!("{CONFLUENCE}:{}", page.id),
     )
     .await
-    .unwrap_or_else(|e| panic!("the reader reads {:?}: {e:?}", page.title))
+    .unwrap_or_else(|e| panic!("the reader reads {:?}: {e:?}", page.title));
+    snapshot(slug, &read);
+    read
+}
+
+/// Write `value` as `<name>.json` under `KNOBAS_DOCS_SNAPSHOT_DIR`, if set.
+fn snapshot(name: &str, value: &impl serde::Serialize) {
+    let Some(dir) = std::env::var_os("KNOBAS_DOCS_SNAPSHOT_DIR") else {
+        return;
+    };
+    let dir = PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).expect("the snapshot directory");
+    let json = serde_json::to_string_pretty(value).expect("the snapshot serialises");
+    std::fs::write(dir.join(format!("{name}.json")), json).expect("the snapshot is written");
 }
 
 /// The markup inside every `html` macro of a showcase file, in order, with the
@@ -1085,8 +1102,8 @@ fn words(blocks: &[knobas_source::docs::DocBlock]) -> String {
 /// ADR-0022, #2456): each mapped macro comes back from the real server's
 /// storage format as its block, a macro the reader does not draw is the named
 /// placeholder, and the declarations around the body -- the space, the parent
-/// chain, the version, the label and a mention of the account -- resolve on
-/// the record the adapter really fetched.
+/// chain, the version, the label and a mention of a person -- resolve on the
+/// record the adapter really fetched.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
 async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
@@ -1116,11 +1133,15 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     let DocBlock::Paragraph { text } = &page.blocks[0] else {
         panic!("the first block is the paragraph: {:#?}", page.blocks)
     };
+    // The seed mentions a second account, never its own: a mention of the
+    // account would sit in its inbox (`atlassian_live`'s mention test).
     assert!(
-        text.iter().any(
-            |i| matches!(i, Inline::Mention { user: Some(u), me: true, .. } if *u == env.user)
-        ),
-        "the mention of the account resolves by key to it, and is mine: {text:?}"
+        text.iter().any(|i| matches!(
+            i,
+            Inline::Mention { user: Some(u), name: Some(n), me: false }
+                if u == MENTIONED && n == "Mentioned Person"
+        )),
+        "the mention resolves by key to the person, who is not me: {text:?}"
     );
     assert!(
         text.iter().any(|i| matches!(i, Inline::PageLink { entity_id: Some(e), .. } if *e == format!("{CONFLUENCE}:{}", design.id))),
@@ -1174,6 +1195,7 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool, &Registry::for_process())
         .await
         .expect("the tree reads");
+    snapshot("tree", &tree);
     let parent_of = |id: &str| {
         tree.spaces
             .iter()

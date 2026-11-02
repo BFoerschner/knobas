@@ -974,8 +974,6 @@ fi  # want jira
 if want confluence; then
 conf GET /rest/api/user/current
 expect "GET /rest/api/user/current as $ADMIN_USER" 200
-ME_KEY=$(printf '%s' "$API_BODY" | jq -r '.userKey // empty')
-[ -n "$ME_KEY" ] || die "GET /rest/api/user/current answered no userKey"
 
 conf GET "/rest/api/space/$SPACE_KEY?expand=homepage"
 if [ "$API_STATUS" = "200" ]; then
@@ -1151,9 +1149,28 @@ fi
 OUTSIDE_HOME=$(printf '%s' "$API_BODY" | jq -r '.homepage.id // empty')
 [ -n "$OUTSIDE_HOME" ] || die "space $OUTSIDE_KEY has no home page"
 
+# The person the showcase mentions: a second account, never the seed's own,
+# whose inbox a mention of it would fill (atlassian_live's mention test reads
+# "the seed mentions nobody"). The same account confluence_live's mention test
+# makes when it is missing (`knobas-mentioned`, #953).
+MENTIONED=knobas-mentioned
+conf GET "/rest/api/user?username=$MENTIONED"
+if [ "$API_STATUS" = "200" ]; then
+  skip "user $MENTIONED"
+else
+  conf POST /rest/api/admin/user "$(jq -n --arg u "$MENTIONED" '{userName: $u, fullName: "Mentioned Person",
+      email: "mentioned@example.com", password: "knobas-mentioned-953", notifyViaEmail: false}')"
+  expect "create user $MENTIONED" 200 201 204
+  created "user $MENTIONED"
+  conf GET "/rest/api/user?username=$MENTIONED"
+  expect "read user $MENTIONED" 200
+fi
+MENTIONED_KEY=$(printf '%s' "$API_BODY" | jq -r '.userKey // empty')
+[ -n "$MENTIONED_KEY" ] || die "user $MENTIONED has no userKey"
+
 showcase_storage() {  # showcase_storage <slug>
   sed -e "s|{{SPACE}}|$SPACE_KEY|g" -e "s|{{OUTSIDE}}|$OUTSIDE_KEY|g" \
-      -e "s|{{ASSETS}}|$ASSETS_URL|g" -e "s|{{ME}}|$ME_KEY|g" "$SHOWCASE_DIR/$1.xml"
+      -e "s|{{ASSETS}}|$ASSETS_URL|g" -e "s|{{MENTIONED}}|$MENTIONED_KEY|g" "$SHOWCASE_DIR/$1.xml"
 }
 
 SHOWCASE='[]'
