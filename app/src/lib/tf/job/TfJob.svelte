@@ -83,6 +83,7 @@
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
   import TfJobAttachments from "./TfJobAttachments.svelte";
+  import { createAttachmentPreviews } from "./attachment-previews.svelte";
   import { cardSections } from "./card-sections";
   import { cardWidth } from "./card-width.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -145,6 +146,25 @@
   // Built once per mount over the ports this page was given: the reader owns the token.
   const reader = createJobReader(ports, { registry: { load: () => registry.load() } });
   const detail = $derived(reader.detail);
+  /**
+   * The attachments' previews (#2405): one object per ticket and list, made
+   * when the page has read its ticket and dropped when it reads another list
+   * or closes, so nothing outlives the page. The panel and the description's
+   * inline images both read it.
+   */
+  const previewsKey = $derived(
+    detail == null ? "" : [detail.row.entity_id, ...(detail.attachments ?? []).map((file) => `${file.id} ${file.content_url} ${file.size ?? ""}`)].join("\n"),
+  );
+  const previews = $derived.by(() => {
+    if (previewsKey === "") return null;
+    return untrack(() =>
+      detail == null ? null : createAttachmentPreviews({ entityId: detail.row.entity_id, files: detail.attachments ?? [], source: detail.source.display_name }),
+    );
+  });
+  $effect(() => {
+    const held = previews;
+    return () => held?.drop();
+  });
   const failure = $derived(reader.failure);
   const thread = $derived(reader.thread);
   const threadFailure = $derived(reader.threadFailure);
@@ -154,12 +174,16 @@
   const inherited = $derived(reader.inherited);
   const sources = $derived(reader.sources);
   const repos = $derived(reader.repos);
-  /** The description's inline images (#2406): the ticket's attachments, read through the page's seam. */
-  const inlineImages = $derived(
-    detail == null
-      ? null
-      : ticketImages(detail.row.entity_id, detail.attachments ?? [], detail.source.display_name, detail.web_url ?? null),
-  );
+  /**
+   * The description's inline images (#2406): the ticket's attachments, read
+   * through the page's previews (#2405). Made again on *Try again*, so the
+   * description draws again and a placeholder asks once more.
+   */
+  const inlineImages = $derived.by(() => {
+    if (detail == null || previews === null) return null;
+    void previews.attempt;
+    return ticketImages(previews, detail.source.display_name, detail.web_url ?? null);
+  });
   /** The ticket's *Refresh* or *Sync now* (#2134). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
@@ -543,8 +567,8 @@
               {/if}
             </div>
           </section>
-          {#if detail.attachments !== undefined && detail.attachments.length > 0}
-            <TfJobAttachments files={detail.attachments} />
+          {#if previews !== null && previews.files.length > 0}
+            <TfJobAttachments {previews} />
           {/if}
           <section aria-labelledby="tf-tktalk">
             <header><h2 id="tf-tktalk">Conversation</h2></header>

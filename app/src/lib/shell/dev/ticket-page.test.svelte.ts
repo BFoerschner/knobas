@@ -9,12 +9,11 @@
  * (`house-rules.test.ts`).
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test } from "vitest";
 
 import App from "../../../App.svelte";
 import { chosenJob } from "../../tf/job/chosen.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
-import { fakeAttachmentImages } from "./fake-attachment-images";
 import { until } from "../test-wait";
 
 /** Every command the app sent, in order, with its arguments. */
@@ -728,45 +727,59 @@ test("OPS-77 has no attachments and draws no Attachments section", async () => {
 
 // ---- the description's inline images and task boxes (#2406) ----
 
-test("PAY-231's description draws its inline screenshot where the wiki put it, and its checklist as task boxes", async () => {
-  const undo = fakeAttachmentImages("reachable");
-  try {
-    await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
-    await pageOf("PAY-231");
-    const desc = () => reading()?.querySelector(".tf-tkdesc .tf-md");
-    await until(() => desc()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline image never drew");
-    const img = desc()!.querySelector("img.tf-md-att")!;
-    expect(img.getAttribute("alt")).toBe("psp-409-trace.png");
-    const blocks = [...desc()!.children];
-    expect(blocks.findIndex((block) => block.contains(img)), "after the first paragraph, before the list").toBe(1);
-    expect(desc()!.textContent).not.toContain("!psp-409-trace.png");
-    const tasks = [...desc()!.querySelectorAll("li.tf-task")].map((item) => [item.querySelector(".tf-box")?.getAttribute("aria-label"), item.textContent?.trim()]);
-    expect(tasks).toEqual([
-      ["Done", "Retry only the transient codes (AC04 is final)"],
-      ["Not done", "Cap the retry budget"],
-    ]);
-  } finally {
-    undo();
+/**
+ * An observer that sees every node it is given (#2405): the suite's own never
+ * reports an intersection (`test-setup.ts`), and the page fetches an inline
+ * image only once it is in view. Answers the undo.
+ */
+function seeEverything(): () => void {
+  const held = globalThis.IntersectionObserver;
+  class Seeing {
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+    observe(target: Element): void {
+      queueMicrotask(() => this.callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): [] {
+      return [];
+    }
   }
+  Object.defineProperty(globalThis, "IntersectionObserver", { writable: true, configurable: true, value: Seeing });
+  return () => Object.defineProperty(globalThis, "IntersectionObserver", { writable: true, configurable: true, value: held });
+}
+
+test("PAY-231's description draws its inline screenshot where the wiki put it, and its checklist as task boxes", async () => {
+  onTestFinished(seeEverything());
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  const desc = () => reading()?.querySelector(".tf-tkdesc .tf-md");
+  await until(() => desc()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline image never drew");
+  const img = desc()!.querySelector("img.tf-md-att")!;
+  expect(img.getAttribute("alt")).toBe("psp-409-trace.png");
+  const blocks = [...desc()!.children];
+  expect(blocks.findIndex((block) => block.contains(img)), "after the first paragraph, before the list").toBe(1);
+  expect(desc()!.textContent).not.toContain("!psp-409-trace.png");
+  const tasks = [...desc()!.querySelectorAll("li.tf-task")].map((item) => [item.querySelector(".tf-box")?.getAttribute("aria-label"), item.textContent?.trim()]);
+  expect(tasks).toEqual([
+    ["Done", "Retry only the transient codes (AC04 is final)"],
+    ["Not done", "Cap the retry budget"],
+  ]);
 });
 
 test("with the fake's attachment read failing, PAY-231's inline screenshot is the placeholder with a link to the ticket in the source", async () => {
+  onTestFinished(seeEverything());
   sent = [];
-  installFakeTauri(recorded({ ...withTicketSearch(demoHandlers()), "plugin:opener|open_url": () => null }));
-  const undo = fakeAttachmentImages("unreachable");
-  try {
-    await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
-    await pageOf("PAY-231");
-    const missing = () => reading()?.querySelector<HTMLElement>(".tf-tkdesc .tf-md-noimg");
-    await until(() => missing() != null, "the placeholder never drew");
-    expect(reading()!.querySelector(".tf-tkdesc img")).toBeNull();
-    expect(missing()!.textContent).toMatch(/^psp-409-trace\.png, not reachable in .+ right now\. Open in /);
-    const link = missing()!.querySelector<HTMLAnchorElement>("a.tf-ext")!;
-    expect(link.getAttribute("href")).toBe("http://127.0.0.1:5399/browse/PAY-231");
-    link.click();
-    await until(() => sent.some((call) => call.cmd === "plugin:opener|open_url"), "the link never reached the opener");
-    expect(sent.find((call) => call.cmd === "plugin:opener|open_url")!.args["url"]).toBe("http://127.0.0.1:5399/browse/PAY-231");
-  } finally {
-    undo();
-  }
+  installFakeTauri(recorded({ ...withTicketSearch(demoHandlers(new URLSearchParams("fake-attachments=unreachable"))), "plugin:opener|open_url": () => null }));
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  await pageOf("PAY-231");
+  const missing = () => reading()?.querySelector<HTMLElement>(".tf-tkdesc .tf-md-noimg");
+  await until(() => missing() != null, "the placeholder never drew");
+  expect(reading()!.querySelector(".tf-tkdesc img")).toBeNull();
+  expect(missing()!.textContent).toMatch(/^psp-409-trace\.png, not reachable in .+ right now\. Open in /);
+  const link = missing()!.querySelector<HTMLAnchorElement>("a.tf-ext")!;
+  expect(link.getAttribute("href")).toBe("http://127.0.0.1:5399/browse/PAY-231");
+  link.click();
+  await until(() => sent.some((call) => call.cmd === "plugin:opener|open_url"), "the link never reached the opener");
+  expect(sent.find((call) => call.cmd === "plugin:opener|open_url")!.args["url"]).toBe("http://127.0.0.1:5399/browse/PAY-231");
 });

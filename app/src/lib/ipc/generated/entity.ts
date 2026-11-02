@@ -160,6 +160,22 @@ content_url: string,
 thumbnail_url: string | null, };
 
 /**
+ * What [`attachment_bytes`] answers: the file's media type and its bytes in
+ * base64, which the shell draws as a `data:` image (the webview loads
+ * nothing from the source itself).
+ */
+export type AttachmentBytes = { 
+/**
+ * The media type the mirror's list gives the file, else
+ * `application/octet-stream`.
+ */
+mime: string, 
+/**
+ * The whole file, base64 (standard alphabet, padded).
+ */
+data: string, };
+
+/**
  * Which of the Code tile's groups a row is drawn under (#712): what needs
  * me first. Under [`EntityOrder::Attention`], in this order.
  *

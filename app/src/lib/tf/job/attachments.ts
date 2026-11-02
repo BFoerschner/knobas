@@ -1,7 +1,7 @@
 /**
  * What the ticket page's Attachments section says about one file (#2404):
- * its kind, drawn in mono where an image will later draw its preview
- * (#2405), and its line of who, when and how big. The list is the mirror's
+ * its kind, drawn in mono where a file has no preview (#2405), and its line
+ * of who, when and how big. The list is the mirror's
  * (`EntityDetail.attachments`); nothing here reads the bytes.
  */
 import type { Attachment } from "../../ipc/entity";

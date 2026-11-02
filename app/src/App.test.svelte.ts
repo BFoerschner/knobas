@@ -149,6 +149,9 @@ vi.mock("./lib/ipc/entity", () => ({
   // Its pull request worktrees (#2285): none.
   pullRequestWorktrees: () => Promise.resolve([]),
   removePullRequestWorktree: () => Promise.reject(new Error("no worktree is removed in this test")),
+  // The ticket page's attachment previews and download (#2405): nothing fetched here.
+  attachmentBytes: () => Promise.reject(new Error("no attachment is read in this test")),
+  downloadAttachment: () => Promise.reject(new Error("no attachment is downloaded in this test")),
   captureShortcut: () =>
     Promise.resolve({ accelerator: null, refusal: null, shown: noteShownHere, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),

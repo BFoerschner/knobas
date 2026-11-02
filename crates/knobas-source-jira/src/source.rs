@@ -461,6 +461,36 @@ impl Source for JiraSource {
     ) -> Result<Option<knobas_source::query::Translation>, SourceError> {
         Ok(Some(crate::translate::translate_view(view)))
     }
+
+    /// One attachment's bytes up to `cap` (#2405, [`crate::attachments`]):
+    /// an issue of this instance, and an address among its attachments.
+    async fn attachment_bytes(
+        &self,
+        entity: &str,
+        url: &str,
+        cap: u64,
+    ) -> Result<Option<knobas_source::view::FileBytes>, SourceError> {
+        self.issue_key(entity)?;
+        let path = crate::attachments::path_on(&self.base_url, url)?;
+        crate::attachments::bytes(&self.http, &path, cap)
+            .await
+            .map(Some)
+    }
+
+    /// One attachment streamed into `sink` (#2405), checked as
+    /// [`Self::attachment_bytes`] checks it.
+    async fn download_attachment(
+        &self,
+        entity: &str,
+        url: &str,
+        name: &str,
+        sink: &mut dyn knobas_source::run::DownloadSink,
+    ) -> Result<bool, SourceError> {
+        self.issue_key(entity)?;
+        let path = crate::attachments::path_on(&self.base_url, url)?;
+        crate::attachments::download(&self.http, &path, name, sink).await?;
+        Ok(true)
+    }
 }
 
 /// Jira's key grammar: a project key (`[A-Z][A-Z0-9_]*`), a hyphen, then

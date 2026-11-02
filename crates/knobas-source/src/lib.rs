@@ -2317,6 +2317,44 @@ pub trait Source: Send + Sync {
         let _ = (entity, target, sink);
         Ok(false)
     }
+    /// The bytes of one attachment of `entity`, read whole up to `cap` bytes
+    /// with the stored credential (spec #2396, #2405): the ticket page's
+    /// preview of a screenshot. `url` is the attachment's content address as
+    /// this adapter emitted it into the mirror (`Attachment::content_url`);
+    /// the app hands back only an address the mirror lists, and the adapter
+    /// refuses with [`SourceError::Protocol`] one that is not on its own
+    /// instance, so the credential never travels to another host.
+    ///
+    /// A file longer than `cap` is [`FileBytes::TooLarge`](view::FileBytes::TooLarge)
+    /// with its size; the adapter stops reading past the cap and never answers
+    /// a cut file.
+    ///
+    /// `Ok(None)` is **this adapter reads no attachments**, and is the
+    /// default.
+    async fn attachment_bytes(
+        &self,
+        entity: &str,
+        url: &str,
+        cap: u64,
+    ) -> Result<Option<view::FileBytes>, SourceError> {
+        let _ = (entity, url, cap);
+        Ok(None)
+    }
+    /// Stream one attachment of `entity` into `sink` with the stored
+    /// credential (spec #2396, #2405), suggesting `name` as the file's name.
+    /// `url` as for [`attachment_bytes`](Source::attachment_bytes), and
+    /// refused the same way. `Ok(false)` is **this adapter reads no
+    /// attachments**, and is the default.
+    async fn download_attachment(
+        &self,
+        entity: &str,
+        url: &str,
+        name: &str,
+        sink: &mut dyn run::DownloadSink,
+    ) -> Result<bool, SourceError> {
+        let _ = (entity, url, name, sink);
+        Ok(false)
+    }
 }
 
 /// Where a syncing adapter hands its items. Implemented by the sync engine;

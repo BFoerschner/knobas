@@ -83,8 +83,10 @@
    */
   function drawAttachments(node: HTMLElement, read: AttachmentImages) {
     let live = true;
+    const watches: (() => void)[] = [];
     for (const img of node.querySelectorAll<HTMLImageElement>("img[data-md-attachment]")) {
       const id = img.dataset["mdAttachment"] ?? "";
+      if (read.watch) watches.push(read.watch(img, id));
       const fail = (error: unknown) => {
         if (!live) return;
         const said = read.missing(img.alt, error);
@@ -110,6 +112,7 @@
     }
     return () => {
       live = false;
+      for (const stop of watches) stop();
     };
   }
 

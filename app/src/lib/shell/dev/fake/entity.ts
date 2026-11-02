@@ -6,7 +6,6 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
-import { fakeAttachmentImages } from "../fake-attachment-images";
 import { CORPUS, fakeEpicEntry, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
@@ -197,11 +196,6 @@ function refreshesKind(adapterKind: string, kind: string): boolean {
 }
 
 let bridge: FakeBridge | null = null;
-
-/** The description's inline images (#2406): drawn, or failing with `?fake-attachments=unreachable`. */
-export function seed(params: URLSearchParams): void {
-  fakeAttachmentImages(params.get("fake-attachments") === "unreachable" ? "unreachable" : "reachable");
-}
 
 /** Hold the bridge, so a refresh can end on `item:refreshed` (#2107). */
 export function attach(installed: FakeBridge): void {

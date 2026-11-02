@@ -42,6 +42,12 @@ import { D2, GRAPHVIZ, MERMAID, renderersForFence } from "./registry";
  * `missing` says what a refused one draws instead, by its name.
  */
 export interface AttachmentImages {
+  /**
+   * Where the surface fetches an image only once it is in view (#2405): asked
+   * for each image before `load`, and answers how to stop watching. Without
+   * it, `load` asks at once.
+   */
+  watch?(node: Element, id: string): () => void;
   load(id: string): Promise<string>;
   missing(name: string, error: unknown): { text: string; link: { href: string; label: string } | null };
 }

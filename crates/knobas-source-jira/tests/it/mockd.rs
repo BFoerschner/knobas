@@ -1127,3 +1127,151 @@ async fn an_incremental_run_delivers_the_widened_payload_for_what_it_returns() {
     assert_eq!(sink.0[0].payload["fields"]["parent"]["key"], "PAY-200");
     jira.assert_no_violations();
 }
+
+// -- the attachment bytes (#2405) --------------------------------------------
+
+/// What an attachment's bytes are recorded into for a download: the name the
+/// adapter suggested and every byte, in order.
+#[derive(Default)]
+struct Kept {
+    name: Option<String>,
+    bytes: Vec<u8>,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::run::DownloadSink for Kept {
+    async fn start(&mut self, file_name: &str) -> Result<(), SourceError> {
+        self.name = Some(file_name.to_owned());
+        Ok(())
+    }
+    async fn write(&mut self, bytes: &[u8]) -> Result<(), SourceError> {
+        self.bytes.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+/// PAY-231's second screenshot's content address on `jira`, as the sync
+/// emitted it into the payload.
+fn timeline_url(jira: &MockServer) -> String {
+    format!(
+        "{}/secure/attachment/50001/retry-timeline.png",
+        jira.base_url().trim_end_matches('/')
+    )
+}
+
+/// **An attachment's bytes through the credential** (#2405): the preview's
+/// read answers the whole file, a PNG of the size the list declares, and
+/// stops at a cap smaller than the file with the file's size rather than a
+/// cut file. The app asks with 5 MiB (`ATTACHMENT_CAP`); a smaller cap here
+/// holds the refusal without a fixture file over 5 MiB.
+#[tokio::test]
+async fn an_attachments_bytes_come_through_the_credential_and_stop_at_the_cap() {
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let url = timeline_url(&jira);
+
+    let read = source
+        .attachment_bytes("jira:PAY-231", &url, ATTACHMENT_CAP)
+        .await
+        .unwrap()
+        .expect("Jira reads attachments");
+    let FileBytes::Read(bytes) = read else {
+        panic!("a 96 KB file is under 5 MiB: {read:?}")
+    };
+    assert_eq!(bytes.len(), 98_304);
+    assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"), "{:?}", &bytes[..8]);
+
+    let capped = source
+        .attachment_bytes("jira:PAY-231", &url, 64 * 1024)
+        .await
+        .unwrap();
+    assert_eq!(capped, Some(FileBytes::TooLarge { size: 98_304 }));
+    // The size is the one Jira announces, believed before a byte is read: a
+    // read cut at 1 KiB of a 182 KB file could not know it.
+    let trace = timeline_url(&jira).replace("50001/retry-timeline", "50000/psp-409-trace");
+    let announced = source
+        .attachment_bytes("jira:PAY-231", &trace, 1024)
+        .await
+        .unwrap();
+    assert_eq!(announced, Some(FileBytes::TooLarge { size: 186_368 }));
+
+    jira.assert_no_violations();
+}
+
+/// **The download** (#2405): the same file streamed into a sink under the
+/// name the mirror lists, every byte of it. The app's sink numbers the file
+/// in the Downloads folder (`crates/knobas-app/tests/it/attachments_ipc.rs`).
+#[tokio::test]
+async fn an_attachment_downloads_whole_under_its_listed_name() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut kept = Kept::default();
+    let streamed = source
+        .download_attachment(
+            "jira:PAY-231",
+            &timeline_url(&jira),
+            "retry-timeline.png",
+            &mut kept,
+        )
+        .await
+        .unwrap();
+    assert!(streamed, "Jira downloads attachments");
+    assert_eq!(kept.name.as_deref(), Some("retry-timeline.png"));
+    assert_eq!(kept.bytes.len(), 98_304);
+    assert!(kept.bytes.starts_with(b"\x89PNG"));
+    jira.assert_no_violations();
+}
+
+/// **The credential never leaves the instance** (#2405): an address on
+/// another host, or one on this host outside its attachments, is refused
+/// before anything is sent.
+#[tokio::test]
+async fn an_attachment_address_off_the_instance_is_refused_unsent() {
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let base = jira.base_url();
+    let base = base.trim_end_matches('/');
+    for url in [
+        "https://elsewhere.example/secure/attachment/50001/retry-timeline.png".to_owned(),
+        format!("{base}.evil.example/secure/attachment/50001/x.png"),
+        format!("{base}/rest/api/2/myself"),
+        format!("{base}/secure/attachment/../../rest/api/2/myself"),
+    ] {
+        let read = source.attachment_bytes("jira:PAY-231", &url, 1024).await;
+        assert!(
+            matches!(read, Err(SourceError::Protocol { status: None, .. })),
+            "{url}: {read:?}"
+        );
+    }
+    jira.assert_no_violations();
+}
+
+/// **Unreachable and refused** (#2405): a Jira that does not answer is
+/// `Unreachable` (the page's stale strip), and one that refuses the
+/// credential is `Unauthorized` with its status.
+#[tokio::test]
+async fn an_attachment_read_on_a_failing_jira_is_unreachable_or_unauthorized() {
+    let jira = spawn_mock_jira().await;
+    let source = source(
+        &jira.base_url(),
+        serde_json::json!({ "request_timeout_secs": 1 }),
+    );
+    let url = timeline_url(&jira);
+    jira.set_fault(MockFault::Timeout {
+        hang_ms: HANG_FOR_GOOD_MS,
+    });
+    let hung = within_the_guard(source.attachment_bytes("jira:PAY-231", &url, 1024)).await;
+    assert!(matches!(hung, Err(SourceError::Unreachable(_))), "{hung:?}");
+
+    jira.set_fault(MockFault::Unauthorized);
+    let refused = source.attachment_bytes("jira:PAY-231", &url, 1024).await;
+    assert!(
+        matches!(
+            refused,
+            Err(SourceError::Unauthorized { status: Some(401) })
+        ),
+        "{refused:?}"
+    );
+    jira.assert_no_violations();
+}

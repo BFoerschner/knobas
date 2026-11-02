@@ -563,7 +563,7 @@ pub async fn entity_file_piped_inner(
 }
 
 /// `size` bytes in MiB, to one place where it is not whole.
-fn mebibytes(size: u64) -> String {
+pub(super) fn mebibytes(size: u64) -> String {
     #[allow(clippy::cast_precision_loss)]
     let mib = size as f64 / (1024.0 * 1024.0);
     if mib.fract() == 0.0 {
