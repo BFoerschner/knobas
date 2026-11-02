@@ -225,8 +225,8 @@ export function sheetActions(subject: SheetSubject, ctx: SheetContext): SheetAct
         { id: "copy", label: "Copy address", detail: hash, does: { kind: "copy", text: hash, said: `Copied the address of ${subject.title}` } },
       ];
     }
-    case "set":
-      return [
+    case "set": {
+      const actions: SheetAction[] = [
         {
           id: "open",
           label: "Open",
@@ -234,6 +234,10 @@ export function sheetActions(subject: SheetSubject, ctx: SheetContext): SheetAct
           does: { kind: "go", hash: entityAddress("set", subject.id, subject.title) },
         },
       ];
+      const show = showOnJob(subject.id, ctx);
+      if (show) actions.push(show);
+      return actions;
+    }
     case "inbox":
       return inboxActions(subject.item, subject.ops, ctx.now ?? new Date());
     case "entity":
@@ -367,6 +371,25 @@ function setAction(subject: Extract<SheetSubject, { kind: "entity" }>, sets: rea
         return { kind: "save-set", draft, said: `Added ${title} to ${set.name}` };
       },
     },
+  };
+}
+
+/**
+ * *Show on ⟨job⟩* on a set (story 38): the set re-saved with one manual rule
+ * on the chosen job's ticket (`withHandRule`, as *Show a set on ⟨key⟩…* on
+ * the ticket does). No job chosen, or the set not among the sets read yet,
+ * no row.
+ */
+function showOnJob(setId: string, ctx: SheetContext): SheetAction | null {
+  const set = ctx.sets?.find((candidate) => candidate.id === setId);
+  const job = ctx.job;
+  if (!set || job === null) return null;
+  const held = set.rules.some((rule) => rule.kind === "manual" && rule.value === job.entityId);
+  return {
+    id: "show",
+    label: `Show on ${job.label}`,
+    detail: "The set's members appear on the job's ticket",
+    does: { kind: "save-set", draft: held ? draftOf(set) : withHandRule(set, job.entityId), said: `${set.name} now shows on ${job.label}` },
   };
 }
 

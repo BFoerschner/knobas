@@ -207,3 +207,21 @@ test("Favourite on an entity and a saved list, Unfavourite on one that is a favo
   expect(ids({ kind: "set", id: "payments", title: "Payments" })).not.toContain("fav");
   expect(ids({ kind: "inbox", item: LINE, ops: [] })).not.toContain("fav");
 });
+
+test("a set: Open, then Show on the chosen job, which shows the set on the job's ticket by a manual rule (story 38)", () => {
+  const ctx = { ...CTX, sets: [SET] };
+  const set = { kind: "set", id: "payments", title: "Payments" } as const;
+  const actions = sheetActions(set, ctx);
+  expect(actions.map((a) => a.id)).toEqual(["open", "show"]);
+  expect(actions[1]).toMatchObject({
+    label: "Show on PAY-999",
+    does: { kind: "save-set", said: "Payments now shows on PAY-999", draft: { rules: [{ kind: "manual", value: "jira:PAY-231" }, { kind: "manual", value: "jira:PAY-999" }] } },
+  });
+  // Already shown there: saved as it is, no second rule.
+  const held = sheetActions(set, { ...ctx, job: { entityId: "jira:PAY-231", label: "PAY-231" } })[1]!;
+  expect(held.does).toMatchObject({ kind: "save-set", draft: { rules: [{ kind: "manual", value: "jira:PAY-231" }] } });
+  if (held.does.kind === "save-set") expect(held.does.draft.rules).toHaveLength(1);
+  // No job chosen, or the set not read yet: Open alone.
+  expect(ids(set, { ...ctx, job: null })).toEqual(["open"]);
+  expect(ids(set, CTX)).toEqual(["open"]);
+});

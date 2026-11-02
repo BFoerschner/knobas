@@ -772,6 +772,26 @@ test("Show a set on a ticket picks a set and adds one manual rule for the ticket
   expect(lastToast()).toBe("Ops now shows on PAY-231");
 });
 
+test("a set: Show on the job adds one manual rule for the job's ticket (story 38)", async () => {
+  const calls = mountIt();
+  calls.linkSets.mockImplementation(async () => SETS);
+  await settle();
+  await sheetOn("set");
+  expect(labels()).toEqual(["Open", "Show on PAY-999"]);
+  narrow("show");
+  press("Enter");
+  await settle();
+  expect(calls.saveLinkSet).toHaveBeenCalledTimes(1);
+  expect(calls.saveLinkSet.mock.calls[0]![0]).toMatchObject({
+    id: "payments",
+    rules: [
+      { kind: "manual", value: "jira:PAY-100" },
+      { kind: "manual", value: "jira:PAY-999" },
+    ],
+  });
+  expect(lastToast()).toBe("Payments now shows on PAY-999");
+});
+
 test("no link sets, no set row; a kind a set cannot hold has none either", async () => {
   const calls = mountIt();
   await settle();
