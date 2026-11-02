@@ -1,5 +1,5 @@
 use super::*;
-use crate::docs::{DocBlock, Inline, TableCell};
+use crate::docs::{DocBlock, Inline, ListItem, TableCell};
 
 fn plain(html: &str) -> Vec<DocBlock> {
     to_blocks(html, &Plain)
@@ -58,14 +58,17 @@ fn nested_lists_and_wrappers_keep_their_nesting() {
         vec![DocBlock::List {
             ordered: false,
             items: vec![
-                vec![
+                ListItem::new(vec![
                     para("Build"),
                     DocBlock::List {
                         ordered: true,
-                        items: vec![vec![para("unit")], vec![para("live")]]
+                        items: vec![
+                            ListItem::new(vec![para("unit")]),
+                            ListItem::new(vec![para("live")])
+                        ]
                     }
-                ],
-                vec![para("Ship")],
+                ]),
+                ListItem::new(vec![para("Ship")]),
             ]
         }]
     );
@@ -223,7 +226,7 @@ fn the_hook_answers_blocks_inlines_or_unwraps() {
                 title: Some("Heads up".into()),
                 blocks: vec![DocBlock::List {
                     ordered: false,
-                    items: vec![vec![para("one")]]
+                    items: vec![ListItem::new(vec![para("one")])]
                 }]
             },
         ]

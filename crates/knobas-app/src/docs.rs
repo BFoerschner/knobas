@@ -1547,7 +1547,7 @@ pub async fn created_page(pool: &PgPool, write_id: i64) -> Result<Option<String>
 #[cfg(test)]
 mod markdown_golden {
     use super::*;
-    use knobas_source::docs::{PanelKind, TableCell};
+    use knobas_source::docs::{ListItem, PanelKind, TableCell};
 
     fn text(words: &str) -> Vec<Inline> {
         vec![Inline::text(words)]
@@ -1646,15 +1646,18 @@ mod markdown_golden {
             DocBlock::List {
                 ordered: false,
                 items: vec![
-                    vec![para("one")],
-                    vec![
+                    ListItem::new(vec![para("one")]),
+                    ListItem::new(vec![
                         para("two"),
                         DocBlock::List {
                             ordered: true,
-                            items: vec![vec![para("a")], vec![para("b")]],
+                            items: vec![
+                                ListItem::new(vec![para("a")]),
+                                ListItem::new(vec![para("b")]),
+                            ],
                         },
                         panel(PanelKind::Tip, None, vec![para("inside")]),
-                    ],
+                    ]),
                 ],
             },
             DocBlock::Code {

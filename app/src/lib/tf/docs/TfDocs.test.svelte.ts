@@ -329,6 +329,36 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   expect(doc.querySelector("h2#s-1 a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
 });
 
+test("a task list draws each item's state, nested too, beside an ordinary list, and nothing in it ticks a task (spec #2432, story 23)", async () => {
+  const para = (t: string) => ({ type: "paragraph" as const, text: [text(t)] });
+  const blocks: DocPage["blocks"] = [
+    {
+      type: "list",
+      ordered: false,
+      items: [
+        { checked: true, blocks: [para("Drain the queue")] },
+        {
+          checked: false,
+          blocks: [para("Restart the worker"), { type: "list", ordered: false, items: [{ checked: true, blocks: [para("eu-1")] }] }],
+        },
+      ],
+    },
+    { type: "list", ordered: false, items: [{ checked: null, blocks: [para("Notes")] }] },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const doc = target.querySelector(".tf-doc")!;
+  const items = [...doc.querySelectorAll("li")];
+  const state = (li: Element) => li.querySelector(":scope > .tf-box")?.getAttribute("aria-label") ?? null;
+  expect(items.map((li) => [li.querySelector("p")?.textContent, state(li)])).toEqual([
+    ["Drain the queue", "Done"],
+    ["Restart the worker", "Not done"],
+    ["eu-1", "Done"],
+    ["Notes", null],
+  ]);
+  expect(items.map((li) => li.querySelector(":scope > .tf-box")?.classList.contains("tf-on") ?? null)).toEqual([true, false, true, null]);
+  expect(doc.querySelectorAll("li input, li button, li [tabindex]"), "a task's box is drawn, never a control").toHaveLength(0);
+});
+
 test("Copy copies the code, and the placeholder and Open in Confluence open the page", async () => {
   const io = await draw(["confluence:2"]);
   const copy = [...target.querySelectorAll("button")].find((b) => b.textContent === "Copy")!;

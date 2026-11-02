@@ -13,6 +13,7 @@
 //! | `h1` to `h6` | heading |
 //! | `p`, loose text | paragraph |
 //! | `ul`, `ol` (nested too) | list |
+//! | `ac:task-list` (nested too) | list, each item checked or not |
 //! | `table` with `th` / `td` | table |
 //! | `pre`, the `code` and `noformat` macros | code, with the macro's `language` |
 //! | the `info`, `note`, `warning`, `tip` and `panel` macros | panel |
@@ -21,7 +22,7 @@
 //! | `ac:link` to `ri:page` | a page link (inline) |
 //! | `a href` | a link (inline) |
 //! | `strong`/`b`, `em`/`i`, `code` | text marks |
-//! | **any other macro, `ac:image`, `ac:task-list`** | placeholder, named |
+//! | **any other macro, `ac:image`** | placeholder, named |
 //!
 //! `div`, `section`, `span`, `blockquote`, `thead`, `tbody` and Confluence's
 //! layout elements are transparent: their children are read in their place.
@@ -40,7 +41,7 @@ use std::collections::HashMap;
 
 use knobas_source::docs::{
     DocBlock, DocComment, DocContent, DocSection, DocVersion, EditRefused, EmbedContent, Inline,
-    PanelKind, SectionEdit, SectionRefusal,
+    ListItem, PanelKind, SectionEdit, SectionRefusal,
 };
 use serde_json::Value;
 
@@ -191,6 +192,10 @@ fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
         {
             Some(SectionRefusal::Code)
         }
+        // The editor's text has no checkbox (spec #2432). A task's own
+        // parts are the list's, not macros; what its body holds still counts.
+        "ac:task-list" => Some(SectionRefusal::Formatting),
+        "ac:task" | "ac:task-id" | "ac:task-uuid" | "ac:task-status" | "ac:task-body" => None,
         n if n.starts_with("ac:") || n.starts_with("ri:") => Some(SectionRefusal::Macro),
         // A numbered list would come back bulleted: the editor's text has
         // only `- ` items, and `from_plain` writes them as `<ul>`.
@@ -618,7 +623,7 @@ impl Hook for Storage<'_> {
         match node.name().unwrap_or_default() {
             "ac:structured-macro" | "ac:macro" => r#macro(node, reading),
             "ac:image" => Hooked::Blocks(vec![placeholder("image")]),
-            "ac:task-list" => Hooked::Blocks(vec![placeholder("task list")]),
+            "ac:task-list" => Hooked::Blocks(vec![task_list(node, reading)]),
             "ac:layout" | "ac:layout-section" | "ac:layout-cell" | "ac:rich-text-body" => {
                 Hooked::Blocks(reading.blocks(node.children()))
             }
@@ -635,6 +640,47 @@ impl Hook for Storage<'_> {
             // as what it holds.
             _ => Hooked::Unwrap,
         }
+    }
+}
+
+/// `ac:task-list`: a list whose items carry their checked state (spec
+/// #2432). A nested task list may sit in a task's body, in the task beside
+/// its body, or after the task in the outer list; each lands inside the task
+/// it belongs to.
+fn task_list(node: &Node, reading: &Reading<'_>) -> DocBlock {
+    let mut items: Vec<ListItem> = Vec::new();
+    for child in node.children() {
+        match child.name() {
+            Some("ac:task") => {
+                let done = child
+                    .child("ac:task-status")
+                    .is_some_and(|s| s.text().trim().eq_ignore_ascii_case("complete"));
+                let mut blocks = child
+                    .child("ac:task-body")
+                    .map(|body| reading.blocks(body.children()))
+                    .unwrap_or_default();
+                blocks.extend(
+                    child
+                        .children()
+                        .iter()
+                        .filter(|c| c.name() == Some("ac:task-list"))
+                        .map(|inner| task_list(inner, reading)),
+                );
+                items.push(ListItem::task(done, blocks));
+            }
+            Some("ac:task-list") => {
+                let inner = task_list(child, reading);
+                match items.last_mut() {
+                    Some(item) => item.blocks.push(inner),
+                    None => items.push(ListItem::new(vec![inner])),
+                }
+            }
+            _ => {}
+        }
+    }
+    DocBlock::List {
+        ordered: false,
+        items,
     }
 }
 
@@ -736,7 +782,7 @@ impl Storage<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use knobas_source::docs::TableCell;
+    use knobas_source::docs::{ListItem, TableCell};
     use serde_json::json;
 
     fn blocks(storage: &str) -> Vec<DocBlock> {
@@ -798,14 +844,14 @@ mod tests {
             vec![DocBlock::List {
                 ordered: true,
                 items: vec![
-                    vec![
+                    ListItem::new(vec![
                         para("Export the rows"),
                         DocBlock::List {
                             ordered: false,
-                            items: vec![vec![para("as CSV")]]
+                            items: vec![ListItem::new(vec![para("as CSV")])]
                         }
-                    ],
-                    vec![para("Group them")],
+                    ]),
+                    ListItem::new(vec![para("Group them")]),
                 ]
             }]
         );
@@ -1080,19 +1126,130 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     }
 
     #[test]
-    fn images_and_task_lists_are_placeholders() {
+    fn an_image_is_a_placeholder() {
         assert_eq!(
-            blocks(
-                r#"<ac:image><ri:attachment ri:filename="a.png" /></ac:image><ac:task-list><ac:task><ac:task-body>x</ac:task-body></ac:task></ac:task-list>"#
+            blocks(r#"<ac:image><ri:attachment ri:filename="a.png" /></ac:image>"#),
+            vec![DocBlock::Placeholder {
+                name: "image".into()
+            }]
+        );
+    }
+
+    fn task(id: u32, status: &str, body: &str) -> String {
+        format!(
+            "<ac:task><ac:task-id>{id}</ac:task-id><ac:task-uuid>u-{id}</ac:task-uuid>\
+             <ac:task-status>{status}</ac:task-status><ac:task-body>{body}</ac:task-body></ac:task>"
+        )
+    }
+
+    /// Spec #2432, story 23: a task list is a list whose items carry their
+    /// checked state.
+    #[test]
+    fn a_task_list_is_a_list_of_checked_and_unchecked_items() {
+        let storage = format!(
+            "<ac:task-list>{}{}</ac:task-list>",
+            task(
+                1,
+                "complete",
+                "<span class=\"placeholder-inline-tasks\">Drain the <strong>queue</strong></span>"
             ),
+            task(2, "incomplete", "Restart the worker"),
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![DocBlock::List {
+                ordered: false,
+                items: vec![
+                    ListItem::task(
+                        true,
+                        vec![DocBlock::Paragraph {
+                            text: vec![
+                                Inline::text("Drain the "),
+                                Inline::Text {
+                                    text: "queue".into(),
+                                    strong: true,
+                                    emphasis: false,
+                                    code: false,
+                                },
+                            ],
+                        }]
+                    ),
+                    ListItem::task(false, vec![para("Restart the worker")]),
+                ]
+            }]
+        );
+    }
+
+    /// A nested task list lands inside the task it follows, whether the
+    /// storage puts it in the task's body, in the task, or after the task in
+    /// the outer list.
+    #[test]
+    fn a_nested_task_list_is_a_list_inside_its_task() {
+        let inner = |id| {
+            format!(
+                "<ac:task-list>{}</ac:task-list>",
+                task(id, "complete", "eu-1")
+            )
+        };
+        let nested = ListItem::task(
+            false,
             vec![
-                DocBlock::Placeholder {
-                    name: "image".into()
+                para("Restart"),
+                DocBlock::List {
+                    ordered: false,
+                    items: vec![ListItem::task(true, vec![para("eu-1")])],
                 },
-                DocBlock::Placeholder {
-                    name: "task list".into()
-                },
-            ]
+            ],
+        );
+        let in_body = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "incomplete", &format!("Restart{}", inner(2)))
+        );
+        let in_task = format!(
+            "<ac:task-list><ac:task><ac:task-id>1</ac:task-id><ac:task-status>incomplete</ac:task-status>\
+             <ac:task-body>Restart</ac:task-body>{}</ac:task></ac:task-list>",
+            inner(2)
+        );
+        let after = format!(
+            "<ac:task-list>{}{}</ac:task-list>",
+            task(1, "incomplete", "Restart"),
+            inner(2)
+        );
+        for storage in [in_body, in_task, after] {
+            assert_eq!(
+                blocks(&storage),
+                vec![DocBlock::List {
+                    ordered: false,
+                    items: vec![nested.clone()]
+                }],
+                "{storage}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_task_list_inside_a_sentence_and_a_panel_still_reads() {
+        let list = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "complete", "Done")
+        );
+        let done = DocBlock::List {
+            ordered: false,
+            items: vec![ListItem::task(true, vec![para("Done")])],
+        };
+        assert_eq!(
+            blocks(&format!("<p>Before{list}after</p>")),
+            vec![para("Before"), done.clone(), para("after")]
+        );
+        assert_eq!(
+            blocks(&format!(
+                "<ac:structured-macro ac:name=\"info\"><ac:rich-text-body>{list}</ac:rich-text-body></ac:structured-macro>"
+            )),
+            vec![DocBlock::Panel {
+                kind: PanelKind::Info,
+                title: None,
+                blocks: vec![done]
+            }]
         );
     }
 
@@ -1245,6 +1402,31 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (8, Some(String::new()), None),
                 (9, None, Some(SectionRefusal::Formatting)),
                 (10, Some("- a b".to_owned()), None),
+            ]
+        );
+    }
+
+    /// Spec #2432: the editor's text has no checkbox, so a section holding a
+    /// task list refuses with `formatting` rather than losing them.
+    #[test]
+    fn a_section_holding_a_task_list_refuses_as_formatting() {
+        let list = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "incomplete", "Restart")
+        );
+        let storage = format!(
+            "<h2>Tasks</h2><p>Lead.</p>{list}\
+             <h2>In a panel</h2><ac:structured-macro ac:name=\"note\"><ac:rich-text-body>{list}</ac:rich-text-body></ac:structured-macro>\
+             <h2>Plain</h2><ul><li>a</li></ul>"
+        );
+        let got: Vec<Option<SectionRefusal>> =
+            sections(&storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(SectionRefusal::Formatting),
+                Some(SectionRefusal::Formatting),
+                None
             ]
         );
     }

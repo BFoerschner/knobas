@@ -113,8 +113,9 @@ impl Lines {
                 self.push(&words);
             }
             DocBlock::List { items, .. } => {
+                // A task's checked state is not words (spec #2432).
                 for item in items {
-                    for inner in item {
+                    for inner in &item.blocks {
                         self.block(inner, false);
                     }
                 }
@@ -196,7 +197,7 @@ fn clean(text: &str) -> String {
 mod tests {
     use super::*;
     use crate::docs::indexed::{Part, read};
-    use crate::docs::{DocComment, PanelKind, TableCell};
+    use crate::docs::{DocComment, ListItem, PanelKind, TableCell};
 
     fn content(blocks: Vec<DocBlock>, comments: Vec<DocComment>) -> DocContent {
         DocContent {
@@ -311,9 +312,10 @@ mod tests {
         assert_eq!(read.runs[1].text, "Queue\nCap\npayouts\n40 per minute");
     }
 
-    /// Lists, panels (title included) and code draw words; a placeholder draws
-    /// only the source's name for something knobas does not draw, which is
-    /// not the page's words. A heading inside a panel is no section.
+    /// Lists, panels (title included) and code draw words; a task's checked
+    /// state draws none. A placeholder draws only the source's name for
+    /// something knobas does not draw, which is not the page's words. A
+    /// heading inside a panel is no section.
     #[test]
     fn nested_blocks_draw_their_words_and_a_placeholder_draws_none() {
         let page = content(
@@ -321,8 +323,8 @@ mod tests {
                 DocBlock::List {
                     ordered: false,
                     items: vec![
-                        vec![para(vec![Inline::text("drain the queue")])],
-                        vec![para(vec![Inline::text("restart")])],
+                        ListItem::task(true, vec![para(vec![Inline::text("drain the queue")])]),
+                        ListItem::new(vec![para(vec![Inline::text("restart")])]),
                     ],
                 },
                 DocBlock::Panel {

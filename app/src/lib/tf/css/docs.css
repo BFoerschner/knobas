@@ -76,7 +76,7 @@
 .tf-doc p { margin: 0 0 15px; }
 .tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
 .tf-doc li { margin: 4px 0; }
-.tf-doc li > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
+.tf-doc li > p:last-child, .tf-doc li.tf-task > div > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
 .tf-doc code { font: .82em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
 /* A code block: its language and Copy in a strip above the code, so neither covers a long line (#2083). */
 .tf-pre { margin: 0 0 18px; }

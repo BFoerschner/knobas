@@ -17,7 +17,7 @@ use knobas_app::commands::entity::{
 use knobas_app::docs::DocsScope;
 use knobas_app::sources::Registry;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
-use knobas_source::docs::{DocBlock, EmbedContent, Inline};
+use knobas_source::docs::{DocBlock, EmbedContent, Inline, ListItem};
 use serde_json::{Value, json};
 
 async fn pool() -> sqlx::PgPool {
@@ -423,6 +423,65 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
         text.iter()
             .any(|i| matches!(i, Inline::Mention { me: true, .. })),
         "a comment's mention of the reader is marked too"
+    );
+}
+
+/// Spec #2432, story 23: a Confluence task list reads as a list whose items
+/// carry their checked state, nested too, with the mirror filled in inside a
+/// task's words.
+#[tokio::test]
+async fn a_task_list_reads_with_each_item_checked_or_not() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let task = |id: u32, status: &str, body: &str| {
+        format!(
+            "<ac:task><ac:task-id>{id}</ac:task-id><ac:task-status>{status}</ac:task-status><ac:task-body>{body}</ac:task-body></ac:task>"
+        )
+    };
+    let storage = format!(
+        "<ac:task-list>{}{}<ac:task-list>{}</ac:task-list></ac:task-list>",
+        task(1, "complete", "Drain the queue"),
+        task(
+            2,
+            "incomplete",
+            r#"Ask <ac:link><ri:user ri:username="mara" /></ac:link>"#
+        ),
+        task(3, "complete", "eu-1"),
+    );
+    let checklist = page(&pool, &src, "1", "Release checklist", "OPS", &[], &storage).await;
+
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &checklist)
+        .await
+        .unwrap();
+    let para = |text: Vec<Inline>| DocBlock::Paragraph { text };
+    assert_eq!(
+        doc.blocks,
+        vec![DocBlock::List {
+            ordered: false,
+            items: vec![
+                ListItem::task(true, vec![para(vec![Inline::text("Drain the queue")])]),
+                ListItem::task(
+                    false,
+                    vec![
+                        para(vec![
+                            Inline::text("Ask "),
+                            Inline::Mention {
+                                user: Some("mara".into()),
+                                name: None,
+                                me: true,
+                            },
+                        ]),
+                        DocBlock::List {
+                            ordered: false,
+                            items: vec![ListItem::task(
+                                true,
+                                vec![para(vec![Inline::text("eu-1")])]
+                            )],
+                        },
+                    ],
+                ),
+            ],
+        }]
     );
 }
 
