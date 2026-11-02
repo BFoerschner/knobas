@@ -806,7 +806,7 @@
         if (subject.kind !== "list") return;
         sheet = null;
         box?.focus();
-        void session.deleteList(subject.id).then(() => push({ text: `Deleted ${subject.label}` }));
+        void session.deleteList(subject.id).then((done) => done && push({ text: `Deleted ${subject.label}` }));
         return;
       case "inbox": {
         if (subject.kind !== "inbox") return;
@@ -831,7 +831,7 @@
       const { id } = current.subject;
       sheet = null;
       box?.focus();
-      void session.renameList(id, label).then(() => push({ text: `Renamed to ${label}` }));
+      void session.renameList(id, label).then((done) => done && push({ text: `Renamed to ${label}` }));
     } else if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();

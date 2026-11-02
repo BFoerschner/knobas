@@ -501,6 +501,29 @@ test("Esc while renaming goes back to the list's actions and renames nothing", a
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
 });
 
+test("a refused rename or delete toasts no success", async () => {
+  const calls = mountIt();
+  calls.renameSmartList.mockRejectedValueOnce(new Error("name taken"));
+  calls.deleteSmartList.mockRejectedValueOnce(new Error("gone already"));
+  await settle();
+  await sheetOn("list");
+  narrow("rename");
+  press("Enter");
+  await settle();
+  narrow("SEPA out");
+  press("Enter");
+  await settle();
+  expect(calls.renameSmartList).toHaveBeenCalled();
+  expect(toasts.items.map((toast) => toast.text)).not.toContain("Renamed to SEPA out");
+
+  await sheetOn("list");
+  narrow("delete");
+  press("Enter");
+  await settle();
+  expect(calls.deleteSmartList).toHaveBeenCalled();
+  expect(toasts.items.map((toast) => toast.text)).not.toContain("Deleted sepa payouts");
+});
+
 test("an inbox line: Open, Re-run where the source offers it, Done", async () => {
   const calls = mountIt();
   await settle();

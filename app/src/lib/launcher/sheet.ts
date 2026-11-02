@@ -14,8 +14,8 @@
  * `docs/decisions/2026-11-02-launcher-sheet.md`.
  *
  * Adapter-declared source actions join under the same rule: a row here whose
- * `does` is a `write` of the op the source declares. Today's are the ones
- * every page already sends (`Approve`, `TriggerBuild`, `RerunBuild`).
+ * `does` is a `write` of the op the source declares. Today's are the
+ * declared ops the app already builds (`Approve`, `TriggerBuild`, `RerunBuild`).
  */
 import type { InboxItem } from "../ipc/entity";
 import type { WriteOpPayload } from "../ipc/sources";
