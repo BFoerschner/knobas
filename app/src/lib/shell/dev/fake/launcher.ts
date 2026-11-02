@@ -87,6 +87,8 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
   if (listed) return fakeSmartListItems({ id: listed[1]!, limit: 50 });
   const palette = actionPalette((query.raw ?? "").trim());
   if (palette !== null) return palette;
+  const help = helpCard((query.raw ?? "").trim());
+  if (help !== null) return help;
   const byKey = ticketsByKey((query.raw ?? "").trim());
   if (byKey !== null) return byKey;
   const words = wordSearch(query.raw ?? "");
@@ -135,6 +137,26 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
           ],
     total: hits.length,
     took_ms: 2,
+    coverage: [],
+  };
+}
+
+/**
+ * `search` for `?` (#2421): the help prefix and no groups, as the backend
+ * answers it, so the `?` card and its colour legend draw under `?fake-ipc`.
+ */
+function helpCard(raw: string): SearchResponse | null {
+  if (raw !== "?") return null;
+  return {
+    interpreted: {
+      text: "",
+      prefix: "help",
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [],
+    total: 0,
+    took_ms: 0,
     coverage: [],
   };
 }

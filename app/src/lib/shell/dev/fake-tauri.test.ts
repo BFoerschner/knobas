@@ -1314,6 +1314,8 @@ test("the fixture's search answers plain words from the corpus, a ticket with it
   const inProgress = answer.groups[0]!.hits.find((hit) => hit.entity_id === "mock:PAY-231");
   expect(inProgress?.state?.tone).toBe("info");
   expect(() => search("sepa kind:page")).toThrow();
+  // `?` is the help card, as the backend reads it.
+  expect((handlers["search"]!({ query: { raw: "?", filters: {} } }) as { interpreted: { prefix: string } }).interpreted.prefix).toBe("help");
 });
 
 /**
