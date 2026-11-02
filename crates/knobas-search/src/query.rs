@@ -2,8 +2,8 @@
 //!
 //! Everything the `⌘K` box understands is parsed **here, in the backend**
 //! (ruling P2): the leading prefixes (`>` `?` `t ` `note:` `list:` `asset:`),
-//! the token markers (`/source` `@person` `#ticket`) and the inline
-//! `key:value` filters. One grammar, one implementation -- the frontend
+//! the token markers (`@person`, and `#` with filter letters: `#t`, `#rl`) and
+//! the inline `key:value` filters. One grammar, one implementation -- the frontend
 //! renders the chips this returns instead of parsing the same string a second
 //! time, and saved searches parse through the same door.
 //!
@@ -12,7 +12,7 @@
 //!
 //! # What the grammar does *not* do
 //!
-//! It never guesses. A `/alias` that resolves to nothing, an `updated:` it
+//! It never guesses. A `source:` that resolves to nothing, an `updated:` it
 //! cannot read, an `env:` or `health:` no ticket has given a home yet -- each
 //! is reported, not honoured, in [`ParsedQuery::unknown_tokens`] so the
 //! launcher can grey it out with a reason. So is a `-` on a key or marker with
@@ -41,7 +41,7 @@ const MAX_UNKNOWN_TOKENS: usize = 8;
 /// `the_leading_table_is_ordered_longest_first` is that check.
 ///
 /// `t ` is not in here because it is a prefix only as a *whole word* -- see
-/// [`leading_prefix`]. `#`, `@` and `/` are not in here either: they are token
+/// [`leading_prefix`]. `#` and `@` are not in here either: they are token
 /// markers that work anywhere in the query, so they live in [`apply_token`].
 const LEADING: &[(&str, Prefix)] = &[
     ("assets:", Prefix::Asset),
@@ -394,7 +394,7 @@ pub fn parse(raw: &str, vocab: &Vocabulary) -> Parsed {
 /// Reconcile the filters the user *typed* with the chips they *clicked*.
 ///
 /// Dimension by dimension: the text wins wherever it spoke, and the chip holds
-/// wherever it was silent. Typing `/ji` while a Gitea chip is up means the user
+/// wherever it was silent. Typing `in:ji` while a Gitea chip is up means the user
 /// changed their mind about the source, not that they want both -- but it says
 /// nothing about the kind chip, which stays.
 ///
@@ -600,21 +600,24 @@ fn tokenize(input: &str) -> Vec<String> {
 /// `jira:PAY-231` must *search*, not be read as a filter on a key called
 /// `jira`.
 fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut Vec<String>) {
-    if let Some(alias) = token.strip_prefix('/') {
-        parsed.claim_prefix(Prefix::Source);
-        resolve_sources(parsed, vocab, alias, token);
-        return;
-    }
     if let Some(person) = token.strip_prefix('@') {
         parsed.claim_prefix(Prefix::Person);
         apply_person(parsed, person);
         return;
     }
     if let Some(rest) = token.strip_prefix('#') {
-        parsed.claim_prefix(Prefix::Ticket);
-        push_unique(&mut parsed.query.filters.kinds, "ticket");
-        if !rest.is_empty() {
-            terms.push(rest.to_owned());
+        match kinds_of_letters(rest) {
+            Some(kinds) => {
+                for kind in kinds {
+                    push_unique(&mut parsed.query.filters.kinds, kind);
+                }
+            }
+            // Not filter letters: the word itself, hash dropped (#2420).
+            // `#PAY-210` finds the ticket because its key is indexed beside
+            // its title (`0048`), as plain `pay-210` does.
+            None if !rest.is_empty() => terms.push(rest.to_owned()),
+            // A bare `#` is somebody mid-typing.
+            None => {}
         }
         return;
     }
@@ -636,6 +639,41 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
     terms.push(token.to_owned());
 }
 
+/// The `#` filter letters and the kind each one narrows to (spec #2419), in
+/// the order the `?` card draws them.
+///
+/// `#` followed by one or more of these, and nothing else, is a kind filter;
+/// the letters combine (`#rl` is repositories and saved lists), case aside.
+/// Like `kind:`, a letter whose kind nothing indexes yet matches nothing:
+/// `list` and `inbox` are answered by later tickets of the spec.
+pub const KIND_LETTERS: [(char, &str); 8] = [
+    ('t', "ticket"),
+    ('p', "pr"),
+    ('r', "repo"),
+    ('b', "pipeline"),
+    ('m', "monitor"),
+    ('d', "page"),
+    ('l', "list"),
+    ('i', "inbox"),
+];
+
+/// The kinds a run of `#` letters names, in the order typed and once each, or
+/// `None` when the run is empty or holds anything that is not a filter letter.
+fn kinds_of_letters(letters: &str) -> Option<Vec<&'static str>> {
+    if letters.is_empty() {
+        return None;
+    }
+    letters
+        .chars()
+        .map(|letter| {
+            KIND_LETTERS
+                .iter()
+                .find(|(known, _)| known.eq_ignore_ascii_case(&letter))
+                .map(|(_, kind)| *kind)
+        })
+        .collect()
+}
+
 /// The keys [`apply_key_value`] reads, which have no negation (#1649). Kept
 /// beside it and pinned to it by
 /// `the_refused_keys_are_the_keys_apply_key_value_reads`.
@@ -645,7 +683,7 @@ const NEGATION_UNSUPPORTED_KEYS: [&str; 15] = [
 ];
 
 /// Whether a `-` token is the negation of something the grammar reads and has
-/// no negation for: a marker (`-@x`, `-/x`, `-#x`) or a `key:value` whose key
+/// no negation for: a marker (`-@x`), a `#` filter (`-#t`) or a `key:value` whose key
 /// [`apply_key_value`] knows. Websearch would take it for a search word and
 /// negate the English word (`-kind:pr` is `!kind & pr`), which is the
 /// demotion the module's rule rules out. `-word` and `-unknownkey:v` stay
@@ -654,8 +692,11 @@ fn negates_what_cannot_be_negated(token: &str) -> bool {
     let Some(rest) = token.strip_prefix('-') else {
         return false;
     };
-    if rest.starts_with(['@', '/', '#']) {
-        return rest.len() > 1;
+    if let Some(person) = rest.strip_prefix('@') {
+        return !person.is_empty();
+    }
+    if let Some(letters) = rest.strip_prefix('#') {
+        return kinds_of_letters(letters).is_some();
     }
     split_key_value(rest).is_some_and(|(key, _)| NEGATION_UNSUPPORTED_KEYS.contains(&key.as_str()))
 }
@@ -999,7 +1040,7 @@ fn push_unique(into: &mut Vec<String>, value: &str) {
 /// `knobas_core::link_set_pattern_hits!` matches.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Pattern {
-    /// `source:` (or `/alias`): the item's source id.
+    /// `source:`: the item's source id.
     pub sources: Vec<String>,
     /// `project:` (or `space:`): the item's declared project, by key or name
     /// (ADR-0010).
@@ -1034,7 +1075,7 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
             query.text.trim()
         ));
     }
-    // `source:` and `/alias` claim `Prefix::Source` when they come first,
+    // `source:` claims `Prefix::Source` when it comes first,
     // and they are a pattern's own key; every other prefix is foreign.
     let foreign = query.prefix.is_some_and(|prefix| prefix != Prefix::Source)
         || parsed.list_id.is_some()
@@ -1096,7 +1137,6 @@ mod tests {
             ("list:failing", Some(Prefix::List), ""),
             ("asset: pve-02", Some(Prefix::Asset), "pve-02"),
             ("assets: pve-02", Some(Prefix::Asset), "pve-02"),
-            ("#PAY-231", Some(Prefix::Ticket), "PAY-231"),
             ("sepa retry", None, "sepa retry"),
         ] {
             let p = parse(raw, &v);
@@ -1111,7 +1151,6 @@ mod tests {
         // needs no mode.
         assert_eq!(parse("note: x", &v).query.filters.kinds, ["note"]);
         assert_eq!(parse("asset: x", &v).query.filters.kinds, ["asset"]);
-        assert_eq!(parse("#PAY-231", &v).query.filters.kinds, ["ticket"]);
         assert_eq!(
             parse("list:failing", &v).list_id.as_deref(),
             Some("failing")
@@ -1124,6 +1163,63 @@ mod tests {
         // list called "".
         assert_eq!(parse("list:", &v).list_id, None);
         assert_eq!(parse("list:", &v).query.prefix, Some(Prefix::List));
+    }
+
+    #[test]
+    fn hash_letters_are_kind_filters_that_combine() {
+        let v = fixture();
+        for (raw, kinds, text) in [
+            ("#t", &["ticket"][..], ""),
+            ("#p", &["pr"][..], ""),
+            ("#r", &["repo"][..], ""),
+            ("#b", &["pipeline"][..], ""),
+            ("#m", &["monitor"][..], ""),
+            ("#d", &["page"][..], ""),
+            ("#l", &["list"][..], ""),
+            ("#i", &["inbox"][..], ""),
+            ("#rl sepa", &["repo", "list"][..], "sepa"),
+            ("#t #b", &["ticket", "pipeline"][..], ""),
+            ("#tt", &["ticket"][..], ""),
+            ("#T PAY-210", &["ticket"][..], "PAY-210"),
+            ("sepa #d", &["page"][..], "sepa"),
+            ("#d kind:pr", &["page", "pr"][..], ""),
+        ] {
+            let p = parse(raw, &v);
+            assert_eq!(p.query.filters.kinds, kinds, "{raw:?}");
+            assert_eq!(p.query.text, text, "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+            // A kind filter, like `kind:`, names no mode.
+            assert_eq!(p.query.prefix, None, "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn a_hash_word_that_is_not_filter_letters_is_the_word() {
+        let v = fixture();
+        for (raw, text) in [
+            ("#PAY-210", "PAY-210"),
+            ("#sepa", "sepa"),
+            ("#tx retry", "tx retry"),
+            ("#", ""),
+        ] {
+            let p = parse(raw, &v);
+            assert!(p.query.filters.kinds.is_empty(), "{raw:?}");
+            assert_eq!(p.query.text, text, "{raw:?}");
+            assert_eq!(p.query.prefix, None, "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+        }
+    }
+
+    #[test]
+    fn a_slash_is_no_longer_a_marker() {
+        let v = fixture();
+        for raw in ["/ji sepa", "/", "/nope x"] {
+            let p = parse(raw, &v);
+            assert!(p.query.filters.sources.is_empty(), "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+            assert_eq!(p.query.prefix, None, "{raw:?}");
+        }
+        assert_eq!(parse("/ji sepa", &v).query.text, "/ji sepa");
     }
 
     #[test]
@@ -1143,31 +1239,31 @@ mod tests {
     #[test]
     fn source_aliases_resolve_to_every_instance_of_that_adapter() {
         let v = fixture();
-        // One alias, two instances: /ji means "the Jiras", not "the first
-        // Jira".
+        // One alias, two instances: source:ji means "the Jiras", not "the
+        // first Jira".
         assert_eq!(
-            parse("/ji sepa", &v).query.filters.sources,
+            parse("source:ji sepa", &v).query.filters.sources,
             ["jira", "jira-eu"]
         );
-        assert_eq!(parse("/ji sepa", &v).query.text, "sepa");
-        assert_eq!(parse("/gitea", &v).query.filters.sources, ["gitea"]);
-        assert_eq!(parse("/jira-eu", &v).query.filters.sources, ["jira-eu"]); // exact id wins
-        assert_eq!(parse("/tc", &v).query.filters.sources, ["teamcity"]);
+        assert_eq!(parse("source:ji sepa", &v).query.text, "sepa");
+        assert_eq!(parse("source:gitea", &v).query.filters.sources, ["gitea"]);
+        assert_eq!(
+            parse("source:jira-eu", &v).query.filters.sources,
+            ["jira-eu"]
+        ); // exact id wins
+        assert_eq!(parse("source:tc", &v).query.filters.sources, ["teamcity"]);
         assert_eq!(parse("source:gt x", &v).query.filters.sources, ["gitea"]);
         assert_eq!(parse("src:gt x", &v).query.filters.sources, ["gitea"]);
         assert_eq!(parse("in:gt x", &v).query.filters.sources, ["gitea"]);
-        assert_eq!(parse("/ji /gt", &v).query.filters.sources.len(), 3);
+        assert_eq!(parse("in:ji in:gt", &v).query.filters.sources.len(), 3);
         // The same source twice is one filter, not two binds.
-        assert_eq!(parse("/jira /jira", &v).query.filters.sources, ["jira"]);
+        assert_eq!(parse("in:jira in:jira", &v).query.filters.sources, ["jira"]);
         // Unresolvable: reported, never silently dropped and never guessed.
-        let p = parse("/nope x", &v);
+        let p = parse("source:nope x", &v);
         assert!(p.query.filters.sources.is_empty());
-        assert_eq!(p.query.unknown_tokens, ["/nope"]);
+        assert_eq!(p.query.unknown_tokens, ["source:nope"]);
         assert_eq!(p.query.text, "x");
-        // A bare marker is mid-typing, not a mistake.
-        let bare = parse("/", &v);
-        assert_eq!(bare.query.prefix, Some(Prefix::Source));
-        assert!(bare.query.unknown_tokens.is_empty());
+        assert_eq!(p.query.prefix, Some(Prefix::Source));
     }
 
     #[test]
@@ -1207,8 +1303,8 @@ mod tests {
         assert_eq!(parse("@me", &v).query.prefix, Some(Prefix::Person));
         // The *first* marker describes what the user is doing; a later one
         // still filters but does not rename the mode.
-        assert_eq!(parse("/ji @me", &v).query.prefix, Some(Prefix::Source));
-        assert_eq!(parse("> /ji #x", &v).query.prefix, Some(Prefix::Action));
+        assert_eq!(parse("in:ji @me", &v).query.prefix, Some(Prefix::Source));
+        assert_eq!(parse("> in:ji #t", &v).query.prefix, Some(Prefix::Action));
 
         // An unreadable duration is reported, not rounded to something.
         let bad = parse("updated:soonish", &v);
@@ -1325,7 +1421,7 @@ mod tests {
     #[test]
     fn websearch_operators_and_phrases_survive_into_the_text() {
         let v = fixture();
-        let p = parse(r#"/ji "sepa retry" -timeout or backoff"#, &v);
+        let p = parse(r#"in:ji "sepa retry" -timeout or backoff"#, &v);
         assert_eq!(p.query.text, r#""sepa retry" -timeout or backoff"#);
         assert_eq!(p.query.filters.sources, ["jira", "jira-eu"]);
         // A colon inside a phrase is prose, not a filter key.
@@ -1342,9 +1438,9 @@ mod tests {
         assert!(parse("sep", &v).prefix_last_term); // still typing
         assert!(!parse("sep ", &v).prefix_last_term); // word finished
         assert!(!parse(r#""sepa retry""#, &v).prefix_last_term); // a closed phrase
-        assert!(!parse("/ji", &v).prefix_last_term); // no search word at all
+        assert!(!parse("in:ji", &v).prefix_last_term); // no search word at all
         assert!(!parse("", &v).prefix_last_term);
-        assert!(parse("/ji sep", &v).prefix_last_term);
+        assert!(parse("in:ji sep", &v).prefix_last_term);
     }
 
     /// #1648: a negated phrase typed last is closed (its tsquery text ends in
@@ -1376,7 +1472,7 @@ mod tests {
             mine: false,
             authors: vec!["jonas".into()],
         };
-        let eff = merge(&parse("/ji sepa", &v), &chips);
+        let eff = merge(&parse("in:ji sepa", &v), &chips);
         assert_eq!(eff.sources, ["jira", "jira-eu"]); // the text spoke: it decides
         assert_eq!(eff.kinds, ["pr"]); // the text was silent: the chip holds
         assert_eq!(eff.updated_within_days, Some(30));
@@ -1670,9 +1766,8 @@ mod tests {
             read(r#"project:OPS under:"Runbooks""#).map(|p| (p.projects, p.under)),
             Ok((vec!["OPS".to_owned()], vec!["Runbooks".to_owned()]))
         );
-        // `source:` and `/alias` claim the source prefix; they are still a
-        // pattern's key.
-        for raw in ["source:teamcity name:Payout_*", "/teamcity name:Payout_*"] {
+        // `source:` claims the source prefix; it is still a pattern's key.
+        for raw in ["source:teamcity name:Payout_*", "in:teamcity name:Payout_*"] {
             assert_eq!(
                 read(raw).map(|p| (p.sources, p.names)),
                 Ok((vec!["teamcity".to_owned()], vec!["Payout_*".to_owned()])),
@@ -1851,7 +1946,7 @@ mod tests {
             assert_eq!(p.text, "sepa", "{token}");
             assert_eq!(p.unknown_tokens, [token.as_str()], "{token}");
         }
-        for token in ["-@jonas", "-/gitea", "-#PAY-231"] {
+        for token in ["-@jonas", "-#t", "-#rl"] {
             let p = parse(&format!("{token} sepa"), &v).query;
             assert_eq!(p.text, "sepa", "{token}");
             assert_eq!(p.unknown_tokens, [token], "{token}");

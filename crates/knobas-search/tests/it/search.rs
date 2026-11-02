@@ -500,7 +500,7 @@ async fn filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them() {
         "the filter has to have something to remove"
     );
 
-    let r = s.search(q(&format!("/ji {t}"))).await.unwrap();
+    let r = s.search(q(&format!("in:ji {t}"))).await.unwrap();
     assert_eq!(r.interpreted.filters.sources, ["jira"]);
     assert!(
         r.groups

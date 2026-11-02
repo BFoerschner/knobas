@@ -85,13 +85,18 @@ pub struct ParsedQuery {
     pub unknown_tokens: Vec<String>,
 }
 
-/// The launcher's prefixes (§4): `>` `#` `@` `/` `t ` `note:` `list:` `asset:` `?`.
+/// The launcher's prefixes (§4): `>` `@` `t ` `note:` `list:` `asset:` `?`,
+/// and `source:` for [`Prefix::Source`].
+///
+/// `#` is no prefix since spec #2419 (#2420): `#t`, `#rl` and the other filter
+/// letters are kind filters, which claim none, as `kind:` claims none; the
+/// `ticket` variant went with the bare-key lookup it named. `/` for a source
+/// went too, and `source:` is what claims `source` now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Prefix {
     Action,
-    Ticket,
     Person,
     Source,
     Time,

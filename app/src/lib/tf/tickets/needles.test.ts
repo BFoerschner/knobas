@@ -16,7 +16,10 @@ describe("needles", () => {
     expect(markNeedles("error for the ledger", needles("or")).every((run) => !run.hit)).toBe(true);
   });
   it("leaves out the keys, negated or not, and markers", () => {
-    expect(needles("project:PAY -status:Done @mara /jira kind:pr -@x sepa")).toEqual(["sepa"]);
+    expect(needles("project:PAY -status:Done @mara in:jira kind:pr #rl -#t -@x sepa")).toEqual(["sepa"]);
+  });
+  it("keeps a slash word and a hash word that is not filter letters (#2420)", () => {
+    expect(needles("/jira #tx sepa")).toEqual(["jira", "tx", "sepa"]);
   });
   it("keeps an unknown key as a word and #key as its rest", () => {
     expect(needles("jira:PAY-231 #PAY-7")).toEqual(["jira:pay-231", "pay-7"]);

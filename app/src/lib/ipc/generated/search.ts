@@ -258,9 +258,15 @@ text: string, prefix: Prefix | null, filters: SearchFilters,
 unknown_tokens: Array<string>, };
 
 /**
- * The launcher's prefixes (§4): `>` `#` `@` `/` `t ` `note:` `list:` `asset:` `?`.
+ * The launcher's prefixes (§4): `>` `@` `t ` `note:` `list:` `asset:` `?`,
+ * and `source:` for [`Prefix::Source`].
+ *
+ * `#` is no prefix since spec #2419 (#2420): `#t`, `#rl` and the other filter
+ * letters are kind filters, which claim none, as `kind:` claims none; the
+ * `ticket` variant went with the bare-key lookup it named. `/` for a source
+ * went too, and `source:` is what claims `source` now.
  */
-export type Prefix = "action" | "ticket" | "person" | "source" | "time" | "note" | "list" | "asset" | "help";
+export type Prefix = "action" | "person" | "source" | "time" | "note" | "list" | "asset" | "help";
 
 /**
  * One condition: a key, *is* or *is not*, and values any of which it means.

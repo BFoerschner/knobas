@@ -239,7 +239,7 @@ async fn the_launcher_finds_a_demo_ticket_by_its_key() {
     knobas_db::migrate::run(pool).await.unwrap();
     demo::demo_load_inner(pool).await.unwrap();
 
-    for raw in ["PAY-231", "#PAY-231", "pay-231"] {
+    for raw in ["PAY-231", "#PAY-231", "#t PAY-231", "pay-231"] {
         let response = knobas_app::commands::search::search_inner(
             pool,
             &Registry::for_process(),

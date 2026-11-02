@@ -60,7 +60,8 @@ pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{
-    EffectiveFilters, FieldFilter, FieldKey, Parsed, Pattern, merge, parse, pattern_of,
+    EffectiveFilters, FieldFilter, FieldKey, KIND_LETTERS, Parsed, Pattern, merge, parse,
+    pattern_of,
 };
 pub use saved::{Refusal, SavedList};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
@@ -1095,7 +1096,6 @@ mod tests {
                 Prefix::Asset => Some("'asset'"),
                 Prefix::Note => Some("'note'"),
                 Prefix::Action
-                | Prefix::Ticket
                 | Prefix::Person
                 | Prefix::Source
                 | Prefix::Time
@@ -1104,7 +1104,6 @@ mod tests {
             }
         }
         for prefix in [
-            Prefix::Ticket,
             Prefix::Person,
             Prefix::Source,
             Prefix::List,

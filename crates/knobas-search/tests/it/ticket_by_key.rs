@@ -4,7 +4,8 @@
 //! description and comments as the body; the key is only in the entity id
 //! (`jira:PAY-231`). Before `0048` the index read the title and the body and
 //! nothing else, so `PAY-231` found every row that *mentioned* the key and
-//! never the ticket, and `#PAY-231` (tickets only) found nothing.
+//! never the ticket, and `#PAY-231` (then tickets only) found nothing. Since
+//! #2420 a bare `#PAY-231` is the word, and `#t` is what narrows to tickets.
 //!
 //! The keys are literal, so the test takes a database of its own rather than a
 //! token in the file's shared one: a token inside the key would change how it
@@ -143,4 +144,73 @@ async fn a_jira_ticket_is_found_by_its_key_and_comes_first() {
             "`{raw}`"
         );
     }
+}
+
+/// The key is a word (#2420): `pay-210`, `#PAY-210` and `#t PAY-210` all find
+/// PAY-210, and the filter letters combine, `#tp` answering tickets and pull
+/// requests and nothing else.
+#[tokio::test]
+async fn the_key_is_a_word_and_the_filter_letters_combine() {
+    let pool = knobas_db::test_util::scratch_database("key-is-a-word")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('jira', 'jira', 'Jira', 'http://x', 'Pat'),
+                ('gitea', 'gitea', 'Gitea', 'http://z', 'Pat'),
+                ('wiki', 'confluence', 'Wiki', 'http://y', 'Pat')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    ticket(&pool, "PAY-210", "Retry failed SEPA payouts", "", 30).await;
+    item(
+        &pool,
+        "pr",
+        "gitea:tidewater/payout#12",
+        "PAY-210 retry the SEPA batch",
+        "",
+        2,
+    )
+    .await;
+    item(&pool, "page", "wiki:9001", "SEPA retries, PAY-210", "", 1).await;
+
+    let searcher = Searcher::declaring(pool.clone(), [knobas_source_jira::descriptor_template()])
+        .await
+        .unwrap();
+
+    for raw in ["pay-210 ", "#PAY-210 ", "#t PAY-210 ", "#T pay-210 "] {
+        let response = searcher.search(q(raw)).await.unwrap();
+        let ids = all_ids(&response);
+        assert_eq!(
+            ids.first(),
+            Some(&("ticket".to_owned(), "jira:PAY-210".to_owned())),
+            "`{raw}` finds the ticket first: {ids:?}"
+        );
+    }
+    // `#t` narrows to tickets; a bare `#PAY-210` is the word and narrows to nothing.
+    let narrowed = searcher.search(q("#t PAY-210 ")).await.unwrap();
+    assert_eq!(narrowed.interpreted.filters.kinds, ["ticket"]);
+    assert_eq!(all_ids(&narrowed).len(), 1, "{:?}", all_ids(&narrowed));
+    let word = searcher.search(q("#PAY-210 ")).await.unwrap();
+    assert!(word.interpreted.filters.kinds.is_empty());
+    assert_eq!(word.interpreted.text, "PAY-210");
+    assert_eq!(all_ids(&word).len(), 3, "{:?}", all_ids(&word));
+
+    let combined = searcher.search(q("#tp sepa ")).await.unwrap();
+    assert_eq!(combined.interpreted.filters.kinds, ["ticket", "pr"]);
+    assert_eq!(combined.interpreted.prefix, None);
+    let mut kinds: Vec<String> = all_ids(&combined)
+        .into_iter()
+        .map(|(kind, _)| kind)
+        .collect();
+    kinds.sort();
+    assert_eq!(
+        kinds,
+        ["pr", "ticket"],
+        "pages are out: {:?}",
+        all_ids(&combined)
+    );
 }

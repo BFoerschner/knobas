@@ -37,6 +37,11 @@ export interface SyntaxEntry {
   /** The `Prefix` the probe must claim, snake_case, or null for none. */
   prefix: string | null;
   expect: SyntaxExpectation;
+  /**
+   * The kind a `#` filter letter narrows to (#2420), which the Rust test pins
+   * to the parser's own; a kind chip is labelled with this row's summary.
+   */
+  kind?: string;
 }
 
 /** The card, in the order it is drawn. */

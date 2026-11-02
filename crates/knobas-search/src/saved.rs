@@ -293,12 +293,9 @@ impl Refusal {
                 // `empty_corpus` admits only the three above. Listed rather
                 // than a wildcard, so a prefix added to `Prefix` is a compile
                 // error here and someone decides its sentence.
-                Prefix::Ticket
-                | Prefix::Person
-                | Prefix::Source
-                | Prefix::Note
-                | Prefix::List
-                | Prefix::Asset => "That prefix is not a search.",
+                Prefix::Person | Prefix::Source | Prefix::Note | Prefix::List | Prefix::Asset => {
+                    "That prefix is not a search."
+                }
             }
             .to_owned(),
             _ => {

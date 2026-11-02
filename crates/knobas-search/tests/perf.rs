@@ -186,9 +186,9 @@ const CASES: &[(&str, &str)] = &[
     ("phrase", "\"sepa retry\""),
     ("still typing", "pay"),
     ("rare word", "tombstone"),
-    ("filtered", "/ji payout"),
+    ("filtered", "in:ji payout"),
     ("kind + text", "kind:pr backoff"),
-    ("browse, no text", "/tc"),
+    ("browse, no text", "in:tc"),
     ("mine", "@me settlement"),
     ("no match", "zzzznothing"),
 ];
