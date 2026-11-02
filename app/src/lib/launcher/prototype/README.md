@@ -25,9 +25,9 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 |---|---|
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
 | A letter and a space | `p` pull requests, `r` repos, `b` builds, `m` monitors, `d` pages, `i` inbox, `l` saved lists, `t` time (as shipped). `#` tickets, `@` people, `>` go to, `?` help stay. `/` for a source is gone. |
-| ⌘K again, or Tab, on a row | The row lifts under the box and the panel becomes its actions. Esc goes back to the results, never out of the dialog. Typing in the sheet narrows the actions (fuzzy, in order of the letters); Esc clears that first. |
+| ⌘K again, or Tab, on a row | The row lifts under the box, the box empties and the panel becomes its actions. Typing in the box narrows them (fuzzy, in order of the letters). Esc, ⌘K, Tab or Backspace on the empty box go back to the results with the search words back in the box. Never out of the dialog. |
 | ⌘K while a click took the focus | Gives the box its focus back and nothing else. The next ⌘K opens the sheet. |
-| `l`, `l gitea` | Your saved lists, all of them or by name. Enter applies the list's filters in the box and keeps you there. ⌘K on one: *Apply*, *Rename* (a field in the sheet), *Delete*. |
+| `l`, `l gitea` | Your saved lists, all of them or by name. Enter applies the list's filters in the box and keeps you there. ⌘K on one: *Apply*, *Rename* (the box takes the new name, Enter keeps it), *Delete*. |
 | `i`, `i review` | The inbox, newest first, or the lines holding the words. Enter opens what the line is about. ⌘K: *Re-run* (a failed build), *Acknowledge* (an alert), *Snooze until tomorrow 9:00*, *Done*. |
 | ⌘S on any query | Saves it as a list; the footer says so. No button. |
 | `d sepa` | Pages only, path and excerpt, and a last row *Search Docs for "sepa"* that opens `#/docs`. |

@@ -10,7 +10,8 @@
   letter and a space like `t `; no mirror footnote; no lists block on the
   board (lists are `l `, renamed and deleted from the sheet); Esc in the sheet
   closes the sheet, never the dialog; typing in the sheet filters its actions;
-  ⌘S saves the query as a list.
+  ⌘S saves the query as a list. Round 3b: the one box is the sheet's filter
+  and the rename field; the search words come back when the sheet closes.
 
   What is real here: `TfDialog`, `QueryBox`, `Chips`, `Results`, `Row`,
   `Help`, the `Session`, the `>` palette, the `?` card, and every write
@@ -340,10 +341,8 @@
     relation: number;
     /** `sets` picks a set; `rename` holds the field for a saved list's new name. */
     level: "root" | "sets" | "rename";
-    /** What was typed since the sheet opened: the fuzzy filter over its actions. */
+    /** What the box holds while the sheet is open: the fuzzy filter over its actions, or the new name. The search words wait in `session.raw`. */
     filter: string;
-    /** The rename field's starting text. */
-    name: string;
   }
 
   let sheet = $state<Sheet | null>(null);
@@ -455,6 +454,7 @@
     await session.loadHome();
     session.set(session.raw);
     box?.focus();
+    push({ text: `Renamed to ${label}` });
   }
 
   async function deleteList(id: string) {
@@ -471,7 +471,15 @@
       const id = keyOf(row.hit.entity_id);
       return [
         { id: "apply", label: "Apply", detail: "Its filters in the box, as Enter does", run: () => activate(row) },
-        { id: "rename", label: "Rename", detail: "Give the list a new name", run: () => { if (sheet) sheet = { ...sheet, level: "rename", name: row.hit.title }; } },
+        {
+          id: "rename",
+          label: "Rename",
+          detail: "The box takes the new name; Enter keeps it",
+          run: () => {
+            if (sheet) sheet = { ...sheet, level: "rename", filter: row.hit.title };
+            void tick().then(() => box?.focus({ select: true }));
+          },
+        },
         { id: "delete", label: "Delete", detail: "The saved query is gone; there is no undo", run: () => deleteList(id) },
       ];
     }
@@ -608,7 +616,7 @@
     const row = session.current;
     if (!row) return;
     if (itemsFor(row).length === 0) return;
-    sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root", filter: "", name: "" };
+    sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root", filter: "" };
   }
 
   // The sheet belongs to one row: moving off it closes it.
@@ -692,7 +700,7 @@
           return;
         }
         if (sheet) {
-          sheet = null;
+          leaveSheet();
         } else {
           openSheet();
         }
@@ -783,14 +791,21 @@
     return true;
   }
 
+  /** Leave the sheet: the box shows the search words again, untouched. */
+  function leaveSheet() {
+    sheet = null;
+    box?.focus();
+  }
+
   function sheetKey(event: KeyboardEvent, current: Sheet) {
     if (current.level === "rename") {
-      // The field answers its own keys; Esc here is the field's too, so it never reaches the dialog.
-      if (event.key === "Escape") {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        if (listId !== null) void renameList(listId, current.filter);
+      } else if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        sheet = { ...current, level: "root" };
-        box?.focus();
+        sheet = { ...current, level: "root", filter: "" };
       }
       return;
     }
@@ -818,27 +833,23 @@
         return;
       case "Tab":
         event.preventDefault();
-        sheet = null;
+        leaveSheet();
         return;
       case "Escape":
-        // One rung per press, and never the dialog's: the filter, then the level, then the sheet.
+        // Never the dialog's: the set level goes back to the root, the root back to the results.
         event.preventDefault();
         event.stopPropagation();
-        if (current.filter !== "") sheet = { ...current, filter: "", selected: 0 };
-        else if (current.level === "sets") sheet = { ...current, level: "root", selected: Math.max(0, rootItems.findIndex((item) => item.id === "set")) };
-        else sheet = null;
-        box?.focus();
+        if (current.level === "sets") sheet = { ...current, level: "root", filter: "", selected: Math.max(0, rootItems.findIndex((item) => item.id === "set")) };
+        else leaveSheet();
         return;
       case "Backspace":
-        event.preventDefault();
-        sheet = { ...current, filter: current.filter.slice(0, -1), selected: 0 };
+        // An empty box and one more Backspace: back to the results, the words still there.
+        if (current.filter === "") {
+          event.preventDefault();
+          leaveSheet();
+        }
         return;
       default:
-        // A printable key narrows the actions; the box keeps its words.
-        if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
-          event.preventDefault();
-          sheet = { ...current, filter: current.filter + event.key, selected: 0 };
-        }
     }
   }
 
@@ -877,13 +888,13 @@
     }
   }
 
-  /** The rename field takes focus and selects the old name as it opens. */
-  function takeFocus(node: HTMLInputElement) {
-    node.focus();
-    node.select();
-  }
-
-  const placeholder = "Search everything · ? lists the prefixes · > # @ p r b m d i l t";
+  const placeholder = $derived(
+    sheet
+      ? sheet.level === "rename"
+        ? "The list's new name"
+        : `Narrow the actions on ${sheet.title}`
+      : "Search everything · ? lists the prefixes · > # @ p r b m d i l t",
+  );
   const interpreted = $derived(session.response?.interpreted ?? null);
   const sheetHint = $derived.by(() => {
     const row = session.current;
@@ -905,13 +916,16 @@
     {#snippet body()}
       <QueryBox
         bind:this={box}
-        value={session.raw}
+        value={sheet ? sheet.filter : session.raw}
         {placeholder}
         pending={session.pending}
         footnote=""
         controls={controlled.list}
         active={controlled.option}
-        oninput={(value) => { sheet = null; session.type(value); }}
+        oninput={(value) => {
+          if (sheet) sheet = { ...sheet, filter: value, selected: 0 };
+          else session.type(value);
+        }}
         {onkeydown}
         onclose={close}
       />
@@ -939,36 +953,11 @@
             <p class="lead">{sheet.title}</p>
           {/if}
         </div>
-        {#if sheet.level === "rename" && listId !== null}
-          {@const id = listId}
-          <div class="renamerow">
-            <label class="tf-ln-s" for="{uid}-rename">New name</label>
-            <input
-              id="{uid}-rename"
-              class="tf-ln-ren"
-              type="text"
-              use:takeFocus
-              value={sheet.name}
-              onkeydown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  void renameList(id, event.currentTarget.value);
-                } else if (event.key === "Escape") {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  if (sheet) sheet = { ...sheet, level: "root" };
-                  box?.focus();
-                }
-              }}
-            />
-          </div>
+        {#if sheet.level === "rename"}
+          <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
         {:else}
           <!-- Keys from a clicked chip land here first, so Esc never reaches the dialog; a click gives the box its focus back. -->
           <div id={sheetId} class="sheet" role="listbox" tabindex="-1" aria-label="Actions on {sheet.title}" {onkeydown} onclick={() => box?.focus()}>
-            <p class="filter" class:empty={sheet.filter === ""}>
-              {#if sheet.filter === ""}Type to narrow the actions{:else}{sheet.filter}<span class="caret"></span>{/if}
-            </p>
             {#if sheet.level === "sets"}
               <div class="tf-ln-h"><span class="tf-ln-lab">{pinned && memberKindOf(pinned.kind) ? "Add to" : "Show on this ticket"}</span></div>
             {/if}
@@ -1101,7 +1090,7 @@
         <span><kbd>↑↓</kbd> move</span>
         {#if shown[sheet.selected]?.link}<span><kbd>←→</kbd> relation</span>{/if}
         <span><kbd>↵</kbd> {shown[sheet.selected]?.link ? "link" : "do it"}</span>
-        <span><kbd>Esc</kbd> {sheet.filter !== "" ? "clear" : sheet.level === "root" ? "back to results" : "back"}</span>
+        <span><kbd>Esc</kbd> {sheet.level === "root" ? "back to the search" : "back"}</span>
         <span class="tf-spacer"></span>
         <span class="tf-ln-took">{sheet.title} · {counted(shown.length, "action", "actions")}</span>
       {:else}
@@ -1128,11 +1117,6 @@
   .pinned { flex: none; border-bottom: 1px solid var(--rule); }
   .lead { padding: 10px 18px; font-size: var(--t-sm); color: var(--ink); }
   .sheet { flex: 1; min-height: 0; overflow: auto; padding: 0 0 4px; outline: none; }
-  .filter { padding: 8px 18px 6px; font-size: var(--t-sm); color: var(--ink); border-bottom: 1px solid var(--rule); margin-bottom: 4px; }
-  .filter.empty { color: var(--ink-2); }
-  .caret { display: inline-block; width: 1px; height: 1em; background: var(--ink); vertical-align: -2px; margin-left: 1px; }
-  .renamerow { display: flex; align-items: center; gap: 10px; padding: 10px 18px; }
-  .renamerow input { flex: 1; margin: 0; }
   .cut { height: 1px; background: var(--rule); margin: 4px 0; }
   .job {
     display: inline-block; background: var(--card); color: var(--card-ink);
