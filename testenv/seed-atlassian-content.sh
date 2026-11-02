@@ -144,7 +144,8 @@
 # ENDPOINT PROVENANCE. Jira: every path is in the vendored
 # testenv/specs/jira-dc-rest.wadl (`project`, `user`, `field`,
 # `issuetypescheme`, `issue`, `issue/bulk`, `issue/{key}/comment`, `issue/{key}/worklog`,
-# `issue/{key}/transitions`, `issueLink`, `search`). Confluence has no
+# `issue/{key}/transitions`, `issue/{key}/attachments`, `attachment/meta`,
+# `issueLink`, `search`). Confluence has no
 # machine-readable spec; `/rest/api/space`, `/rest/api/content` and
 # `/rest/api/content/{id}/child/comment` are what the container named in
 # seed-atlassian.sh's VERIFIED_CONFLUENCE_IMAGE answers, read off it on
@@ -869,6 +870,52 @@ else
   created "favourite filter $FAV_FILTER (id $FAV_ID)"
 fi
 
+# -- two attachments on OPS-77 (#2410) ----------------------------------------
+# The ticket page's attachment list, preview and download (#2404, #2405) had
+# only knobas-mockd as a witness, whose bytes are made up at the listed size.
+# These are real files in testenv/jira-attachments/, so the live suite can
+# compare what Jira serves back byte for byte: one PNG (the preview) and one
+# PDF (the download). On OPS-77 because OPS is the project the live suite's
+# permission test narrows, which is how it asks for a file as a user who may
+# not browse the project. The fixture has no attachments, so where they go is
+# this seed's decision, as the sprint's is. A file is looked up by name on the
+# issue and skipped when it is there; Jira takes the upload only with
+# `X-Atlassian-Token: no-check` (its XSRF check) and answers 200 with the list.
+ATTACH_ISSUE=OPS-77
+ATTACH_DIR=jira-attachments
+ATTACH_FILES='oncall-dashboard.png:image/png runbook-draft.pdf:application/pdf'
+jira GET /rest/api/2/attachment/meta
+expect "attachment settings" 200
+[ "$(printf '%s' "$API_BODY" | jq -r .enabled)" = true ] || die "this Jira has attachments turned off: $API_BODY"
+jira GET "/rest/api/2/issue/$ATTACH_ISSUE?fields=attachment"
+expect "attachments of $ATTACH_ISSUE" 200
+for spec in $ATTACH_FILES; do
+  file=${spec%%:*}; mime=${spec#*:}
+  [ -r "$ATTACH_DIR/$file" ] || die "$ATTACH_DIR/$file not found"
+  if printf '%s' "$API_BODY" | jq -e --arg f "$file" 'any(.fields.attachment[]; .filename == $f)' >/dev/null; then
+    skip "attachment $file on $ATTACH_ISSUE"; continue
+  fi
+  _raw=$(curl -sS -u "$ADMIN" -X POST -H 'X-Atlassian-Token: no-check' -H 'Accept: application/json' \
+              -F "file=@$ATTACH_DIR/$file;type=$mime" -w '\n%{http_code}' \
+              "$JIRA_URL/rest/api/2/issue/$ATTACH_ISSUE/attachments")
+  API_STATUS=$(printf '%s' "$_raw" | tail -n 1)
+  API_BODY=$(printf '%s' "$_raw" | sed '$d')
+  expect "attach $file to $ATTACH_ISSUE" 200
+  created "attachment $file on $ATTACH_ISSUE (id $(printf '%s' "$API_BODY" | jq -r '.[0].id'))"
+  jira GET "/rest/api/2/issue/$ATTACH_ISSUE?fields=attachment"
+  expect "attachments of $ATTACH_ISSUE" 200
+done
+# Read back: each file once, at its own size. A second copy of one name would
+# make the suite's lookup by name ambiguous, so it stops the seed.
+for spec in $ATTACH_FILES; do
+  file=${spec%%:*}
+  _want=$(wc -c < "$ATTACH_DIR/$file" | tr -d ' ')
+  _have=$(printf '%s' "$API_BODY" | jq -r --arg f "$file" '[.fields.attachment[] | select(.filename == $f) | .size] | map(tostring) | join(" ")')
+  [ "$_have" = "$_want" ] || die "$ATTACH_ISSUE should carry $file once at $_want bytes; it carries [$_have]"
+done
+ATTACHMENTS=$(printf '%s' "$API_BODY" | jq --arg k "$ATTACH_ISSUE" \
+  '{issue: $k, files: [.fields.attachment[] | {id, filename, mimeType, size, content}]}')
+
 # -- jira's ids to seed-state.json --------------------------------------------
 JIRA_IDS='[]'
 for row in $ISSUES; do
@@ -913,6 +960,9 @@ record '.jira += {views: $v}' "$(jq -n --arg b "$FLOW_ID" --arg n "$FLOW_BOARD" 
                          jql: "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
                          untranslatable: "fixVersion is EMPTY"},
       _comment: "Seeded for the Jira views (#877): a Kanban board over PAY and OPS with Jira'"'"'s default sub-filter and a limit on In Progress, and a favourite filter with a clause knobas cannot translate."}')"
+# shellcheck disable=SC2016
+record '.jira += {attachments: $v}' "$(printf '%s' "$ATTACHMENTS" | jq --arg d "$ATTACH_DIR" \
+    '. + {dir: $d, _comment: "Seeded for the attachment witness (#2410): the files in testenv/\($d)/ on one issue, with the ids and content addresses this Jira gave them."}')"
 
 fi  # want jira
 

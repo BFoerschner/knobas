@@ -1,0 +1,2 @@
+# The live seed uploads these and compares them byte for byte (#2410).
+testenv/jira-attachments/** binary
