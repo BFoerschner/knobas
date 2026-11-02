@@ -17,7 +17,7 @@ import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
 import { pageFor } from "../pages";
 import { parseTfHash } from "../route";
-import { linkRequest } from "./current.svelte";
+import { DEBOUNCE_MS } from "../../launcher/session.svelte";
 import type { JobPorts } from "./ports";
 import TfJob from "./TfJob.svelte";
 import { sourceFacts } from "./source-facts.fixture";
@@ -171,7 +171,7 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
     },
     roomSuggestions: () => Promise.resolve({ rows: [PROPOSAL, ELSEWHERE], total: 2, more: [] }),
     search: () => Promise.reject(new Error("not in this test")),
-    launcherHome: () => Promise.resolve({ recent: [], smart_lists: [], stale_sources: [] } as never),
+    launcherHome: () => Promise.resolve({ recent: [], favourites: [], stale_sources: [] } as never),
     jobReach: () => Promise.resolve([]),
     jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
     hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
@@ -513,11 +513,28 @@ test("a link, an unlink and its Undo draw the card's sections again at once, the
   });
   const codeRow = () =>
     [...target.querySelectorAll(".tf-tksecs a")].map((a) => squash(a)).find((row) => row.startsWith("Code")) ?? null;
-  linkRequest.ask("PAY-231", { entity_id: pr.entity_id, title: pr.title, kind: "pr" });
-  open({ ports: io });
+  const found = {
+    interpreted: { text: "retry", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    groups: [{ kind: "pr", label: "Pull request", plural: "Pull requests", monogram: "PR", total: 1, hits: [{ ...pr, rank: 1, snippet: [] }] }],
+    total: 1,
+    took_ms: 1,
+    coverage: [],
+  };
+  open({ ports: { ...io, search: () => Promise.resolve(found as never) } });
   await settle();
   expect(codeRow()).toBeNull();
 
+  // The job's own *Link to…*: the pull request found in its picker, then Link.
+  drawerOpen();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-dacts button")].find((b) => squash(b) === "Link to…")!.click();
+  flushSync();
+  const picker = target.querySelector<HTMLInputElement>("[role='dialog'] input[type='text']")!;
+  picker.value = "retry";
+  picker.dispatchEvent(new Event("input", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 10));
+  await settle();
+  picker.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
   [...target.querySelectorAll<HTMLButtonElement>("[role='dialog'] button")].find((b) => squash(b) === "Link")!.click();
   await settle();
   expect(codeRow(), "the link's PR counts under Code").toBe("Code1›");

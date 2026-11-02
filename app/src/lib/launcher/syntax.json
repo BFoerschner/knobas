@@ -3,22 +3,88 @@
     "token": ">",
     "insert": ">",
     "summary": "actions — where the app can take you",
+    "word": "go to",
     "probe": ">",
     "prefix": "action",
     "expect": "recognised"
   },
   {
-    "token": "#",
-    "insert": "#",
-    "summary": "tickets only — #PAY-231, #sepa",
-    "probe": "#PAY-231",
-    "prefix": "ticket",
-    "expect": "recognised"
+    "token": "#t",
+    "insert": "#t ",
+    "summary": "tickets",
+    "probe": "#t",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "ticket"
+  },
+  {
+    "token": "#p",
+    "insert": "#p ",
+    "summary": "pull requests",
+    "probe": "#p",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "pr"
+  },
+  {
+    "token": "#r",
+    "insert": "#r ",
+    "summary": "repositories",
+    "probe": "#r",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "repo"
+  },
+  {
+    "token": "#b",
+    "insert": "#b ",
+    "summary": "builds",
+    "probe": "#b",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "pipeline"
+  },
+  {
+    "token": "#m",
+    "insert": "#m ",
+    "summary": "monitors",
+    "probe": "#m",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "monitor"
+  },
+  {
+    "token": "#d",
+    "insert": "#d ",
+    "summary": "pages",
+    "probe": "#d",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "page"
+  },
+  {
+    "token": "#l",
+    "insert": "#l ",
+    "summary": "lists",
+    "probe": "#l",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "list"
+  },
+  {
+    "token": "#i",
+    "insert": "#i ",
+    "summary": "inbox",
+    "probe": "#i",
+    "prefix": null,
+    "expect": "recognised",
+    "kind": "inbox"
   },
   {
     "token": "@me",
     "insert": "@me ",
     "summary": "items your configured accounts wrote",
+    "word": "mine",
     "probe": "@me",
     "prefix": "person",
     "expect": "recognised"
@@ -32,17 +98,10 @@
     "expect": "recognised"
   },
   {
-    "token": "/",
-    "insert": "/",
-    "summary": "one source — /ji, /gt, /tc, or its name",
-    "probe": "/ji",
-    "prefix": "source",
-    "expect": "recognised"
-  },
-  {
     "token": "t",
     "insert": "t ",
     "summary": "time — worklogs and the day review",
+    "word": "time",
     "probe": "t today",
     "prefix": "time",
     "expect": "recognised"
@@ -53,14 +112,6 @@
     "summary": "notes you wrote in knobas",
     "probe": "note:standup",
     "prefix": "note",
-    "expect": "recognised"
-  },
-  {
-    "token": "list:",
-    "insert": "list:",
-    "summary": "open a smart list — list:mine",
-    "probe": "list:mine",
-    "prefix": "list",
     "expect": "recognised"
   },
   {

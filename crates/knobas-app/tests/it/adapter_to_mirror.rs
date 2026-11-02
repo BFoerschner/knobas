@@ -890,6 +890,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
         &pool,
         &Registry::for_process(),
         knobas_search::SearchQuery {
+            titles: false,
             raw: "canary".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters {
@@ -928,6 +929,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
             &pool,
             &registry,
             knobas_search::SearchQuery {
+                titles: false,
                 raw: raw.to_owned(),
                 limit: 20,
                 filters: knobas_search::SearchFilters {

@@ -356,6 +356,7 @@ async fn the_editor_the_preview_the_job_and_the_launcher_agree() {
             .await
             .unwrap()
             .search(knobas_search::SearchQuery {
+                titles: false,
                 raw: query.clone(),
                 limit: 200,
                 filters: knobas_search::SearchFilters::default(),
@@ -457,6 +458,7 @@ async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
                 .await
                 .unwrap()
                 .search(knobas_search::SearchQuery {
+                    titles: false,
                     raw: query.clone(),
                     limit: 200,
                     filters: knobas_search::SearchFilters::default(),

@@ -194,6 +194,7 @@ async fn searched(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
         pool,
         &Registry::for_process(),
         SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 50,
             filters: SearchFilters::default(),
@@ -443,6 +444,7 @@ async fn an_unknown_has_value_is_reported() {
         &pool,
         &Registry::for_process(),
         SearchQuery {
+            titles: false,
             raw: "has:dragons".to_owned(),
             limit: 5,
             filters: SearchFilters::default(),

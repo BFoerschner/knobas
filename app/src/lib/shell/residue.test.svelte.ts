@@ -504,7 +504,7 @@ const LAUNCHER_PORTS = {
       coverage: [],
     }),
   launcherHome: () =>
-    deferred({ smart_lists: [], recent: [], sources: [], pending_writes: 0, notes_shown: true }),
+    deferred({ recent: [], favourites: [], sources: [], pending_writes: 0, notes_shown: true }),
 };
 
 /** Settings' commands (#830), every one answering through `deferred`. */
@@ -566,6 +566,8 @@ function sectionPorts() {
     shareExport: () => new Promise<never>(() => {}),
     restoreBackup: () => new Promise<never>(() => {}),
     smartLists: () => deferred([]),
+    favourites: () => deferred([]),
+    keys: () => deferred({ lists: [], actions: [] }),
     ticketViews: () => deferred([]),
     linkSets: () => deferred([]),
     appStatus: () => deferred({ app_version: "1.6.0" }),

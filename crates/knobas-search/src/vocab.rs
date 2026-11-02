@@ -1,6 +1,6 @@
 //! What the grammar parses *against*.
 //!
-//! [`parse`] on its own cannot tell `/ji` from `/nope`, `type:build` from
+//! [`parse`] on its own cannot tell `in:ji` from `in:nope`, `type:build` from
 //! `type:hypervisor`, or `@me` from a stranger: all three depend on what this
 //! installation is actually configured with. That knowledge is collected here,
 //! once per query, so the parser stays pure and testable.
@@ -8,7 +8,7 @@
 //! Three things live in a [`Vocabulary`]:
 //!
 //! * the configured **sources** (id, adapter kind, display name), which is what
-//!   `/alias` and `source:` resolve through;
+//!   `source:` and `in:` resolve through;
 //! * the **identity** behind `@me` -- the usernames the sources were configured
 //!   with, so "who am I" is never a second thing to fill in (interfaces §4.2);
 //! * the [`KindCatalog`], the display metadata a result group is labelled from.
@@ -29,7 +29,7 @@ pub struct SourceVocab {
     /// The instance id, which is also the entity namespace (`"jira-eu"`).
     pub id: String,
     /// Which adapter this is an instance of (`"jira"`). Several instances can
-    /// share one -- that is the whole point of `/ji` meaning *the Jiras*.
+    /// share one -- that is the whole point of `in:ji` meaning *the Jiras*.
     pub adapter_kind: String,
     /// The name shown in the sources list, matched as a typing prefix.
     pub display_name: String,
@@ -48,7 +48,7 @@ pub struct SourceVocab {
     /// Both consumers here skip a disabled source, and for *different* reasons
     /// -- which is why the filter is written twice rather than once:
     ///
-    /// * [`Vocabulary::resolve_source`] skips it because `source:` and `/alias`
+    /// * [`Vocabulary::resolve_source`] skips it because `source:` / `in:`
     ///   must not narrow to a source the sources list no longer offers;
     /// * `coverage::in_scope` skips it because since migration `0012` its items
     ///   are not in `sync.live_item` at all, so it contributes no corpus and a
@@ -64,7 +64,7 @@ pub struct SourceVocab {
 #[derive(Debug, Clone, Default)]
 pub struct Vocabulary {
     /// Configured sources, **ordered by id**. The order is load-bearing: it is
-    /// the order `/ji` returns its instances in, and therefore the order that
+    /// the order `in:ji` returns its instances in, and therefore the order that
     /// ends up in the generated SQL and in every test's expectation.
     pub sources: Vec<SourceVocab>,
     /// The distinct usernames the sources were configured with, sorted. This
@@ -85,9 +85,9 @@ pub struct Vocabulary {
 /// Built-in source aliases (spec §4), mapping an alias to an **adapter kind**
 /// rather than to an instance.
 ///
-/// That indirection is the reason `/ji` finds a second Jira the day it is
+/// That indirection is the reason `in:ji` finds a second Jira the day it is
 /// added, with no table to update. An alias whose adapter is not configured
-/// resolves to nothing, which is the honest answer: `/cf` in M1 means "a
+/// resolves to nothing, which is the honest answer: `in:cf` in M1 means "a
 /// Confluence you have not added yet".
 const SOURCE_ALIASES: &[(&str, &str)] = &[
     ("ji", "jira"),
@@ -157,7 +157,7 @@ impl Vocabulary {
     /// that has the registry (open question **E-Q2**).
     ///
     /// A **disabled** source is in the list and carries `enabled: false`
-    /// (issues #200, #202). `/ji` still stops resolving to it and the token is
+    /// (issues #200, #202). `in:ji` still stops resolving to it and the token is
     /// still reported as unknown -- [`Self::resolve_source`] is what enforces
     /// that -- but it is *present*, because "which sources exist" and "which
     /// sources may a reader see" are different questions, and carrying the
@@ -230,11 +230,11 @@ impl Vocabulary {
         self
     }
 
-    /// Which configured source instances a `/token` or `source:token` names.
+    /// Which configured source instances a `source:token` or `in:token` names.
     ///
     /// Resolution order, most specific first:
     ///
-    /// 1. an exact configured **id** -- so `/jira-eu` is that instance and
+    /// 1. an exact configured **id** -- so `in:jira-eu` is that instance and
     ///    nothing else, even though `jira` is also an alias;
     /// 2. a built-in **alias** ([`SOURCE_ALIASES`]) resolved to an adapter
     ///    kind, then every configured instance of it;
@@ -303,7 +303,7 @@ impl Vocabulary {
         self.sources.iter().filter(|source| source.enabled)
     }
 
-    /// A vocabulary for tests: two Jiras (so `/ji` has something to be plural
+    /// A vocabulary for tests: two Jiras (so `in:ji` has something to be plural
     /// about), a Gitea, a TeamCity, one identity and five declared kinds.
     #[cfg(any(test, feature = "test-util"))]
     #[must_use]
@@ -431,8 +431,9 @@ impl KindCatalog {
     pub fn info(&self, kind: &str) -> KindInfo {
         self.owned
             .get(kind)
-            .or_else(|| self.declared.get(kind))
             .cloned()
+            .or_else(|| launcher_kind(kind))
+            .or_else(|| self.declared.get(kind).cloned())
             .unwrap_or_else(|| derive_kind_info(kind))
     }
 
@@ -449,7 +450,9 @@ impl KindCatalog {
     /// because knobas owns notes, even though no descriptor mentions them.
     #[must_use]
     pub fn is_known(&self, kind: &str) -> bool {
-        self.owned.contains_key(kind) || self.declared.contains_key(kind)
+        self.owned.contains_key(kind)
+            || launcher_kind(kind).is_some()
+            || self.declared.contains_key(kind)
     }
 
     /// Every kind a compiled-in adapter declares, in a stable order.
@@ -532,6 +535,35 @@ fn owned_kinds() -> BTreeMap<String, KindInfo> {
             )
         })
         .collect()
+}
+
+/// The kinds the launcher answers with that are neither an adapter's nor an
+/// entity knobas owns (#2422, spec #2419), `(id, label, plural, monogram)`:
+/// a saved ticket view, a link set, a saved list (#2423), and the shell's
+/// word for what a CI source runs, which a hit of any kind declaring the
+/// Builds frame's `pipeline` is grouped under (ADR-0022). Not `knobas_core::entity::OWNED_KINDS`: those
+/// are entity namespaces (migration `0006`), and a view, a set or a list is no
+/// entity. Ahead of the declared kinds in [`KindCatalog::info`], so a group
+/// says *Pipeline* whatever an adapter calls its own.
+pub const LAUNCHER_KINDS: &[(&str, &str, &str, &str)] = &[
+    ("view", "Ticket view", "Ticket views", "VW"),
+    ("set", "Link set", "Link sets", "LS"),
+    ("pipeline", "Pipeline", "Pipelines", "PL"),
+    ("list", "List", "Lists", "LI"),
+];
+
+fn launcher_kind(kind: &str) -> Option<KindInfo> {
+    LAUNCHER_KINDS
+        .iter()
+        .find(|(id, ..)| *id == kind)
+        .map(|(id, label, plural, monogram)| KindInfo {
+            id: (*id).to_owned(),
+            label: (*label).to_owned(),
+            plural: (*plural).to_owned(),
+            monogram: (*monogram).to_owned(),
+            full_sync_exhaustive: false,
+            refreshes: true,
+        })
 }
 
 /// Everything a kind's chip needs, worked out from its id alone.
@@ -638,7 +670,7 @@ mod tests {
     #[test]
     fn an_alias_for_an_adapter_nobody_configured_resolves_to_nothing() {
         let v = Vocabulary::fixture();
-        // `/cf` is a real alias with no Confluence behind it. Answering with
+        // `in:cf` is a real alias with no Confluence behind it. Answering with
         // "no filter" would silently search everything.
         assert!(v.resolve_source("cf").is_empty());
         assert!(v.resolve_source("as").is_empty());

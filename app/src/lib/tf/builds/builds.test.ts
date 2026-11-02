@@ -103,19 +103,17 @@ test("the latest time reads as prototype-6 writes it: a time today, yesterday an
   expect(latestTime(pipeline("C", [waiting]), now)).toBe("14:20");
 });
 
-test("the filter keeps a pipeline every typed word finds in its name or group; the chips narrow further", () => {
+test("the chips keep the failing or the running ones, and both together keep what is both", () => {
   const list = [
     pipeline("Payout_IntegrationTests", [failed]),
     pipeline("Payout_Build", [running]),
     pipeline("Ledger_Build", [run()], { group: "Ledger" }),
   ];
   const names = (kept: PipelineRow[]) => kept.map((p) => p.name);
-  expect(names(keptPipelines(list, "", []))).toHaveLength(3);
-  expect(names(keptPipelines(list, "payout build", []))).toEqual(["Payout_Build"]);
-  expect(names(keptPipelines(list, "ledger", []))).toEqual(["Ledger_Build"]);
-  expect(names(keptPipelines(list, "", ["Failing"]))).toEqual(["Payout_IntegrationTests"]);
-  expect(names(keptPipelines(list, "", ["Running"]))).toEqual(["Payout_Build"]);
-  expect(names(keptPipelines(list, "", ["Failing", "Running"]))).toEqual([]);
+  expect(names(keptPipelines(list, []))).toHaveLength(3);
+  expect(names(keptPipelines(list, ["Failing"]))).toEqual(["Payout_IntegrationTests"]);
+  expect(names(keptPipelines(list, ["Running"]))).toEqual(["Payout_Build"]);
+  expect(names(keptPipelines(list, ["Failing", "Running"]))).toEqual([]);
 });
 
 test("the address carries the entity id, and a bare #/builds selects the first failing pipeline", () => {
@@ -184,11 +182,6 @@ test("a fold opens as the reader left it, else when something narrows, it holds 
   expect(foldOpen(undefined, calm, null, true)).toBe(true);
   expect(foldOpen(false, loud, null, true)).toBe(false);
   expect(foldOpen(true, calm, null, false)).toBe(true);
-});
-
-test("the filter's words also find a pipeline by any group above it", () => {
-  const list = [at("Payout_Build", ["Payments", "Payouts"]), at("Dbt_Test", ["Data"])];
-  expect(keptPipelines(list, "payments", []).map((p) => p.name)).toEqual(["Payout_Build"]);
 });
 
 test("pinned pipelines, in the list's order", () => {

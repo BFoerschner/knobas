@@ -147,6 +147,7 @@ fn file_ids(key: &str) -> Vec<String> {
 /// A plain launcher query, the shape the box sends.
 fn query(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 20,
         filters: SearchFilters::default(),

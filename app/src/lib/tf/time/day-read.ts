@@ -1,15 +1,11 @@
 /**
- * The Day view's read, shared (#1418): the Day tab asks it for the day it
- * draws, and the shell asks it for today's two figures the launcher's board
- * gives. One read, so the board and the Day tab cannot disagree about what
- * "tracked" and "to log" were made of.
+ * The Day view's read (#1418): the Day tab asks it for the day it draws.
  *
  * `day-view.ts` stays the arithmetic; this is the asking.
  */
-import type { AdHocBlock, DayBlock, OpenStretch, RunningTimer } from "../../ipc/time";
+import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
 import { adHocBlock as realAdHocBlock, dayBlocks as realDayBlocks } from "../../ipc/time";
-import { dayBounds, dayKey, readerDay } from "../../time/day";
-import { dayFigures, dayRows, type DayFigures } from "./day-view";
+import { dayBounds, readerDay } from "../../time/day";
 
 /** The two reads a day is made of. */
 export interface DayReads {
@@ -50,20 +46,4 @@ export async function readDay(io: DayReads, on: string): Promise<DayRecord> {
       ),
   );
   return { day: on, blocks: record.blocks, pastHorizon: record.past_horizon, offers, open: record.open };
-}
-
-/**
- * Today's figures, as the Day tab would show them at `now` with `running` on
- * the clock: the same read, the same rows, the same sums.
- */
-export async function readTodayFigures(
-  now: Date,
-  running: RunningTimer | null,
-  io: DayReads = { dayBlocks: realDayBlocks, adHocBlock: realAdHocBlock },
-): Promise<DayFigures> {
-  const day = dayKey(now);
-  const record = await readDay(io, day);
-  return dayFigures(
-    dayRows({ day, blocks: record.blocks, offers: record.offers, open: record.open, running, now }),
-  );
 }

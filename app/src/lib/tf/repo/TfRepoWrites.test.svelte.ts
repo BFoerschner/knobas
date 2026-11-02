@@ -682,6 +682,25 @@ test("Into is the diff's base: picking another reads and draws the change agains
   );
 });
 
+test("the address names Into as well: the page starts on that base, and From keeps it in the address (#2427)", async () => {
+  // As the launcher's *Create pull request…* writes it: `compare/<base>...<head>`, one segment.
+  await draw([REPO, "compare", "release/1.9...spike/sepa-instant"]);
+  const [into, from] = [...target.querySelectorAll<HTMLSelectElement>(".tf-compare select")];
+  expect(into!.value).toBe("release/1.9");
+  expect(from!.value).toBe("spike/sepa-instant");
+  expect(reads).toContainEqual([REPO, "compare:release/1.9...spike/sepa-instant"]);
+  expect(reads).not.toContainEqual([REPO, "compare:main...spike/sepa-instant"]);
+  from!.value = "chore/bump-tokio";
+  from!.dispatchEvent(new Event("change", { bubbles: true }));
+  expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/release%2F1.9...chore%2Fbump-tokio");
+  unmount(view!);
+  view = null;
+
+  // A base the repository does not list proposes the default branch, as an address without one does.
+  await draw([REPO, "compare", "gone...spike/sepa-instant"]);
+  expect(target.querySelector<HTMLSelectElement>(".tf-compare select")!.value).toBe("main");
+});
+
 test("Open as diff names the compare's two commits once the source settled them, so the diff page can read it locally (Spec 5)", async () => {
   const [mergeBase, tip] = ["907900b245f2941018dfd3ee155b876ef701c10a", "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192"];
   const base = ports();

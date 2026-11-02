@@ -586,7 +586,7 @@ struct Seeded {
 /// what the feature produces and the archive would be carrying a row nothing
 /// else in knobas would.
 const SAVED_LABEL: &str = "Payout tickets this week";
-const SAVED_QUERY: &str = "#payouts updated:7d";
+const SAVED_QUERY: &str = "#t payouts updated:7d";
 
 /// A ticket view's text (#812), with a token today's grammar cannot read
 /// (`sprint:next`), so the round trip shows the text crosses as saved and is
@@ -736,6 +736,26 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     .await
     .expect("seed a saved smart list")
     .id;
+    // ...and two favourites (#2428), the list first and then the ticket, which
+    // ride in the same part beside the saved lists.
+    for target in [
+        knobas_search::FavouriteTarget::List(saved_list.clone()),
+        knobas_search::FavouriteTarget::Entity(ticket.clone()),
+    ] {
+        knobas_app::commands::search::add_favourite_inner(pool, &Registry::for_process(), &target)
+            .await
+            .expect("seed a favourite");
+    }
+    // ...and the keys (#2429): the list's chord and two actions' chords, one
+    // chord on two kinds, which ride in the same part.
+    knobas_app::commands::search::bind_list_key_inner(pool, &saved_list, Some("⌘1"))
+        .await
+        .expect("seed a list's chord");
+    for (kind, action) in [("repo", "open-vscode"), ("pr", "approve")] {
+        knobas_app::commands::search::bind_action_key_inner(pool, kind, action, Some("⌘⇧O"))
+            .await
+            .expect("seed an action's chord");
+    }
 
     // ...and a ticket view (#812), which is what the `ticket_views` part
     // carries, saved through the command the Tickets screen calls.
@@ -944,6 +964,9 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("context", 1),
         ("source_config", 1),
         ("smart_list", 1),
+        ("favourite", 2),
+        ("list_key", 1),
+        ("action_key", 2),
         ("ticket_view", 1),
         ("link_set", 1),
         ("link_set_member", 2),
@@ -1033,6 +1056,55 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
             SAVED_QUERY.to_owned()
         )],
         "the saved smart list did not cross with its id, its name and its query"
+    );
+
+    // **The favourites arrived in their order** (#2428), and the far machine
+    // draws them: the list as its list, the ticket from the address book the
+    // links brought, before any sync of its own has mirrored it.
+    let favourites =
+        knobas_app::commands::search::favourites_inner(there, &Registry::for_process())
+            .await
+            .expect("the colleague's favourites");
+    assert_eq!(
+        favourites
+            .iter()
+            .map(|row| (
+                row.kind.as_str(),
+                row.entity_id.as_str(),
+                row.title.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("list", estate.saved_list.as_str(), SAVED_LABEL),
+            ("ticket", estate.ticket.as_str(), "Retry failed payouts"),
+        ],
+        "the favourites did not cross in their order"
+    );
+
+    // **The keys arrived** (#2429): the list's chord still opens the list it
+    // was bound to, and the one chord still means two actions on two kinds.
+    let keys = knobas_app::commands::search::keys_inner(there)
+        .await
+        .expect("the colleague's keys");
+    assert_eq!(
+        keys.lists
+            .iter()
+            .map(|key| (key.list_id.as_str(), key.chord.as_str(), key.text.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(estate.saved_list.as_str(), "⌘1", SAVED_QUERY)],
+        "the list's chord did not cross"
+    );
+    assert_eq!(
+        keys.actions
+            .iter()
+            .map(|key| (
+                key.kind.as_str(),
+                key.chord.as_str(),
+                key.action_id.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        vec![("pr", "⌘⇧O", "approve"), ("repo", "⌘⇧O", "open-vscode")],
+        "the actions' chords did not cross"
     );
 
     // **The ticket view arrived whole, its text exactly as saved** (#812): the
@@ -1157,7 +1229,7 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
                 smart_lists: true,
                 ..none
             },
-            vec!["smart_list"],
+            vec!["action_key", "favourite", "list_key", "smart_list"],
         ),
         // Nor is a ticket view (#812).
         (
@@ -1293,6 +1365,16 @@ async fn switching_the_saved_lists_part_off_leaves_the_list_table_behind() {
         !held.contains(&"smart_list".to_owned()),
         "the saved lists were switched off and the table is in the archive: {held:?}"
     );
+    assert!(
+        !held.contains(&"favourite".to_owned()),
+        "the favourites ride with the saved lists and stayed in the archive: {held:?}"
+    );
+    for key in ["list_key", "action_key"] {
+        assert!(
+            !held.contains(&key.to_owned()),
+            "the keys ride with the saved lists and {key} stayed in the archive: {held:?}"
+        );
+    }
     // ...and the rest of the defaults are still in it, so that "off" is one
     // part switched off rather than an export that fell over.
     for still in [
@@ -1330,7 +1412,7 @@ async fn switching_the_saved_lists_part_off_leaves_the_list_table_behind() {
 #[tokio::test]
 async fn a_saved_query_crosses_an_archive_exactly_as_it_was_written() {
     /// A query today's grammar refuses: a saved list may not name another one.
-    const REFUSED_QUERY: &str = "list:mine";
+    const REFUSED_QUERY: &str = "list:payouts";
     const REFUSED_ID: &str = "was-a-list";
 
     let (sharer, sharer_dir) = service("sharelistverbatim").await;

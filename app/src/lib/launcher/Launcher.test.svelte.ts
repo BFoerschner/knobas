@@ -19,12 +19,15 @@ import type {
   LauncherHome,
   SearchQuery,
   SearchResponse,
+  Excerpt,
   Segment,
 } from "../ipc";
-import type { InboxItem } from "../ipc/entity";
-import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
+import type { InboxItem, StateChip } from "../ipc/entity";
+import { toasts } from "../shell/toasts.svelte";
+import { kindRegistry } from "../shell/kind-registry.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
+import { createScope } from "./scope.svelte";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -34,8 +37,11 @@ function hit(over: {
   title: string;
   source_id?: string;
   snippet?: Segment[];
+  excerpts?: Excerpt[];
   synced_at?: string;
   path?: string | null;
+  state?: StateChip | null;
+  cell?: string;
 }) {
   return {
     entity_id: over.entity_id,
@@ -44,10 +50,12 @@ function hit(over: {
     updated_at: null,
     synced_at: over.synced_at ?? "2026-08-25T11:56:00Z",
     path: over.path ?? null,
-    state: null,
+    state: over.state ?? null,
+    ...(over.cell === undefined ? {} : { cell: over.cell }),
     title: over.title,
     rank: 1,
     snippet: over.snippet ?? [],
+    excerpts: over.excerpts ?? [],
   };
 }
 
@@ -105,26 +113,6 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
 }
 
 const HOME: LauncherHome = {
-  smart_lists: [
-    {
-      id: "mine",
-      label: "My items",
-      count: 3,
-      changed: true,
-      description: "Yours.",
-      saved: false,
-      needs_attention: false,
-    },
-    {
-      id: "just-synced",
-      label: "Just synced",
-      count: 9,
-      changed: false,
-      description: "New.",
-      saved: false,
-      needs_attention: false,
-    },
-  ],
   recent: [
     {
       entity_id: "jira:PAY-240",
@@ -137,6 +125,7 @@ const HOME: LauncherHome = {
       state: null,
     },
   ],
+  favourites: [],
   sources: [],
   pending_writes: 0,
   notes_shown: true,
@@ -288,16 +277,14 @@ test("markup in source text is rendered as characters, not as elements", async (
   const row = target.querySelector(".tf-ln-res");
   expect(row, "the hit rendered").not.toBeNull();
   expect(row!.textContent).toContain("<script>alert(1)</script>");
-  expect(row!.textContent).toContain('onclick="steal()"');
+  expect(row!.textContent).toContain('onerror="alert(2)"');
   // Nothing was parsed: no element the text merely *looks* like exists.
   expect(target.querySelectorAll("script")).toHaveLength(0);
   expect(target.querySelectorAll("img")).toHaveLength(0);
   expect(target.querySelectorAll("b")).toHaveLength(0);
-  // The highlight is an element the component made, from the `hit` flag.
-  expect(target.querySelectorAll("mark").length).toBeGreaterThan(0);
 });
 
-test("groups render in the engine's order, with the count and what the page left behind", async () => {
+test("groups render in the engine's order", async () => {
   open();
   await settle();
   target.querySelector("input")!.value = "sepa";
@@ -306,141 +293,6 @@ test("groups render in the engine's order, with the count and what the page left
 
   const headings = [...target.querySelectorAll(".tf-ln-lab")].map((el) => el.textContent?.trim());
   expect(headings).toEqual(["Tickets", "Pull requests", "Builds"]);
-
-  // 42 matched, one on the page: §4 wants both numbers or the reader believes
-  // there is one ticket.
-  const first = target.querySelector(".tf-ln-n")!;
-  expect(first.textContent).toContain("42");
-  expect(first.textContent).toContain("41 more");
-
-  // And every row carries its provenance, which is what §4 asks for on all of
-  // them rather than on the ones that happen to have room.
-  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
-  expect(ages).toEqual(["synced 4 min ago", "synced 4 min ago", "synced 4 min ago"]);
-});
-
-test("a source that is refusing the credential replaces the age on its rows", async () => {
-  const sources: CredentialHealth[] = [
-    {
-      source_id: "gitea",
-      state: "unauthorized",
-      checked_at: null,
-      detail: "401",
-      secret_expires_at: null,
-    },
-    // `unknown` is 0002's default and means *never tested*. It must NOT
-    // replace the age, or every row of a fresh install reads as broken.
-    {
-      source_id: "jira",
-      state: "unknown",
-      checked_at: null,
-      detail: null,
-      secret_expires_at: null,
-    },
-  ];
-  open({ sources });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
-  expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
-});
-
-/**
- * The conflation the fallback introduced, now that a shell does supply the prop.
- *
- * `sources.length > 0 ? sources : home` reads an **empty** live list as
- * "unsupplied" and silently reaches for the board's per-opening copy instead.
- * That was correct while nothing supplied the prop, and it stops being correct
- * the moment `App.svelte` passes a live `source:health` store: a store that has
- * just been told the only source is fine — or that is still seeding — is
- * *supplied and empty*, and falling back to a stale board fetch is the launcher
- * drawing a 401 the backend has already retracted.
- *
- * `undefined` means unsupplied. `[]` means "I am watching, and there is
- * nothing to complain about."
- */
-test("an explicitly empty sources prop is a live reading, not an unsupplied one", async () => {
-  open({
-    sources: [],
-    ports: {
-      search: async () => response(),
-      launcherHome: async (): Promise<LauncherHome> => ({
-        ...HOME,
-        // The board's copy is stale: this 401 has already been resolved, and
-        // the live store the shell supplies knows it.
-        sources: [
-          {
-            source_id: "gitea",
-            state: "unauthorized",
-            checked_at: null,
-            detail: "401",
-            secret_expires_at: null,
-          },
-        ],
-      }),
-    },
-  });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
-  expect(ages).toEqual(["synced 4 min ago", "synced 4 min ago", "synced 4 min ago"]);
-});
-
-/**
- * The same behaviour on the path production actually takes.
- *
- * The test above passes `sources` at mount. `App.svelte` does not — nothing in
- * `app/src` polls credential health in M1 — so for one review round the
- * component could replace the age with the credential complaint and never did
- * it in the shipped app: the test was green about a path production does not
- * take, which is the whole finding.
- *
- * This mounts the way `App.svelte` mounts, with **no `sources` prop at all**,
- * and asserts the complaint appears anyway — from `LauncherHome.sources`,
- * which the launcher already fetches on every opening.
- */
-test("with no sources prop, the rows take their health from the board", async () => {
-  open({
-    ports: {
-      search: async () => response(),
-      launcherHome: async (): Promise<LauncherHome> => ({
-        ...HOME,
-        sources: [
-          {
-            source_id: "gitea",
-            state: "unauthorized",
-            checked_at: null,
-            detail: "401",
-            secret_expires_at: null,
-          },
-          // Still the `unknown` control: 0002's default must not read as a
-          // fault, or a fresh install reports every source broken.
-          {
-            source_id: "jira",
-            state: "unknown",
-            checked_at: null,
-            detail: null,
-            secret_expires_at: null,
-          },
-        ],
-      }),
-    },
-  });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  // Three rows from three different sources, only the middle one failing, so
-  // a fixture that could not witness a mix-up is not what is being read here.
-  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
-  expect(ages).toEqual(["synced 4 min ago", "gitea · sign in again", "synced 4 min ago"]);
 });
 
 /**
@@ -457,232 +309,6 @@ test("with no sources prop, the rows take their health from the board", async ()
 test("the box says which store it is reading while the board is in flight", () => {
   open({ ports: { launcherHome: () => new Promise<never>(() => {}) } });
   expect(target.textContent).toContain("Reading the mirror\u2026");
-});
-
-/**
- * The footnote is one of the launcher's four accounts of the store, and the
- * count beside it is the board's own.
- *
- * A **non-zero** `pending_writes`, because `session.home?.pending_writes ?? 0`
- * renders the same `0` for a board that arrived with none and for a board that
- * never arrived — so on `HOME` as it stands a footnote wired to nothing at all
- * would still pass. The negative assertion in the paste-miss test below is not
- * a substitute for this one: it would accept *local cache* as happily as
- * *mirror*.
- */
-test("the footnote names the store and counts the board's pending writes", async () => {
-  open({ ports: { launcherHome: async () => ({ ...HOME, pending_writes: 4 }) } });
-  await settle();
-  expect(target.textContent).toContain("mirror \u00b7 4 pending writes");
-});
-
-test("the footnote counts one pending write in the singular", async () => {
-  open({ ports: { launcherHome: async () => ({ ...HOME, pending_writes: 1 }) } });
-  await settle();
-  expect(target.textContent).toContain("mirror \u00b7 1 pending write");
-  expect(target.textContent).not.toContain("1 pending writes");
-});
-
-test("an empty box shows the smart lists and the recent items", async () => {
-  open();
-  await settle();
-  const text = target.textContent ?? "";
-  expect(text).toContain("My items");
-  expect(text).toContain("Just synced");
-  expect(text).toContain("Reconcile mandates");
-  // The change badge, which is the only thing distinguishing a list worth
-  // opening from one that has not moved.
-  expect(target.querySelector(".tf-ln-c.tf-ln-chg")?.textContent).toContain("3");
-});
-
-/**
- * The board strip and the chips are **one** reading, not two.
- *
- * The strip used to map `home.sources` — the per-opening `launcher_home` fetch
- * — while the chips above it were drawn from the live `source:health` store.
- * They shared `isActionable`, which is a shared *rule* over two sets of data,
- * and a comment in `Board.svelte` claimed on that basis that the two "cannot
- * come to different conclusions about the same source". They could: this test
- * hands the board a stale 401 the live store has already retracted, which is
- * exactly the shape of #27's finding one layer along.
- */
-test("the board strip reads the live health, not the copy the board arrived with", async () => {
-  open({
-    // Supplied and disagreeing with the board's own copy: the store says gitea
-    // is fine, the per-opening fetch still remembers a 401.
-    sources: [
-      {
-        source_id: "gitea",
-        state: "ok",
-        checked_at: "2026-08-25T12:00:00Z",
-        detail: null,
-        secret_expires_at: null,
-      },
-    ],
-    ports: {
-      search: async () => response(),
-      launcherHome: async () => ({
-        ...HOME,
-        sources: [
-          {
-            source_id: "gitea",
-            state: "unauthorized",
-            checked_at: "2026-08-25T11:00:00Z",
-            detail: "401 from Gitea",
-            secret_expires_at: null,
-          },
-        ],
-      }),
-    },
-  });
-  await settle();
-
-  const strip = [...target.querySelectorAll(".tf-ln-strip .tf-ln-src")];
-  expect(strip.length, "the strip did not render at all").toBe(1);
-  expect(strip[0]!.className).not.toContain("fail");
-  expect(strip[0]!.textContent).not.toContain("401 from Gitea");
-});
-
-/**
- * The recent rows read the same live health as the strip above them (#1420).
- *
- * They used to be handed `home.sources`, the copy the board arrived with, so a
- * 401 the live store had already cleared left the strip and stayed on a recent
- * row as *sign in again* until the next opening. The board's copy here still
- * remembers the 401 and the live store says the source is fine; both the strip
- * and the row must read the store. The `synced` line is the positive control:
- * a row that drew no provenance at all would pass the negative half.
- */
-test("the recent rows read the live health, as the strip above them does", async () => {
-  open({
-    sources: [
-      {
-        source_id: "gitea",
-        state: "ok",
-        checked_at: "2026-08-25T12:00:00Z",
-        detail: null,
-        secret_expires_at: null,
-      },
-    ],
-    ports: {
-      search: async () => response(),
-      launcherHome: async (): Promise<LauncherHome> => ({
-        ...HOME,
-        recent: [
-          {
-            entity_id: "gitea:build-7",
-            kind: "build",
-            source_id: "gitea",
-            title: "payments main #7",
-            updated_at: null,
-            synced_at: "2026-08-25T11:58:00Z",
-            path: null,
-            state: null,
-          },
-        ],
-        sources: [
-          {
-            source_id: "gitea",
-            state: "unauthorized",
-            checked_at: "2026-08-25T11:00:00Z",
-            detail: "401 from Gitea",
-            secret_expires_at: null,
-          },
-        ],
-      }),
-    },
-  });
-  await settle();
-
-  const strip = [...target.querySelectorAll(".tf-ln-strip .tf-ln-src")];
-  expect(strip.length, "the strip did not render at all").toBe(1);
-  expect(strip[0]!.className).not.toContain("fail");
-  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
-  expect(ages).toEqual(["synced 2 min ago"]);
-});
-
-/**
- * The board's third section (spec §4: the empty box shows source health beside
- * the lists). Not selectable — a reading, not a destination — so nothing else
- * in this file would notice if it stopped being drawn.
- */
-test("the board shows one line per source, and says which one needs attention", async () => {
-  const sources: CredentialHealth[] = [
-    {
-      source_id: "jira",
-      state: "ok",
-      checked_at: "2026-08-25T11:00:00Z",
-      detail: null,
-      secret_expires_at: null,
-    },
-    {
-      source_id: "gitea",
-      state: "unauthorized",
-      checked_at: "2026-08-25T11:00:00Z",
-      detail: "401 from Gitea",
-      secret_expires_at: null,
-    },
-  ];
-  open({
-    ports: {
-      search: async () => response(),
-      launcherHome: async () => ({ ...HOME, sources }),
-    },
-  });
-  await settle();
-
-  const lines = [...target.querySelectorAll(".tf-ln-src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
-  // `GI`, not `GT`: the monogram is the first two letters of the id, because
-  // §3a forbids a table of adapter names. Written `GT` at first, from the
-  // mockup's hand-curated map — the second time this fixture-vs-derivation gap
-  // has been caught by a test rather than by reading the code.
-  expect(lines).toEqual(["JI jira checked 1 h ago", "GI gitea 401 from Gitea"]);
-  // Only the broken one is marked, and `ok` is not "needs attention".
-  expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail")).toHaveLength(1);
-  expect(target.querySelector(".tf-ln-src.tf-ln-fail")?.textContent).toContain("gitea");
-});
-
-test("the strip marks a source whose last run ended in an error, as the source page reads it (#1581)", async () => {
-  const health = (source_id: string): CredentialHealth => ({
-    source_id,
-    state: "ok",
-    checked_at: "2026-08-25T11:00:00Z",
-    detail: null,
-    secret_expires_at: null,
-  });
-  const run = (source_id: string, last_outcome: "ok" | "error"): SourceSyncStatus => ({
-    source_id,
-    running: false,
-    run_id: 1,
-    started_at: null,
-    last_finished_at: "2026-08-25T11:30:00Z",
-    last_outcome,
-    next_run_at: null,
-    backoff_until: null,
-    last_changed: null,
-  });
-  open({
-    sources: [
-      health("jira"),
-      health("teamcity"),
-      { ...health("gitea"), state: "unreachable", detail: "connection refused" },
-    ],
-    runs: [run("jira", "ok"), run("teamcity", "error"), run("gitea", "ok")],
-  });
-  await settle();
-
-  const lines = [...target.querySelectorAll(".tf-ln-src")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
-  expect(lines).toEqual([
-    "JI jira checked 1 h ago",
-    "TE teamcity Failed 30 min ago",
-    "GI gitea connection refused",
-  ]);
-  // Warn, not the credential's err: the credential is fine.
-  expect(target.querySelectorAll(".tf-ln-src.tf-ln-warn")).toHaveLength(1);
-  expect(target.querySelector(".tf-ln-src.tf-ln-warn")?.textContent).toContain("teamcity");
-  // A credential reading still wins, in its own tone and words.
-  expect(target.querySelector(".tf-ln-src.tf-ln-fail")?.textContent).toContain("gitea");
-  expect(target.querySelectorAll(".tf-ln-src.tf-ln-fail.tf-ln-warn")).toHaveLength(0);
 });
 
 test("Enter on a row navigates to its address and closes the overlay", async () => {
@@ -732,12 +358,8 @@ test("Esc clears the query first and only then closes", async () => {
   window.removeEventListener("keydown", shell);
 });
 
-test("Tab steals no focus, and offers nothing while no detail is open", async () => {
-  // `onlink` is supplied and `openEntity` is not, which is exactly how the
-  // shell mounts this with no detail open: the handler is always there, the
-  // open entity is what comes and goes.
-  const onlink = vi.fn();
-  open({ onlink });
+test("Tab steals no focus, and with no job chosen the sheet has no Link row", async () => {
+  open();
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -745,13 +367,11 @@ test("Tab steals no focus, and offers nothing while no detail is open", async ()
 
   const input = target.querySelector("input");
   const event = press("Tab");
-  expect(event.defaultPrevented, "Tab is the action chain, not a focus move").toBe(true);
+  expect(event.defaultPrevented, "Tab is the action sheet, not a focus move").toBe(true);
   expect(document.activeElement).toBe(input);
-  // #55: the chain's one action needs a second end. With nothing open there is
-  // nothing to link to, so there is no chain at all.
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-  press("Enter");
-  expect(onlink, "Enter opens the row; there was no action to run").not.toHaveBeenCalled();
+  const sheet = target.querySelector('[aria-label="Actions on the selected result"]');
+  expect(sheet?.textContent).toContain("Work on this");
+  expect(sheet?.textContent, "a link needs a job at its other end").not.toContain("Link to");
 });
 
 /**
@@ -786,162 +406,28 @@ test("the overlay is the shell's dialog, and a click on the dim closes it", asyn
 /** The open entity, as the shell names it to the launcher. */
 const OPEN = { entityId: "jira:PAY-999", label: "PAY-999" };
 
-/**
- * #55. The chain exists only while a detail is open, it names what is open,
- * and pressing it hands the *result* back — the launcher never writes.
- */
-test("Tab offers Link to the open entity, and Enter hands the result to the shell", async () => {
-  const onlink = vi.fn();
-  open({ openEntity: OPEN, onlink });
-  await settle();
-  // Search, so the selected row is a result rather than the board.
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent).toContain("Link to PAY-999");
-
-  press("Enter");
-  // The first result of the fixture's first group.
-  expect(onlink).toHaveBeenCalledWith({ entity_id: "jira:PAY-231", title: "Retry failed SEPA payouts", kind: "ticket" });
-  // The launcher steps out of the way of the job's link dialog (#1500).
-  expect(target.querySelector(".tf-launch"), "the launcher stayed open over the job's dialog").toBeNull();
-});
-
-/** The chain acts on the row that was selected when it opened, not on a later one. */
-test("moving the selection abandons an open chain", async () => {
-  const onlink = vi.fn();
-  open({ openEntity: OPEN, onlink });
+/** The sheet belongs to the row selected when Tab opened it. */
+test("leaving the sheet and moving the selection opens it on the next row", async () => {
+  open({ openEntity: OPEN });
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
   press("Tab");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).not.toBeNull();
-
-  // With a chain open the arrows walk *it*, so the selection is moved from a
-  // closed one: Escape first.
+  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("Retry failed SEPA payouts");
   press("Escape");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
   press("ArrowDown");
   press("Tab");
-  press("Enter");
-
-  expect(onlink).toHaveBeenCalledWith({ entity_id: "gitea:acme/svc#142", title: "Backoff", kind: "pr" });
+  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("Backoff");
 });
 
-/** An entity cannot be linked to itself, so its own row offers nothing. */
-test("the open entity's own row has no chain", async () => {
-  const onlink = vi.fn();
-  open({ openEntity: { entityId: "jira:PAY-231", label: "PAY-231" }, onlink });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-  expect(onlink).not.toHaveBeenCalled();
-});
-
-/**
- * *Start timer* on the selected result (#278, story 11).
- *
- * It needs no open detail — that is the difference from *Link to…*, which
- * needs a second end — so this drives the launcher with `openEntity` absent,
- * which is how the shell mounts it from a room with nothing open.
- *
- * The launcher only says *which* result was chosen. **Stopping the running
- * timer first is the shell's**, and the two are separated here on purpose: a
- * launcher that stopped a timer itself would be a second owner of the clock.
- */
-test("Tab offers Start timer on a result, with no detail open", async () => {
-  const ontimer = vi.fn();
-  open({ ontimer });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent).toContain("Start timer on Retry failed SEPA payouts");
-
-  press("Enter");
-  expect(ontimer).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-});
-
-/**
- * **The refusal, in the launcher.** A stored context is a row in
- * `knobas.entity` and comes back from search like anything else, so the row
- * has to be taken out rather than assumed away — the same rule
- * `shell/timer.ts` states and `start_timer` enforces.
- *
- * The fixture puts the context group **first**, so the chain under test is the
- * one on the selected row, and *Link to…* is offered alongside: the assertion
- * is that the timer row is gone and the link row is not, which a chain that
- * simply had nothing in it could not satisfy.
- */
-test("a stored context result is not offered a timer, though it can still be linked", async () => {
-  const ontimer = vi.fn();
-  const onlink = vi.fn();
-  const withContext = response({
-    groups: [
-      {
-        kind: "ctx",
-        label: "Context",
-        plural: "Contexts",
-        monogram: "CX",
-        total: 1,
-        hits: [
-          hit({
-            entity_id: "ctx:5b1c0f1e",
-            kind: "ctx",
-            title: "SEPA migration",
-            source_id: "ctx",
-          }),
-        ],
-      },
-      ...response().groups,
-    ],
-  });
-  open({
-    ontimer,
-    onlink,
-    openEntity: OPEN,
-    ports: { search: async () => withContext, launcherHome: async () => HOME },
-  });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent, "a context was offered a timer").not.toContain("Start timer");
-  expect(chain?.textContent, "the whole chain vanished, so this proves nothing").toContain(
-    "Link to PAY-999",
-  );
-
-  press("Enter");
-  expect(ontimer).not.toHaveBeenCalled();
-});
-
-/**
- * Escape unwinds the chain first — one rung per press, and the shell's ladder
- * still never sees the key.
- */
-test("Escape closes the chain before it clears the query", async () => {
-  // Only `Escape` matters here: the shell binds it (and ⌘K), and `Tab` is
-  // preventDefault-ed rather than stopped, because nothing above listens for it.
+/** Escape leaves the sheet first, then clears the query, and the shell's ladder never sees it. */
+test("Escape leaves the sheet before it clears the query", async () => {
   const reachedTheShell: string[] = [];
   const shell = (event: KeyboardEvent) => reachedTheShell.push(event.key);
   window.addEventListener("keydown", shell);
-  open({ openEntity: OPEN, onlink: () => {} });
+  open({ openEntity: OPEN });
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1000,29 +486,94 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
             text: "",
             prefix: null,
             filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
-            unknown_tokens: ["env:prod", "/cf"],
+            unknown_tokens: ["env:prod", "source:cf"],
           },
           groups: [],
         }),
     },
   });
   await settle();
-  target.querySelector("input")!.value = "env:prod /cf";
+  target.querySelector("input")!.value = "env:prod source:cf";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
   const greyed = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")].map((el) => el.textContent?.trim());
   expect(greyed).toEqual([
     "env:prod — the estate arrives with assets",
-    "/cf — no source matches /cf",
+    "source:cf — no source matches source:cf",
   ]);
+});
+
+/* ── #2420: `#` letters that combine, the key a word, `/` gone ──────── */
+
+test("a combined # filter is sent as typed and draws one chip per letter", async () => {
+  const sent: string[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        sent.push(query.raw);
+        return response({
+          interpreted: {
+            text: "sepa",
+            prefix: null,
+            filters: { sources: [], kinds: ["repo", "list"], updated_within_days: null, mine: false, authors: [] },
+            unknown_tokens: [],
+          },
+        });
+      },
+    },
+  });
+  await settle();
+  typeInBox("#rl sepa");
+  await debounced();
+
+  // The backend parses (ruling P2): the box's text goes over exactly as typed.
+  expect(sent.at(-1)).toBe("#rl sepa");
+  const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
+  // The words the `?` card gives each letter, one chip per kind the answer filtered on.
+  expect(chips).toEqual(["repositories", "lists"]);
+});
+
+test("a key typed as a word finds its ticket and draws no filter chip", async () => {
+  const sent: string[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        sent.push(query.raw);
+        return response({
+          interpreted: {
+            text: "pay-231",
+            prefix: null,
+            filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+            unknown_tokens: [],
+          },
+        });
+      },
+    },
+  });
+  await settle();
+  typeInBox("pay-231");
+  await debounced();
+
+  expect(sent.at(-1)).toBe("pay-231");
+  expect(target.querySelectorAll(".tf-ln-fchip")).toHaveLength(0);
+  expect(target.textContent).toContain("Retry failed SEPA payouts");
+});
+
+test("the placeholder reads only ⌘? for help, so no / source", async () => {
+  open();
+  await settle();
+  // #2424: the grammar is on the ⌘? overlay, not in the placeholder.
+  expect(target.querySelector("input")!.placeholder).toBe("⌘? for help");
 });
 
 /**
  * The third reader of the actionable-health rule, and the one nothing else in
  * this file covers.
  *
- * A `/gitea` chip's dot and the row badge beside it are the same claim about
+ * An `in:gitea` chip's dot and the row badge beside it are the same claim about
  * the same source, so they are drawn from one rule (`shell/health.svelte::isActionable`)
  * rather than from three copies of the state list — which is what #37 asked for
  * and what this asserts is actually wired up. `ok` is the control: without it a
@@ -1068,7 +619,7 @@ test("a source chip is marked when that source is refusing the credential", asyn
     },
   });
   await settle();
-  target.querySelector("input")!.value = "/gitea /jira sepa";
+  target.querySelector("input")!.value = "in:gitea in:jira sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
@@ -1128,7 +679,7 @@ test("a chip for a source with no health reading is not marked failing", async (
     },
   });
   await settle();
-  target.querySelector("input")!.value = "/gitea /nowhere sepa";
+  target.querySelector("input")!.value = "in:gitea in:nowhere sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
@@ -1202,11 +753,16 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
 
   const rows = [...target.querySelectorAll(".tf-ln-opt")];
   expect(rows.length).toBeGreaterThan(8);
-  expect(target.textContent).toContain("tickets only");
+  // One row per `#` letter, each one word (#2420), and no `/` source row.
+  const tokens = rows.map((row) => row.querySelector(".tf-ln-tok")?.textContent?.trim() ?? "");
+  for (const letter of ["#t", "#p", "#r", "#b", "#m", "#d", "#l", "#i"]) {
+    expect(tokens.some((token) => token.startsWith(letter))).toBe(true);
+  }
+  expect(tokens.some((token) => token.startsWith("/"))).toBe(false);
 
   rows[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
-  expect(target.querySelector("input")!.value).toBe("#");
+  expect(target.querySelector("input")!.value).toBe("#t ");
 });
 
 /**
@@ -1362,24 +918,6 @@ async function search(text: string) {
   await debounced();
 }
 
-test("an asset hit draws its monogram and the path from the root", async () => {
-  open({ ports: { search: async () => response(ESTATE), launcherHome: async () => HOME } });
-  await settle();
-  await search("kuma");
-
-  const rows = [...target.querySelectorAll(".tf-ln-res")].map((row) => row.textContent);
-  expect(rows[0]).toContain("AS");
-  expect(rows[0]).toContain("postgres");
-  // Where it sits, which is what tells two containers called `postgres` apart.
-  expect(target.querySelector(".tf-ln-res .tf-ln-pa")?.textContent).toBe("hel1 › vm-db-01");
-  expect(rows[1]).toContain("RO");
-  expect(rows[1]).toContain("Uptime Kuma");
-  // The group headings are the backend's plurals, so the estate reads as a
-  // section of the launcher rather than as unknown kinds at the bottom.
-  const headings = [...target.querySelectorAll(".tf-ln-h .tf-ln-lab")].map((el) => el.textContent);
-  expect(headings).toEqual(["Assets", "Routes"]);
-});
-
 test("Enter on a Jira view opens that view in Tickets, never Code (#1094)", async () => {
   const onnavigate = vi.fn();
   const views = {
@@ -1404,6 +942,83 @@ test("Enter on a Jira view opens that view in Tickets, never Code (#1094)", asyn
 
   expect(onnavigate).toHaveBeenCalledWith("#/tickets/jira-board-21");
   expect(onnavigate).not.toHaveBeenCalledWith("#/code");
+});
+
+/** A saved ticket view, a link set and a pipeline, as the engine groups them (#2422). */
+const OWN_KINDS = {
+  groups: [
+    {
+      kind: "view",
+      label: "Ticket view",
+      plural: "Ticket views",
+      monogram: "VW",
+      total: 1,
+      hits: [hit({ entity_id: "payments-backlog", kind: "view", source_id: "view", title: "Payments backlog", path: 'Team · project:PAY status:"To Do"' })],
+    },
+    {
+      kind: "set",
+      label: "Link set",
+      plural: "Link sets",
+      monogram: "LS",
+      total: 1,
+      hits: [hit({ entity_id: "payout-stack", kind: "set", source_id: "set", title: "Payout stack", path: "6 items · 2 patterns · 4 tickets" })],
+    },
+    {
+      kind: "pipeline",
+      label: "Pipeline",
+      plural: "Pipelines",
+      monogram: "PL",
+      total: 1,
+      hits: [
+        hit({
+          entity_id: "teamcity:buildType:Payout_Deploy",
+          kind: "pipeline",
+          source_id: "teamcity",
+          title: "Payout_Deploy",
+          path: "Tidewater › Payouts",
+          state: { text: "FAILURE", tone: "err" },
+        }),
+      ],
+    },
+  ],
+  total: 3,
+};
+
+test("a view, a set and a pipeline each draw their group and their key cell (#2422)", async () => {
+  open({ ports: { search: async () => response(OWN_KINDS), launcherHome: async () => HOME } });
+  await settle();
+  await search("pay");
+
+  const headings = [...target.querySelectorAll(".tf-ln-lab")].map((el) => el.textContent?.trim());
+  expect(headings).toEqual(["Ticket views", "Link sets", "Pipelines"]);
+  const rows = [...target.querySelectorAll(".tf-ln-res")].map((row) => [
+    row.querySelector(".tf-ln-mg")?.textContent?.trim(),
+    row.querySelector(".tf-ln-k")?.textContent?.trim(),
+    row.querySelector(".tf-ln-t")?.textContent?.trim(),
+  ]);
+  expect(rows).toEqual([
+    ["VW", "Team", "Payments backlog"],
+    ["LS", "link set", "Payout stack"],
+    ["PL", "Payouts", "Payout_Deploy"],
+  ]);
+  // A pipeline is coloured by its newest run, the engine's state.
+  expect(target.querySelectorAll(".tf-ln-mg")[2]?.getAttribute("data-tone")).toBe("err");
+});
+
+test("Enter on a view opens its Tickets page, on a set its page, on a pipeline Builds at it (#2422)", async () => {
+  const addresses = ["#/tickets/payments-backlog", "#/sets/payout-stack", "#/builds/teamcity%3AbuildType%3APayout_Deploy"];
+  for (const [at, address] of addresses.entries()) {
+    const onnavigate = vi.fn();
+    open({ onnavigate, ports: { search: async () => response(OWN_KINDS), launcherHome: async () => HOME } });
+    await settle();
+    await search("pay");
+    for (let step = 0; step < at; step += 1) press("ArrowDown");
+    press("Enter");
+    await settle();
+    expect(onnavigate, address).toHaveBeenCalledWith(address);
+    if (app) unmount(app);
+    app = undefined;
+  }
 });
 
 /**
@@ -1441,63 +1056,6 @@ test("Enter on a note opens its page, and on a protocol note the Standup at its 
   }
 });
 
-/**
- * Every hit whose kind declares a parent arrives with the parent chain on its
- * `path` (#596), and the launcher draws whatever path a hit carries — no kind
- * is named here, so a later adapter's parent needs no launcher code. Two
- * "fix typo" commits from two repos are told apart by that line, and a hit
- * with no path draws no line at all.
- */
-test("two same-titled commits are told apart by their repo on the path line", async () => {
-  const commits: SearchResponse = {
-    ...response(),
-    groups: [
-      {
-        kind: "commit",
-        label: "Commit",
-        plural: "Commits",
-        monogram: "CO",
-        total: 2,
-        hits: [
-          hit({
-            entity_id: "gitea:tidewater/payout-service@c90d11",
-            kind: "commit",
-            source_id: "gitea",
-            title: "fix typo",
-            path: "tidewater/payout-service",
-          }),
-          hit({
-            entity_id: "gitea:tidewater/ledger@4e1a07",
-            kind: "commit",
-            source_id: "gitea",
-            title: "fix typo",
-            path: "tidewater/ledger",
-          }),
-        ],
-      },
-      {
-        kind: "monitor",
-        label: "Monitor",
-        plural: "Monitors",
-        monogram: "MO",
-        total: 1,
-        hits: [hit({ entity_id: "kuma:8", kind: "monitor", source_id: "kuma", title: "payout health" })],
-      },
-    ],
-    total: 3,
-  };
-  open({ ports: { search: async () => commits, launcherHome: async () => HOME } });
-  await settle();
-  await search("fix typo");
-
-  const rows = [...target.querySelectorAll(".tf-ln-res")];
-  expect(rows.map((row) => row.querySelector(".tf-ln-pa")?.textContent ?? null)).toEqual([
-    "tidewater/payout-service",
-    "tidewater/ledger",
-    null,
-  ]);
-});
-
 test("Enter on an asset opens the Tree at it, and on a route at its exposing asset", async () => {
   const onnavigate = vi.fn();
   open({
@@ -1532,31 +1090,6 @@ test("Enter on an asset opens the Tree at it, and on a route at its exposing ass
  * *Link to <key>* then *Start timer on <title>*, and nothing else, on an
  * asset as on a ticket.
  */
-test("Tab offers Link to the job, then Start timer, and nothing else", async () => {
-  const onlink = vi.fn();
-  const ontimer = vi.fn();
-  open({
-    openEntity: OPEN,
-    onlink,
-    ontimer,
-    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
-  });
-  await settle();
-  await search("kuma");
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect([...chain!.querySelectorAll(".tf-ln-chain-a")].map((el) => el.textContent?.trim())).toEqual([
-    "Link to PAY-999",
-    "Start timer on postgres",
-  ]);
-
-  press("ArrowDown");
-  press("Enter");
-  expect(ontimer).toHaveBeenCalledWith("asset:9f1c", "postgres");
-  expect(onlink).not.toHaveBeenCalled();
-});
-
 // -- a pasted link (#496, spec #491 stories 9 and 10) ------------------------
 
 const PASTED = "https://jira.example/browse/PAY-231";
@@ -1716,129 +1249,224 @@ test("the launcher's own default resolver is what a paste reaches", async () => 
 });
 
 // ---------------------------------------------------------------------------
-// Saved smart lists (#506)
+// Saved lists (#506, #2423)
 // ---------------------------------------------------------------------------
 
-/** A board carrying one built-in, one saved list, and one that needs attention. */
-const SAVED_HOME: LauncherHome = {
-  ...HOME,
-  smart_lists: [
-    {
-      id: "mine",
-      label: "My items",
-      count: 3,
-      changed: true,
-      description: "Yours.",
-      saved: false,
-      needs_attention: false,
-    },
-    {
-      id: "sepa-retries",
-      label: "SEPA retries",
-      count: 12,
-      changed: true,
-      description: "#sepa @me",
-      saved: true,
-      needs_attention: false,
-    },
-    {
-      id: "legacy-palette",
-      label: "Palette",
-      count: 0,
-      changed: false,
-      description:
-        "Needs attention: the saved query starts with a prefix that is not a search. Delete it and save the search again.",
-      saved: true,
-      needs_attention: true,
-    },
-  ],
+/** What `create_smart_list` answers with for the query saved below. */
+const SAVED = {
+  id: "sepa-retries",
+  label: "SEPA retries",
+  count: 12,
+  description: "sepa retries",
+  needs_attention: false,
 };
 
-/** The smart-list rows on the board, as one object per row. */
-function railRows() {
-  return [...target.querySelectorAll(".tf-ln-slrow")].map((row) => ({
-    text: row.textContent ?? "",
-    /** The right-hand cell: the count, or the words a refused query draws. */
-    right: row.querySelector(".tf-ln-c")?.textContent?.trim() ?? "",
-    controls: [...row.querySelectorAll("button.tf-ln-mini")].map(
-      (button) => button.textContent?.trim() ?? "",
-    ),
-    open: row.querySelector<HTMLButtonElement>("button.tf-ln-sl"),
-  }));
+/** A list hit, as the engine answers `#l` with one (kind `list`, the text as its path line). */
+function listHit(id: string, title: string, text: string, state: StateChip | null = null) {
+  return hit({ entity_id: id, kind: "list", source_id: "list", title, path: text, state });
+}
+
+/** `#l`'s answer: the saved lists, one needing attention. */
+function listsAnswer(): SearchResponse {
+  return response({
+    interpreted: {
+      text: "",
+      prefix: null,
+      filters: { sources: [], kinds: ["list"], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [
+      {
+        kind: "list",
+        label: "List",
+        plural: "Lists",
+        monogram: "LI",
+        total: 2,
+        hits: [
+          listHit("sepa-tickets", "SEPA tickets", "#t sepa @me"),
+          listHit("old-gitea", "Old Gitea search", "/gitea payout", {
+            text: "Needs attention: the saved query names a source as `/gitea`. Delete it and save the search again.",
+            tone: "warn",
+          }),
+        ],
+      },
+    ],
+    total: 2,
+  });
 }
 
 /**
- * Saved and built-in lists are one rail, and only the saved ones carry the two
- * controls (#506, stories 57 and 58).
- *
- * The built-in row is asserted **beside** the saved one rather than on its
- * own: what the story asks for is one kind with one difference, and a test
- * that only looked at the saved row could not see a *Rename* that had appeared
- * on every row.
+ * Enter on a saved list puts its own text back into the box, filters and
+ * words, and runs it; the reader stays in the box (#2423, spec #2419 story
+ * 14). The row's key cell is the kind's word and its monogram `LI`.
  */
-test("the rail draws saved lists beside the built-ins, and only they can be renamed", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+test("enter on a saved list applies its text in the box and stays", async () => {
+  const onnavigate = vi.fn();
+  const asked: string[] = [];
+  open({
+    onnavigate,
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        asked.push(query.raw);
+        return query.raw.startsWith("#l") ? listsAnswer() : response();
+      },
+    },
+  });
   await settle();
+  await search("#l");
+  const row = target.querySelector(".tf-ln-res");
+  expect(row?.querySelector(".tf-ln-mg")?.textContent).toBe("LI");
+  expect(row?.querySelector(".tf-ln-k")?.textContent).toBe("list");
+  expect(row?.querySelector(".tf-ln-t")?.textContent).toBe("SEPA tickets");
 
-  const rows = railRows();
-  expect(rows).toHaveLength(3);
-  // The built-in: its count, its badge, and nothing to press but the row.
-  expect(rows[0]!.text).toContain("My items");
-  expect(rows[0]!.text).toContain("3");
-  expect(rows[0]!.controls).toEqual([]);
-  // The saved one: the same count and badge, plus the two controls.
-  expect(rows[1]!.text).toContain("SEPA retries");
-  expect(rows[1]!.text).toContain("12");
-  // Its blurb is the query it stands for.
-  expect(rows[1]!.text).toContain("#sepa @me");
-  expect(rows[1]!.controls).toEqual(["Rename", "Delete"]);
-  // Both badges are drawn, so "like the built-ins" is a rendered fact.
-  expect(target.querySelectorAll(".tf-ln-dot")).toHaveLength(2);
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("#t sepa @me ");
+  expect(asked.at(-1)).toBe("#t sepa @me ");
+  expect(onnavigate, "a list is applied, not opened somewhere").not.toHaveBeenCalled();
+  expect(target.querySelector("input"), "the launcher stays open").not.toBeNull();
 });
 
 /**
- * A saved query today's grammar refuses reads *needs attention* and cannot be
- * opened (story 60).
- *
- * The second half is the one that matters and the one a text assertion alone
- * would miss: a row that said the right words and still put `list:legacy-…`
- * in the box would send the reader to the backend's refusal.
+ * A list whose text today's grammar refuses says so and does not apply: its
+ * row is in the warning tone with the reason as its name, and Enter raises the
+ * reason instead of putting the text into the box.
  */
-test("a saved list that needs attention says so and does not open", async () => {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+test("a saved list that needs attention says why and does not apply", async () => {
+  toasts.items.splice(0);
+  const asked: string[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        asked.push(query.raw);
+        return listsAnswer();
+      },
+    },
+  });
   await settle();
+  await search("#l");
+  const broken = target.querySelectorAll(".tf-ln-res")[1]!;
+  expect(broken.querySelector(".tf-ln-mg")?.getAttribute("data-tone")).toBe("warn");
+  expect(broken.querySelector(".tf-ln-mg")?.getAttribute("title")).toContain("Needs attention");
 
-  const row = railRows()[2]!;
-  // The **count cell** and not the row's whole text: the blurb under the name
-  // carries these two words too, so a row that had gone back to drawing `0`
-  // beside a needs-attention blurb would satisfy a whole-row `toContain`.
-  expect(row.right).toBe("Needs attention");
-  expect(row.open?.disabled).toBe(true);
-
-  row.open?.click();
-  flushSync();
-  await settle();
-  expect(target.querySelector("input")!.value).toBe("");
-
-  // And from the keyboard, which does not go through the button at all: the
-  // arrows and `Enter` reach `activate` directly, so `disabled` alone would
-  // leave `Enter` putting `list:legacy-palette` in the box and sending the
-  // reader to the backend's refusal.
-  press("ArrowDown");
   press("ArrowDown");
   press("Enter");
   await settle();
-  expect(target.querySelector("input")!.value).toBe("");
+  expect(target.querySelector("input")!.value).toBe("#l");
+  expect(asked).toEqual(["#l"]);
+  expect(toasts.items.map((toast) => toast.text)).toEqual([
+    "Needs attention: the saved query names a source as `/gitea`. Delete it and save the search again.",
+  ]);
+  toasts.items.splice(0);
+});
 
-  // The positive control, and the assertion above is worth nothing without
-  // it: an empty box is also what a launcher whose arrows never moved and
-  // whose `Enter` never fired would show. `ArrowUp` steps back onto the
-  // runnable saved row, and that one *does* open -- so the three keystrokes
-  // above are known to have landed on the row they were aimed at.
-  press("ArrowUp");
+/** Three inbox lines, out of order, so "newest first" is the launcher's doing. */
+const INBOX = {
+  count: 3,
+  items: [
+    inboxItem("a", "review_request", "Review: SEPA backoff", "2026-08-25T09:15:00Z", "gitea:tidewater/payout-service#142", "pr"),
+    inboxItem("b", "failed_build", "Build #1187 failed", "2026-08-25T11:40:00Z", "teamcity:1187", "build"),
+    inboxItem("c", "new_assignment", "Assigned: reconcile mandates", "2026-08-24T16:05:00Z", "jira:PAY-240", "ticket"),
+  ],
+};
+
+function inboxItem(
+  key: string,
+  category: InboxItem["category"],
+  title: string,
+  occurred_at: string,
+  entity_id: string,
+  kind: string,
+): InboxItem {
+  return {
+    key: `${category}:${key}`,
+    category,
+    source_id: entity_id.split(":")[0]!,
+    entity_id,
+    kind,
+    title,
+    reason: "",
+    occurred_at,
+    web_url: null,
+    snoozed_until: null,
+  };
+}
+
+/** `#i`'s answer: no groups (nothing in the index is an inbox line), kind `inbox`. */
+function inboxAnswer(text: string): SearchResponse {
+  return response({
+    interpreted: {
+      text,
+      prefix: null,
+      filters: { sources: [], kinds: ["inbox"], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [],
+    total: 0,
+  });
+}
+
+/**
+ * `#i` answers the inbox store's lines newest first, the time as the key
+ * cell; `#i review` narrows them; Enter opens the line's opener (#2423, spec
+ * #2419 story 15).
+ */
+test("hash i lists the inbox lines newest first and enter opens one", async () => {
+  const onnavigate = vi.fn();
+  open({
+    inbox: INBOX,
+    onnavigate,
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => inboxAnswer(query.raw.replace(/^#i\s*/u, "").trim()),
+    },
+  });
+  await settle();
+  await search("#i");
+  const rows = [...target.querySelectorAll(".tf-ln-res")];
+  expect(rows.map((row) => row.querySelector(".tf-ln-t")?.textContent)).toEqual([
+    "Build #1187 failed",
+    "Review: SEPA backoff",
+    "Assigned: reconcile mandates",
+  ]);
+  const times = rows.map((row) => row.querySelector(".tf-ln-k")?.textContent ?? "");
+  expect(times[0]).toMatch(/^\d\d:\d\d$/u);
+  expect(times[2]).toMatch(/^yesterday \d\d:\d\d$/u);
+  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+
+  await search("#i review");
+  const narrowed = [...target.querySelectorAll(".tf-ln-res")];
+  expect(narrowed.map((row) => row.querySelector(".tf-ln-t")?.textContent)).toEqual(["Review: SEPA backoff"]);
   press("Enter");
   await settle();
-  expect(target.querySelector("input")!.value).toBe("list:sepa-retries");
+  expect(onnavigate).toHaveBeenCalledWith("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
+});
+
+/**
+ * Under *Titles* a word only in a line's reason or category finds nothing;
+ * under *Everything* it finds the line (spec #2419 story 51, the titles flag).
+ */
+test("hash i under Titles matches the line's title alone, under Everything its reason too", async () => {
+  const failed = { ...INBOX.items[1]!, reason: "Step deploy-staging exited 1" };
+  open({
+    inbox: { count: 1, items: [failed] },
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => inboxAnswer(query.raw.replace(/^#i\s*/u, "").trim()),
+    },
+  });
+  await settle();
+  const titles = () => [...target.querySelectorAll(".tf-ln-res")].map((row) => row.querySelector(".tf-ln-t")?.textContent);
+  await search("#i staging");
+  expect(titles()).toEqual([]);
+  await search("#i build");
+  expect(titles()).toEqual(["Build #1187 failed"]);
+  await search("#i staging");
+  press("d", { metaKey: true });
+  await settle();
+  expect(titles()).toEqual(["Build #1187 failed"]);
 });
 
 /**
@@ -1848,10 +1476,10 @@ test("a saved list that needs attention says so and does not open", async () => 
  * board, and a board has nothing to save.
  */
 test("save as list is offered on a query, never on an empty box", async () => {
-  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
-  const home = vi.fn(async () => SAVED_HOME);
+  const created = vi.fn(async () => SAVED);
+  const searched = vi.fn(async () => response());
   open({
-    ports: { launcherHome: home, search: async () => response(), createSmartList: created },
+    ports: { launcherHome: async () => HOME, search: searched, createSmartList: created },
   });
   await settle();
   expect(target.querySelector("button.tf-ln-save"), "an empty box is the board").toBeNull();
@@ -1860,18 +1488,20 @@ test("save as list is offered on a query, never on an empty box", async () => {
   const button = target.querySelector<HTMLButtonElement>("button.tf-ln-save");
   expect(button?.textContent?.trim()).toBe("Save as list");
 
-  const before = home.mock.calls.length;
   button!.click();
   await settle();
 
-  // The **raw box text**, both as the query and as the name — one click, and
-  // the name is what *Rename* is for.
+  // The button asks for the name in the box, the query prefilled (#2424, as
+  // ⌘S does; `Launcher.overlay.test.svelte.ts`). Enter keeps the prefill.
+  expect(created).not.toHaveBeenCalled();
+  press("Enter");
+  await settle();
   expect(created).toHaveBeenCalledWith("sepa retries", "sepa retries");
   expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Saved as list");
   expect(
-    home.mock.calls.length,
-    "the rail is re-read rather than patched in place",
-  ).toBeGreaterThan(before);
+    searched.mock.calls.length,
+    "the query is asked again rather than the answer patched in place",
+  ).toBeGreaterThan(1);
 
   // And the next keystroke is a different query, so the control comes back.
   await search("sepa retries and more");
@@ -1888,11 +1518,11 @@ test("save as list is offered on a query, never on an empty box", async () => {
  * grammar deciding and not a copy of the prefix table on this side.
  */
 test("save as list is off the palette and the help card", async () => {
-  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+  const created = vi.fn(async () => SAVED);
   for (const prefix of ["action", "help"] as const) {
     open({
       ports: {
-        launcherHome: async () => SAVED_HOME,
+        launcherHome: async () => HOME,
         search: async () =>
           response({ interpreted: { ...response().interpreted, prefix }, groups: [] }),
         createSmartList: created,
@@ -1908,27 +1538,25 @@ test("save as list is off the palette and the help card", async () => {
 });
 
 /**
- * The control is off the two queries that answer as results and that the
- * backend still refuses to save, and off a search that failed (#1413).
+ * The control is off the query that answers as results and that the backend
+ * still refuses to save, and off a search that failed (#1413).
  *
- * An opened list (`list:`) would be a list of a list, `t ` is a worklog query
- * and not a search, and a failed search leaves an error line with no answer
- * under it. All three read as *results* to the mode helper, so the gate is the
+ * `t ` is a worklog query and not a search, and a failed search leaves an
+ * error line with no answer under it. Both read as *results* to the mode helper, so the gate is the
  * backend's `interpreted.prefix` and the presence of an answer. The plain
  * query at the end is the positive control: without it a launcher that never
  * drew the control would pass.
  */
-test("save as list is off an opened list, a time query and a failed search", async () => {
-  const created = vi.fn(async () => SAVED_HOME.smart_lists[1]!);
+test("save as list is off a time query and a failed search", async () => {
+  const created = vi.fn(async () => SAVED);
   const cases = [
-    { raw: "list:not-monitored", prefix: "list" as const, fails: false },
     { raw: "t today", prefix: "time" as const, fails: false },
     { raw: "sepa retries", prefix: null, fails: true },
   ];
   for (const { raw, prefix, fails } of cases) {
     open({
       ports: {
-        launcherHome: async () => SAVED_HOME,
+        launcherHome: async () => HOME,
         search: async () => {
           if (fails) throw { code: "internal", message: "the engine is down" };
           return response({ interpreted: { ...response().interpreted, prefix } });
@@ -1947,7 +1575,7 @@ test("save as list is off an opened list, a time query and a failed search", asy
 
   open({
     ports: {
-      launcherHome: async () => SAVED_HOME,
+      launcherHome: async () => HOME,
       search: async () => response(),
       createSmartList: created,
     },
@@ -1955,122 +1583,6 @@ test("save as list is off an opened list, a time query and a failed search", asy
   await settle();
   await search("sepa retries");
   expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list");
-});
-
-/**
- * Renaming: Enter commits the field, Escape abandons it — and Escape does not
- * reach the launcher's own ladder while the field is open.
- *
- * The last clause is the one that would be silently wrong: the ladder clears
- * the box on `Esc` and closes on the next one, so a rename field that let the
- * key through would close the overlay over the name being typed.
- */
-test("a saved list is renamed in place, and Escape abandons rather than commits", async () => {
-  const renamed = vi.fn(async () => {});
-  const closed = vi.fn();
-  open({
-    onclose: closed,
-    ports: {
-      launcherHome: async () => SAVED_HOME,
-      search: async () => response(),
-      renameSmartList: renamed,
-    },
-  });
-  await settle();
-
-  const rename = () =>
-    [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")].find(
-      (button) => button.textContent?.trim() === "Rename",
-    )!;
-
-  // Abandoned.
-  rename().click();
-  flushSync();
-  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
-  expect(field.value).toBe("SEPA retries");
-  field.value = "Half a name";
-  const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-  field.dispatchEvent(escape);
-  flushSync();
-  await settle();
-  expect(renamed).not.toHaveBeenCalled();
-  expect(target.querySelector("input.tf-ln-ren")).toBeNull();
-  expect(closed, "the launcher's own Esc ladder never saw the key").not.toHaveBeenCalled();
-
-  // Committed.
-  rename().click();
-  flushSync();
-  const again = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
-  again.value = "SEPA, retried";
-  again.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  flushSync();
-  await settle();
-  expect(renamed).toHaveBeenCalledWith("sepa-retries", "SEPA, retried");
-  expect(target.querySelector("input.tf-ln-ren")).toBeNull();
-});
-
-/** Deleting takes two presses on the row, and the first one only arms it. */
-test("deleting a saved list takes a second press", async () => {
-  const removed = vi.fn(async () => {});
-  open({
-    ports: {
-      launcherHome: async () => SAVED_HOME,
-      search: async () => response(),
-      deleteSmartList: removed,
-    },
-  });
-  await settle();
-
-  const remove = () =>
-    [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini.tf-ln-del")].find((button) =>
-      ["Delete", "Confirm"].includes(button.textContent?.trim() ?? ""),
-    )!;
-
-  remove().click();
-  flushSync();
-  await settle();
-  expect(removed, "the first press only arms it").not.toHaveBeenCalled();
-  expect(remove().textContent?.trim()).toBe("Confirm");
-
-  remove().click();
-  flushSync();
-  await settle();
-  expect(removed).toHaveBeenCalledWith("sepa-retries");
-});
-
-/**
- * The `Tab` chain is the keyboard's way to the same two writes, and a built-in
- * has no chain at all.
- *
- * The negative is the half that keeps the rule legible: *Rename* on a built-in
- * would be a row offering a write the backend answers `not_found` to.
- */
-test("the Tab chain renames and deletes a saved list, and offers nothing on a built-in", async () => {
-  const removed = vi.fn(async () => {});
-  open({
-    ports: {
-      launcherHome: async () => SAVED_HOME,
-      search: async () => response(),
-      deleteSmartList: removed,
-    },
-  });
-  await settle();
-
-  // Row 0 is the built-in, and `Tab` on it opens nothing.
-  press("Tab");
-  expect(target.querySelector(".tf-ln-chain")).toBeNull();
-
-  // Row 1 is the saved one.
-  press("ArrowDown");
-  press("Tab");
-  const chain = [...target.querySelectorAll(".tf-ln-chain-a")].map((row) => row.textContent?.trim());
-  expect(chain).toEqual(["Rename SEPA retries", "Delete SEPA retries"]);
-
-  press("ArrowDown");
-  press("Enter");
-  await settle();
-  expect(removed).toHaveBeenCalledWith("sepa-retries");
-  expect(target.querySelector(".tf-ln-chain"), "the chain closes behind the write").toBeNull();
 });
 
 // ── Value suggestions for `kind:`, `source:` and `under:` (#601) ──────────
@@ -2356,36 +1868,10 @@ function typeInBox(raw: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-test("a supplied source list that is still being read is not 'No source is configured'", async () => {
-  const retry = vi.fn();
-  open({ sources: [], sourcesRead: { phase: "loading", error: null, retry } });
-  await settle();
-  expect(target.textContent).not.toContain("No source is configured yet");
-  expect(target.textContent).toContain("Reading the sources");
-});
-
-test("a failed source read says why and offers a retry, never 'No source is configured'", async () => {
-  const retry = vi.fn();
-  open({ sources: [], sourcesRead: { phase: "failed", error: "the keychain is locked", retry } });
-  await settle();
-  expect(target.textContent).not.toContain("No source is configured yet");
-  expect(target.textContent).toContain("Could not read the sources");
-  expect(target.textContent).toContain("the keychain is locked");
-  const button = [...target.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith("Retry"));
-  button!.click();
-  expect(retry).toHaveBeenCalledTimes(1);
-});
-
-test("a ready, empty source read still says no source is configured", async () => {
-  open({ sources: [], sourcesRead: { phase: "ready", error: null, retry: () => {} } });
-  await settle();
-  expect(target.textContent).toContain("No source is configured yet");
-});
-
-test("a /source token is not 'no source matches' while the sources are unread", async () => {
+test("a source: token is not 'no source matches' while the sources are unread", async () => {
   const unknown = (raw: string) =>
     response({
-      interpreted: { ...response().interpreted, text: raw, unknown_tokens: ["/cf"] },
+      interpreted: { ...response().interpreted, text: raw, unknown_tokens: ["source:cf"] },
     });
   open({
     sources: [],
@@ -2393,9 +1879,9 @@ test("a /source token is not 'no source matches' while the sources are unread", 
     ports: { launcherHome: async () => HOME, search: async () => unknown("x") },
   });
   await settle();
-  typeInBox("/cf x");
+  typeInBox("source:cf x");
   await debounced();
-  expect(target.textContent).toContain("/cf");
+  expect(target.textContent).toContain("source:cf");
   expect(target.textContent).not.toContain("no source matches");
 });
 
@@ -2462,9 +1948,27 @@ function recordScrolls() {
   return calls;
 }
 
-/** The board with its saved lists, as the rename and chain tests need it. */
+/** A recent item on the board. */
+function recent(entity_id: string, title: string): LauncherHome["recent"][number] {
+  return { entity_id, kind: "ticket", source_id: "jira", title, updated_at: null, synced_at: "2026-08-25T11:58:00Z", path: null, state: null };
+}
+
+/**
+ * The board with three recent items, each with its sheet: *Link to* the
+ * open job, *Start timer* and the ticket's own.
+ */
 function openSaved() {
-  open({ ports: { launcherHome: async () => SAVED_HOME, search: async () => response() } });
+  open({
+    openEntity: OPEN,
+    ontimer: vi.fn(),
+    ports: {
+      launcherHome: async () => ({
+        ...HOME,
+        recent: [recent("jira:PAY-240", "Reconcile mandates"), recent("jira:PAY-241", "Batch cut-off"), recent("jira:PAY-242", "Return codes")],
+      }),
+      search: async () => response(),
+    },
+  });
 }
 
 /** The results listbox's options in flat-list order. */
@@ -2535,7 +2039,7 @@ test("the box is a combobox that names the active result, and names nothing with
   app = undefined;
   open({
     ports: {
-      launcherHome: async () => ({ ...HOME, smart_lists: [], recent: [] }),
+      launcherHome: async () => ({ ...HOME, recent: [] }),
       search: async () => response(),
     },
   });
@@ -2544,17 +2048,7 @@ test("the box is a combobox that names the active result, and names nothing with
   expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
 });
 
-test("a list being renamed has no option, so the box names none", async () => {
-  openSaved();
-  await settle();
-  press("ArrowDown");
-  press("Tab");
-  press("Enter");
-  expect(target.querySelector("input.tf-ln-ren")).not.toBeNull();
-  expect(box().hasAttribute("aria-activedescendant")).toBe(false);
-});
-
-test("the Tab chain's active row is scrolled into view and named by the box", async () => {
+test("the Tab sheet's active row is scrolled into view and named by the box", async () => {
   openSaved();
   await settle();
   press("ArrowDown");
@@ -2563,7 +2057,7 @@ test("the Tab chain's active row is scrolled into view and named by the box", as
   press("Tab");
   const chain = listbox("Actions on the selected result");
   const rows = [...chain.querySelectorAll('[role="option"]')];
-  expect(rows).toHaveLength(2);
+  expect(rows.length).toBeGreaterThan(1);
   // The box controls the list the arrows now walk.
   expect(chain.id).not.toBe("");
   expect(box().getAttribute("aria-controls")).toBe(chain.id);
@@ -2579,7 +2073,7 @@ test("the Tab chain's active row is scrolled into view and named by the box", as
   expect(box().getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
   expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
 
-  // Closing the chain hands the box back to the results, on the same row.
+  // Leaving the sheet hands the box back to the results, on the same row.
   press("Tab");
   expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
   expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
@@ -2726,67 +2220,6 @@ test("pressing a palette row navigates to its address and closes the launcher", 
   expect(onnavigate).toHaveBeenCalledWith("#/inbox");
 });
 
-// ── Rename takes the focus it needs (#1412) ────────────────────────────────
-
-/** The name field, focused, with its whole text selected. */
-function expectRenameFocused() {
-  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren");
-  expect(field, "the rename field is open").not.toBeNull();
-  expect(document.activeElement, "focus is in the name field, not the query box").toBe(field);
-  expect(field!.selectionStart).toBe(0);
-  expect(field!.selectionEnd).toBe("SEPA retries".length);
-}
-
-test("Rename from the Tab chain focuses the name field with the name selected", async () => {
-  openSaved();
-  await settle();
-  press("ArrowDown");
-  press("Tab");
-  press("Enter");
-  await settle();
-  expectRenameFocused();
-});
-
-test("the row's Rename button focuses the name field with the name selected", async () => {
-  openSaved();
-  await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")]
-    .find((button) => button.textContent?.trim() === "Rename")!
-    .click();
-  flushSync();
-  await settle();
-  expectRenameFocused();
-});
-
-test("what is typed after the chain's Rename goes into the name, not the query", async () => {
-  const renamed = vi.fn(async () => {});
-  open({
-    ports: { launcherHome: async () => SAVED_HOME, search: async () => response(), renameSmartList: renamed },
-  });
-  await settle();
-  press("ArrowDown");
-  press("Tab");
-  press("Enter");
-  await settle();
-
-  // Typing is whatever holds focus receiving the text; jsdom does not insert
-  // it for a keydown, so the test writes into the focused element.
-  const focused = document.activeElement as HTMLInputElement;
-  focused.value = "X";
-  focused.dispatchEvent(new Event("input", { bubbles: true }));
-  await settle();
-
-  const query = target.querySelector<HTMLInputElement>("input:not(.tf-ln-ren)")!;
-  expect(query.value, "the query box is untouched").toBe("");
-  expect(target.querySelector<HTMLInputElement>("input.tf-ln-ren")!.value).toBe("X");
-  expect(railRows(), "the board is still drawn").toHaveLength(3);
-
-  focused.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-  flushSync();
-  await settle();
-  expect(renamed).toHaveBeenCalledWith("sepa-retries", "X");
-});
-
 // ── The chain rows and the suggestions keep their own layout (#1414) ───────
 
 /**
@@ -2804,7 +2237,7 @@ function launcherStyles(): HTMLStyleElement {
   return style;
 }
 
-test("a value suggestion draws inline, a chain row spans one column, and a prefix row keeps two", async () => {
+test("a value suggestion draws inline, a sheet's action keeps two columns like a prefix row", async () => {
   const style = launcherStyles();
   try {
     await openPalette();
@@ -2828,174 +2261,15 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
     await settle();
     press("ArrowDown");
     press("Tab");
-    const chainRow = target.querySelector<HTMLElement>(".tf-ln-chain [role='option']")!;
-    expect(chainRow.classList.contains("tf-ln-opt"), "the chain row is a prefix row underneath").toBe(true);
-    expect(getComputedStyle(chainRow).gridTemplateColumns).toBe("1fr");
+    const action = target.querySelector<HTMLElement>(".tf-ln-sheet button[role='option']")!;
+    expect(action.classList.contains("tf-ln-opt"), "a sheet action is a prefix row").toBe(true);
+    expect(getComputedStyle(action).gridTemplateColumns).toBe("240px 1fr");
   } finally {
     style.remove();
   }
 });
 
-/** One inbox line, as `inbox_items` answers it (#1418). */
-function inboxItem(over: Partial<InboxItem> & Pick<InboxItem, "key">): InboxItem {
-  return {
-    category: "mention",
-    source_id: "jira",
-    entity_id: "jira:PAY-1",
-    kind: "ticket",
-    title: "Reconcile mandates",
-    reason: "mara mentioned you",
-    occurred_at: "2026-08-25T11:30:00Z",
-    web_url: null,
-    snoozed_until: null,
-    ...over,
-  };
-}
-
-const INBOX = {
-  count: 3,
-  items: [
-    inboxItem({
-      key: "review_request:gitea:acme/payouts#144",
-      category: "review_request",
-      source_id: "gitea",
-      entity_id: "gitea:acme/payouts#144",
-      kind: "pr",
-      title: "Retry SEPA batches",
-      reason: "jonas asked for your review",
-    }),
-    inboxItem({
-      key: "failed_build:tc:payments-main-88",
-      category: "failed_build",
-      source_id: "tc",
-      entity_id: "tc:payments-main-88",
-      kind: "build",
-      title: "payments main #88",
-      reason: "build failed",
-      occurred_at: "2026-08-24T15:10:00Z",
-    }),
-    inboxItem({ key: "mention:jira:PAY-1" }),
-  ],
-};
-
-/**
- * The board's inbox preview (#1418, spec §4: *"inbox preview"*): the count the
- * top bar reads and the newest items, each a row of the board's own list.
- *
- * With nothing in the inbox there is no block at all — an empty column with a
- * heading over it reads as a broken app, which is the board header's own rule.
- */
-test("the board previews the inbox: the count and its newest three, and nothing when it is empty", async () => {
-  open({ inbox: INBOX });
-  await settle();
-  const block = target.querySelector(".tf-ln-inbox");
-  expect(block, "no inbox block").not.toBeNull();
-  expect(target.querySelector(".tf-ln-h.tf-ln-inboxh")?.textContent).toMatch(/Inbox\s*3/);
-  const rows = [...target.querySelectorAll(".tf-ln-inbox [role=option]")].map((el) =>
-    el.textContent?.replace(/\s+/g, " ").trim(),
-  );
-  expect(rows).toEqual([
-    "jonas asked for your review: Retry SEPA batches 13:30",
-    // The Inbox page's err dot on a failure.
-    "\u25cf Build failed: payments main #88 yesterday 17:10",
-    "Mara mentioned you: Reconcile mandates 13:30",
-  ]);
-  if (app) unmount(app);
-  app = undefined;
-
-  open({ inbox: { count: 0, items: [] } });
-  await settle();
-  expect(target.querySelector(".tf-ln-inbox")).toBeNull();
-  expect(target.querySelector(".tf-ln-inboxh")).toBeNull();
-  // The board itself still drew: the absence is the inbox's, not the board's.
-  expect(target.textContent).toContain("Reconcile mandates");
-});
-
-/**
- * Today's time on the board (#1418, spec §4: *"today's time"*): the Day view's
- * tracked and to-log figures, in its words, and nothing on a day with none.
- */
-test("the board gives today's tracked and to-log time, and nothing on a day with none", async () => {
-  open({ today: { tracked: 130, toLog: 65 } });
-  await settle();
-  const block = target.querySelector(".tf-ln-today [role=option]");
-  expect(block?.textContent?.replace(/\s+/g, " ").trim()).toBe("2h 10m tracked 1h 5m to log");
-  if (app) unmount(app);
-  app = undefined;
-
-  open({ today: { tracked: 0, toLog: 0 } });
-  await settle();
-  expect(target.querySelector(".tf-ln-today")).toBeNull();
-  expect(target.textContent).toContain("Reconcile mandates");
-});
-
-/**
- * Pressing an inbox row opens its item; pressing the time block opens Time ›
- * Day (#1418). Both by pointer and by the keyboard, since they are rows of the
- * board's one list: `↓` from the last smart list lands on the first inbox row.
- */
-test("an inbox row opens its item and the time block opens the day", async () => {
-  const onnavigate = vi.fn();
-  async function reopen() {
-    if (app) unmount(app);
-    app = undefined;
-    open({ onnavigate, inbox: INBOX, today: { tracked: 130, toLog: 0 } });
-    await settle();
-  }
-  await reopen();
-  target.querySelectorAll<HTMLButtonElement>(".tf-ln-inbox [role=option]")[1]!.click();
-  expect(onnavigate).toHaveBeenLastCalledWith("#/build/tc%3Apayments-main-88");
-
-  await reopen();
-  target.querySelector<HTMLButtonElement>(".tf-ln-today [role=option]")!.click();
-  expect(onnavigate).toHaveBeenLastCalledWith("#/time");
-
-  // The keyboard: two smart lists, then the inbox's three, then the day.
-  await reopen();
-  press("ArrowDown");
-  press("ArrowDown");
-  press("Enter");
-  expect(onnavigate).toHaveBeenLastCalledWith("#/pr/gitea%3Aacme%2Fpayouts%23144");
-  await reopen();
-  for (let i = 0; i < 5; i += 1) press("ArrowDown");
-  press("Enter");
-  expect(onnavigate).toHaveBeenLastCalledWith("#/time");
-  expect(onnavigate).toHaveBeenCalledTimes(4);
-});
-
-test("two sources' PAY-231: each row names its source before its age, a unique key's row does not (#1476)", async () => {
-  const twins = response({
-    groups: [
-      {
-        kind: "ticket",
-        label: "Ticket",
-        plural: "Tickets",
-        monogram: "TK",
-        total: 3,
-        hits: [
-          hit({ entity_id: "mock:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", source_id: "mock", synced_at: "2026-08-25T11:59:50Z" }),
-          hit({ entity_id: "jira:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", source_id: "jira", synced_at: "2026-08-25T11:35:00Z" }),
-          hit({ entity_id: "jira:PAY-232", kind: "ticket", title: "Metrics for SEPA retry attempts" }),
-        ],
-      },
-    ],
-  });
-  const onnavigate = vi.fn();
-  open({ onnavigate, ports: { search: async () => twins, launcherHome: async () => HOME } });
-  await settle();
-  target.querySelector("input")!.value = "PAY-231";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-  const ages = [...target.querySelectorAll(".tf-ln-sy")].map((el) => el.textContent?.trim());
-  expect(ages).toEqual(["mock · synced just now", "jira · synced 25 min ago", "synced 4 min ago"]);
-  // The Jira row opens Jira's PAY-231, by the address that names its source.
-  press("ArrowDown");
-  press("Enter");
-  await settle();
-  expect(onnavigate).toHaveBeenCalledWith("#/ticket/jira%3APAY-231");
-});
-
-// ── Reopening selects the kept query (#1480) ───────────────────────────────
+// ── ⌘K always opens empty; a section's keys open with its filter (#2425) ──
 
 /** Close by the ×, which leaves the session's query in place (Esc empties it first). */
 function closeByX() {
@@ -3010,8 +2284,9 @@ async function reopen() {
   await settle();
 }
 
-test("⌘K reopens on the kept query with the whole of it selected", async () => {
-  open();
+test("⌘K opens with an empty box every time, never the last query (#2425)", async () => {
+  const searched: string[] = [];
+  open({ ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME } });
   await settle();
   await search("PAY-231");
   closeByX();
@@ -3019,27 +2294,83 @@ test("⌘K reopens on the kept query with the whole of it selected", async () =>
   await reopen();
 
   const input = target.querySelector("input")!;
-  expect(input.value, "the session keeps what was searched for").toBe("PAY-231");
+  expect(input.value).toBe("");
   expect(document.activeElement).toBe(input);
-  expect(input.selectionStart).toBe(0);
-  expect(input.selectionEnd).toBe("PAY-231".length);
-});
+  expect(target.textContent, "the board, not the last answer").not.toContain("Retry failed SEPA payouts");
 
-test("typing after a reopen replaces the kept query instead of appending to it", async () => {
-  open();
-  await settle();
-  await search("PAY-231");
+  await search("ledger");
   closeByX();
   await reopen();
+  expect(target.querySelector("input")!.value, "and again on the next opening").toBe("");
+  expect(searched).toEqual(["PAY-231", "ledger"]);
+});
 
-  // Typing replaces whatever is selected; jsdom does not insert text for a
-  // keydown, so the test does what the WebView does with a keystroke.
+test("opened with a section's filter, the box starts with it, the caret after it, and asks for it (#2425)", async () => {
+  const searched: string[] = [];
+  open({
+    query: "#b ",
+    ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME },
+  });
+  await settle();
+  await debounced();
   const input = target.querySelector("input")!;
-  input.setRangeText("x", input.selectionStart!, input.selectionEnd!, "end");
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
+  expect(input.value).toBe("#b ");
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart, "typing goes after the filter, not over it").toBe(3);
+  expect(input.selectionEnd).toBe(3);
+  expect(searched).toEqual(["#b "]);
 
-  expect(input.value).toBe("x");
+  // ⌘K after that is the global search: empty, whatever the last opening held.
+  closeByX();
+  await reopen();
+  expect(target.querySelector("input")!.value).toBe("");
+});
+
+/** A `#d` answer: pages only, as the engine sends it for `#d ledger retry`. */
+function pagesAnswer(kinds: string[]): SearchResponse {
+  return response({
+    interpreted: {
+      text: "ledger retry",
+      prefix: null,
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [
+      {
+        kind: "page",
+        label: "Page",
+        plural: "Pages",
+        monogram: "PG",
+        total: 1,
+        hits: [hit({ entity_id: "confluence:7", kind: "page", title: "Ledger retries", source_id: "confluence" })],
+      },
+    ],
+    total: 1,
+  });
+}
+
+test("a #d answer ends with Search Docs for its words, which opens the Docs area searching them (#2425)", async () => {
+  const onnavigate = vi.fn();
+  open({ onnavigate, ports: { search: async () => pagesAnswer(["page"]), launcherHome: async () => HOME } });
+  await settle();
+  await search("#d ledger retry");
+  const rows = [...target.querySelectorAll('[role="option"]')];
+  expect(rows.at(-1)?.textContent).toContain("Search Docs for “ledger retry”");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/docs/search/ledger%20retry");
+});
+
+test("an answer that is not #d, or #d with no words, has no Search Docs row (#2425)", async () => {
+  let answer = pagesAnswer([]);
+  open({ ports: { search: async () => answer, launcherHome: async () => HOME } });
+  await settle();
+  await search("ledger retry");
+  expect(target.textContent).not.toContain("Search Docs for");
+  answer = { ...pagesAnswer(["page"]), interpreted: { ...pagesAnswer(["page"]).interpreted, text: "" } };
+  await search("#d ");
+  expect(target.textContent).not.toContain("Search Docs for");
 });
 
 test("an empty box opens with the caret in it and nothing to select", async () => {
@@ -3052,33 +2383,317 @@ test("an empty box opens with the caret in it and nothing to select", async () =
 });
 
 /**
- * The re-focus after a click on a row keeps the caret where it was. Witnessed
- * through a row whose click leaves the box's text alone (Rename, then Esc out
- * of the name): a row that sets the box's text moves the caret to its end on
- * the value write whatever the re-focus did, and could not tell the two apart.
- * Blanks keep the board, and its rail, on screen.
+ * The row is three cells (#2421): the kind's monogram, a key cell a person
+ * reads, and the title. One group per kind here, each with one hit whose
+ * cell rule is the kind's.
  */
-test("a click on a row re-focuses the box without selecting its text", async () => {
-  openSaved();
-  await settle();
-  const input = target.querySelector("input")!;
-  input.value = "   ";
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  await settle();
-  input.setSelectionRange(1, 1);
+function oneOf(kind: string, label: string, monogram: string, over: Parameters<typeof hit>[0]) {
+  return { kind, label, plural: `${label}s`, monogram, total: 1, hits: [hit(over)] };
+}
 
-  [...target.querySelectorAll<HTMLButtonElement>("button.tf-ln-mini")]
-    .find((button) => button.textContent?.trim() === "Rename")!
-    .click();
-  flushSync();
+const EVERY_KIND = {
+  groups: [
+    oneOf("ticket", "Ticket", "TK", { entity_id: "jira:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", state: { text: "In Progress", tone: "info" } }),
+    oneOf("pr", "Pull request", "PR", { entity_id: "gitea:tidewater/payout-service#142", kind: "pr", title: "Backoff on SEPA retries", path: "tidewater/payout-service", state: { text: "merged", tone: "ok" } }),
+    oneOf("repo", "Repository", "RP", { entity_id: "gitea:tidewater/payout-service", kind: "repo", title: "tidewater/payout-service" }),
+    oneOf("page", "Page", "PG", { entity_id: "confluence:98307", kind: "page", title: "SEPA retry design", path: "Engineering › Payments" }),
+    oneOf("pipeline", "Pipeline", "PL", { entity_id: "teamcity:Payout_Build", kind: "pipeline", title: "Build", path: "Payments › Payout service", state: { text: "FAILURE", tone: "err" } }),
+    oneOf("monitor", "Monitor", "MO", { entity_id: "kuma:8", kind: "monitor", title: "payout health", path: "http", state: { text: "down", tone: "err" } }),
+    oneOf("view", "View", "VW", { entity_id: "knobas:view-3", kind: "view", title: "My open SEPA work", path: "Payments · status:open" }),
+    oneOf("note", "Note", "NT", { entity_id: "note:7a1", kind: "note", title: "Ask Jonas about the cut-off" }),
+  ],
+  total: 8,
+};
+
+/** Each row's three cells, as text: monogram, key cell, title. */
+function cells() {
+  return [...target.querySelectorAll(".tf-ln-res")].map((row) =>
+    [...row.children].map((cell) => cell.textContent?.trim()),
+  );
+}
+
+test("a result row is three cells, the key cell following the kind's rule", async () => {
+  open({ ports: { search: async () => response(EVERY_KIND), launcherHome: async () => HOME } });
   await settle();
-  const field = target.querySelector<HTMLInputElement>("input.tf-ln-ren")!;
-  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-  flushSync();
+  await search("sepa");
+
+  expect(cells()).toEqual([
+    ["TK", "PAY-231", "Retry failed SEPA payouts"],
+    ["PR", "payout-service", "Backoff on SEPA retries"],
+    // The owner is the cell, so the repository's own name is the title.
+    ["RP", "tidewater", "payout-service"],
+    ["PG", "Engineering", "SEPA retry design"],
+    ["PL", "Payout service", "Build"],
+    ["MO", "http", "payout health"],
+    ["VW", "Payments", "My open SEPA work"],
+    // Nothing better known: the kind's word.
+    ["NT", "note", "Ask Jonas about the cut-off"],
+  ]);
+  // Only a ticket's key is an identifier, drawn in the mono face.
+  const mono = [...target.querySelectorAll(".tf-ln-res .tf-ln-k")].map((cell) => cell.classList.contains("tf-ln-mono"));
+  expect(mono).toEqual([true, false, false, false, false, false, false, false]);
+});
+
+/**
+ * The engine's key cell (#2452): a hit or a recent row that carries `cell`
+ * draws it, ahead of what its path line says. A monitor's type is on no path
+ * line, and a page's space is not its top ancestor page.
+ */
+test("a row draws the key cell the engine sends, on a hit and on the board", async () => {
+  open({
+    ports: {
+      search: async () =>
+        response({
+          groups: [
+            oneOf("page", "Page", "PG", { entity_id: "confluence:98307", kind: "page", title: "SEPA retry design", path: "Handbook › Payments", cell: "Engineering" }),
+            oneOf("monitor", "Monitor", "MO", { entity_id: "kuma:8", kind: "monitor", title: "payout health", path: null, cell: "http" }),
+          ],
+          total: 2,
+        }),
+      launcherHome: async () => ({
+        ...HOME,
+        recent: [
+          { entity_id: "kuma:9", kind: "monitor", source_id: "kuma", title: "ledger health", updated_at: null, synced_at: "2026-08-25T11:58:00Z", path: null, state: null, cell: "keyword" },
+        ],
+      }),
+    },
+  });
+  await settle();
+  expect(cells()).toEqual([["MO", "keyword", "ledger health"]]);
+
+  await search("health");
+  expect(cells()).toEqual([
+    ["PG", "Engineering", "SEPA retry design"],
+    ["MO", "http", "payout health"],
+  ]);
+});
+
+test("a row draws no second line, no provenance and no state chip", async () => {
+  open({ ports: { search: async () => response(), launcherHome: async () => HOME } });
+  await settle();
+  await search("sepa");
+
+  const row = target.querySelector(".tf-ln-res")!;
+  expect(row.children).toHaveLength(3);
+  expect(row.textContent).not.toContain("synced");
+  expect(row.textContent, "the excerpt is not drawn").not.toContain("batch");
+  expect(target.querySelectorAll(".tf-chip, .tf-ln-sy, .tf-ln-pa, .tf-ln-sn, mark")).toHaveLength(0);
+});
+
+test("the monogram takes the state's tone, and a row with no state is uncoloured", async () => {
+  open({ ports: { search: async () => response(EVERY_KIND), launcherHome: async () => HOME } });
+  await settle();
+  await search("sepa");
+
+  const monograms = [...target.querySelectorAll<HTMLElement>(".tf-ln-res .tf-ln-mg")];
+  expect(monograms.map((mg) => mg.dataset["tone"] ?? null)).toEqual(["info", "ok", null, null, "err", "err", null, null]);
+  // The colour is the only sign, so the state is named for a screen reader.
+  expect(monograms[0]!.getAttribute("aria-label")).toBe("Ticket: In Progress");
+  expect(monograms[2]!.getAttribute("aria-label")).toBe("Repository");
+});
+
+test("headings carry no count and the footer no match count", async () => {
+  open();
+  await settle();
+  await search("sepa");
+
+  expect(target.querySelectorAll(".tf-ln-n, .tf-ln-more, .tf-ln-took")).toHaveLength(0);
+  expect(target.querySelector("footer")?.textContent).not.toMatch(/match/);
+});
+
+test("the empty box draws the recent items alone, with the same three cells", async () => {
+  open({
+    inbox: { count: 2, items: [] },
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => ({
+        ...HOME,
+        recent: [
+          { entity_id: "jira:PAY-240", kind: "ticket", source_id: "jira", title: "Reconcile mandates", updated_at: null, synced_at: "2026-08-25T11:58:00Z", path: null, state: { text: "Done", tone: "ok" } },
+          { entity_id: "gitea:tidewater/ledger", kind: "repo", source_id: "gitea", title: "tidewater/ledger", updated_at: null, synced_at: "2026-08-25T11:58:00Z", path: null, state: null },
+        ],
+      }),
+    },
+  });
   await settle();
 
-  expect(document.activeElement, "focus is back in the box").toBe(input);
-  expect(input.value).toBe("   ");
-  expect(input.selectionStart).toBe(1);
-  expect(input.selectionEnd).toBe(1);
+  const headings = [...target.querySelectorAll(".tf-ln-h .tf-ln-lab")].map((el) => el.textContent?.trim());
+  expect(headings).toEqual(["Recent"]);
+  expect(cells()).toEqual([
+    ["TK", "PAY-240", "Reconcile mandates"],
+    ["RP", "tidewater", "ledger"],
+  ]);
+  expect(target.querySelector<HTMLElement>(".tf-ln-res .tf-ln-mg")!.dataset["tone"]).toBe("ok");
+  // No smart lists, inbox, time or source strip.
+  expect(target.querySelectorAll(".tf-ln-sl, .tf-ln-strip, .tf-ln-src")).toHaveLength(0);
+  expect(target.textContent).not.toContain("My items");
+});
+
+test("the box has no footnote, no ⌘K badge and no caret bar", async () => {
+  open();
+  await settle();
+
+  const box = target.querySelector(".tf-ln-q")!;
+  expect(box.querySelectorAll(".tf-ln-foot, kbd, .tf-ln-caret")).toHaveLength(0);
+  expect(box.textContent).not.toContain("pending write");
+});
+
+/**
+ * The `?` card ends with a colour legend per kind (#2421), built from the
+ * states the adapters declare, so it cannot drift from what a row draws.
+ */
+test("the ? card ends with a legend per kind, from the adapters' declared states", async () => {
+  const declared = vi.spyOn(kindRegistry, "declaredStates").mockReturnValue([
+    {
+      kind: "ticket",
+      values: [
+        { value: "Done", tone: "ok", text: null },
+        { value: "In Progress", tone: "info", text: null },
+        { value: "Resolved", tone: "ok", text: null },
+        { value: "Closed", tone: "muted", text: null },
+      ],
+    },
+    {
+      kind: "pr",
+      values: [
+        { value: true, tone: "ok", text: "merged" },
+        { value: "open", tone: "info", text: null },
+        { value: "closed", tone: "muted", text: null },
+      ],
+    },
+  ]);
+  try {
+    open({
+      ports: {
+        launcherHome: async () => HOME,
+        search: async () =>
+          response({
+            interpreted: { text: "", prefix: "help", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+            groups: [],
+          }),
+      },
+    });
+    await settle();
+    await search("?");
+
+    const legend = target.querySelector('[aria-label="Colours"]')!;
+    expect(legend, "the legend is drawn").not.toBeNull();
+    // After the syntax rows, never among them: nothing in it is an option.
+    expect(legend.querySelectorAll('[role="option"]')).toHaveLength(0);
+    const kinds = [...legend.querySelectorAll(".tf-ln-lg")].map((line) => ({
+      kind: line.querySelector(".tf-ln-lgk")?.textContent?.trim(),
+      tones: [...line.querySelectorAll<HTMLElement>(".tf-ln-mg")].map((mg) => [mg.dataset["tone"], mg.nextElementSibling?.textContent?.trim()]),
+    }));
+    expect(kinds).toEqual([
+      { kind: "Tickets", tones: [["ok", "Done, Resolved"], ["info", "In Progress"], ["muted", "Closed"]] },
+      { kind: "Pull requests", tones: [["ok", "merged"], ["info", "open"], ["muted", "closed"]] },
+    ]);
+  } finally {
+    declared.mockRestore();
+  }
+});
+
+/** A storage that outlives a launcher, as the webview's does a restart. */
+function memoryStorage() {
+  const kept = new Map<string, string>();
+  return {
+    getItem: (key: string) => kept.get(key) ?? null,
+    setItem: (key: string, value: string) => void kept.set(key, value),
+    removeItem: (key: string) => void kept.delete(key),
+  };
+}
+
+/** Words typed and the debounced search they send, settled. */
+async function asked(text: string) {
+  await typeInto(text);
+  await debounced();
+}
+
+const chip = () => target.querySelector<HTMLButtonElement>(".tf-ln-scope button");
+const footer = () => target.querySelector("footer")?.textContent ?? "";
+
+test("Titles is the first choice, and the search says so with the titles flag", async () => {
+  const sent: SearchQuery[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => (sent.push(query), response()),
+    },
+  });
+  await settle();
+  await asked("pay-210");
+
+  expect(sent.at(-1)).toMatchObject({ raw: "pay-210", titles: true });
+  expect(chip()?.textContent?.trim()).toBe("Titles");
+  // The footer names the other mode, the one ⌘D goes to.
+  expect(footer()).toContain("⌘D everything");
+});
+
+test("⌘D flips to Everything and asks again at once, and flips back", async () => {
+  const sent: SearchQuery[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => (sent.push(query), response()),
+    },
+  });
+  await settle();
+  await asked("sepa");
+  const before = sent.length;
+
+  const event = press("d", { metaKey: true });
+  await settle();
+  // The webview's own ⌘D (a bookmark) never runs.
+  expect(event.defaultPrevented).toBe(true);
+  expect(sent).toHaveLength(before + 1);
+  expect(sent.at(-1)).toMatchObject({ raw: "sepa", titles: false });
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+  expect(footer()).toContain("⌘D titles only");
+
+  press("d", { metaKey: true });
+  await settle();
+  expect(sent.at(-1)).toMatchObject({ raw: "sepa", titles: true });
+  expect(chip()?.textContent?.trim()).toBe("Titles");
+});
+
+test("⌘D on an empty box flips the choice and sends nothing", async () => {
+  const search = vi.fn(async () => response());
+  open({ ports: { launcherHome: async () => HOME, search } });
+  await settle();
+
+  press("d", { metaKey: true });
+  await settle();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+  expect(search).not.toHaveBeenCalled();
+});
+
+test("the chip flips it too, and the choice survives closing, reopening and a restart", async () => {
+  const storage = memoryStorage();
+  const scope = createScope(() => storage);
+  open({ scope });
+  await settle();
+  chip()!.click();
+  flushSync();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+
+  // Closed and opened again, in the same run.
+  unmount(app!);
+  open({ scope });
+  await settle();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+
+  // A restart: a new choice read from what the webview kept.
+  unmount(app!);
+  const sent: SearchQuery[] = [];
+  open({
+    scope: createScope(() => storage),
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => (sent.push(query), response()),
+    },
+  });
+  await settle();
+  expect(chip()?.textContent?.trim()).toBe("Everything");
+  await asked("sepa");
+  expect(sent.at(-1)).toMatchObject({ titles: false });
 });

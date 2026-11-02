@@ -240,6 +240,7 @@ async fn a_restored_backup_still_links_the_entities_a_later_sync_rebuilt() {
         &into,
         &Registry::for_process(),
         SearchQuery {
+            titles: false,
             raw: seeded.token.clone(),
             limit: 20,
             filters: SearchFilters::default(),
@@ -458,6 +459,7 @@ async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
             pool,
             &Registry::for_process(),
             SearchQuery {
+                titles: false,
                 raw: raw.clone(),
                 limit: 20,
                 filters: SearchFilters::default(),

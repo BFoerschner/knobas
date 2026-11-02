@@ -108,7 +108,9 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     setBackupSchedule: vi.fn((schedule) => Promise.resolve({ ...status(), schedule })),
     shareExport: vi.fn(() => Promise.resolve({ taken_at: NOW.toISOString(), file: "knobas-share-new.knobas", bytes: 1024 })),
     restoreBackup: vi.fn(() => Promise.resolve()),
-    smartLists: vi.fn(() => Promise.resolve([{ saved: false }])),
+    smartLists: vi.fn(() => Promise.resolve([])),
+    favourites: vi.fn(() => Promise.resolve([])),
+    keys: vi.fn(() => Promise.resolve({ lists: [], actions: [] })),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
@@ -362,8 +364,27 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
 });
 
 test("a saved smart list draws its tick, on by default", async () => {
-  const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ saved: true }])) }));
-  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Smart lists");
+  const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ id: "sepa" }])) }));
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists, favourites and keys");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("a favourite with no saved list draws the same tick, and the part goes on (#2428)", async () => {
+  const p = await open("backup", sectionPorts({ favourites: vi.fn(() => Promise.resolve([{ entity_id: "jira:PAY-231" }])) }));
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists, favourites and keys");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("an action's key with no saved list draws the same tick, and the part goes on (#2429)", async () => {
+  const p = await open(
+    "backup",
+    sectionPorts({ keys: vi.fn(() => Promise.resolve({ lists: [], actions: [{ kind: "pr", chord: "⌘⇧P", action_id: "approve" }] })) }),
+  );
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists, favourites and keys");
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
@@ -602,7 +623,12 @@ test("Keyboard lists the fixed shortcuts", async () => {
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
-    "Search everything",
+    "Search everything, from an empty box",
+  ]);
+  expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
+    "/ ⌘/",
+    "Anywhere; / outside a field",
+    "Search this section: the launcher with its filter",
   ]);
   expect([...rows[3]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent), "history, #1086").toEqual([
     "⌘[",

@@ -74,6 +74,7 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
         &pool,
         &Registry::for_process(),
         knobas_search::SearchQuery {
+            titles: false,
             raw: "quaywright".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters {

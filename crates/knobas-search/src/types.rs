@@ -17,6 +17,19 @@ pub struct SearchQuery {
     pub raw: String,
     pub limit: u32,
     pub filters: SearchFilters,
+    /// *Titles* rather than *Everything* (spec #2419, #2430): match only what
+    /// a row shows, its title or its key (a ticket's key), never its body.
+    /// Every corpus indexes exactly those at weight A, so the engine matches
+    /// the A lexemes alone. Off answers as before, bodies included.
+    ///
+    /// The reader's choice, sent with every query from the launcher and never
+    /// stored with a saved list: a saved list answers as Everything.
+    ///
+    /// `#[serde(default)]` because it was **added** to a frozen struct
+    /// (§10.8), as [`SearchFilters::authors`] was: a caller written before it
+    /// sends none and is answered as Everything.
+    #[serde(default)]
+    pub titles: bool,
 }
 
 /// The filters a query is narrowed by, whether typed inline or clicked.
@@ -85,18 +98,23 @@ pub struct ParsedQuery {
     pub unknown_tokens: Vec<String>,
 }
 
-/// The launcher's prefixes (§4): `>` `#` `@` `/` `t ` `note:` `list:` `asset:` `?`.
+/// The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and
+/// `source:` for [`Prefix::Source`].
+///
+/// `#` is no prefix since spec #2419 (#2420): `#t`, `#rl` and the other filter
+/// letters are kind filters, which claim none, as `kind:` claims none; the
+/// `ticket` variant went with the bare-key lookup it named. `/` for a source
+/// went too, and `source:` is what claims `source` now. `list:` went with
+/// #2423: a saved list is found behind `#l` and applied by its own text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 #[serde(rename_all = "snake_case")]
 pub enum Prefix {
     Action,
-    Ticket,
     Person,
     Source,
     Time,
     Note,
-    List,
     Asset,
     Help,
 }
@@ -287,6 +305,21 @@ pub struct EntityRow {
     /// `#[serde(default)]` for `path`'s reason.
     #[serde(default)]
     pub state: Option<knobas_core::payload::StateChip>,
+    /// The row's key cell (#2452, spec #2419 story 19): what a person reads
+    /// beside the title to know where the thing sits -- a pull request's
+    /// repository, a page's space, a pipeline's project, a monitor's type.
+    /// Resolved from the kind's declarations when the row is written
+    /// (`sync.item.key_cell`, migration `0068`), and indexed at the title's
+    /// weight so *Titles* finds it (#2451). Absent for a ticket (its key is
+    /// its id), for a row whose declarations name none, and for every row of
+    /// a corpus knobas owns: the ADR-0007 **miss**, and the launcher falls
+    /// back to the path line, then the kind's word.
+    ///
+    /// Optional on the wire and left out when absent, so a reader written
+    /// before it, and a fixture that never sets it, read the same row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub cell: Option<String>,
 }
 
 /// One result: a row, its rank, and the excerpt with the match marked.
@@ -297,6 +330,29 @@ pub struct SearchHit {
     pub row: EntityRow,
     pub rank: f32,
     pub snippet: Vec<Segment>,
+    /// Where the words appear in the row's text, each with its place
+    /// (#2431): what the launcher's preview draws under *Everything*, so the
+    /// preview is this list and no second read. Empty under *Titles*, for a
+    /// browse, and for a row whose text holds none of the words (a hit by its
+    /// title alone). Read from the index: a page's section and comment marks
+    /// (`knobas_source::docs::indexed`), a pipeline's stored latest run log
+    /// (migration `0067`), a ticket's, pull request's or note's text.
+    #[serde(default)]
+    pub excerpts: Vec<Excerpt>,
+}
+
+/// One place the words appear in a hit's text (#2431).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct Excerpt {
+    /// Where in the row it sits, as the reader finds it there: a page's
+    /// section heading, `Comment by <name>`, a run log's `line <n>`. `None`
+    /// for text the index keeps no place for: a page's lead, a ticket's,
+    /// pull request's or note's text.
+    pub place: Option<String>,
+    /// The text around the words, the words flagged (raw source text, as
+    /// [`Segment`] says).
+    pub segments: Vec<Segment>,
 }
 
 /// A run of excerpt text, and whether it is part of the match.

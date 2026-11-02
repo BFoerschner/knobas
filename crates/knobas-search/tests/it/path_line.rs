@@ -19,6 +19,7 @@ use knobas_search::{SearchFilters, SearchQuery, SearchResponse, Searcher};
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 30,
         filters: SearchFilters::default(),
@@ -171,12 +172,13 @@ fn paths(response: &SearchResponse) -> Vec<(String, Option<String>)> {
     out
 }
 
-/// A branch, a pull request and a commit each carry `owner/repo` -- the repo's
-/// full name, the first name Gitea declares for it -- and the repo itself,
-/// whose kind declares no parent, carries none. Two "fix typo" commits from
-/// two repos are told apart by their row.
+/// A branch and a pull request each carry `owner/repo` -- the repo's full
+/// name, the first name Gitea declares for it -- and the repo itself, whose
+/// kind declares no parent, carries none. Two "fix typo" pull requests from
+/// two repos are told apart by their row. The commits are in no answer
+/// (#2422); a built-in list's rows draw theirs (below).
 #[tokio::test]
-async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
+async fn a_gitea_branch_and_pr_carry_their_repo_as_their_path() {
     let pool = pool().await;
     let t = token();
     let now = Utc::now();
@@ -190,12 +192,10 @@ async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
     let mut expected = vec![
         (ours[0].clone(), None),
         (ours[1].clone(), ours_path.clone()),
-        (ours[2].clone(), ours_path.clone()),
-        (ours[3].clone(), ours_path),
+        (ours[2].clone(), ours_path),
         (theirs[0].clone(), None),
         (theirs[1].clone(), theirs_path.clone()),
-        (theirs[2].clone(), theirs_path.clone()),
-        (theirs[3].clone(), theirs_path),
+        (theirs[2].clone(), theirs_path),
     ];
     expected.sort();
     assert_eq!(paths(&response), expected);
@@ -217,7 +217,7 @@ async fn a_gitea_branch_pr_and_commit_carry_their_repo_as_their_path() {
 }
 
 /// A kind no adapter declares a parent for carries no path: a Kuma monitor,
-/// whose adapter declares none, and a Gitea commit read by a searcher nobody
+/// whose adapter declares none, and a Gitea branch read by a searcher nobody
 /// told about the adapters -- the declaration is what draws the line, never
 /// the payload's shape on its own.
 #[tokio::test]
@@ -252,17 +252,16 @@ async fn a_kind_that_declares_no_parent_carries_no_path() {
     assert_eq!(paths(&response), vec![(monitor, None)]);
 
     let blind = Searcher::new(pool.clone())
-        .search(q(&format!("kind:commit {t}")))
+        .search(q(&format!("kind:branch {t}")))
         .await
         .unwrap();
-    assert_eq!(paths(&blind), vec![(ids[3].clone(), None)]);
+    assert_eq!(paths(&blind), vec![(ids[1].clone(), None)]);
 }
 
-/// The board's newest rows and a built-in list's rows are launcher rows too,
-/// and draw the same line a search draws: one answer to "where is this",
-/// wherever the row comes from.
+/// The board's newest rows are launcher rows too, and draw the same line a
+/// search draws: one answer to "where is this", wherever the row comes from.
 #[tokio::test]
-async fn the_boards_and_a_lists_rows_carry_the_same_path() {
+async fn the_boards_rows_carry_the_same_path() {
     let pool = pool().await;
     let t = token();
     // Far enough ahead that no other test's rows outrank these on the board.
@@ -270,31 +269,11 @@ async fn the_boards_and_a_lists_rows_carry_the_same_path() {
     let ids = repo(&pool, "tidewater", &format!("board-{t}"), &t, ahead).await;
 
     let board = searcher(&pool).await.launcher_board().await.unwrap();
-    let commit = board
+    // The branch: a commit is not among the board's rows (#2422).
+    let branch = board
         .recent
         .iter()
-        .find(|row| row.entity_id == ids[3])
-        .expect("the newest commit is on the board");
-    assert_eq!(commit.path, Some(format!("tidewater/board-{t}")));
-
-    // Just synced: everything the mirror saw in the last hour, newest first.
-    let listed = searcher(&pool)
-        .await
-        .search(q("list:just-synced"))
-        .await
-        .unwrap();
-    let in_list: Vec<(String, Option<String>)> = paths(&listed)
-        .into_iter()
-        .filter(|(id, _)| ids.contains(id))
-        .collect();
-    let line = Some(format!("tidewater/board-{t}"));
-    assert_eq!(
-        in_list,
-        vec![
-            (ids[0].clone(), None),
-            (ids[2].clone(), line.clone()),
-            (ids[3].clone(), line.clone()),
-            (ids[1].clone(), line),
-        ]
-    );
+        .find(|row| row.entity_id == ids[1])
+        .expect("the newest branch is on the board");
+    assert_eq!(branch.path, Some(format!("tidewater/board-{t}")));
 }

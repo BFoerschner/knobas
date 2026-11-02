@@ -31,17 +31,19 @@ use crate::{IpcError, Lifecycle};
 ///
 /// **The one DTO in this stream that composes two streams' data**, which is
 /// why it lives in the command module rather than in `knobas-search`:
-/// `smart_lists` and `recent` are the search crate's [`LauncherBoard`],
+/// `recent` is the search crate's [`LauncherBoard`],
 /// `sources` is stream F's [`CredentialHealth`], and `pending_writes` counts
 /// stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
 /// depends on none of those crates.
+///
+/// No lists since #2423 (spec #2419): a saved list is a `list` hit behind
+/// `#l`, and the built-in ones are gone.
 ///
 /// [`LauncherBoard`]: knobas_search::LauncherBoard
 /// [`CredentialHealth`]: knobas_sync::CredentialHealth
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
 pub struct LauncherHome {
-    pub smart_lists: Vec<knobas_search::SmartListSummary>,
     /// `knobas_search::EntityRow`, a *different Rust struct* from
     /// `knobas_core::entity_list::EntityRow` with the same eight fields on
     /// the wire. The shell has one type for both, the room's, which is the
@@ -49,6 +51,13 @@ pub struct LauncherHome {
     /// if the two ever stop agreeing.
     #[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]
     pub recent: Vec<knobas_search::EntityRow>,
+    /// What the reader favourited (#2428, spec #2419 stories 39 and 40),
+    /// in the order they were favourited, drawn above `recent` under one
+    /// heading: an entity as `recent` draws one, a saved list as its `list`
+    /// hit (kind and source `list`, its text as `path`, the refusal as
+    /// `state`). The rows of [`favourites`].
+    #[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]
+    pub favourites: Vec<knobas_search::EntityRow>,
     /// Stream F's credential health, read straight from `knobas.source_config`
     /// -- **not** a second copy of the type (interfaces §2.2, open question
     /// **E-Q5**, resolved: `knobas_sync::CredentialHealth` has merged, so the
@@ -76,8 +85,8 @@ pub struct LauncherHome {
 ///
 /// The whole mapping, in one place, because it is the only decision this
 /// module makes: a malformed query is the caller's fault (`invalid`), a
-/// `list:` nobody ships is `not_found` -- which is what lets the box say *no
-/// such list* rather than *something went wrong* -- and a database failure is
+/// saved list nobody saved is `not_found` (a rename or a delete of one already
+/// gone), and a database failure is
 /// `internal`, because nothing downstream can do anything about it.
 impl From<knobas_search::SearchError> for IpcError {
     fn from(error: knobas_search::SearchError) -> Self {
@@ -103,9 +112,8 @@ impl From<knobas_search::SearchError> for IpcError {
 ///
 /// # Errors
 ///
-/// `invalid` for a query outside the engine's bounds, `not_found` for a
-/// `list:` nobody ships, `not_ready` before the database is up, `internal` for
-/// anything else.
+/// `invalid` for a query outside the engine's bounds, `not_ready` before the
+/// database is up, `internal` for anything else.
 #[tauri::command]
 pub async fn search(
     lifecycle: State<'_, Lifecycle>,
@@ -114,8 +122,8 @@ pub async fn search(
     search_inner(&lifecycle.pool()?, lifecycle.registry(), query).await
 }
 
-/// What the launcher shows before anything is typed: the smart lists, the
-/// newest items, and the health of every configured source.
+/// What the launcher shows before anything is typed: the newest items, and
+/// the health of every configured source.
 ///
 /// # Errors
 ///
@@ -125,11 +133,10 @@ pub async fn launcher_home(lifecycle: State<'_, Lifecycle>) -> Result<LauncherHo
     launcher_home_inner(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
-/// Every smart list -- built-in and saved -- with its count and its change
-/// badge.
+/// Every saved list, with its count or the reason it needs attention.
 ///
-/// The rail on its own, for a launcher refreshing it without re-reading the
-/// whole board, which is what it does after a save, a rename or a delete.
+/// Settings reads it to know whether there is any list to share; the launcher
+/// finds lists through `search` (`#l`, #2423).
 ///
 /// # Errors
 ///
@@ -167,10 +174,8 @@ pub async fn create_smart_list(
 ///
 /// # Errors
 ///
-/// `invalid` for a blank name, `not_found` if nobody saved a list by that id
-/// -- **including every built-in id**, which is not a saved list and cannot be
-/// renamed -- `not_ready` before the database is up, `internal` if the write
-/// fails.
+/// `invalid` for a blank name, `not_found` if nobody saved a list by that id,
+/// `not_ready` before the database is up, `internal` if the write fails.
 #[tauri::command]
 pub async fn rename_smart_list(
     lifecycle: State<'_, Lifecycle>,
@@ -192,6 +197,96 @@ pub async fn delete_smart_list(
     id: String,
 ) -> Result<(), IpcError> {
     delete_smart_list_inner(&lifecycle.pool()?, lifecycle.registry(), &id).await
+}
+
+/// Every favourite (#2428), in the order they were favourited: the block
+/// the empty box draws above the recent items, which `launcher_home` also
+/// carries.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn favourites(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<knobas_search::EntityRow>, IpcError> {
+    favourites_inner(&lifecycle.pool()?, lifecycle.registry()).await
+}
+
+/// Favourite an entity or a saved list (#2428, story 39), last in the block;
+/// favouriting one twice leaves it in its place.
+///
+/// # Errors
+///
+/// `not_found` for a saved list nobody saved, `not_ready` before the database
+/// is up, `internal` if the write fails.
+#[tauri::command]
+pub async fn add_favourite(
+    lifecycle: State<'_, Lifecycle>,
+    target: knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    add_favourite_inner(&lifecycle.pool()?, lifecycle.registry(), &target).await
+}
+
+/// Unfavourite an entity or a saved list (#2428); not a favourite is no
+/// error.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the delete fails.
+#[tauri::command]
+pub async fn remove_favourite(
+    lifecycle: State<'_, Lifecycle>,
+    target: knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    remove_favourite_inner(&lifecycle.pool()?, lifecycle.registry(), &target).await
+}
+
+/// Every key bound (#2429, spec #2419 stories 43 to 47): the saved lists'
+/// chords, each with the list's name and text, and the actions' chords per
+/// kind. See [`knobas_search::keys`].
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn keys(lifecycle: State<'_, Lifecycle>) -> Result<knobas_search::Keys, IpcError> {
+    keys_inner(&lifecycle.pool()?).await
+}
+
+/// Give a saved list a chord that opens it from anywhere (#2429, story 43),
+/// or take its chord away with `chord: null`. A chord another list held moves
+/// to this one.
+///
+/// # Errors
+///
+/// `invalid` for a chord that is none, `not_found` for a list nobody saved,
+/// `not_ready` before the database is up, `internal` if the write fails.
+#[tauri::command]
+pub async fn bind_list_key(
+    lifecycle: State<'_, Lifecycle>,
+    list_id: String,
+    chord: Option<String>,
+) -> Result<(), IpcError> {
+    bind_list_key_inner(&lifecycle.pool()?, &list_id, chord.as_deref()).await
+}
+
+/// Give an action a chord on one kind (#2429, stories 44 and 45), or take
+/// it away with `chord: null`. `action_id` is the Tab sheet's stable id. A
+/// chord another action of the kind held moves to this one.
+///
+/// # Errors
+///
+/// `invalid` for a chord that is none, `not_ready` before the database is
+/// up, `internal` if the write fails.
+#[tauri::command]
+pub async fn bind_action_key(
+    lifecycle: State<'_, Lifecycle>,
+    kind: String,
+    action_id: String,
+    chord: Option<String>,
+) -> Result<(), IpcError> {
+    bind_action_key_inner(&lifecycle.pool()?, &kind, &action_id, chord.as_deref()).await
 }
 
 /// Every ticket view (#812, R-3.2, R-3.3), in list order, each with its count
@@ -405,8 +500,8 @@ pub async fn launcher_home_inner(
     let board = searcher(pool, registry).await?.launcher_board().await?;
     let notes_shown = crate::capture::shown(pool).await?;
     Ok(LauncherHome {
-        smart_lists: board.smart_lists,
         recent: board.recent,
+        favourites: board.favourites,
         sources: knobas_sync::config::health_all(pool).await?,
         // Pending only -- see the field's own doc for why the other two open
         // states stay with `write_queue_counts`. `count(*)` is an `i64` and
@@ -496,6 +591,86 @@ pub async fn delete_smart_list_inner(
     Ok(searcher(pool, registry).await?.delete_list(id).await?)
 }
 
+/// [`favourites`], against a pool and a registry.
+///
+/// # Errors
+///
+/// See [`favourites`].
+pub async fn favourites_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<Vec<knobas_search::EntityRow>, IpcError> {
+    Ok(searcher(pool, registry).await?.favourites().await?)
+}
+
+/// [`add_favourite`], against a pool and a registry.
+///
+/// # Errors
+///
+/// See [`add_favourite`].
+pub async fn add_favourite_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    target: &knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .add_favourite(target)
+        .await?)
+}
+
+/// [`remove_favourite`], against a pool and a registry.
+///
+/// # Errors
+///
+/// See [`remove_favourite`].
+pub async fn remove_favourite_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    target: &knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .remove_favourite(target)
+        .await?)
+}
+
+/// [`keys`], against a pool.
+///
+/// # Errors
+///
+/// See [`keys`].
+pub async fn keys_inner(pool: &PgPool) -> Result<knobas_search::Keys, IpcError> {
+    Ok(knobas_search::keys::read(pool).await?)
+}
+
+/// [`bind_list_key`], against a pool.
+///
+/// # Errors
+///
+/// See [`bind_list_key`].
+pub async fn bind_list_key_inner(
+    pool: &PgPool,
+    list_id: &str,
+    chord: Option<&str>,
+) -> Result<(), IpcError> {
+    Ok(knobas_search::keys::bind_list(pool, list_id, chord).await?)
+}
+
+/// [`bind_action_key`], against a pool.
+///
+/// # Errors
+///
+/// See [`bind_action_key`].
+pub async fn bind_action_key_inner(
+    pool: &PgPool,
+    kind: &str,
+    action_id: &str,
+    chord: Option<&str>,
+) -> Result<(), IpcError> {
+    Ok(knobas_search::keys::bind_action(pool, kind, action_id, chord).await?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -526,6 +701,8 @@ mod tests {
             text: "FAILURE".to_owned(),
             tone: knobas_core::tone::Tone::Err,
         });
+        // #2452: a value, for `path`'s reason; it is skipped when absent.
+        let cell = Some("Payments".to_owned());
         let search = serde_json::to_value(knobas_search::EntityRow {
             entity_id: "jira:PAY-231".to_owned(),
             kind: "ticket".to_owned(),
@@ -535,6 +712,7 @@ mod tests {
             synced_at: at,
             path: path.clone(),
             state: state.clone(),
+            cell: cell.clone(),
         })
         .expect("serializes");
         let room = serde_json::to_value(knobas_core::entity_list::EntityRow {
@@ -546,6 +724,7 @@ mod tests {
             synced_at: at,
             path,
             state,
+            cell,
         })
         .expect("serializes");
 

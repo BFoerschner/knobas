@@ -589,7 +589,8 @@ export function estateQuery(raw: string, limit: number = MATCH_LIMIT): SearchQue
   // `noFilters()` and then the one dimension, rather than the literal shape:
   // a dimension added to `SearchFilters` is one edit in the bridge and none
   // here.
-  return { raw, limit, filters: { ...noFilters(), kinds: ["asset"] } };
+  // Everything: an asset is found by its path and properties as well as its name.
+  return { raw, limit, filters: { ...noFilters(), kinds: ["asset"] }, titles: false };
 }
 
 /** One asset the search box offers, in the engine's own order. */

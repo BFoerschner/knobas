@@ -216,6 +216,17 @@ pub fn search_sql(
 
     // One narrow row per match. MATERIALIZED because `totals` and `top` both
     // read it and the scan must happen once.
+    // Where the mirror's detail branch is, for a corpus whose matches are
+    // mirror rows (`Corpus::drawn_as_mirror`, #2431).
+    let mirror = corpora
+        .iter()
+        // By relation: a `const` has no one address, so `ptr::eq` misses.
+        .position(|corpus| corpus.relation == crate::corpus::LIVE_ITEM.relation);
+    let drawn_by = |index: usize, corpus: &Corpus| match mirror {
+        Some(mirror) if corpus.drawn_as_mirror => mirror,
+        _ => index,
+    };
+
     sql.push_str("m as materialized (\n");
     for (index, corpus) in corpora.iter().enumerate() {
         if index > 0 {
@@ -234,8 +245,11 @@ pub fn search_sql(
         };
         let _ = writeln!(
             sql,
-            "  select {} as entity_id, {} as kind, {rank} as rank, {named} as named,\n         {} as item_updated_at, {index} as corpus",
-            corpus.entity_id, corpus.kind, corpus.updated_at
+            "  select {} as entity_id, {} as kind, {rank} as rank, {named} as named,\n         {} as item_updated_at, {} as corpus",
+            corpus.entity_id,
+            answered_kind(corpus, &bound),
+            corpus.updated_at,
+            drawn_by(index, corpus)
         );
         let _ = write!(sql, "    from {}", corpus.relation);
         if text.is_some() {
@@ -273,10 +287,15 @@ pub fn search_sql(
 
     // Titles and excerpts, on the rows that survived and no others.
     sql.push_str("detail as (\n");
+    let mut first = true;
     for (index, corpus) in corpora.iter().enumerate() {
-        if index > 0 {
+        if drawn_by(index, corpus) != index {
+            continue;
+        }
+        if !first {
             sql.push_str("  union all\n");
         }
+        first = false;
         let snippet = match &headline_opts {
             Some(opts) => format!(
                 "ts_headline('english', {}, q.tsq, {opts})",
@@ -284,10 +303,22 @@ pub fn search_sql(
             ),
             None => "null::text".to_owned(),
         };
+        // The text excerpts are read from (#2431): only under *Everything*
+        // with words, and only for the page, as the headline.
+        let (excerpt, excerpt_line) = if filters.excerpts && text.is_some() {
+            (corpus.excerpt, corpus.excerpt_line)
+        } else {
+            ("null::text", "null::bigint")
+        };
         let _ = writeln!(
             sql,
-            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path, {} as state,\n         {snippet} as snippet",
-            corpus.source_id, corpus.title, corpus.synced_at, corpus.path, corpus.state
+            "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path, {} as state, {} as cell,\n         {snippet} as snippet,\n         {excerpt} as excerpt_text, {excerpt_line} as excerpt_line",
+            corpus.source_id,
+            corpus.title,
+            corpus.synced_at,
+            corpus.path,
+            corpus.state,
+            corpus.cell
         );
         let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
         let _ = write!(sql, " on {} = p.entity_id", corpus.entity_id);
@@ -316,7 +347,7 @@ pub fn search_sql(
     // their kind rather than at the front of it.
     let _ = write!(
         sql,
-        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path, d.state as state,\n       d.rank as rank, d.snippet as snippet\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
+        "select t.kind as group_kind, t.kind_total as kind_total,\n       d.entity_id as entity_id, d.source_id as source_id, d.title as title,\n       d.item_updated_at as updated_at, d.synced_at as synced_at,\n       d.path as path, d.state as state, d.cell as cell,\n       d.rank as rank, d.snippet as snippet,\n       d.excerpt_text as excerpt_text, d.excerpt_line as excerpt_line\n  from totals t\n  left join detail d on d.kind = t.kind\n order by t.kind, {}",
         order_by("d.", ranked, true)
     );
 
@@ -506,6 +537,13 @@ struct BoundFilters {
     /// The declarations' placeholder, once a filter has bound it: `under:`
     /// and the ticket keys share it, and so does the detail stage's path.
     declarations: Option<String>,
+    /// [`EffectiveFilters::titles`]: no bind, a fixed weight filter.
+    titles: bool,
+    /// [`EffectiveFilters::pipeline_kinds`]' placeholder: the mirror's
+    /// pipeline-framed kinds, which the match stage answers as `pipeline`.
+    pipelines: Option<String>,
+    /// [`EffectiveFilters::hidden_kinds`]' placeholder (#2422).
+    hidden: Option<String>,
 }
 
 /// One ticket-key condition's placeholders.
@@ -580,11 +618,17 @@ fn bind_dimensions(
     let reach = filters
         .filters_by_reach()
         .then(|| bind_lowered(builder, &filters.reach));
+    // Read by the match stage's select list, before any `where` (#2422).
+    let pipelines = (!filters.pipeline_kinds.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.pipeline_kinds.clone())));
+    let hidden = (!filters.hidden_kinds.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.hidden_kinds.clone())));
+    // A `pipeline` filter takes in every kind that is answered as one.
+    let kinds = filters.kind_scope();
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),
-        kinds: (!filters.kinds.is_empty())
-            .then(|| builder.param(Bind::Texts(filters.kinds.clone()))),
+        kinds: (!kinds.is_empty()).then(|| builder.param(Bind::Texts(kinds))),
         days: filters
             .updated_within_days
             .map(|days| builder.param(Bind::I32(clamp_days(days)))),
@@ -612,6 +656,23 @@ fn bind_dimensions(
             .then(|| builder.param(Bind::Texts(filters.names.clone()))),
         fields: Vec::new(),
         declarations: None,
+        titles: filters.titles,
+        pipelines,
+        hidden,
+    }
+}
+
+/// The kind a corpus's row is answered as (#2422): its own, except that a
+/// mirrored kind declaring the Builds frame's `pipeline` is `pipeline`. A
+/// corpus whose kind is a quoted constant is knobas' own and never renamed.
+fn answered_kind(corpus: &Corpus, bound: &BoundFilters) -> String {
+    match &bound.pipelines {
+        Some(pipelines) if !corpus.kind.starts_with('\'') => format!(
+            "case when {kind} = any({pipelines}) then '{word}' else {kind} end",
+            kind = corpus.kind,
+            word = crate::frames::PIPELINE
+        ),
+        _ => corpus.kind.to_owned(),
     }
 }
 
@@ -636,9 +697,24 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     let mut predicates: Vec<String> = Vec::new();
     if let Some(fts) = fts {
         predicates.push(format!("{} @@ {fts}", corpus.fts));
+        if let Some(unless) = corpus.unless {
+            // The row another corpus answers for when it matches (#2431).
+            predicates.push(format!("not ({unless} @@ {fts})"));
+        }
+        if bound.titles {
+            // *Titles* (#2430): every corpus indexes what a row shows -- its
+            // title, a ticket's key -- at weight A and its body below, so the
+            // words must match the A lexemes alone. Beside the plain match,
+            // never instead of it: that one is what the GIN index answers,
+            // and this filters the rows it found.
+            predicates.push(format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts));
+        }
     }
     if let Some(scope) = corpus.scope {
         predicates.push(scope.to_owned());
+    }
+    if let Some(hidden) = &bound.hidden {
+        predicates.push(format!("{} <> all({hidden})", corpus.kind));
     }
     if let Some(sources) = &bound.sources {
         predicates.push(format!("{} = any({sources})", corpus.source_id));
@@ -1242,6 +1318,12 @@ mod tests {
         "review-for-me",
         "review asked of you",
         "warn",
+        // A pipeline's path line and state (#2422, `corpus::mirror_path!` and
+        // `mirror_state!`): the frame key and word, its chain of groups, and the
+        // declaration key its runs name it by.
+        "frame",
+        "pipeline",
+        "group_path",
     ];
 
     fn filters(
@@ -1825,6 +1907,43 @@ mod tests {
         assert!(built.sql.contains("from picked p"), "{}", built.sql);
     }
 
+    /// A run log's hits are live pipelines, drawn by the mirror's detail
+    /// branch (#2431): the statement plans one detail branch fewer than it
+    /// has corpora, and the log branch's matches carry the mirror's index.
+    #[test]
+    fn a_log_hit_is_drawn_by_the_mirrors_detail_branch() {
+        let built = search_sql(
+            crate::corpus::ALL,
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert_eq!(
+            built.sql.matches("    from picked p\n").count(),
+            crate::corpus::ALL.len() - 1,
+            "{}",
+            built.sql
+        );
+        assert_eq!(built.sql.matches("0 as corpus").count(), 2, "{}", built.sql);
+        // Alone, as the perf fixture runs a branch, it draws its own.
+        let alone = search_sql(
+            &[&crate::corpus::PIPELINE_LOG],
+            Some("sepa"),
+            false,
+            &EffectiveFilters::default(),
+            10,
+            50,
+        );
+        assert_eq!(
+            alone.sql.matches("    from picked p\n").count(),
+            1,
+            "{}",
+            alone.sql
+        );
+    }
+
     /// The mirror is read through the view migration 0002 added, and `fts` is
     /// matched against rather than selected (interfaces §1).
     #[test]
@@ -1838,7 +1957,17 @@ mod tests {
             50,
         );
         assert!(built.sql.contains("sync.live_item i"), "{}", built.sql);
-        assert!(!built.sql.contains("sync.item "), "{}", built.sql);
+        // The one read of `sync.item` itself is a pipeline's newest run, by
+        // the id `sync.item_pipeline`'s range gave (#2422, `mirror_state!`).
+        assert_eq!(
+            built.sql.matches("sync.item ").count(),
+            built
+                .sql
+                .matches("join sync.item i on i.entity_id = n.entity_id")
+                .count(),
+            "{}",
+            built.sql
+        );
         // `select *` over a CTE this module defined is fine -- its columns are
         // the ones `m` named. What must never happen is `select *` over the
         // mirror itself, whose `fts` is a tsvector that panics when read into a
@@ -1877,11 +2006,16 @@ mod tests {
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus
             // rather than be quietly dropped for it.
+            excerpt: "null::text",
+            excerpt_line: "null::bigint",
+            unless: None,
+            drawn_as_mirror: false,
             author: None,
             updated_at: "o.updated_at",
             synced_at: "o.synced_at",
             path: "null::text",
             state: "null::jsonb",
+            cell: "null::text",
             scope: Some("o.archived is false"),
             under: None,
             fields: &[],

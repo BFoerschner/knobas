@@ -148,6 +148,7 @@
           mine: false,
           authors: [],
         },
+        titles: false,
       });
       if (mine !== searching) return;
       hits = found.groups

@@ -197,6 +197,7 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
 
     let response = knobas_search::Searcher::new(pool.clone())
         .search(knobas_search::SearchQuery {
+            titles: false,
             raw: "sepa retry".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters::default(),
@@ -239,11 +240,12 @@ async fn the_launcher_finds_a_demo_ticket_by_its_key() {
     knobas_db::migrate::run(pool).await.unwrap();
     demo::demo_load_inner(pool).await.unwrap();
 
-    for raw in ["PAY-231", "#PAY-231", "pay-231"] {
+    for raw in ["PAY-231", "#PAY-231", "#t PAY-231", "pay-231"] {
         let response = knobas_app::commands::search::search_inner(
             pool,
             &Registry::for_process(),
             knobas_search::SearchQuery {
+                titles: false,
                 raw: raw.to_owned(),
                 limit: 20,
                 filters: knobas_search::SearchFilters::default(),

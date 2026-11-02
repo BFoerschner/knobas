@@ -6,7 +6,7 @@
  * The stored text is the truth (R-3.3). The editor reads it into conditions
  * when it opens and writes text from them on save. Every key of #811 and the
  * two built keys the editor offers (`under:` as Epic, `updated:`) is a
- * condition; any other token (`is:mine`, a `/source` scope, a quoted phrase) stays in
+ * condition; any other token (`is:mine`, a `source:` scope, a quoted phrase) stays in
  * the words as typed, so nothing a reader typed is lost.
  */
 import type { MiniBoardColumn } from "../../ipc/entity";

@@ -4348,6 +4348,7 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
         &state.pool,
         &Registry::for_process(),
         knobas_search::SearchQuery {
+            titles: false,
             raw: CRITERION.to_owned(),
             limit: 30,
             filters: knobas_search::SearchFilters::default(),

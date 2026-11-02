@@ -608,6 +608,21 @@ pub async fn execute_run(
     progress: Option<Arc<dyn ProgressSink>>,
     started: std::time::Instant,
 ) -> RunResult {
+    run_keeping_the_adapter(deps, source_id, run_id, mode, progress, started)
+        .await
+        .0
+}
+
+/// [`execute_run`], handing back the adapter of a run that committed, for
+/// the pipelines' latest logs that follow the run's ending (#2431).
+async fn run_keeping_the_adapter(
+    deps: &SchedulerDeps,
+    source_id: &str,
+    run_id: i64,
+    mode: RunMode,
+    progress: Option<Arc<dyn ProgressSink>>,
+    started: std::time::Instant,
+) -> (RunResult, Option<Box<dyn Source>>) {
     // `started` comes from the caller so that every message about this run --
     // including the terminal one the ticker sends after `settle` -- measures
     // the same thing: how long the user has been waiting.
@@ -624,23 +639,30 @@ pub async fn execute_run(
     }
 
     tracing::info!(source_id, run_id, ?mode, "sync started");
-    let result = match attempt(deps, source_id, run_id, mode, progress.as_ref(), started).await {
-        Ok(report) => RunResult {
-            outcome: SyncOutcome::Ok,
-            counts: run_log::RunCounts::of(&report),
-            error: None,
-            left_out: report.left_out,
-        },
-        Err(failure) => {
-            tracing::warn!(source_id, run_id, failure = %failure.message(), "sync run failed");
-            RunResult {
-                outcome: failure.outcome(),
-                counts: run_log::RunCounts::default(),
-                error: Some(failure.message()),
-                left_out: None,
+    let (result, adapter) =
+        match attempt(deps, source_id, run_id, mode, progress.as_ref(), started).await {
+            Ok((report, adapter)) => (
+                RunResult {
+                    outcome: SyncOutcome::Ok,
+                    counts: run_log::RunCounts::of(&report),
+                    error: None,
+                    left_out: report.left_out,
+                },
+                Some(adapter),
+            ),
+            Err(failure) => {
+                tracing::warn!(source_id, run_id, failure = %failure.message(), "sync run failed");
+                (
+                    RunResult {
+                        outcome: failure.outcome(),
+                        counts: run_log::RunCounts::default(),
+                        error: Some(failure.message()),
+                        left_out: None,
+                    },
+                    None,
+                )
             }
-        }
-    };
+        };
     // Duration here rather than in `settle`: `started` is the user's wait,
     // the same clock every progress message uses.
     tracing::info!(
@@ -650,7 +672,7 @@ pub async fn execute_run(
         duration_ms = elapsed_ms(started),
         "sync finished"
     );
-    result
+    (result, adapter)
 }
 
 /// Send one progress message.
@@ -936,7 +958,7 @@ async fn attempt(
     mode: RunMode,
     progress: Option<&Arc<dyn ProgressSink>>,
     started: std::time::Instant,
-) -> Result<crate::SyncReport, RunFailure> {
+) -> Result<(crate::SyncReport, Box<dyn Source>), RunFailure> {
     let cfg = config::get(&deps.pool, source_id)
         .await
         .map_err(RunFailure::Db)?
@@ -1033,12 +1055,15 @@ async fn attempt(
         record_discovered(deps, source_id, found).await;
     }
     // The same test as `write_queue::retryable`'s: change the two together.
-    report.map_err(|error| match error {
-        SyncError::Source(SourceError::Protocol { status: None, .. }) if held_on.is_some() => {
-            RunFailure::LocalQuota(error)
+    match report {
+        Ok(report) => Ok((report, source)),
+        Err(error @ SyncError::Source(SourceError::Protocol { status: None, .. }))
+            if held_on.is_some() =>
+        {
+            Err(RunFailure::LocalQuota(error))
         }
-        error => RunFailure::Sync(error),
-    })
+        Err(error) => Err(RunFailure::Sync(error)),
+    }
 }
 
 /// Close the run: log it, judge the credential, set or clear the backoff, emit.
@@ -2472,20 +2497,20 @@ impl Inner {
             }
         };
 
-        let result = match permit {
-            None => RunResult::cancelled(),
+        let (result, adapter) = match permit {
+            None => (RunResult::cancelled(), None),
             Some(_permit) => {
                 tokio::select! {
                     biased;
-                    () = self.cancel.cancelled() => RunResult::cancelled(),
-                    result = execute_run(
+                    () = self.cancel.cancelled() => (RunResult::cancelled(), None),
+                    ran = run_keeping_the_adapter(
                         &self.deps,
                         &source_id,
                         run_id,
                         mode,
                         Some(Arc::clone(&watchers) as Arc<dyn ProgressSink>),
                         started,
-                    ) => result,
+                    ) => ran,
                 }
             }
         };
@@ -2498,6 +2523,23 @@ impl Inner {
         closing.recorder = None;
         self.end_run(&source_id, run_id, &result, &watchers, started)
             .await;
+
+        // The newest finished runs' logs, into the index (#2431): after the
+        // ending, so a slow log neither holds the run's verdict, its permit
+        // or the source, nor turns a committed run into a stopped one when
+        // the quit lands meanwhile. Best-effort and bounded
+        // (`pipeline_logs::BUDGET`); the quit cuts it.
+        if let Some(adapter) = adapter {
+            tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => {}
+                stored = crate::pipeline_logs::refresh(&self.deps.pool, &source_id, adapter.as_ref()) => {
+                    if let Err(error) = stored {
+                        tracing::warn!(source_id, %error, "storing the pipelines' latest logs failed");
+                    }
+                }
+            }
+        }
     }
 
     /// Record a run's verdict and tell everyone watching how it ended: settle,

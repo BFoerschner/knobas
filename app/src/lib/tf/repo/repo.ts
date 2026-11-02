@@ -104,7 +104,12 @@ export interface RepoRoute {
   commit: string | null;
   /** Compare: the branch proposed (#837's `compare/<branch>`). */
   branch: string | null;
+  /** Compare: the branch it goes into, where the address names one (`compare/<base>...<head>`, #2427). */
+  base: string | null;
 }
+
+/** Between the base and the head in a compare address: git's own, and never part of a ref name. */
+const BASE_HEAD = "...";
 
 const TABS = new Set<string>([...REPO_TABS.map((tab) => tab.id), "edit"]);
 
@@ -117,17 +122,20 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
   const repoId = rest[0] || null;
   if (rest[1] === LINE) {
     const n = /^\d+$/.test(rest[2] ?? "") ? Number(rest[2]) : 0;
-    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null };
+    return { repoId, tab: "files", path: rest.slice(3).join("/") || null, line: n > 0 ? n : null, commit: null, branch: null, base: null };
   }
   const tab = (TABS.has(rest[1] ?? "") ? rest[1] : "files") as RepoTab;
   const tail = rest.slice(2).join("/") || null;
+  const cut = tab === "compare" && tail !== null ? tail.indexOf(BASE_HEAD) : -1;
+  const compared = cut > 0 ? { branch: tail!.slice(cut + BASE_HEAD.length) || null, base: tail!.slice(0, cut) } : { branch: tail, base: null };
   return {
     repoId,
     tab,
     path: tab === "files" || tab === "edit" ? tail : null,
     line: null,
     commit: tab === "commits" ? (rest[2] ?? null) : null,
-    branch: tab === "compare" ? tail : null,
+    branch: tab === "compare" ? compared.branch : null,
+    base: tab === "compare" ? compared.base : null,
   };
 }
 
@@ -409,9 +417,15 @@ export function editHash(repoId: string, path: string): string {
   return repoHash(repoId, "edit", ...path.split("/").map(encodeURIComponent));
 }
 
-/** The compare page of a branch (#840, #837's `compare/<branch>`), the name one segment. */
-export function compareHash(repoId: string, branch: string): string {
-  return repoHash(repoId, "compare", encodeURIComponent(branch));
+/**
+ * The compare page of a branch (#840, #837's `compare/<branch>`), the name one
+ * segment; with `base`, the branch it goes into too, as git writes the pair
+ * (`compare/<base>...<head>`, #2427). A ref name never holds `..`
+ * (git-check-ref-format), so the pair reads back whole.
+ */
+export function compareHash(repoId: string, branch: string, base?: string | null): string {
+  const tail = base ? `${base}${BASE_HEAD}${branch}` : branch;
+  return repoHash(repoId, "compare", encodeURIComponent(tail));
 }
 
 /**

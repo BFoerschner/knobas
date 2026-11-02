@@ -4,6 +4,7 @@
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
 import type { AttentionGroup, CodeFacts, ContextKind, ContextRow, LaneField, Signal, StateChip } from "../../../ipc/entity";
+import type { StateValue } from "../../../ipc/sources";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { wordAlternatives } from "../../../tf/tickets/needles";
@@ -395,16 +396,6 @@ function row(
  * walked); *Promote* adds to it. */
 export const FAKE_CONTEXTS: ContextRow[] = [];
 
-/**
- * The estate assets a context holds, by the context's anchor (#1503). The
- * fixture has no link graph, so this one table is all the asset membership
- * there is; `smart-lists.ts` reads it for *Open alerts on my jobs*. PAY-231
- * holds the TeamCity asset, which is the one the fixture's acked alert watches.
- */
-export const FAKE_CONTEXT_ASSETS: Record<string, string[]> = {
-  "mock:PAY-231": ["asset:knobas-teamcity"],
-};
-
 let nextContext = 1;
 export function fakeContext(kind: ContextKind, title: string, anchor_id: string | null): ContextRow {
   return {
@@ -420,6 +411,28 @@ export function fakeContext(kind: ContextKind, title: string, anchor_id: string 
 FAKE_CONTEXTS.push(fakeContext("ticket", "Retry failed SEPA payouts", "mock:PAY-231"));
 
 /**
+ * A ticket's state as the Jira adapter declares it (#2421,
+ * `knobas-source-jira`'s `ticket_state`): the fixture's descriptors declare
+ * these (`fake/sources.ts`), and a ticket row resolves its status against
+ * them, so the launcher's colours and the `?` card's legend read one list.
+ */
+export const TICKET_STATES: StateValue[] = [
+  { value: "Done", tone: "ok", text: null },
+  { value: "Resolved", tone: "ok", text: null },
+  { value: "In Progress", tone: "info", text: null },
+  { value: "In Review", tone: "info", text: null },
+  { value: "Closed", tone: "muted", text: null },
+];
+
+/** A ticket's status as its declared state, or none: a word the list does not name is a miss. */
+function ticketState(entry: (typeof CORPUS)[number]): StateChip | null {
+  const status = entry.payload["status"];
+  if (entry.kind !== "ticket" || typeof status !== "string") return null;
+  const found = TICKET_STATES.find((value) => value.value === status.trim());
+  return found ? { text: status, tone: found.tone } : null;
+}
+
+/**
  * The mirror row `list_entities` returns. The path and the state chip are
  * the fixture's own `path` and `chip` payload keys where a row carries them
  * (#817's job rows), and `null` otherwise, as the mock adapter declares
@@ -427,7 +440,8 @@ FAKE_CONTEXTS.push(fakeContext("ticket", "Retry failed SEPA payouts", "mock:PAY-
  */
 export function mirrorRow(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) => (typeof value === "string" ? value : null);
-  const chip = entry.payload["chip"] as StateChip | undefined;
+  const chip = (entry.payload["chip"] as StateChip | undefined) ?? ticketState(entry) ?? undefined;
+  const cell = text(entry.payload["cell"]);
   return {
     entity_id: entry.entity_id,
     kind: entry.kind,
@@ -437,6 +451,8 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
     synced_at: SYNCED_AT,
     path: text(entry.payload["path"]),
     state: chip ?? null,
+    // The engine's key cell (#2452): a monitor's type, which is on no path line.
+    ...(cell === null ? {} : { cell }),
   };
 }
 

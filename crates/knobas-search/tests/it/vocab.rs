@@ -72,7 +72,7 @@ async fn aliases_resolve_across_instances_and_identity_comes_from_the_configs() 
         .unwrap();
 
     // One adapter kind, two instances: the adapter kind typed out means "the
-    // instances of it", which is what makes `/ji` plural (the built-in alias
+    // instances of it", which is what makes `in:ji` plural (the built-in alias
     // table maps aliases onto exactly this step).
     assert_eq!(
         vocab.resolve_source("vta-jira-kind"),
@@ -113,7 +113,7 @@ async fn aliases_resolve_across_instances_and_identity_comes_from_the_configs() 
 
 /// A source the user switched off is **unnameable, and still present**.
 ///
-/// Unnameable because the sources view no longer offers it: answering `/x`
+/// Unnameable because the sources view no longer offers it: answering `in:x`
 /// with "every instance of x" would narrow a query to a source the user is
 /// shown as off, so the token must be unresolvable for the parser to report.
 /// `Vocabulary::resolve_source` is what enforces that (#200's mechanism

@@ -4,13 +4,18 @@
  */
 import type { SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
+import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
-import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
+import { fakeLinkSetLines } from "./link-sets";
+import { fakeLog } from "./run-reads";
+import { fakeFavourites, fakeListSearch } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
+import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { kindLabel, kindMonogram, kindSingular } from "../../kinds";
 
 /**
  * `search` for a ticket key the corpus holds (#1476), `PAY-231`: every
@@ -23,7 +28,7 @@ function ticketsByKey(raw: string): SearchResponse | null {
   const key = raw.toUpperCase();
   const hits = CORPUS.filter(
     (entry) => entry.kind === "ticket" && entry.deleted_at === null && keyOf(entry.entity_id) === key,
-  ).map((entry, index) => ({ ...mirrorRow(entry), rank: 1 - index / 10, snippet: [] }));
+  ).map((entry, index) => ({ ...mirrorRow(entry), rank: 1 - index / 10, snippet: [], excerpts: [] }));
   if (hits.length === 0) return null;
   return {
     interpreted: {
@@ -75,19 +80,21 @@ function actionPalette(raw: string): SearchResponse | null {
 function estateSearch(args: Record<string, unknown>): SearchResponse {
   const query = (args.query ?? {}) as {
     raw?: string;
+    titles?: boolean;
     filters?: { kinds?: string[] };
   };
-  // `list:<id>` routes to the list and not to the corpus, which is what
-  // `Searcher::search` does with a `Prefix::List` -- and it is the only way a
-  // smart list is ever opened, because `Launcher.svelte` opens one by typing
-  // its id into the box. Without this branch the rail draws but every row on
-  // it answers with the refusal below.
-  const listed = /^list:([a-z0-9-]+)$/.exec((query.raw ?? "").trim());
-  if (listed) return fakeSmartListItems({ id: listed[1]!, limit: 50 });
+  // `#l` and `#i` (#2423): the saved lists, and the kind the launcher
+  // answers from the shell's inbox store.
+  const listed = fakeListSearch(query.raw ?? "");
+  if (listed !== null) return listed;
   const palette = actionPalette((query.raw ?? "").trim());
   if (palette !== null) return palette;
+  const help = helpCard((query.raw ?? "").trim());
+  if (help !== null) return help;
   const byKey = ticketsByKey((query.raw ?? "").trim());
   if (byKey !== null) return byKey;
+  const words = wordSearch(query.raw ?? "", query.titles !== false);
+  if (words !== null) return words;
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
       code: "not_ready",
@@ -109,6 +116,7 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
     state: null,
     rank: 1 - index / 10,
     snippet: [],
+    excerpts: [],
   }));
   return {
     interpreted: {
@@ -136,24 +144,180 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
   };
 }
 
+/**
+ * `search` for `?` (#2421): the help prefix and no groups, as the backend
+ * answers it, so the `?` card and its colour legend draw under `?fake-ipc`.
+ */
+function helpCard(raw: string): SearchResponse | null {
+  if (raw !== "?") return null;
+  return {
+    interpreted: {
+      text: "",
+      prefix: "help",
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [],
+    total: 0,
+    took_ms: 0,
+    coverage: [],
+  };
+}
+
+/** `knobas_search::group`'s order, unknown kinds last. */
+const GROUP_ORDER = ["view", "set", "ticket", "asset", "repo", "pr", "pipeline", "build_config", "build", "page", "note", "commit", "branch", "route", "monitor", "list"];
+
+/** What the engine leaves out of the answer (#2422, `knobas_search::frames`): runs, commits, a Jira view's mirror row. */
+const LEFT_OUT = new Set(["build", "commit", "jira_view"]);
+
+type Hit = SearchResponse["groups"][number]["hits"][number];
+
+/**
+ * Everything's excerpts (#2431) as the fixture makes them: each line (a run
+ * log's, numbered from `firstLine`) or sentence of `text` that holds a word,
+ * the words marked, a page's `\u001e` section and `\u001f` comment marks as
+ * places. **A substring match, fixture-only**: the engine's are
+ * `knobas_search::excerpt`'s, witnessed over PostgreSQL.
+ */
+function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
+  const out: Hit["excerpts"] = [];
+  let place: string | null = null;
+  const lines = text.startsWith(title) ? text.slice(title.length).split("\n") : text.split("\n");
+  lines.forEach((line, index) => {
+    if (line.startsWith("\u001e")) return void (place = line.slice(1).trim());
+    if (line.startsWith("\u001f")) return void (place = `Comment by ${line.slice(1).trim()}`);
+    if (line.startsWith("\u001d")) return;
+    const pieces = firstLine === null ? line.split(/(?<=[.!?])\s+/) : [line];
+    for (const piece of pieces) {
+      const lower = piece.toLowerCase();
+      if (out.length >= 8 || !words.some((word) => lower.includes(word))) continue;
+      const segments: Hit["snippet"] = [];
+      let at = 0;
+      while (at < piece.length) {
+        const next = words
+          .map((word) => [lower.indexOf(word, at), word.length] as const)
+          .filter(([found]) => found >= 0)
+          .sort((a, b) => a[0] - b[0])[0];
+        if (!next) break;
+        if (next[0] > at) segments.push({ text: piece.slice(at, next[0]), hit: false });
+        segments.push({ text: piece.slice(next[0], next[0] + next[1]), hit: true });
+        at = next[0] + next[1];
+      }
+      if (at < piece.length) segments.push({ text: piece.slice(at), hit: false });
+      out.push({ place: firstLine === null ? place : `line ${firstLine + index}`, segments });
+    }
+  });
+  return out;
+}
+
+/** A pipeline's newest run's log under the fixture, as `run_log` answers it. */
+function fixtureLogText(pipeline: ReturnType<typeof fakePipelines>[number]): string {
+  const newest = pipeline.recent[0];
+  const run = newest ? fixtureRun(newest.entity_id) : undefined;
+  return run ? fakeLog(run.config, run.no, run.st).lines.map((line) => line.text).join("\n") : "";
+}
+
+/**
+ * The launcher's own kinds (#2422) as the fixture holds them: the ticket
+ * views, the link sets and the pipelines, each with its path line, and a
+ * pipeline in its newest run's state. Fixture-only, like the word search.
+ */
+function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
+  const hit = (kind: string, entity_id: string, title: string, path: string, state: Hit["state"] = null): Hit => ({
+    entity_id,
+    kind,
+    source_id: kind,
+    title,
+    updated_at: SYNCED_AT,
+    synced_at: SYNCED_AT,
+    path,
+    state,
+    rank: 1,
+    snippet: [],
+    excerpts: [],
+  });
+  return [
+    ...fakeTicketViewLines().map((view) => ({ haystack: `${view.name} ${view.path}`, hit: hit("view", view.id, view.name, view.path) })),
+    ...fakeLinkSetLines().map((set) => ({ haystack: `${set.name} ${set.description}`, hit: hit("set", set.id, set.name, set.path) })),
+    ...fakePipelines().map((pipeline) => ({
+      haystack: `${pipeline.name} ${pipeline.path.join(" ")}`,
+      log: fixtureLogText(pipeline),
+      hit: { ...hit("pipeline", pipeline.entity_id, pipeline.name, pipeline.path.join(" › "), pipeline.recent[0]?.state ?? null), source_id: pipeline.source_id },
+    })),
+  ];
+}
+
+/**
+ * `search` for plain words (#2421): the corpus rows whose key, title, path or
+ * key cell (#2452) holds every word, grouped in the engine's order, each with its state. So a
+ * free search can be looked at under `?fake-ipc`, the launcher's rows and
+ * their colours with it.
+ *
+ * **A substring match, fixture-only**, like the estate search below: it
+ * answers the shape and not the engine's question. The ranking, the excerpt
+ * and the grammar are the engine's, witnessed over a real PostgreSQL in
+ * `knobas-search`'s integration tests. A query with a prefix or a `:` token
+ * is not answered here.
+ */
+function wordSearch(raw: string, titles: boolean): SearchResponse | null {
+  const text = raw.trim();
+  if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
+  const words = text.toLowerCase().split(/\s+/);
+  const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
+  for (const { haystack, hit, log } of launcherKindHits()) {
+    // Everything (#2431): a pipeline is found by its newest run's log too.
+    const body = titles ? "" : (log ?? "");
+    if (!words.every((word) => `${haystack} ${body}`.toLowerCase().includes(word))) continue;
+    const hits = byKind.get(hit.kind) ?? [];
+    hits.push({ ...hit, rank: 1 - hits.length / 100, excerpts: titles ? [] : fixtureExcerpts("", body, words, 1) });
+    byKind.set(hit.kind, hits);
+  }
+  for (const entry of CORPUS) {
+    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
+    const row = mirrorRow(entry);
+    const body = titles ? "" : entry.body_text;
+    const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
+    if (!words.every((word) => haystack.includes(word))) continue;
+    const hits = byKind.get(entry.kind) ?? [];
+    const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words);
+    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts });
+    byKind.set(entry.kind, hits);
+  }
+  const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));
+  const groups = [...byKind]
+    .sort(([left], [right]) => at(left) - at(right) || left.localeCompare(right))
+    .map(([kind, hits]) => ({
+      kind,
+      label: kindSingular(kind),
+      plural: kindLabel(kind),
+      monogram: kindMonogram(kind),
+      total: hits.length,
+      hits: hits.slice(0, 8),
+    }));
+  return {
+    interpreted: {
+      text,
+      prefix: null,
+      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups,
+    total: groups.reduce((sum, group) => sum + group.total, 0),
+    took_ms: 3,
+    coverage: [],
+  };
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
-    // The launcher board (#504). Until now `launcher_home` had no handler at
-    // all, so `⌘K` under `?fake-ipc` drew a red "command not found" over the
-    // whole board -- which is why the three estate lists this ticket adds
-    // could not be looked at in a browser.
-    //
-    // **Everything here is fixture-only** and none of it certifies the bridge.
-    // What it is for is the walk: that the rail draws a row per list with its
-    // count, and that Enter on an estate row hands the shell the Tree's
-    // address. The rules themselves are witnessed at the IPC seam over a real
-    // PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
+    // The launcher board (#504): the recent items alone since #2421 and
+    // #2423. **Fixture-only**; the rules are witnessed at the IPC seam over a
+    // real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
     launcher_home: () => ({
-      smart_lists: fakeSmartLists(),
       // The newest of the fixture's corpus, in the shape `list_entities`
       // answers in -- the board draws recent rows with the same component.
-      recent: CORPUS.filter((entry) => entry.deleted_at === null)
+      recent: CORPUS.filter((entry) => entry.deleted_at === null && !LEFT_OUT.has(entry.kind))
         // `recent_sql!`'s order, because the comment above has to be true:
         // newest first, a row the source never dated last, and the id to
         // break a tie. CORPUS is in reading order, not date order.
@@ -164,16 +328,17 @@ export function handlers(): Handlers {
         )
         .slice(0, 8)
         .map(mirrorRow),
+      // What the reader favourited (#2428), above the recent rows.
+      favourites: fakeFavourites(),
       sources: FIXTURE_SOURCES.map((source) => source.health),
       pending_writes: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
       notes_shown: fakeNotesAreShown(),
     }),
-    // The Tree's search box (#430), and **only** the Tree's: a query that is
-    // not narrowed to assets is refused rather than answered from the estate,
-    // because the launcher's corpus is the mirror's and this fixture has no
-    // mirror to search. A handler that answered everything with assets would
-    // make a QA pass over the launcher look like it worked. `>` is answered
-    // (#1417) because the backend answers it without a corpus too.
+    // The Tree's search box (#430), a ticket key (#1476), `>` (#1417) and
+    // plain words over the corpus by substring (#2421). Anything else is
+    // refused rather than answered from the estate: a handler that answered
+    // everything with assets would make a QA pass over the launcher look like
+    // it worked.
     search: (args) => estateSearch(args),
     // The query box's suggestions (#601). **Fixture-only**: the kinds the
     // corpus holds and the configured sources, so `kind:` and `source:` can be

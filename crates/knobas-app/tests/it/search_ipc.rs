@@ -14,7 +14,6 @@
 //! anything global takes a database of its own (#1907).
 
 use knobas_app::IpcErrorCode;
-use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::commands::search::{
     create_smart_list_inner, delete_smart_list_inner, filter_suggestions_inner,
     launcher_home_inner, rename_smart_list_inner, search_inner, smart_lists_inner,
@@ -92,24 +91,11 @@ async fn seed(pool: &sqlx::PgPool, tag: &str) -> String {
 
 fn query(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 20,
         filters: SearchFilters::default(),
     }
-}
-
-/// Open a smart list the way the launcher does: by searching for `list:<id>`.
-async fn open_list(
-    pool: &sqlx::PgPool,
-    id: &str,
-    limit: u32,
-) -> Result<knobas_search::SearchResponse, knobas_app::IpcError> {
-    let open = SearchQuery {
-        raw: format!("list:{id}"),
-        limit,
-        filters: SearchFilters::default(),
-    };
-    search_inner(pool, &Registry::for_process(), open).await
 }
 
 /// The field names are the contract.
@@ -151,6 +137,13 @@ async fn the_wire_shape_is_the_contract() {
         v["groups"][0]["hits"][0]["snippet"][0]["text"].is_string(),
         "{v}"
     );
+    // Everything's excerpts (#2431): each a place (text or null) and segments.
+    let excerpt = &v["groups"][0]["hits"][0]["excerpts"][0];
+    assert!(
+        excerpt["place"].is_null() || excerpt["place"].is_string(),
+        "{v}"
+    );
+    assert!(excerpt["segments"][0]["hit"].is_boolean(), "{v}");
     assert!(v["took_ms"].is_number(), "{v}");
     assert!(v["total"].is_number(), "{v}");
 
@@ -198,20 +191,22 @@ async fn no_markup_reaches_the_wire_in_a_snippet() {
 /// Errors carry a code the frontend can branch on (ruling P1).
 ///
 /// `not_found` is what makes a command naming a missing list say *no such
-/// list* instead of *something went wrong* (a `list:` typed into the box is
-/// not such a command, #1655); the message is for humans and nobody parses
-/// it.
+/// list* instead of *something went wrong*; the message is for humans and
+/// nobody parses it.
 #[tokio::test]
 async fn errors_carry_a_code_the_frontend_can_branch_on() {
     let pool = pool().await;
 
-    // Typed into the box, a list nobody ships is a half-typed state (#1655):
-    // an empty answer and the id as an unknown token, never an error.
-    let typed = open_list(&pool, "nope", 10).await.unwrap();
-    assert!(typed.groups.is_empty(), "{typed:?}");
-    assert_eq!(typed.interpreted.unknown_tokens, ["list:nope"]);
+    // `list:` is retired from the box (#2423): it is the words it is, and
+    // no prefix.
+    let typed = search_inner(&pool, &Registry::for_process(), query("list:nope"))
+        .await
+        .unwrap();
+    assert_eq!(typed.interpreted.prefix, None, "{typed:?}");
+    assert_eq!(typed.interpreted.text, "list:nope", "{typed:?}");
+    assert!(typed.interpreted.unknown_tokens.is_empty(), "{typed:?}");
 
-    // The commands that name a list still say `not_found`.
+    // The commands that name a list say `not_found`.
     let unknown = delete_smart_list_inner(&pool, &Registry::for_process(), "nope")
         .await
         .unwrap_err();
@@ -237,18 +232,18 @@ async fn errors_carry_a_code_the_frontend_can_branch_on() {
     assert_eq!(dead.code, IpcErrorCode::Internal, "{dead:?}");
 }
 
-/// The board reports source health beside the lists (interfaces §2.4).
+/// The board reports source health beside the recent rows (interfaces §2.4).
 ///
 /// `LauncherHome` is the one DTO in this stream that composes two streams'
-/// data: the lists and the recent rows are `knobas-search`'s, `sources` is
+/// data: the recent rows are `knobas-search`'s, `sources` is
 /// stream F's `CredentialHealth`, and `pending_writes` is stream G's write
-/// queue. What is asserted here is that all four halves arrive and are shaped
+/// queue. What is asserted here is that all three halves arrive and are shaped
 /// as the mirror declares them; the *value* of the count belongs to
 /// `launcher_home_counts_the_pending_writes`, which is the only test in this
 /// file that queues anything and therefore the only one that may say a
 /// number out loud about a table the whole file shares.
 #[tokio::test]
-async fn launcher_home_reports_source_health_beside_the_lists() {
+async fn launcher_home_reports_source_health_beside_the_recent_rows() {
     let pool = pool().await;
     seed(&pool, "home").await;
 
@@ -257,9 +252,11 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
         .unwrap();
     let v = serde_json::to_value(&home).unwrap();
 
-    for field in ["smart_lists", "recent", "sources", "pending_writes"] {
+    for field in ["recent", "sources", "pending_writes"] {
         assert!(!v[field].is_null(), "{field} missing: {v}");
     }
+    // No lists on the board since #2423: a saved list is found behind `#l`.
+    assert!(v.get("smart_lists").is_none(), "{v}");
     assert!(
         v["pending_writes"].is_u64(),
         "the footer renders this as a number: {v}"
@@ -285,14 +282,7 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
         assert!(jira.get(field).is_some(), "{field} missing: {jira}");
     }
 
-    // The board's own two halves are populated and shaped as the mirror
-    // declares them: a smart list with a count and a badge, and recent rows
-    // carrying the provenance stamp §4 renders "synced 4 min ago" from.
-    assert!(!home.smart_lists.is_empty(), "M1 ships built-in lists");
-    let list = serde_json::to_value(&home.smart_lists[0]).unwrap();
-    for field in ["id", "label", "count", "changed", "description"] {
-        assert!(list.get(field).is_some(), "{field} missing: {list}");
-    }
+    // The board's recent rows carry the provenance stamp.
     assert!(!home.recent.is_empty(), "this test seeded two items");
     assert!(v["recent"][0]["synced_at"].is_string(), "{v}");
 }
@@ -351,51 +341,6 @@ async fn launcher_home_counts_the_pending_writes() {
         before,
         "a held write waits for the user, not for the network"
     );
-}
-
-/// `smart_lists` answers the same summaries the board embeds.
-///
-/// Two commands, one source of truth: the launcher refreshes the rail without
-/// re-reading the whole board, and a divergence between them would show as a
-/// count that changes when nothing did.
-#[tokio::test]
-async fn the_rail_and_the_board_report_the_same_lists() {
-    let pool = pool().await;
-    seed(&pool, "rail").await;
-
-    let standalone = smart_lists_inner(&pool, &Registry::for_process())
-        .await
-        .unwrap();
-    let embedded = launcher_home_inner(&pool, &Registry::for_process())
-        .await
-        .unwrap()
-        .smart_lists;
-
-    let ids = |lists: &[knobas_search::SmartListSummary]| {
-        lists.iter().map(|l| l.id.clone()).collect::<Vec<_>>()
-    };
-    assert_eq!(ids(&standalone), ids(&embedded));
-    assert!(!standalone.is_empty());
-}
-
-/// Opening a list answers with a `SearchResponse`, so the launcher renders it
-/// with the code it renders results with.
-#[tokio::test]
-async fn a_smart_list_answers_in_the_search_shape() {
-    let pool = pool().await;
-    seed(&pool, "list").await;
-
-    let response = open_list(&pool, "just-synced", 20).await.unwrap();
-    let v = serde_json::to_value(&response).unwrap();
-
-    assert_eq!(v["interpreted"]["prefix"], "list", "{v}");
-    assert!(v["groups"].is_array(), "{v}");
-    assert!(v["took_ms"].is_number(), "{v}");
-    // A list row has no excerpt and no rank -- it was not matched against
-    // anything -- and the *shape* is still a search's, which is the point.
-    let hit = &v["groups"][0]["hits"][0];
-    assert!(hit["entity_id"].is_string(), "{v}");
-    assert_eq!(hit["snippet"], serde_json::json!([]), "{v}");
 }
 
 /// **The Tree's search box, at the wire** (#430, story 30).
@@ -516,6 +461,7 @@ async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
         .value;
 
     let browse = SearchQuery {
+        titles: false,
         raw: String::new(),
         limit: 50,
         filters: SearchFilters {
@@ -888,440 +834,6 @@ async fn moving_an_asset_moves_what_under_returns() {
 }
 
 // ---------------------------------------------------------------------------
-// The three estate smart lists (#504)
-// ---------------------------------------------------------------------------
-//
-// **A scratch database each, unlike the rest of this file.** Every one of these
-// lists is a whole-estate aggregate -- "how many assets has nobody attached a
-// monitor to" is a question about the *table*, not about a token -- so there is
-// no per-test token that can isolate a count, and the delta trick `knobas-
-// search`'s own `tests/it/lists.rs` uses cannot be applied to a fixture that is a
-// whole file. `knobas_db::test_util::scratch_database` is what the estate tests
-// in `adapter_to_mirror.rs` already reach for, for the same reason.
-//
-// **The estate is the real file**, `testenv/estate.json`, imported
-// through `knobas_app::assets::apply_import`: the same door `--demo` and
-// `estate_exit.rs` use. Not seventeen assets typed out here, because a
-// fixture written beside the assertion agrees with it by construction, and
-// because two of these rules run over the *tree* -- an alert routed through an
-// ancestor needs an ancestor somebody drew on purpose.
-
-/// The estate the three lists are read over -- the real file.
-const ESTATE_FILE: &str = include_str!("../../../../testenv/estate.json");
-
-/// How many assets that file holds. A literal, and deliberately not counted out
-/// of the file: a count derived from the fixture agrees with the fixture
-/// however wrong the import is.
-const ESTATE_ASSETS: i64 = 19;
-
-/// One mirrored monitor, and what its payload says about a certificate.
-///
-/// By hand, the way `assets_ipc.rs` seeds one: what is under test here is the
-/// **read**, and `crates/knobas-source-kuma` is where "the adapter writes this
-/// key" is the claim. `cert_days` is `None` for a monitor watching no
-/// certificate -- which is most of them, and which is the miss the predicate's
-/// `jsonb_typeof` guard has to survive.
-async fn mirror_monitor(pool: &sqlx::PgPool, name: &str, cert_days: Option<f64>) -> String {
-    let id = format!("kuma:{}", name.replace(|c: char| !c.is_alphanumeric(), "-"));
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'monitor',$2)")
-        .bind(&id)
-        .bind(name)
-        .execute(pool)
-        .await
-        .expect("the monitor's entity row");
-    sqlx::query(
-        "insert into sync.item
-           (entity_id, source_id, kind, title, body_text, item_updated_at, synced_at, payload)
-         values ($1,'kuma','monitor',$2,'', now(), now(),
-                 jsonb_build_object('state','up','cert_days_remaining', $3::float8))",
-    )
-    .bind(&id)
-    .bind(name)
-    .bind(cert_days)
-    .execute(pool)
-    .await
-    .expect("the mirrored monitor");
-    id
-}
-
-/// An unarchived context holding one entity by a confirmed link.
-async fn context_holding(pool: &sqlx::PgPool, key: &str, entity: &str) -> String {
-    let id = format!("ctx:{key}");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ctx',$2)")
-        .bind(&id)
-        .bind(key)
-        .execute(pool)
-        .await
-        .expect("the context's entity row");
-    sqlx::query("insert into knobas.context (id, kind, title) values ($1,'adhoc',$2)")
-        .bind(&id)
-        .bind(key)
-        .execute(pool)
-        .await
-        .expect("the context");
-    sqlx::query(
-        "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at)
-         values ($1,$2,'related','manual','test', now())",
-    )
-    .bind(&id)
-    .bind(entity)
-    .execute(pool)
-    .await
-    .expect("the confirmed link");
-    id
-}
-
-/// One open alert on a monitor.
-async fn open_alert(pool: &sqlx::PgPool, monitor: &str) {
-    sqlx::query("insert into knobas.monitor_alert (entity_id, state) values ($1,'down')")
-        .bind(monitor)
-        .execute(pool)
-        .await
-        .expect("the open alert");
-}
-
-/// The estate, three monitors on it, and the links the import draws.
-///
-/// The three monitors are the three cases the certificate rule has to tell
-/// apart, and they are attached to three different assets so no two lists
-/// can be satisfied by the same one:
-///
-/// * `gitea` -- five days left, on `asset:knobas-gitea`, under
-///   `asset:wsl-docker`.
-/// * `notebook` -- **31** days left, on `asset:notebook`, in another branch
-///   of the tree from the engine rather than under it. The certificate negative the criterion asks for by
-///   name.
-/// * `jira` -- no certificate at all, on `asset:knobas-jira`. The miss
-///   direction: a payload with the key absent contributes nothing rather than
-///   raising.
-///
-/// The names are the estate file's own, so the links are drawn by the import's
-/// resolution rule rather than inserted here -- which is what makes *Not
-/// monitored*'s negative a real attachment and not a row this test wrote.
-async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
-    let pool = knobas_db::test_util::scratch_database(label)
-        .await
-        .pool(2)
-        .await
-        .expect("a pool on the scratch database");
-
-    mirror_monitor(&pool, "gitea", Some(5.0)).await;
-    mirror_monitor(&pool, "notebook", Some(31.0)).await;
-    mirror_monitor(&pool, "jira", None).await;
-
-    let outcome = knobas_app::assets::apply_import(&pool, ESTATE_FILE, ESTATE_FILE_PRODUCER)
-        .await
-        .expect("the estate imports")
-        .value;
-    assert_eq!(
-        outcome.assets_created, ESTATE_ASSETS,
-        "the real estate file is what these lists are read over"
-    );
-    assert_eq!(
-        outcome.monitors_linked, 3,
-        "the three seeded names resolved; the file's other two are still \
-         waiting on a monitor nobody has mirrored"
-    );
-    pool
-}
-
-/// The count of one list, off the board the launcher draws.
-async fn list_count(pool: &sqlx::PgPool, id: &str) -> i64 {
-    smart_lists_inner(pool, &Registry::for_process())
-        .await
-        .expect("the board")
-        .into_iter()
-        .find(|list| list.id == id)
-        .unwrap_or_else(|| panic!("no list {id}"))
-        .count
-}
-
-/// Every asset id one list answers with, in the order it answers.
-async fn list_rows(pool: &sqlx::PgPool, id: &str) -> Vec<String> {
-    open_list(pool, id, 200)
-        .await
-        .expect("the list's rows")
-        .groups
-        .into_iter()
-        .flat_map(|group| group.hits)
-        .map(|hit| hit.row.entity_id)
-        .collect()
-}
-
-/// **Not monitored, at the wire** -- and it is the Monitors tab's roster.
-///
-/// The count, the rows and the negative in one test because they are one claim:
-/// the number on the launcher's rail and the rows behind it come from the same
-/// predicate, which is the failure `knobas_search::lists` calls the worst one
-/// available. The comparison against `assets::unmonitored_assets` is the other
-/// half -- two statements in two crates hard-coding the same two words, with no
-/// compiler between them.
-#[tokio::test]
-async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
-    let pool = estate_with_monitors("lists-unmonitored").await;
-
-    let rows = list_rows(&pool, "not-monitored").await;
-    assert_eq!(
-        list_count(&pool, "not-monitored").await,
-        rows.len() as i64,
-        "the rail's number and the rows behind it are one predicate"
-    );
-    assert_eq!(
-        rows.len() as i64,
-        ESTATE_ASSETS - 3,
-        "three of the estate's assets have a monitor attached and the rest do not"
-    );
-
-    // The negative the criterion asks for: an asset something watches is absent.
-    for watched in ["asset:knobas-gitea", "asset:notebook", "asset:knobas-jira"] {
-        assert!(
-            !rows.contains(&watched.to_owned()),
-            "{watched} has a confirmed monitored-by link and must not be on the roster"
-        );
-    }
-    assert!(
-        rows.contains(&"asset:wsl".to_owned()),
-        "an asset nothing watches is: {rows:?}"
-    );
-
-    // And the same question asked of the Monitors tab, which is the read this
-    // list was written from.
-    let tab: Vec<String> = knobas_app::assets::unmonitored_assets(&pool)
-        .await
-        .expect("the tab's roster")
-        .into_iter()
-        // The tab lists routes too (#976); the launcher's list is assets.
-        .filter(|row| row.type_id != "route")
-        .map(|asset| asset.id)
-        .collect();
-    assert_eq!(
-        rows, tab,
-        "the launcher and the Monitors tab answer the same roster, in the same \
-         order -- path, then name, then id"
-    );
-}
-
-/// **Open alerts on my jobs, at the wire** -- routed by membership, and
-/// through an ancestor.
-///
-/// The context holds `asset:wsl-docker`, which is the *parent* of the
-/// asset the alerting monitor watches. So the row that comes back is there
-/// through ADR-0008's `held` recursion and not through a direct link, which is
-/// the half of *"directly or through an ancestor"* a flat membership rule would
-/// get wrong while passing every other assertion here.
-#[tokio::test]
-async fn an_open_alert_reaches_the_list_through_the_contexts_ancestors() {
-    let pool = estate_with_monitors("lists-alerts").await;
-
-    // The row's name on the rail is the reader's word for the rule (#1503).
-    let board = smart_lists_inner(&pool, &Registry::for_process())
-        .await
-        .expect("the board");
-    let list = board.iter().find(|l| l.id == "alerts-in-context").unwrap();
-    assert_eq!(list.label, "Open alerts on my jobs");
-
-    open_alert(&pool, "kuma:gitea").await;
-    // ...and one on an asset no context holds. The negative the criterion asks
-    // for by name: `asset:notebook` is in the estate, has a monitor, sits
-    // *outside* the engine the context will hold, and is nobody's business.
-    open_alert(&pool, "kuma:notebook").await;
-
-    assert_eq!(
-        list_rows(&pool, "alerts-in-context").await,
-        Vec::<String>::new(),
-        "with no context at all, an open alert is nobody's business -- spec \
-         #427 story 60"
-    );
-
-    context_holding(&pool, "shipping", "asset:wsl-docker").await;
-
-    let rows = list_rows(&pool, "alerts-in-context").await;
-    assert_eq!(
-        rows,
-        ["asset:knobas-gitea"],
-        "the container under the engine the context holds, and nothing else"
-    );
-    assert_eq!(
-        list_count(&pool, "alerts-in-context").await,
-        1,
-        "the rail's number and the rows behind it are one predicate"
-    );
-
-    // An archived context is one the reader put away, and stops routing.
-    sqlx::query("update knobas.context set archived_at = now() where id = 'ctx:shipping'")
-        .execute(&pool)
-        .await
-        .expect("the archive");
-    assert_eq!(
-        list_rows(&pool, "alerts-in-context").await,
-        Vec::<String>::new(),
-        "an archived context routes nothing"
-    );
-}
-
-/// An **acked** alert is still open, and this is not the inbox.
-///
-/// The one place this list and the inbox's sixth rule deliberately differ. Ack
-/// clears the inbox item and leaves the alert open (#446, story 62), and every
-/// other surface -- the Assets view's strip, the top strip's badge -- keeps
-/// showing it. A predicate that copied the inbox's `acked_at is null` would
-/// make this list empty itself the moment somebody said "seen".
-#[tokio::test]
-async fn an_acked_alert_is_still_open_and_still_on_the_list() {
-    let pool = estate_with_monitors("lists-alerts-acked").await;
-    open_alert(&pool, "kuma:gitea").await;
-    context_holding(&pool, "shipping", "asset:wsl-docker").await;
-
-    sqlx::query("update knobas.monitor_alert set acked_at = now() where entity_id = 'kuma:gitea'")
-        .execute(&pool)
-        .await
-        .expect("the ack");
-
-    assert_eq!(
-        list_rows(&pool, "alerts-in-context").await,
-        ["asset:knobas-gitea"],
-        "an ack is seen, not fixed"
-    );
-
-    // Recovery is what takes it off, and it is the same clause the reconciler
-    // writes.
-    sqlx::query("update knobas.monitor_alert set closed_at = now() where entity_id = 'kuma:gitea'")
-        .execute(&pool)
-        .await
-        .expect("the recovery");
-    assert_eq!(
-        list_rows(&pool, "alerts-in-context").await,
-        Vec::<String>::new()
-    );
-}
-
-/// **Certificates expiring, at the wire** -- with the 31-day negative.
-///
-/// Three monitors, three answers: five days is on the list, 31 days is not, and
-/// a payload with no `cert_days_remaining` at all is not -- the third being the
-/// miss direction ADR-0007 asks a payload read to fail in. The 31-day row is
-/// the negative the criterion names, and the asset it watches is *in the
-/// estate* and *does have a monitor*, so its absence is the window and nothing
-/// else.
-#[tokio::test]
-async fn only_a_certificate_inside_the_window_is_expiring() {
-    let pool = estate_with_monitors("lists-certs").await;
-
-    let rows = list_rows(&pool, "certs-expiring").await;
-    assert_eq!(
-        rows,
-        ["asset:knobas-gitea"],
-        "five days left is expiring; 31 days is not, and no certificate at all \
-         is not"
-    );
-    assert_eq!(
-        list_count(&pool, "certs-expiring").await,
-        1,
-        "the rail's number and the rows behind it are one predicate"
-    );
-
-    // The boundary itself, walked on the one monitor whose reading this test
-    // moves rather than asserted from a second fixture: 31 is out (above), 30
-    // is out and 29 is in, which is what *under 30 days* means.
-    for (days, on_the_list) in [(30.0_f64, false), (29.0_f64, true)] {
-        sqlx::query(
-            "update sync.item
-                set payload = jsonb_set(payload, '{cert_days_remaining}', to_jsonb($1::float8))
-              where entity_id = 'kuma:notebook'",
-        )
-        .bind(days)
-        .execute(&pool)
-        .await
-        .expect("the new reading");
-        assert_eq!(
-            list_rows(&pool, "certs-expiring")
-                .await
-                .contains(&"asset:notebook".to_owned()),
-            on_the_list,
-            "a certificate with {days} days left"
-        );
-    }
-}
-
-/// A payload that stopped carrying a number empties the list rather than
-/// failing the board.
-///
-/// The `jsonb_typeof` guard, at the wire. Without it the `::numeric` cast
-/// raises on the first drifted row and `launcher_home` -- the whole board, not
-/// this one list -- comes back as an error. The direction matters: a launcher
-/// that will not open is worse than a list that says nothing.
-#[tokio::test]
-async fn a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure() {
-    let pool = estate_with_monitors("lists-certs-drift").await;
-
-    sqlx::query(
-        "update sync.item
-            set payload = jsonb_set(payload, '{cert_days_remaining}', '\"nine\"'::jsonb)
-          where entity_id = 'kuma:gitea'",
-    )
-    .execute(&pool)
-    .await
-    .expect("the drifted payload");
-
-    assert_eq!(
-        list_rows(&pool, "certs-expiring").await,
-        Vec::<String>::new()
-    );
-    // And the board still loads, which is the half that would have been an
-    // outage.
-    assert!(
-        launcher_home_inner(&pool, &Registry::for_process())
-            .await
-            .expect("the board still loads")
-            .smart_lists
-            .iter()
-            .any(|list| list.id == "certs-expiring")
-    );
-}
-
-/// The three estate lists badge and clear like the four mirror lists.
-///
-/// One test over all three, because what is under test is the mechanism they
-/// share: `SUMMARY_SQL`'s per-list stamp against the one `knobas.setting` row,
-/// and opening a list (`list:<id>`) writing that row. The stamps are
-/// **three different expressions** -- an asset's own `updated_at`, an alert's
-/// `opened_at`, a monitor's `synced_at` -- so a list whose stamp did not exist
-/// would never badge and one whose stamp was somebody else's would never clear.
-#[tokio::test]
-async fn every_estate_list_badges_until_it_is_opened() {
-    let pool = estate_with_monitors("lists-estate-badge").await;
-    open_alert(&pool, "kuma:gitea").await;
-    context_holding(&pool, "shipping", "asset:wsl-docker").await;
-
-    let badged = |pool: sqlx::PgPool| async move {
-        smart_lists_inner(&pool, &Registry::for_process())
-            .await
-            .expect("the board")
-            .into_iter()
-            .filter(|list| list.changed)
-            .map(|list| list.id)
-            .collect::<Vec<_>>()
-    };
-
-    let before = badged(pool.clone()).await;
-    for id in ["not-monitored", "alerts-in-context", "certs-expiring"] {
-        assert!(
-            before.contains(&id.to_owned()),
-            "{id} holds something and has never been opened: {before:?}"
-        );
-        open_list(&pool, id, 20).await.expect("opening the list");
-    }
-
-    let after = badged(pool).await;
-    for id in ["not-monitored", "alerts-in-context", "certs-expiring"] {
-        assert!(
-            !after.contains(&id.to_owned()),
-            "{id} was just opened and still claims to be new: {after:?}"
-        );
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Saved smart lists (#506, spec #491 stories 56-58 and 60)
 // ---------------------------------------------------------------------------
 
@@ -1387,7 +899,23 @@ async fn mirror_row(
     .unwrap();
 }
 
-/// The whole rail, as ids.
+/// Apply a saved list the way the launcher does (#2423): its own text in the
+/// box, followed by the space the box leaves after it, searched.
+async fn apply(
+    pool: &sqlx::PgPool,
+    list: &knobas_search::SmartListSummary,
+    limit: u32,
+) -> Result<knobas_search::SearchResponse, knobas_app::IpcError> {
+    let applied = SearchQuery {
+        titles: false,
+        raw: format!("{} ", list.description),
+        limit,
+        filters: SearchFilters::default(),
+    };
+    search_inner(pool, &Registry::for_process(), applied).await
+}
+
+/// Every saved list.
 async fn rail(pool: &sqlx::PgPool) -> Vec<knobas_search::SmartListSummary> {
     smart_lists_inner(pool, &Registry::for_process())
         .await
@@ -1406,9 +934,9 @@ async fn rail_row(pool: &sqlx::PgPool, id: &str) -> knobas_search::SmartListSumm
 /// **The whole of story 56, at the wire**: a saved query keeps its text, its
 /// chips and its prefix, and the number beside it counts what it matches.
 ///
-/// The corpus is built so that every clause of `#<token> @mara` has something
+/// The corpus is built so that every clause of `#t <token> @mara` has something
 /// to exclude: a ticket by somebody else (the author chip), a PR by Mara (the
-/// `#` prefix's kind), and a ticket by Mara that does not carry the token (the
+/// `#t` filter's kind), and a ticket by Mara that does not carry the token (the
 /// text). Without all three an answer of two rows is not evidence that
 /// anything was narrowed -- it is evidence that the corpus is small.
 #[tokio::test]
@@ -1454,7 +982,7 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     )
     .await;
 
-    let raw = format!("#{t} @mara");
+    let raw = format!("#t {t} @mara");
     let made = create_smart_list_inner(&pool, &Registry::for_process(), "Mara's open ones", &raw)
         .await
         .expect("the query is one the grammar runs");
@@ -1463,7 +991,6 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     let wire = serde_json::to_value(&made).unwrap();
     assert_eq!(wire["id"], "mara-s-open-ones", "{wire}");
     assert_eq!(wire["label"], "Mara's open ones", "{wire}");
-    assert_eq!(wire["saved"], true, "{wire}");
     assert_eq!(wire["needs_attention"], false, "{wire}");
     // A saved list's blurb is the query it stands for.
     assert_eq!(wire["description"], raw, "{wire}");
@@ -1472,29 +999,24 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
         "the two tickets Mara wrote carrying {t}: {wire}"
     );
 
-    // And on the rail itself: after the built-ins, never among them.
+    // And in `smart_lists`, alone: there are no built-ins beside it (#2423).
     let listed = rail(&pool).await;
-    let saved: Vec<&knobas_search::SmartListSummary> =
-        listed.iter().filter(|list| list.saved).collect();
-    assert_eq!(saved.len(), 1, "one saved list");
-    assert_eq!(saved[0].id, made.id);
     assert_eq!(
-        listed.iter().position(|list| list.saved),
-        Some(listed.len() - 1),
-        "the built-ins come first and the saved ones after"
-    );
-    assert!(
-        listed.iter().filter(|list| !list.saved).count() >= 4,
-        "the built-ins are still on the rail beside it"
+        listed
+            .iter()
+            .map(|list| list.id.as_str())
+            .collect::<Vec<_>>(),
+        [made.id.as_str()]
     );
 
-    // Opening it: the rows the count promised, and the *saved query's* own
+    // Applying it: the rows the count promised, and the saved query's own
     // interpretation -- which is what draws the chip row above the results.
-    let opened = open_list(&pool, &made.id, 20)
+    let opened = apply(&pool, &made, 20)
         .await
-        .expect("the saved list opens");
+        .expect("the saved list applies");
     let v = serde_json::to_value(&opened).unwrap();
-    assert_eq!(v["interpreted"]["prefix"], "ticket", "{v}");
+    // `#t` is a kind filter and claims no prefix (#2420); `@mara` claims one.
+    assert_eq!(v["interpreted"]["prefix"], "person", "{v}");
     assert_eq!(v["interpreted"]["text"], t, "{v}");
     assert_eq!(
         v["interpreted"]["filters"]["authors"],
@@ -1531,11 +1053,9 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
 
 /// **The count on the rail and the rows behind it are one predicate.**
 ///
-/// The failure `knobas_search::lists` calls the worst one available -- a
-/// number on screen that no test comparing the list against itself can see --
-/// and for a saved list the two come from *two generated statements*
-/// (`sql::saved_summary_sql` and `sql::search_sql`), which is one more chance
-/// to disagree than a built-in has. Several query shapes, because the shapes
+/// The worst failure available -- a number nobody can check against the rows
+/// -- and for a saved list the two come from *two generated statements*
+/// (`sql::saved_summary_sql` and `sql::search_sql`). Several query shapes, because the shapes
 /// are where a builder diverges: text alone, a chip alone, a prefix, a window,
 /// and the combination.
 #[tokio::test]
@@ -1597,20 +1117,28 @@ async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
     for (name, raw) in [
         ("text alone", t.clone()),
         ("an author chip", format!("{t} @mara")),
-        ("a prefix", format!("#{t}")),
+        ("a kind filter", format!("#t {t}")),
         ("a window", format!("{t} updated:7d")),
-        ("all of them", format!("#{t} @mara updated:7d")),
+        ("all of them", format!("#t {t} @mara updated:7d")),
         ("a query that matches nothing", format!("{t} @nobody")),
     ] {
         let made = create_smart_list_inner(&pool, &Registry::for_process(), name, &raw)
             .await
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
-        let opened = open_list(&pool, &made.id, 200)
+        let opened = apply(&pool, &made, 200)
             .await
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+        // The items it holds: applied, the box also finds the saved lists
+        // whose text holds the words (#2423), which a list does not count.
+        let lists = opened
+            .groups
+            .iter()
+            .filter(|group| group.kind == "list")
+            .map(|group| group.total)
+            .sum::<u32>();
         assert_eq!(
             u64::try_from(made.count).expect("a count is not negative"),
-            u64::from(opened.total),
+            u64::from(opened.total - lists),
             "{name} ({raw}): the rail says {} and the list answers with {}",
             made.count,
             opened.total
@@ -1623,59 +1151,6 @@ async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
             assert_eq!(made.count, 0, "{name} ({raw})");
         }
     }
-}
-
-/// The change badge, in both directions, on a list nobody shipped.
-///
-/// Story 57: *"a saved list shows a live count and a change badge like the
-/// built-ins"*. The badge is `max(synced_at)` in the list against the stamp in
-/// `knobas.setting`, and both are the database's clock -- the new row is
-/// inserted at `now() + interval '1 second'` so that "after it was opened" is
-/// a fact rather than a race on two statements that could read the same
-/// microsecond.
-#[tokio::test]
-async fn a_saved_lists_badge_lights_when_the_corpus_moves_and_clears_when_it_is_opened() {
-    let pool = saved_pool("saved-badge").await;
-    let t = token("badge");
-    mirror_row(
-        &pool,
-        "jira:one",
-        "ticket",
-        &format!("{t} first"),
-        "mara",
-        "-1 hour",
-    )
-    .await;
-
-    let made = create_smart_list_inner(&pool, &Registry::for_process(), "Payments", &t)
-        .await
-        .expect("saved");
-    assert!(
-        rail_row(&pool, &made.id).await.changed,
-        "it holds something and has never been opened"
-    );
-
-    open_list(&pool, &made.id, 20)
-        .await
-        .expect("opening it clears the badge");
-    assert!(
-        !rail_row(&pool, &made.id).await.changed,
-        "it was just opened and still claims to be new"
-    );
-    assert_eq!(rail_row(&pool, &made.id).await.count, 1);
-
-    mirror_row(
-        &pool,
-        "jira:two",
-        "ticket",
-        &format!("{t} second"),
-        "mara",
-        "1 second",
-    )
-    .await;
-    let after = rail_row(&pool, &made.id).await;
-    assert!(after.changed, "a sync brought a new row into the list");
-    assert_eq!(after.count, 2, "and the count moved with it");
 }
 
 /// **Story 60**: a saved query today's grammar refuses is one line on the rail
@@ -1704,18 +1179,20 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
         .await
         .expect("saved");
 
-    // Four rows an older grammar could have written and this one cannot run:
-    // a prefix that is not a search, a list of a list, a paste, and a query
-    // whose every token the parser no longer keeps.
+    // Five rows an older grammar could have written and this one cannot run:
+    // a prefix that is not a search, a list of a list, a source named the old
+    // way, a paste, and a query whose every token the parser no longer keeps.
     for (id, label, query) in [
         ("legacy-palette", "Palette", "> palette".to_owned()),
-        ("legacy-alias", "Alias", "list:mine".to_owned()),
+        ("legacy-alias", "Alias", "list:payouts".to_owned()),
+        ("legacy-slash", "Slash", format!("/jira {t}")),
         ("legacy-paste", "Paste", "x".repeat(600)),
         // A source the reader has since deleted: the alias resolves to
         // nothing, so the saved query has no text and no filter left in it --
-        // and `0025`'s own check constraint is why the row is `/gone` and not
-        // a blank string, which the table refuses outright.
-        ("legacy-gone", "Gone", "/gone".to_owned()),
+        // and `0025`'s own check constraint is why the row is `source:gone`
+        // and not a blank string, which the table refuses outright. It was
+        // `/gone` until #2420 made `/` a word.
+        ("legacy-gone", "Gone", "source:gone".to_owned()),
     ] {
         sqlx::query("insert into knobas.smart_list (id, label, query) values ($1,$2,$3)")
             .bind(id)
@@ -1730,6 +1207,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
     let broken = [
         "legacy-palette",
         "legacy-alias",
+        "legacy-slash",
         "legacy-paste",
         "legacy-gone",
     ];
@@ -1739,9 +1217,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
             .find(|list| list.id == id)
             .unwrap_or_else(|| panic!("{id} is not on the rail at all"));
         assert!(row.needs_attention, "{id}: {row:?}");
-        assert!(row.saved, "{id}: {row:?}");
         assert_eq!(row.count, 0, "{id} was never asked: {row:?}");
-        assert!(!row.changed, "{id} was never asked: {row:?}");
         assert!(
             row.description
                 .starts_with(knobas_search::saved::NEEDS_ATTENTION),
@@ -1750,7 +1226,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
         );
     }
     // Each says *which* rule refused it, or the reader is told something is
-    // wrong and never what -- asserted as *four different sentences* rather
+    // wrong and never what -- asserted as *five different sentences* rather
     // than as a length, because "long enough" is a stand-in for the property
     // and this is the property.
     let mut reasons: Vec<&str> = listed
@@ -1764,7 +1240,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
     assert_eq!(
         reasons.len(),
         broken.len(),
-        "two of the four rows are refused with the same sentence: {reasons:?}"
+        "two of the five rows are refused with the same sentence: {reasons:?}"
     );
 
     // The rest of the rail is untouched -- which is the half of story 60 that
@@ -1775,42 +1251,36 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
         .expect("the healthy saved list");
     assert!(!still.needs_attention);
     assert_eq!(still.count, 1);
-    assert!(
-        listed.iter().filter(|list| !list.saved).count() >= 4,
-        "the built-ins are still there"
-    );
 
-    // And the whole board draws, which is what a launcher opening actually
-    // asks for.
-    let home = launcher_home_inner(&pool, &Registry::for_process())
+    // And `#l` draws all six, each broken one carrying its own sentence as
+    // its state: the launcher refuses to apply it with that reason (#2423).
+    let found = search_inner(&pool, &Registry::for_process(), query("#l"))
         .await
-        .expect("the board");
-    assert_eq!(home.smart_lists.len(), listed.len());
-    assert!(!home.recent.is_empty());
-
-    // Typing `list:<id>` for one answers with the reason, not with an empty
-    // page: a refusal a reader can act on beats a list that looks empty.
-    let refused = open_list(&pool, "legacy-palette", 20)
-        .await
-        .expect_err("a list that cannot run cannot be opened");
-    assert_eq!(refused.code, IpcErrorCode::Invalid);
-    assert!(
-        refused
-            .message
-            .contains(knobas_search::saved::NEEDS_ATTENTION),
-        "{refused:?}"
-    );
+        .expect("#l answers");
+    let group = found
+        .groups
+        .iter()
+        .find(|g| g.kind == "list")
+        .expect("lists");
+    assert_eq!(group.hits.len(), broken.len() + 1, "{found:?}");
+    for hit in &group.hits {
+        let summary = listed
+            .iter()
+            .find(|list| list.id == hit.row.entity_id)
+            .unwrap();
+        match &hit.row.state {
+            Some(state) => assert_eq!(state.text, summary.description, "{hit:?}"),
+            None => assert_eq!(hit.row.entity_id, healthy.id, "{hit:?}"),
+        }
+    }
 }
 
-/// Rename keeps the id and the query; delete takes the row off the rail; and
-/// neither reaches a built-in.
+/// Rename keeps the id and the query; delete takes the row out of `#l`.
 ///
-/// The id not moving is the load-bearing part: it is what `list:<id>` names
-/// and what the change badge's seen-stamp is keyed on, so a rename that
-/// re-derived it would silently un-read the list and break a `list:` the
-/// reader had learned to type.
+/// The id not moving is the load-bearing part: it is the `list` hit's entity
+/// id, which a favourite or a key bound to the list holds (spec #2419).
 #[tokio::test]
-async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither() {
+async fn a_saved_list_can_be_renamed_and_deleted() {
     let pool = saved_pool("saved-crud").await;
     let t = token("crud");
     mirror_row(
@@ -1827,10 +1297,6 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
         .expect("saved");
     assert_eq!(made.id, "payments-retries");
 
-    // Opened once, so the seen-stamp exists and the rename can be shown not to
-    // have lost it.
-    open_list(&pool, &made.id, 20).await.expect("opens");
-
     rename_smart_list_inner(&pool, &Registry::for_process(), &made.id, "  SEPA  ")
         .await
         .expect("renamed");
@@ -1838,7 +1304,6 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
     assert_eq!(renamed.label, "SEPA", "the name is trimmed");
     assert_eq!(renamed.id, made.id, "the id does not move");
     assert_eq!(renamed.description, t, "the query is untouched");
-    assert!(!renamed.changed, "and the badge is still cleared");
     assert_eq!(renamed.count, 1);
 
     // A blank name is refused rather than stored.
@@ -1851,44 +1316,14 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
     );
     assert_eq!(rail_row(&pool, &made.id).await.label, "SEPA");
 
-    // A built-in is code and is not a saved list, so neither write reaches it.
-    for id in ["mine", "not-monitored"] {
-        assert_eq!(
-            rename_smart_list_inner(&pool, &Registry::for_process(), id, "Mine, renamed")
-                .await
-                .expect_err("a built-in cannot be renamed")
-                .code,
-            IpcErrorCode::NotFound,
-            "{id}"
-        );
-        assert_eq!(
-            delete_smart_list_inner(&pool, &Registry::for_process(), id)
-                .await
-                .expect_err("a built-in cannot be deleted")
-                .code,
-            IpcErrorCode::NotFound,
-            "{id}"
-        );
-        assert!(
-            rail(&pool).await.iter().any(|list| list.id == id),
-            "{id} is still on the rail"
-        );
-    }
-
     delete_smart_list_inner(&pool, &Registry::for_process(), &made.id)
         .await
         .expect("deleted");
-    assert!(
-        !rail(&pool).await.iter().any(|list| list.saved),
-        "nothing saved is left"
-    );
-    // Typed into the box it is now an unknown token, not an error (#1655).
-    let gone = open_list(&pool, &made.id, 20).await.expect("it is gone");
+    assert!(rail(&pool).await.is_empty(), "nothing saved is left");
+    let gone = search_inner(&pool, &Registry::for_process(), query("#l"))
+        .await
+        .expect("#l answers");
     assert!(gone.groups.is_empty(), "{gone:?}");
-    assert_eq!(
-        gone.interpreted.unknown_tokens,
-        [format!("list:{}", made.id)]
-    );
     assert_eq!(
         delete_smart_list_inner(&pool, &Registry::for_process(), &made.id)
             .await
@@ -1898,16 +1333,9 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
     );
 }
 
-/// Creating refuses what it cannot run, and never shadows a built-in.
-///
-/// `list:<id>` has one meaning, so the two id spaces are one: a saved list
-/// called *My items* slugs to `mine`, which is the built-in that answers
-/// `list:mine`, and the generator has to walk past it. Asserted by **opening**
-/// the built-in id afterwards and getting the built-in, not by reading the
-/// generated string alone -- the string is a representation of the collision
-/// and the answer is the collision itself.
+/// Creating refuses what it cannot run, and two lists of one name get two ids.
 #[tokio::test]
-async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
+async fn creating_refuses_a_query_it_cannot_run() {
     let pool = saved_pool("saved-refuse").await;
     let t = token("refuse");
     mirror_row(
@@ -1923,7 +1351,8 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
     let mut refusals: Vec<String> = Vec::new();
     for (why, label, query) in [
         ("a prefix that is not a search", "Palette", "> palette"),
-        ("a list of a list", "Alias", "list:mine"),
+        ("a list of a list", "Alias", "list:payouts"),
+        ("a source named the old way", "Slash", "/jira sepa"),
         ("the help card", "Help", "?"),
         ("nothing to search for", "Nothing", "   "),
         (
@@ -1964,33 +1393,19 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
     );
 
     // Nothing above left a row behind.
-    assert!(!rail(&pool).await.iter().any(|list| list.saved));
+    assert!(rail(&pool).await.is_empty());
 
-    // And the collision: *My items* slugs onto the built-in that answers
-    // `list:mine`.
-    let made = create_smart_list_inner(&pool, &Registry::for_process(), "My items", &t)
+    // No built-in holds `mine` any more (#2423), so it is a saved list's to
+    // take, and a second of the same name walks past it.
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "mine", &t)
         .await
         .expect("saved");
-    assert_ne!(made.id, "mine", "a saved list may not shadow a built-in");
-    assert_eq!(made.id, "my-items");
-    let clash = create_smart_list_inner(&pool, &Registry::for_process(), "mine", &t)
+    assert_eq!(made.id, "mine");
+    let clash = create_smart_list_inner(&pool, &Registry::for_process(), "Mine", &t)
         .await
         .expect("saved");
     assert_eq!(clash.id, "mine-2");
-    // The proof is what `list:mine` opens, not what the generator returned.
-    let built_in = open_list(&pool, "mine", 20)
-        .await
-        .expect("the built-in still answers");
-    assert!(
-        built_in.coverage.is_empty(),
-        "a built-in list reports no coverage; a saved one would: {built_in:?}"
-    );
-    assert_eq!(
-        rail_row(&pool, "mine").await.label,
-        "My items",
-        "and it is still the built-in on the rail"
-    );
-    assert!(!rail_row(&pool, "mine").await.saved);
+    assert_eq!(rail_row(&pool, "mine-2").await.label, "Mine");
 }
 
 /// The wire between the registry and the search (#595): `search_inner` hands
@@ -1998,7 +1413,8 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
 /// the parent the **real** Gitea adapter declares. Without that wiring every
 /// `under:` here would match nothing and be reported as unknown -- the
 /// search crate's own tests, which pass the template by hand, could not see
-/// it go.
+/// it go. A branch, which declares its repo as a commit does: a commit is in
+/// no launcher answer (#2422).
 #[tokio::test]
 async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
     let pool = pool().await;
@@ -2011,16 +1427,16 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
     .execute(&pool)
     .await
     .unwrap();
-    let id = format!("gitea:tidewater/{t}@c90d11");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'commit','jitter')")
+    let id = format!("gitea:tidewater/{t}@refs/heads/jitter");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'branch','jitter')")
         .bind(&id)
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query(
         "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
-         values ($1, 'gitea', 'commit', 'jitter', 'jitter',
-                 jsonb_build_object('sha', 'c90d11', 'repository',
+         values ($1, 'gitea', 'branch', 'jitter', 'jitter',
+                 jsonb_build_object('name', 'jitter', 'repository',
                    jsonb_build_object('full_name', 'tidewater/' || $2, 'name', $2::text)))",
     )
     .bind(&id)
@@ -2047,8 +1463,9 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
 
 /// The query box's suggestions cross the bridge in the shape
 /// `app/src/lib/ipc/generated/search.ts` declares (#601), and through the searcher the
-/// app builds: the compiled-in adapters' declarations, so a Gitea commit's
-/// repo is offered for `under:` with its kind.
+/// app builds: the compiled-in adapters' declarations, so a Gitea branch's
+/// repo is offered for `under:` with its kind. A branch: `kind:` offers no
+/// commit since #2422.
 #[tokio::test]
 async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     let pool = pool().await;
@@ -2061,18 +1478,18 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     .execute(&pool)
     .await
     .unwrap();
-    let id = format!("gitea:o/{t}@abc");
-    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'commit', 'fix')")
+    let id = format!("gitea:o/{t}@refs/heads/fix");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'branch', 'fix')")
         .bind(&id)
         .execute(&pool)
         .await
         .unwrap();
     sqlx::query(
         "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
-         values ($1, 'gitea', 'commit', 'fix', 'fix', $2)",
+         values ($1, 'gitea', 'branch', 'fix', 'fix', $2)",
     )
     .bind(&id)
-    .bind(serde_json::json!({ "sha": "abc", "repository": { "full_name": format!("o/{t}"), "name": t } }))
+    .bind(serde_json::json!({ "name": "fix", "repository": { "full_name": format!("o/{t}"), "name": t } }))
     .execute(&pool)
     .await
     .unwrap();
@@ -2091,8 +1508,8 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|k| k["kind"] == "commit")
-        .unwrap_or_else(|| panic!("a commit has a row: {v}"));
+        .find(|k| k["kind"] == "branch")
+        .unwrap_or_else(|| panic!("a branch has a row: {v}"));
     assert!(kind["label"].is_string(), "{v}");
     assert!(
         v["sources"]
@@ -2135,4 +1552,458 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
             (t.clone(), "repo".to_owned())
         ]
     );
+}
+
+/// *Titles* (spec #2419 story 51, #2430): with the query's `titles` flag on,
+/// the engine answers only rows whose title or key holds every word, so a
+/// ticket is found by its key and by its summary and not by a word only its
+/// description holds. With the flag off it answers as it always has, bodies
+/// included.
+#[tokio::test]
+async fn titles_matches_the_title_and_the_key_and_never_the_body() {
+    let pool = pool().await;
+    let key = format!("{}-210", token("key"));
+    let named = token("named");
+    let written = token("written");
+    let id = format!("jira:{key}");
+    mirror_row(
+        &pool,
+        &id,
+        "ticket",
+        &format!("Payouts {named} retry"),
+        "mara",
+        "-4 minutes",
+    )
+    .await;
+    sqlx::query("update sync.item set body_text = $2 where entity_id = $1")
+        .bind(&id)
+        .bind(format!("The batch {written} gives up after one retry."))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    async fn ids(pool: &sqlx::PgPool, raw: &str, titles: bool) -> Vec<String> {
+        let asked = SearchQuery {
+            titles,
+            ..query(raw)
+        };
+        search_inner(pool, &Registry::for_process(), asked)
+            .await
+            .unwrap()
+            .groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+            .collect()
+    }
+    let ours = vec![id.clone()];
+
+    // The key, the title, and the two together: on screen, found either way.
+    for raw in [key.clone(), named.clone(), format!("{key} {named}")] {
+        assert_eq!(ids(&pool, &raw, true).await, ours, "titles: {raw}");
+        assert_eq!(ids(&pool, &raw, false).await, ours, "everything: {raw}");
+    }
+    // A word only the body holds: Everything finds it, Titles does not, and
+    // neither does a title word beside it.
+    assert_eq!(ids(&pool, &written, false).await, ours);
+    assert!(ids(&pool, &written, true).await.is_empty());
+    assert!(
+        ids(&pool, &format!("{named} {written}"), true)
+            .await
+            .is_empty()
+    );
+    // The last word half-typed is still a prefix under Titles.
+    assert_eq!(ids(&pool, &named[..named.len() - 4], true).await, ours);
+}
+
+/// *Titles* reads the key cell of a row whose key is where it sits (#2451,
+/// spec #2419 stories 19 and 51): a pull request's repository, a page's space,
+/// a pipeline's project and a monitor's type are in the index at the title's
+/// weight, so `#p <repo>` finds the repository's pull requests although no
+/// title names it. Each hit carries that text as its `cell` (#2452), which the
+/// launcher draws in the key column. A word only the body holds is still no
+/// match.
+#[tokio::test]
+async fn titles_finds_a_row_by_its_key_cell_and_the_hit_carries_it() {
+    let pool = pool().await;
+    for (id, name) in [
+        ("gitea", "Gitea"),
+        ("confluence", "Confluence"),
+        ("teamcity", "TeamCity"),
+        ("kuma", "Uptime Kuma"),
+    ] {
+        sqlx::query(
+            "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+             values ($1, $1, $2, 'http://x', 'Pat')
+             on conflict (id) do nothing",
+        )
+        .bind(id)
+        .bind(name)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    // The registry's declarations reach the database on the first search.
+    search_inner(&pool, &Registry::for_process(), query("warm"))
+        .await
+        .unwrap();
+    let repo = token("repo");
+    let space = token("space");
+    let project = token("project");
+    let monitor_type = token("type");
+    let body = token("body");
+    let rows = [
+        (
+            format!("gitea:tidewater/{repo}#7"),
+            "gitea",
+            "pr",
+            serde_json::json!({ "base": { "ref": "main", "repo": {
+                "full_name": format!("tidewater/{repo}"), "name": repo } } }),
+            repo.clone(),
+        ),
+        (
+            format!("confluence:{space}-1"),
+            "confluence",
+            "page",
+            serde_json::json!({ "space": { "key": "PAY", "name": space },
+                                "ancestors": [{ "title": "Handbook" }] }),
+            space.clone(),
+        ),
+        (
+            format!("teamcity:{project}_Deploy"),
+            "teamcity",
+            "build_config",
+            serde_json::json!({ "id": format!("{project}_Deploy"), "name": "Deploy",
+                                "projectName": project,
+                                "projectPath": [{ "id": "R", "name": "Root" },
+                                                { "id": "P", "name": project }] }),
+            project.clone(),
+        ),
+        (
+            format!("kuma:{monitor_type}-1"),
+            "kuma",
+            "monitor",
+            serde_json::json!({ "type": monitor_type, "name": "Payouts API" }),
+            monitor_type.clone(),
+        ),
+    ];
+    for (id, source, kind, payload, _) in &rows {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,'Payouts')")
+            .bind(id)
+            .bind(kind)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, item_updated_at,
+                                    synced_at, payload)
+             values ($1, $2, $3, 'Payouts', $4, now(), now(), $5)",
+        )
+        .bind(id)
+        .bind(source)
+        .bind(kind)
+        .bind(format!("The {body} worker."))
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let answer = |raw: String| {
+        let pool = pool.clone();
+        async move {
+            let asked = SearchQuery {
+                titles: true,
+                ..query(&raw)
+            };
+            search_inner(&pool, &Registry::for_process(), asked)
+                .await
+                .unwrap()
+                .groups
+                .iter()
+                .flat_map(|g| g.hits.iter())
+                .map(|h| (h.row.entity_id.clone(), h.row.cell.clone()))
+                .collect::<Vec<_>>()
+        }
+    };
+    for ((id, _, _, _, cell), letter) in rows.iter().zip(["p", "d", "b", "m"]) {
+        assert_eq!(
+            answer(format!("#{letter} {cell}")).await,
+            [(id.clone(), Some(cell.clone()))],
+            "#{letter} {cell}"
+        );
+    }
+    // The body is still not a title.
+    assert!(answer(body.clone()).await.is_empty());
+}
+
+/// The flag is optional on the wire, as `authors` is (§10.8): a caller
+/// written before it sends none and is answered as Everything.
+#[test]
+fn a_query_without_the_titles_flag_reads_as_everything() {
+    let decoded: SearchQuery = serde_json::from_value(serde_json::json!({
+        "raw": "pay-210",
+        "limit": 20,
+        "filters": { "sources": [], "kinds": [], "updated_within_days": null, "mine": false },
+    }))
+    .unwrap();
+    assert!(!decoded.titles);
+}
+
+/// The launcher's new kinds on the wire (#2422): a saved ticket view, a link
+/// set and a TeamCity configuration come back as groups `view` (VW), `set`
+/// (LS) and `pipeline` (PL), each hit with the path line its key cell reads,
+/// and the configuration's run is not among them.
+#[tokio::test]
+async fn views_sets_and_pipelines_are_kinds_on_the_wire_and_runs_are_not() {
+    let pool = pool().await;
+    let t = token("kinds");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('teamcity', 'teamcity', 'TeamCity', 'http://x', 'Pat')
+         on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into knobas.ticket_view (id, name, view_group, position, query)
+         values ($1, $2, 'Team', 0, '#t status:open')",
+    )
+    .bind(format!("{t}-view"))
+    .bind(format!("Open {t}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("insert into knobas.link_set (id, name) values ($1, $2)")
+        .bind(format!("{t}-set"))
+        .bind(format!("Stack {t}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    // The registry's declarations reach the database on the first search.
+    search_inner(&pool, &Registry::for_process(), query("warm"))
+        .await
+        .unwrap();
+    let config = format!("{t}_Deploy");
+    for (id, kind, title, payload) in [
+        (
+            format!("teamcity:{config}"),
+            "build_config",
+            format!("Deploy {t}"),
+            serde_json::json!({ "id": config, "name": format!("Deploy {t}"),
+                                "projectPath": [{ "id": "P", "name": "Payouts" }] }),
+        ),
+        (
+            format!("teamcity:{t}-1"),
+            "build",
+            format!("Deploy {t} #1"),
+            serde_json::json!({ "buildTypeId": config, "state": "finished", "status": "SUCCESS" }),
+        ),
+    ] {
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
+            .bind(&id)
+            .bind(kind)
+            .bind(&title)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, item_updated_at,
+                                    synced_at, payload)
+             values ($1, 'teamcity', $2, $3, '', now(), now(), $4)",
+        )
+        .bind(&id)
+        .bind(kind)
+        .bind(&title)
+        .bind(payload)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let response = search_inner(&pool, &Registry::for_process(), query(&t))
+        .await
+        .unwrap();
+    let wire = serde_json::to_value(&response).unwrap();
+    // A group as `(kind, monogram, hits)`, a hit as `(entity id, path, tone)`.
+    type Hit = (String, Option<String>, Option<String>);
+    let groups: Vec<(String, String, Vec<Hit>)> = wire["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|g| {
+            (
+                g["kind"].as_str().unwrap().to_owned(),
+                g["monogram"].as_str().unwrap().to_owned(),
+                g["hits"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|h| {
+                        (
+                            h["entity_id"].as_str().unwrap().to_owned(),
+                            h["path"].as_str().map(str::to_owned),
+                            h["state"]["tone"].as_str().map(str::to_owned),
+                        )
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        groups,
+        vec![
+            (
+                "view".to_owned(),
+                "VW".to_owned(),
+                vec![(
+                    format!("{t}-view"),
+                    Some("Team · #t status:open".to_owned()),
+                    None
+                )]
+            ),
+            (
+                "set".to_owned(),
+                "LS".to_owned(),
+                vec![(
+                    format!("{t}-set"),
+                    Some("0 items · 0 patterns · 0 tickets".to_owned()),
+                    None
+                )]
+            ),
+            (
+                "pipeline".to_owned(),
+                "PL".to_owned(),
+                vec![(
+                    format!("teamcity:{config}"),
+                    Some("Payouts".to_owned()),
+                    Some("ok".to_owned())
+                )]
+            ),
+        ]
+    );
+}
+
+/// The hits of one kind in an answer, as `(entity_id, title, path)`.
+fn hits_of(
+    response: &knobas_search::SearchResponse,
+    kind: &str,
+) -> Vec<(String, String, Option<String>)> {
+    response
+        .groups
+        .iter()
+        .filter(|group| group.kind == kind)
+        .flat_map(|group| group.hits.iter())
+        .map(|hit| {
+            (
+                hit.row.entity_id.clone(),
+                hit.row.title.clone(),
+                hit.row.path.clone(),
+            )
+        })
+        .collect()
+}
+
+/// Saved lists are a kind in the index (#2423, spec #2419 story 13): `#l`
+/// answers every one, `#l <word>` the ones whose name or text holds it, and
+/// a list's path line is its own text, which Enter puts back into the box.
+#[tokio::test]
+async fn hash_l_answers_the_saved_lists_with_their_text_as_the_path_line() {
+    let pool = saved_pool("list-kind").await;
+    let t = token("lk");
+    let gitea = format!("#p {t} gitea");
+    let other = format!("#t {t} payouts");
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "Reviews", &gitea)
+        .await
+        .expect("a query the grammar runs");
+    create_smart_list_inner(&pool, &Registry::for_process(), "Payout tickets", &other)
+        .await
+        .expect("a query the grammar runs");
+
+    let every = search_inner(&pool, &Registry::for_process(), query("#l"))
+        .await
+        .expect("#l answers");
+    let mut lists = hits_of(&every, "list");
+    lists.sort();
+    assert_eq!(
+        lists,
+        [
+            (
+                "payout-tickets".to_owned(),
+                "Payout tickets".to_owned(),
+                Some(other.clone())
+            ),
+            (made.id.clone(), "Reviews".to_owned(), Some(gitea.clone())),
+        ],
+        "{every:?}"
+    );
+    assert!(
+        every.groups.iter().all(|group| group.kind == "list"),
+        "#l narrows to lists: {every:?}"
+    );
+    let group = every.groups.iter().find(|g| g.kind == "list").unwrap();
+    assert_eq!(group.monogram, "LI");
+
+    // By the text, and by the name.
+    let by_text = search_inner(&pool, &Registry::for_process(), query("#l gitea"))
+        .await
+        .expect("#l gitea answers");
+    assert_eq!(
+        hits_of(&by_text, "list"),
+        [(made.id.clone(), "Reviews".to_owned(), Some(gitea.clone()))]
+    );
+    let by_name = search_inner(&pool, &Registry::for_process(), query("#l payout"))
+        .await
+        .expect("#l payout answers");
+    assert_eq!(
+        hits_of(&by_name, "list")
+            .into_iter()
+            .map(|hit| hit.0)
+            .collect::<Vec<_>>(),
+        ["payout-tickets"]
+    );
+}
+
+/// A saved list whose text today's grammar refuses says so on its row (#2423):
+/// its state is the reason, in the warning tone, and a healthy list has none.
+#[tokio::test]
+async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
+    let pool = saved_pool("list-attention").await;
+    let t = token("la");
+    create_smart_list_inner(
+        &pool,
+        &Registry::for_process(),
+        "Healthy",
+        &format!("#t {t}"),
+    )
+    .await
+    .expect("a query the grammar runs");
+    // Written as an older knobas could have: `>` is the palette, not a search.
+    sqlx::query("insert into knobas.smart_list (id, label, query) values ('broken', 'Broken', '> settings')")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let every = search_inner(&pool, &Registry::for_process(), query("#l"))
+        .await
+        .expect("#l answers");
+    let group = every
+        .groups
+        .iter()
+        .find(|g| g.kind == "list")
+        .expect("a list group");
+    let state = |id: &str| {
+        group
+            .hits
+            .iter()
+            .find(|hit| hit.row.entity_id == id)
+            .unwrap_or_else(|| panic!("no {id} in {every:?}"))
+            .row
+            .state
+            .clone()
+    };
+    assert_eq!(state("healthy"), None);
+    let broken = state("broken").expect("the broken list says so");
+    assert_eq!(broken.tone, knobas_core::tone::Tone::Warn);
+    assert!(broken.text.starts_with("Needs attention"), "{broken:?}");
 }

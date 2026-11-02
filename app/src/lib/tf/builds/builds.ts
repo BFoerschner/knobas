@@ -8,7 +8,6 @@
  */
 import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import { clockLabel } from "../../time/format";
-import { matchesAll } from "../filter/filter";
 import { originLabel } from "../job/job";
 
 /** How many runs the strip under a pipeline's name shows (R-9.4a). */
@@ -65,11 +64,13 @@ export function runHash(pipelineId: string, runId: string): string {
   return `#/build/${encodeURIComponent(pipelineId)}/${encodeURIComponent(runId)}`;
 }
 
-/** The pipelines the filter's words and the chips keep, in the list's order. */
-export function keptPipelines(list: readonly PipelineRow[], text: string, chips: readonly string[]): PipelineRow[] {
+/**
+ * The pipelines the chips keep, in the list's order. Words are the launcher's
+ * `#b` now (#2425): the list has no search field of its own.
+ */
+export function keptPipelines(list: readonly PipelineRow[], chips: readonly string[]): PipelineRow[] {
   return list.filter(
     (pipeline) =>
-      matchesAll(`${pipeline.name} ${groupsOf(pipeline).join(" ")}`, text) &&
       (!chips.includes("Failing") || isFailing(pipeline)) &&
       (!chips.includes("Running") || isRunning(pipeline)),
   );

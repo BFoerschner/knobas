@@ -18,6 +18,7 @@ use knobas_search::{
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 30,
         filters: SearchFilters::default(),
@@ -285,6 +286,7 @@ async fn mine_is_an_author_query_even_when_nobody_is_configured() {
 
     let response = searcher(&pool)
         .search(SearchQuery {
+            titles: false,
             raw: format!("{t} source:{source}"),
             limit: 30,
             filters: SearchFilters {
@@ -684,7 +686,7 @@ async fn a_disabled_sources_rows_leave_the_corpus_so_it_gets_no_verdict() {
 
 /// The grammar still cannot name a source the user turned off.
 ///
-/// The other half of #200, unchanged by #202: `source:` and `/alias` read the
+/// The other half of #200, unchanged by #202: `source:` / `in:` read the
 /// **enabled** sources, and since #202 `coverage::in_scope` does too -- the
 /// same answer to what are still different questions. A disabled source
 /// resolving again would put it back in the chip row and let a query narrow to

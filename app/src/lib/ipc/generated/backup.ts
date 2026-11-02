@@ -133,6 +133,15 @@ sources: boolean,
  *
  * The query crosses exactly as it was typed: nothing on either side of an
  * archive rewrites a stored query to a newer grammar.
+ *
+ * `knobas.favourite` rides in this part too (#2428, spec #2419 story
+ * 49, "beside the saved lists"): a list favourite references its list,
+ * so the two cannot come apart, and an entity favourite names an id with
+ * no foreign key, resolving once the colleague's address book or sync
+ * holds it. The keys ride here as well (#2429): `knobas.list_key`
+ * references its list, and `knobas.action_key` is the reader's own
+ * chords per kind. The dialog offers the toggle once a saved list, a
+ * favourite or a key exists.
  */
 smart_lists: boolean, 
 /**

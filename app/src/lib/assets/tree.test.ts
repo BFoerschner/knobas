@@ -512,6 +512,7 @@ function answer(groups: { kind: string; hits: { id: string; title: string; path?
         state: null,
         rank: 1 - index / 10,
         snippet: [],
+        excerpts: [],
       })),
     })),
   };

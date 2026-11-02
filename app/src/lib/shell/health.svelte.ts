@@ -55,13 +55,12 @@ const ACTIONABLE: Record<AuthState, boolean> = {
 /**
  * Whether this state is one a person has to resolve.
  *
- * The one spelling of the rule. Several places branch on it — `launcher/format.ts`
- * row provenance, `launcher/Board.svelte`'s source strip, `launcher/Chips.svelte`'s
+ * The one spelling of the rule. Several places branch on it — `launcher/Chips.svelte`'s
  * chip dot and this module's own {@link Health.failing} — and inline
  * copies are chances for them to disagree about what a red dot means.
  *
  * **`undefined` is a state too, and it is answered here** (#72). A caller can
- * hold a source id the health store has no row for — a `/gitea` chip typed
+ * hold a source id the health store has no row for — an `in:gitea` chip typed
  * before the first scheduler run — and "no reading yet" deserves exactly the
  * answer `unknown` gets. Taking `AuthState | undefined` is what keeps that
  * half of the rule from living at the call site: while the signature forbade
@@ -76,8 +75,8 @@ const ACTIONABLE: Record<AuthState, boolean> = {
  * satisfies no branch of the union the compiler checked.
  *
  * The widening costs something, and it is worth naming here rather than
- * discovering later: every *other* caller — `launcher/format.ts`,
- * `launcher/Board.svelte` and {@link Health.failing} — passes a
+ * discovering later: every *other* caller — {@link Health.failing}
+ * among them — passes a
  * `CredentialHealth.state`, which is
  * required, so for them the parameter is now looser than the value. Were that
  * field ever to become optional, those would quietly read `false` instead

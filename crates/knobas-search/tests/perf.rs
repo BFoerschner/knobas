@@ -92,6 +92,11 @@
 //!
 //! ## The rail carries the saved-list cap (#533)
 //!
+//! **Since #2423 (spec #2419) there is no rail on ⌘K**: the built-in lists are
+//! gone, `launcher_board` reads the recent items alone, and `smart_lists`
+//! (saved lists only) is read by Settings and after a save. The readings
+//! below are kept as the ceiling they were; the history is #533's.
+//!
 //! `knobas.smart_list` was **empty in this fixture** when #506 added it: with
 //! nothing saved, `saved::summaries` returns on its first read, so the
 //! `smart_lists` assertion below covered the **built-in half of the rail and
@@ -186,9 +191,9 @@ const CASES: &[(&str, &str)] = &[
     ("phrase", "\"sepa retry\""),
     ("still typing", "pay"),
     ("rare word", "tombstone"),
-    ("filtered", "/ji payout"),
+    ("filtered", "in:ji payout"),
     ("kind + text", "kind:pr backoff"),
-    ("browse, no text", "/tc"),
+    ("browse, no text", "in:tc"),
     ("mine", "@me settlement"),
     ("no match", "zzzznothing"),
 ];
@@ -204,6 +209,7 @@ const PATHOLOGICAL: (&str, &str) = ("matches everything", "ledger");
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 40,
         filters: SearchFilters::default(),
@@ -317,7 +323,7 @@ fn rank(n: usize, p: usize) -> usize {
 /// The search text a case's raw query reduces to, for the match count.
 ///
 /// The grammar markers are the parser's business, and `match_count` takes plain
-/// text -- so a case whose whole query is a filter (`/tc`) has no text and
+/// text -- so a case whose whole query is a filter (`in:tc`) has no text and
 /// matches nothing by this measure, which is reported as `0` rather than
 /// guessed at.
 fn text_of(raw: &str) -> String {
@@ -399,7 +405,7 @@ async fn fill_the_rail(pool: &sqlx::PgPool, count: i64) {
 /// aggregate over nothing.
 async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
     let rail = searcher.smart_lists().await.expect("the rail reads");
-    let saved: Vec<&SmartListSummary> = rail.iter().filter(|list| list.saved).collect();
+    let saved: Vec<&SmartListSummary> = rail.iter().collect();
     assert_eq!(
         i64::try_from(saved.len()).expect("a rail smaller than a machine word"),
         expected,
@@ -897,7 +903,9 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
 /// the report's and nothing else's: a reordered `corpus::ALL` would print the
 /// wrong names beside the right numbers, and every assertion below is per branch
 /// either way.
-const BRANCHES: [&str; 4] = ["mirror", "notes", "assets", "routes"];
+const BRANCHES: [&str; 8] = [
+    "mirror", "notes", "assets", "routes", "views", "sets", "lists", "logs",
+];
 
 /// Every branch the launcher unions holds rows, read through the launcher's own
 /// statement -- and how many of them the pinned query matches, printed.
@@ -1035,6 +1043,17 @@ async fn the_match_set_is_not_joined_row_by_row() {
     // tag of its own would put a second estate beside the first and make the
     // other test's report a reading of two.
     testing::seed_estate(&pool, "bench").await.unwrap();
+    testing::seed_views_and_sets(&pool, 30).await.unwrap();
+    // Run logs, so the logs' branch (#2431) has rows.
+    testing::seed_pipeline_logs(&pool, 300).await.unwrap();
+    // A saved list, so the lists' branch (#2423) is a relation with a row in it.
+    sqlx::query(
+        "insert into knobas.smart_list (id, label, query)
+         values ('bench-ledger', 'Ledger', 'ledger') on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_every_branch_has_rows(&pool, "ledger").await;
 
     let built = sql::search_sql(

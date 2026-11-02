@@ -1,88 +1,52 @@
 <!--
-  One selectable line of the launcher: prototype-6's `.launch .res a` (kind,
-  title, source), with the provenance as its source column (#1422; the rules
-  are `tf/css/launcher.css`). Mono only on the key and the path.
+  One selectable line of the launcher (#2421, spec #2419): three cells like a
+  table. The kind's monogram in the state's tone, a key cell a person reads
+  (`cells.ts` decides it per kind), and the title. No second line, no
+  excerpt, no path, no state chip and no provenance: the state is the
+  monogram's colour, and what a second line said is in the title or not
+  worth the row's height.
 
-  Results and the board's recent items both draw this, deliberately: spec §4
-  promises the same per-row provenance everywhere, and two components drawing
-  "a row" is how the two drift apart.
+  Results, the board's recents and the sheet's pinned row all draw this, so
+  "a row" is one thing everywhere.
 
-  **Everything here is text.** `title` and every `snippet` segment are raw
-  source text — whatever somebody typed into a ticket, `<script>` included —
-  and the highlight is the segment's `hit` flag, never markup inside the
-  string (roadmap §4 gotcha 7). `ts_headline` happens to elide well-formed
-  tags, which is a fidelity accident and *not* a sanitiser: `onclick=…` travels
-  through untouched.
+  **Everything here is text.** `title` and `cell` are raw source text,
+  whatever somebody typed into a ticket, `<script>` included (roadmap §4
+  gotcha 7).
 -->
 <script lang="ts">
-  import type { Segment } from "../ipc";
-  import type { StateChip as Chip } from "../ipc/entity";
-  import type { CredentialHealth } from "../ipc/sources";
-  import StateChip from "../shell/StateChip.svelte";
-  import { kindMonogram, kindSingular } from "../shell/kinds";
-  import { provenance } from "./format";
-  import { keyOf } from "../time/format";
+  import type { Tone } from "../ipc/entity";
 
   let {
-    entityId,
-    kind,
-    sourceId,
+    monogram,
+    tone = null,
+    kindName,
+    cell,
+    mono = false,
     title,
-    syncedAt,
-    path = null,
-    state = null,
-    snippet = [],
-    named = false,
-    sources,
+    chord = null,
     id,
     selected,
-    now,
     onopen,
     onhover,
   }: {
-    entityId: string;
-    kind: string;
-    sourceId: string;
+    monogram: string;
+    /** The state's tone, which colours the monogram; `null` for a row with no state. */
+    tone?: Tone | null;
+    /** What the monogram stands for, with the state's word when it has one: *Ticket: Done*. */
+    kindName: string;
+    /** The key cell. */
+    cell: string;
+    /** Whether the key cell is an identifier, drawn in the mono face. */
+    mono?: boolean;
     title: string;
-    syncedAt: string;
-    /**
-     * Where this item sits inside its source — a Confluence page's ancestor
-     * path, `Engineering › Payments` (#284), or the parent chain any kind
-     * declares, `tidewater/payout-service` for a Gitea commit (#596). Drawn
-     * even when the title already repeats it.
-     *
-     * `null` for every row that has none, which is the ADR-0007 **miss**: the
-     * row shows no path rather than a wrong one, and the caller does not have
-     * to know what kind it is holding. Joined by one SQL expression
-     * (`knobas_core::path_line_read!`) and carried on `EntityRow.path`, so
-     * this row and the detail panel cannot disagree about what a path is.
-     *
-     * Drawn under the title and not beside the key, because a path is prose of
-     * unbounded length and the key column is 56 px.
-     */
-    path?: string | null;
-    /**
-     * The item's state chip (#666) — a pull request's `merged`, a build's
-     * `FAILURE` — drawn after the title, or `null` for a kind that declares
-     * none. The same `StateChip` a room row draws.
-     */
-    state?: Chip | null;
-    /** The matched excerpt, already split. Empty for a list or board row. */
-    snippet?: Segment[];
-    /** Whether another source's row holds the same key (#1476): the provenance then names this one's source. */
-    named?: boolean;
-    sources: CredentialHealth[];
+    /** The chord bound to the row (#2429): a saved list's, which opens it from anywhere. */
+    chord?: string | null;
     /** The option's element id, which the listbox names while it is active (#1411). */
     id: string;
     selected: boolean;
-    now?: Date | undefined;
     onopen: () => void;
     onhover: () => void;
   } = $props();
-
-  /** The key half of the id: `confluence:ENG:SEPA design` reads `ENG:SEPA design`. */
-  const key = $derived(keyOf(entityId));
-  const prov = $derived(provenance(sourceId, syncedAt, sources, now, named));
 </script>
 
 <button
@@ -94,21 +58,8 @@
   onclick={onopen}
   onmouseenter={onhover}
 >
-  <span class="tf-ln-mg" title={kindSingular(kind)} aria-label={kindSingular(kind)}>{kindMonogram(kind)}</span>
-  <span class="tf-ln-ty">{kind}</span>
-  <span class="tf-ln-t">
-    <span class="tf-ln-k">{key}</span>{title}
-    {#if state}
-      <StateChip {state} />
-    {/if}
-    {#if path}
-      <span class="tf-ln-pa">{path}</span>
-    {/if}
-    {#if snippet.length > 0}
-      <span class="tf-ln-sn"
-        >{#each snippet as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark>{:else}{seg.text}{/if}{/each}</span
-      >
-    {/if}
-  </span>
-  <span class="tf-ln-sy" class:tf-ln-fail={prov.failing}>{prov.text}</span>
+  <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{monogram}</span>
+  <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>
+  <span class="tf-ln-t">{title}</span>
+  {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}
 </button>

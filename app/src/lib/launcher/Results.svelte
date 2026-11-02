@@ -1,6 +1,5 @@
 <!--
-  The grouped answer (spec §4: "results grouped by type with source monogram
-  and sync age").
+  The grouped answer: one heading per kind, then three-cell rows (#2421).
 
   The group order is the **backend's** — `knobas_search::group` fixes it
   (tickets, PRs, builds, …, unknown kinds last), so a launcher that sorted its
@@ -10,10 +9,10 @@
 -->
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
-  import type { CredentialHealth } from "../ipc/sources";
+  import { clockLabel } from "../time/format";
   import Row from "./Row.svelte";
+  import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
-  import { sharesKey } from "./format";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -21,25 +20,25 @@
     rows,
     selected,
     optionId,
-    sources,
+    chordOf = () => null,
     now,
     onopen,
     onhover,
   }: {
     response: SearchResponse;
+    /** The clock an inbox line's time cell is read against (#2423). */
+    now?: Date | undefined;
     /** The flat selectable list, so an index means the same thing everywhere. */
     rows: LauncherRow[];
     selected: number;
     /** The element id of the option at a flat-list index (#1411). */
     optionId: (index: number) => string;
-    sources: CredentialHealth[];
-    now?: Date | undefined;
+    /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
+    chordOf?: (row: LauncherRow) => string | null;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
 
-  /** Rows another source's row of the same key sits beside (#1476): they name their source. */
-  const shares = $derived(sharesKey(response.groups.flatMap((group) => group.hits)));
   /** Where each group's hits start in the flat list. */
   const offsets = $derived.by(() => {
     const out: number[] = [];
@@ -66,7 +65,7 @@
 {#if gaps.length > 0}
   <div class="tf-ln-gap">
     <!-- Deliberately not "not every source": that is false in the case a
-         reader most needs this, `@jonas /tc`, where the one source in scope is
+         reader most needs this, `@jonas in:tc`, where the one source in scope is
          the one that cannot be asked. A heading that does not count is honest
          at one source and at five. -->
     <p class="tf-ln-gap-h">An author search cannot be answered by:</p>
@@ -89,32 +88,22 @@
   </div>
 {/if}
 
+<!-- No count on a heading (#2421): the list is quiet, and the rows are what is read. -->
 {#each response.groups as group, g (group.kind)}
-  <div class="tf-ln-h">
-    <span class="tf-ln-lab">{group.plural}</span>
-    <span class="tf-ln-n">
-      {group.total}
-      {#if group.total > group.hits.length}
-        <span class="tf-ln-more">· {group.total - group.hits.length} more</span>
-      {/if}
-    </span>
-  </div>
+  <div class="tf-ln-h"><span class="tf-ln-lab">{group.plural}</span></div>
   {#each group.hits as hit, h (hit.entity_id)}
     {@const index = (offsets[g] ?? 0) + h}
     {@const row = rows[index]}
     {#if row}
+      {@const cells = cellsOf(hit, group.label)}
       <Row
-        entityId={hit.entity_id}
-        kind={hit.kind}
-        sourceId={hit.source_id}
-        title={hit.title}
-        syncedAt={hit.synced_at}
-        path={hit.path}
-        state={hit.state}
-        snippet={hit.snippet}
-        named={shares(hit)}
-        {sources}
-        {now}
+        monogram={group.monogram}
+        tone={hit.state?.tone ?? null}
+        kindName={hit.state ? `${group.label}: ${hit.state.text}` : group.label}
+        cell={cells.cell}
+        mono={cells.mono}
+        title={cells.title}
+        chord={chordOf(row)}
         id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}
@@ -124,7 +113,49 @@
   {/each}
 {/each}
 
-{#if response.groups.length === 0}
+<!--
+  The inbox's lines behind `#i` (#2423): after the engine's groups, under
+  their own heading, the time as the key cell. `rows` holds them only for an
+  answer the engine read as `#i`.
+-->
+{#if rows.some((row) => row.kind === "inbox")}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Inbox</span></div>
+{/if}
+{#each rows as row, index (row.id)}
+  {#if row.kind === "inbox"}
+    <Row
+      monogram="IN"
+      kindName="Inbox line"
+      cell={clockLabel(row.item.occurred_at, now ?? new Date(), true)}
+      mono
+      title={row.item.title}
+      id={optionId(index)}
+      selected={index === selected}
+      onopen={() => onopen(row)}
+      onhover={() => onhover(index)}
+    />
+  {/if}
+{/each}
+
+<!-- *Search Docs for …* (#2425): last, after every group; `rows` holds it only for a `#d` answer with words. -->
+{#each rows as row, index (row.id)}
+  {#if row.kind === "docs"}
+    <button
+      id={optionId(index)}
+      class="tf-ln-opt"
+      class:tf-ln-on={index === selected}
+      role="option"
+      aria-selected={index === selected}
+      onclick={() => onopen(row)}
+      onmouseenter={() => onhover(index)}
+    >
+      <span class="tf-ln-nm">Search Docs for “{row.words}”</span>
+      <span class="tf-ln-s">Every space, in the Docs area</span>
+    </button>
+  {/if}
+{/each}
+
+{#if response.groups.length === 0 && !rows.some((row) => row.kind === "inbox")}
   <p class="tf-ln-none">
     Nothing in the mirror matches
     <strong>{response.interpreted.text || "these filters"}</strong>.

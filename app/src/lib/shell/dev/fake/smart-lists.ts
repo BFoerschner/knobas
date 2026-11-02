@@ -1,191 +1,106 @@
 /**
- * `?fake-ipc`: Smart lists (#504, #506): the built-in and saved lists, their items and
- * the three writes.
+ * `?fake-ipc`: the lists a reader saved (#506, #2423): `#l` and `#i` in the
+ * box, `smart_lists` and the three writes; and the favourites (#2428), which
+ * name a saved list or an entity and are drawn at the top of the empty box;
+ * and the keys (#2429), a saved list's chord and an action's chord per kind.
  *
- * **`crates/knobas-search/src/lists.rs` reads this file** (`include_str!`)
- * and slices `fakeSmartLists` and `fakeSavedLists` out of it, with
- * `FIXTURE_SAVED` declared after `fakeSmartLists` as its negative control. It
- * is its own module so the rest of the fixture is frontend-only.
+ * The built-in smart lists are gone (spec #2419), so this is saved lists
+ * alone: what `#l` answers as kind `list`, and what Settings reads to know a
+ * list exists.
  */
-import type { SearchResponse } from "../../../ipc/search";
+import type { EntityRow } from "../../../ipc/entity";
+import type { ActionKey, FavouriteTarget, Keys, SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
-import { FAKE_CONTEXTS, FAKE_CONTEXT_ASSETS, SYNCED_AT } from "./corpus";
-import { FIXTURE_ESTATE, assetPathText } from "./estate";
-import { fakeMonitorRoster, fakeOpenAlerts, fakeUnmonitored } from "./monitors";
+import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 
 /**
- * The launcher's smart-list rail (#504) -- **fixture-only**.
+ * The lists a reader saved -- **fixture-only**, and mutable, because saving
+ * one is the gesture the walk is here to make.
  *
- * A restatement of `knobas_search::lists`' seven lists, in this file's own
- * terms, and a restatement is a copy that can drift: the Rust registry is the
- * authority and a divergence here is a bug in this file, never a second
- * opinion. `miniBoard` and `listEntities` carry the same warning for the same
- * reason. Nothing here proves a predicate; what it lets a browser see is the
- * rail, the counts beside it and what a row opens.
- *
- * **The three literals per list are pinned** since #506:
- * `knobas_search::lists`' `the_builtin_registry_matches_its_typescript_fixture`
- * parses the arrays below and compares the id, label and blurb triples against
- * `BUILTINS` itself. Everything the two paragraphs after this one call a
- * divergence — the counts, the badges, the row order, and what a reader with
- * no identity configured actually reads on the two `@me` rows — is outside
- * that pin, deliberately, and the test's own doc says so.
- *
- * **The four mirror lists honestly read 0.** This fixture's corpus is frozen
- * at `SYNCED_AT` -- 22 August 2026 -- so nothing in it changed today and
- * nothing synced in the last hour; and no source here carries a username, so
- * the two `@me` lists are empty for the reason the real ones would be.
- *
- * Their **descriptions** are the Rust blurbs, copied, and for the two `@me`
- * lists that is a divergence rather than a copy: with no identity configured
- * `lists::describe` replaces the blurb with `describe_missing_identity()` --
- * three sentences about *Test connection* filling a source's username in.
- * Restating that here would be the longest copied string in this file and the
- * likeliest to rot, and it is not what #504 is about. What a walk sees on
- * those two rows is therefore the blurb where the app would show the advice.
- *
- * **The three estate lists are derived from the estate this file draws**, each
- * from the nearest thing the fixture has to the rule:
- *
- * * *Not monitored* is `fakeUnmonitored` -- the assets the estate file names no
- *   monitor for -- which is what the backend's read answers over a mirror that
- *   has resolved those names into links.
- * * *Open alerts on my jobs* is the assets of `fakeOpenAlerts` that an
- *   **unarchived** fake context holds (`FAKE_CONTEXT_ASSETS`, keyed by the
- *   context's anchor), which is the registry's rule over the fixture's one
- *   membership table: an archived context holds nothing, and an alerted asset
- *   no job holds is not on the list. The fixture has no link graph, so an
- *   asset reaches a context only through that table and not through an
- *   ancestor; the ancestor walk is asserted over a real database in
- *   `search_ipc.rs`. Acked alerts stay in, as in the registry.
- * * *Certificates expiring* is the roster rows whose `cert_days_remaining` is
- *   under thirty -- the one certificate the roster invents, at nine days.
- *
- * The change badge is `false` on every row: a badge is a comparison against a
- * stamp in `knobas.setting`, and this fixture has no setting table to remember
- * one in. A badge that was always on would be the more misleading of the two.
- */
-export function fakeSmartLists() {
-  const mirror = [
-    ["changed-today", "Changed today", "Everything a source touched since midnight."],
-    [
-      "mine",
-      "My items",
-      "Items your configured accounts are the author of, from the last 30 days.",
-    ],
-    ["mine-stale", "Mine, untouched 14 days", "Yours, and nothing has moved them in a fortnight."],
-    ["just-synced", "Just synced", "What the last hour of syncing brought in."],
-  ] as const;
-  const estate = [
-    [
-      "not-monitored",
-      "Not monitored",
-      "Estate assets with no monitor attached to them.",
-    ],
-    [
-      "alerts-in-context",
-      "Open alerts on my jobs",
-      "Assets a job you have not finished holds, with a monitor in trouble.",
-    ],
-    [
-      "certs-expiring",
-      "Certificates expiring",
-      "Assets whose certificate runs out in under 30 days.",
-    ],
-  ] as const;
-
-  return [
-    ...mirror.map(([id, label, description]) => ({
-      id,
-      label,
-      count: 0,
-      changed: false,
-      description,
-      saved: false,
-      needs_attention: false,
-    })),
-    ...estate.map(([id, label, description]) => ({
-      id,
-      label,
-      count: fakeListAssets(id).length,
-      changed: false,
-      description,
-      saved: false,
-      needs_attention: false,
-    })),
-    ...fakeSavedLists(),
-  ];
-}
-
-/**
- * The lists a reader saved (#506) -- **fixture-only**, and mutable, because
- * saving one is the gesture the walk is here to make.
- *
- * Seeded with **one row of each kind the rail can draw**: a runnable saved
- * query, and one that needs attention. The second is seeded rather than made
- * because no command can make one -- `knobas_search::saved::create` runs the
- * grammar first and refuses a query it could not run, so a needs-attention row
- * is what a *grammar change* leaves behind, and the backend's own IPC-seam
- * test writes its row with SQL for the same reason.
- *
- * `needs_attention` is carried as **data** rather than re-derived here. The
- * verdict is `saved::plan`'s, over §4's grammar and this installation's
- * vocabulary, and a second reading of that in TypeScript is exactly the copy
- * that drifts. What the walk sees is the two states drawn; what decides them
- * is asserted over a real database in `crates/knobas-app/tests/it/search_ipc.rs`.
+ * Seeded with two runnable lists and one that needs attention. The last is
+ * seeded rather than made because no command can make one --
+ * `knobas_search::saved::create` runs the grammar first and refuses a query
+ * it could not run -- and the backend's own IPC-seam test writes its row with
+ * SQL for the same reason. `broken` is carried as **data** rather than
+ * re-derived here: the verdict is `saved::plan`'s, witnessed over a real
+ * database in `crates/knobas-app/tests/it/search_ipc.rs`.
  */
 const FIXTURE_SAVED: { id: string; label: string; query: string; broken?: boolean }[] = [
-  { id: "gitea-boxes", label: "Gitea boxes", query: "gitea" },
-  { id: "todays-palette", label: "Today's palette", query: "> palette", broken: true },
+  { id: "sepa-payouts", label: "SEPA payouts", query: "sepa payouts" },
+  { id: "my-reviews", label: "My reviews", query: "#p @me" },
+  { id: "old-gitea", label: "Old Gitea search", query: "/gitea payout", broken: true },
 ];
 
-/**
- * What one saved list stands for here: a **substring match over asset names**,
- * where the real count is PostgreSQL FTS over four corpora -- the mirror,
- * notes, assets and routes -- with `corpus::ALL`'s weights. The same stand-in
- * `estateSearch` already makes, for the same reason: this fixture has no
- * mirror to search.
- *
- * The change badge is `false` on every row, as it is on the built-ins: a badge
- * is a comparison against a stamp in `knobas.setting`, and there is no setting
- * table here to remember one in.
- */
-function fakeSavedAssets(query: string) {
-  const needle = query.trim().toLowerCase();
-  return needle === ""
-    ? []
-    : FIXTURE_ESTATE.filter((asset) => asset.name.toLowerCase().includes(needle));
-}
+/** `saved::Refusal::description` for the seeded broken row. */
+const BROKEN =
+  "Needs attention: the saved query names a source as `/gitea`, which the launcher now reads as a word; today that is `source:gitea`. Delete it and save the search again.";
 
 function fakeSavedLists() {
   return FIXTURE_SAVED.map((list) => ({
     id: list.id,
     label: list.label,
-    count: list.broken ? 0 : fakeSavedAssets(list.query).length,
-    changed: false,
-    // The saved query is a saved list's own blurb, and a refused one says
-    // which rule refused it -- `saved::Refusal::description`, whose heading is
-    // the wording the rail draws.
-    description: list.broken
-      ? "Needs attention: the saved query starts with a prefix that is not a search. Delete it and save the search again."
-      : list.query,
-    saved: true,
+    // No mirror to count over here; the count is the engine's, witnessed
+    // over a real database.
+    count: 0,
+    description: list.broken ? BROKEN : list.query,
     needs_attention: list.broken === true,
   }));
 }
 
 /**
- * `create_smart_list`: save the box's query -- **fixture-only**.
- *
- * The id is slugged and de-duplicated the way `knobas_search::saved`'s `slug`
- * and `free_id` do it -- **against the built-ins as well as the saved rows**,
- * because `list:<id>` is one namespace and a fixture that let a new list take
- * `mine` would draw two rows under one `{#each}` key. What it does *not* do is
- * judge the query: every refusal the real command makes past a blank one is
- * §4's grammar's, and this fixture has no grammar. The panel is what keeps an
- * unrunnable query away from here -- `Session.canSave` reads the backend's own
- * interpretation and offers the control on results only.
+ * `search` for `#l` and `#i` (#2423), alone or with words: the saved lists as
+ * kind `list` (their text the path line, a broken one's reason its state),
+ * and for `#i` the kind the launcher answers from the shell's inbox store.
+ * `null` for anything else. A substring match over the name and the text,
+ * fixture-only: the engine's FTS is witnessed in the Rust tests.
+ */
+export function fakeListSearch(raw: string): SearchResponse | null {
+  const found = /^#([li]+)(?:\s+(.*))?$/i.exec(raw.trim());
+  if (!found) return null;
+  const letters = found[1]!.toLowerCase();
+  const text = (found[2] ?? "").trim();
+  const kinds = [...new Set([...letters].map((letter) => (letter === "l" ? "list" : "inbox")))];
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  const hits = kinds.includes("list")
+    ? FIXTURE_SAVED.filter((list) =>
+        words.every((word) => `${list.label} ${list.query}`.toLowerCase().includes(word)),
+      ).map((list, index) => ({
+        entity_id: list.id,
+        kind: "list",
+        source_id: "list",
+        title: list.label,
+        updated_at: null,
+        synced_at: SYNCED_AT,
+        path: list.query,
+        state: list.broken ? { text: BROKEN, tone: "warn" as const } : null,
+        rank: 1 - index / 10,
+        snippet: [],
+        excerpts: [],
+      }))
+    : [];
+  return {
+    interpreted: {
+      text,
+      prefix: null,
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups:
+      hits.length === 0
+        ? []
+        : [{ kind: "list", label: "List", plural: "Lists", monogram: "LI", total: hits.length, hits }],
+    total: hits.length,
+    took_ms: 1,
+    coverage: [],
+  };
+}
+
+/**
+ * `create_smart_list`: save the box's query -- **fixture-only**. The id is
+ * slugged and de-duplicated the way `knobas_search::saved`'s `slug` and
+ * `free_id` do it. It does not judge the query: every refusal the real
+ * command makes past a blank one is §4's grammar's, and this fixture has none.
  */
 function fakeCreateSmartList(args: Record<string, unknown>) {
   const label = String(args["label"] ?? "").trim();
@@ -200,7 +115,7 @@ function fakeCreateSmartList(args: Record<string, unknown>) {
     .slice(0, 48)
     .replace(/-+$/, "");
   const base = slug === "" ? "list" : slug;
-  const taken = new Set(fakeSmartLists().map((list) => list.id));
+  const taken = new Set(FIXTURE_SAVED.map((list) => list.id));
   let id = base;
   for (let suffix = 2; taken.has(id); suffix += 1) {
     id = `${base}-${suffix}`;
@@ -224,139 +139,122 @@ function fakeRenameSmartList(args: Record<string, unknown>) {
   return null;
 }
 
-/** `delete_smart_list`. */
+/** `delete_smart_list`; its favourite goes with it, as `0069`'s cascade does. */
 function fakeDeleteSmartList(args: Record<string, unknown>) {
   const id = String(args["id"] ?? "");
   const at = FIXTURE_SAVED.findIndex((list) => list.id === id);
   if (at < 0) throw { code: "not_found", message: `no saved list ${id}`, source_id: null };
   FIXTURE_SAVED.splice(at, 1);
+  const favourite = FIXTURE_FAVOURITES.findIndex((target) => "list" in target && target.list === id);
+  if (favourite >= 0) FIXTURE_FAVOURITES.splice(favourite, 1);
+  // ...and its key, as `0070`'s cascade does.
+  const key = FIXTURE_LIST_KEYS.findIndex((bound) => bound.list_id === id);
+  if (key >= 0) FIXTURE_LIST_KEYS.splice(key, 1);
   return null;
 }
 
 /**
- * The assets one estate list answers with -- **fixture-only**, see
- * `fakeSmartLists` for what each stands in for and what it drops.
+ * The favourites (#2428) -- **fixture-only**, mutable, in the order they
+ * were favourited: one saved list and one page, so the empty box shows the
+ * block under `?fake-ipc`. Order, the cascade and the unknown entity are
+ * witnessed over a real database in `tests/it/favourites_ipc.rs`.
  */
-function fakeListAssets(id: string): (typeof FIXTURE_ESTATE)[number][] {
-  const byId = (assetId: string) => FIXTURE_ESTATE.find((asset) => asset.id === assetId);
-  switch (id) {
-    case "not-monitored":
-      return fakeUnmonitored()
-        .map((row) => byId(row.id))
-        .filter((asset) => asset !== undefined);
-    case "alerts-in-context":
-      return fakeJobAlerts()
-        .map((assetId) => byId(assetId))
-        .filter((asset) => asset !== undefined);
-    case "certs-expiring":
-      return fakeMonitorRoster()
-        .filter((row) => row.cert_days_remaining !== null && row.cert_days_remaining < 30)
-        .flatMap((row) => row.assets)
-        .map((asset) => byId(asset.id))
-        .filter((asset) => asset !== undefined);
-    default:
-      return [];
+const FIXTURE_FAVOURITES: FavouriteTarget[] = [{ list: "sepa-payouts" }, { entity: "confluence:sepa" }];
+
+/** `favourites`: each target as the board's row, a list as its `#l` hit is drawn; what resolves nowhere is skipped. */
+export function fakeFavourites(): EntityRow[] {
+  return FIXTURE_FAVOURITES.flatMap((target): EntityRow[] => {
+    if ("list" in target) {
+      const list = FIXTURE_SAVED.find((saved) => saved.id === target.list);
+      if (!list) return [];
+      const state = list.broken ? { text: BROKEN, tone: "warn" as const } : null;
+      return [{ entity_id: list.id, kind: "list", source_id: "list", title: list.label, updated_at: null, synced_at: SYNCED_AT, path: list.query, state }];
+    }
+    const entry = CORPUS.find((row) => row.entity_id === target.entity && row.deleted_at === null);
+    return entry ? [mirrorRow(entry) as EntityRow] : [];
+  });
+}
+
+const sameTarget = (a: FavouriteTarget, b: FavouriteTarget) =>
+  ("list" in a && "list" in b && a.list === b.list) || ("entity" in a && "entity" in b && a.entity === b.entity);
+
+/** `add_favourite`: last in the block, once; a list nobody saved is `not_found`. */
+function fakeAddFavourite(args: Record<string, unknown>) {
+  const target = args["target"] as FavouriteTarget;
+  if ("list" in target && !FIXTURE_SAVED.some((list) => list.id === target.list)) {
+    throw { code: "not_found", message: `no saved list ${target.list}`, source_id: null };
   }
+  if (!FIXTURE_FAVOURITES.some((kept) => sameTarget(kept, target))) FIXTURE_FAVOURITES.push(target);
+  return null;
+}
+
+/** `remove_favourite`: not a favourite is no error. */
+function fakeRemoveFavourite(args: Record<string, unknown>) {
+  const target = args["target"] as FavouriteTarget;
+  const at = FIXTURE_FAVOURITES.findIndex((kept) => sameTarget(kept, target));
+  if (at >= 0) FIXTURE_FAVOURITES.splice(at, 1);
+  return null;
 }
 
 /**
- * The ids of the alerted assets an unarchived fake context holds (#1503),
- * each once, in the alerts' order.
+ * The keys (#2429) -- **fixture-only**, mutable: *SEPA payouts* opens on ⌘1,
+ * and *Approve* runs on a pull request on ⌘⇧P, so the rows draw their chords
+ * under `?fake-ipc`. The tables' rules (one chord per list and per action on
+ * a kind, the cascade, the chord's spelling) are witnessed over a real
+ * database in `tests/it/keys_ipc.rs`.
  */
-function fakeJobAlerts(): string[] {
-  const held = new Set(
-    FAKE_CONTEXTS.filter((context) => context.archived_at === null).flatMap(
-      (context) => FAKE_CONTEXT_ASSETS[context.anchor_id ?? ""] ?? [],
-    ),
-  );
-  const alerted = fakeOpenAlerts().flatMap((alert) => alert.assets.map((asset) => asset.id));
-  return [...new Set(alerted)].filter((id) => held.has(id));
-}
+const FIXTURE_LIST_KEYS: { list_id: string; chord: string }[] = [{ list_id: "sepa-payouts", chord: "⌘1" }];
+const FIXTURE_ACTION_KEYS: ActionKey[] = [{ kind: "pr", chord: "⌘⇧P", action_id: "approve" }];
 
-/**
- * One list's rows, `search`'s answer to `list:<id>`, in the shape a search
- * answers in -- which is the whole point of a smart list on this side of the
- * wire, and what lets the launcher render one with the component it renders
- * results with.
- *
- * An unknown id is refused the way the real search refuses it, so a typo in
- * `list:` under `?fake-ipc` looks like a typo and not like an empty list.
- *
- * **The order is the fixture's, not the statement's** -- the last of the
- * divergences `fakeSmartLists` lists. `rows_over_estate!` returns an estate
- * list `order by coalesce(path,'') asc, title asc, entity_id asc`; these rows
- * come back in whatever order the roster and the alert list already build,
- * because reproducing that ordering here would be a fourth restatement to keep
- * in step and the walk asserts nothing about it. What a browser sees is which
- * rows, not which first.
- */
-export function fakeSmartListItems(args: Record<string, unknown>): SearchResponse {
-  const id = String(args["id"] ?? "");
-  const known = fakeSmartLists().some((list) => list.id === id);
-  if (!known) {
-    throw { code: "invalid", message: `unknown smart list: ${id}`, source_id: null };
-  }
-  const limit = Number(args["limit"] ?? 20);
-  // A saved list answers with its own query's rows, and a built-in with its
-  // rule's -- one id namespace and one shape, which is what lets the launcher
-  // open either by typing `list:<id>`.
-  const saved = FIXTURE_SAVED.find((list) => list.id === id);
-  const assets = saved ? fakeSavedAssets(saved.query) : fakeListAssets(id);
-  const hits = assets.slice(0, limit).map((asset) => ({
-    entity_id: asset.id,
-    kind: "asset",
-    source_id: "asset",
-    updated_at: null,
-    synced_at: SYNCED_AT,
-    title: asset.name,
-    path: assetPathText(asset),
-    state: null,
-    // A list row was matched against nothing, so it carries no rank and no
-    // excerpt -- the rule the real response follows.
-    rank: 0,
-    snippet: [],
-  }));
+/** `keys`: each list's chord with its name and text, the actions' by kind then chord. */
+function fakeKeys(): Keys {
   return {
-    interpreted: {
-      text: "",
-      prefix: "list",
-      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
-      unknown_tokens: [],
-    },
-    groups:
-      assets.length === 0
-        ? []
-        : [
-            {
-              kind: "asset",
-              label: "Asset",
-              plural: "Assets",
-              monogram: "AS",
-              // The list's total, never the page's.
-              total: assets.length,
-              hits,
-            },
-          ],
-    total: assets.length,
-    took_ms: 2,
-    coverage: [],
+    lists: FIXTURE_LIST_KEYS.flatMap((key) => {
+      const list = FIXTURE_SAVED.find((saved) => saved.id === key.list_id);
+      return list ? [{ ...key, label: list.label, text: list.query }] : [];
+    }),
+    actions: [...FIXTURE_ACTION_KEYS].sort((a, b) => a.kind.localeCompare(b.kind) || a.chord.localeCompare(b.chord)),
   };
+}
+
+/** `bind_list_key`: the chord moves to this list; `null` takes it away; a list nobody saved is `not_found`. */
+function fakeBindListKey(args: Record<string, unknown>) {
+  const listId = String(args["listId"] ?? "");
+  const chord = (args["chord"] as string | null) ?? null;
+  if (!FIXTURE_SAVED.some((list) => list.id === listId)) {
+    throw { code: "not_found", message: `no saved list ${listId}`, source_id: null };
+  }
+  const kept = FIXTURE_LIST_KEYS.filter((key) => key.list_id !== listId && key.chord !== chord);
+  FIXTURE_LIST_KEYS.splice(0, FIXTURE_LIST_KEYS.length, ...kept, ...(chord ? [{ list_id: listId, chord }] : []));
+  return null;
+}
+
+/** `bind_action_key`: on the kind, the chord moves to this action and the action holds one chord. */
+function fakeBindActionKey(args: Record<string, unknown>) {
+  const kind = String(args["kind"] ?? "");
+  const actionId = String(args["actionId"] ?? "");
+  const chord = (args["chord"] as string | null) ?? null;
+  const kept = FIXTURE_ACTION_KEYS.filter((key) => key.kind !== kind || (key.action_id !== actionId && key.chord !== chord));
+  FIXTURE_ACTION_KEYS.splice(0, FIXTURE_ACTION_KEYS.length, ...kept, ...(chord ? [{ kind, chord, action_id: actionId }] : []));
+  return null;
 }
 
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
-    smart_lists: () => fakeSmartLists(),
-    // *Save as list* and the two writes that keep the rail tidy (#506).
-    // **Fixture-only**: the rows live in a module array, not in a database,
-    // and what they certify is the panel -- the rail drawing a saved row
-    // beside the built-ins, the rename field, the two-press delete. The table,
-    // the counts, the badge and the grammar's verdict are witnessed at the IPC
-    // seam over a real PostgreSQL, in `crates/knobas-app/tests/it/search_ipc.rs`.
+    smart_lists: () => fakeSavedLists(),
+    // *Save as list* and the two writes. **Fixture-only**: the rows live in a
+    // module array, not in a database.
     create_smart_list: (args) => fakeCreateSmartList(args),
     rename_smart_list: (args) => fakeRenameSmartList(args),
     delete_smart_list: (args) => fakeDeleteSmartList(args),
+    favourites: () => fakeFavourites(),
+    add_favourite: (args) => fakeAddFavourite(args),
+    remove_favourite: (args) => fakeRemoveFavourite(args),
+    keys: () => fakeKeys(),
+    bind_list_key: (args) => fakeBindListKey(args),
+    bind_action_key: (args) => fakeBindActionKey(args),
   };
 }
 
-keepSeed(FIXTURE_SAVED);
+keepSeed(FIXTURE_SAVED, FIXTURE_FAVOURITES, FIXTURE_LIST_KEYS, FIXTURE_ACTION_KEYS);

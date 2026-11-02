@@ -3,9 +3,40 @@ import type { EntityRow, StateChip } from "./entity";
 import type { CredentialHealth } from "./sources";
 
 /**
+ * An action's chord on one kind: the action is the Tab sheet's row with
+ * that stable id (`launcher/sheet.ts`).
+ */
+export type ActionKey = { kind: string, chord: string, action_id: string, };
+
+/**
  * [`CARD_FIELDS`]: what a card can show (R-3.16).
  */
 export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | "labels";
+
+/**
+ * One place the words appear in a hit's text (#2431).
+ */
+export type Excerpt = { 
+/**
+ * Where in the row it sits, as the reader finds it there: a page's
+ * section heading, `Comment by <name>`, a run log's `line <n>`. `None`
+ * for text the index keeps no place for: a page's lead, a ticket's,
+ * pull request's or note's text.
+ */
+place: string | null, 
+/**
+ * The text around the words, the words flagged (raw source text, as
+ * [`Segment`] says).
+ */
+segments: Array<Segment>, };
+
+/**
+ * What a favourite names: an entity (`knobas.entity.id`) or a saved list
+ * (`knobas.smart_list.id`, the `list` hit's `entity_id`).
+ *
+ * On the wire `{ "entity": "<id>" }` or `{ "list": "<id>" }`.
+ */
+export type FavouriteTarget = { "entity": string } | { "list": string };
 
 /**
  * One value a ticket key can take (#811).
@@ -141,6 +172,11 @@ parents: Array<ParentSuggestion>,
 fields: Array<FieldSuggestion>, };
 
 /**
+ * Every key bound: the lists' by chord, the actions' by kind then chord.
+ */
+export type Keys = { lists: Array<ListKey>, actions: Array<ActionKey>, };
+
+/**
  * One kind `kind:` can name.
  */
 export type KindSuggestion = { 
@@ -158,15 +194,18 @@ label: string, };
  *
  * **The one DTO in this stream that composes two streams' data**, which is
  * why it lives in the command module rather than in `knobas-search`:
- * `smart_lists` and `recent` are the search crate's [`LauncherBoard`],
+ * `recent` is the search crate's [`LauncherBoard`],
  * `sources` is stream F's [`CredentialHealth`], and `pending_writes` counts
  * stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
  * depends on none of those crates.
  *
+ * No lists since #2423 (spec #2419): a saved list is a `list` hit behind
+ * `#l`, and the built-in ones are gone.
+ *
  * [`LauncherBoard`]: knobas_search::LauncherBoard
  * [`CredentialHealth`]: knobas_sync::CredentialHealth
  */
-export type LauncherHome = { smart_lists: Array<SmartListSummary>, 
+export type LauncherHome = { 
 /**
  * `knobas_search::EntityRow`, a *different Rust struct* from
  * `knobas_core::entity_list::EntityRow` with the same eight fields on
@@ -175,6 +214,14 @@ export type LauncherHome = { smart_lists: Array<SmartListSummary>,
  * if the two ever stop agreeing.
  */
 recent: Array<EntityRow>, 
+/**
+ * What the reader favourited (#2428, spec #2419 stories 39 and 40),
+ * in the order they were favourited, drawn above `recent` under one
+ * heading: an entity as `recent` draws one, a saved list as its `list`
+ * hit (kind and source `list`, its text as `path`, the refusal as
+ * `state`). The rows of [`favourites`].
+ */
+favourites: Array<EntityRow>, 
 /**
  * Stream F's credential health, read straight from `knobas.source_config`
  * -- **not** a second copy of the type (interfaces §2.2, open question
@@ -223,6 +270,12 @@ reason: string, };
 export type ListColumn = "key" | "summary" | "status" | "priority" | "signals" | "assignee" | "updated" | "epic" | "labels";
 
 /**
+ * A saved list's chord, with what opening it needs: the list's name and its
+ * text as saved.
+ */
+export type ListKey = { list_id: string, chord: string, label: string, text: string, };
+
+/**
  * The list's header sort (R-3.6).
  */
 export type ListSort = { column: ViewSortColumn, direction: "ascending" | "descending", };
@@ -258,9 +311,16 @@ text: string, prefix: Prefix | null, filters: SearchFilters,
 unknown_tokens: Array<string>, };
 
 /**
- * The launcher's prefixes (§4): `>` `#` `@` `/` `t ` `note:` `list:` `asset:` `?`.
+ * The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and
+ * `source:` for [`Prefix::Source`].
+ *
+ * `#` is no prefix since spec #2419 (#2420): `#t`, `#rl` and the other filter
+ * letters are kind filters, which claim none, as `kind:` claims none; the
+ * `ticket` variant went with the bare-key lookup it named. `/` for a source
+ * went too, and `source:` is what claims `source` now. `list:` went with
+ * #2423: a saved list is found behind `#l` and applied by its own text.
  */
-export type Prefix = "action" | "ticket" | "person" | "source" | "time" | "note" | "list" | "asset" | "help";
+export type Prefix = "action" | "person" | "source" | "time" | "note" | "asset" | "help";
 
 /**
  * One condition: a key, *is* or *is not*, and values any of which it means.
@@ -436,7 +496,17 @@ authors: Array<string>, };
 /**
  * One result: a row, its rank, and the excerpt with the match marked.
  */
-export type SearchHit = { rank: number, snippet: Array<Segment>, entity_id: string, kind: string, source_id: string, title: string, 
+export type SearchHit = { rank: number, snippet: Array<Segment>, 
+/**
+ * Where the words appear in the row's text, each with its place
+ * (#2431): what the launcher's preview draws under *Everything*, so the
+ * preview is this list and no second read. Empty under *Titles*, for a
+ * browse, and for a row whose text holds none of the words (a hit by its
+ * title alone). Read from the index: a page's section and comment marks
+ * (`knobas_source::docs::indexed`), a pipeline's stored latest run log
+ * (migration `0067`), a ticket's, pull request's or note's text.
+ */
+excerpts: Array<Excerpt>, entity_id: string, kind: string, source_id: string, title: string, 
 /**
  * When the source says the item changed, an RFC 3339 timestamp; `None`
  * if the source never dated the item.
@@ -476,7 +546,22 @@ path: string | null,
  * every row of a corpus knobas owns: the ADR-0007 **miss**.
  * `#[serde(default)]` for `path`'s reason.
  */
-state: StateChip | null, };
+state: StateChip | null, 
+/**
+ * The row's key cell (#2452, spec #2419 story 19): what a person reads
+ * beside the title to know where the thing sits -- a pull request's
+ * repository, a page's space, a pipeline's project, a monitor's type.
+ * Resolved from the kind's declarations when the row is written
+ * (`sync.item.key_cell`, migration `0068`), and indexed at the title's
+ * weight so *Titles* finds it (#2451). Absent for a ticket (its key is
+ * its id), for a row whose declarations name none, and for every row of
+ * a corpus knobas owns: the ADR-0007 **miss**, and the launcher falls
+ * back to the path line, then the kind's word.
+ *
+ * Optional on the wire and left out when absent, so a reader written
+ * before it, and a fixture that never sets it, read the same row.
+ */
+cell?: string, };
 
 /**
  * What the launcher asks for: the raw box text, plus whatever the UI already
@@ -487,7 +572,21 @@ export type SearchQuery = {
  * Exactly what is in the box, prefixes and all. **The backend parses it**
  * -- see the module docs.
  */
-raw: string, limit: number, filters: SearchFilters, };
+raw: string, limit: number, filters: SearchFilters, 
+/**
+ * *Titles* rather than *Everything* (spec #2419, #2430): match only what
+ * a row shows, its title or its key (a ticket's key), never its body.
+ * Every corpus indexes exactly those at weight A, so the engine matches
+ * the A lexemes alone. Off answers as before, bodies included.
+ *
+ * The reader's choice, sent with every query from the launcher and never
+ * stored with a saved list: a saved list answers as Everything.
+ *
+ * `#[serde(default)]` because it was **added** to a frozen struct
+ * (§10.8), as [`SearchFilters::authors`] was: a caller written before it
+ * sends none and is answered as Everything.
+ */
+titles: boolean, };
 
 /**
  * One answered query.
@@ -529,50 +628,33 @@ coverage: Array<FilterCoverage>, };
 export type Segment = { text: string, hit: boolean, };
 
 /**
- * One entry of the launcher board's smart-list rail (interfaces §2.4).
+ * One saved list as `smart_lists` and `create_smart_list` answer it
+ * (interfaces §2.4): Settings reads whether any exist, and *Save as list*
+ * reads back the row it made.
  *
- * Built-in and saved lists are **one shape** (#506, story 57): both are
- * opened by `list:<id>`, both carry a count and a change badge, and
- * [`Self::saved`] is the only thing that tells them apart.
+ * One kind of list since #2423: the built-in ones are gone, so nothing tells
+ * a saved list from another, and nothing badges one (`changed` and `saved`
+ * went with them). In the launcher a list is a `list` hit, found behind `#l`.
  */
 export type SmartListSummary = { 
 /**
- * Stable id; also what `list:<id>` in the box names.
+ * The slug [`create`] made; what rename and delete take, and the `list`
+ * hit's entity id.
  */
 id: string, label: string, 
 /**
- * How many items are in the list right now.
+ * How many items the list answers with right now.
  */
 count: number, 
 /**
- * Something in this list is newer than the last time it was opened.
- */
-changed: boolean, 
-/**
- * Display text: the list's blurb, the reason it is empty, or -- for a
- * saved list -- the query it stands for.
+ * The query the list stands for, or the reason it needs attention.
  */
 description: string, 
 /**
- * Whether somebody saved this list, rather than knobas shipping it
- * (#506).
- *
- * The one thing the rail needs to tell the two apart, and it is a
- * *capability* rather than a provenance note: a saved list can be renamed
- * and deleted and a built-in cannot, so the row draws those two controls
- * exactly when this is `true`. Both kinds are opened the same way, by
- * `list:<id>`, which is why the id is not what says which one this is.
- */
-saved: boolean, 
-/**
  * The saved query cannot be run by today's grammar (#506, story 60).
- *
- * Always `false` for a built-in: a built-in's predicate is compiled in, so
- * there is no version of it the launcher could fail to understand.
- * [`Self::count`] is `0` and [`Self::changed`] `false` on such a row --
- * not because the list is empty, but because nothing was asked -- and
- * [`Self::description`] carries [`crate::saved::NEEDS_ATTENTION`] and the
- * reason, the rule that refused it. The row does not open.
+ * [`Self::count`] is `0` on such a row -- nothing was asked -- and
+ * [`Self::description`] carries [`NEEDS_ATTENTION`] and the rule that
+ * refused it.
  */
 needs_attention: boolean, };
 

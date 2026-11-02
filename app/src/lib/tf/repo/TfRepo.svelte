@@ -643,6 +643,7 @@
                   {source}
                   branches={branches}
                   head={placeOf(one).branch ?? proposed}
+                  base={placeOf(one).base}
                   defaultBranch={defaultBranch?.name ?? null}
                   {refreshed}
                 />

@@ -696,6 +696,14 @@ pub fn run() {
             // #2405's attachment bytes and download, appended at the foot (§10.8).
             commands::entity::attachment_bytes,
             commands::entity::download_attachment,
+            // #2428's favourites, appended at the foot (§10.8).
+            commands::search::favourites,
+            commands::search::add_favourite,
+            commands::search::remove_favourite,
+            // #2429's keys, appended at the foot (§10.8).
+            commands::search::keys,
+            commands::search::bind_list_key,
+            commands::search::bind_action_key,
         ])
         .build(context)
         .expect("build the tauri application")
