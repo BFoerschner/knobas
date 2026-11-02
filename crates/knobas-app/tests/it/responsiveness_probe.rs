@@ -1245,19 +1245,24 @@ async fn what_the_reader_waits_on() {
         "#t payment",
         "#tp payment retry",
     ] {
-        time("search keystroke", &format!("search {raw:?}"), runs, || {
-            search_inner(
-                pool,
-                &registry,
-                knobas_search::SearchQuery {
-                    titles: false,
-                    raw: raw.into(),
-                    limit: 50,
-                    filters: Default::default(),
-                },
-            )
-        })
-        .await;
+        // Everything under the label it has always had, and Titles (#2430),
+        // the launcher's first choice, beside it.
+        for titles in [false, true] {
+            let mode = if titles { " titles" } else { "" };
+            time("search keystroke", &format!("search {raw:?}{mode}"), runs, || {
+                search_inner(
+                    pool,
+                    &registry,
+                    knobas_search::SearchQuery {
+                        titles,
+                        raw: raw.into(),
+                        limit: 50,
+                        filters: Default::default(),
+                    },
+                )
+            })
+            .await;
+        }
     }
     // The word that matches most of the mirror (#1849): the ranking and the
     // count run over every match, not the few a prefix of `payment` reaches.
@@ -1276,6 +1281,17 @@ async fn what_the_reader_waits_on() {
         &format!("search {COMMON_WORD:?} (matches {matched} of {items})"),
         runs,
         || search_inner(pool, &registry, common.clone()),
+    )
+    .await;
+    let titled = knobas_search::SearchQuery {
+        titles: true,
+        ..common.clone()
+    };
+    time(
+        "search keystroke",
+        &format!("search {COMMON_WORD:?} titles"),
+        runs,
+        || search_inner(pool, &registry, titled.clone()),
     )
     .await;
     println!("RP-MATCHES search {COMMON_WORD:?} total={matched} items={items}");
