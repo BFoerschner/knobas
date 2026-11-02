@@ -99,12 +99,12 @@ export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
 
 /** Keyboard: requirements §14, in prototype-6's words. Fixed in this version. */
 export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: string])[] = [
-  ["⌘K", "Anywhere", "Search everything"],
+  ["⌘K", "Anywhere", "Search everything, from an empty box"],
   ["⌘T", "Anywhere", "Stop or start the timer"],
   ["⌘,", "Anywhere", "Settings"],
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
   ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
-  ["/", "A list", "Focus the filter"],
+  ["/ ⌘/", "Anywhere; / outside a field", "Search this section: the launcher with its filter"],
   ["Esc", "Anywhere", "Back one step: dialog, drawer, filter, view, job"],
   ["J K ↑ ↓", "Tickets", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],

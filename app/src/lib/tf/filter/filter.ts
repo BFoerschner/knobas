@@ -85,11 +85,11 @@ export interface FilterConfig {
    */
   base?: string;
   /**
-   * Whether the bar draws the `/` hint and answers the key. Default on; a page
-   * that holds two bars (Builds) turns it off on the inner ones, since `/` is
-   * the page filter's key (R-2.4, R-14) and goes to the first (#1453).
+   * Whether the bar draws its text field. Default on; a section page whose
+   * search is the launcher's (the Inbox, #2425) turns it off and keeps the
+   * scope, the chips and the dropdowns.
    */
-  hint?: boolean;
+  search?: boolean;
 }
 
 /** Where one view's filter stands. */

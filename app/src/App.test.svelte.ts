@@ -1241,6 +1241,23 @@ async function pressLauncherKey(): Promise<void> {
   flushSync();
 }
 
+test("/ on Tickets opens the launcher with the section's filter, and ⌘K after it opens it empty (#2425)", async () => {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector("a[aria-label='Settings']") !== null, "the top bar never drew");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
+  flushSync();
+  const box = () => target.querySelector<HTMLInputElement>(".tf-launch input");
+  await until(() => box()?.value === "#t ", "the launcher never opened on #t");
+  target.querySelector<HTMLButtonElement>('.tf-ln-q button[aria-label="Close"]')!.click();
+  flushSync();
+  await until(() => box() === null, "the launcher never closed");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+  await until(() => box() !== null, "⌘K never opened the launcher");
+  expect(box()!.value).toBe("");
+});
+
 test("launcher-hotkey: ⌘K lands on the launcher's query box", async () => {
   await pressLauncherKey();
   await landsOn(landing("launcher-hotkey", "cmd-k"));

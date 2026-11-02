@@ -602,7 +602,12 @@ test("Keyboard lists the fixed shortcuts", async () => {
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
-    "Search everything",
+    "Search everything, from an empty box",
+  ]);
+  expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
+    "/ ⌘/",
+    "Anywhere; / outside a field",
+    "Search this section: the launcher with its filter",
   ]);
   expect([...rows[3]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent), "history, #1086").toEqual([
     "⌘[",
