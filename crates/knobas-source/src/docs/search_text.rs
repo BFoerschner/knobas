@@ -119,7 +119,9 @@ impl Lines {
                     self.block(inner, false);
                 }
             }
-            DocBlock::Placeholder { .. } => {}
+            // Included text is the included page's, found there and not on
+            // every page that includes it (spec #2432, story 22).
+            DocBlock::Include { .. } | DocBlock::Placeholder { .. } => {}
         }
     }
 
@@ -184,6 +186,7 @@ mod tests {
             comments,
             sections: Vec::new(),
             history: Vec::new(),
+            excerpt: None,
         }
     }
 
@@ -326,6 +329,39 @@ mod tests {
 
     /// A mention is the `@account` the inbox's mention rule reads, never run
     /// into the word after it; a ticket is its key; a break is a new line.
+    /// Spec #2432, story 22: included text is found on the page it belongs
+    /// to, so an include writes no words and no link, filled or not.
+    #[test]
+    fn an_include_writes_nothing_even_when_filled() {
+        let filled = DocBlock::Include {
+            title: "Retry budget".into(),
+            space: Some("ENG".into()),
+            excerpt: false,
+            entity_id: Some("c:9".into()),
+            blocks: vec![
+                heading("Budget"),
+                para(vec![
+                    Inline::text("Thirty retries."),
+                    page_link("Ledger", "Ledger", None),
+                ]),
+            ],
+            unfilled: None,
+        };
+        let text = search_text(
+            "Payouts",
+            "OPS",
+            &content(
+                vec![
+                    para(vec![Inline::text("Before.")]),
+                    filled,
+                    DocBlock::include("Gone", None, true),
+                ],
+                vec![],
+            ),
+        );
+        assert_eq!(text, "Payouts\n\nBefore.");
+    }
+
     #[test]
     fn inlines_draw_as_the_reader_names_them() {
         let page = content(

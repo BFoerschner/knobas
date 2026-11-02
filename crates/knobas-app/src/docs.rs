@@ -444,6 +444,116 @@ const PAGE: &str = concat!(
       where i.entity_id = $1"
 );
 
+/// The live page an include names: one of the source's pages of that space
+/// and title, with what it projects from. `$1` source, `$2` space key, `$3`
+/// title.
+const INCLUDED: &str = "\
+select i.entity_id, i.kind, i.payload, s.kind as adapter_kind from sync.live_item i
+  join sync.item_project p on p.entity_id = i.entity_id
+  join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind
+ where i.kind = 'page' and p.source_id = $1 and p.key = $2 and i.title = $3
+ order by i.entity_id
+ limit 1";
+
+/// What the include fill reads the included pages with.
+struct Includes<'a> {
+    pool: &'a PgPool,
+    project: &'a (dyn Fn(&str) -> Option<knobas_source::docs::DocProjection> + Sync),
+    source_id: &'a str,
+}
+
+type Filling<'f> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), IpcError>> + Send + 'f>>;
+
+/// Fill every include in `blocks` from the mirror as it is now (spec #2432,
+/// *Include resolution in knobas*): the page of that title in its space (or
+/// `space`, the space of the page the blocks are from) of the same source,
+/// projected, its whole body or its excerpt, filled in turn. `path` is the
+/// pages on the way here, the page read first: its length is how deep these
+/// includes sit, and a page on it is a cycle. Never loops: every turn is one
+/// deeper, and past [`INCLUDE_DEPTH`](knobas_source::docs::INCLUDE_DEPTH) it
+/// stops.
+fn fill_includes<'f>(
+    at: &'f Includes<'_>,
+    blocks: &'f mut [DocBlock],
+    space: Option<&'f str>,
+    path: &'f [String],
+) -> Filling<'f> {
+    use knobas_source::docs::{INCLUDE_DEPTH, Unfilled};
+    Box::pin(async move {
+        for block in knobas_source::docs::includes_mut(blocks) {
+            let DocBlock::Include {
+                title,
+                space: named,
+                excerpt,
+                entity_id,
+                blocks: inner,
+                unfilled,
+            } = block
+            else {
+                continue;
+            };
+            let Some(key) = named.clone().or_else(|| space.map(str::to_owned)) else {
+                *unfilled = Some(Unfilled::NotMirrored);
+                continue;
+            };
+            let Some(row) = sqlx::query(INCLUDED)
+                .bind(at.source_id)
+                .bind(&key)
+                .bind(&*title)
+                .fetch_optional(at.pool)
+                .await?
+            else {
+                *unfilled = Some(Unfilled::NotMirrored);
+                continue;
+            };
+            let target: String = row.get("entity_id");
+            *entity_id = Some(target.clone());
+            if path.contains(&target) {
+                *unfilled = Some(Unfilled::Cycle);
+                continue;
+            }
+            if path.len() > INCLUDE_DEPTH {
+                *unfilled = Some(Unfilled::TooDeep);
+                continue;
+            }
+            let kind: String = row.get("kind");
+            let payload: serde_json::Value = row.get("payload");
+            let Some(content) = (at.project)(&row.get::<String, _>("adapter_kind"))
+                .and_then(|projection| projection(&kind, &payload))
+            else {
+                *unfilled = Some(Unfilled::NotMirrored);
+                continue;
+            };
+            let mut drawn = if *excerpt {
+                let Some(excerpt) = content.excerpt else {
+                    *unfilled = Some(Unfilled::NoExcerpt);
+                    continue;
+                };
+                excerpt
+            } else {
+                content.blocks
+            };
+            // A link that names no space is to the included page's space,
+            // not to the space of the page drawing it.
+            for inline in knobas_source::docs::inlines_mut(&mut drawn) {
+                if let Inline::PageLink {
+                    space: space @ None,
+                    ..
+                } = inline
+                {
+                    *space = Some(key.clone());
+                }
+            }
+            let mut deeper = path.to_vec();
+            deeper.push(target);
+            fill_includes(at, &mut drawn, Some(&key), &deeper).await?;
+            *inner = drawn;
+        }
+        Ok(())
+    })
+}
+
 /// The live pages of one space of one source, by title. `$1` source, `$2`
 /// space key, `$3` titles.
 const PAGES_BY_TITLE: &str = "\
@@ -531,7 +641,7 @@ async fn backlinks(
 pub async fn page(
     pool: &PgPool,
     declarations: &Declarations,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection> + Sync,
     writes: impl Fn(&str) -> Vec<String>,
     me: &[String],
     entity_id: &str,
@@ -568,11 +678,34 @@ pub async fn page(
         comments: Vec::new(),
         sections: Vec::new(),
         history: Vec::new(),
+        excerpt: None,
     });
+
+    let here = space.as_ref().map(|s| s.key.clone());
+    // The tickets the page itself references, before includes bring in the
+    // tickets of the pages they draw: those are the included pages' work.
+    let own_keys: BTreeSet<String> = every_inline(&mut content)
+        .into_iter()
+        .filter_map(|inline| match &*inline {
+            Inline::Issue { key, .. } => Some(key.clone()),
+            _ => None,
+        })
+        .collect();
+    {
+        let includes = Includes {
+            pool,
+            project: &project,
+            source_id: &source_id,
+        };
+        let path = [id.clone()];
+        fill_includes(&includes, &mut content.blocks, here.as_deref(), &path).await?;
+        for comment in &mut content.comments {
+            fill_includes(&includes, &mut comment.blocks, here.as_deref(), &path).await?;
+        }
+    }
 
     // Titles to resolve, per space: the chain in this page's space, and every
     // page link in its own (or this page's).
-    let here = space.as_ref().map(|s| s.key.clone());
     let mut wanted: HashMap<String, BTreeSet<String>> = HashMap::new();
     if let Some(key) = &here {
         wanted
@@ -681,6 +814,7 @@ pub async fn page(
             title: Some(summary),
             status,
         } = &*inline
+            && own_keys.contains(key)
             && !work.iter().any(|w| w.entity_id == *ticket)
         {
             work.push(DocWork {
@@ -1271,7 +1405,7 @@ pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
 pub async fn export(
     pool: &PgPool,
     declarations: &Declarations,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection> + Sync,
     entity_id: &str,
     folder: &std::path::Path,
 ) -> Result<DocExport, IpcError> {

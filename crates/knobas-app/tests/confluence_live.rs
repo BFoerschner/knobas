@@ -1188,6 +1188,169 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     drop(state);
 }
 
+/// **Includes, from pages Confluence itself stored** (spec #2432, stories
+/// 13 to 19): an `include` and an `excerpt-include` of a page in the synced
+/// space are filled from the mirror, the page's `excerpt` draws as its
+/// contents on its own page, and an include of a page in a space the source
+/// does not sync says it is not mirrored. Both pages are made through the
+/// REST API, so the storage format is the server's own, and are deleted
+/// again by [`Litter`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn includes_are_filled_from_the_mirror_and_say_why_when_they_cannot_be() {
+    use knobas_source::docs::{DocBlock, Inline, Unfilled};
+
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+    let mut create = async |title: &str, storage: String| {
+        let (status, made) = env
+            .call(
+                reqwest::Method::POST,
+                "rest/api/content",
+                Some(json!({
+                    "type": "page",
+                    "title": title,
+                    "space": { "key": env.space },
+                    "ancestors": [{ "id": parent.id }],
+                    "body": { "storage": { "value": storage, "representation": "storage" } },
+                })),
+            )
+            .await;
+        assert_eq!(status, 200, "creating {title}: {made}");
+        let id = made["id"].as_str().expect("the new page's id").to_owned();
+        litter.created.push(id.clone());
+        id
+    };
+    let target_title = format!("Docs reader included page [{LITTER}]");
+    let target = create(
+        &target_title,
+        concat!(
+            r#"<p>Whole body.</p>"#,
+            r#"<ac:structured-macro ac:name="excerpt" ac:schema-version="1"><ac:rich-text-body><p>The excerpt.</p></ac:rich-text-body></ac:structured-macro>"#,
+        )
+        .to_owned(),
+    )
+    .await;
+    // A space the source is not configured to sync: what the mirror cannot
+    // hold, whether or not the server has it.
+    let outside = "KNOBASOUTSIDE";
+    let include = |name: &str, space: &str, title: &str| {
+        format!(
+            r#"<ac:structured-macro ac:name="{name}" ac:schema-version="1"><ac:parameter ac:name=""><ac:link><ri:page ri:space-key="{space}" ri:content-title="{title}" /></ac:link></ac:parameter></ac:structured-macro>"#
+        )
+    };
+    let reader = create(
+        &format!("Docs reader includes [{LITTER}]"),
+        format!(
+            "<p>Ours.</p>{}{}{}",
+            include("include", &env.space, &target_title),
+            include("excerpt-include", &env.space, &target_title),
+            include("include", outside, "Elsewhere"),
+        ),
+    )
+    .await;
+
+    let state = app("confluence_live_includes", &env).await;
+    for id in [&target, &reader] {
+        sync_until(&state, id, "the new page", |_| true).await;
+    }
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &format!("{CONFLUENCE}:{reader}"),
+    )
+    .await
+    .expect("the reader reads the page");
+    let stored = mirrored(&state.pool, &reader)
+        .await
+        .map(|p| p["body"]["storage"]["value"].clone());
+
+    fn words(blocks: &[DocBlock]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                DocBlock::Paragraph { text } => Some(
+                    text.iter()
+                        .map(|i| match i {
+                            Inline::Text { text, .. } => text.as_str(),
+                            _ => "",
+                        })
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    type Seen = (
+        String,
+        Option<String>,
+        bool,
+        Option<String>,
+        String,
+        Option<Unfilled>,
+    );
+    let includes: Vec<Seen> = page
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            DocBlock::Include {
+                title,
+                space,
+                excerpt,
+                entity_id,
+                blocks,
+                unfilled,
+            } => Some((
+                title.clone(),
+                space.clone(),
+                *excerpt,
+                entity_id.clone(),
+                words(blocks),
+                *unfilled,
+            )),
+            _ => None,
+        })
+        .collect();
+    let target_entity = Some(format!("{CONFLUENCE}:{target}"));
+    assert_eq!(
+        includes,
+        vec![
+            (
+                target_title.clone(),
+                Some(env.space.clone()),
+                false,
+                target_entity.clone(),
+                "Whole body. The excerpt.".to_owned(),
+                None
+            ),
+            (
+                target_title.clone(),
+                Some(env.space.clone()),
+                true,
+                target_entity,
+                "The excerpt.".to_owned(),
+                None
+            ),
+            (
+                "Elsewhere".to_owned(),
+                Some(outside.to_owned()),
+                false,
+                None,
+                String::new(),
+                Some(Unfilled::NotMirrored)
+            ),
+        ],
+        "the includes: {:#?}\nstored: {stored:?}",
+        page.blocks
+    );
+    drop(litter);
+}
+
 /// **The Docs search's sync-time marks against the real Confluence** (#860,
 /// #861): a page made through Confluence's own REST API, with a heading, a
 /// link to the seeded parent and a comment, syncs into a `body_text` whose

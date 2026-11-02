@@ -5,7 +5,7 @@
 import { createRawSnippet, flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 
-import type { DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
+import type { DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, Unfilled, WriteAsk } from "../../ipc/entity";
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
@@ -356,6 +356,73 @@ test("a task list draws each item's state, nested too, beside an ordinary list, 
   ]);
   expect(items.map((li) => li.querySelector(":scope > .tf-box")?.classList.contains("tf-on") ?? null)).toEqual([true, false, true, null]);
   expect(doc.querySelectorAll("li input, li button, li [tabindex]"), "a task's box is drawn, never a control").toHaveLength(0);
+});
+
+test("an include draws the page it includes in a frame reading from <title>, which opens that page (spec #2432, stories 13 and 16)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "paragraph", text: [text("Ours.")] },
+    {
+      type: "include",
+      title: "Retry budget",
+      space: "ENG",
+      excerpt: true,
+      entity_id: "confluence:9",
+      blocks: [
+        { type: "heading", level: 2, text: [text("Budget")] },
+        { type: "paragraph", text: [text("Thirty retries.")] },
+      ],
+      unfilled: null,
+    },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks, sections: [] })) }));
+  const frame = target.querySelector(".tf-doc .tf-incl")!;
+  expect(frame.querySelector(".tf-incl-from")?.textContent?.replace(/\s+/g, " ").trim()).toBe("from Retry budget");
+  const link = frame.querySelector<HTMLAnchorElement>(".tf-incl-from a")!;
+  expect([link.getAttribute("href"), link.querySelector("em")?.textContent]).toEqual(["#/page/confluence%3A9", "Retry budget"]);
+  expect([...frame.querySelectorAll("h2, p")].map((e) => [e.tagName, e.textContent])).toEqual([
+    ["H2", "Budget"],
+    ["P", "Thirty retries."],
+  ]);
+  expect(target.querySelector(".tf-doc .tf-macro"), "a filled include is no placeholder").toBeNull();
+});
+
+test("an include knobas could not fill is a placeholder that says why and names the page, linking it or the source (spec #2432, stories 19 to 21)", async () => {
+  const miss = (title: string, why: Unfilled, entity_id: string | null): DocPage["blocks"][number] => ({
+    type: "include",
+    title,
+    space: null,
+    excerpt: why === "no_excerpt",
+    entity_id,
+    blocks: [],
+    unfilled: why,
+  });
+  const blocks: DocPage["blocks"] = [
+    miss("Gone", "not_mirrored", null),
+    miss("Plain", "no_excerpt", "confluence:3"),
+    miss("Level 5", "too_deep", "confluence:15"),
+    miss("Alpha", "cycle", "confluence:4"),
+  ];
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks, sections: [] })) }));
+  const boxes = [...target.querySelectorAll(".tf-doc .tf-macro")];
+  expect(boxes.map((b) => b.querySelector("span")?.textContent)).toEqual([
+    "This part includes Gone, which knobas does not mirror.",
+    "This part includes the excerpt of Plain, which has none.",
+    "This part includes Level 5 more than three includes deep, so knobas stops here.",
+    "This part includes Alpha, which includes this page again, so knobas stops here.",
+  ]);
+  expect(boxes.map((b) => b.querySelector("a.tf-pgl")?.getAttribute("href") ?? null)).toEqual([
+    null,
+    "#/page/confluence%3A3",
+    "#/page/confluence%3A15",
+    "#/page/confluence%3A4",
+  ]);
+  expect(boxes.map((b) => b.querySelector("b")?.textContent)).toEqual(["Gone", "Plain", "Level 5", "Alpha"]);
+  // A page the mirror does not hold is linked in the source.
+  expect(boxes.map((b) => b.querySelector("button")?.textContent ?? null)).toEqual(["Open this part in Confluence", null, null, null]);
+  boxes[0]!.querySelector("button")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+  expect(target.querySelector(".tf-doc .tf-incl")).toBeNull();
 });
 
 test("Copy copies the code, and the placeholder and Open in Confluence open the page", async () => {

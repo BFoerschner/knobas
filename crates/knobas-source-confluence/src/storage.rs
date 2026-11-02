@@ -211,6 +211,7 @@ mod tests {
             comments: Vec::new(),
             sections: Vec::new(),
             history: Vec::new(),
+            excerpt: None,
         };
         knobas_source::docs::search_text("", "", &content)
     }

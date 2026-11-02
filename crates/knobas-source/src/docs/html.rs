@@ -771,7 +771,7 @@ fn block_words(block: &DocBlock) -> String {
                 _ => String::new(),
             })
             .collect(),
-        DocBlock::Table { .. } => String::new(),
+        DocBlock::Table { .. } | DocBlock::Include { .. } => String::new(),
         DocBlock::Placeholder { name } => format!("[{name}]"),
     }
 }

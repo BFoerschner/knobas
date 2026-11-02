@@ -875,13 +875,19 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `code`: A code block, verbatim, with the language the source named.
  * - `table`: A table, row by row; a header cell says so.
  * - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+ * - `include`: Another page of the source drawn in place (spec #2432): the
+ *   page by `title` and `space` as a page link names one, and whether only
+ *   its `excerpt` is wanted. The adapter leaves the rest empty; knobas fills
+ *   it when the reader is read, from the mirror as it is now: `entity_id`
+ *   the mirrored page, `blocks` what it includes, or `unfilled` why it
+ *   could not ([`Unfilled`]).
  * - `placeholder`: Something the source has that the reader does not draw: the
  *   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
  *   so a page with a part knobas cannot draw says so (story 134).
  *
  * Source text, never markup.
  */
-export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
+export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "include", title: string, space: string | null, excerpt: boolean, entity_id: string | null, blocks: Array<DocBlock>, unfilled: Unfilled | null, } | { "type": "placeholder", name: string, };
 
 /**
  * One comment on a page.
@@ -3983,6 +3989,18 @@ untracked: Array<string>,
  * listed.
  */
 untracked_truncated: boolean, };
+
+/**
+ * Why knobas could not fill a [`DocBlock::Include`] when the reader was read.
+ *
+ * - `not_mirrored`: The mirror holds no page of that title in that space of
+ *   the same source (another space, no access, deleted).
+ * - `no_excerpt`: The page is mirrored, but marks no excerpt.
+ * - `too_deep`: The include sits more than [`INCLUDE_DEPTH`] includes deep.
+ * - `cycle`: The page is already on the way here: a page including itself,
+ *   or one including a page that includes it.
+ */
+export type Unfilled = "not_mirrored" | "no_excerpt" | "too_deep" | "cycle";
 
 /**
  * What a pasted URL resolved to: the entity, and the kind that says where it

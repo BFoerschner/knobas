@@ -108,6 +108,10 @@
   color: var(--ink-2); margin: 0 0 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
 }
 .tf-macro .tf-btn { margin-left: auto; }
+/* An include (spec #2432): the other page's words in a light frame that says where they are from. */
+.tf-incl { border-left: 2px solid var(--rule-2); padding: 2px 0 2px 16px; margin: 0 0 18px; }
+.tf-incl-from { font: var(--t-xs) var(--sans); color: var(--ink-2); margin: 0 0 6px; }
+.tf-incl > :last-child { margin-bottom: 0; }
 .tf-tchip {
   display: inline-flex; gap: 5px; align-items: baseline; font-family: var(--sans); font-size: var(--t-md); padding: 0 6px;
   border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); text-decoration: none; white-space: nowrap; line-height: 1.5;

@@ -155,6 +155,8 @@ type Proto =
   | { info: string }
   | { warn: string }
   | { note: string }
+  /** An include (spec #2432): another page's body, or its excerpt, filled as the real read fills it. */
+  | { include: string; excerpt?: boolean }
   | { macro: string };
 
 type Task = [done: boolean, text: string, under?: Task[]];
@@ -163,6 +165,8 @@ interface Body {
   labels: string[];
   version: number;
   blocks: Proto[];
+  /** What the page marks as its excerpt, for an excerpt include of it. */
+  excerpt?: Proto[];
   comments: [string, string, string][];
 }
 
@@ -244,6 +248,7 @@ const BODIES: Record<string, Body> = {
       { h: "Escalation" },
       { table: [["After", "Who"], ["15 min unacknowledged", "second on-call"], ["30 min prod outage", "Tomasz Wójcik"], ["Money at risk", "Priya Nair"]] },
     ],
+    excerpt: [{ p: "On-call rotates weekly on Tuesdays at 10:00. The current person is in the #oncall channel topic." }],
     comments: [["TW", "2026-08-19 09:00", "Rewriting the Ledger section this week."]],
   },
   "Ledger reconciliation runbook": {
@@ -255,6 +260,9 @@ const BODIES: Record<string, Body> = {
       { h: "Steps" },
       { ol: ["Export the flagged rows.", "Group them by PSP code and amount.", "For partial refunds, check whether the fee was booked twice; that was [[PAY-228]]."] },
       { code: "select payout_id, ledger_amount, psp_amount\nfrom recon.flagged\nwhere created_at > now() - interval '1 day'\norder by abs(ledger_amount - psp_amount) desc;", lang: "sql" },
+      { h: "Who to ask" },
+      { include: "On-call handbook", excerpt: true },
+      { include: "Reconciliation in the old ledger" },
     ],
     comments: [],
   },
@@ -390,7 +398,24 @@ function block(b: Proto): DocBlock {
   if ("info" in b) return { type: "panel", kind: "info", title: null, blocks: [para(b.info)] };
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
+  if ("include" in b) return include(b.include, b.excerpt ?? false);
   return { type: "placeholder", name: b.macro };
+}
+
+/** An include as the real read fills it: the page's blocks or its excerpt, or why not. */
+function include(title: string, excerpt: boolean): DocBlock {
+  const page = PAGES.find((p) => p.title === title);
+  const body = BODIES[title];
+  const drawn = excerpt ? body?.excerpt : body?.blocks;
+  return {
+    type: "include",
+    title,
+    space: null,
+    excerpt,
+    entity_id: page?.id ?? null,
+    blocks: drawn?.map(block) ?? [],
+    unfilled: page === undefined ? "not_mirrored" : drawn === undefined ? "no_excerpt" : null,
+  };
 }
 
 /** prototype-6's generic body for a page it does not write out. */
@@ -457,7 +482,7 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
     for (const b of list) {
       if (b.type === "table") note("table");
       else if (b.type === "code") note("code");
-      else if (b.type === "placeholder" || (b.type === "panel" && inPanel)) note("macro");
+      else if (b.type === "placeholder" || b.type === "include" || (b.type === "panel" && inPanel)) note("macro");
       else if (b.type === "panel") visit(b.blocks, true);
       else if (b.type === "paragraph") inlines(b.text);
       else if (b.type === "list") {
