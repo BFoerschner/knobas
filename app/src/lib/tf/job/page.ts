@@ -3,7 +3,9 @@
  *
  * - `#/ticket/<entity id>`, the ticket's page, in its reading mood unless
  *   the ticket is the chosen job; opening it chooses nothing. The page has
- *   no tabs (#2399): an old `/<tab>` after the id draws the same page;
+ *   no tabs (#2399): an old `/<tab>` after the id draws the same page, and
+ *   `/mention` (`MENTION_TAB`, what an inbox mention opens) draws it brought
+ *   to the newest comment that mentions the reader;
  * - `#/job/<key or id>[/<tab>]`, the old way in (links, bookmarks, the timer
  *   chip, *Start work*): the page resolves the ticket, chooses it as the job
  *   (`chosen.svelte.ts`) and replaces the address with the ticket's;
@@ -16,7 +18,7 @@
  * the page that already read it.
  */
 import { definePage } from "../page-entry";
-import type { TfRoute } from "../route";
+import { MENTION_TAB, type TfRoute } from "../route";
 import { chosenJob } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
 
@@ -36,6 +38,7 @@ export const page = definePage({
   props: ({ route, back, timer, layers, ontimer, onstarttimer, jobPorts }) => ({
     segment: segmentOf(route) ?? "",
     choose: route.view === "job" && route.key !== null,
+    toMention: route.view === "ticket" && route.tab === MENTION_TAB,
     back,
     timer,
     layers,
