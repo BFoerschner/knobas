@@ -211,3 +211,54 @@ async fn a_monitor_carries_its_type_on_the_board_and_on_a_hit() {
         .collect();
     assert_eq!(hits, [(id.as_str(), Some(kind.as_str()))]);
 }
+
+/// A declaration change rewrites `sync.item` rows under `0028`'s exclusive
+/// key, so every statement that writes `sync.item` must take the shared key
+/// before it locks a row. A stamp (`0064`) names none of the columns the row
+/// trigger watches: were the key taken only after its rows (`0028`'s
+/// statement trigger), a sync stamping a row while a declaration change
+/// waited to rewrite it would deadlock with it.
+#[tokio::test]
+async fn a_stamp_waits_for_a_declaration_change_before_it_locks_a_row() {
+    let _serial = SERIAL.lock().await;
+    let pool = pool().await;
+    configure(&pool, "gitea", "gitea").await;
+    declare_gitea(&pool).await;
+    let repo = token("lock");
+    let id = format!("gitea:tidewater/{repo}#3");
+    item(&pool, &id, "gitea", "pr", pr_payload(&repo)).await;
+
+    // The declaration writer: the exclusive key, as its trigger takes it.
+    let mut change = pool.begin().await.unwrap();
+    sqlx::query("select pg_advisory_xact_lock(627, 0)")
+        .execute(&mut *change)
+        .await
+        .unwrap();
+    // A sync run stamps the row meanwhile.
+    let stamp = {
+        let pool = pool.clone();
+        let id = id.clone();
+        tokio::spawn(async move {
+            let mut run = pool.begin().await.unwrap();
+            sqlx::query("update sync.item set synced_at = now() where entity_id = $1")
+                .bind(&id)
+                .execute(&mut *run)
+                .await?;
+            run.commit().await
+        })
+    };
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    // The recompute rewrites the row: it must not wait on the stamp.
+    sqlx::query("set local lock_timeout = '3s'")
+        .execute(&mut *change)
+        .await
+        .unwrap();
+    sqlx::query("update sync.item set key_cell = 'recomputed' where entity_id = $1")
+        .bind(&id)
+        .execute(&mut *change)
+        .await
+        .expect("the stamp holds no row lock while it waits for the key");
+    change.commit().await.unwrap();
+    stamp.await.unwrap().expect("the stamp runs once the change commits");
+    assert_eq!(key_cell(&pool, &id).await.as_deref(), Some("recomputed"));
+}

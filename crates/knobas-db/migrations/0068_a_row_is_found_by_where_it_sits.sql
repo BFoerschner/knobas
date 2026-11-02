@@ -43,8 +43,13 @@
 --   changed rows' old or new declarations name, and only those whose value
 --   changed. A truncate recomputes every row.
 --
--- Both take `0028`'s advisory key `(627, 0)` the way its triggers do: a row
--- write shared, a declaration change exclusive, before reading anything.
+-- Both take `0028`'s advisory key `(627, 0)`: a declaration change
+-- exclusive, as its triggers do, and every statement that writes `sync.item`
+-- shared, in a `before` statement trigger, so before it locks a row. The
+-- recompute rewrites `sync.item` rows under the exclusive key, which `0028`'s
+-- never did; a stamp (`0064`) names none of the row trigger's columns, and
+-- taking the key only in `0028`'s `after` statement trigger, past its row
+-- locks, deadlocked it with a recompute waiting on those rows.
 --
 -- ## The index
 --
@@ -73,10 +78,20 @@ language sql stable as $fn$
       limit 1) d
 $fn$;
 
-create function sync.item_key_cell() returns trigger
+create function sync.item_write_shares_the_key() returns trigger
 language plpgsql as $fn$
 begin
   perform pg_advisory_xact_lock_shared(627, 0);
+  return null;
+end
+$fn$;
+create trigger item_write_shares_the_key before insert or update or delete on sync.item
+  for each statement execute function sync.item_write_shares_the_key();
+
+-- Under the shared key the statement trigger above took.
+create function sync.item_key_cell() returns trigger
+language plpgsql as $fn$
+begin
   new.key_cell := sync.key_cell_of(new.source_id, new.kind, new.payload);
   return new;
 end
