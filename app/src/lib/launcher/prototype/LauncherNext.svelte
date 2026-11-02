@@ -67,6 +67,12 @@
   the kind), the key is as large as the title and in ink, the second line is
   the sans at 12 px, the provenance column is as wide as its text.
 
+  Round 9 (Björn, 2026-11-02, "less is more"): the row is three cells like
+  a table (the monogram in the state's colour, a key column, the title); no
+  second line, no provenance, no counts on the headings; `#b` is the build
+  configurations (pipelines), and builds and commits are left out of the
+  answer altogether. `RowNext.svelte` and `ResultsNext.svelte` draw it.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -114,12 +120,15 @@
   import { clockLabel, keyOf } from "../../time/format";
   import Chips from "../Chips.svelte";
   import QueryBox from "../QueryBox.svelte";
-  import Results from "../Results.svelte";
-  import Row from "../Row.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "../actions";
   import type { InboxPreview, LauncherRow, TodayTime } from "../rows";
   import { Session, type SessionPorts } from "../session.svelte";
   import BoardNext from "./BoardNext.svelte";
+  import ResultsNext from "./ResultsNext.svelte";
+  import { cellOf } from "./cells";
+  import RowNext from "./RowNext.svelte";
+  import { pipelineHash } from "../../tf/builds/builds";
+  import { kindMonogram, kindSingular } from "../../shell/kinds";
 
   let {
     open = $bindable(false),
@@ -264,6 +273,9 @@
   // svelte-ignore state_referenced_locally
   const realHome = ports?.launcherHome ?? defaultHome;
 
+  /** Kinds nobody looks for in the box (Björn, round 9): a run and a commit are reached from their pipeline and repository. */
+  const LEFT_OUT = new Set(["build", "commit"]);
+
   /** The board without lists: the saved ones are kept aside for `#l`, the built-ins are gone. */
   async function homeNext(): Promise<LauncherHome> {
     const home = await realHome();
@@ -271,7 +283,8 @@
     listsLoaded = true;
     const starred = new Set(favourites.map((row) => row.entity_id));
     const starredLists = favouriteLists.map((id) => lists.find((list) => list.id === id)).filter((list): list is SmartListSummary => list !== undefined);
-    return { ...home, smart_lists: starredLists, recent: [...favourites, ...home.recent.filter((row) => !starred.has(row.entity_id))] };
+    const recent = home.recent.filter((row) => !starred.has(row.entity_id) && !LEFT_OUT.has(row.kind));
+    return { ...home, smart_lists: starredLists, recent: [...favourites, ...recent] };
   }
 
   const BLANK = { updated_at: null, state: null, rank: 1, snippet: [] as SearchHit["snippet"] };
@@ -371,7 +384,7 @@
   const realSearch = ports?.search ?? defaultSearch;
 
   /** `#x`: letters after the hash are kinds, and they combine (`#rl`); the backend filters on six, two are answered here. */
-  const KIND_OF: Record<string, string> = { t: "ticket", p: "pr", r: "repo", b: "build", m: "monitor", d: "page" };
+  const KIND_OF: Record<string, string> = { t: "ticket", p: "pr", r: "repo", b: "pipeline", m: "monitor", d: "page" };
   const LOCAL = new Set(["l", "i"]);
   const TOKEN = /^#([tprbmdli]+)$/i;
 
@@ -418,6 +431,7 @@
     }
     const sent = kinds.length === 0 ? query : { ...query, raw: [...kinds.map((kind) => `kind:${kind}`), text].join(" ") };
     let response = await realSearch(sent);
+    response = { ...response, groups: response.groups.filter((group) => !LEFT_OUT.has(group.kind)) };
     if (kinds.length === 1 && kinds[0] === "page") response = docsRow(response, at);
     if (localGroups.length > 0) {
       response = { ...response, groups: [...response.groups, ...localGroups], total: response.total + localGroups.reduce((n, group) => n + group.total, 0) };
@@ -455,7 +469,7 @@
     { token: "#t", insert: "#t", summary: "tickets" },
     { token: "#p", insert: "#p", summary: "pull requests" },
     { token: "#r", insert: "#r", summary: "repositories" },
-    { token: "#b", insert: "#b", summary: "builds" },
+    { token: "#b", insert: "#b", summary: "pipelines" },
     { token: "#m", insert: "#m", summary: "monitors" },
     { token: "#d", insert: "#d", summary: "pages" },
     { token: "#l", insert: "#l", summary: "lists" },
@@ -1011,6 +1025,9 @@
         items.push(...openInRows(entity, "The checkout under the clones root"));
         items.push({ id: "clone", label: "Clone", detail: "Into a new folder under the clones root", run: () => doing(`Cloning ${entity.title}`, () => cloneRepo(id)) });
         break;
+      case "pipeline":
+        items.push({ id: "run", label: "Run", detail: "Queued as a write to the source", run: () => doing(`Run queued for ${entity.title}`, () => submitWrite({ TriggerBuild: { entity: id } })) });
+        break;
       case "build":
         items.push({ id: "rerun", label: "Re-run", detail: "Queued as a write to the source", run: () => doing(`Re-run queued for ${entity.title}`, () => submitWrite({ RerunBuild: { entity: id } })) });
         break;
@@ -1203,6 +1220,7 @@
           const item = inboxItemOf(row);
           return item ? (opener(item)?.href ?? "#/inbox") : "#/inbox";
         }
+        if (row.hit.kind === "pipeline") return pipelineHash(row.hit.entity_id);
         if (row.group.kind === "docs-search") {
           // PROTOTYPE: the Docs page does not read this yet; the hand-off is the implementer's.
           sessionStorage.setItem("knobas.prototype.docs-search", keyOf(row.hit.entity_id));
@@ -1490,7 +1508,7 @@
   const pinnedHit = $derived.by(() => {
     if (!sheet) return null;
     if (sheet.row.kind === "hit") return sheet.row.hit;
-    if (sheet.row.kind === "recent") return { ...sheet.row.row, snippet: [] };
+    if (sheet.row.kind === "recent") return sheet.row.row;
     return null;
   });
   /** What the footer says Tab would open: the word alone, as asked, once a row with actions is under the cursor. */
@@ -1529,16 +1547,14 @@
         <!-- The row the sheet acts on, lifted under the box; the box keeps its words aside. -->
         <div class="pinned">
           {#if pinnedHit}
-            <Row
-              entityId={pinnedHit.entity_id}
-              kind={pinnedHit.kind}
-              sourceId={pinnedHit.source_id}
+            {@const cell = cellOf(pinnedHit.kind, pinnedHit.entity_id, sheet.row.kind === "hit" ? sheet.row.group.label : kindSingular(pinnedHit.kind))}
+            <RowNext
+              monogram={sheet.row.kind === "hit" ? sheet.row.group.monogram : kindMonogram(pinnedHit.kind)}
+              tone={pinnedHit.state?.tone ?? null}
+              kindName={kindSingular(pinnedHit.kind)}
+              cell={cell.cell}
+              mono={cell.mono}
               title={pinnedHit.title}
-              syncedAt={pinnedHit.synced_at}
-              path={pinnedHit.path}
-              state={pinnedHit.state}
-              sources={health}
-              {now}
               id={`${uid}-pinned`}
               selected={false}
               onopen={() => {}}
@@ -1727,13 +1743,11 @@
           {:else if session.response && session.response.groups.length === 0 && /(^|\s)#[li](\s|$)/i.test(session.raw) && session.response.interpreted.filters.kinds.length === 0}
             <p class="tf-ln-none">Nothing in your lists or the inbox matches.</p>
           {:else if session.response}
-            <Results
+            <ResultsNext
               response={session.response}
               rows={session.rows}
               selected={session.selected}
               {optionId}
-              sources={health}
-              {now}
               onopen={activate}
               onhover={(index) => (session.selected = index)}
             />
@@ -1772,9 +1786,6 @@
         <span><kbd>⌘?</kbd> help</span>
         <span><kbd>Esc</kbd> back one step</span>
         <span class="tf-spacer"></span>
-        {#if session.response}
-          <span class="tf-ln-took">{session.response.total} matches · {session.response.took_ms} ms</span>
-        {/if}
       {/if}
     {/snippet}
   </TfDialog>
@@ -1782,15 +1793,6 @@
 
 <style>
   /* PROTOTYPE rules. The shipped ones are `tf/css/launcher.css`; these would join them. */
-  /* The rows, round 8: three columns instead of four, one size for the key and the title, one grey for the rest. */
-  :global(.tf .tf-launch .tf-ln-res) { grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; min-height: 40px; padding: 7px 18px; }
-  :global(.tf-launch .tf-ln-res .tf-ln-ty) { display: none; }
-  :global(.tf-launch .tf-ln-res .tf-ln-t) { font-size: var(--t-md); line-height: 1.35; }
-  :global(.tf-launch .tf-ln-res .tf-ln-k) { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin-right: 8px; }
-  :global(.tf-launch .tf-ln-res .tf-ln-pa) { font-family: var(--sans); font-size: var(--t-xs); margin-top: 2px; }
-  :global(.tf-launch .tf-ln-res .tf-ln-sn) { font-size: var(--t-xs); margin-top: 2px; }
-  :global(.tf-launch .tf-ln-res .tf-ln-sy) { font-size: var(--t-2xs); padding-left: 6px; max-width: 160px; }
-  :global(.tf-launch .tf-ln-res .tf-chip.tf-state) { margin-left: 8px; }
   :global(.tf-launch .tf-ln-h) { padding-top: 10px; }
   /* The box's own ⌘K badge is gone (Björn, round 4); `QueryBox.svelte` would lose the element. */
   :global(.tf-launch .tf-ln-q > kbd) { display: none; }

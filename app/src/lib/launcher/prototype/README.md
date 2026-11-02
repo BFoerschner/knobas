@@ -26,7 +26,7 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | Empty box | The recent items, nothing else. The box says only "⌘? for help". |
 | ⌘? | From any search: the box empties and narrows the filters (one word each), Enter adds the picked one to the search that was there, the keys sit at the bottom. `#r` then `#l` becomes `#rl`. |
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
-| `#t`, `#p`, `#r`, `#b`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests, repositories, builds, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
+| `#t`, `#p`, `#r`, `#b`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests, repositories, pipelines, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
 | Tab on a row | The row lifts under the box, the box empties and the panel becomes its actions. Typing in the box narrows them (fuzzy, in order of the letters). Esc, Tab or Backspace on the empty box go back to the results with the search words back in the box. Never out of the dialog. The footer says just "Tab actions". |
 | ⌘K while open | Gives the box its focus back, wherever a click left it. Nothing else: Tab is the one way into the actions. |
 | An action that asks something | A **flow**: the sheet shows the step's choices, the box narrows them, Enter picks, the next step follows, the last pick runs the action. Esc or Backspace on the empty box step back. |
@@ -52,7 +52,7 @@ app today:
 | ticket | *Start timer*, *Work on this* (`#/job/<id>`), *Copy key* |
 | pull request | *Review the files* (the Files changed tab), *Conversation*, *Approve* (a queued write), *Merge…* (a flow: merge commit, squash or rebase, then a queued `MergePullRequest`), *Open in ⟨app⟩* (one row per application under Settings › Checkouts, the default first), *Copy title* |
 | repo | *Create pull request…* (a flow: the branch with the change, then the branch it goes into, from the repository's Branches view; then the compare page), *Pull requests*, *Branches*, *Open in ⟨app⟩*, *Clone* (ADR-0023), *Copy title* |
-| build | *Re-run* (a queued write), *Copy title* |
+| pipeline | *Run* (a queued `TriggerBuild`), *Copy title* |
 | monitor | *Acknowledge alert*, *Copy title* |
 | commit, branch | *Open in ⟨app⟩* (ADR-0034), *Copy title* |
 | page, asset, note | the pair and *Copy title* |
@@ -73,15 +73,15 @@ source offers and then open the ticket page's dialog with it set.
 
 ### The rows
 
-A readability pass (round 8), as `:global` rules in the component that
-would move to `tf/css/launcher.css`:
+Round 9, "less is more": `RowNext.svelte` and `ResultsNext.svelte` draw
+the rows; the shipped `Row.svelte` and `Results.svelte` would take their
+shape.
 
-- three columns, not four: the monogram names the kind, the word beside it is gone, the title gets the room;
-- the key is as large as the title and in ink, 600 weight, mono: it is what the eye looks for;
-- the title is 14 px regular ink; the state chip follows it;
-- one second line at 12 px in the sans, one grey: the path, or the excerpt with its mark;
-- the provenance is as wide as its text, 11 px, at the right;
-- rows are 40 px high with 7 px of padding, headings get 2 px more air.
+- Three cells like a table: the kind's monogram, a key column, the title.
+- The monogram is coloured by the state's tone, the same tones the chips use: a merged pull request, a failed pipeline, a monitor that is down are told by colour alone. No chip, no state word.
+- The key column is an identifier where a person reads one (a ticket's key, a pull request's number, an inbox line's time), in the mono face; otherwise the kind's word.
+- No second line, no provenance, no "no secret", no counts on the headings or in the footer. What a second line said is in the title or not worth the row's height; a repository's path is its name.
+- Builds are their configurations: `#b` finds pipelines, coloured by their last run. Runs and commits are not in the answer at all; they are reached from the pipeline and the repository.
 
 ## What is real and what is a shortcut
 

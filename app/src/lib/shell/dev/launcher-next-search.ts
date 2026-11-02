@@ -17,16 +17,18 @@
  * Throwaway: on the prototype branch, never on main.
  */
 import type { ResultGroup, SearchHit, SearchResponse, Segment } from "../../ipc/search";
+import { fakePipelines } from "./fake/builds";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./fake/corpus";
 import { fakeDocPages } from "./fake/docs";
 
 /** The engine's group order (`knobas_search::group`), unknown kinds last. */
-const ORDER = ["ticket", "pr", "build", "page", "note", "commit", "branch", "repo", "asset", "monitor", "incident"];
+const ORDER = ["ticket", "pr", "pipeline", "build", "page", "note", "commit", "branch", "repo", "asset", "monitor", "incident"];
 
 const WORDS: Record<string, [label: string, plural: string, monogram: string]> = {
   ticket: ["Ticket", "Tickets", "TK"],
   pr: ["Pull request", "Pull requests", "PR"],
   build: ["Build", "Builds", "BU"],
+  pipeline: ["Pipeline", "Pipelines", "PL"],
   page: ["Page", "Pages", "PG"],
   note: ["Note", "Notes", "NT"],
   commit: ["Commit", "Commits", "CM"],
@@ -126,7 +128,20 @@ function candidates(): Candidate[] {
       body: "",
     };
   });
-  return [...fromCorpus, ...fromDocs];
+  // The build configurations (round 9): what `#b` finds; their state is the last run's.
+  const fromPipelines: Candidate[] = fakePipelines().map((pipeline) => ({
+    entity_id: pipeline.entity_id,
+    kind: "pipeline",
+    source_id: pipeline.source_id,
+    title: pipeline.name,
+    updated_at: pipeline.recent[0]?.updated_at ?? null,
+    synced_at: SYNCED_AT,
+    path: pipeline.path.join(" › "),
+    state: pipeline.recent[0]?.state ?? null,
+    haystack: `${pipeline.name} ${pipeline.path.join(" ")}`.toLowerCase(),
+    body: "",
+  }));
+  return [...fromCorpus, ...fromDocs, ...fromPipelines];
 }
 
 /**

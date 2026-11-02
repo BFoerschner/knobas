@@ -6,9 +6,10 @@
 <script lang="ts">
   import type { LauncherHome } from "../../ipc";
   import type { CredentialHealth } from "../../ipc/sources";
-  import { sharesKey } from "../format";
-  import Row from "../Row.svelte";
+  import { kindMonogram, kindSingular } from "../../shell/kinds";
   import type { LauncherRow } from "../rows";
+  import { cellOf } from "./cells";
+  import RowNext from "./RowNext.svelte";
 
   let {
     home,
@@ -34,44 +35,44 @@
   } = $props();
 
   const recentFrom = $derived(Math.max(0, rows.findIndex((row) => row.kind === "recent")));
-  const shares = $derived(sharesKey(home.recent));
+  // svelte-ignore state_referenced_locally
+  void sources;
+  // svelte-ignore state_referenced_locally
+  void now;
 </script>
 
 {#if home.smart_lists.length + favourites > 0}
-  <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span><span class="tf-ln-n">{home.smart_lists.length + favourites}</span></div>
+  <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span></div>
 {/if}
 {#each home.smart_lists as list, i (list.id)}
   {@const row = rows[i]}
-  <div class="tf-ln-slrow" class:tf-ln-on={i === selected} role="presentation" onmouseenter={() => onhover(i)}>
-    <button id={optionId(i)} class="tf-ln-sl" role="option" aria-selected={i === selected} disabled={list.needs_attention} onclick={() => row && onopen(row)}>
-      <span class="tf-ln-nm">
-        {list.label}
-        <small class:tf-ln-att={list.needs_attention}>{list.description}</small>
-      </span>
-      <span class="tf-ln-c" class:tf-ln-chg={list.changed}>
-        {#if list.needs_attention}<span class="tf-ln-att">Needs attention</span>{:else}{list.count}{/if}
-      </span>
-    </button>
-  </div>
+  <RowNext
+    monogram="LI"
+    tone={list.needs_attention ? "err" : null}
+    kindName={list.needs_attention ? "Saved list: needs attention" : "Saved list"}
+    cell="list"
+    title={list.label}
+    id={optionId(i)}
+    selected={i === selected}
+    onopen={() => row && onopen(row)}
+    onhover={() => onhover(i)}
+  />
 {/each}
 {#each home.recent as item, i (item.entity_id)}
   {@const index = recentFrom + i}
   {@const row = rows[index]}
   {#if i === favourites}
-    <div class="tf-ln-h"><span class="tf-ln-lab">Recent</span><span class="tf-ln-n">{home.recent.length - favourites}</span></div>
+    <div class="tf-ln-h"><span class="tf-ln-lab">Recent</span></div>
   {/if}
   {#if row}
-    <Row
-      entityId={item.entity_id}
-      kind={item.kind}
-      sourceId={item.source_id}
+    {@const cell = cellOf(item.kind, item.entity_id, kindSingular(item.kind))}
+    <RowNext
+      monogram={kindMonogram(item.kind)}
+      tone={item.state?.tone ?? null}
+      kindName={item.state ? `${kindSingular(item.kind)}: ${item.state.text}` : kindSingular(item.kind)}
+      cell={cell.cell}
+      mono={cell.mono}
       title={item.title}
-      syncedAt={item.synced_at}
-      path={item.path}
-      state={item.state}
-      named={shares(item)}
-      {sources}
-      {now}
       id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}
