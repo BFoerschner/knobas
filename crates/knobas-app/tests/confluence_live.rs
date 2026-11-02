@@ -180,7 +180,10 @@ fn env() -> Env {
     };
     Env {
         home: text(&seeded["home_page_id"], "home_page_id"),
-        outside: text(&showcase["outside_space"]["key"], "showcase.outside_space.key"),
+        outside: text(
+            &showcase["outside_space"]["key"],
+            "showcase.outside_space.key",
+        ),
         assets: text(&showcase["assets"], "showcase.assets"),
         showcase: showcase_pages,
         url: need("KNOBAS_CONFLUENCE_URL")
@@ -1047,8 +1050,7 @@ fn showcase_html(env: &Env, slug: &str) -> Vec<String> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../testenv/confluence-showcase")
         .join(format!("{slug}.xml"));
-    let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let raw = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     raw.split(r#"<ac:structured-macro ac:name="html""#)
         .skip(1)
         .map(|macro_on| {
@@ -1080,10 +1082,9 @@ fn words(blocks: &[knobas_source::docs::DocBlock]) -> String {
             match b {
                 DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => inlines(text, out),
                 DocBlock::List { items, .. } => items.iter().for_each(|i| walk(&i.blocks, out)),
-                DocBlock::Table { rows } => rows
-                    .iter()
-                    .flatten()
-                    .for_each(|c| walk(&c.blocks, out)),
+                DocBlock::Table { rows } => {
+                    rows.iter().flatten().for_each(|c| walk(&c.blocks, out))
+                }
                 DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
                     walk(blocks, out)
                 }
@@ -1095,7 +1096,10 @@ fn words(blocks: &[knobas_source::docs::DocBlock]) -> String {
     }
     let mut out = Vec::new();
     walk(blocks, &mut out);
-    out.concat().split_whitespace().collect::<Vec<_>>().join(" ")
+    out.concat()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// **The Docs reader's blocks, from the seeded showcase page** (#859,
@@ -1126,7 +1130,11 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         "the declared chain ends at the space home, the mirrored parent"
     );
     let (_, version) = env.body_and_version(&showcase.id).await;
-    assert_eq!(page.version, Some(version as u64), "the version Confluence holds");
+    assert_eq!(
+        page.version,
+        Some(version as u64),
+        "the version Confluence holds"
+    );
     assert_eq!(page.labels, vec!["knobas-docs"]);
     assert!(page.web_url.is_some());
 
@@ -1305,7 +1313,13 @@ async fn the_showcase_tables_read_with_their_spans_and_rich_cells() {
         }]
     );
     assert!(
-        matches!(held("A panel").as_slice(), [DocBlock::Panel { kind: PanelKind::Warning, .. }]),
+        matches!(
+            held("A panel").as_slice(),
+            [DocBlock::Panel {
+                kind: PanelKind::Warning,
+                ..
+            }]
+        ),
         "{:#?}",
         held("A panel")
     );
@@ -1318,8 +1332,15 @@ async fn the_showcase_tables_read_with_their_spans_and_rich_cells() {
         "{:#?}",
         held("An expand")
     );
-    let [DocBlock::Include { excerpt: true, entity_id: Some(_), blocks, unfilled: None, .. }] =
-        held("An include").as_slice()
+    let [
+        DocBlock::Include {
+            excerpt: true,
+            entity_id: Some(_),
+            blocks,
+            unfilled: None,
+            ..
+        },
+    ] = held("An include").as_slice()
     else {
         panic!("the include in a cell is filled: {:#?}", held("An include"))
     };
@@ -1363,7 +1384,9 @@ async fn the_showcase_task_lists_and_expands_read_as_the_reader_draws_them() {
         .blocks
         .iter()
         .find_map(|b| match b {
-            DocBlock::List { items, .. } if items.iter().any(|i| i.checked.is_some()) => Some(items),
+            DocBlock::List { items, .. } if items.iter().any(|i| i.checked.is_some()) => {
+                Some(items)
+            }
             _ => None,
         })
         .unwrap_or_else(|| panic!("the task list: {:#?}", page.blocks));
@@ -1418,13 +1441,24 @@ async fn the_showcase_task_lists_and_expands_read_as_the_reader_draws_them() {
         .collect();
     assert_eq!(expands.len(), 4, "{expands:#?}");
     assert_eq!(expands[0].0, "Rollback");
-    assert!(matches!(expands[0].1.as_slice(), [DocBlock::List { .. }]), "{expands:#?}");
-    assert_eq!(expands[1].0, "Retry budget per PSP");
-    assert!(matches!(expands[1].1.as_slice(), [DocBlock::Table { .. }]), "{expands:#?}");
-    assert_eq!(expands[2].0, "Quarantine ledger");
-    assert!(matches!(expands[2].1.as_slice(), [DocBlock::Panel { .. }]), "{expands:#?}");
     assert!(
-        !expands[3].0.is_empty() && !["Rollback", "Retry budget per PSP", "Quarantine ledger"].contains(&expands[3].0.as_str()),
+        matches!(expands[0].1.as_slice(), [DocBlock::List { .. }]),
+        "{expands:#?}"
+    );
+    assert_eq!(expands[1].0, "Retry budget per PSP");
+    assert!(
+        matches!(expands[1].1.as_slice(), [DocBlock::Table { .. }]),
+        "{expands:#?}"
+    );
+    assert_eq!(expands[2].0, "Quarantine ledger");
+    assert!(
+        matches!(expands[2].1.as_slice(), [DocBlock::Panel { .. }]),
+        "{expands:#?}"
+    );
+    assert!(
+        !expands[3].0.is_empty()
+            && !["Rollback", "Retry budget per PSP", "Quarantine ledger"]
+                .contains(&expands[3].0.as_str()),
         "the untitled expand gets the reader's own title: {expands:#?}"
     );
 
@@ -1498,7 +1532,12 @@ async fn html_macros_read_as_embeds_of_their_markup() {
             .await
             .expect("the page's search text");
     assert!(body_text.contains("Settled today"), "{body_text:?}");
-    for code in ["getElementById", "SwaggerUIBundle", "openapi.json", "swagger-ui-bundle"] {
+    for code in [
+        "getElementById",
+        "SwaggerUIBundle",
+        "openapi.json",
+        "swagger-ui-bundle",
+    ] {
         assert!(
             !body_text.contains(code),
             "{code} is script, not words: {body_text:?}"
@@ -1537,7 +1576,9 @@ async fn iframe_and_widget_macros_read_as_url_embeds() {
         vec![
             &DocBlock::Embed {
                 name: "iframe".into(),
-                content: EmbedContent::Url { url: status.clone() },
+                content: EmbedContent::Url {
+                    url: status.clone()
+                },
             },
             &DocBlock::Embed {
                 name: "widget".into(),
@@ -1601,20 +1642,52 @@ async fn includes_are_filled_from_the_mirror_and_say_why_when_they_cannot_be() {
             .filter(|b| matches!(b, DocBlock::Include { .. }))
             .collect()
     }
-    type Seen = (String, Option<String>, bool, Option<String>, Option<Unfilled>);
+    type Seen = (
+        String,
+        Option<String>,
+        bool,
+        Option<String>,
+        Option<Unfilled>,
+    );
     let seen = |b: &DocBlock| -> Seen {
-        let DocBlock::Include { title, space, excerpt, entity_id, unfilled, .. } = b else {
+        let DocBlock::Include {
+            title,
+            space,
+            excerpt,
+            entity_id,
+            unfilled,
+            ..
+        } = b
+        else {
             unreachable!()
         };
-        (title.clone(), space.clone(), *excerpt, entity_id.clone(), *unfilled)
+        (
+            title.clone(),
+            space.clone(),
+            *excerpt,
+            entity_id.clone(),
+            *unfilled,
+        )
     };
     let top = includes(&page.blocks);
     let synced = Some(env.space.clone());
     assert_eq!(
         top.iter().map(|b| seen(b)).collect::<Vec<_>>(),
         vec![
-            ("Showcase: payout runbook".to_owned(), synced.clone(), false, entity("runbook"), None),
-            ("Showcase: payout runbook".to_owned(), synced.clone(), true, entity("runbook"), None),
+            (
+                "Showcase: payout runbook".to_owned(),
+                synced.clone(),
+                false,
+                entity("runbook"),
+                None
+            ),
+            (
+                "Showcase: payout runbook".to_owned(),
+                synced.clone(),
+                true,
+                entity("runbook"),
+                None
+            ),
             (
                 outside.title.clone(),
                 Some(env.outside.clone()),
@@ -1622,20 +1695,41 @@ async fn includes_are_filled_from_the_mirror_and_say_why_when_they_cannot_be() {
                 None,
                 Some(Unfilled::NotMirrored)
             ),
-            ("Showcase: on-call glossary".to_owned(), synced.clone(), true, entity("glossary"), Some(Unfilled::NoExcerpt)),
-            ("Showcase: include depth 1".to_owned(), synced.clone(), false, entity("depth-1"), None),
-            ("Showcase: include cycle A".to_owned(), synced.clone(), false, entity("cycle-a"), None),
+            (
+                "Showcase: on-call glossary".to_owned(),
+                synced.clone(),
+                true,
+                entity("glossary"),
+                Some(Unfilled::NoExcerpt)
+            ),
+            (
+                "Showcase: include depth 1".to_owned(),
+                synced.clone(),
+                false,
+                entity("depth-1"),
+                None
+            ),
+            (
+                "Showcase: include cycle A".to_owned(),
+                synced.clone(),
+                false,
+                entity("cycle-a"),
+                None
+            ),
         ],
         "the includes: {:#?}",
         page.blocks
     );
     let filled = |b: &DocBlock| -> Vec<DocBlock> {
-        let DocBlock::Include { blocks, .. } = b else { unreachable!() };
+        let DocBlock::Include { blocks, .. } = b else {
+            unreachable!()
+        };
         blocks.clone()
     };
     let excerpt = "Retry a failed payout with exponential backoff, at most five attempts.";
     assert!(
-        words(&filled(top[0])).contains(excerpt) && words(&filled(top[0])).contains("Check the PSP status page."),
+        words(&filled(top[0])).contains(excerpt)
+            && words(&filled(top[0])).contains("Check the PSP status page."),
         "the whole runbook: {:#?}",
         filled(top[0])
     );
@@ -1653,18 +1747,32 @@ async fn includes_are_filled_from_the_mirror_and_say_why_when_they_cannot_be() {
     }
     let inner = includes(&level).into_iter().cloned().collect::<Vec<_>>();
     assert_eq!(
-        inner.iter().map(|b| seen(b)).collect::<Vec<_>>(),
-        vec![("Showcase: include depth 4".to_owned(), synced.clone(), false, entity("depth-4"), Some(Unfilled::TooDeep))],
+        inner.iter().map(&seen).collect::<Vec<_>>(),
+        vec![(
+            "Showcase: include depth 4".to_owned(),
+            synced.clone(),
+            false,
+            entity("depth-4"),
+            Some(Unfilled::TooDeep)
+        )],
         "depth 4 is past the limit"
     );
 
     // The cycle: A holds B, and B's include of A comes round.
     let a = filled(top[5]);
-    let [b] = includes(&a).into_iter().cloned().collect::<Vec<_>>().try_into().unwrap_or_else(|v: Vec<DocBlock>| panic!("A holds B: {v:#?}"));
+    let [b] = includes(&a)
+        .into_iter()
+        .cloned()
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap_or_else(|v: Vec<DocBlock>| panic!("A holds B: {v:#?}"));
     assert_eq!(seen(&b).4, None, "B is filled inside A");
     let back = filled(&b);
     assert_eq!(
-        includes(&back).iter().map(|b| seen(b).4).collect::<Vec<_>>(),
+        includes(&back)
+            .iter()
+            .map(|b| seen(b).4)
+            .collect::<Vec<_>>(),
         vec![Some(Unfilled::Cycle)],
         "B's include of A is the cycle: {back:#?}"
     );
