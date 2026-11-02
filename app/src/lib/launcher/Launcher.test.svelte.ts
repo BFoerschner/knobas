@@ -3123,6 +3123,53 @@ test("opened with a section's filter, the box starts with it, the caret after it
   expect(target.querySelector("input")!.value).toBe("");
 });
 
+/** A `#d` answer: pages only, as the engine sends it for `#d ledger retry`. */
+function pagesAnswer(kinds: string[]): SearchResponse {
+  return response({
+    interpreted: {
+      text: "ledger retry",
+      prefix: null,
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+    },
+    groups: [
+      {
+        kind: "page",
+        label: "Page",
+        plural: "Pages",
+        monogram: "PG",
+        total: 1,
+        hits: [hit({ entity_id: "confluence:7", kind: "page", title: "Ledger retries", source_id: "confluence" })],
+      },
+    ],
+    total: 1,
+  });
+}
+
+test("a #d answer ends with Search Docs for its words, which opens the Docs area searching them (#2425)", async () => {
+  const onnavigate = vi.fn();
+  open({ onnavigate, ports: { search: async () => pagesAnswer(["page"]), launcherHome: async () => HOME } });
+  await settle();
+  await search("#d ledger retry");
+  const rows = [...target.querySelectorAll('[role="option"]')];
+  expect(rows.at(-1)?.textContent).toContain("Search Docs for “ledger retry”");
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/docs/search/ledger%20retry");
+});
+
+test("an answer that is not #d, or #d with no words, has no Search Docs row (#2425)", async () => {
+  let answer = pagesAnswer([]);
+  open({ ports: { search: async () => answer, launcherHome: async () => HOME } });
+  await settle();
+  await search("ledger retry");
+  expect(target.textContent).not.toContain("Search Docs for");
+  answer = { ...pagesAnswer(["page"]), interpreted: { ...pagesAnswer(["page"]).interpreted, text: "" } };
+  await search("#d ");
+  expect(target.textContent).not.toContain("Search Docs for");
+});
+
 test("an empty box opens with the caret in it and nothing to select", async () => {
   open();
   await settle();

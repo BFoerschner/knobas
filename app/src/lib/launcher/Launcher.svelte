@@ -68,6 +68,7 @@
   import type { LinkTarget } from "../tf/job/current.svelte";
   import { canBeTarget } from "../shell/timer";
   import TfDialog from "../tf/settings/TfDialog.svelte";
+  import { docsSearchHash } from "../tf/docs/docs";
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
@@ -355,6 +356,7 @@
       case "syntax":
       case "inbox":
       case "today":
+      case "docs":
         return null;
     }
   }
@@ -580,6 +582,9 @@
       // Time › Day, which is today when the address names no day.
       case "today":
         return "#/time";
+      // The Docs area searching the words (#2425).
+      case "docs":
+        return docsSearchHash(row.words);
       // A list and a syntax row do not navigate: they rewrite the box, which
       // is what makes them a *filter* rather than a destination.
       case "list":
