@@ -199,7 +199,7 @@ export function blockWords(block: DocBlock): string {
     case "table":
       return block.rows
         .flat()
-        .map((c) => inlineWords(c.text))
+        .flatMap((c) => c.blocks.map(blockWords))
         .join(" ");
     case "panel":
       return block.blocks.map(blockWords).join(" ");
@@ -359,6 +359,24 @@ export function panelLabel(block: Extract<DocBlock, { type: "panel" }>): string 
 export function headed(rows: { header: boolean }[][]): boolean {
   const first = rows[0];
   return first !== undefined && first.length > 0 && first.every((c) => c.header);
+}
+
+/**
+ * Whether a table's body rows (`rows` from `from` on) open with a header cell
+ * each, so that column heads its rows (#2436): a header column, recognized
+ * from the cells' own `header` as a header row is. A row the first column's
+ * cell above spans into opens with that cell.
+ */
+export function headerColumn(rows: { header: boolean; rowspan: number }[][], from: number): boolean {
+  const body = rows.slice(from);
+  let spannedTo = 0;
+  for (const [r, row] of body.entries()) {
+    if (r < spannedTo) continue;
+    const first = row[0];
+    if (!first?.header) return false;
+    spannedTo = r + Math.max(1, first.rowspan);
+  }
+  return body.length > 0;
 }
 
 // -- the search (#860) and the find bar --------------------------------------

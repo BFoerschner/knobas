@@ -718,7 +718,9 @@ impl<'a> Blocks<'a> {
                             };
                             Some(TableCell {
                                 header,
-                                text: self.cell(cell.children()),
+                                blocks: blocks(cell.children(), self.hook),
+                                colspan: span(cell, "colspan"),
+                                rowspan: span(cell, "rowspan"),
                             })
                         })
                         .collect(),
@@ -729,51 +731,17 @@ impl<'a> Blocks<'a> {
         }
         rows
     }
-
-    /// A cell's content as one run of inlines: paragraphs inside a cell are
-    /// joined by a line break.
-    fn cell(&self, nodes: &[Node]) -> Vec<Inline> {
-        let mut out = Vec::new();
-        for (i, block) in blocks(nodes, self.hook).into_iter().enumerate() {
-            if i > 0 {
-                out.push(Inline::Break);
-            }
-            match block {
-                DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => out.extend(text),
-                DocBlock::Placeholder { name } => out.push(Inline::text(format!("[{name}]"))),
-                other => out.push(Inline::text(block_words(&other))),
-            }
-        }
-        out
-    }
 }
 
-/// The words of a block, for a cell that holds one.
-fn block_words(block: &DocBlock) -> String {
-    match block {
-        DocBlock::Code { code, .. } => code.clone(),
-        DocBlock::List { items, .. } => items
-            .iter()
-            .flat_map(|item| &item.blocks)
-            .map(block_words)
-            .collect::<Vec<_>>()
-            .join(" "),
-        DocBlock::Panel { blocks, .. } => {
-            blocks.iter().map(block_words).collect::<Vec<_>>().join(" ")
-        }
-        DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => text
-            .iter()
-            .map(|i| match i {
-                Inline::Text { text, .. }
-                | Inline::Link { text, .. }
-                | Inline::PageLink { text, .. } => text.clone(),
-                Inline::Issue { key, .. } => key.clone(),
-                _ => String::new(),
-            })
-            .collect(),
-        DocBlock::Table { .. } => String::new(),
-        DocBlock::Placeholder { name } | DocBlock::Embed { name, .. } => format!("[{name}]"),
-    }
+/// A cell's `colspan` or `rowspan`: a positive whole number, else 1 (HTML's
+/// `rowspan="0"`, "to the end of the group", reads as 1 here), at most what
+/// HTML's own table model takes (1,000 columns, 65,534 rows).
+fn span(cell: &Node, key: &str) -> u32 {
+    let most = if key == "colspan" { 1_000 } else { 65_534 };
+    cell.attr(key)
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .map_or(1, |n| n.min(most))
 }
 
 // -- inlines ------------------------------------------------------------------

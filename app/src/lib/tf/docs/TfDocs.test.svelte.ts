@@ -5,7 +5,7 @@
 import { createRawSnippet, flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 
-import type { DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
+import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, TableCell, WriteAsk } from "../../ipc/entity";
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
@@ -37,6 +37,14 @@ function text(t: string) {
   return { type: "text" as const, text: t, strong: false, emphasis: false, code: false };
 }
 
+function para(t: string): DocBlock {
+  return { type: "paragraph", text: [text(t)] };
+}
+
+function cell(header: boolean, blocks: DocBlock[], colspan = 1, rowspan = 1): TableCell {
+  return { header, blocks, colspan, rowspan };
+}
+
 const PAGE: DocPage = {
   entity_id: "confluence:2",
   source_id: "confluence",
@@ -66,7 +74,7 @@ const PAGE: DocPage = {
       ],
     },
     { type: "code", code: "select 1;", language: "sql" },
-    { type: "table", rows: [[{ header: true, text: [text("After")] }], [{ header: false, text: [text("15 min")] }]] },
+    { type: "table", rows: [[cell(true, [para("After")])], [cell(false, [para("15 min")])]] },
     { type: "placeholder", name: "roadmap" },
   ],
   comments: [{ id: "65700", author: "priya", author_name: "Priya Nair", at: "2026-08-19T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Rewriting it.")] }] }],
@@ -369,6 +377,95 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   [...target.querySelectorAll("button")].find((b) => b.textContent === "Open in Confluence")!.click();
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+});
+
+test("a table draws its spans, a header row and a header column, and blocks in its cells (spec #2432, #2436)", async () => {
+  const blocks: DocPage["blocks"] = [
+    {
+      type: "table",
+      rows: [
+        [cell(true, [para("Day")]), cell(true, [para("Rota")], 2)],
+        [
+          cell(true, [para("Mon")], 1, 2),
+          cell(false, [{ type: "list", ordered: false, items: [{ checked: null, blocks: [para("Mara")] }, { checked: null, blocks: [para("Tomasz")] }] }]),
+          cell(false, [para("One.")]),
+        ],
+        [
+          cell(false, [
+            para("Swap first."),
+            para("Then page."),
+            { type: "code", code: "page --swap", language: null },
+            { type: "panel", kind: "info", title: null, blocks: [para("Ask first.")] },
+            { type: "table", rows: [[cell(false, [para("inner")])]] },
+          ]),
+          cell(false, [para("Two.")]),
+        ],
+        [cell(true, [para("Tue")]), cell(false, [para("Priya")], 2)],
+      ],
+    },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const table = target.querySelector(".tf-doc table")!;
+  const head = [...table.querySelectorAll(":scope > thead > tr > th")];
+  expect(head.map((th) => [th.textContent, th.getAttribute("scope"), th.getAttribute("colspan")])).toEqual([
+    ["Day", "col", null],
+    ["Rota", "col", "2"],
+  ]);
+  const rows = [...table.querySelectorAll(":scope > tbody > tr")];
+  // A header cell opening every row, the one spanning two rows included, is a header column.
+  expect(rows.map((tr) => [...tr.children].map((c) => [c.tagName, c.getAttribute("scope"), c.getAttribute("colspan"), c.getAttribute("rowspan")]))).toEqual([
+    [
+      ["TH", "row", null, "2"],
+      ["TD", null, null, null],
+      ["TD", null, null, null],
+    ],
+    [
+      ["TD", null, null, null],
+      ["TD", null, null, null],
+    ],
+    [
+      ["TH", "row", null, null],
+      ["TD", null, "2", null],
+    ],
+  ]);
+  const list = rows[0]!.children[1]!;
+  expect([...list.querySelectorAll("ul > li")].map((li) => li.textContent)).toEqual(["Mara", "Tomasz"]);
+  const blocky = rows[1]!.children[0]!;
+  expect([...blocky.querySelectorAll(":scope > p")].map((p) => p.textContent)).toEqual(["Swap first.", "Then page."]);
+  expect(blocky.querySelector("pre code")?.textContent).toBe("page --swap");
+  expect(blocky.querySelector(".tf-callout.tf-info")?.textContent).toContain("Ask first.");
+  expect(blocky.querySelector("table td")?.textContent).toBe("inner");
+});
+
+test("a table scrolls sideways inside itself, and a header cell that opens only some rows is no header column (#2436)", async () => {
+  const blocks: DocPage["blocks"] = [
+    {
+      type: "table",
+      rows: [
+        [cell(true, [para("Key")]), cell(false, [para("a")])],
+        [cell(false, [para("b")]), cell(false, [para("c")])],
+      ],
+    },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const table = target.querySelector(".tf-doc table")!;
+  expect(table.parentElement?.classList.contains("tf-doc-tbl")).toBe(true);
+  expect(table.querySelector("thead")).toBeNull();
+  expect([...table.querySelectorAll("th")].map((th) => [th.textContent, th.getAttribute("scope")])).toEqual([["Key", null]]);
+});
+
+test("a placeholder inside a table cell draws as its block with Open this part in, never as [name] text (#2436)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "table", rows: [[cell(false, [para("Before"), { type: "placeholder", name: "expand" }])]] },
+  ];
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const td = target.querySelector(".tf-doc td")!;
+  expect(td.textContent).not.toContain("[expand]");
+  const macro = td.querySelector(".tf-macro")!;
+  expect(macro.textContent).toContain("This part is a Confluence expand macro, which knobas does not draw.");
+  [...macro.querySelectorAll("button")].find((b) => b.textContent === "Open this part in Confluence")!.click();
+  await settle();
   expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
 });
 

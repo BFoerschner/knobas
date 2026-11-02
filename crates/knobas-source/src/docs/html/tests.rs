@@ -83,24 +83,69 @@ fn a_table_reads_its_rows_through_thead_and_tbody() {
         vec![DocBlock::Table {
             rows: vec![
                 vec![
+                    TableCell::new(true, vec![para("Host")]),
+                    TableCell::new(true, vec![para("Port")]),
+                ],
+                vec![
+                    TableCell::new(false, vec![para("db")]),
+                    TableCell::new(false, vec![para("5432"), para("5433")]),
+                ],
+            ]
+        }]
+    );
+}
+
+#[test]
+fn a_cell_keeps_its_spans_and_its_blocks() {
+    let cell = |blocks| TableCell::new(false, blocks);
+    assert_eq!(
+        plain(concat!(
+            "<table>",
+            r#"<tr><th colspan="2">Owner</th><th rowspan=" 3 ">Notes</th></tr>"#,
+            "<tr><th>Team</th><td><ul><li>Mara</li><li>Tomasz</li></ul><p>On call</p></td></tr>",
+            r#"<tr><th rowspan="0" colspan="x">Ops</th><td><table><tr><td>inner</td></tr></table><pre>run</pre><blink>!</blink></td></tr>"#,
+            "</table>"
+        )),
+        vec![DocBlock::Table {
+            rows: vec![
+                vec![
                     TableCell {
-                        header: true,
-                        text: vec![Inline::text("Host")]
+                        colspan: 2,
+                        ..TableCell::new(true, vec![para("Owner")])
                     },
                     TableCell {
-                        header: true,
-                        text: vec![Inline::text("Port")]
+                        rowspan: 3,
+                        ..TableCell::new(true, vec![para("Notes")])
                     },
                 ],
                 vec![
-                    TableCell {
-                        header: false,
-                        text: vec![Inline::text("db")]
-                    },
-                    TableCell {
-                        header: false,
-                        text: vec![Inline::text("5432"), Inline::Break, Inline::text("5433")]
-                    },
+                    TableCell::new(true, vec![para("Team")]),
+                    cell(vec![
+                        DocBlock::List {
+                            ordered: false,
+                            items: vec![
+                                ListItem::new(vec![para("Mara")]),
+                                ListItem::new(vec![para("Tomasz")]),
+                            ],
+                        },
+                        para("On call"),
+                    ]),
+                ],
+                vec![
+                    // A span that is no positive number spans one.
+                    TableCell::new(true, vec![para("Ops")]),
+                    cell(vec![
+                        DocBlock::Table {
+                            rows: vec![vec![cell(vec![para("inner")])]],
+                        },
+                        DocBlock::Code {
+                            code: "run".into(),
+                            language: None,
+                        },
+                        DocBlock::Placeholder {
+                            name: "blink".into(),
+                        },
+                    ]),
                 ],
             ]
         }]
@@ -261,4 +306,14 @@ fn the_tree_keeps_where_each_element_sits() {
         })
         .collect();
     assert_eq!(spans, vec![(0, 10), (10, html.len())]);
+}
+
+#[test]
+fn a_span_past_what_html_draws_is_cut_to_it() {
+    let [DocBlock::Table { rows }] =
+        &plain(r#"<table><tr><td colspan="4000000000" rowspan="70000">x</td></tr></table>"#)[..]
+    else {
+        panic!("one table")
+    };
+    assert_eq!((rows[0][0].colspan, rows[0][0].rowspan), (1_000, 65_534));
 }
