@@ -1406,9 +1406,9 @@ async fn rail_row(pool: &sqlx::PgPool, id: &str) -> knobas_search::SmartListSumm
 /// **The whole of story 56, at the wire**: a saved query keeps its text, its
 /// chips and its prefix, and the number beside it counts what it matches.
 ///
-/// The corpus is built so that every clause of `#<token> @mara` has something
+/// The corpus is built so that every clause of `#t <token> @mara` has something
 /// to exclude: a ticket by somebody else (the author chip), a PR by Mara (the
-/// `#` prefix's kind), and a ticket by Mara that does not carry the token (the
+/// `#t` filter's kind), and a ticket by Mara that does not carry the token (the
 /// text). Without all three an answer of two rows is not evidence that
 /// anything was narrowed -- it is evidence that the corpus is small.
 #[tokio::test]
@@ -1454,7 +1454,7 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     )
     .await;
 
-    let raw = format!("#{t} @mara");
+    let raw = format!("#t {t} @mara");
     let made = create_smart_list_inner(&pool, &Registry::for_process(), "Mara's open ones", &raw)
         .await
         .expect("the query is one the grammar runs");
@@ -1494,7 +1494,8 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
         .await
         .expect("the saved list opens");
     let v = serde_json::to_value(&opened).unwrap();
-    assert_eq!(v["interpreted"]["prefix"], "ticket", "{v}");
+    // `#t` is a kind filter and claims no prefix (#2420); `@mara` claims one.
+    assert_eq!(v["interpreted"]["prefix"], "person", "{v}");
     assert_eq!(v["interpreted"]["text"], t, "{v}");
     assert_eq!(
         v["interpreted"]["filters"]["authors"],
@@ -1597,9 +1598,9 @@ async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
     for (name, raw) in [
         ("text alone", t.clone()),
         ("an author chip", format!("{t} @mara")),
-        ("a prefix", format!("#{t}")),
+        ("a kind filter", format!("#t {t}")),
         ("a window", format!("{t} updated:7d")),
-        ("all of them", format!("#{t} @mara updated:7d")),
+        ("all of them", format!("#t {t} @mara updated:7d")),
         ("a query that matches nothing", format!("{t} @nobody")),
     ] {
         let made = create_smart_list_inner(&pool, &Registry::for_process(), name, &raw)
@@ -1713,9 +1714,10 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
         ("legacy-paste", "Paste", "x".repeat(600)),
         // A source the reader has since deleted: the alias resolves to
         // nothing, so the saved query has no text and no filter left in it --
-        // and `0025`'s own check constraint is why the row is `/gone` and not
-        // a blank string, which the table refuses outright.
-        ("legacy-gone", "Gone", "/gone".to_owned()),
+        // and `0025`'s own check constraint is why the row is `source:gone`
+        // and not a blank string, which the table refuses outright. It was
+        // `/gone` until #2420 made `/` a word.
+        ("legacy-gone", "Gone", "source:gone".to_owned()),
     ] {
         sqlx::query("insert into knobas.smart_list (id, label, query) values ($1,$2,$3)")
             .bind(id)

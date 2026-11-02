@@ -586,7 +586,7 @@ struct Seeded {
 /// what the feature produces and the archive would be carrying a row nothing
 /// else in knobas would.
 const SAVED_LABEL: &str = "Payout tickets this week";
-const SAVED_QUERY: &str = "#payouts updated:7d";
+const SAVED_QUERY: &str = "#t payouts updated:7d";
 
 /// A ticket view's text (#812), with a token today's grammar cannot read
 /// (`sprint:next`), so the round trip shows the text crosses as saved and is
