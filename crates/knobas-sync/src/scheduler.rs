@@ -50,9 +50,11 @@ pub use crate::run_log::SourceSyncStatus;
 /// a compiled-in adapter's plain [`DocProjection`](knobas_source::docs::DocProjection),
 /// or an external adapter's call into its component. Cheap to clone.
 #[derive(Clone)]
-pub struct Projection(
-    Arc<dyn Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent> + Send + Sync>,
-);
+pub struct Projection(Arc<ProjectFn>);
+
+/// What a [`Projection`] calls.
+type ProjectFn =
+    dyn Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent> + Send + Sync;
 
 impl Projection {
     /// A projection that calls `project`.

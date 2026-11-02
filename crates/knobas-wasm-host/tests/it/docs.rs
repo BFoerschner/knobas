@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use knobas_source::SyncItem;
 use knobas_source::contract::VecSink;
 use knobas_source::docs::{DocBlock, DocContent, EmbedContent, Inline};
 use knobas_source::instance::SourceInstance;
-use knobas_source::SyncItem;
 use knobas_wasm_host::limits::Limits;
 use knobas_wasm_host::{WasmAdapter, load_fixture, manifest, patched_fixture};
 use serde_json::{Value, json};
@@ -197,7 +197,10 @@ async fn a_synced_page_is_drawn_by_the_component_in_every_block_of_the_vocabular
             text: vec![Inline::text("Five knots inside the breakwater.")]
         }])
     );
-    assert_eq!(adapter.project("survey", &json!({ "key": "survey-1" })), None);
+    assert_eq!(
+        adapter.project("survey", &json!({ "key": "survey-1" })),
+        None
+    );
 }
 
 /// What knobas fills when a page is read is the host's to fill: a
@@ -291,7 +294,11 @@ async fn a_pages_search_text_is_built_by_the_host_from_the_projection() {
         .iter()
         .find(|item| item.title == "Berthing rules")
         .unwrap();
-    assert!(rules.body_text.contains("Five knots inside the breakwater."));
+    assert!(
+        rules
+            .body_text
+            .contains("Five knots inside the breakwater.")
+    );
     assert!(items.iter().all(|item| !item.body_text.contains(SENT)));
     let survey = items.iter().find(|item| item.kind == "survey").unwrap();
     assert!(survey.body_text.contains("quaywright"), "kept as sent");
@@ -358,7 +365,11 @@ async fn a_projection_reaches_no_host_even_one_its_manifest_declares() {
         .await
         .unwrap();
     assert_eq!(drawn, None, "the refused request trapped the projection");
-    assert_eq!(accepted.load(Ordering::SeqCst), 1, "nothing reached the host");
+    assert_eq!(
+        accepted.load(Ordering::SeqCst),
+        1,
+        "nothing reached the host"
+    );
 }
 
 /// A projection that traps, runs past its deadline or past its memory cap
@@ -369,7 +380,6 @@ fn a_projection_that_traps_spins_or_hogs_is_no_content_and_the_adapter_goes_on()
     let adapter = load_fixture().with_limits(Limits {
         deadline: Duration::from_secs(1),
         memory_mib: 32,
-        ..Limits::default()
     });
     for key in ["trap", "spin", "hog"] {
         let mut asks = payload("<p>words</p>");
@@ -391,11 +401,13 @@ fn a_projection_that_traps_spins_or_hogs_is_no_content_and_the_adapter_goes_on()
 async fn a_component_that_draws_differently_redraws_the_same_payload() {
     let handbook = page(&load_fixture(), "Harbour handbook").await;
     let before = load_fixture().project("page", &handbook.payload).unwrap();
-    let redrawn =
-        WasmAdapter::from_bytes(&patched_fixture("the quay projection", "the pier projection"))
-            .unwrap()
-            .project("page", &handbook.payload)
-            .unwrap();
+    let redrawn = WasmAdapter::from_bytes(&patched_fixture(
+        "the quay projection",
+        "the pier projection",
+    ))
+    .unwrap()
+    .project("page", &handbook.payload)
+    .unwrap();
     assert_eq!(last_words(&before), "Drawn by the quay projection.");
     assert_eq!(last_words(&redrawn), "Drawn by the pier projection.");
 }

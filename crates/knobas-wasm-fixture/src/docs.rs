@@ -27,13 +27,13 @@
 //! allocates until the memory cap stops it.
 
 use chrono::{TimeZone, Utc};
+use knobas_adapter_sdk::SyncItem;
 use knobas_adapter_sdk::spi::docs::html::{self, Hook, Hooked, Node, Reading};
 use knobas_adapter_sdk::spi::docs::{
     DocBlock, DocComment, DocContent, EmbedContent, Inline, ListItem, PAGE_KIND, PanelKind,
 };
 use knobas_adapter_sdk::spi::role::{RoleClaim, WIKI};
 use knobas_adapter_sdk::spi::{EntityRef, KindInfo, KindPaths, ParentPath, PayloadPath};
-use knobas_adapter_sdk::SyncItem;
 use serde_json::{Value, json};
 
 /// The space both pages are in.

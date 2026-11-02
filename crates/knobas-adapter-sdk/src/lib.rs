@@ -329,10 +329,7 @@ pub trait Adapter: Sized + 'static {
     /// Built against 1.4.0 or earlier, which has no `docs`, it is never
     /// called.
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
-    fn project(
-        kind: &str,
-        payload: &serde_json::Value,
-    ) -> Option<knobas_source::docs::DocContent> {
+    fn project(kind: &str, payload: &serde_json::Value) -> Option<knobas_source::docs::DocContent> {
         let _ = (kind, payload);
         None
     }

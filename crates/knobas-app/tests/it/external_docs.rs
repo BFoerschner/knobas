@@ -50,7 +50,10 @@ async fn synced(registry: &Registry) -> (PgPool, String) {
     let run = knobas_sync::run_from_stored_cursor(&mut conn, &pool, source.as_ref())
         .await
         .unwrap();
-    assert_eq!(run.upserted, 7, "the surveys, the pipeline, the run, two pages");
+    assert_eq!(
+        run.upserted, 7,
+        "the surveys, the pipeline, the run, two pages"
+    );
     (pool, id)
 }
 
@@ -107,7 +110,7 @@ async fn a_page_from_the_component_opens_in_docs_with_its_includes_filled() {
             },
         ] => {
             assert_eq!((excerpt_of, whole_of), (&rules, &rules));
-            assert_eq!(excerpt, &[five_knots.clone()]);
+            assert_eq!(excerpt, std::slice::from_ref(&five_knots));
             assert!(whole.contains(&five_knots), "{whole:?}");
             assert_eq!(last_words(whole), "Drawn by the quay projection.");
         }
@@ -122,7 +125,10 @@ async fn a_page_from_the_component_opens_in_docs_with_its_includes_filled() {
         .unwrap();
     assert!(body.contains("Spring tides run at four knots."), "{body}");
     assert!(!body.contains(SENT), "{body}");
-    assert!(!body.contains("Five knots"), "an include's words are its page's");
+    assert!(
+        !body.contains("Five knots"),
+        "an include's words are its page's"
+    );
 }
 
 /// A new component whose projection draws differently draws the mirrored
