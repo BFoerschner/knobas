@@ -137,23 +137,30 @@
 .tf-tkread .tf-compose:focus-within textarea { min-height: 80px; }
 /* Attachments (#2404): the mirror's list folded to one line, a native disclosure closed by default whose summary is the
    section heading, a count badge and a chevron (right closed, down open). Open, one row a file, the job's `.tf-r`: its
-   kind in mono, the name with who, when and how big under it, and *Open*. */
+   kind in mono, the name with who, when and how big under it; the row opens the preview. */
 .tf-tkread details.tf-tkfold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; min-height: var(--control-h-sm); margin-bottom: 10px; border-radius: 4px; }
 .tf-tkread details.tf-tkfold > summary::-webkit-details-marker { display: none; }
 .tf-tkread details.tf-tkfold > summary h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-tkread details.tf-tkfold > summary .tf-tkmark { width: 14px; height: 14px; color: var(--ink-2); transition: transform 120ms ease-out; }
 .tf-tkread details.tf-tkfold[open] > summary .tf-tkmark { transform: rotate(90deg); }
 .tf-tkread details.tf-tkfold > summary:hover h2 { text-decoration: underline; text-underline-offset: 3px; }
-.tf-tkatt .tf-r { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 12px; }
+.tf-tkatt .tf-r { display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 12px; padding: 8px 12px; }
+/* A row is one button that opens the file's preview (#2415): drawn as the row, not as a control. */
+.tf-tkatt button.tf-r { width: 100%; border: 0; border-top: 1px solid var(--rule-2); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tf-tkatt button.tf-r:hover { background: var(--sheet-2); }
 .tf-tkatt .tf-rows > .tf-r:first-child { border-top: 0; }
-.tf-tkatt .tf-r .tf-rend { margin-left: 0; }
 .tf-tkatt .tf-r .tf-t { display: flex; flex-direction: column; gap: 2px; }
 .tf-tkatt .tf-rsub { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-tkkind {
   width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2);
   display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
 }
-.tf-tkatt .tf-rend .tf-btn { color: var(--ink-2); }
+/* The attachment preview (#2415): a wide dialog, the image scaled to fit, the PDF in the file viewer's component, else
+   the kind, *No preview* and *Download*, or why the bytes are missing. */
+.tf-dialog.tf-attdlg { width: min(960px, calc(100vw - 32px)); }
+.tf-attview { display: flex; flex-direction: column; align-items: center; gap: 10px; min-height: 120px; justify-content: center; }
+.tf-attview > img { display: block; max-width: 100%; max-height: 68vh; object-fit: contain; border: 1px solid var(--rule); border-radius: 4px; }
+.tf-attview > .tf-fpdf, .tf-attview > .tf-empty { align-self: stretch; }
 /* An image's preview (#2405): the file's bytes, fetched when the panel opens and drawn as a data image, cropped to the
    frame. One that cannot be fetched is the same frame dashed and empty, as `.tf-md-noimg` draws a missing image. The
    panel then leads with the stale strip and its *Try again*. */

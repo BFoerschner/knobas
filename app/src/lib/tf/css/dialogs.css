@@ -9,9 +9,11 @@
 }
 .tf-dialog header { padding: 14px 18px; border-bottom: 1px solid var(--rule); }
 .tf-dialog header h2 { font-size: var(--t-xl); }
-/* TfDialog's title line: the title block on the left, an optional Close on the right. The negative margin
-   keeps the 32px icon button from growing the header: placement only, no size. */
+/* TfDialog's title line: the title block on the left, optional actions (the attachment preview's Download) and an
+   optional Close on the right. The negative margin keeps the 32px icon button from growing the header: placement
+   only, no size. */
 .tf-dhead { display: flex; align-items: flex-start; gap: 10px; }
+.tf-dhead .tf-acts { display: flex; gap: var(--control-gap); flex: none; }
 .tf-dtitle { flex: 1; min-width: 0; }
 .tf-dhead .tf-dclose { margin: -5px -8px -5px 0; }
 .tf-dclose svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }

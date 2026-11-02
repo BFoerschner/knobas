@@ -93,6 +93,17 @@
       </footer>
     </section>
 
+    <section class="tf-dialog" aria-labelledby="tf-ctl-viewer">
+      <header class="tf-dhead">
+        <div class="tf-dtitle"><h2 id="tf-ctl-viewer">A viewer's title line</h2><p class="tf-dsub">Its action, then the Close; no footer.</p></div>
+        <div class="tf-acts"><button type="button" class="tf-btn">Download</button></div>
+        <button type="button" class="tf-iconbtn tf-dclose" aria-label="Close">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        </button>
+      </header>
+      <div class="tf-body"><p>A dialog that shows a thing and decides nothing.</p></div>
+    </section>
+
     <section class="tf-dialog" aria-labelledby="tf-ctl-danger">
       <header><h2 id="tf-ctl-danger">The danger pair</h2></header>
       <div class="tf-body">

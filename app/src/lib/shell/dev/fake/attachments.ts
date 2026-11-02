@@ -1,7 +1,8 @@
 /**
  * `?fake-ipc`'s attachment bytes and download (spec #2396, #2405):
  * `attachment_bytes` answers PAY-231's two screenshots with a drawn picture
- * of a log panel each (#2406's, moved here when the two joined), and the other files with a line of text; `download_attachment`
+ * of a log panel each (#2406's, moved here when the two joined), its PDF
+ * with a short PDF (#2415's preview), and the other files with a line of text; `download_attachment`
  * answers the path a download would land at. Both look the file up in the
  * fixture's attachment list, as the real commands look it up in the mirror's.
  *
@@ -11,6 +12,7 @@
  */
 import type { Attachment, AttachmentBytes } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { SPEC_PDF } from "../../../render/pdf-fixture";
 import { CORPUS } from "./corpus";
 
 /** The cap the real command reads under: 5 MiB (`ATTACHMENT_CAP`). */
@@ -85,6 +87,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         throw { code: "invalid", message: `${file.name} is over 5 MiB; knobas previews an attachment up to 5 MiB`, source_id: null };
       const mime = file.mime ?? "application/octet-stream";
       if (mime.startsWith("image/")) return { mime: "image/bmp", data: picture(Number(file.id) || 0).slice("data:image/bmp;base64,".length) };
+      if (mime === "application/pdf") return { mime, data: btoa(String.fromCharCode(...SPEC_PDF())) };
       return { mime, data: btoa(`${file.name}\n`) };
     },
     download_attachment: (args) => {

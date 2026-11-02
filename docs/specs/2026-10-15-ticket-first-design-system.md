@@ -134,7 +134,7 @@ The title block on the left and `.tf-acts` on the right, on the title line, top-
 3. "Open in <source>", always a ghost button;
 4. *Sync now* / *Refresh*, always last.
 
-A section heading that carries an action puts it on the right of the heading line at the small size. The ticket page has no header: its key, status and actions are on its card ([below](#the-ticket-pages-card)), and its title heads the reading column.
+A section heading that carries an action puts it on the right of the heading line at the small size. A dialog that shows a thing and decides nothing (the attachment preview, #2415) is a viewer: its action is on its title line at the default size, in `TfDialog`'s `actions` before the Close, and it has no footer. The ticket page has no header: its key, status and actions are on its card ([below](#the-ticket-pages-card)), and its title heads the reading column.
 
 ### The ticket page's card
 
@@ -144,11 +144,11 @@ The card (`TfJobCard.svelte`, `job.css`) is the same markup in both moods (spec 
 - **The copy button** beside the key is `.tf-iconbtn.tf-sm`.
 - **The foot** is one `.tf-btn.tf-primary.tf-lg`, ink on the card's own surface: the decision while reading, the timer once chosen. No line under it.
 - **The width handle** is a 6 px `separator` on the card's right edge (`.tf-tkhandle`), focusable, that shows as the edge darkening under the pointer. Dragging sets the card between 240 and 720 px, ←/→ step 16 px, and a double click or Enter fits the card so nothing on it wraps. The width is browser state (`knobas.ticket.side`, default 320 px). Below 900 px the handle is gone.
-- **The fold.** The reading column's Attachments panel is a native `<details class="tf-tkfold">`, closed by default. Its summary is the heading, a count badge and a chevron (`.tf-tkmark`) that points right while closed and turns down when open, in 120 ms. An attachment row's *Open* and *Download* are `.tf-btn.tf-sm.tf-ghost`.
+- **The fold.** The reading column's Attachments panel is a native `<details class="tf-tkfold">`, closed by default. Its summary is the heading, a count badge and a chevron (`.tf-tkmark`) that points right while closed and turns down when open, in 120 ms. An attachment row is one button drawn as the row, not a `.tf-btn`, that opens the attachment preview; the row has no *Open* or *Download* (#2415).
 
 ### Dialog footer
 
-Right-aligned, `var(--control-gap)` apart, at the default size. A ghost *Cancel* comes first, then the primary. An extra action (an edit dialog's *Delete*) goes on the far left. Every dialog has a primary.
+Right-aligned, `var(--control-gap)` apart, at the default size. A ghost *Cancel* comes first, then the primary. An extra action (an edit dialog's *Delete*) goes on the far left. Every dialog has a primary, except a viewer ([Header](#header)), which has no footer.
 
 ### Danger
 
@@ -176,6 +176,7 @@ There is no third way to draw danger.
 | Row with small actions | `.tf-ext-row .tf-trail .tf-btn.tf-sm` |
 | Icon-only button | `.tf-ext-row .tf-trail .tf-iconbtn` |
 | Dialog footer with an extra action | `.tf-dialog footer .tf-btn.tf-first` |
+| A viewer's title-line action | `.tf-dialog .tf-dhead .tf-acts .tf-btn` |
 | Dialog footer's ghost *Cancel* | `.tf-dialog footer .tf-btn.tf-ghost` |
 | Danger, starting | `.tf-btn.tf-danger:not(.tf-primary)` |
 | Danger, confirming | `.tf-btn.tf-primary.tf-danger` |

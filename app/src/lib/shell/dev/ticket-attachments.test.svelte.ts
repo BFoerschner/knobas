@@ -2,12 +2,15 @@
  * The ticket page's attachment previews and downloads (spec #2396, #2405)
  * through the app's own mount over the whole fake IPC: opening the panel
  * fetches PAY-231's two screenshots through `attachment_bytes` and draws them
- * as data images; *Download* saves through `download_attachment`. With the
- * read failing (`?fake-attachments=unreachable`), the panel leads with the
- * stale strip, the image rows draw dashed placeholders, *Download* waits,
- * *Open* stays a link and *Try again* reads again; a 403 reads *not
- * permitted*; an image over the 5 MiB cap is never fetched and keeps both
- * buttons. Under `dev/` because only the harness may import the harness.
+ * as data images. A row opens the attachment's preview (#2415): the image,
+ * the PDF, or its kind and *No preview*; its *Download* saves through
+ * `download_attachment`. With the read failing
+ * (`?fake-attachments=unreachable`), the panel leads with the stale strip,
+ * the image rows draw dashed placeholders, *Download* waits, the preview
+ * says why and *Try again* reads again; a 403 reads *not permitted*; a file
+ * over the 5 MiB cap is never fetched and its preview says so. The
+ * description's `[^name]` links and inline images, and a comment's, open the
+ * same preview. Under `dev/` because only the harness may import the harness.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -131,21 +134,38 @@ function cell(row: HTMLElement): string {
   return row.querySelector(".tf-tkkind")?.textContent?.trim() ?? "?";
 }
 
-function button(row: HTMLElement, name: string): HTMLButtonElement | HTMLAnchorElement {
-  return [...row.querySelectorAll<HTMLButtonElement | HTMLAnchorElement>(".tf-rend .tf-btn")].find((b) => b.textContent?.trim() === name)!;
+/** The open attachment preview, if one is open. */
+function modal(): HTMLElement | null {
+  return target.querySelector<HTMLElement>(".tf-modal [role='dialog'].tf-attdlg");
 }
+
+/** A button of the preview by its words. */
+function inModal(name: string): HTMLButtonElement | undefined {
+  return [...(modal()?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find((b) => (b.getAttribute("aria-label") ?? b.textContent?.trim()) === name);
+}
+
+/** Opens the preview of `row` as a click on it does. */
+function preview(row: HTMLElement): HTMLElement {
+  row.click();
+  flushSync();
+  expect(modal(), "the row opened no preview").not.toBeNull();
+  return modal()!;
+}
+
+const squash = (node: Element | null | undefined) => node?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 
 const reads = () => sent.filter((call) => call.cmd === "attachment_bytes").map((call) => call.args["attachmentId"]);
 
 const strip = (fold: HTMLDetailsElement) => fold.querySelector<HTMLElement>(".tf-tkatt > .tf-stale");
 
-test("opening PAY-231's panel draws its two screenshots' previews; only the one the description shows was fetched before", async () => {
+test("opening PAY-231's panel draws its two screenshots' previews, both fetched before by the description's and a comment's inline images", async () => {
   install();
   const fold = await openPay231();
   // The description's inline screenshot is fetched once in view; the panel's
   // other image waits for the panel.
-  await until(() => reads().length > 0, "the inline screenshot was never fetched");
-  expect(reads()).toEqual(["50000"]);
+  await until(() => reads().length > 1, "the inline screenshots were never fetched");
+  // The description's and the comment's (#2415).
+  expect(reads()).toEqual(["50000", "50001"]);
 
   unfold(fold);
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew");
@@ -160,12 +180,69 @@ test("opening PAY-231's panel draws its two screenshots' previews; only the one 
   expect(reads()).toEqual(["50000", "50001"]);
 });
 
-test("Download saves the file through download_attachment and says where", async () => {
+test("a row opens the preview of its file: an image draws whole, Escape closes it and focus comes back to the row (#2415)", async () => {
   install();
   const fold = await openPay231();
   unfold(fold);
-  const pdf = rows(fold)[2]!;
-  const download = button(pdf, "Download") as HTMLButtonElement;
+  const row = rows(fold)[1]!;
+  row.focus();
+  const shown = preview(row);
+  expect(squash(shown.querySelector("h2"))).toBe("retry-timeline.png");
+  expect(squash(shown.querySelector(".tf-dsub"))).toBe("Mara Lindqvist, 2026-08-19, 96 KB");
+  expect(inModal("Download")).toBeDefined();
+  expect(inModal("Close")).toBeDefined();
+  expect(shown.querySelector("a[href]"), "no Open").toBeNull();
+  await until(() => shown.querySelector<HTMLImageElement>(".tf-attview img")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the image never drew");
+  expect(shown.contains(document.activeElement)).toBe(true);
+
+  shown.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(modal()).toBeNull();
+  expect(document.activeElement).toBe(row);
+});
+
+test("× and a click on the backdrop close the preview", async () => {
+  install();
+  const fold = await openPay231();
+  unfold(fold);
+  preview(rows(fold)[3]!);
+  inModal("Close")!.click();
+  flushSync();
+  expect(modal()).toBeNull();
+  preview(rows(fold)[3]!);
+  const backdrop = modal()!.closest<HTMLElement>(".tf-modal")!;
+  backdrop.click();
+  flushSync();
+  expect(modal()).toBeNull();
+});
+
+test("a PDF's preview is the PDF viewer over the file's bytes", async () => {
+  install();
+  const fold = await openPay231();
+  unfold(fold);
+  const shown = preview(rows(fold)[2]!);
+  await until(() => shown.querySelector(".tf-attview .tf-fpdf, .tf-attview .tf-empty") !== null, "no PDF viewer");
+  expect(reads()).toContain("50002");
+});
+
+test("a file with no preview says its kind and No preview, and offers Download", async () => {
+  install();
+  const fold = await openPay231();
+  unfold(fold);
+  const shown = preview(rows(fold)[3]!);
+  const body = shown.querySelector(".tf-attview")!;
+  expect(squash(body.querySelector(".tf-tkkind"))).toBe("CSV");
+  expect(squash(body)).toContain("No preview for this kind of file");
+  expect(body.querySelector("button")?.textContent?.trim()).toBe("Download");
+  expect(reads()).not.toContain("50003");
+});
+
+test("Download in the preview saves the file through download_attachment and says where", async () => {
+  install();
+  const fold = await openPay231();
+  unfold(fold);
+  preview(rows(fold)[2]!);
+  const download = inModal("Download")!;
   expect(download.disabled).toBe(false);
   download.click();
   await until(() => target.querySelector(".tf-toasts")?.textContent?.includes("Saved sepa-error-codes.pdf to ~/Downloads") ?? false, "no Saved toast");
@@ -174,7 +251,7 @@ test("Download saves the file through download_attachment and says where", async
   ]);
 });
 
-test("with the source unreachable, the strip leads, images are placeholders, Download waits, Open stays a link and Try again reads again", async () => {
+test("with the source unreachable, the strip leads, images are placeholders, the preview says why with Try again, Download waits, and Try again reads again", async () => {
   const handlers = install("fake-attachments=unreachable");
   const fold = await openPay231();
   unfold(fold);
@@ -184,31 +261,32 @@ test("with the source unreachable, the strip leads, images are placeholders, Dow
     "Tidewater (mock) cannot be reached, so previews and downloads wait. The names and links are the mirror's.",
   );
   expect(rows(fold).map(cell)).toEqual(["placeholder", "placeholder", "PDF", "CSV"]);
-  for (const row of rows(fold)) {
-    expect((button(row, "Download") as HTMLButtonElement).disabled).toBe(true);
-    const open = button(row, "Open") as HTMLAnchorElement;
-    expect(open.tagName).toBe("A");
-    expect(open.getAttribute("href")).toMatch(/^http:\/\/127\.0\.0\.1:5399\/secure\/attachment\/5000\d\//);
-  }
   expect(reads()).toEqual(["50000", "50001"]);
 
-  // The source answers again: *Try again* reads what failed, and the strip goes.
+  const shown = preview(rows(fold)[1]!);
+  await until(() => squash(shown.querySelector(".tf-attview")).includes("not reachable"), "the preview never said why");
+  expect(squash(shown.querySelector(".tf-attview p"))).toBe("retry-timeline.png, not reachable in Tidewater (mock) right now.");
+  const download = inModal("Download")!;
+  expect(download.disabled).toBe(true);
+  expect(download.title).toBe("Waits until Tidewater (mock) can be read");
+
+  // The source answers again: *Try again* reads what failed, and the image draws.
   const reachable = demoHandlers();
   installFakeTauri(recorded({ ...handlers, attachment_bytes: reachable["attachment_bytes"]! }));
-  const again = strip(fold)!.querySelector<HTMLButtonElement>("button")!;
-  expect(again.textContent?.trim()).toBe("Try again");
-  again.click();
+  inModal("Try again")!.click();
+  await until(() => shown.querySelector<HTMLImageElement>(".tf-attview img")?.getAttribute("src")?.startsWith("data:image/") ?? false, "Try again drew no image");
+  await until(() => strip(fold) === null, "the strip stayed");
+  expect(inModal("Download")!.disabled).toBe(false);
+  inModal("Close")!.click();
+  flushSync();
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "Try again drew no previews");
-  expect(reads()).toEqual(["50000", "50001", "50000", "50001"]);
-  expect(strip(fold)).toBeNull();
-  expect((button(rows(fold)[0]!, "Download") as HTMLButtonElement).disabled).toBe(false);
   // The description's placeholder asks again too, and draws the screenshot.
   const inline = () => target.querySelector(".tf-kept:not([hidden]) .tf-tkdesc .tf-md");
   await until(() => inline()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline screenshot stayed a placeholder");
   expect(inline()!.querySelector(".tf-md-noimg")).toBeNull();
 });
 
-test("a 403 reads not permitted", async () => {
+test("a 403 reads not permitted, in the strip and in the preview", async () => {
   install("fake-attachments=forbidden");
   const fold = await openPay231();
   unfold(fold);
@@ -217,9 +295,12 @@ test("a 403 reads not permitted", async () => {
     "Tidewater (mock) answers not permitted, so previews and downloads wait. The names and links are the mirror's.",
   );
   expect(rows(fold).map(cell)).toEqual(["placeholder", "placeholder", "PDF", "CSV"]);
+  const shown = preview(rows(fold)[2]!);
+  await until(() => squash(shown.querySelector(".tf-attview")).includes("not permitted"), "the PDF's preview never said why");
+  expect(squash(shown.querySelector(".tf-attview p"))).toBe("sepa-error-codes.pdf, not permitted in Tidewater (mock).");
 });
 
-test("an image over the 5 MiB cap gets no preview, is never fetched, and keeps both buttons", async () => {
+test("an image over the 5 MiB cap gets no preview, is never fetched, and its preview says so with Download", async () => {
   const getEntity = demoHandlers()["get_entity"]!;
   const huge: Attachment = {
     id: "50009",
@@ -242,9 +323,40 @@ test("an image over the 5 MiB cap gets no preview, is never fetched, and keeps b
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew");
   const last = rows(fold)[4]!;
   expect(cell(last)).toBe("PNG");
+  const shown = preview(last);
+  expect(squash(shown.querySelector(".tf-attview p"))).toBe("full-trace.png is over the 5 MB preview cap.");
+  expect(inModal("Try again")).toBeUndefined();
+  expect(inModal("Download")!.disabled).toBe(false);
   expect(reads()).not.toContain("50009");
-  expect((button(last, "Download") as HTMLButtonElement).disabled).toBe(false);
-  expect(button(last, "Open").tagName).toBe("A");
+});
+
+test("the description's [^name] link, its inline image and a comment's inline image open the preview", async () => {
+  install();
+  await openPay231();
+  const desc = () => target.querySelector(".tf-kept:not([hidden]) .tf-tkdesc .tf-md");
+  const link = [...desc()!.querySelectorAll<HTMLAnchorElement>("a.tf-md-attlink")].find((a) => squash(a) === "sepa-error-codes.pdf")!;
+  expect(link).toBeDefined();
+  link.click();
+  flushSync();
+  expect(squash(modal()?.querySelector("h2"))).toBe("sepa-error-codes.pdf");
+  inModal("Close")!.click();
+  flushSync();
+
+  await until(() => desc()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline screenshot never drew");
+  desc()!.querySelector<HTMLImageElement>("img.tf-md-att")!.click();
+  flushSync();
+  expect(squash(modal()?.querySelector("h2"))).toBe("psp-409-trace.png");
+  inModal("Close")!.click();
+  flushSync();
+
+  const talk = () => target.querySelector(".tf-kept:not([hidden]) .tf-convo");
+  await until(() => talk()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the comment's screenshot never drew");
+  const img = talk()!.querySelector<HTMLImageElement>("img.tf-md-att")!;
+  expect(img.alt).toBe("retry-timeline.png");
+  expect(squash(img.closest(".tf-msg"))).not.toContain("!retry-timeline.png");
+  img.click();
+  flushSync();
+  expect(squash(modal()?.querySelector("h2"))).toBe("retry-timeline.png");
 });
 
 test("previews live with the page: a page drawn again fetches them again", async () => {
@@ -258,7 +370,8 @@ test("previews live with the page: a page drawn again fetches them again", async
   app = mount(App, { target, props: {} });
   await until(() => panel() !== null, "PAY-231 never drew again");
   fold = panel()!;
-  expect(rows(fold)[1] && cell(rows(fold)[1]!), "nothing kept from the closed page").toBe("PNG");
+  // Nothing kept from the closed page: the inline images ask again, before the panel opens.
+  await until(() => reads().length === 4, "the page drawn again fetched nothing");
   unfold(fold);
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew again");
   expect(reads()).toEqual(["50000", "50001", "50000", "50001"]);

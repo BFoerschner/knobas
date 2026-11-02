@@ -8,7 +8,7 @@ import { flushSync } from "svelte";
 import { describe, expect, test } from "vitest";
 
 import type { Attachment, AttachmentBytes } from "../../ipc/entity";
-import { createAttachmentPreviews } from "./attachment-previews.svelte";
+import { createAttachmentPreviews, dataBytes, isPdf } from "./attachment-previews.svelte";
 
 function file(id: string, name: string, mime: string | null, size: number | null): Attachment {
   return { id, name, mime, size, author: null, created: null, content_url: `https://jira.example/secure/attachment/${id}/${name}`, thumbnail_url: null };
@@ -130,6 +130,20 @@ describe("attachment previews", () => {
     await settle();
     expect(asked).toEqual([]);
     expect(previews.of("1")).toEqual({ state: "none" });
+  });
+
+  test("the PDF test: a media type, or a .pdf name where there is none (#2415)", () => {
+    expect(isPdf({ name: "codes.pdf", mime: "application/pdf" })).toBe(true);
+    expect(isPdf({ name: "codes.bin", mime: "Application/PDF" })).toBe(true);
+    expect(isPdf({ name: "CODES.PDF", mime: null })).toBe(true);
+    expect(isPdf({ name: "codes.pdf", mime: "" })).toBe(true);
+    expect(isPdf({ name: "codes.pdf", mime: "text/plain" })).toBe(false);
+    expect(isPdf({ name: "codes.pdf.txt", mime: null })).toBe(false);
+  });
+
+  test("a preview's data URL is the file's bytes (#2415)", () => {
+    expect([...dataBytes("data:application/pdf;base64,JVBERi0=")]).toEqual([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    expect([...dataBytes("data:application/octet-stream;base64,/wA=")]).toEqual([0xff, 0x00]);
   });
 
   test("watch asks once the node is in view, and at once where nothing can tell", () => {

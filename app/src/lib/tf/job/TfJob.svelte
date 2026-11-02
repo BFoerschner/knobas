@@ -85,6 +85,7 @@
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
   import TfJobAttachments from "./TfJobAttachments.svelte";
+  import TfAttachmentPreview from "./TfAttachmentPreview.svelte";
   import { createAttachmentPreviews } from "./attachment-previews.svelte";
   import { cardSections } from "./card-sections";
   import { cardWidth } from "./card-width.svelte";
@@ -176,15 +177,19 @@
   const inherited = $derived(reader.inherited);
   const sources = $derived(reader.sources);
   const repos = $derived(reader.repos);
+  /** The attachment whose preview is open (#2415), by id; `null` while none is. */
+  let previewing = $state<string | null>(null);
+  const previewed = $derived(previewing === null ? null : (previews?.files.find((file) => file.id === previewing) ?? null));
   /**
-   * The description's inline images (#2406): the ticket's attachments, read
-   * through the page's previews (#2405). Made again on *Try again*, so the
-   * description draws again and a placeholder asks once more.
+   * The description's and the comments' inline images (#2406): the ticket's
+   * attachments, read through the page's previews (#2405), and opening their
+   * preview when clicked (#2415). Made again on *Try again*, so the prose
+   * draws again and a placeholder asks once more.
    */
   const inlineImages = $derived.by(() => {
     if (detail == null || previews === null) return null;
     void previews.attempt;
-    return ticketImages(previews, detail.source.display_name, detail.web_url ?? null);
+    return ticketImages(previews, detail.source.display_name, detail.web_url ?? null, (id) => (previewing = id));
   });
   /** The ticket's *Refresh* or *Sync now* (#2134). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
@@ -588,7 +593,7 @@
             </div>
           </section>
           {#if previews !== null && previews.files.length > 0}
-            <TfJobAttachments {previews} />
+            <TfJobAttachments {previews} onopen={(id) => (previewing = id)} />
           {/if}
           <section aria-labelledby="tf-tktalk">
             <header><h2 id="tf-tktalk">Conversation</h2></header>
@@ -602,6 +607,8 @@
               now={today()}
               refused={commentRefused}
               oncomment={comment}
+              attachments={detail.attachments ?? []}
+              images={inlineImages}
             />
           </section>
         </div>
@@ -629,6 +636,9 @@
       onapplyset={() => (applyingSet = true)}
       onsaveset={() => (savingSet = true)}
     />
+  {/if}
+  {#if previewed !== null && previews !== null}
+    <TfAttachmentPreview file={previewed} {previews} source={detail.source.display_name} {layers} onclose={() => (previewing = null)} />
   {/if}
   {#if applyingSet}
     <TfApplySet

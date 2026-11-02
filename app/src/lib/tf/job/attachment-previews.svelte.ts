@@ -8,8 +8,9 @@
  * mirror.
  *
  * Fetching is asked for, never done on page open: the Attachments panel
- * asks for its image rows when it opens (`fetchImages`), and an inline image
- * in the description asks once it is in view (`watch`). Each file is asked at
+ * asks for its image rows when it opens (`fetchImages`), an inline image
+ * asks once it is in view (`watch`), and the attachment preview asks for the
+ * image or PDF it shows (#2415). Each file is asked at
  * most once until *Try again* (`retry`) forgets the failures. A file the list
  * says is over the 5 MiB cap is never asked.
  */
@@ -77,6 +78,20 @@ export interface Previews {
 /** Whether a file is drawn as a picture: its media type says image. */
 export function isImage(file: Pick<Attachment, "mime">): boolean {
   return file.mime?.startsWith("image/") ?? false;
+}
+
+/** Whether a file is previewed as a PDF (#2415): its media type says so, or, with none, its name ends `.pdf`. */
+export function isPdf(file: Pick<Attachment, "name" | "mime">): boolean {
+  const mime = file.mime?.trim() ?? "";
+  return mime === "" ? /\.pdf$/i.test(file.name) : mime.toLowerCase() === "application/pdf";
+}
+
+/** A preview's `data:…;base64,` URL as the file's bytes (#2415): what the PDF viewer reads. */
+export function dataBytes(src: string): Uint8Array {
+  const binary = atob(src.slice(src.indexOf(",") + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
+  return bytes;
 }
 
 /** The reason a rejected read gives. */

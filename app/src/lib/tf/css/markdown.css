@@ -30,6 +30,8 @@
 .tf-md .tf-md-noimg { display: inline-block; font-size: var(--t-sm); color: var(--ink-2); border: 1px dashed var(--rule); border-radius: 3px; padding: 2px 8px; }
 /* A ticket attachment the wiki drew inline (#2406), as the ticket-page mockup's `.tf-tkfig`: at most the panel's width, nothing under it. */
 .tf-md img.tf-md-att { display: block; max-width: 100%; max-height: 280px; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet-2); }
+/* An attachment image that opens its preview (#2415): a link around it, the image the link's whole box. */
+.tf-md a.tf-md-attlink:has(> img) { display: inline-block; border-radius: 6px; cursor: zoom-in; }
 .tf-md .tf-md-noimg.tf-md-attnone { display: inline-flex; align-items: center; gap: 8px; padding: 10px 12px; }
 /* A diagram fence (#2258), as the mockup's `.fence .diagram`. */
 .tf-md .tf-fence .tf-diagram { padding: 18px; display: grid; place-items: center; background: var(--sheet); overflow: auto; }
