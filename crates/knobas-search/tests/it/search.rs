@@ -64,11 +64,11 @@ fn searcher(pool: &sqlx::PgPool) -> Searcher {
     )
 }
 
-/// Register the source instances the grammar resolves `/ji` against.
+/// Register the source instances the grammar resolves `in:ji` against.
 ///
 /// Only ever `jira` and `gitea`, and only from this file: `Vocabulary::load`
 /// reads every enabled source, so a second instance of the *jira* adapter kind
-/// anywhere in this file would make `/ji` plural and change what
+/// anywhere in this file would make `in:ji` plural and change what
 /// `filters_narrow_and_are_echoed_back_as_the_launcher_will_chip_them`
 /// asserts.
 async fn seed_sources(pool: &sqlx::PgPool) {

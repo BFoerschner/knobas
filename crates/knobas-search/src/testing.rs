@@ -271,7 +271,7 @@ pub async fn prepare(pool: &PgPool) -> Result<(), SearchError> {
 
 /// Register the three sources the corpus attributes rows to.
 ///
-/// Without these, `/ji` resolves to nothing and `@me` has no identity, so two
+/// Without these, `in:ji` resolves to nothing and `@me` has no identity, so two
 /// of the benchmark's ten cases would silently measure an *empty* filter
 /// rather than the filtered path they are named after.
 ///

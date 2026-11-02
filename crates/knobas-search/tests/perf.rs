@@ -317,7 +317,7 @@ fn rank(n: usize, p: usize) -> usize {
 /// The search text a case's raw query reduces to, for the match count.
 ///
 /// The grammar markers are the parser's business, and `match_count` takes plain
-/// text -- so a case whose whole query is a filter (`/tc`) has no text and
+/// text -- so a case whose whole query is a filter (`in:tc`) has no text and
 /// matches nothing by this measure, which is reported as `0` rather than
 /// guessed at.
 fn text_of(raw: &str) -> String {

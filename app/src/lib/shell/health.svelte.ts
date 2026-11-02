@@ -61,7 +61,7 @@ const ACTIONABLE: Record<AuthState, boolean> = {
  * copies are chances for them to disagree about what a red dot means.
  *
  * **`undefined` is a state too, and it is answered here** (#72). A caller can
- * hold a source id the health store has no row for — a `/gitea` chip typed
+ * hold a source id the health store has no row for — an `in:gitea` chip typed
  * before the first scheduler run — and "no reading yet" deserves exactly the
  * answer `unknown` gets. Taking `AuthState | undefined` is what keeps that
  * half of the rule from living at the call site: while the signature forbade

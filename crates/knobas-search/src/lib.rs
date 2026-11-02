@@ -305,7 +305,7 @@ impl Searcher {
     }
 
     /// Read `raw` as a link-set pattern (#868, R-7.2) with this
-    /// installation's vocabulary (`/alias` and `source:` resolved), or say why
+    /// installation's vocabulary (`source:` and `in:` resolved), or say why
     /// it is not one: [`query::pattern_of`].
     ///
     /// # Errors

@@ -1088,7 +1088,7 @@ test("the placeholder names the # letters and no / source", async () => {
  * The third reader of the actionable-health rule, and the one nothing else in
  * this file covers.
  *
- * A `/gitea` chip's dot and the row badge beside it are the same claim about
+ * An `in:gitea` chip's dot and the row badge beside it are the same claim about
  * the same source, so they are drawn from one rule (`shell/health.svelte::isActionable`)
  * rather than from three copies of the state list — which is what #37 asked for
  * and what this asserts is actually wired up. `ok` is the control: without it a
