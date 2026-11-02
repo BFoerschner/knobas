@@ -173,3 +173,14 @@ impl<A: Adapter> crate::bindings::exports::knobas::adapter::refresh::Guest for A
         }
     }
 }
+
+/// `docs` (1.5.0, #2442): a free function, with no instance at all. A
+/// payload that is not JSON is no content, as a kind the adapter does not
+/// draw is.
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+impl<A: Adapter> crate::bindings::exports::knobas::adapter::docs::Guest for A {
+    fn project(kind: String, payload: String) -> Option<String> {
+        let payload: serde_json::Value = serde_json::from_str(&payload).ok()?;
+        A::project(&kind, &payload).as_ref().map(to_json)
+    }
+}

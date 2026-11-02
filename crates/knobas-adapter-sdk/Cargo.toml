@@ -4,7 +4,7 @@ edition.workspace = true
 # The `knobas:adapter` interface version this SDK binds (#2028), not the
 # workspace's: `wit/adapter.wit`'s package version, which a test holds it to.
 # A WIT minor bumps this with it, in the same §10.8 entry.
-version = "1.4.0"
+version = "1.5.0"
 license.workspace = true
 
 # The Rust SDK of the adapter standard (spec #1192, ADR-0028): the

@@ -15,7 +15,7 @@
 /// round-trip tested there, and it is what spec §3a made the SPI's types for:
 /// plain data that can leave the process without a contract change. Each
 /// such parameter or result names the Rust type whose JSON it is.
-package knobas:adapter@1.4.0;
+package knobas:adapter@1.5.0;
 
 interface types {
     /// The serde JSON of the `knobas-source` type its use names.
@@ -261,12 +261,47 @@ interface refresh {
     refresh: func(instance: instance, entity: string) -> result<refresh-answer, source-error>;
 }
 
+/// `knobas_source::docs::DocProjection` (1.5.0, #2442, ADR-0040): one
+/// mirrored record drawn as a docs page, read when the page is opened and
+/// when the host indexes a `page` at sync.
+///
+/// Its own interface, not a function on `adapter`, for the reason
+/// `downloads` is: a component built against an earlier 1.x, which does not
+/// export it, still links, and draws no page. A component that claims the
+/// `wiki` role exports it; install refuses one that does not.
+///
+/// **No way out.** The host calls it with no HTTP capability: every request
+/// the component sends is refused before it leaves, whatever its manifest
+/// declares. A projection reads the payload it is handed and nothing else,
+/// under the adapter's deadline and memory cap. One that traps, runs past
+/// either or answers what does not decode is no content: the page draws as
+/// the source's failure.
+interface docs {
+    use types.{json};
+
+    /// `payload` is a record's payload as this adapter emitted it in its
+    /// `sync-item`, of entity kind `kind`. The answer is a
+    /// `docs::DocContent` as JSON, the whole docs vocabulary in its serde
+    /// form (a block tree, which a WIT type cannot nest), or `none` for a
+    /// kind this adapter draws no page for, or a payload it cannot read.
+    ///
+    /// What knobas fills when the page is read, it fills: an include's
+    /// `entity-id`, `blocks` and `unfilled`, a page link's and a ticket's
+    /// `entity-id`, a ticket's title and status, a mention's `me`. The host
+    /// clears whatever the component put there. A URL embed takes only an
+    /// absolute `http(s)` URL; any other is drawn as a placeholder.
+    ///
+    /// For a `page` the host builds the record's search text from this
+    /// answer, and the `body-text` the adapter sent for it is ignored.
+    project: func(kind: string, payload: json) -> option<json>;
+}
+
 /// What the host binds of every 1.x component: the 1.0.0 world, and the
 /// imports later minors add, which a component that does not use them never
 /// imports (`download-sink` in 1.1.0, `sink.walked` in 1.3.0: a function the
 /// host provides and an earlier component's `sink` import does not name).
-/// `downloads` (1.1.0), `query` (1.2.0) and `refresh` (1.4.0) are looked up
-/// apart, as optional.
+/// `downloads` (1.1.0), `query` (1.2.0), `refresh` (1.4.0) and `docs`
+/// (1.5.0) are looked up apart, as optional.
 world hosted {
     import sink;
     import log;
@@ -274,19 +309,20 @@ world hosted {
     export source;
 }
 
-/// What an external adapter is: it exports `source`, `downloads`, `query` and
-/// `refresh`, and may call `sink`, `download-sink` and `log`. Nothing else is
-/// granted beyond WASI with nothing in it (no directory, no environment, no
-/// socket) and `wasi:http` 0.2's outgoing handler, which the host holds to
-/// the hosts the adapter's manifest declares and attaches the source's
-/// credential to (#1203).
+/// What an external adapter is: it exports `source`, `downloads`, `query`,
+/// `refresh` and `docs`, and may call `sink`, `download-sink` and `log`.
+/// Nothing else is granted beyond WASI with nothing in it (no directory, no
+/// environment, no socket) and `wasi:http` 0.2's outgoing handler, which the
+/// host holds to the hosts the adapter's manifest declares and attaches the
+/// source's credential to (#1203), and which `docs` is called without.
 ///
 /// 1.1.0 added `download-sink` and `downloads` (#1205); 1.2.0 added `query`
 /// (#1208); 1.3.0 added `sink.walked` (#1380); 1.4.0 added `refresh`
-/// (#2101).
+/// (#2101); 1.5.0 added `docs` (#2442).
 world adapter {
     include hosted;
     export downloads;
     export query;
     export refresh;
+    export docs;
 }

@@ -23,6 +23,9 @@ knobas-core = { path = "../knobas-core" }
 # instance wait on beside every built-in client for that origin (#1631).
 knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
+# A page's space read off its declared `project_key`, as every read of the
+# mirror reads it, for the search text the host builds at sync (#2442).
+knobas-spi-types = { path = "../knobas-spi-types" }
 serde.workspace = true
 serde_json.workspace = true
 # The artifact hash a manifest names (#1202). The release `knobas-mockd` already

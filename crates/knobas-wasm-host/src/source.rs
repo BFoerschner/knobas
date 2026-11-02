@@ -1,5 +1,6 @@
 //! [`WasmSource`]: the `Source` trait, forwarded across the WIT boundary.
 
+use knobas_source::docs::{DocBlock, DocContent, EmbedContent, Inline, PAGE_KIND};
 use knobas_source::{
     Capability, ConnectionInfo, Cursor, RefreshAnswer, Sink, Source, SourceDescriptor, SourceError,
     SyncItem, WriteOp, WriteReceipt, pipeline, run, view,
@@ -328,6 +329,174 @@ async fn refresh_func<'a>(
     optional_func(adapter, store, adapter.inner.refresh.as_ref(), "refresh").await
 }
 
+/// `docs.project`'s parameters and results, as the host calls it (1.5.0,
+/// #2442).
+type ProjectParams<'a> = (&'a str, &'a str);
+type ProjectResults = (Option<String>,);
+
+/// `docs.project` of a fresh instance of the component in `store`.
+async fn project_func<'a>(
+    adapter: &WasmAdapter,
+    store: &mut Store<HostState>,
+) -> Result<TypedFunc<ProjectParams<'a>, ProjectResults>, SourceError> {
+    optional_func(adapter, store, adapter.inner.project.as_ref(), "project").await
+}
+
+/// At load: the `project` a component exports has the type 1.5.0 gives it.
+pub(crate) async fn check_project(adapter: &WasmAdapter) -> Result<(), String> {
+    let mut store = probe_store(adapter);
+    limits::bounded(adapter, async {
+        project_func(adapter, &mut store).await.map(drop)
+    })
+    .await
+    .map_err(|e| format!("its docs projection does not have the type knobas hosts: {e}"))
+}
+
+/// The docs projection of one record (1.5.0, #2442, ADR-0040), or `None`
+/// for a kind the component draws no page for and for every failure, which
+/// is logged.
+///
+/// The store's policy allows no host, so a request the component sends is
+/// refused before a socket opens: a projection reads the payload it is
+/// handed and nothing else. The adapter's deadline and memory cap hold it as
+/// they hold every call.
+pub(crate) async fn project(
+    adapter: &WasmAdapter,
+    kind: &str,
+    payload: &serde_json::Value,
+) -> Option<DocContent> {
+    let payload = convert::to_json(payload);
+    let answer = limits::bounded(adapter, async {
+        let mut store = new_store(
+            adapter,
+            adapter.kind(),
+            SinkSlot::none(),
+            Arc::new(net::Policy::none(adapter.kind())),
+        );
+        let func = project_func(adapter, &mut store).await?;
+        let (answer,) = func
+            .call_async(&mut store, (kind, &payload))
+            .await
+            .map_err(|e| failed(adapter, &e))?;
+        Ok(answer)
+    })
+    .await;
+    let text = match answer {
+        Ok(text) => text?,
+        Err(error) => {
+            tracing::warn!(
+                adapter = adapter.kind(),
+                "the docs projection of a {kind} failed, so it draws as the source's failure: \
+                 {error}"
+            );
+            return None;
+        }
+    };
+    match serde_json::from_str::<DocContent>(&text) {
+        Ok(mut content) => {
+            settle(&mut content);
+            Some(content)
+        }
+        Err(error) => {
+            tracing::warn!(
+                adapter = adapter.kind(),
+                "the docs projection of a {kind} answered what is not docs content, so it draws \
+                 as the source's failure: {error}"
+            );
+            None
+        }
+    }
+}
+
+/// What a component's docs content may not say, cleared: what knobas fills
+/// when the page is read (an include's target, blocks and why it is
+/// unfilled; a page link's and a ticket's mirrored entity, a ticket's title
+/// and status; whether a mention is the reader), so a component cannot
+/// point a link at an entity of its choosing or mark the reader mentioned;
+/// and a URL embed of anything but an absolute `http(s)` URL, which is a
+/// placeholder named as the embed is, as a built-in adapter draws one
+/// ([`EmbedContent::url`]).
+fn settle(content: &mut DocContent) {
+    settle_blocks(&mut content.blocks);
+    if let Some(excerpt) = &mut content.excerpt {
+        settle_blocks(excerpt);
+    }
+    for comment in &mut content.comments {
+        settle_blocks(&mut comment.blocks);
+    }
+}
+
+/// [`settle`] over a block list, every nesting included. The match names
+/// every block, so a new one is a decision here.
+fn settle_blocks(blocks: &mut [DocBlock]) {
+    for block in blocks {
+        match block {
+            DocBlock::Heading { text, .. } | DocBlock::Paragraph { text } => settle_inlines(text),
+            DocBlock::List { items, .. } => {
+                for item in items {
+                    settle_blocks(&mut item.blocks);
+                }
+            }
+            DocBlock::Table { rows } => {
+                for cell in rows.iter_mut().flatten() {
+                    settle_blocks(&mut cell.blocks);
+                }
+            }
+            DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
+                settle_blocks(blocks);
+            }
+            DocBlock::Include {
+                entity_id,
+                blocks,
+                unfilled,
+                ..
+            } => {
+                *entity_id = None;
+                blocks.clear();
+                *unfilled = None;
+            }
+            DocBlock::Embed {
+                name,
+                content: EmbedContent::Url { url },
+            } => match EmbedContent::url(url) {
+                Some(framed) => {
+                    *block = DocBlock::Embed {
+                        name: std::mem::take(name),
+                        content: framed,
+                    };
+                }
+                None => *block = knobas_source::docs::html::placeholder(name),
+            },
+            DocBlock::Embed {
+                content: EmbedContent::Html { .. },
+                ..
+            }
+            | DocBlock::Code { .. }
+            | DocBlock::Placeholder { .. } => {}
+        }
+    }
+}
+
+fn settle_inlines(inlines: &mut [Inline]) {
+    for inline in inlines {
+        match inline {
+            Inline::PageLink { entity_id, .. } => *entity_id = None,
+            Inline::Issue {
+                entity_id,
+                title,
+                status,
+                ..
+            } => {
+                *entity_id = None;
+                *title = None;
+                *status = None;
+            }
+            Inline::Mention { me, .. } => *me = false,
+            Inline::Text { .. } | Inline::Link { .. } | Inline::Break => {}
+        }
+    }
+}
+
 /// A store for a check at load, before any source of the adapter exists.
 fn probe_store(adapter: &WasmAdapter) -> Store<HostState> {
     new_store(
@@ -413,6 +582,33 @@ impl WasmSource {
         }
     }
 
+    /// `item` as the mirror stores it (1.5.0, #2442, ADR-0040): a live
+    /// `page` of a component that exports the docs projection gets the
+    /// search text the host builds from its projection with the shared
+    /// function, and the `body-text` the component sent is dropped. Its
+    /// space is its declared `project_key`. A page the projection does not
+    /// draw is found by its title alone. Every other item, and every item
+    /// of a component built against 1.4.0 or earlier, is kept as sent.
+    async fn indexed(&self, mut item: SyncItem) -> SyncItem {
+        if item.kind != PAGE_KIND || item.deleted || !self.adapter.projects() {
+            return item;
+        }
+        let space = self
+            .descriptor
+            .payload_paths
+            .iter()
+            .find(|paths| paths.kind == PAGE_KIND)
+            .and_then(|paths| {
+                knobas_spi_types::payload::resolve_string(&item.payload, &paths.project_key)
+            })
+            .unwrap_or_default();
+        item.body_text = match project(&self.adapter, &item.kind, &item.payload).await {
+            Some(content) => knobas_source::docs::search_text(&item.title, &space, &content),
+            None => item.title.trim().to_owned(),
+        };
+        item
+    }
+
     /// The JSON answer of a read, decoded as the SPI type `what` names.
     fn decode<T: serde::de::DeserializeOwned>(
         answer: Option<String>,
@@ -475,6 +671,7 @@ impl Source for WasmSource {
             while let Some(emit) = received.recv().await {
                 match emit {
                     Emit::Item(item, answer) => {
+                        let item = self.indexed(item).await;
                         let _ = answer.send(sink.item(item).await);
                     }
                     Emit::Walked { done, of, unit } => sink.walked(done, of, &unit).await,
@@ -526,7 +723,9 @@ impl Source for WasmSource {
         })
         .await?;
         Ok(match answer {
-            WitRefreshAnswer::Item(item) => RefreshAnswer::Item(convert::sync_item(item)?),
+            WitRefreshAnswer::Item(item) => {
+                RefreshAnswer::Item(self.indexed(convert::sync_item(item)?).await)
+            }
             WitRefreshAnswer::Gone => RefreshAnswer::Gone,
             WitRefreshAnswer::NotOffered => RefreshAnswer::NotOffered,
         })

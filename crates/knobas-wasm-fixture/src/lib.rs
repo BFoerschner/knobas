@@ -1,8 +1,8 @@
 //! The fixture external adapter (issue #1198, ADR-0028).
 //!
 //! A test adapter built to a WASM component against
-//! `knobas:adapter@1.4.0`. It serves three surveys, and a pipeline with one
-//! run ([`builds`], #1205), so that the host can be tested with the contract
+//! `knobas:adapter@1.5.0`. It serves three surveys, a pipeline with one
+//! run ([`builds`], #1205), and two docs pages ([`docs`], #2442), so that the host can be tested with the contract
 //! battery, every live read, and through the sync engine into the mirror,
 //! without a real product behind it. No external
 //! adapter ships with knobas; this is what the host is tested with.
@@ -38,6 +38,12 @@
 //!   frozen 1.3.0 world (the SDK's `v1_3`), the minor before `refresh`: it
 //!   exports no `refresh` and declares no `Capability::Refresh`, so its
 //!   source falls back to a run after a landed write (#2101).
+//! * **The docs source** (1.5.0, #2442, ADR-0040): two pages of the
+//!   *Harbour* space after the run, the wiki claim, and the projection that
+//!   draws every block of the docs vocabulary from them ([`docs`]). The
+//!   1.0.0 and 1.3.0 builds have neither pages nor claim, so they sync the
+//!   five items they always did; a test byte-patches this build's `docs`
+//!   export away for a wiki claim without the export.
 //! * **The refresh** (1.4.0, #2101, ADR-0031): `refresh` reads one item by
 //!   id as the sync emits it, every kind, and the older run `older_runs`
 //!   answers; an id of this source it does not hold is *gone*.
@@ -88,6 +94,8 @@
 //!   without one it does not translate (`none`).
 
 mod builds;
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+mod docs;
 mod fetch;
 
 use chrono::{TimeZone, Utc};
@@ -308,6 +316,8 @@ impl Fixture {
             builds::pipeline_payload(),
         ));
         items.push(self.run(builds::RUN, "42"));
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        items.extend(docs::pages(&self.id));
         items
     }
 
@@ -409,6 +419,35 @@ impl Adapter for Fixture {
             .block();
         }
         let [pipeline, run] = builds::kinds();
+        #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+        let mut entity_kinds = vec![
+            KindInfo {
+                id: "survey".into(),
+                label: "Survey".into(),
+                plural: "Surveys".into(),
+                monogram: "SV".into(),
+                full_sync_exhaustive: true,
+                refreshes: true,
+            },
+            pipeline,
+            run,
+        ];
+        #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+        let mut payload_paths: Vec<_> = builds::payload_paths().into();
+        #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+        let mut roles = vec![
+            RoleClaim {
+                role: ROLE.into(),
+                reads: Vec::new(),
+            },
+            builds::role(),
+        ];
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        {
+            entity_kinds.push(docs::kind());
+            payload_paths.push(docs::payload_paths());
+            roles.push(docs::role());
+        }
         SourceDescriptor {
             id: self.id.clone(),
             adapter_kind: KIND.into(),
@@ -429,18 +468,7 @@ impl Adapter for Fixture {
             accepts_account: false,
             min_sync_interval_secs: 60,
             write_ops: vec![SOURCE_ACTION.into()],
-            entity_kinds: vec![
-                KindInfo {
-                    id: "survey".into(),
-                    label: "Survey".into(),
-                    plural: "Surveys".into(),
-                    monogram: "SV".into(),
-                    full_sync_exhaustive: true,
-                    refreshes: true,
-                },
-                pipeline,
-                run,
-            ],
+            entity_kinds,
             config_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -460,14 +488,8 @@ impl Adapter for Fixture {
                 },
                 "additionalProperties": false,
             }),
-            payload_paths: builds::payload_paths().into(),
-            roles: vec![
-                RoleClaim {
-                    role: ROLE.into(),
-                    reads: Vec::new(),
-                },
-                builds::role(),
-            ],
+            payload_paths,
+            roles,
             source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
             url_forms: Vec::new(),
@@ -721,6 +743,15 @@ impl Adapter for Fixture {
     /// [`builds::OLDER_RUN`]; an id of this source it does not hold, a
     /// `"deleted"` survey among them, is gone. A faulted fixture fails as
     /// its sync does.
+    /// (#2442) A page drawn ([`docs::project`]); every other kind is none.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn project(
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_adapter_sdk::spi::docs::DocContent> {
+        docs::project(kind, payload)
+    }
+
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
     fn refresh(&self, entity: &str) -> Result<knobas_adapter_sdk::RefreshAnswer, SourceError> {
         use knobas_adapter_sdk::RefreshAnswer;
