@@ -33,8 +33,7 @@
   open, switch between *This job <key>* and *Everything* (`#/deps`).
 -->
 <script lang="ts">
-  import { onMount, tick, untrack } from "svelte";
-  import { inTextField } from "../../shell/keys";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -103,7 +102,6 @@
   import TfDepsViewMenu from "./TfDepsViewMenu.svelte";
   import { depViewState, type DepViewState } from "./views.svelte";
   import { ENVIRONMENTS } from "./views";
-  import { pageVisible } from "../kept-pages.svelte";
 
   type Ports = {
     dependencies: () => Promise<Dependencies>;
@@ -476,23 +474,7 @@
   });
 
   let jump = -1;
-  let findField = $state<HTMLInputElement | null>(null);
 
-  /** `/` focuses Find (R-2.4, R-14), in FilterBar's shape: not while typing elsewhere, not with a modifier. */
-  const pageShown = pageVisible();
-  onMount(() => {
-    const onkey = (event: KeyboardEvent) => {
-      // A page keep-alive holds hidden (#2247) takes no keys.
-      if (!pageShown()) return;
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
-      const at = document.activeElement;
-      if (at instanceof HTMLElement && inTextField(at)) return;
-      event.preventDefault();
-      findField?.focus();
-    };
-    window.addEventListener("keydown", onkey);
-    return () => window.removeEventListener("keydown", onkey);
-  });
 
   /** The matches drawn as tiles and the "more" lines that hold matches, in page order. */
   const findStops = () => [...(bandsEl?.querySelectorAll<HTMLElement>(".tf-dp-t.tf-dp-hit .tf-dp-open, .tf-dp-more.tf-dp-hit") ?? [])];
@@ -609,7 +591,6 @@
           placeholder="Find among {read.items.length.toLocaleString('en')} items"
           aria-label="Find"
           data-filter
-          bind:this={findField}
           autocomplete="off"
           value={query}
           oninput={(event) => {
