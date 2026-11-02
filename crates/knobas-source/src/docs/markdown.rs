@@ -22,6 +22,8 @@
 //! * a ticket chip is its key, a mention `@` and a first name;
 //! * a placeholder is an HTML comment naming it, so the reader sees where
 //!   something was without knobas inventing its content;
+//! * a framed page is a link to its URL, embedded HTML a link to the page
+//!   that runs it, named for the embed (spec #2432);
 //! * a filled include is the blocks it holds after an HTML comment naming the
 //!   page they are from, an unfilled one a comment naming the page (spec
 //!   #2432).
@@ -35,10 +37,11 @@
 use super::{DocBlock, EmbedContent, Inline, ListItem, PanelKind, TableCell};
 
 /// A page as Markdown: `title` as a level-1 heading, then `blocks`, ending in
-/// one newline.
+/// one newline. `web_url` is the page's own address in its source, which an
+/// HTML embed links to.
 #[must_use]
-pub fn page(title: &str, blocks: &[DocBlock]) -> String {
-    document(title, &join_blocks(blocks))
+pub fn page(title: &str, web_url: Option<&str>, blocks: &[DocBlock]) -> String {
+    document(title, &join_blocks(blocks, web_url))
 }
 
 /// A page whose body is already Markdown (a note's), passed through as it is
@@ -105,31 +108,32 @@ fn is_windows_device(stem: &str) -> bool {
         })
 }
 
-fn join_blocks(blocks: &[DocBlock]) -> String {
+/// `at` is the page's web URL, handed down to every block inside.
+fn join_blocks(blocks: &[DocBlock], at: Option<&str>) -> String {
     blocks
         .iter()
-        .map(block)
+        .map(|b| block(b, at))
         .filter(|text| !text.is_empty())
         .collect::<Vec<_>>()
         .join("\n\n")
 }
 
-fn block(block: &DocBlock) -> String {
+fn block(block: &DocBlock, at: Option<&str>) -> String {
     match block {
         DocBlock::Heading { level, text } => {
             let hashes = "#".repeat(usize::from((*level).clamp(1, 6)));
             format!("{hashes} {}", one_line(&inlines(text)))
         }
         DocBlock::Paragraph { text } => guard_line_start(&inlines(text)),
-        DocBlock::List { ordered, items } => list(*ordered, items),
+        DocBlock::List { ordered, items } => list(*ordered, items, at),
         DocBlock::Code { code, language } => fenced(language.as_deref(), code),
-        DocBlock::Table { rows } => table(rows),
+        DocBlock::Table { rows } => table(rows, at),
         DocBlock::Panel {
             kind,
             title,
             blocks,
-        } => panel(*kind, title.as_deref(), blocks),
-        DocBlock::Collapsible { title, blocks } => collapsible(title, blocks),
+        } => panel(*kind, title.as_deref(), blocks, at),
+        DocBlock::Collapsible { title, blocks } => collapsible(title, blocks, at),
         DocBlock::Include {
             title,
             blocks,
@@ -138,7 +142,7 @@ fn block(block: &DocBlock) -> String {
         } => match unfilled {
             None => [
                 format!("<!-- from: {} -->", comment_safe(title)),
-                join_blocks(blocks),
+                join_blocks(blocks, at),
             ]
             .into_iter()
             .filter(|text| !text.is_empty())
@@ -157,10 +161,18 @@ fn block(block: &DocBlock) -> String {
         }),
         // Markup that runs has no Markdown spelling, and pasting its scripts
         // into a file the reader opens elsewhere would run them there (#2440).
+        // It has no address of its own, so it is a link to the page that runs
+        // it (spec #2432, story 40), or a comment where the page has none.
         DocBlock::Embed {
             name,
             content: EmbedContent::Html { .. },
-        } => format!("<!-- embed: {} -->", comment_safe(name)),
+        } => match at {
+            Some(url) => inline(&Inline::Link {
+                text: name.clone(),
+                href: url.to_owned(),
+            }),
+            None => format!("<!-- embed: {} -->", comment_safe(name)),
+        },
     }
 }
 
@@ -169,7 +181,7 @@ fn comment_safe(text: &str) -> String {
     text.replace("--", "- -")
 }
 
-fn list(ordered: bool, items: &[ListItem]) -> String {
+fn list(ordered: bool, items: &[ListItem], at: Option<&str>) -> String {
     items
         .iter()
         .enumerate()
@@ -185,7 +197,7 @@ fn list(ordered: bool, items: &[ListItem]) -> String {
                 Some(false) => "[ ] ",
                 None => "",
             };
-            let body = join_blocks(&item.blocks);
+            let body = join_blocks(&item.blocks, at);
             let mut lines = body.lines();
             let mut out = format!("{marker}{task}{}", lines.next().unwrap_or(""));
             for line in lines {
@@ -215,8 +227,8 @@ fn fenced(language: Option<&str>, code: &str) -> String {
 /// place and the places it covers are left empty, so the columns below a
 /// merged cell still line up. A cell's blocks are written as a page's are,
 /// their lines joined by `<br>`.
-fn table(rows: &[Vec<TableCell>]) -> String {
-    let grid = grid(rows);
+fn table(rows: &[Vec<TableCell>], at: Option<&str>) -> String {
+    let grid = grid(rows, at);
     let Some((header, rows)) = grid.split_first() else {
         return String::new();
     };
@@ -238,7 +250,7 @@ fn table(rows: &[Vec<TableCell>]) -> String {
 /// The table's rows as places: each cell's text at the first free place of
 /// its row, the places its spans cover empty. A span past the last row stops
 /// there.
-fn grid(rows: &[Vec<TableCell>]) -> Vec<Vec<String>> {
+fn grid(rows: &[Vec<TableCell>], at: Option<&str>) -> Vec<Vec<String>> {
     let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
     for (r, row) in rows.iter().enumerate() {
         let mut column = 0;
@@ -255,7 +267,7 @@ fn grid(rows: &[Vec<TableCell>]) -> Vec<Vec<String>> {
                 }
                 for (across, place) in places[column..column + colspan].iter_mut().enumerate() {
                     *place = Some(if down == 0 && across == 0 {
-                        table_cell(&join_blocks(&cell.blocks))
+                        table_cell(&join_blocks(&cell.blocks, at))
                     } else {
                         String::new()
                     });
@@ -286,13 +298,13 @@ fn table_cell(text: &str) -> String {
     out.lines().collect::<Vec<_>>().join("<br>")
 }
 
-fn panel(kind: PanelKind, title: Option<&str>, blocks: &[DocBlock]) -> String {
+fn panel(kind: PanelKind, title: Option<&str>, blocks: &[DocBlock], at: Option<&str>) -> String {
     let mut first = format!("**{}**", panel_word(kind));
     if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
         first.push(' ');
         first.push_str(&one_line(&escape(title)));
     }
-    let body = join_blocks(blocks);
+    let body = join_blocks(blocks, at);
     let text = if body.is_empty() {
         first
     } else {
@@ -312,12 +324,12 @@ fn panel(kind: PanelKind, title: Option<&str>, blocks: &[DocBlock]) -> String {
 
 /// A collapsible as GitHub's `<details>`: the title is HTML text in the
 /// summary, the blocks Markdown after a blank line.
-fn collapsible(title: &str, blocks: &[DocBlock]) -> String {
+fn collapsible(title: &str, blocks: &[DocBlock], at: Option<&str>) -> String {
     let summary = one_line(title)
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;");
-    let body = join_blocks(blocks);
+    let body = join_blocks(blocks, at);
     if body.is_empty() {
         return format!("<details>\n<summary>{summary}</summary>\n\n</details>");
     }

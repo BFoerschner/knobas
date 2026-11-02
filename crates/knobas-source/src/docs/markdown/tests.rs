@@ -17,7 +17,7 @@ fn cell(words: &str) -> TableCell {
 
 /// The body alone, as a page titled `T` writes it.
 fn body(blocks: &[DocBlock]) -> String {
-    page("T", blocks)
+    page("T", None, blocks)
         .strip_prefix("# T\n\n")
         .expect("a body")
         .to_owned()
@@ -201,7 +201,7 @@ fn a_table_is_a_pipe_table_headed_by_its_first_row() {
         "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n",
         "a header wider than every row sets the width"
     );
-    assert_eq!(page("T", &[DocBlock::Table { rows: vec![] }]), "# T\n");
+    assert_eq!(page("T", None, &[DocBlock::Table { rows: vec![] }]), "# T\n");
 }
 
 /// A pipe in a nested table's cell is escaped once, by the inner table, and
@@ -326,17 +326,43 @@ fn a_placeholder_is_an_html_comment_naming_it() {
     assert_eq!(md, "<!-- macro: jira- -chart -->\n\n<!-- macro: toc -->\n");
 }
 
-/// An HTML embed is never pasted into the file: a viewer that renders the
-/// Markdown would run its scripts (#2440). A comment names it.
-#[test]
-fn an_html_embed_is_a_comment_naming_it_and_not_its_markup() {
-    let md = body(&[DocBlock::Embed {
+fn html_embed() -> DocBlock {
+    DocBlock::Embed {
         name: "html".to_owned(),
         content: crate::docs::EmbedContent::Html {
             html: "<script>alert(1)</script>".to_owned(),
         },
-    }]);
-    assert_eq!(md, "<!-- embed: html -->\n");
+    }
+}
+
+/// An HTML embed is never pasted into the file: a viewer that renders the
+/// Markdown would run its scripts (#2440). It has no URL of its own, so it
+/// is a link to the page it is on, named for the embed (spec #2432, story
+/// 40), wherever on the page it sits.
+#[test]
+fn an_html_embed_is_a_link_to_its_page_named_for_it_and_not_its_markup() {
+    let md = page(
+        "T",
+        Some("https://wiki.example/pages/5"),
+        &[
+            html_embed(),
+            DocBlock::Collapsible {
+                title: "Try it".to_owned(),
+                blocks: vec![html_embed()],
+            },
+        ],
+    );
+    assert_eq!(
+        md,
+        "# T\n\n[html](https://wiki.example/pages/5)\n\n<details>\n<summary>Try it</summary>\n\n[html](https://wiki.example/pages/5)\n\n</details>\n"
+    );
+}
+
+/// A page with no web URL has nothing to link an HTML embed to: a comment
+/// names it.
+#[test]
+fn an_html_embed_on_a_page_with_no_url_is_a_comment_naming_it() {
+    assert_eq!(body(&[html_embed()]), "<!-- embed: html -->\n");
 }
 
 /// A URL embed is a link to the page it frames (spec #2432, story 40).

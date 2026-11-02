@@ -1454,10 +1454,11 @@ pub struct DocExport {
 
 /// A page as Markdown (R-10.17), through the one converter, which reads the
 /// frame's own blocks (`knobas_source::docs::markdown`, #952): its title as
-/// the heading, then its blocks.
+/// the heading, then its blocks; `web_url` is the page's own, which an HTML
+/// embed links to.
 #[must_use]
-pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
-    knobas_source::docs::markdown::page(title, blocks)
+pub fn page_markdown(title: &str, web_url: Option<&str>, blocks: &[DocBlock]) -> String {
+    knobas_source::docs::markdown::page(title, web_url, blocks)
 }
 
 /// Write one page as Markdown into `folder`, under the first free name of
@@ -1489,7 +1490,7 @@ pub async fn export(
     let (path, mut out) = crate::downloads::create_free(folder, &name)
         .await
         .map_err(|(path, e)| IpcError::internal(format!("writing {}: {e}", path.display())))?;
-    let text = page_markdown(&page.title, &page.blocks);
+    let text = page_markdown(&page.title, page.web_url.as_deref(), &page.blocks);
     if let Err(e) = write_whole(&mut out, text.as_bytes()).await {
         drop(out);
         let _ = tokio::fs::remove_file(&path).await;
@@ -1843,7 +1844,7 @@ mod markdown_golden {
 
     #[test]
     fn every_block_and_inline_exports_as_before() {
-        let md = page_markdown("Retry *budget*: [v2]", &fixture());
+        let md = page_markdown("Retry *budget*: [v2]", None, &fixture());
         let want = concat!(
             "# Retry \\*budget\\*: \\[v2\\]\n\n",
             "## Retry policy\n\n",
@@ -1889,8 +1890,8 @@ mod markdown_golden {
 
     #[test]
     fn an_empty_page_is_its_title() {
-        assert_eq!(page_markdown("Empty", &[]), "# Empty\n");
-        assert_eq!(page_markdown("", &[]), "# \n");
+        assert_eq!(page_markdown("Empty", None, &[]), "# Empty\n");
+        assert_eq!(page_markdown("", None, &[]), "# \n");
     }
 }
 
