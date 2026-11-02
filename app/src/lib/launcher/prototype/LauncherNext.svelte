@@ -26,6 +26,13 @@
     - the sheet's actions are a fixed list per kind, not adapter-declared;
     - `BoardNext.svelte` is `Board.svelte` without the lists block.
 
+  Round 3 (Björn, 2026-11-02): no `/` for a source and no sources strip on
+  the board; one-letter prefixes for the kinds he reaches for (`p r b m d i
+  l`, `t` as shipped); actions per kind that are real addresses or real
+  writes of the app (a PR's Files changed, a repo's compare page for a new
+  pull request, re-run, approve, ack, snooze, done, open the checkout,
+  clone); ⌘K while open gives the box its focus back when a click took it.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -33,6 +40,9 @@
   import { onMount, tick } from "svelte";
 
   import {
+    ackAlert,
+    cloneRepo,
+    completeInboxItem,
     createLink,
     createSmartList as defaultCreateSmartList,
     deleteSmartList as defaultDeleteSmartList,
@@ -40,11 +50,19 @@
     launcherHome as defaultHome,
     ipcErrorMessage,
     linkSets,
+    openCheckout,
     renameSmartList as defaultRenameSmartList,
     saveLinkSet,
     search as defaultSearch,
+    snoozeInboxItem,
+    submitWrite,
     ticketViews,
   } from "../../ipc";
+  import type { InboxItem } from "../../ipc/entity";
+  import { pickedMorning, tomorrowValue } from "../../inbox/inbox.svelte";
+  import { prHash } from "../../tf/pr/pr";
+  import { repoHash } from "../../tf/repo/repo";
+  import { clockLabel } from "../../time/format";
   import type { LauncherHome, ResultGroup, SearchHit, SearchQuery, SearchResponse, SmartListSummary, TicketViewRow } from "../../ipc/search";
   import type { LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
   import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
@@ -54,7 +72,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { entityAddress } from "../../tf/address";
   import { counted } from "../../tf/counted";
-  import { opener } from "../../tf/inbox/inbox";
+  import { opener, sentence } from "../../tf/inbox/inbox";
   import type { LinkTarget } from "../../tf/job/current.svelte";
   import { jobHash } from "../../tf/route";
   import TfDialog from "../../tf/settings/TfDialog.svelte";
@@ -72,7 +90,7 @@
   let {
     open = $bindable(false),
     sources,
-    runs = [],
+    runs,
     sourcesRead,
     inbox,
     today,
@@ -104,6 +122,9 @@
   } = $props();
   // svelte-ignore state_referenced_locally
   void onlink;
+  // Unused since round 3: the board draws no source strip. Kept so `App.svelte` mounts both launchers alike.
+  // svelte-ignore state_referenced_locally
+  void runs;
 
   // ---- PROTOTYPE: the local corpus the backend does not index yet ----------
 
@@ -207,9 +228,49 @@
   // svelte-ignore state_referenced_locally
   const realSearch = ports?.search ?? defaultSearch;
 
-  /** The two one-letter prefixes, `t ` style: `d ` pages, `l ` saved lists. */
-  const DOCS = /^d(?:\s+|$)/i;
+  /**
+   * The one-letter prefixes, `t ` style: a letter, a space, the words. Five
+   * are a kind the backend already filters on; `l` and `i` are answered here.
+   */
+  const KIND_OF: Record<string, string> = { d: "page", r: "repo", p: "pr", b: "build", m: "monitor" };
+  const KINDED = /^([drpbm])(?:\s+|$)/i;
   const LISTS = /^l(?:\s+|$)/i;
+  const INBOX = /^i(?:\s+|$)/i;
+
+  /** `i ⟨text⟩`: the inbox's items whose sentence holds the text, newest first; `i` alone is all of them. */
+  function inboxAnswer(text: string, at: string): SearchResponse {
+    const needle = text.toLowerCase();
+    const items = inbox?.items ?? [];
+    // The row's key column is the line's time, as the board shows it; the item's own key is kept aside.
+    inboxKeys.clear();
+    const seen = new Map<string, number>();
+    const hits: SearchHit[] = items
+      .filter((item) => `${sentence(item)} ${item.reason}`.toLowerCase().includes(needle))
+      .map((item) => {
+        const when = clockLabel(item.occurred_at, now ?? new Date(), true);
+        const n = (seen.get(when) ?? 0) + 1;
+        seen.set(when, n);
+        const id = `inbox:${when}${n > 1 ? ` (${n})` : ""}`;
+        inboxKeys.set(id, item.key);
+        return { ...BLANK, entity_id: id, kind: "inbox", source_id: item.source_id, title: sentence(item), synced_at: at, path: item.reason };
+      });
+    return {
+      interpreted: { text, prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+      groups: hits.length === 0 ? [] : [{ kind: "inbox", label: "Inbox item", plural: "Inbox", monogram: "IN", total: hits.length, hits }],
+      total: hits.length,
+      took_ms: 0,
+      coverage: [],
+    };
+  }
+
+  /** Which inbox item a row stands for, by the row's id. */
+  const inboxKeys = new Map<string, string>();
+
+  function inboxItemOf(row: LauncherRow): InboxItem | null {
+    if (row.kind !== "hit" || row.hit.kind !== "inbox") return null;
+    const key = inboxKeys.get(row.hit.entity_id);
+    return key === undefined ? null : (inbox?.items.find((item) => item.key === key) ?? null);
+  }
 
   /** The search port with the prototype's additions layered over the real answer. */
   async function searchNext(query: SearchQuery): Promise<SearchResponse> {
@@ -221,10 +282,12 @@
       if (!listsLoaded) await homeNext();
       return listsAnswer(raw.replace(LISTS, "").trim(), at);
     }
-    const docs = DOCS.test(raw);
-    const sent = docs ? { ...query, raw: raw.replace(DOCS, "kind:page ") } : query;
+    if (INBOX.test(raw)) return inboxAnswer(raw.replace(INBOX, "").trim(), at);
+    const letter = KINDED.exec(raw)?.[1]?.toLowerCase();
+    const kind = letter ? KIND_OF[letter] : undefined;
+    const sent = kind ? { ...query, raw: raw.replace(KINDED, `kind:${kind} `) } : query;
     const response = await realSearch(sent);
-    if (docs) return docsRow(response, at);
+    if (kind === "page") return docsRow(response, at);
     if (response.interpreted.prefix !== null) return response;
     const needle = response.interpreted.text.trim().toLowerCase();
     if (needle === "") return response;
@@ -294,7 +357,7 @@
   function entityOf(row: LauncherRow): Entity | null {
     switch (row.kind) {
       case "hit":
-        if (["view", "set", "list"].includes(row.hit.kind) || row.group.kind === "docs-search") return null;
+        if (["view", "set", "list", "inbox"].includes(row.hit.kind) || row.group.kind === "docs-search") return null;
         return { entityId: row.hit.entity_id, title: row.hit.title, kind: row.hit.kind };
       case "recent":
         return { entityId: row.row.entity_id, title: row.row.title, kind: row.row.kind };
@@ -361,6 +424,18 @@
     }
   }
 
+  /** A write that answers at once, said in the toast; the launcher closes either way the write went. */
+  async function doing(said: string, write: () => Promise<unknown>) {
+    try {
+      await write();
+      push({ text: said });
+      close();
+    } catch (cause) {
+      sheet = null;
+      session.error = ipcErrorMessage(cause);
+    }
+  }
+
   async function copy(text: string, said: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -417,11 +492,33 @@
       }
       return items;
     }
+    const item = inboxItemOf(row);
+    if (item) {
+      const items: SheetItem[] = [{ id: "open", label: "Open", detail: opener(item)?.href ? "What the line is about" : "The Inbox page", run: () => activate(row) }];
+      const entity = item.entity_id;
+      if (item.kind === "build" && entity) {
+        items.push({ id: "rerun", label: "Re-run", detail: "Queued as a write to the source", run: () => doing(`Re-run queued for ${item.title}`, () => submitWrite({ RerunBuild: { entity } })) });
+      }
+      if (item.category === "alert" && entity) {
+        items.push({ id: "ack", label: "Acknowledge", detail: "The alert stops asking", run: () => doing(`Acknowledged ${item.title}`, () => ackAlert(entity)) });
+      }
+      items.push({
+        id: "snooze",
+        label: "Snooze until tomorrow 9:00",
+        detail: "Back in the inbox then",
+        run: () => doing(`Snoozed ${item.title}`, () => snoozeInboxItem(item.key, (pickedMorning(tomorrowValue(now ?? new Date()), now) ?? new Date()).toISOString())),
+      });
+      items.push({ id: "done", label: "Done", detail: "Leaves the inbox", run: () => doing(`Done: ${item.title}`, () => completeInboxItem(item.key)) });
+      return items;
+    }
     const entity = entityOf(row);
     if (!entity) return [];
     const items: SheetItem[] = [];
     const job = openEntity;
-    if (job && entity.entityId !== job.entityId) {
+    const id = entity.entityId;
+    const key = keyOf(id);
+    // The pair first: what this item and the job can be to each other.
+    if (job && id !== job.entityId) {
       items.push({ id: "link", label: `Link to ${job.label}`, detail: "", link: true, run: () => writeLink(entity, sheet?.relation ?? 0) });
     }
     if (sets.length > 0) {
@@ -429,22 +526,49 @@
       if (member || entity.kind === "ticket") {
         items.push({
           id: "set",
-          label: member ? "Add to a set…" : `Show a set on ${keyOf(entity.entityId)}…`,
+          label: member ? "Add to a set…" : `Show a set on ${key}…`,
           detail: member ? "A fixed member, shown on every ticket the set applies to" : "The set's members appear on this ticket",
           run: () => { if (sheet) sheet = { ...sheet, level: "sets", selected: 0, filter: "" }; },
         });
       }
     }
-    if (ontimer && canBeTarget({ entityId: entity.entityId })) {
+    if (ontimer && canBeTarget({ entityId: id })) {
       const start = ontimer;
-      items.push({ id: "timer", label: "Start timer", detail: "Stops the running one first", run: () => { start(entity.entityId, entity.title); close(); } });
+      items.push({ id: "timer", label: "Start timer", detail: "Stops the running one first", run: () => { start(id, entity.title); close(); } });
     }
-    if (entity.kind === "ticket") {
-      items.push({ id: "work", label: "Work on this", detail: `Makes ${keyOf(entity.entityId)} the job and opens its page`, run: () => { close(); onnavigate(jobHash(entity.entityId)); } });
-      items.push({ id: "copy", label: "Copy key", detail: keyOf(entity.entityId), run: () => void copy(keyOf(entity.entityId), `Copied ${keyOf(entity.entityId)}`) });
-    } else {
-      items.push({ id: "copy", label: "Copy title", detail: entity.title, run: () => void copy(entity.title, "Copied the title") });
+    // Then what the kind can do: a real address of the app, or a real write.
+    const go = (hash: string) => () => { close(); onnavigate(hash); };
+    switch (entity.kind) {
+      case "ticket":
+        items.push({ id: "work", label: "Work on this", detail: `Makes ${key} the job and opens its page`, run: go(jobHash(id)) });
+        break;
+      case "pr":
+        items.push({ id: "diff", label: "Review the files", detail: "Files changed", run: go(prHash(id, "diff")) });
+        items.push({ id: "talk", label: "Conversation", detail: "The review thread", run: go(prHash(id, "conversation")) });
+        items.push({ id: "approve", label: "Approve", detail: "Queued as a write to the source", run: () => doing(`Approval queued for ${entity.title}`, () => submitWrite({ Approve: { entity: id, body: "" } })) });
+        items.push({ id: "editor", label: "Open in editor", detail: "The checkout, at this pull request's branch", run: () => doing(`Opened ${entity.title} in the editor`, () => openCheckout(id)) });
+        break;
+      case "repo":
+        items.push({ id: "newpr", label: "Create pull request", detail: "The compare page: pick the branch, open the request", run: go(repoHash(id, "compare")) });
+        items.push({ id: "prs", label: "Pull requests", detail: "Open ones first", run: go(repoHash(id, "prs")) });
+        items.push({ id: "branches", label: "Branches", detail: "Every branch and where it stands", run: go(repoHash(id, "branches")) });
+        items.push({ id: "editor", label: "Open in editor", detail: "The checkout under the clones root", run: () => doing(`Opened ${entity.title} in the editor`, () => openCheckout(id)) });
+        items.push({ id: "clone", label: "Clone", detail: "Into a new folder under the clones root", run: () => doing(`Cloning ${entity.title}`, () => cloneRepo(id)) });
+        break;
+      case "build":
+        items.push({ id: "rerun", label: "Re-run", detail: "Queued as a write to the source", run: () => doing(`Re-run queued for ${entity.title}`, () => submitWrite({ RerunBuild: { entity: id } })) });
+        break;
+      case "monitor":
+        items.push({ id: "ack", label: "Acknowledge alert", detail: "If one is open on it", run: () => doing(`Acknowledged ${entity.title}`, () => ackAlert(id)) });
+        break;
+      case "commit":
+      case "branch":
+        items.push({ id: "editor", label: "Open in editor", detail: "The checkout, at this point", run: () => doing(`Opened ${entity.title} in the editor`, () => openCheckout(id)) });
+        break;
+      default:
     }
+    if (entity.kind === "ticket") items.push({ id: "copy", label: "Copy key", detail: key, run: () => void copy(key, `Copied ${key}`) });
+    else items.push({ id: "copy", label: "Copy title", detail: entity.title, run: () => void copy(entity.title, "Copied the title") });
     return items;
   }
 
@@ -535,6 +659,14 @@
     }
   });
 
+  // The inbox store seeds after the shell mounts: an `i` typed before that is asked again once it has.
+  let inboxSeen = 0;
+  $effect(() => {
+    const count = inbox?.items.length ?? 0;
+    if (count > 0 && inboxSeen === 0 && open && INBOX.test(session.raw.trim())) session.set(session.raw);
+    inboxSeen = count;
+  });
+
   // PROTOTYPE: the screenshot affordances.
   const params = new URLSearchParams(location.search);
   let autoSheet = params.has("launcher-sheet");
@@ -552,9 +684,15 @@
         event.preventDefault();
         if (!open) {
           open = true;
-        } else if (sheet) {
-          sheet = null;
+          return;
+        }
+        // A click on a chip or a row took the focus: the first ⌘K only gives it back.
+        if (!document.activeElement?.closest(".tf-ln-q")) {
           box?.focus();
+          return;
+        }
+        if (sheet) {
+          sheet = null;
         } else {
           openSheet();
         }
@@ -585,6 +723,10 @@
         // PROTOTYPE: a view and a set are addresses the search does not know yet.
         if (row.hit.kind === "view") return `#/tickets/${encodeURIComponent(keyOf(row.hit.entity_id))}`;
         if (row.hit.kind === "set") return `#/sets/${encodeURIComponent(keyOf(row.hit.entity_id))}`;
+        if (row.hit.kind === "inbox") {
+          const item = inboxItemOf(row);
+          return item ? (opener(item)?.href ?? "#/inbox") : "#/inbox";
+        }
         if (row.group.kind === "docs-search") {
           // PROTOTYPE: the Docs page does not read this yet; the hand-off is the implementer's.
           sessionStorage.setItem("knobas.prototype.docs-search", keyOf(row.hit.entity_id));
@@ -741,7 +883,7 @@
     node.select();
   }
 
-  const placeholder = "Search everything, or > actions, # tickets, d pages, l lists, @ people, / source, ? help";
+  const placeholder = "Search everything · ? lists the prefixes · > # @ p r b m d i l t";
   const interpreted = $derived(session.response?.interpreted ?? null);
   const sheetHint = $derived.by(() => {
     const row = session.current;
@@ -831,7 +973,7 @@
               <div class="tf-ln-h"><span class="tf-ln-lab">{pinned && memberKindOf(pinned.kind) ? "Add to" : "Show on this ticket"}</span></div>
             {/if}
             {#each shown as item, index (item.id)}
-              {#if index > 0 && sheet.level === "root" && sheet.filter === "" && (item.id === "timer" || item.id === "copy") && shown[index - 1]?.id !== "timer"}
+              {#if index > 0 && sheet.level === "root" && sheet.filter === "" && (item.id === "copy" || ["link", "set", "timer"].includes(shown[index - 1]?.id ?? "") !== ["link", "set", "timer"].includes(item.id))}
                 <div class="cut"></div>
               {/if}
               {#if item.link}
@@ -899,8 +1041,6 @@
                 home={session.home}
                 inboxCount={inbox?.count ?? 0}
                 sources={health}
-                {runs}
-                reading={sourcesRead}
                 rows={session.rows}
                 selected={session.selected}
                 {optionId}
@@ -936,6 +1076,8 @@
             {/if}
           {:else if session.response && session.response.interpreted.prefix === "list" && session.response.groups.length === 0}
             <p class="tf-ln-none">{lists.length === 0 ? "No saved list yet. Search for something and press ⌘S." : "No saved list matches."}</p>
+          {:else if session.response && INBOX.test(session.raw.trim()) && session.response.groups.length === 0}
+            <p class="tf-ln-none">{(inbox?.items.length ?? 0) === 0 ? "The inbox is empty." : "No inbox line matches."}</p>
           {:else if session.response}
             <Results
               response={session.response}
