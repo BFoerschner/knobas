@@ -286,7 +286,9 @@ impl EmbedContent {
         let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
         let framed = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
         let clean = !url.chars().any(|c| c.is_whitespace() || c.is_control());
-        (framed && clean && !host.is_empty()).then(|| Self::Url { url: url.to_owned() })
+        (framed && clean && !host.is_empty()).then(|| Self::Url {
+            url: url.to_owned(),
+        })
     }
 }
 
