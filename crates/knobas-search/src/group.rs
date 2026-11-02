@@ -93,7 +93,11 @@ pub fn group(rows: Vec<RawHit>, kinds: &KindCatalog) -> Vec<ResultGroup> {
 /// [`group`], each hit carrying the places in its text that hold one of
 /// `needles` (#2431, [`crate::excerpt`]).
 #[must_use]
-pub fn with_excerpts(rows: Vec<RawHit>, kinds: &KindCatalog, needles: &[String]) -> Vec<ResultGroup> {
+pub fn with_excerpts(
+    rows: Vec<RawHit>,
+    kinds: &KindCatalog,
+    needles: &[String],
+) -> Vec<ResultGroup> {
     grouped(rows, kinds, needles)
 }
 

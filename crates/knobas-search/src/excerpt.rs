@@ -34,7 +34,12 @@ const SPAN: usize = 180;
 /// text is read for the Docs marks, and the title a source opens the text
 /// with is not quoted (it is on screen).
 #[must_use]
-pub fn excerpts(title: &str, text: &str, first_line: Option<i64>, needles: &[String]) -> Vec<Excerpt> {
+pub fn excerpts(
+    title: &str,
+    text: &str,
+    first_line: Option<i64>,
+    needles: &[String],
+) -> Vec<Excerpt> {
     let stems: Vec<Vec<char>> = needles
         .iter()
         .map(|n| stem(n))
@@ -225,13 +230,26 @@ mod tests {
 
     #[test]
     fn a_stemmed_word_is_marked_to_its_end_and_only_at_a_word_start() {
-        let out = excerpts("T", "T\nThe payouts retried. Prepayout stays.", None, &needles(&["payout", "retries"]));
-        assert_eq!(flat(&out), vec![(None, "The [payouts] [retried].".to_owned())]);
+        let out = excerpts(
+            "T",
+            "T\nThe payouts retried. Prepayout stays.",
+            None,
+            &needles(&["payout", "retries"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![(None, "The [payouts] [retried].".to_owned())]
+        );
     }
 
     #[test]
     fn a_log_names_each_line_by_its_number_in_the_whole_log() {
-        let out = excerpts("x", "ok\nboom AC04\nok\nAC04 again", Some(40), &needles(&["ac04"]));
+        let out = excerpts(
+            "x",
+            "ok\nboom AC04\nok\nAC04 again",
+            Some(40),
+            &needles(&["ac04"]),
+        );
         assert_eq!(
             flat(&out),
             vec![

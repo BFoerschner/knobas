@@ -29,7 +29,15 @@ fn token() -> String {
         .collect()
 }
 
-async fn item(pool: &sqlx::PgPool, source: &str, kind: &str, key: &str, title: &str, payload: serde_json::Value, hours_ago: i64) -> String {
+async fn item(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    key: &str,
+    title: &str,
+    payload: serde_json::Value,
+    hours_ago: i64,
+) -> String {
     let id = format!("{source}:{key}");
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$3)")
         .bind(&id)
@@ -165,7 +173,10 @@ async fn everything(pool: &sqlx::PgPool, raw: &str, titles: bool) -> SearchRespo
 }
 
 /// `(kind, id, [(place, text)])` of every hit.
-fn hits(response: &SearchResponse) -> Vec<(String, String, Vec<(Option<String>, String)>)> {
+/// A hit as the tests read it: kind, entity id, `(place, text)` per excerpt.
+type Read = (String, String, Vec<(Option<String>, String)>);
+
+fn hits(response: &SearchResponse) -> Vec<Read> {
     response
         .groups
         .iter()
@@ -193,7 +204,14 @@ async fn the_newest_finished_runs_log_is_stored_once_and_found_by_everything() {
     let pool = pool().await;
     let t = token();
     let source = format!("tc{}", &t[..8]);
-    crate::support::source_config(&pool, &source, "teamcity", "TeamCity", &serde_json::json!({})).await;
+    crate::support::source_config(
+        &pool,
+        &source,
+        "teamcity",
+        "TeamCity",
+        &serde_json::json!({}),
+    )
+    .await;
     // The declarations, stored by the search as every launcher opening does.
     everything(&pool, "warmup", false).await;
 
@@ -209,41 +227,93 @@ async fn the_newest_finished_runs_log_is_stored_once_and_found_by_everything() {
         5,
     )
     .await;
-    let older = item(&pool, &source, "build", "7", "Deploy #7", run(&config, 7, false), 3).await;
-    let newer = item(&pool, &source, "build", "8", "Deploy #8", run(&config, 8, false), 2).await;
+    let older = item(
+        &pool,
+        &source,
+        "build",
+        "7",
+        "Deploy #7",
+        run(&config, 7, false),
+        3,
+    )
+    .await;
+    let newer = item(
+        &pool,
+        &source,
+        "build",
+        "8",
+        "Deploy #8",
+        run(&config, 8, false),
+        2,
+    )
+    .await;
     let reads = Arc::new(Mutex::new(Vec::new()));
     let logs = Logs {
         id: source.clone(),
         lines: vec![
             (older.clone(), vec![format!("old{t} words")]),
-            (newer.clone(), vec!["compiling".to_owned(), format!("refused{t} by the bank")]),
+            (
+                newer.clone(),
+                vec!["compiling".to_owned(), format!("refused{t} by the bank")],
+            ),
         ],
         reads: Arc::clone(&reads),
     };
 
-    let stored = knobas_sync::pipeline_logs::refresh(&pool, &source, &logs).await.unwrap();
+    let stored = knobas_sync::pipeline_logs::refresh(&pool, &source, &logs)
+        .await
+        .unwrap();
     assert_eq!(stored, 1);
-    assert_eq!(*reads.lock().unwrap(), vec![newer.clone()], "only the newest run's log");
+    assert_eq!(
+        *reads.lock().unwrap(),
+        vec![newer.clone()],
+        "only the newest run's log"
+    );
 
     assert_eq!(
         hits(&everything(&pool, &format!("refused{t}"), false).await),
         vec![(
             "pipeline".to_owned(),
             pipeline.clone(),
-            vec![(Some("line 102".to_owned()), format!("refused{t} by the bank"))]
+            vec![(
+                Some("line 102".to_owned()),
+                format!("refused{t} by the bank")
+            )]
         )]
     );
     assert!(hits(&everything(&pool, &format!("refused{t}"), true).await).is_empty());
     assert!(hits(&everything(&pool, &format!("old{t}"), false).await).is_empty());
 
     // Nothing newer: the next sync reads no log.
-    assert_eq!(knobas_sync::pipeline_logs::refresh(&pool, &source, &logs).await.unwrap(), 0);
+    assert_eq!(
+        knobas_sync::pipeline_logs::refresh(&pool, &source, &logs)
+            .await
+            .unwrap(),
+        0
+    );
     assert_eq!(reads.lock().unwrap().len(), 1);
 
     // A run still going is not read; the stored log stays the last finished one's.
-    item(&pool, &source, "build", "9", "Deploy #9", run(&config, 9, true), 1).await;
-    assert_eq!(knobas_sync::pipeline_logs::refresh(&pool, &source, &logs).await.unwrap(), 0);
-    assert_eq!(hits(&everything(&pool, &format!("refused{t}"), false).await).len(), 1);
+    item(
+        &pool,
+        &source,
+        "build",
+        "9",
+        "Deploy #9",
+        run(&config, 9, true),
+        1,
+    )
+    .await;
+    assert_eq!(
+        knobas_sync::pipeline_logs::refresh(&pool, &source, &logs)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        hits(&everything(&pool, &format!("refused{t}"), false).await).len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -251,7 +321,14 @@ async fn a_newer_finished_run_replaces_the_stored_log() {
     let pool = pool().await;
     let t = token();
     let source = format!("tc{}", &t[..8]);
-    crate::support::source_config(&pool, &source, "teamcity", "TeamCity", &serde_json::json!({})).await;
+    crate::support::source_config(
+        &pool,
+        &source,
+        "teamcity",
+        "TeamCity",
+        &serde_json::json!({}),
+    )
+    .await;
     everything(&pool, "warmup", false).await;
     let config = format!("{t}_Build");
     let pipeline = item(
@@ -264,7 +341,16 @@ async fn a_newer_finished_run_replaces_the_stored_log() {
         5,
     )
     .await;
-    let first = item(&pool, &source, "build", "1", "Build #1", run(&config, 1, false), 3).await;
+    let first = item(
+        &pool,
+        &source,
+        "build",
+        "1",
+        "Build #1",
+        run(&config, 1, false),
+        3,
+    )
+    .await;
     let mut lines = vec![(first.clone(), vec![format!("first{t}")])];
     let reads = Arc::new(Mutex::new(Vec::new()));
     let logs = |lines: Vec<(String, Vec<String>)>| Logs {
@@ -272,12 +358,25 @@ async fn a_newer_finished_run_replaces_the_stored_log() {
         lines,
         reads: Arc::clone(&reads),
     };
-    knobas_sync::pipeline_logs::refresh(&pool, &source, &logs(lines.clone())).await.unwrap();
+    knobas_sync::pipeline_logs::refresh(&pool, &source, &logs(lines.clone()))
+        .await
+        .unwrap();
 
-    let second = item(&pool, &source, "build", "2", "Build #2", run(&config, 2, false), 1).await;
+    let second = item(
+        &pool,
+        &source,
+        "build",
+        "2",
+        "Build #2",
+        run(&config, 2, false),
+        1,
+    )
+    .await;
     lines.push((second, vec![format!("second{t}")]));
     assert_eq!(
-        knobas_sync::pipeline_logs::refresh(&pool, &source, &logs(lines)).await.unwrap(),
+        knobas_sync::pipeline_logs::refresh(&pool, &source, &logs(lines))
+            .await
+            .unwrap(),
         1
     );
     assert!(hits(&everything(&pool, &format!("first{t}"), false).await).is_empty());

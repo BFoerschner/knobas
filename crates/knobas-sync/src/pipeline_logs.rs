@@ -68,10 +68,9 @@ pub async fn refresh(
             }
             Ok(Ok(Some(log))) => log,
         };
-        let first_line = log
-            .lines
-            .first()
-            .map_or(1, |line| i64::try_from(line.number.max(1)).unwrap_or(i64::MAX));
+        let first_line = log.lines.first().map_or(1, |line| {
+            i64::try_from(line.number.max(1)).unwrap_or(i64::MAX)
+        });
         let body = log
             .lines
             .iter()
@@ -96,21 +95,17 @@ async fn owed(
 ) -> Result<Vec<(String, String)>, sqlx::Error> {
     let declarations = knobas_core::payload::Declarations::empty()
         .with(source_id, source.descriptor().payload_paths);
-    let pipelines = match knobas_core::builds::pipelines(
-        pool,
-        &declarations,
-        &[],
-        &[source_id.to_owned()],
-    )
-    .await
-    {
-        Ok(pipelines) => pipelines,
-        Err(knobas_core::CoreError::Db(error)) => return Err(error),
-        Err(error) => {
-            tracing::debug!(source_id, %error, "the pipelines were not read for their logs");
-            return Ok(Vec::new());
-        }
-    };
+    let pipelines =
+        match knobas_core::builds::pipelines(pool, &declarations, &[], &[source_id.to_owned()])
+            .await
+        {
+            Ok(pipelines) => pipelines,
+            Err(knobas_core::CoreError::Db(error)) => return Err(error),
+            Err(error) => {
+                tracing::debug!(source_id, %error, "the pipelines were not read for their logs");
+                return Ok(Vec::new());
+            }
+        };
     let newest: Vec<(String, String)> = pipelines
         .into_iter()
         .filter_map(|pipeline| {
@@ -122,7 +117,10 @@ async fn owed(
     if newest.is_empty() {
         return Ok(newest);
     }
-    let ids: Vec<&str> = newest.iter().map(|(pipeline, _)| pipeline.as_str()).collect();
+    let ids: Vec<&str> = newest
+        .iter()
+        .map(|(pipeline, _)| pipeline.as_str())
+        .collect();
     let stored: HashMap<String, String> = sqlx::query_as::<_, (String, String)>(
         "select pipeline_id, run_id from sync.pipeline_log where pipeline_id = any($1)",
     )

@@ -1933,7 +1933,12 @@ mod tests {
             10,
             50,
         );
-        assert_eq!(alone.sql.matches("    from picked p\n").count(), 1, "{}", alone.sql);
+        assert_eq!(
+            alone.sql.matches("    from picked p\n").count(),
+            1,
+            "{}",
+            alone.sql
+        );
     }
 
     #[test]

@@ -66,9 +66,10 @@ pub use query::{
 pub use saved::{Refusal, SavedList, SmartListSummary};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions,
-    KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters,
-    Excerpt, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
+    EntityRow, Excerpt, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension,
+    FilterSuggestions, KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix,
+    ResultGroup, SearchFilters, SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer,
+    SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 

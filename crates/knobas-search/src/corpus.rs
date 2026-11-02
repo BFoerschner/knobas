@@ -1023,7 +1023,8 @@ mod tests {
 
     #[test]
     fn titles_leaves_the_run_logs_out_and_everything_keeps_them() {
-        let has_logs = |corpora: &[&Corpus]| corpora.iter().any(|c| c.relation == PIPELINE_LOG.relation);
+        let has_logs =
+            |corpora: &[&Corpus]| corpora.iter().any(|c| c.relation == PIPELINE_LOG.relation);
         assert!(has_logs(&searched(ALL, false)));
         assert!(has_logs(&searched(WITHOUT_NOTES, false)));
         assert!(!has_logs(&searched(ALL, true)));

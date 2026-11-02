@@ -139,7 +139,10 @@ async fn the_wire_shape_is_the_contract() {
     );
     // Everything's excerpts (#2431): each a place (text or null) and segments.
     let excerpt = &v["groups"][0]["hits"][0]["excerpts"][0];
-    assert!(excerpt["place"].is_null() || excerpt["place"].is_string(), "{v}");
+    assert!(
+        excerpt["place"].is_null() || excerpt["place"].is_string(),
+        "{v}"
+    );
     assert!(excerpt["segments"][0]["hit"].is_boolean(), "{v}");
     assert!(v["took_ms"].is_number(), "{v}");
     assert!(v["total"].is_number(), "{v}");

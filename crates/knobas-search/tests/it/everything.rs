@@ -206,7 +206,10 @@ async fn a_word_only_in_a_run_log_answers_the_pipeline_coloured_by_its_last_run(
     let hits = all_hits(&response);
     assert_eq!(hits.len(), 1, "{response:#?}");
     let hit = hits[0];
-    assert_eq!((hit.row.kind.as_str(), hit.row.entity_id.as_str()), ("pipeline", id.as_str()));
+    assert_eq!(
+        (hit.row.kind.as_str(), hit.row.entity_id.as_str()),
+        ("pipeline", id.as_str())
+    );
     assert_eq!(hit.row.path.as_deref(), Some("Root › Payouts"));
     assert_eq!(
         hit.row.state,
