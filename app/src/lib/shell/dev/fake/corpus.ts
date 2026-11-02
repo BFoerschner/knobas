@@ -421,12 +421,6 @@ export function fakeContext(kind: ContextKind, title: string, anchor_id: string 
 FAKE_CONTEXTS.push(fakeContext("ticket", "Retry failed SEPA payouts", "mock:PAY-231"));
 
 /**
- * The mirror row `list_entities` returns. The path and the state chip are
- * the fixture's own `path` and `chip` payload keys where a row carries them
- * (#817's job rows), and `null` otherwise, as the mock adapter declares
- * neither; a row from another source names it as `source`.
- */
-/**
  * A ticket's state as the Jira adapter declares it (#2421,
  * `knobas-source-jira`'s `ticket_state`): the fixture's descriptors declare
  * these (`fake/sources.ts`), and a ticket row resolves its status against
@@ -448,6 +442,12 @@ function ticketState(entry: (typeof CORPUS)[number]): StateChip | null {
   return found ? { text: status, tone: found.tone } : null;
 }
 
+/**
+ * The mirror row `list_entities` returns. The path and the state chip are
+ * the fixture's own `path` and `chip` payload keys where a row carries them
+ * (#817's job rows), and `null` otherwise, as the mock adapter declares
+ * neither; a row from another source names it as `source`.
+ */
 export function mirrorRow(entry: (typeof CORPUS)[number]) {
   const text = (value: unknown) => (typeof value === "string" ? value : null);
   const chip = (entry.payload["chip"] as StateChip | undefined) ?? ticketState(entry) ?? undefined;

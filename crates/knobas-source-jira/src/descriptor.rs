@@ -95,6 +95,26 @@ pub fn descriptor_template() -> SourceDescriptor {
     }
 }
 
+/// A ticket's state (#2421, spec #2419): its status, in the tone the launcher
+/// colours its monogram with and the `?` card's legend explains. Done and
+/// resolved are green, in progress and in review blue, closed grey; to do,
+/// and any word a workflow adds that is not named here, is no state at all,
+/// which draws the row uncoloured. By name, as `done_statuses` is, and not by
+/// status category: knobas does not sync the category.
+fn ticket_state() -> Vec<knobas_source::StatePath> {
+    use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
+    vec![StatePath {
+        at: PayloadPath::of(["fields", "status", "name"]),
+        values: vec![
+            StateValue::of("Done", Tone::Ok),
+            StateValue::of("Resolved", Tone::Ok),
+            StateValue::of("In Progress", Tone::Info),
+            StateValue::of("In Review", Tone::Info),
+            StateValue::of("Closed", Tone::Muted),
+        ],
+    }]
+}
+
 /// Where a Jira Data Center issue keeps what knobas reads (#277, ADR-0007).
 ///
 /// Every path here is one this adapter's own reads already relied on -- the
@@ -168,26 +188,6 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// second candidate (the deputy's ruling of 2026-10-12 on #598). A sub-task's
 /// direct parent comes first. On any one instance one of the two is unused,
 /// which is what clause 6's shared evidence slot tolerates (#301).
-/// A ticket's state (#2421, spec #2419): its status, in the tone the launcher
-/// colours its monogram with and the `?` card's legend explains. Done and
-/// resolved are green, in progress and in review blue, closed grey; to do,
-/// and any word a workflow adds that is not named here, is no state at all,
-/// which draws the row uncoloured. By name, as `done_statuses` is, and not by
-/// status category: knobas does not sync the category.
-fn ticket_state() -> Vec<knobas_source::StatePath> {
-    use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
-    vec![StatePath {
-        at: PayloadPath::of(["fields", "status", "name"]),
-        values: vec![
-            StateValue::of("Done", Tone::Ok),
-            StateValue::of("Resolved", Tone::Ok),
-            StateValue::of("In Progress", Tone::Info),
-            StateValue::of("In Review", Tone::Info),
-            StateValue::of("Closed", Tone::Muted),
-        ],
-    }]
-}
-
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
     vec![
