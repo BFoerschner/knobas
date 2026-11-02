@@ -507,13 +507,21 @@ test("on the Tickets board and list, yellow is the chosen job's card and row, an
   expect(block(code, ".tf-row.tf-card.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--card-ink\);/);
 });
 
-test("the yellow page card is a light surface in both themes: its dots and chips take the light tone values, the blocked chip too (spec #2396, #2400)", () => {
+test("every yellow card is a light surface in both themes: the page card's, the board card's and the list row's dots and chips take the light tone values, the blocked chip too (spec #2396 story 56, #2400)", () => {
   const TONES = ["--ok", "--ok-bg", "--warn", "--warn-bg", "--err", "--err-bg", "--info", "--info-bg", "--muted", "--muted-bg"];
   // The light values are the spec's colour table's, not a copy of the stylesheet.
   const light = new Map(COLOURS.map(([token, value]) => [token, value]));
   expect(TONES.every((token) => light.has(token)), "the spec's table names every tone").toBe(true);
-  const card = block(code, ".tf-ticketcard.tf-card");
-  const wrong = TONES.filter((token) => !card.includes(`${token}: ${light.get(token)};`));
+  // The bodies of every rule whose selector list names `selector` exactly, so a grouped rule counts for each.
+  const rulesNaming = (selector: string) =>
+    [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+      .filter(([, list]) => list!.split(",").some((one) => one.trim() === selector))
+      .map(([, , body]) => body)
+      .join("\n");
+  const wrong = [".tf-ticketcard.tf-card", ".tf-tcard.tf-card", ".tf-row.tf-card"].flatMap((selector) => {
+    const card = rulesNaming(selector);
+    return TONES.filter((token) => !card.includes(`${token}: ${light.get(token)};`)).map((token) => `${selector} ${token}`);
+  });
   expect(wrong).toEqual([]);
   // Every dot and chip draws from these tokens, so none needs a value of its own on the card.
   expect(block(code, ".tf-dot.tf-err")).toContain("var(--err)");

@@ -75,8 +75,9 @@
 .tf-sheetcard .tf-facts a.tf-tkepicchip { color: var(--ink); }
 .tf-ticketcard .tf-facts a.tf-tkepicchip:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* The yellow card is a light surface in both themes (design system, Colour), so its dots and chips take the light
-   tone values: dark's --warn is the card's own yellow and its --err pink on it. The blocked chip follows. */
-.tf-ticketcard.tf-card {
+   tone values: dark's --warn is the card's own yellow and its --err pink on it. The blocked chip follows. Every
+   yellow card: the ticket page's, the Tickets board's and the list's row (spec #2396 story 56). */
+.tf-ticketcard.tf-card, .tf-tcard.tf-card, .tf-row.tf-card {
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
 }
