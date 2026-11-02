@@ -849,7 +849,7 @@ async fn a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts() 
     let (state, heard) = mock_fixture("refresh_mock").await;
     // At the mock's own position, so the run after each write is incremental
     // and writes nothing over what the refresh wrote.
-    sqlx::query("update knobas.source_config set cursor = 'tidewater-v4' where id = 'mockread'")
+    sqlx::query("update knobas.source_config set cursor = 'tidewater-v5' where id = 'mockread'")
         .execute(&state.pool)
         .await
         .unwrap();
@@ -926,7 +926,7 @@ async fn a_landed_writes_item_is_mirrored_from_the_mock_before_any_run_starts() 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_mock_that_does_not_offer_the_read_gets_the_run_alone() {
     let (state, heard) = mock_fixture("refresh_mock_unoffered").await;
-    sqlx::query("update knobas.source_config set cursor = 'tidewater-v4' where id = 'mocknoread'")
+    sqlx::query("update knobas.source_config set cursor = 'tidewater-v5' where id = 'mocknoread'")
         .execute(&state.pool)
         .await
         .unwrap();

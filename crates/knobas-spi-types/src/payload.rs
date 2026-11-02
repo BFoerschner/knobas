@@ -182,6 +182,32 @@ pub struct ProjectPath {
     pub name: Vec<PayloadPath>,
 }
 
+/// Where a ticket's **worklog** is, and what each entry says (#2403): who
+/// logged it and how long, in seconds.
+///
+/// * `at` leads to an **array of objects**, one per entry. Anything else is
+///   a miss: no worklog, never an empty one.
+/// * `author` is where the account that logged the entry sits inside it, as
+///   the source spells the account, so it can be matched against the
+///   configured username as [`KindPaths::assignee`] is. Jira's
+///   `author.name`.
+/// * `seconds` is where the time sits inside it, a whole JSON number of
+///   seconds, read as [`KindPaths::estimate`] is. Jira's `timeSpentSeconds`.
+///
+/// An entry whose author or time misses is left out ([`resolve_worklog`]).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
+pub struct WorklogPath {
+    /// Where the array of entries is.
+    pub at: PayloadPath,
+    /// Where an entry's author sits inside it.
+    #[serde(default)]
+    pub author: Vec<PayloadPath>,
+    /// Where an entry's time in seconds sits inside it.
+    #[serde(default)]
+    pub seconds: Vec<PayloadPath>,
+}
+
 /// Where a record keeps **the files attached to it**, and where each file's
 /// facts sit inside its element (#2404): Jira's `fields.attachment`.
 ///
@@ -409,6 +435,31 @@ pub struct KindPaths {
     /// misread. Empty for every kind with no estimate, and a miss draws none.
     #[serde(default)]
     pub estimate: Vec<PayloadPath>,
+    /// Who filed a ticket, as the source spells the account (#2403), so it
+    /// can be matched against the configured username as
+    /// [`assignee`](Self::assignee) is: Jira's `fields.reporter.name`,
+    /// Gitea's `user.login`. The ticket page card's *Reporter*. Empty for
+    /// every kind with no reporter, and a miss draws no row.
+    #[serde(default)]
+    pub reporter: Vec<PayloadPath>,
+    /// When a ticket was filed (#2403), an ISO 8601 instant as
+    /// [`started`](Self::started) is written: Jira's `fields.created`,
+    /// Gitea's `created_at`. Empty for every kind with no such date.
+    #[serde(default)]
+    pub created: Vec<PayloadPath>,
+    /// The time logged on a ticket, **in seconds** (#2403), by everyone:
+    /// Jira's `fields.timespent`. A whole JSON number, read as
+    /// [`estimate`](Self::estimate) is; the ticket page card's *Logged*.
+    /// Empty for every kind with no time tracking (Gitea's), and a miss
+    /// draws none.
+    #[serde(default)]
+    pub time_spent: Vec<PayloadPath>,
+    /// The entries of a ticket's worklog (#2403), from which the card tells
+    /// the reader's share of [`time_spent`](Self::time_spent). Candidates
+    /// in declaration order, the first whose `at` leads to an array winning.
+    /// Empty for every kind with no worklog.
+    #[serde(default)]
+    pub worklog: Vec<WorklogPath>,
     /// How many comments a ticket has (#894): Jira's `fields.comment.total`.
     /// A whole JSON number, read as `estimate` is; the ticket card draws
     /// "N comments" above zero. Empty for every kind with no count, and a
@@ -808,6 +859,10 @@ pub mod field {
     pub const SPRINT_STATE: &str = "sprint_state";
     pub const ESTIMATE: &str = "estimate";
     pub const COMMENT_COUNT: &str = "comment_count";
+    pub const REPORTER: &str = "reporter";
+    pub const CREATED: &str = "created";
+    pub const TIME_SPENT: &str = "time_spent";
+    pub const WORKLOG: &str = "worklog";
     pub const DESCRIPTION: &str = "description";
     pub const POSITION: &str = "position";
     pub const NAME: &str = "name";
@@ -863,6 +918,10 @@ pub mod field {
         SPRINT_STATE,
         ESTIMATE,
         COMMENT_COUNT,
+        REPORTER,
+        CREATED,
+        TIME_SPENT,
+        WORKLOG,
         DESCRIPTION,
         POSITION,
         NAME,
@@ -1227,6 +1286,40 @@ pub fn resolve_list(payload: &serde_json::Value, candidates: &[ListPath]) -> Vec
         }
     }
     out
+}
+
+/// The time a ticket's declared worklog holds, summed per author (#2403).
+///
+/// The first candidate whose `at` leads to an array is read; an entry counts
+/// where its author resolves as [`resolve_string`] reads one and its time is
+/// a whole JSON number of seconds, not negative. Every other entry is left
+/// out, which costs that entry and not the worklog. Ordered by author.
+/// `None` where no candidate leads to an array: no worklog, never an empty
+/// one.
+#[must_use]
+pub fn resolve_worklog(
+    payload: &serde_json::Value,
+    candidates: &[WorklogPath],
+) -> Option<BTreeMap<String, i64>> {
+    let (candidate, entries) = candidates
+        .iter()
+        .find_map(|candidate| Some((candidate, at(payload, &candidate.at)?.as_array()?)))?;
+    let mut by_author = BTreeMap::new();
+    for entry in entries {
+        let Some(author) = resolve_string(entry, &candidate.author) else {
+            continue;
+        };
+        let Some(seconds) = candidate
+            .seconds
+            .iter()
+            .find_map(|path| at(entry, path)?.as_i64())
+            .filter(|seconds| *seconds >= 0)
+        else {
+            continue;
+        };
+        *by_author.entry(author).or_insert(0) += seconds;
+    }
+    Some(by_author)
 }
 
 /// The chip a record's declared state draws, if any (#666).
@@ -2075,6 +2168,54 @@ mod tests {
         assert_eq!(resolve_trigger(&both, &two), Some(Trigger::Schedule));
     }
 
+    /// A worklog sums per author (#2403): an entry whose author or time
+    /// misses (blank, absent, a number spelled as text, negative) costs that
+    /// entry; the first candidate leading to an array wins, an empty array
+    /// is an empty worklog, and no array is none.
+    #[test]
+    fn a_worklog_sums_per_author_and_drops_the_entries_it_cannot_read() {
+        let jira = WorklogPath {
+            at: PayloadPath::of(["worklog", "worklogs"]),
+            author: vec![PayloadPath::of(["author", "name"])],
+            seconds: vec![PayloadPath::of(["timeSpentSeconds"])],
+        };
+        let payload = serde_json::json!({ "worklog": { "worklogs": [
+            { "author": { "name": "mara" }, "timeSpentSeconds": 3600 },
+            { "author": { "name": " lena " }, "timeSpentSeconds": 1800 },
+            { "author": { "name": "mara" }, "timeSpentSeconds": 2400 },
+            { "author": { "name": "" }, "timeSpentSeconds": 60 },
+            { "author": { "name": "jonas" }, "timeSpentSeconds": "60" },
+            { "author": { "name": "jonas" }, "timeSpentSeconds": -60 },
+            { "timeSpentSeconds": 60 },
+        ] } });
+        assert_eq!(
+            resolve_worklog(&payload, std::slice::from_ref(&jira)),
+            Some(BTreeMap::from([
+                ("lena".to_owned(), 1800),
+                ("mara".to_owned(), 6000)
+            ]))
+        );
+
+        let elsewhere = WorklogPath {
+            at: PayloadPath::of(["worklogs"]),
+            author: vec![PayloadPath::of(["who"])],
+            seconds: vec![PayloadPath::of(["seconds"])],
+        };
+        let flat = serde_json::json!({ "worklogs": [{ "who": "mara", "seconds": 60 }] });
+        assert_eq!(
+            resolve_worklog(&flat, &[jira.clone(), elsewhere.clone()]),
+            Some(BTreeMap::from([("mara".to_owned(), 60)]))
+        );
+        let empty = serde_json::json!({ "worklogs": [] });
+        assert_eq!(
+            resolve_worklog(&empty, std::slice::from_ref(&elsewhere)),
+            Some(BTreeMap::new())
+        );
+        let none = serde_json::json!({ "worklogs": null });
+        assert_eq!(resolve_worklog(&none, &[elsewhere]), None);
+        assert_eq!(resolve_worklog(&payload, &[]), None);
+    }
+
     /// A declared time is ISO 8601 in either spelling (#848): TeamCity's
     /// basic form and RFC 3339 read as the same instant; a date alone, a
     /// word or a blank is a miss.
@@ -2086,6 +2227,11 @@ mod tests {
         assert_eq!(parse_instant("20260822T122000+0200"), Some(expected));
         assert_eq!(parse_instant("2026-08-22T10:20:00Z"), Some(expected));
         assert_eq!(parse_instant(" 20260822T102000+0000 "), Some(expected));
+        // Jira's `created` (#2403): extended, milliseconds, a basic offset.
+        assert_eq!(
+            parse_instant("2026-08-22T12:20:00.000+0200"),
+            Some(expected)
+        );
         assert_eq!(parse_instant("2026-08-22"), None);
         assert_eq!(parse_instant("yesterday"), None);
         assert_eq!(parse_instant(""), None);

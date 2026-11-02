@@ -899,6 +899,67 @@ async fn a_synced_issue_carries_epic_membership_links_and_resolution() {
     jira.assert_no_violations();
 }
 
+/// **The three typed facts and the worklog** (#2403) read off a synced issue
+/// through the paths the adapter declares, the exact query the sync sends:
+/// PAY-231's reporter by username, its created date as an instant, its time
+/// spent in seconds, and its worklog summed by author. An issue nobody logged
+/// on reads no time spent and an empty worklog, never zero for a miss.
+#[tokio::test]
+async fn a_synced_issue_reads_its_reporter_created_spent_and_worklog_through_the_descriptor() {
+    use knobas_core::payload::{parse_instant, resolve_string, resolve_worklog};
+
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.unwrap();
+    let descriptor = source.descriptor();
+    let paths = descriptor
+        .payload_paths
+        .iter()
+        .find(|p| p.kind == "ticket")
+        .expect("the adapter declares its tickets");
+    let payload = |key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.entity.key == key)
+            .unwrap_or_else(|| panic!("{key} is in the fixture"))
+            .payload
+            .clone()
+    };
+
+    let logged = payload("PAY-231");
+    assert_eq!(
+        resolve_string(&logged, &paths.reporter).as_deref(),
+        Some("mara.lindqvist")
+    );
+    let created = resolve_string(&logged, &paths.created).expect("PAY-231 has a created date");
+    assert_eq!(
+        parse_instant(&created).map(|at| at.to_rfc3339()),
+        Some("2026-08-08T11:48:00+00:00".to_owned()),
+        "{created}"
+    );
+    assert_eq!(
+        knobas_core::payload::resolve_number(&logged, &paths.time_spent),
+        Some(16_200.0)
+    );
+    assert_eq!(
+        resolve_worklog(&logged, &paths.worklog),
+        Some([("mara.lindqvist".to_owned(), 16_200)].into())
+    );
+
+    let bare = payload("PAY-240");
+    assert_eq!(
+        knobas_core::payload::resolve_number(&bare, &paths.time_spent),
+        None
+    );
+    assert_eq!(
+        resolve_worklog(&bare, &paths.worklog),
+        Some(std::collections::BTreeMap::new())
+    );
+
+    jira.assert_no_violations();
+}
+
 /// **The attachment list** (#2404): `attachment` rides in `fields=` with no
 /// violation, and PAY-231's four files read off the payload through the
 /// descriptor's own `attachments` declaration, with their names, sizes,

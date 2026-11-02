@@ -317,7 +317,7 @@ pub use knobas_spi_types::delivery::Delivery;
 pub use knobas_spi_types::entity::EntityRef;
 pub use knobas_spi_types::payload::{
     AttachmentPath, Frame, KindPaths, ListPath, Markup, ParentPath, PayloadPath, ProjectPath,
-    StateChip, StatePath, StateValue, Trigger, TriggerPath, TriggerValue,
+    StateChip, StatePath, StateValue, Trigger, TriggerPath, TriggerValue, WorklogPath,
 };
 pub use knobas_spi_types::tone::Tone;
 

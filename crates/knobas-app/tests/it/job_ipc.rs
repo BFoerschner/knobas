@@ -125,6 +125,64 @@ async fn a_tickets_detail_carries_its_labels_and_leaves_them_off_the_wire_when_t
     assert!(wire.get("labels").is_none(), "{wire}");
 }
 
+/// **The card's Reporter and Logged rows** (#2403) come with the detail,
+/// through the paths the Jira adapter declares: the reporter by username as
+/// the assignee is, `created`, `timespent` in seconds, and the synced
+/// worklog summed per author, so the card can tell the reader's share. A
+/// ticket that carries none of them leaves all four off the wire.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_reporter_created_spent_and_worklog_by_author() {
+    let pool = pool().await;
+    let id = issue(
+        &pool,
+        &key(),
+        serde_json::json!({
+            "reporter": { "name": "lena", "key": "JIRAUSER1", "displayName": "Lena Hoffmann" },
+            "created": "2026-08-12T09:30:00.000+0200",
+            "timespent": 7800,
+            "worklog": { "startAt": 0, "maxResults": 20, "total": 3, "worklogs": [
+                { "author": { "name": "mara" }, "timeSpentSeconds": 3600 },
+                { "author": { "name": "lena" }, "timeSpentSeconds": 1800 },
+                { "author": { "name": "mara" }, "timeSpentSeconds": 2400 },
+            ] },
+        }),
+    )
+    .await;
+    let bare = issue(&pool, &key(), serde_json::json!({ "timespent": null })).await;
+
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(detail.reporter.as_deref(), Some("lena"));
+    assert_eq!(
+        detail.created.map(|at| at.to_rfc3339()),
+        Some("2026-08-12T07:30:00+00:00".to_owned())
+    );
+    assert_eq!(detail.time_spent_seconds, Some(7800));
+    let logged: Vec<(String, i64)> = detail
+        .logged_by
+        .unwrap()
+        .into_iter()
+        .map(|l| (l.author, l.seconds))
+        .collect();
+    assert_eq!(
+        logged,
+        vec![("lena".to_owned(), 1800), ("mara".to_owned(), 6000)]
+    );
+
+    let none = get_entity_inner(&pool, &Registry::for_process(), &bare)
+        .await
+        .unwrap();
+    assert_eq!(none.reporter, None);
+    assert_eq!(none.created, None);
+    assert_eq!(none.time_spent_seconds, None);
+    assert_eq!(none.logged_by, None);
+    let wire = serde_json::to_value(&none).unwrap();
+    for field in ["reporter", "created", "time_spent_seconds", "logged_by"] {
+        assert!(wire.get(field).is_none(), "{field}: {wire}");
+    }
+}
+
 /// **The ticket page's attachment list** (#2404) comes with the detail,
 /// through the `attachments` declaration the Jira adapter makes, in the
 /// record's order with each file's name, size, author, date and addresses; a

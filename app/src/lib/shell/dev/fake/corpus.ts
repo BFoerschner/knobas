@@ -94,6 +94,18 @@ export const CORPUS: {
     estimate_h: 6,
     blocked: false,
     labels: ["sepa", "psp"],
+    // The card's Reporter and Logged rows (#2403), in the mock adapter's
+    // spelling: 2h 10m of the 6h logged, 1h 40m of it mara's (the fake's
+    // username), 30m lena's. The reporter is a display name here, where the
+    // adapters declare a username: the mockup's words for the row.
+    reporter: "Lena Hoffmann",
+    created: "2026-08-12T07:30:00Z",
+    time_spent_seconds: 7800,
+    worklogs: [
+      { who: "mara", seconds: 3600 },
+      { who: "lena", seconds: 1800 },
+      { who: "mara", seconds: 2400 },
+    ],
     // Markdown, as the mock adapter declares its descriptions (#2308).
     description:
       "Payouts to two SEPA banks fail with a **409** on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n- Retry only the transient codes (`AC04` is final)\n- Cap the retry budget",
@@ -128,6 +140,10 @@ export const CORPUS: {
     priority: "Normal",
     assignee: "jonas",
     type: "Bug",
+    // Logged with no estimate (#2403): the time alone, and my own report.
+    reporter: "mara",
+    time_spent_seconds: 13200,
+    worklogs: [{ who: "mara", seconds: 13200 }],
   }),
   row("mock:OPS-77", "ticket", "Rotate the staging database credentials", "2026-08-19T09:00:00Z", "priya", {
     key: "OPS-77",
@@ -176,6 +192,8 @@ export const CORPUS: {
       ...(epic ? { epic } : {}),
       // prototype-6's one label outside PAY-231 and OPS-77 (#813).
       ...(key === "PAY-240" ? { labels: ["finance"] } : {}),
+      // An estimate and nothing logged yet (#2403): *0m of 2h*.
+      ...(key === "PAY-240" ? { reporter: "Priya Nair", estimate_h: 2 } : {}),
       description: `${title}. Finance asked for this; scope is the stage environment first.`,
     }),
   ),

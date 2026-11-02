@@ -64,6 +64,40 @@ async fn a_full_sync_emits_every_issue_open_or_closed_as_a_ticket() {
     assert!(!closed.deleted);
 }
 
+/// **Who filed an issue and when** (#2403): the ticket page card's
+/// *Reporter*, by the creator's login as the assignee is read, and the
+/// created date, both through the paths the adapter declares. Gitea keeps no
+/// time spent and no worklog, so a synced issue reads neither.
+#[tokio::test]
+async fn a_synced_issue_reads_its_creator_and_created_and_no_time_spent() {
+    use knobas_core::payload::{parse_instant, resolve_number, resolve_string, resolve_worklog};
+
+    let fake = Fake::start(&State::tidewater()).await;
+    let source = source(fake.base_url(), json!({}));
+    let (items, _) = run(&*source, None).await;
+    let descriptor = source.descriptor();
+    let paths = descriptor
+        .payload_paths
+        .iter()
+        .find(|p| p.kind == "ticket")
+        .expect("the adapter declares its tickets");
+    let open = tickets(&items)[0];
+
+    assert_eq!(
+        resolve_string(&open.payload, &paths.reporter).as_deref(),
+        Some("mara")
+    );
+    assert_eq!(
+        resolve_string(&open.payload, &paths.created)
+            .as_deref()
+            .and_then(parse_instant)
+            .map(|at| at.to_rfc3339()),
+        Some("2026-08-20T09:00:00+00:00".to_owned())
+    );
+    assert_eq!(resolve_number(&open.payload, &paths.time_spent), None);
+    assert_eq!(resolve_worklog(&open.payload, &paths.worklog), None);
+}
+
 #[tokio::test]
 async fn an_idle_run_emits_no_ticket_and_a_changed_issue_comes_back_alone() {
     let mut state = State::tidewater();

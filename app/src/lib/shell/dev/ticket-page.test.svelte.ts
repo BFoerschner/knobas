@@ -533,22 +533,76 @@ function facts(card: HTMLElement): [string, string][] {
   return terms.map((term) => [term.textContent?.trim() ?? "", value(term.nextElementSibling)]);
 }
 
-test("PAY-231's card: the key with its copy button, the status chip, then Epic, Assignee, Type, Priority and Labels", async () => {
+test("PAY-231's card: the key with its copy button, the status chip, then Epic, Reporter, Assignee, Type, Priority, Labels and Logged", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
   const page = await pageOf("PAY-231");
-  await until(() => facts(page).length === 5, `the facts read ${JSON.stringify(facts(page))}`);
+  await until(() => facts(page).length === 7, `the facts read ${JSON.stringify(facts(page))}`);
 
   expect(page.querySelector(".tf-tkhead .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(page.querySelector(".tf-tkhead button.tf-tkcopy")?.getAttribute("aria-label")).toBe("Copy the key and the title");
   expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In Progress");
-  expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Assignee", "Type", "Priority", "Labels"]);
-  expect(facts(page)[1]![1]).toBe("MA mara (you)");
-  expect(page.querySelector("dl.tf-facts .tf-av")?.classList.contains("tf-me"), "my own ticket's avatar is in full ink").toBe(true);
-  expect(facts(page).slice(2)).toEqual([
+  expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Reporter", "Assignee", "Type", "Priority", "Labels", "Logged"]);
+  expect(facts(page)[1]).toEqual(["Reporter", "LH Lena Hoffmann"]);
+  expect(avatar(page, "Reporter")?.classList.contains("tf-me"), "somebody else's report is not in full ink").toBe(false);
+  expect(facts(page)[2]![1]).toBe("MA mara (you)");
+  expect(avatar(page, "Assignee")?.classList.contains("tf-me"), "my own ticket's avatar is in full ink").toBe(true);
+  expect(facts(page).slice(3)).toEqual([
     ["Type", "Story"],
     ["Priority", "High"],
     ["Labels", "sepa psp"],
+    ["Logged", "2h 10m of 6h, 1h 40m yours"],
   ]);
+});
+
+// ---- the card: Reporter and Logged (#2403) ----
+
+/** The avatar on the facts row labelled `label`, or `null`. */
+function avatar(card: HTMLElement, label: string): HTMLElement | null {
+  const term = [...card.querySelectorAll("dl.tf-facts > dt")].find((dt) => dt.textContent?.trim() === label);
+  return term?.nextElementSibling?.querySelector<HTMLElement>(".tf-av") ?? null;
+}
+
+/** The Logged row's meter: its segments' classes and widths, whether it is over, or `null` for none. */
+function meter(card: HTMLElement): { segments: [string, string][]; over: boolean } | null {
+  const bar = card.querySelector<HTMLElement>("dl.tf-facts .tf-tkmeter");
+  if (bar === null) return null;
+  return {
+    segments: [...bar.querySelectorAll<HTMLElement>("i")].map((segment) => [segment.className, segment.style.width]),
+    over: bar.classList.contains("tf-tkover"),
+  };
+}
+
+test("PAY-231's meter splits the logged time against the estimate: mine in full ink, the others' after it", async () => {
+  await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+  const page = await pageOf("PAY-231");
+  await until(() => meter(page) !== null, "no meter drawn");
+  // 6h is the track; 1h 40m of it mine, 30m somebody else's.
+  expect(meter(page)).toEqual({
+    segments: [
+      ["tf-tkme", "27.8%"],
+      ["tf-tkothers", "8.3%"],
+    ],
+    over: false,
+  });
+  expect(page.querySelector("dl.tf-facts .tf-tkmeter")?.getAttribute("aria-label")).toBe("2h 10m of 6h logged, 1h 40m yours");
+});
+
+test("a ticket with no estimate draws the time alone and no meter; my own report is in full ink", async () => {
+  await openOn("#/ticket/mock%3APAY-228", "Idempotency key on the payout endpoint");
+  const page = await pageOf("PAY-228");
+  await until(() => facts(page).some(([label]) => label === "Logged"), `the facts read ${JSON.stringify(facts(page))}`);
+  expect(facts(page).find(([label]) => label === "Logged")).toEqual(["Logged", "3h 40m"]);
+  expect(meter(page)).toBeNull();
+  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "MA mara (you)"]);
+  expect(avatar(page, "Reporter")?.classList.contains("tf-me")).toBe(true);
+});
+
+test("a ticket with an estimate and nothing logged draws 0m of it over an empty track", async () => {
+  await openOn("#/ticket/mock%3APAY-240", "Payout dashboard latency");
+  const page = await pageOf("PAY-240");
+  await until(() => facts(page).some(([label]) => label === "Logged"), `the facts read ${JSON.stringify(facts(page))}`);
+  expect(facts(page).find(([label]) => label === "Logged")).toEqual(["Logged", "0m of 2h"]);
+  expect(meter(page)).toEqual({ segments: [], over: false });
 });
 
 test("the epic is a chip that opens the epic's page, cut with its whole name as its title", async () => {
@@ -562,7 +616,7 @@ test("the epic is a chip that opens the epic's page, cut with its whole name as 
   expect(chip.title).toBe("PAY-200 Payout reliability");
 });
 
-test("OPS-77's card draws no row its source leaves empty: no Epic and no Type; somebody else's assignee is not mine", async () => {
+test("OPS-77's card draws no row its source leaves empty: no Epic, no Reporter, no Type and no Logged; somebody else's assignee is not mine", async () => {
   await openOn("#/ticket/mock%3AOPS-77", "Rotate the staging database credentials");
   const page = await pageOf("OPS-77");
   await until(() => facts(page).length > 0, "no facts drawn");
@@ -596,13 +650,13 @@ test("the copy button puts the key and the title on the clipboard and toasts Cop
 test("both moods draw the same card markup", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
   const reading = await pageOf("PAY-231");
-  await until(() => facts(reading).length === 5, "the facts never drew");
+  await until(() => facts(reading).length === 7, "the facts never drew");
   const shape = (card: HTMLElement) => [...card.querySelectorAll("*")].map((node) => node.tagName).join(" ");
   const before = shape(reading);
   location.hash = "#/job/mock%3APAY-231";
   await until(() => mood(pageCard()!) === "pinned", "the card never turned yellow");
   const pinned = pageCard()!;
-  await until(() => facts(pinned).length === 5, "the pinned facts never drew");
+  await until(() => facts(pinned).length === 7, "the pinned facts never drew");
   expect(shape(pinned)).toBe(before);
 });
 

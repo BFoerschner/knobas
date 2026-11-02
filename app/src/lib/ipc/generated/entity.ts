@@ -1302,6 +1302,32 @@ priority: string | null,
  */
 estimate_seconds: number | null, 
 /**
+ * Who filed a ticket (#2403), through the declared `reporter` path, by
+ * the account's username as [`author`](Self::author) carries the
+ * assignee: the ticket page card's *Reporter*, in full ink when it is
+ * the reader. Absent on the wire on a miss (ADR-0007).
+ */
+reporter?: string, 
+/**
+ * When a ticket was filed (#2403), through the declared `created` path.
+ * Absent on the wire on a miss.
+ */
+created?: string, 
+/**
+ * The time logged on a ticket in seconds, by everyone (#2403), through
+ * the declared `time_spent` path: the card's *Logged* row, against
+ * [`estimate_seconds`](Self::estimate_seconds). Absent on a miss, never
+ * zero for one.
+ */
+time_spent_seconds?: number, 
+/**
+ * The synced worklog summed per author, ordered by author (#2403): the
+ * card's share of the logged time that is the reader's, the entries
+ * whose author is the source's username. Absent where the record
+ * carries no worklog.
+ */
+logged_by?: Array<LoggedBy>, 
+/**
  * A ticket's labels through the declared `labels` path (#2400), the
  * ticket page card's *Labels* row; the mini board reads them by the same
  * rule. `None`, absent on the wire, where there are none, so the row is
@@ -2412,6 +2438,17 @@ seconds: number | null,
  * `err` when a line in it is an error, else `warn` when one is a warning.
  */
 tone: Tone | null, };
+
+/**
+ * The time one account logged on a ticket, in seconds (#2403): its entries
+ * in the declared worklog, summed.
+ */
+export type LoggedBy = { 
+/**
+ * The account, as the source spells it: matched against the configured
+ * username as the assignee is.
+ */
+author: string, seconds: number, };
 
 /**
  * One room's tickets as the mini board draws them.

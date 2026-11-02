@@ -88,6 +88,32 @@ pub struct EntityDetail {
     /// `estimate` path: a whole JSON number or nothing, never zero for a
     /// miss. The ticket page's card draws it again on the Logged row (#2403).
     pub estimate_seconds: Option<i64>,
+    /// Who filed a ticket (#2403), through the declared `reporter` path, by
+    /// the account's username as [`author`](Self::author) carries the
+    /// assignee: the ticket page card's *Reporter*, in full ink when it is
+    /// the reader. Absent on the wire on a miss (ADR-0007).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reporter: Option<String>,
+    /// When a ticket was filed (#2403), through the declared `created` path.
+    /// Absent on the wire on a miss.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub created: Option<DateTime<Utc>>,
+    /// The time logged on a ticket in seconds, by everyone (#2403), through
+    /// the declared `time_spent` path: the card's *Logged* row, against
+    /// [`estimate_seconds`](Self::estimate_seconds). Absent on a miss, never
+    /// zero for one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub time_spent_seconds: Option<i64>,
+    /// The synced worklog summed per author, ordered by author (#2403): the
+    /// card's share of the logged time that is the reader's, the entries
+    /// whose author is the source's username. Absent where the record
+    /// carries no worklog.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub logged_by: Option<Vec<knobas_core::detail::LoggedBy>>,
     /// A ticket's labels through the declared `labels` path (#2400), the
     /// ticket page card's *Labels* row; the mini board reads them by the same
     /// rule. `None`, absent on the wire, where there are none, so the row is
@@ -179,6 +205,10 @@ pub async fn get_entity_inner(
         issue_type: detail.issue_type,
         priority: detail.priority,
         estimate_seconds: detail.estimate_seconds,
+        reporter: detail.reporter,
+        created: detail.created,
+        time_spent_seconds: detail.time_spent_seconds,
+        logged_by: detail.logged_by,
         labels: Some(detail.labels).filter(|labels| !labels.is_empty()),
         attachments: Some(detail.attachments).filter(|files| !files.is_empty()),
         default_branch: detail.default_branch,
