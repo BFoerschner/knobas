@@ -167,6 +167,8 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     ticketViews: vi.fn(() => Promise.resolve(JIRA_VIEWS.map((row) => ({ ...row })))),
     hideSavedView: vi.fn(() => Promise.resolve()),
     appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: false })),
+    runEmbeddedHtml: vi.fn(() => Promise.resolve(true)),
+    setRunEmbeddedHtml: vi.fn((_id: string, on: boolean) => Promise.resolve(on)),
     ...over,
   };
 }
@@ -892,6 +894,25 @@ test("the schedule and the pause switch are saved as they change", async () => {
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", { enabled: false });
   // A pause holds the sync, never a write the reader makes (#1438).
   expect(toasts.items.at(-1)?.text).toBe("Paused. Nothing syncs until you turn it on; writes you make still go.");
+});
+
+test("a wiki's page has Run embedded HTML, on by default and saved as it changes; a source that is no wiki has none (#2440)", async () => {
+  const wiki = summary("confluence", "Confluence", "ok", { roles: [{ role: "wiki", reads: [] }] });
+  const { p } = await open(["source", "confluence"], ports({ listSources: vi.fn(() => Promise.resolve([...SOURCES, wiki])) }));
+  expect(p.runEmbeddedHtml).toHaveBeenCalledWith("confluence");
+  const embeds = () => target.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Run embedded HTML"]')!;
+  expect(embeds().getAttribute("aria-checked")).toBe("true");
+  embeds().click();
+  await settle();
+  expect(p.setRunEmbeddedHtml).toHaveBeenCalledWith("confluence", false);
+  expect(embeds().getAttribute("aria-checked")).toBe("false");
+  expect(toasts.items.at(-1)?.text).toBe("Confluence pages draw their embedded HTML as a placeholder.");
+
+  unmount(view!);
+  view = null;
+  target.replaceChildren();
+  await open(["source", "jira"]);
+  expect(target.querySelector('[aria-label="Run embedded HTML"]')).toBeNull();
 });
 
 test("Backfill runs backfill_source for this source", async () => {

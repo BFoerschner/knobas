@@ -535,6 +535,8 @@ function settingsPorts() {
     ticketViews: () => deferred([]),
     hideSavedView: () => deferred(undefined),
     appStatus: () => deferred({ secrets_in_memory: false }),
+    runEmbeddedHtml: () => deferred(true),
+    setRunEmbeddedHtml: () => deferred(true),
   };
 }
 

@@ -125,12 +125,12 @@ test("the frame's height follows what its reporter says, up to the viewport", as
   await draw();
   vi.spyOn(window, "innerHeight", "get").mockReturnValue(700);
   say({ knobas: "embed", height: 312 });
-  expect(frame()!.style.height).toBe("312px");
+  expect(frame()!.getAttribute("height")).toBe("312");
   say({ knobas: "embed", height: 4000 });
-  expect(frame()!.style.height).toBe("700px");
+  expect(frame()!.getAttribute("height")).toBe("700");
   // Another window saying the same is not the frame.
   say({ knobas: "embed", height: 50 }, window);
-  expect(frame()!.style.height).toBe("700px");
+  expect(frame()!.getAttribute("height")).toBe("700");
 });
 
 test("a link or popup from the frame opens through the external-open path", async () => {

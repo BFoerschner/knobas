@@ -64,6 +64,7 @@ import type {
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS, fakeRoleScope } from "./corpus";
+import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
 
 /** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
@@ -142,6 +143,31 @@ const META: Record<string, [string, string]> = {
   "Ledger reconciliation runbook": ["TW", "2026-08-19 09:00"],
 };
 
+/**
+ * An `html` macro's body (#2440): an endpoint list its script builds, so a
+ * frame that runs no script shows only the heading, and a line that says
+ * whether the script could reach the app's document (it cannot: the frame's
+ * origin is opaque).
+ */
+const EXPLORER = `<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 12px 16px; color: #1f2933; }
+  h3 { margin: 0 0 8px; } .ep { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid #e4e7eb; }
+  .m { font: 600 12px ui-monospace, monospace; width: 52px; color: #fff; border-radius: 3px; text-align: center; }
+  .GET { background: #2f80ed; } .POST { background: #27ae60; } .wall { color: #6b7785; margin-top: 10px; }
+</style>
+<h3>ledger-api 2.4</h3>
+<div id="eps"></div>
+<p class="wall" id="wall"></p>
+<script>
+  [["GET", "/balances/{account}"], ["POST", "/bookings"], ["GET", "/bookings/{id}"], ["POST", "/refunds"]].forEach(function (e) {
+    var row = document.createElement("div"); row.className = "ep";
+    row.innerHTML = '<span class="m ' + e[0] + '">' + e[0] + "</span><code>" + e[1] + "</code>";
+    document.getElementById("eps").appendChild(row);
+  });
+  var reached; try { reached = !!parent.document.title; } catch (e) { reached = false; }
+  document.getElementById("wall").textContent = reached ? "This frame reached the app." : "Runs in a sandbox: knobas is out of reach.";
+</script>`;
+
 /** A prototype body block. */
 type Proto =
   | { h: string }
@@ -153,7 +179,8 @@ type Proto =
   | { info: string }
   | { warn: string }
   | { note: string }
-  | { macro: string };
+  | { macro: string }
+  | { html: string };
 
 interface Body {
   labels: string[];
@@ -215,6 +242,9 @@ const BODIES: Record<string, Body> = {
       { h: "Data flow" },
       { p: "A payout starts as a booking in ledger-api, is picked up by payout-service at 13:00, and comes back as a settlement event the next morning." },
       { macro: "draw.io diagram" },
+      { h: "API reference" },
+      { p: "The ledger API's endpoints, from the embedded explorer the platform team hosts." },
+      { html: EXPLORER },
     ],
     comments: [],
   },
@@ -369,6 +399,7 @@ function block(b: Proto): DocBlock {
   if ("info" in b) return { type: "panel", kind: "info", title: null, blocks: [para(b.info)] };
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
+  if ("html" in b) return { type: "embed", name: "html", content: { kind: "html", html: b.html } };
   return { type: "placeholder", name: b.macro };
 }
 
@@ -436,7 +467,7 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
     for (const b of list) {
       if (b.type === "table") note("table");
       else if (b.type === "code") note("code");
-      else if (b.type === "placeholder" || (b.type === "panel" && inPanel)) note("macro");
+      else if (b.type === "placeholder" || b.type === "embed" || (b.type === "panel" && inPanel)) note("macro");
       else if (b.type === "panel") visit(b.blocks, true);
       else if (b.type === "paragraph") inlines(b.text);
       else if (b.type === "list") {
@@ -566,7 +597,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
     backlinks: backlinks(found.title),
     work: work(body.blocks.map(block)),
     writes: ["comment", "update_page", "create_page"],
-    run_embeds: true,
+    run_embeds: !EMBEDS_OFF.has("confluence"),
   };
 }
 

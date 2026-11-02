@@ -17,6 +17,9 @@
     Every config save reads the stored config again and lays only the
     reader's changes over it (`source-config.ts`), so an id the sync recorded
     after the page opened is kept.
+  - **Docs** (#2440), for a source that claims the wiki role: *Run
+    embedded HTML*, saved as it changes (`set_run_embedded_html`). Off, the
+    reader draws the source's embeds as placeholders.
   - **Boards and filters** (#878), for an adapter whose schema declares the
     section: which Jira boards and favourite filters come in, and every Jira
     view with *Hide* / *Show* (`TfBoardsAndFilters.svelte`).
@@ -60,6 +63,7 @@
   import type { Layers } from "../layers.svelte";
   import { configChanges, formValues, pageFields, withAdded, withChanges } from "./source-config";
   import TfSchemaForm from "./TfSchemaForm.svelte";
+  import { WIKI } from "../roles.svelte";
   import type { SettingsPorts } from "./ports";
   import { expiryNote } from "../../shell/health.svelte";
   import { storedWhere } from "../../shell/secret-store";
@@ -145,6 +149,34 @@
     };
   });
   const stored = $derived(storedWhere(secretsInMemory));
+
+  // *Run embedded HTML* (#2440), for a wiki: `null` until it is read.
+  const wiki = $derived(source.roles.some((claim) => claim.role === WIKI));
+  let embedsOn = $state<boolean | null>(null);
+  $effect(() => {
+    if (!wiki) return;
+    let dead = false;
+    ports
+      .runEmbeddedHtml(source.id)
+      .then((on) => {
+        if (!dead) embedsOn = on;
+      })
+      .catch(() => {});
+    return () => {
+      dead = true;
+    };
+  });
+  async function setEmbeds(on: boolean): Promise<void> {
+    saving = true;
+    try {
+      embedsOn = await ports.setRunEmbeddedHtml(source.id, on);
+      push({ text: embedsOn ? `${name} pages run their embedded HTML.` : `${name} pages draw their embedded HTML as a placeholder.` });
+    } catch (cause) {
+      push({ text: `Could not save ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      saving = false;
+    }
+  }
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
   const acceptsAccount = $derived(adapter?.accepts_account ?? false);
   // The adapter's floor (#1188); an adapter this build does not know offers the
@@ -618,6 +650,26 @@
     </div>
   {/if}
 </section>
+
+{#if wiki}
+  <section class="tf-stg-sec">
+    <h2>Docs</h2>
+    <div class="tf-stg-row">
+      <div class="tf-stg-l">Run embedded HTML</div>
+      <div class="tf-stg-c">
+        <button
+          class="tf-stg-sw"
+          role="switch"
+          aria-checked={embedsOn ?? true}
+          aria-label="Run embedded HTML"
+          disabled={saving || embedsOn === null}
+          onclick={() => void setEmbeds(!(embedsOn ?? true))}><i></i></button
+        >
+      </div>
+    </div>
+    <p class="tf-stg-note">HTML a page embeds runs in a sandboxed frame that cannot reach knobas. Off, it is a placeholder with Open in {name}.</p>
+  </section>
+{/if}
 
 {#if boardsSection}
   <TfBoardsAndFilters

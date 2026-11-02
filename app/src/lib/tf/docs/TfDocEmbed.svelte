@@ -4,7 +4,8 @@
   origin (`render/embed.ts` says why it cannot reach the app).
 
   - The frame is as tall as its reporter says its document is, up to the
-    window's height; past that it scrolls inside itself.
+    window's height; past that it scrolls inside itself. The height is the
+    frame's `height` attribute: the app's policy refuses inline styles.
   - A link or popup from the frame opens through `onopen`, which is the
     external-open path and its scheme check.
   - With *Run embedded HTML* off for the page's source, or offline, the embed
@@ -74,7 +75,7 @@
       title="Embedded HTML from {sourceName}"
       sandbox={EMBED_SANDBOX}
       referrerpolicy="no-referrer"
-      style:height="{height}px"
+      {height}
       {...source}
     ></iframe>
   </div>
