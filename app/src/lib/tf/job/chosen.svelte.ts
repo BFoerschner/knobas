@@ -24,11 +24,10 @@
  */
 import { untrack } from "svelte";
 
+import { keptValue, windowStorage, type KeptStorage } from "../kept-value";
 import { isEntityId } from "./job";
 
 export const CHOSEN_KEY = "knobas.job.chosen";
-
-type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
 
 export interface ChosenJob {
   /** The chosen job's entity id, or `null` when none is chosen. */
@@ -41,14 +40,11 @@ export interface ChosenJob {
   reset(): void;
 }
 
-export function createChosenJob(storage: () => Storage | null): ChosenJob {
+export function createChosenJob(storage: () => KeptStorage | null): ChosenJob {
+  const kept = keptValue(storage, CHOSEN_KEY);
   const read = (): string | null => {
-    try {
-      const kept = storage()?.getItem(CHOSEN_KEY) ?? null;
-      return kept !== null && isEntityId(kept) ? kept : null;
-    } catch {
-      return null;
-    }
+    const id = kept.read();
+    return id !== null && isEntityId(id) ? id : null;
   };
   let id = $state<string | null>(read());
   return {
@@ -60,27 +56,17 @@ export function createChosenJob(storage: () => Storage | null): ChosenJob {
       // when something else changes the choice.
       if (untrack(() => id) === next) return;
       id = next;
-      try {
-        storage()?.setItem(CHOSEN_KEY, next);
-      } catch {
-        // Kept for this run only.
-      }
+      kept.write(next);
     },
     load() {
       id = read();
     },
     reset() {
       id = null;
-      try {
-        storage()?.removeItem(CHOSEN_KEY);
-      } catch {
-        // Nothing kept to clear.
-      }
+      kept.clear();
     },
   };
 }
 
 /** The window's one chosen job, over this viewer's `localStorage` where there is one. */
-export const chosenJob: ChosenJob = createChosenJob(() =>
-  typeof window === "undefined" ? null : window.localStorage,
-);
+export const chosenJob: ChosenJob = createChosenJob(windowStorage);

@@ -8,12 +8,12 @@
  * bounds reads clamped; one that is no number, or a read that fails, reads as
  * the default. A write that fails keeps the width for this run only.
  */
+import { keptValue, windowStorage, type KeptStorage } from "../kept-value";
+
 export const SIDE_KEY = "knobas.ticket.side";
 export const SIDE_MIN = 240;
 export const SIDE_MAX = 720;
 export const SIDE_DEFAULT = 320;
-
-type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
 
 /** A width in whole pixels, within the bounds. */
 export function clampSide(px: number): number {
@@ -31,14 +31,11 @@ export interface CardWidth {
   reset(): void;
 }
 
-export function createCardWidth(storage: () => Storage | null): CardWidth {
+export function createCardWidth(storage: () => KeptStorage | null): CardWidth {
+  const kept = keptValue(storage, SIDE_KEY);
   const read = (): number => {
-    try {
-      const kept = Number.parseFloat(storage()?.getItem(SIDE_KEY) ?? "");
-      return Number.isFinite(kept) ? clampSide(kept) : SIDE_DEFAULT;
-    } catch {
-      return SIDE_DEFAULT;
-    }
+    const px = Number.parseFloat(kept.read() ?? "");
+    return Number.isFinite(px) ? clampSide(px) : SIDE_DEFAULT;
   };
   let px = $state(SIDE_DEFAULT);
   return {
@@ -47,28 +44,20 @@ export function createCardWidth(storage: () => Storage | null): CardWidth {
     },
     set(next) {
       px = clampSide(next);
-      try {
-        storage()?.setItem(SIDE_KEY, String(px));
-      } catch {
-        // Kept for this run only.
-      }
+      kept.write(String(px));
     },
     load() {
       px = read();
     },
     reset() {
       px = SIDE_DEFAULT;
-      try {
-        storage()?.removeItem(SIDE_KEY);
-      } catch {
-        // Nothing kept to clear.
-      }
+      kept.clear();
     },
   };
 }
 
 /** The window's one card width, over this viewer's `localStorage` where there is one. */
-export const cardWidth: CardWidth = createCardWidth(() => (typeof window === "undefined" ? null : window.localStorage));
+export const cardWidth: CardWidth = createCardWidth(windowStorage);
 
 /**
  * The width at which nothing on `card` wraps: a clone laid out at its

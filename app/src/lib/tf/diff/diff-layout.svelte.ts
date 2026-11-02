@@ -14,6 +14,7 @@
  */
 import { MediaQuery } from "svelte/reactivity";
 
+import { keptValue, windowStorage, type KeptStorage } from "../kept-value";
 import type { DiffLayout } from "./diff";
 
 export const LAYOUT_KEY = "knobas.diff.layout";
@@ -27,44 +28,26 @@ export interface DiffLayoutChoice {
   reset(): void;
 }
 
-type Storage = Pick<globalThis.Storage, "getItem" | "setItem" | "removeItem">;
-
-export function createDiffLayout(storage: () => Storage | null): DiffLayoutChoice {
-  const read = (): DiffLayout => {
-    try {
-      return storage()?.getItem(LAYOUT_KEY) === "split" ? "split" : "unified";
-    } catch {
-      return "unified";
-    }
-  };
-  let chosen = $state<DiffLayout>(read());
+export function createDiffLayout(storage: () => KeptStorage | null): DiffLayoutChoice {
+  const kept = keptValue(storage, LAYOUT_KEY);
+  let chosen = $state<DiffLayout>(kept.read() === "split" ? "split" : "unified");
   return {
     get chosen() {
       return chosen;
     },
     set(layout) {
       chosen = layout;
-      try {
-        storage()?.setItem(LAYOUT_KEY, layout);
-      } catch {
-        // Kept for this run only.
-      }
+      kept.write(layout);
     },
     reset() {
       chosen = "unified";
-      try {
-        storage()?.removeItem(LAYOUT_KEY);
-      } catch {
-        // Nothing stored to clear.
-      }
+      kept.clear();
     },
   };
 }
 
 /** The app's one choice, over this viewer's `localStorage` where there is one. */
-export const diffLayout: DiffLayoutChoice = createDiffLayout(() =>
-  typeof window === "undefined" ? null : window.localStorage,
-);
+export const diffLayout: DiffLayoutChoice = createDiffLayout(windowStorage);
 
 /** Whether the window is too narrow for split; never where there is no `matchMedia` (jsdom). */
 export function windowNarrow(): { readonly current: boolean } {
