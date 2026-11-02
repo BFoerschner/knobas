@@ -1111,7 +1111,12 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     // task inside the one it follows. Item words are compared as text, so
     // the server's own wrapper spans and whitespace do not count.
     let DocBlock::List { ordered, items } = rest[8] else {
-        panic!("the task list: {rest:#?}\nstored: {:?}", mirrored(&state.pool, &id).await.map(|p| p["body"]["storage"]["value"].clone()))
+        panic!(
+            "the task list: {rest:#?}\nstored: {:?}",
+            mirrored(&state.pool, &id)
+                .await
+                .map(|p| p["body"]["storage"]["value"].clone())
+        )
     };
     fn words(blocks: &[DocBlock]) -> String {
         blocks
@@ -1133,7 +1138,8 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             .collect::<Vec<_>>()
             .join(" ")
     }
-    fn tasks(items: &[ListItem]) -> Vec<(Option<bool>, String, Vec<(Option<bool>, String)>)> {
+    type Task = (Option<bool>, String);
+    fn tasks(items: &[ListItem]) -> Vec<(Task, Vec<Task>)> {
         items
             .iter()
             .map(|item| {
@@ -1147,7 +1153,7 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
                     .flatten()
                     .map(|inner| (inner.checked, words(&inner.blocks)))
                     .collect();
-                (item.checked, words(&item.blocks), nested)
+                ((item.checked, words(&item.blocks)), nested)
             })
             .collect()
     }
@@ -1155,15 +1161,16 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     assert_eq!(
         tasks(items),
         vec![
-            (Some(true), "Drain the queue".to_owned(), vec![]),
+            ((Some(true), "Drain the queue".to_owned()), vec![]),
             (
-                Some(false),
-                "Restart the worker".to_owned(),
+                (Some(false), "Restart the worker".to_owned()),
                 vec![(Some(true), "eu-1".to_owned())]
             ),
         ],
         "the task list's states: {items:#?}\nstored: {:?}",
-        mirrored(&state.pool, &id).await.map(|p| p["body"]["storage"]["value"].clone())
+        mirrored(&state.pool, &id)
+            .await
+            .map(|p| p["body"]["storage"]["value"].clone())
     );
 
     // The tree: the new page hangs under its parent.

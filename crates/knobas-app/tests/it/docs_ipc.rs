@@ -441,7 +441,11 @@ async fn a_task_list_reads_with_each_item_checked_or_not() {
     let storage = format!(
         "<ac:task-list>{}{}<ac:task-list>{}</ac:task-list></ac:task-list>",
         task(1, "complete", "Drain the queue"),
-        task(2, "incomplete", r#"Ask <ac:link><ri:user ri:username="mara" /></ac:link>"#),
+        task(
+            2,
+            "incomplete",
+            r#"Ask <ac:link><ri:user ri:username="mara" /></ac:link>"#
+        ),
         task(3, "complete", "eu-1"),
     );
     let checklist = page(&pool, &src, "1", "Release checklist", "OPS", &[], &storage).await;
@@ -469,7 +473,10 @@ async fn a_task_list_reads_with_each_item_checked_or_not() {
                         ]),
                         DocBlock::List {
                             ordered: false,
-                            items: vec![ListItem::task(true, vec![para(vec![Inline::text("eu-1")])])],
+                            items: vec![ListItem::task(
+                                true,
+                                vec![para(vec![Inline::text("eu-1")])]
+                            )],
                         },
                     ],
                 ),

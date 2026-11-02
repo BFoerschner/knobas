@@ -1078,7 +1078,11 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     fn a_task_list_is_a_list_of_checked_and_unchecked_items() {
         let storage = format!(
             "<ac:task-list>{}{}</ac:task-list>",
-            task(1, "complete", "<span class=\"placeholder-inline-tasks\">Drain the <strong>queue</strong></span>"),
+            task(
+                1,
+                "complete",
+                "<span class=\"placeholder-inline-tasks\">Drain the <strong>queue</strong></span>"
+            ),
             task(2, "incomplete", "Restart the worker"),
         );
         assert_eq!(
@@ -1111,7 +1115,12 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     /// the outer list.
     #[test]
     fn a_nested_task_list_is_a_list_inside_its_task() {
-        let inner = |id| format!("<ac:task-list>{}</ac:task-list>", task(id, "complete", "eu-1"));
+        let inner = |id| {
+            format!(
+                "<ac:task-list>{}</ac:task-list>",
+                task(id, "complete", "eu-1")
+            )
+        };
         let nested = ListItem::task(
             false,
             vec![
@@ -1150,7 +1159,10 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
 
     #[test]
     fn a_task_list_inside_a_sentence_and_a_panel_still_reads() {
-        let list = format!("<ac:task-list>{}</ac:task-list>", task(1, "complete", "Done"));
+        let list = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "complete", "Done")
+        );
         let done = DocBlock::List {
             ordered: false,
             items: vec![ListItem::task(true, vec![para("Done")])],
@@ -1328,7 +1340,10 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     /// task list refuses with `formatting` rather than losing them.
     #[test]
     fn a_section_holding_a_task_list_refuses_as_formatting() {
-        let list = format!("<ac:task-list>{}</ac:task-list>", task(1, "incomplete", "Restart"));
+        let list = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "incomplete", "Restart")
+        );
         let storage = format!(
             "<h2>Tasks</h2><p>Lead.</p>{list}\
              <h2>In a panel</h2><ac:structured-macro ac:name=\"note\"><ac:rich-text-body>{list}</ac:rich-text-body></ac:structured-macro>\
