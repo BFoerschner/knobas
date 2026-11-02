@@ -75,7 +75,7 @@
 
   Round 10 (Björn, 2026-11-02): tickets coloured by status (done green, in
   progress blue, closed grey); a colour legend per kind in the ⌘? card;
-  `#p` is pipelines and `#c` pull requests; the key column is something a
+  `#b` is the build configurations and `#p` pull requests; the key column is something a
   person reads (a pull request's repository, a repository's owner, a
   monitor's type, a page's space, a pipeline's project); the caret bar on
   the box is gone.
@@ -93,8 +93,8 @@
 
   Round 12 (Björn, 2026-11-02): the one box replaces the pages' own search
   fields. Opened with a page's own search keys (`/` or ⌘/), the box starts
-  with that section's filter; ⌘K stays the global search and opens empty: `#t ` on Tickets, `#rc ` on Code,
-  `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox;
+  with that section's filter; ⌘K stays the global search and opens empty: `#t ` on Tickets, `#rp ` on Code,
+  `#b ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox;
   the pages' own fields are hidden. PROTOTYPE: the hiding is a `:global`
   rule here; the real change removes the fields and their `/` handlers.
 
@@ -421,9 +421,9 @@
       case "inbox":
         return "#i ";
       case "code":
-        return "#rc ";
+        return "#rp ";
       case "builds":
-        return "#p ";
+        return "#b ";
       case "docs":
         return "#d ";
       case "monitors":
@@ -568,9 +568,9 @@
   const realSearch = ports?.search ?? defaultSearch;
 
   /** `#x`: letters after the hash are kinds, and they combine (`#rl`); the backend filters on six, two are answered here. */
-  const KIND_OF: Record<string, string> = { t: "ticket", c: "pr", r: "repo", p: "pipeline", m: "monitor", d: "page" };
+  const KIND_OF: Record<string, string> = { t: "ticket", p: "pr", r: "repo", b: "pipeline", m: "monitor", d: "page" };
   const LOCAL = new Set(["l", "i"]);
-  const TOKEN = /^#([tcrpmdli]+)$/i;
+  const TOKEN = /^#([tprbmdli]+)$/i;
 
   /** The search port with the prototype's grammar read first and its groups layered over the real answer. */
   async function searchNext(query: SearchQuery): Promise<SearchResponse> {
@@ -698,9 +698,9 @@
   }
   const HELP: HelpEntry[] = [
     { token: "#t", insert: "#t", summary: "tickets" },
-    { token: "#c", insert: "#c", summary: "pull requests" },
+    { token: "#p", insert: "#p", summary: "pull requests" },
     { token: "#r", insert: "#r", summary: "repositories" },
-    { token: "#p", insert: "#p", summary: "pipelines" },
+    { token: "#b", insert: "#b", summary: "builds" },
     { token: "#m", insert: "#m", summary: "monitors" },
     { token: "#d", insert: "#d", summary: "pages" },
     { token: "#l", insert: "#l", summary: "lists" },

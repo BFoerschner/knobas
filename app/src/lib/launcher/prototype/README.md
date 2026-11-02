@@ -24,10 +24,10 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | Try | What happens |
 |---|---|
 | Empty box | The recent items, nothing else. The box says only "⌘? for help". |
-| Opened by a page's search keys | `/` or ⌘/ opens the box with that section's filter already in it (⌘K stays the global search and always opens with an empty box, never the last query): `#t ` on Tickets, `#rc ` on Code, `#p ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox. Delete the token to search everything. The pages' own search fields are gone; this is their search. |
+| Opened by a page's search keys | `/` or ⌘/ opens the box with that section's filter already in it (⌘K stays the global search and always opens with an empty box, never the last query): `#t ` on Tickets, `#rp ` on Code, `#b ` on Builds, `#d ` on Docs, `#m ` on Monitors, `#i ` on the Inbox. Delete the token to search everything. The pages' own search fields are gone; this is their search. |
 | ⌘? | From any search: the box empties and narrows the filters (one word each), Enter adds the picked one to the search that was there, the keys sit at the bottom. `#r` then `#l` becomes `#rl`. |
 | `sepa` | Results as today, with two new groups first: **Views** (saved ticket views, by name, group or conditions) and **Sets** (link sets, by name or description). |
-| `#t`, `#c`, `#r`, `#p`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests (c for changes), repositories, pipelines, monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
+| `#t`, `#p`, `#r`, `#b`, `#m`, `#d`, `#l`, `#i` | Tickets, pull requests, repositories, builds (their configurations), monitors, pages, your saved lists, the inbox. Letters combine: `#rl sepa` is repositories and lists. A key is `#t PAY-231`; a bare `#PAY-231` is no lookup any more. `>` go to, `@me` and `t ` time stay; `/` for a source is gone. |
 | Tab on a row | The row lifts under the box, the box empties and the panel becomes its actions. Typing in the box narrows them (fuzzy, in order of the letters). Esc, Tab or Backspace on the empty box go back to the results with the search words back in the box. Never out of the dialog. The footer says just "Tab actions". |
 | ⌘K while open | Gives the box its focus back, wherever a click left it. Nothing else: Tab is the one way into the actions. |
 | An action that asks something | A **flow**: the sheet shows the step's choices, the box narrows them, Enter picks, the next step follows, the last pick runs the action. Esc or Backspace on the empty box step back. |
@@ -85,6 +85,14 @@ shape.
 - Tickets are coloured by status too: done green, in progress or in review blue, closed grey, to do plain. The ⌘? card ends with a legend per kind.
 - No second line, no provenance, no "no secret", no counts on the headings or in the footer. What a second line said is in the title or not worth the row's height; a repository's path is its name.
 - Builds are their configurations: `#b` finds pipelines, coloured by their last run. Runs and commits are not in the answer at all; they are reached from the pipeline and the repository.
+
+## Decisions (Björn, 2026-11-02)
+
+- `#p` is pull requests, `#b` is builds, meaning their configurations.
+- Built-in smart lists are gone completely. Saved lists stay, behind `#l`.
+- The preview reads from the index in production: run logs and page sections indexed, the match's place carried on the hit. No second read per row.
+- Favourites and keys (lists and actions) go into the share export beside the saved lists.
+- The 2026-10-21 ruling on #1416 is reversed by the spec: the sheet, the inline relation and the per-kind actions.
 
 ## What is real and what is a shortcut
 
