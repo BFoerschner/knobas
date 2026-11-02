@@ -496,8 +496,7 @@ const PEOPLE: Record<string, string> = {
   TW: "Tomasz Wójcik",
   LH: "Lena Hoffmann",
 };
-/** Who, when, what; a fourth `jira_wiki` where the comment is Jira's wiki markup (#2415), else Markdown. */
-const PAY_231_THREAD: ([string, string, string] | [string, string, string, "jira_wiki"])[] = [
+const PAY_231_THREAD: [string, string, string][] = [
   ["LH", "2026-08-12 09:14", "Finance keeps chasing failed SEPA payouts by hand, about 30 a week. Can we retry the transient ones automatically?"],
   ["PN", "2026-08-12 09:40", "Yes. @mara can you pick this up after PAY-219? Keep it to transient PSP errors only."],
   ["ML", "2026-08-12 10:02", "Sure. Which codes count as transient? I only know 503."],
@@ -509,7 +508,7 @@ const PAY_231_THREAD: ([string, string, string] | [string, string, string, "jira
   ["LH", "2026-08-14 09:30", "Yes, the cutoff is 15:00."],
   ["ML", "2026-08-18 09:06", "Starting. The design goes on the SEPA payout retry design page."],
   ["PN", "2026-08-19 11:45", "Add jitter, otherwise all retries of a batch hit the PSP in the same second."],
-  ["ML", "2026-08-19 12:10", "Will do. ±20 %? The retry timeline as I see it:\n\n!retry-timeline.png|thumbnail!", "jira_wiki"],
+  ["ML", "2026-08-19 12:10", "Will do. ±20 %?"],
   ["TW", "2026-08-20 08:50", "Staging PSP sandbox is flaky this week, don’t trust red integration tests blindly."],
   ["PN", "yesterday 14:20", "Please make sure the backoff policy matches the design page. Finance wants max 5 attempts."],
   ["LH", "yesterday 15:02", "@mara will the manual review queue get an SLA? Finance asked twice."],
@@ -543,13 +542,13 @@ function entityThread(args: Record<string, unknown>): Thread {
   }
   if (id !== "mock:PAY-231") return { comments: [], me: ["mara"] };
   return {
-    comments: PAY_231_THREAD.map(([who, at, body, markup]) => ({
+    comments: PAY_231_THREAD.map(([who, at, body]) => ({
       author: PEOPLE[who] ?? who,
       at: fixtureTime(at),
       body,
       mine: who === "ML",
       mentions_me: /@mara(?![\p{L}\p{N}_.-])/u.test(body),
-      markup: markup ?? ("markdown" as const),
+      markup: "markdown" as const,
     })),
     me: ["mara"],
   };

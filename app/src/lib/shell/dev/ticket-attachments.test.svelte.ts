@@ -16,7 +16,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import App from "../../../App.svelte";
-import type { Attachment, EntityDetail } from "../../ipc/entity";
+import type { Attachment, EntityDetail, Thread } from "../../ipc/entity";
 import { chosenJob } from "../../tf/job/chosen.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
 import { until } from "../test-wait";
@@ -158,14 +158,13 @@ const reads = () => sent.filter((call) => call.cmd === "attachment_bytes").map((
 
 const strip = (fold: HTMLDetailsElement) => fold.querySelector<HTMLElement>(".tf-tkatt > .tf-stale");
 
-test("opening PAY-231's panel draws its two screenshots' previews, both fetched before by the description's and a comment's inline images", async () => {
+test("opening PAY-231's panel draws its two screenshots' previews; only the one the description shows was fetched before", async () => {
   install();
   const fold = await openPay231();
   // The description's inline screenshot is fetched once in view; the panel's
   // other image waits for the panel.
-  await until(() => reads().length > 1, "the inline screenshots were never fetched");
-  // The description's and the comment's (#2415).
-  expect(reads()).toEqual(["50000", "50001"]);
+  await until(() => reads().length > 0, "the inline screenshot was never fetched");
+  expect(reads()).toEqual(["50000"]);
 
   unfold(fold);
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew");
@@ -330,8 +329,16 @@ test("an image over the 5 MiB cap gets no preview, is never fetched, and its pre
   expect(reads()).not.toContain("50009");
 });
 
-test("the description's [^name] link, its inline image and a comment's inline image open the preview", async () => {
-  install();
+test("the description's [^name] link, its inline image and a Jira comment's inline image open the preview", async () => {
+  const thread = demoHandlers()["entity_thread"]!;
+  install("", {
+    // One comment in Jira's wiki markup, as a Jira ticket's thread holds them all.
+    entity_thread: async (args) => {
+      const read = (await thread(args)) as Thread;
+      const wiki = { ...read.comments[0]!, body: "The retry timeline as I see it:\n\n!retry-timeline.png|thumbnail!", markup: "jira_wiki" as const };
+      return { ...read, comments: [wiki, ...read.comments.slice(1)] };
+    },
+  });
   await openPay231();
   const desc = () => target.querySelector(".tf-kept:not([hidden]) .tf-tkdesc .tf-md");
   const link = [...desc()!.querySelectorAll<HTMLAnchorElement>("a.tf-md-attlink")].find((a) => squash(a) === "sepa-error-codes.pdf")!;
@@ -370,8 +377,7 @@ test("previews live with the page: a page drawn again fetches them again", async
   app = mount(App, { target, props: {} });
   await until(() => panel() !== null, "PAY-231 never drew again");
   fold = panel()!;
-  // Nothing kept from the closed page: the inline images ask again, before the panel opens.
-  await until(() => reads().length === 4, "the page drawn again fetched nothing");
+  expect(rows(fold)[1] && cell(rows(fold)[1]!), "nothing kept from the closed page").toBe("PNG");
   unfold(fold);
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew again");
   expect(reads()).toEqual(["50000", "50001", "50000", "50001"]);
