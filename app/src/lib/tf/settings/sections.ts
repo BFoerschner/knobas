@@ -18,8 +18,9 @@ export interface ShareTick {
 
 /**
  * The ticks, in prototype-6's order. Each is a part of the share export
- * (`ShareParts`). *Saved lists and favourites* is drawn only once a saved
- * list or a favourite exists (the favourites ride in that part, #2428),
+ * (`ShareParts`). *Saved lists, favourites and keys* is drawn only once a
+ * saved list, a favourite or a key exists (they ride in that part, #2428,
+ * #2429),
  * *Ticket views* (#812) only once a view exists and *Link sets* (#870) only
  * once a set exists: each part is a box about nothing before that
  * (CONTEXT.md, *Share export*).
@@ -32,7 +33,7 @@ export function shareTicks(savedLists: boolean, savedViews = false, savedSets = 
     { part: "contexts", label: "Contexts" },
     { part: "assets", label: "Assets and routes" },
     { part: "sources", label: "Sources, without passwords" },
-    { part: "smart_lists", label: "Saved lists and favourites" },
+    { part: "smart_lists", label: "Saved lists, favourites and keys" },
     { part: "notes", label: "Notes" },
     { part: "time", label: "Time" },
   ];

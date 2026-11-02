@@ -12,13 +12,13 @@ test("the share ticks are the export's parts, in prototype-6's order, and no tic
     ["contexts", "Contexts"],
     ["assets", "Assets and routes"],
     ["sources", "Sources, without passwords"],
-    ["smart_lists", "Saved lists and favourites"],
+    ["smart_lists", "Saved lists, favourites and keys"],
     ["notes", "Notes"],
     ["time", "Time"],
   ]);
-  // Saved lists and favourites only once one exists, ticket views and link sets once one
+  // Saved lists, favourites and keys only once one exists, ticket views and link sets once one
   // exists (CONTEXT.md, *Share export*; #812, #870).
-  expect(shareTicks(false, true, true).map((tick) => tick.label)).not.toContain("Saved lists and favourites");
+  expect(shareTicks(false, true, true).map((tick) => tick.label)).not.toContain("Saved lists, favourites and keys");
   expect(shareTicks(true, true, false).map((tick) => tick.label)).not.toContain("Link sets");
   expect(shareTicks(true, false, true).map((tick) => tick.label)).not.toContain("Ticket views");
 });

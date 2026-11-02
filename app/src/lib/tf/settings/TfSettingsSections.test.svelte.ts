@@ -110,6 +110,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     restoreBackup: vi.fn(() => Promise.resolve()),
     smartLists: vi.fn(() => Promise.resolve([])),
     favourites: vi.fn(() => Promise.resolve([])),
+    keys: vi.fn(() => Promise.resolve({ lists: [], actions: [] })),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
@@ -364,7 +365,7 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
 
 test("a saved smart list draws its tick, on by default", async () => {
   const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ id: "sepa" }])) }));
-  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists and favourites");
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists, favourites and keys");
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
@@ -372,7 +373,18 @@ test("a saved smart list draws its tick, on by default", async () => {
 
 test("a favourite with no saved list draws the same tick, and the part goes on (#2428)", async () => {
   const p = await open("backup", sectionPorts({ favourites: vi.fn(() => Promise.resolve([{ entity_id: "jira:PAY-231" }])) }));
-  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists and favourites");
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists, favourites and keys");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("an action's key with no saved list draws the same tick, and the part goes on (#2429)", async () => {
+  const p = await open(
+    "backup",
+    sectionPorts({ keys: vi.fn(() => Promise.resolve({ lists: [], actions: [{ kind: "pr", chord: "⌘⇧P", action_id: "approve" }] })) }),
+  );
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists, favourites and keys");
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
