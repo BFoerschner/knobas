@@ -1,0 +1,27 @@
+---
+status: accepted
+---
+
+# A docs source projects at read time through a shared reader, inside or outside WASM
+
+Extends [ADR-0022](0022-the-shell-draws-builds-and-docs-over-declared-kinds.md) and [ADR-0028](0028-an-external-adapter-is-a-sandboxed-wasm-component-installed-from-a-release.md). Confluence pages draw in pieces: HTML macros, includes, task lists and expands are grey boxes, and a table cell holds one line of text. XWiki is next, and it will be an [external adapter](../../CONTEXT.md#external-adapter), whose WIT world carries no docs projection at all. Decided 2026-11-02 (Björn, spec #2432 grilling): **a docs source maps its own markup onto one shared block vocabulary through one shared HTML reader, knobas runs that projection when a page is opened, inside the component for an external adapter, and the host builds a page's search text from the blocks.**
+
+- **The vocabulary is the seam.** Every docs source maps its markup onto the frozen `DocBlock` / `Inline` / `TableCell` vocabulary in `knobas-source`'s docs module, and the shell draws that vocabulary and nothing source-specific. No source's rendered HTML is drawn in place of blocks. The vocabulary names no source: a table cell holds blocks and spans, a list item may be a task, and an [embed](../../CONTEXT.md#embed), an [include](../../CONTEXT.md#include) and a [collapsible](../../CONTEXT.md#collapsible) are blocks that Confluence's macros and XWiki's will both map onto. Each change to it is a §10.8 entry.
+- **Search text comes from the blocks, in shared code.** One function in `knobas-source` builds a page's `body_text` from its `DocContent`: title and lead text, a section line per heading, a comment line per comment, link lines last, as the `indexed` module defines them. It takes the words in table cells, collapsibles and an embed's visible HTML text, never script or style contents, and nothing from an include's target, which is found on its own page.
+- **Projection runs at read time, for built-in and external adapters alike.** The [mirror](../../CONTEXT.md#mirror) holds the source's raw [payload](../../CONTEXT.md#payload). Opening a page calls the source's projection on it, and nothing projected is stored. For an external adapter that call goes into the component, with no HTTP capability granted and under ADR-0028's deadline and memory cap; a projection that traps, times out or runs out of memory reads as no content, and the page draws as the source's failure. knobas fills an include's blocks at the same read, from the mirror as it is now.
+- **The host owns a page's search text.** During sync, for a record of kind `page` from an external adapter, the host calls the same projection and writes `body_text` with the shared function. The `body-text` the adapter sent for a `page` is ignored. A built-in docs source writes its page `body_text` with the same function.
+- **One shared HTML reader with an adapter hook.** One tolerant HTML-to-blocks reader lives in `knobas-source`, so it compiles into knobas and into the adapter SDK. It reads plain HTML (headings, paragraphs, lists, tables with spans, `pre`/`code`, links, text marks, line breaks) and treats wrappers such as `div`, `section`, `span`, `blockquote` and `thead`/`tbody` as transparent. For an element it does not know it asks a hook the adapter supplies, which answers blocks or inlines or declines; a declined element is a named placeholder. It never fails: broken markup reads as the text it holds. An adapter's hook maps only its own elements: Confluence's `ac:`/`ri:` macros and links, later XWiki's macro markers.
+
+## Rejected
+
+- Drawing the source's rendered HTML. The shell would draw a source instead of a role (ADR-0029), a second wiki would need its own reader, and a page's HTML would run with the app's reach.
+- Projecting at sync and storing the blocks. An improved projection would reach mirrored pages only after a full re-sync, an include would show its target as it stood at the including page's last sync, and the store would hold a second copy of every page in a frozen shape.
+- The adapter writing a page's search text. Every adapter would have to get the section, comment and link marks right that Docs search reads back, and the text could drift from what the reader draws, as Confluence's storage-to-text scan did, which indexed the raw markup of HTML macros.
+- One HTML parser per source. Every wiki would re-solve tables, spans, lists and broken markup, and an external adapter's author would map all of HTML instead of the elements that are theirs.
+
+## Consequences
+
+- ADR-0022 stands: the Docs frame is still drawn over `DocContent`. This ADR states how that `DocContent` is made, when it is made, and that it is never stored.
+- ADR-0028 stands: the WIT world gains the docs projection and the docs writes (`DocWrites`' section edit and new-page body) as a minor, additive version and a §10.8 entry. The descriptor's static checks accept a docs-source claim only from a component that exports the projection, and `knobas adapter check` runs the docs contract.
+- The Confluence adapter is rebuilt on the shared reader, keeping only its `ac:`/`ri:` mapping as the hook, and its storage-to-text scan stops writing page search text. Its cursor version is bumped, so the first sync after the upgrade is full and every page's `body_text` is rebuilt.
+- Every page open runs a projection, and an include runs one per target. No projection is cached in memory; a cache would come under ADR-0032 only if opening pages proves slow.
