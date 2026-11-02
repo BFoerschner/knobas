@@ -463,14 +463,6 @@ macro_rules! estate_subtree {
     };
 }
 
-/// The synced mirror: M1's only corpus.
-///
-/// **`sync.live_item`, never `sync.item`.** Migration `0002` made the tombstone
-/// filter structural precisely so that no query has to remember the join to
-/// `knobas.entity`; reading the base table would put items a source deleted
-/// back in the launcher. Migration `0012` put the *disabled-source* filter in
-/// the same place for the same reason (issue #202), so reading the base table
-/// now also puts back items from a source the user switched off.
 /// The Builds frame a mirrored row's kind declares (`pipeline`, `run`), or
 /// null; `$decl` holds the declarations and the row is `i`.
 macro_rules! mirror_frame {
@@ -538,6 +530,14 @@ macro_rules! mirror_state {
 }
 pub(crate) use mirror_frame;
 
+/// The synced mirror: M1's only corpus.
+///
+/// **`sync.live_item`, never `sync.item`.** Migration `0002` made the tombstone
+/// filter structural precisely so that no query has to remember the join to
+/// `knobas.entity`; reading the base table would put items a source deleted
+/// back in the launcher. Migration `0012` put the *disabled-source* filter in
+/// the same place for the same reason (issue #202), so reading the base table
+/// now also puts back items from a source the user switched off.
 pub const LIVE_ITEM: Corpus = Corpus {
     relation: "sync.live_item i",
     entity_id: "i.entity_id",
@@ -769,15 +769,6 @@ pub const ROUTE: Corpus = Corpus {
     fields: &[],
 };
 
-/// Every corpus the launcher searches.
-///
-/// One list, so a corpus cannot be added to the crate and forgotten by the
-/// query. Which rows each one contributes is decided by the *filters*, not by
-/// membership here: `note:` sets `kinds = ["note"]`, which the mirror's branch
-/// cannot match; a `source:` chip names configured sources, which
-/// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
-/// with no author column outright. So the union is always both branches and the
-/// answer is always the right one.
 /// A saved ticket view (#2422, `knobas.ticket_view`, migration `0035`): the
 /// launcher's kind `view`, found by its name (weight A, so *Titles* finds it)
 /// and by its group and its conditions (weight B). Its path line is the group
@@ -860,6 +851,15 @@ pub const SET: Corpus = Corpus {
     fields: &[],
 };
 
+/// Every corpus the launcher searches.
+///
+/// One list, so a corpus cannot be added to the crate and forgotten by the
+/// query. Which rows each one contributes is decided by the *filters*, not by
+/// membership here: `note:` sets `kinds = ["note"]`, which the mirror's branch
+/// cannot match; a `source:` chip names configured sources, which
+/// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
+/// with no author column outright. So the union is always both branches and the
+/// answer is always the right one.
 pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE, &VIEW, &SET];
 
 /// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
