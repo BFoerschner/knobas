@@ -225,7 +225,6 @@ export function revealMatch(match: Element): void {
     const title = fold.querySelector(":scope > summary");
     if (!title?.contains(match)) (fold as HTMLDetailsElement).open = true;
   }
-  }
 }
 
 /**
