@@ -17,12 +17,18 @@
   let {
     rows,
     selected,
+    heading = "Prefix syntax",
+    keys = [],
     optionId,
     onopen,
     onhover,
   }: {
     rows: LauncherRow[];
     selected: number;
+    /** The card's heading: the typed `?` card's, or the ⌘? overlay's. */
+    heading?: string;
+    /** The keys the box answers, listed at the bottom of the card (#2424). */
+    keys?: [string, string][];
     /** The element id of the option at a flat-list index (#1411). */
     optionId: (index: number) => string;
     onopen: (row: LauncherRow) => void;
@@ -30,7 +36,7 @@
   } = $props();
 </script>
 
-<div class="tf-ln-h"><span class="tf-ln-lab">Prefix syntax</span><span class="tf-ln-n">{rows.length}</span></div>
+<div class="tf-ln-h"><span class="tf-ln-lab">{heading}</span><span class="tf-ln-n">{rows.length}</span></div>
 <div class="tf-ln-help">
   {#each rows as row, i (row.id)}
     {#if row.kind === "syntax"}
@@ -51,3 +57,10 @@
     {/if}
   {/each}
 </div>
+{#if keys.length > 0}
+  <div class="tf-ln-keys" aria-label="Keys">
+    {#each keys as [key, what] (key)}
+      <span><kbd>{key}</kbd> {what}</span>
+    {/each}
+  </div>
+{/if}

@@ -80,6 +80,8 @@
   import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
+  import { addFilter, narrowFilters, overlayFilters } from "./syntax";
+  import { push } from "../shell/toasts.svelte";
 
   let {
     open = $bindable(false),
@@ -271,6 +273,44 @@
   let renaming = $state<string | null>(null);
 
   /**
+   * The ⌘? overlay (#2424), or `null`: the box holds `filter`, which narrows
+   * the filters, and the search words wait untouched in `session.raw`.
+   */
+  let overlay = $state<{ filter: string; selected: number } | null>(null);
+  const overlayShown = $derived(overlay ? narrowFilters(overlayFilters(session.syntax), overlay.filter) : []);
+  /** The overlay's filters as the `?` card's rows, so one component draws both. */
+  const overlayRows = $derived<LauncherRow[]>(
+    overlayShown.map(({ entry, word }) => ({ kind: "syntax", id: `filter:${entry.token}`, entry: { ...entry, summary: word } })),
+  );
+
+  /**
+   * The list's name while ⌘S asks for it (#2424), or `null`. The box holds
+   * the name; the query being saved waits in `session.raw`.
+   */
+  let naming = $state<string | null>(null);
+
+  /**
+   * A close ends the mode: the launcher stays mounted and keeps its query, so
+   * without this the next ⌘K would reopen on the overlay or the prompt.
+   */
+  $effect.pre(() => {
+    if (!open) {
+      overlay = null;
+      naming = null;
+    }
+  });
+
+  /**
+   * What the box asks for, drawn as the label in front of it: its own
+   * element, never part of the text. `null` while the box is the search.
+   * Later modes (the sheet's Actions, Keys, New name, a flow's step) join here.
+   */
+  const boxLabel = $derived(naming !== null ? "Name" : overlay ? "Filter" : null);
+  const placeholder = $derived(
+    naming !== null ? "the list's name" : overlay ? "narrow the filters" : "⌘? for help",
+  );
+
+  /**
    * The value suggestions under the box (#601): the `kind:`, `source:` or
    * `under:` token being typed, and the values it can still become.
    *
@@ -282,7 +322,7 @@
   let dismissedAt = $state<string | null>(null);
   let suggestionPicked = $state(0);
   const offer = $derived<Suggestion[]>(
-    typing && session.suggestions && session.raw !== dismissedAt
+    typing && session.suggestions && session.raw !== dismissedAt && !overlay && naming === null
       ? suggest(typing, session.suggestions)
       : [],
   );
@@ -472,6 +512,7 @@
    * they are open, then the Tab chain, then the results.
    */
   const controlled = $derived.by(() => {
+    if (overlay) return { list: resultsId, option: overlayRows.length > 0 ? optionId(overlay.selected) : undefined };
     if (offer.length > 0) return { list: suggestionsId, option: suggestionId(suggestionPicked) };
     if (chain) return { list: chainId, option: activeChainOption };
     return { list: resultsId, option: activeOption };
@@ -649,15 +690,101 @@
   }
 
   /**
-   * *Save as list* (#506, story 56: *"a search I run every day is one click"*).
-   *
-   * The name is the query itself, because one click is the story and the
-   * launcher has nowhere to ask for a name that is not a second dialog over
-   * this one. *Rename* on the row is what turns it into a word — which is why
-   * the two shipped together.
+   * *Save as list*, from ⌘S or the footer's button (#2424, spec #2419 story
+   * 41): the box itself asks for the name, labelled *Name*, the query
+   * prefilled and selected, so typing replaces it and Enter on it keeps it.
+   * No second dialog over this one; Esc goes back to the search.
    */
-  function saveAsList() {
-    void session.saveCurrent(session.raw.trim());
+  function startNaming() {
+    if (!session.canSave || session.savedId !== null) return;
+    chain = null;
+    naming = session.raw.trim();
+    void tick().then(() => box?.focus({ select: true }));
+  }
+
+  /** The naming prompt's keys: Enter saves under the name, Esc keeps searching. */
+  function namingKey(event: KeyboardEvent, name: string) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      const label = name.trim();
+      if (label === "") return;
+      naming = null;
+      box?.focus();
+      void session.saveCurrent(label).then(() => {
+        if (session.savedId !== null) push({ text: `Saved as list ${label}` });
+      });
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      naming = null;
+      box?.focus();
+    }
+  }
+
+  function openOverlay() {
+    chain = null;
+    overlay = { filter: "", selected: 0 };
+    box?.focus();
+  }
+
+  function leaveOverlay() {
+    overlay = null;
+    box?.focus();
+  }
+
+  /** Enter or a click on a filter: it goes into the search that was there. */
+  function pickFilter(row: LauncherRow) {
+    if (row.kind !== "syntax") return;
+    const picked = overlayShown.find(({ entry }) => entry.token === row.entry.token);
+    overlay = null;
+    if (picked) session.set(addFilter(session.raw, picked.entry, session.syntax));
+    box?.focus();
+  }
+
+  /** The overlay's keys: arrows walk, Enter picks, Esc or Backspace on the empty box go back. */
+  function overlayKey(event: KeyboardEvent, current: { filter: string; selected: number }) {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        current.selected = Math.min(overlayRows.length - 1, current.selected + 1);
+        return;
+      case "ArrowUp":
+        event.preventDefault();
+        current.selected = Math.max(0, current.selected - 1);
+        return;
+      case "Enter": {
+        event.preventDefault();
+        const row = overlayRows[current.selected];
+        if (row) pickFilter(row);
+        else leaveOverlay();
+        return;
+      }
+      case "Tab":
+        event.preventDefault();
+        return;
+      case "Escape":
+        event.preventDefault();
+        event.stopPropagation();
+        leaveOverlay();
+        return;
+      case "Backspace":
+        if (current.filter === "") {
+          event.preventDefault();
+          leaveOverlay();
+        }
+        return;
+      default:
+    }
+  }
+
+  /** ⌘? (⌘⇧/ as most keyboards send it): the overlay from any search, and back. */
+  function isHelpChord(event: KeyboardEvent): boolean {
+    return (event.metaKey || event.ctrlKey) && (event.key === "?" || (event.key === "/" && event.shiftKey));
+  }
+
+  /** ⌘S, with no other modifier. */
+  function isSaveChord(event: KeyboardEvent): boolean {
+    return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "s";
   }
 
   function activate(row: LauncherRow) {
@@ -683,6 +810,28 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (naming !== null) {
+      // ⌘S again is the prompt's own key, not the browser's Save.
+      if (isSaveChord(event)) event.preventDefault();
+      else namingKey(event, naming);
+      return;
+    }
+    if (isHelpChord(event)) {
+      event.preventDefault();
+      if (overlay) leaveOverlay();
+      else openOverlay();
+      return;
+    }
+    if (overlay) {
+      if (isSaveChord(event)) event.preventDefault();
+      else overlayKey(event, overlay);
+      return;
+    }
+    if (isSaveChord(event)) {
+      event.preventDefault();
+      startNaming();
+      return;
+    }
     if (suggestionKey(event)) return;
     switch (event.key) {
       case "ArrowDown":
@@ -755,8 +904,14 @@
     }
   }
 
-  const placeholder =
-    "Search everything, or type > for actions, #t tickets (letters combine), @ people, ? help";
+  /** The keys the box answers, at the bottom of the ⌘? overlay. */
+  const keys: [string, string][] = [
+    ["↵", "open"],
+    ["Tab", "actions"],
+    ["⌘S", "save as list"],
+    ["⌘?", "filters"],
+    ["Esc", "back"],
+  ];
   const footnote = $derived(
     `mirror · ${counted(session.home?.pending_writes ?? 0, "pending write", "pending writes")}`,
   );
@@ -777,18 +932,29 @@
   -->
   <TfDialog title="Search and actions" className="tf-launch" onclose={close}>
     {#snippet body()}
-      <QueryBox
-        bind:this={box}
-        value={session.raw}
-        {placeholder}
-        pending={session.pending}
-        {footnote}
-        controls={controlled.list}
-        active={controlled.option}
-        oninput={(value) => session.type(value)}
-        {onkeydown}
-        onclose={close}
-      />
+      <!--
+        The label is its own element in front of the box (#2424): what the box
+        asks for, highlighted, never part of the text and so never deletable.
+      -->
+      <div class="tf-ln-boxrow">
+        {#if boxLabel !== null}<span class="tf-ln-mode">{boxLabel}</span>{/if}
+        <QueryBox
+          bind:this={box}
+          value={naming !== null ? naming : overlay ? overlay.filter : session.raw}
+          {placeholder}
+          pending={session.pending}
+          {footnote}
+          controls={controlled.list}
+          active={controlled.option}
+          oninput={(value) => {
+            if (naming !== null) naming = value;
+            else if (overlay) overlay = { filter: value, selected: 0 };
+            else session.type(value);
+          }}
+          {onkeydown}
+          onclose={close}
+        />
+      </div>
 
       {#if offer.length > 0}
         <!--
@@ -814,12 +980,22 @@
         </div>
       {/if}
 
-      {#if interpreted}
+      {#if interpreted && !overlay}
         <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
       <div id={resultsId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Results">
-        {#if session.error}
+        {#if overlay}
+          <Help
+            rows={overlayRows}
+            selected={overlay.selected}
+            heading="Filters"
+            {keys}
+            {optionId}
+            onopen={pickFilter}
+            onhover={(index) => overlay && (overlay.selected = index)}
+          />
+        {:else if session.error}
           <p class="tf-ln-none tf-ln-err">{session.error}</p>
           <!-- A board that failed to load has nothing else to offer; a failed
                search is retried by typing. -->
@@ -953,7 +1129,7 @@
           there is nothing there to save. `canSave` is the session's, so the
           control and the write agree about when there is a query.
         -->
-        <button class="tf-btn tf-sm tf-ln-save" onclick={saveAsList} disabled={session.savedId !== null}>
+        <button class="tf-btn tf-sm tf-ln-save" onclick={startNaming} disabled={session.savedId !== null || naming !== null}>
           {session.savedId === null ? "Save as list" : "Saved as list"}
         </button>
       {/if}

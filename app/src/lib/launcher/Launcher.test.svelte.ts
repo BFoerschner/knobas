@@ -1076,12 +1076,11 @@ test("a key typed as a word finds its ticket and draws no filter chip", async ()
   expect(target.textContent).toContain("Retry failed SEPA payouts");
 });
 
-test("the placeholder names the # letters and no / source", async () => {
+test("the placeholder reads only ⌘? for help, so no / source", async () => {
   open();
   await settle();
-  const placeholder = target.querySelector("input")!.placeholder;
-  expect(placeholder).not.toContain("/");
-  expect(placeholder).toContain("#t");
+  // #2424: the grammar is on the ⌘? overlay, not in the placeholder.
+  expect(target.querySelector("input")!.placeholder).toBe("⌘? for help");
 });
 
 /**
@@ -1935,8 +1934,11 @@ test("save as list is offered on a query, never on an empty box", async () => {
   button!.click();
   await settle();
 
-  // The **raw box text**, both as the query and as the name — one click, and
-  // the name is what *Rename* is for.
+  // The button asks for the name in the box, the query prefilled (#2424, as
+  // ⌘S does; `Launcher.overlay.test.svelte.ts`). Enter keeps the prefill.
+  expect(created).not.toHaveBeenCalled();
+  press("Enter");
+  await settle();
   expect(created).toHaveBeenCalledWith("sepa retries", "sepa retries");
   expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Saved as list");
   expect(
