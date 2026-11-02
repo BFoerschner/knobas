@@ -182,7 +182,7 @@ pub struct Corpus {
     pub(crate) state: &'static str,
     /// The row's key cell as `text` (#2452), or `null::text` for a corpus
     /// whose rows have none. For the mirror it is the stored
-    /// `sync.item.key_cell` (migration `0066`), resolved from the
+    /// `sync.item.key_cell` (migration `0068`), resolved from the
     /// declarations when the row is written -- the same text `fts` holds at
     /// weight A, so what *Titles* matches and what the key column draws are
     /// one value.
@@ -547,7 +547,7 @@ macro_rules! mirror_state {
 ///   `project_name` (a page's space), else its outermost parent's first name
 ///   past its last `/` (a pull request's or a branch's repository).
 ///
-/// **Not read per query.** Migration `0066` pastes this expansion with
+/// **Not read per query.** Migration `0068` pastes this expansion with
 /// `$decl` = `d.decl` into `sync.key_cell_of`, which writes
 /// `sync.item.key_cell` when a row is written or its declarations change,
 /// and `fts` folds that column in at weight A.
@@ -967,7 +967,7 @@ pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &VIEW, &SET,
 mod tests {
     use super::*;
 
-    /// Migration `0066` stores the key cell through `sync.key_cell_of`, which
+    /// Migration `0068` stores the key cell through `sync.key_cell_of`, which
     /// pastes [`key_cell!`]'s expansion over `d.decl` (#2451). This holds the
     /// pasted text to the macro and the macros it is built of, so a change to
     /// any of them fails here until a new migration restates the function --
@@ -975,10 +975,10 @@ mod tests {
     #[test]
     fn the_stored_key_cell_is_this_expansion() {
         let migration =
-            include_str!("../../knobas-db/migrations/0066_a_row_is_found_by_where_it_sits.sql");
+            include_str!("../../knobas-db/migrations/0068_a_row_is_found_by_where_it_sits.sql");
         assert!(
             migration.contains(key_cell!("d.decl")),
-            "0066 no longer holds key_cell!(\"d.decl\"):\n{}",
+            "0068 no longer holds key_cell!(\"d.decl\"):\n{}",
             key_cell!("d.decl")
         );
     }

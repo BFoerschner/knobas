@@ -1597,7 +1597,7 @@ state: StateChip | null,
  * beside the title to know where the thing sits -- a pull request's
  * repository, a page's space, a pipeline's project, a monitor's type.
  * Resolved from the kind's declarations when the row is written
- * (`sync.item.key_cell`, migration `0066`), and indexed at the title's
+ * (`sync.item.key_cell`, migration `0068`), and indexed at the title's
  * weight so *Titles* finds it (#2451). Absent for a ticket (its key is
  * its id), for a row whose declarations name none, and for every row of
  * a corpus knobas owns: the ADR-0007 **miss**, and the launcher falls

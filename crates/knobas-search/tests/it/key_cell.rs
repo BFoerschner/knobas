@@ -1,5 +1,5 @@
 //! `sync.item.key_cell` against what it claims to follow, on a real
-//! PostgreSQL (migration `0066`, #2451, #2452).
+//! PostgreSQL (migration `0068`, #2451, #2452).
 //!
 //! The key cell is written once, when a row is, from the declarations the
 //! database holds (`sync.parent_declaration`), and `fts` holds it at weight A.

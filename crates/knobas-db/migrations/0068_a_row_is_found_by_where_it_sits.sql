@@ -1,4 +1,4 @@
--- 0066_a_row_is_found_by_where_it_sits.sql -- `sync.item.key_cell`, the
+-- 0068_a_row_is_found_by_where_it_sits.sql -- `sync.item.key_cell`, the
 -- code that keeps it, and `sync.item.fts` restated to hold it (issues #2451
 -- and #2452, spec #2419).
 --
