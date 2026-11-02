@@ -274,9 +274,7 @@ fn edits(adapter: &WasmAdapter, page: &SyncItem, content: &DocContent) -> Result
     Ok(())
 }
 
-fn shown(
-    answer: Option<&Result<knobas_source::docs::SectionEdit, EditRefused>>,
-) -> String {
+fn shown(answer: Option<&Result<knobas_source::docs::SectionEdit, EditRefused>>) -> String {
     match answer {
         None => "nothing (it trapped or ran out of time or memory)".to_owned(),
         Some(Ok(_)) => "an edit".to_owned(),

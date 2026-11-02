@@ -14,7 +14,10 @@ use crate::docs::instance;
 
 /// The fixture built with `config`, its descriptor and what a full sync
 /// emitted.
-async fn synced(adapter: &WasmAdapter, config: Value) -> (knobas_source::SourceDescriptor, Vec<SyncItem>) {
+async fn synced(
+    adapter: &WasmAdapter,
+    config: Value,
+) -> (knobas_source::SourceDescriptor, Vec<SyncItem>) {
     let mut instance = instance();
     instance.config = config;
     let source = adapter.build(instance).expect("the fixture builds");
@@ -48,7 +51,9 @@ async fn a_projection_that_draws_any_kind_fails_naming_the_check() {
     let breach = breached("draws_any_kind").await;
     assert_eq!(breach.check, Check::OtherKindRefused, "{breach}");
     assert!(
-        breach.to_string().starts_with("docs contract, other kind refused: "),
+        breach
+            .to_string()
+            .starts_with("docs contract, other kind refused: "),
         "{breach}"
     );
     assert!(breach.detail.contains("docs_contract_probe"), "{breach}");
@@ -109,5 +114,10 @@ async fn the_fixture_s_pages_have_a_refused_and_an_editable_section() {
         .flat_map(|item| adapter.project("page", &item.payload).unwrap().sections)
         .collect();
     assert!(sections.iter().any(|s| s.refusal.is_some()), "{sections:?}");
-    assert!(sections.iter().any(|s| s.text.as_deref() == Some("Two lines, fore and aft.")), "{sections:?}");
+    assert!(
+        sections
+            .iter()
+            .any(|s| s.text.as_deref() == Some("Two lines, fore and aft.")),
+        "{sections:?}"
+    );
 }

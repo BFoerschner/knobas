@@ -43,13 +43,13 @@
 use chrono::{TimeZone, Utc};
 use knobas_adapter_sdk::SyncItem;
 use knobas_adapter_sdk::html::{self, Node};
-use knobas_adapter_sdk::{Hook, Hooked, Reading, html_from_text};
 use knobas_adapter_sdk::spi::docs::{
     DocBlock, DocComment, DocContent, DocSection, EditRefused, EmbedContent, Inline, ListItem,
     PAGE_KIND, PanelKind, SectionEdit, SectionRefusal,
 };
 use knobas_adapter_sdk::spi::role::{RoleClaim, WIKI};
 use knobas_adapter_sdk::spi::{EntityRef, KindInfo, KindPaths, ParentPath, PayloadPath};
+use knobas_adapter_sdk::{Hook, Hooked, Reading, html_from_text};
 use serde_json::{Value, json};
 
 /// The space both pages are in.
