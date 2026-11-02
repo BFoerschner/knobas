@@ -16,6 +16,7 @@
   import type { ParsedQuery } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
   import { isActionable } from "../shell/health.svelte";
+  import { SYNTAX } from "./syntax";
 
   let {
     interpreted,
@@ -25,7 +26,7 @@
     interpreted: ParsedQuery;
     sources: CredentialHealth[];
     /**
-     * Whether the source list has been read (#746). "No source matches /cf" is
+     * Whether the source list has been read (#746). "No source matches source:cf" is
      * a claim about that list; before it has answered, the chip says only that
      * the sources are not read yet.
      */
@@ -35,7 +36,6 @@
   /** The prefix chip, in the words the `?` card uses. */
   const PREFIX_LABEL: Record<string, string> = {
     action: "actions",
-    ticket: "tickets",
     person: "people",
     source: "source",
     time: "time",
@@ -44,6 +44,18 @@
     asset: "assets",
     help: "help",
   };
+
+  /**
+   * A kind chip in the word the `?` card gives its `#` letter (#2420): `#rl`
+   * is *repositories* and *lists*. A kind no letter names (`kind:build`) keeps
+   * its own spelling.
+   */
+  function kindLabel(kind: string): string {
+    return SYNTAX.find((entry) => entry.kind === kind)?.summary ?? kind;
+  }
+
+  /** The keys that name a source (`apply_key_value`). */
+  const SOURCE_KEYS = new Set(["source", "src", "in"]);
 
   /**
    * Why a token did nothing, in a sentence rather than a shrug.
@@ -56,7 +68,7 @@
    */
   function reason(token: string): string {
     const key = token.split(":")[0]?.toLowerCase() ?? "";
-    if (token.startsWith("/")) {
+    if (SOURCE_KEYS.has(key)) {
       return sourcesRead ? `no source matches ${token}` : "the sources have not been read yet";
     }
     if (key === "env" || key === "health") return "the estate arrives with assets";
@@ -96,7 +108,7 @@
       });
     }
     for (const kind of interpreted.filters.kinds) {
-      out.push({ key: `kind:${kind}`, text: kind, title: "kind", fail: false });
+      out.push({ key: `kind:${kind}`, text: kindLabel(kind), title: "kind", fail: false });
     }
     if (interpreted.filters.updated_within_days !== null) {
       out.push({

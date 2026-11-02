@@ -66,7 +66,7 @@
 {#if gaps.length > 0}
   <div class="tf-ln-gap">
     <!-- Deliberately not "not every source": that is false in the case a
-         reader most needs this, `@jonas /tc`, where the one source in scope is
+         reader most needs this, `@jonas in:tc`, where the one source in scope is
          the one that cannot be asked. A heading that does not count is honest
          at one source and at five. -->
     <p class="tf-ln-gap-h">An author search cannot be answered by:</p>

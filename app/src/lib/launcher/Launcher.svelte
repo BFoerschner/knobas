@@ -736,7 +736,7 @@
   }
 
   const placeholder =
-    "Search everything, or type > for actions, # tickets, @ people, / source, ? help";
+    "Search everything, or type > for actions, #t tickets (letters combine), @ people, ? help";
   const footnote = $derived(
     `mirror · ${counted(session.home?.pending_writes ?? 0, "pending write", "pending writes")}`,
   );

@@ -1000,22 +1000,88 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
             text: "",
             prefix: null,
             filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
-            unknown_tokens: ["env:prod", "/cf"],
+            unknown_tokens: ["env:prod", "source:cf"],
           },
           groups: [],
         }),
     },
   });
   await settle();
-  target.querySelector("input")!.value = "env:prod /cf";
+  target.querySelector("input")!.value = "env:prod source:cf";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
   const greyed = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")].map((el) => el.textContent?.trim());
   expect(greyed).toEqual([
     "env:prod — the estate arrives with assets",
-    "/cf — no source matches /cf",
+    "source:cf — no source matches source:cf",
   ]);
+});
+
+/* ── #2420: `#` letters that combine, the key a word, `/` gone ──────── */
+
+test("a combined # filter is sent as typed and draws one chip per letter", async () => {
+  const sent: string[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        sent.push(query.raw);
+        return response({
+          interpreted: {
+            text: "sepa",
+            prefix: null,
+            filters: { sources: [], kinds: ["repo", "list"], updated_within_days: null, mine: false, authors: [] },
+            unknown_tokens: [],
+          },
+        });
+      },
+    },
+  });
+  await settle();
+  typeInBox("#rl sepa");
+  await debounced();
+
+  // The backend parses (ruling P2): the box's text goes over exactly as typed.
+  expect(sent.at(-1)).toBe("#rl sepa");
+  const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
+  // The words the `?` card gives each letter, one chip per kind the answer filtered on.
+  expect(chips).toEqual(["repositories", "lists"]);
+});
+
+test("a key typed as a word finds its ticket and draws no filter chip", async () => {
+  const sent: string[] = [];
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async (query: SearchQuery) => {
+        sent.push(query.raw);
+        return response({
+          interpreted: {
+            text: "pay-231",
+            prefix: null,
+            filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+            unknown_tokens: [],
+          },
+        });
+      },
+    },
+  });
+  await settle();
+  typeInBox("pay-231");
+  await debounced();
+
+  expect(sent.at(-1)).toBe("pay-231");
+  expect(target.querySelectorAll(".tf-ln-fchip")).toHaveLength(0);
+  expect(target.textContent).toContain("Retry failed SEPA payouts");
+});
+
+test("the placeholder names the # letters and no / source", async () => {
+  open();
+  await settle();
+  const placeholder = target.querySelector("input")!.placeholder;
+  expect(placeholder).not.toContain("/");
+  expect(placeholder).toContain("#t");
 });
 
 /**
@@ -1068,7 +1134,7 @@ test("a source chip is marked when that source is refusing the credential", asyn
     },
   });
   await settle();
-  target.querySelector("input")!.value = "/gitea /jira sepa";
+  target.querySelector("input")!.value = "in:gitea in:jira sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
@@ -1128,7 +1194,7 @@ test("a chip for a source with no health reading is not marked failing", async (
     },
   });
   await settle();
-  target.querySelector("input")!.value = "/gitea /nowhere sepa";
+  target.querySelector("input")!.value = "in:gitea in:nowhere sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
@@ -1202,11 +1268,16 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
 
   const rows = [...target.querySelectorAll(".tf-ln-opt")];
   expect(rows.length).toBeGreaterThan(8);
-  expect(target.textContent).toContain("tickets only");
+  // One row per `#` letter, each one word (#2420), and no `/` source row.
+  const tokens = rows.map((row) => row.querySelector(".tf-ln-tok")?.textContent?.trim() ?? "");
+  for (const letter of ["#t", "#p", "#r", "#b", "#m", "#d", "#l", "#i"]) {
+    expect(tokens.some((token) => token.startsWith(letter))).toBe(true);
+  }
+  expect(tokens.some((token) => token.startsWith("/"))).toBe(false);
 
   rows[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
-  expect(target.querySelector("input")!.value).toBe("#");
+  expect(target.querySelector("input")!.value).toBe("#t ");
 });
 
 /**
@@ -2382,10 +2453,10 @@ test("a ready, empty source read still says no source is configured", async () =
   expect(target.textContent).toContain("No source is configured yet");
 });
 
-test("a /source token is not 'no source matches' while the sources are unread", async () => {
+test("a source: token is not 'no source matches' while the sources are unread", async () => {
   const unknown = (raw: string) =>
     response({
-      interpreted: { ...response().interpreted, text: raw, unknown_tokens: ["/cf"] },
+      interpreted: { ...response().interpreted, text: raw, unknown_tokens: ["source:cf"] },
     });
   open({
     sources: [],
@@ -2393,9 +2464,9 @@ test("a /source token is not 'no source matches' while the sources are unread", 
     ports: { launcherHome: async () => HOME, search: async () => unknown("x") },
   });
   await settle();
-  typeInBox("/cf x");
+  typeInBox("source:cf x");
   await debounced();
-  expect(target.textContent).toContain("/cf");
+  expect(target.textContent).toContain("source:cf");
   expect(target.textContent).not.toContain("no source matches");
 });
 

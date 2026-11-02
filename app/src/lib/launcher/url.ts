@@ -48,8 +48,8 @@ const WRITTEN_OUT = /^https?:\/\//i;
  * resolver as a link nobody pasted.
  *
  * A relative address (`/browse/PAY-231`) is a query as far as this is
- * concerned. It has no host, so it cannot say *which* Jira, and the launcher's
- * `/` prefix already means something else.
+ * concerned. It has no host, so it cannot say *which* Jira: the box searches
+ * it as words.
  */
 export function pastedUrl(raw: string): string | null {
   const text = raw.trim();
