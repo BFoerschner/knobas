@@ -736,6 +736,16 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     .await
     .expect("seed a saved smart list")
     .id;
+    // ...and two favourites (#2428), the list first and then the ticket, which
+    // ride in the same part beside the saved lists.
+    for target in [
+        knobas_search::FavouriteTarget::List(saved_list.clone()),
+        knobas_search::FavouriteTarget::Entity(ticket.clone()),
+    ] {
+        knobas_app::commands::search::add_favourite_inner(pool, &Registry::for_process(), &target)
+            .await
+            .expect("seed a favourite");
+    }
 
     // ...and a ticket view (#812), which is what the `ticket_views` part
     // carries, saved through the command the Tickets screen calls.
@@ -944,6 +954,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("context", 1),
         ("source_config", 1),
         ("smart_list", 1),
+        ("favourite", 2),
         ("ticket_view", 1),
         ("link_set", 1),
         ("link_set_member", 2),
@@ -1033,6 +1044,24 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
             SAVED_QUERY.to_owned()
         )],
         "the saved smart list did not cross with its id, its name and its query"
+    );
+
+    // **The favourites arrived in their order** (#2428), and the far machine
+    // draws them: the list as its list, the ticket from the address book the
+    // links brought, before any sync of its own has mirrored it.
+    let favourites = knobas_app::commands::search::favourites_inner(there, &Registry::for_process())
+        .await
+        .expect("the colleague's favourites");
+    assert_eq!(
+        favourites
+            .iter()
+            .map(|row| (row.kind.as_str(), row.entity_id.as_str(), row.title.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("list", estate.saved_list.as_str(), SAVED_LABEL),
+            ("ticket", estate.ticket.as_str(), "Retry failed payouts"),
+        ],
+        "the favourites did not cross in their order"
     );
 
     // **The ticket view arrived whole, its text exactly as saved** (#812): the
@@ -1157,7 +1186,7 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
                 smart_lists: true,
                 ..none
             },
-            vec!["smart_list"],
+            vec!["favourite", "smart_list"],
         ),
         // Nor is a ticket view (#812).
         (
@@ -1292,6 +1321,10 @@ async fn switching_the_saved_lists_part_off_leaves_the_list_table_behind() {
     assert!(
         !held.contains(&"smart_list".to_owned()),
         "the saved lists were switched off and the table is in the archive: {held:?}"
+    );
+    assert!(
+        !held.contains(&"favourite".to_owned()),
+        "the favourites ride with the saved lists and stayed in the archive: {held:?}"
     );
     // ...and the rest of the defaults are still in it, so that "off" is one
     // part switched off rather than an export that fell over.
