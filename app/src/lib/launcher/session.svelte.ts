@@ -295,18 +295,18 @@ export class Session {
     });
   }
 
-  /** Rename a saved list and ask the box again. */
-  async renameList(id: string, label: string): Promise<void> {
+  /** Rename a saved list and ask the box again; whether the backend took it. */
+  async renameList(id: string, label: string): Promise<boolean> {
     const rename = this.#ports.renameSmartList;
-    if (!rename) return;
-    await this.#write(() => rename(id, label));
+    if (!rename) return false;
+    return this.#write(() => rename(id, label));
   }
 
-  /** Delete a saved list and ask the box again. */
-  async deleteList(id: string): Promise<void> {
+  /** Delete a saved list and ask the box again; whether the backend took it. */
+  async deleteList(id: string): Promise<boolean> {
     const remove = this.#ports.deleteSmartList;
-    if (!remove) return;
-    await this.#write(async () => {
+    if (!remove) return false;
+    return this.#write(async () => {
       await remove(id);
       if (this.savedId === id) this.savedId = null;
     });
@@ -321,16 +321,17 @@ export class Session {
    * opinion about what the backend holds. The re-read is one round trip on a
    * gesture a reader makes by hand, which is not the ⌘K budget.
    */
-  async #write(write: () => Promise<void>): Promise<void> {
+  async #write(write: () => Promise<void>): Promise<boolean> {
     try {
       await write();
       this.error = null;
     } catch (cause) {
       this.error = ipcErrorMessage(cause);
-      return;
+      return false;
     }
     if (this.raw.trim() === "") await this.loadHome();
     else await this.run();
+    return true;
   }
 
   /**

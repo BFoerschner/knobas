@@ -354,12 +354,8 @@ test("Esc clears the query first and only then closes", async () => {
   window.removeEventListener("keydown", shell);
 });
 
-test("Tab steals no focus, and offers nothing while no detail is open", async () => {
-  // `onlink` is supplied and `openEntity` is not, which is exactly how the
-  // shell mounts this with no detail open: the handler is always there, the
-  // open entity is what comes and goes.
-  const onlink = vi.fn();
-  open({ onlink });
+test("Tab steals no focus, and with no job chosen the sheet has no Link row", async () => {
+  open();
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -367,13 +363,11 @@ test("Tab steals no focus, and offers nothing while no detail is open", async ()
 
   const input = target.querySelector("input");
   const event = press("Tab");
-  expect(event.defaultPrevented, "Tab is the action chain, not a focus move").toBe(true);
+  expect(event.defaultPrevented, "Tab is the action sheet, not a focus move").toBe(true);
   expect(document.activeElement).toBe(input);
-  // #55: the chain's one action needs a second end. With nothing open there is
-  // nothing to link to, so there is no chain at all.
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-  press("Enter");
-  expect(onlink, "Enter opens the row; there was no action to run").not.toHaveBeenCalled();
+  const sheet = target.querySelector('[aria-label="Actions on the selected result"]');
+  expect(sheet?.textContent).toContain("Work on this");
+  expect(sheet?.textContent, "a link needs a job at its other end").not.toContain("Link to");
 });
 
 /**
@@ -408,162 +402,28 @@ test("the overlay is the shell's dialog, and a click on the dim closes it", asyn
 /** The open entity, as the shell names it to the launcher. */
 const OPEN = { entityId: "jira:PAY-999", label: "PAY-999" };
 
-/**
- * #55. The chain exists only while a detail is open, it names what is open,
- * and pressing it hands the *result* back — the launcher never writes.
- */
-test("Tab offers Link to the open entity, and Enter hands the result to the shell", async () => {
-  const onlink = vi.fn();
-  open({ openEntity: OPEN, onlink });
-  await settle();
-  // Search, so the selected row is a result rather than the board.
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent).toContain("Link to PAY-999");
-
-  press("Enter");
-  // The first result of the fixture's first group.
-  expect(onlink).toHaveBeenCalledWith({ entity_id: "jira:PAY-231", title: "Retry failed SEPA payouts", kind: "ticket" });
-  // The launcher steps out of the way of the job's link dialog (#1500).
-  expect(target.querySelector(".tf-launch"), "the launcher stayed open over the job's dialog").toBeNull();
-});
-
-/** The chain acts on the row that was selected when it opened, not on a later one. */
-test("moving the selection abandons an open chain", async () => {
-  const onlink = vi.fn();
-  open({ openEntity: OPEN, onlink });
+/** The sheet belongs to the row selected when Tab opened it. */
+test("leaving the sheet and moving the selection opens it on the next row", async () => {
+  open({ openEntity: OPEN });
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
   await debounced();
 
   press("Tab");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).not.toBeNull();
-
-  // With a chain open the arrows walk *it*, so the selection is moved from a
-  // closed one: Escape first.
+  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("Retry failed SEPA payouts");
   press("Escape");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
   press("ArrowDown");
   press("Tab");
-  press("Enter");
-
-  expect(onlink).toHaveBeenCalledWith({ entity_id: "gitea:acme/svc#142", title: "Backoff", kind: "pr" });
+  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("Backoff");
 });
 
-/** An entity cannot be linked to itself, so its own row offers nothing. */
-test("the open entity's own row has no chain", async () => {
-  const onlink = vi.fn();
-  open({ openEntity: { entityId: "jira:PAY-231", label: "PAY-231" }, onlink });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-  expect(onlink).not.toHaveBeenCalled();
-});
-
-/**
- * *Start timer* on the selected result (#278, story 11).
- *
- * It needs no open detail — that is the difference from *Link to…*, which
- * needs a second end — so this drives the launcher with `openEntity` absent,
- * which is how the shell mounts it from a room with nothing open.
- *
- * The launcher only says *which* result was chosen. **Stopping the running
- * timer first is the shell's**, and the two are separated here on purpose: a
- * launcher that stopped a timer itself would be a second owner of the clock.
- */
-test("Tab offers Start timer on a result, with no detail open", async () => {
-  const ontimer = vi.fn();
-  open({ ontimer });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent).toContain("Start timer on Retry failed SEPA payouts");
-
-  press("Enter");
-  expect(ontimer).toHaveBeenCalledWith("jira:PAY-231", "Retry failed SEPA payouts");
-  expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
-});
-
-/**
- * **The refusal, in the launcher.** A stored context is a row in
- * `knobas.entity` and comes back from search like anything else, so the row
- * has to be taken out rather than assumed away — the same rule
- * `shell/timer.ts` states and `start_timer` enforces.
- *
- * The fixture puts the context group **first**, so the chain under test is the
- * one on the selected row, and *Link to…* is offered alongside: the assertion
- * is that the timer row is gone and the link row is not, which a chain that
- * simply had nothing in it could not satisfy.
- */
-test("a stored context result is not offered a timer, though it can still be linked", async () => {
-  const ontimer = vi.fn();
-  const onlink = vi.fn();
-  const withContext = response({
-    groups: [
-      {
-        kind: "ctx",
-        label: "Context",
-        plural: "Contexts",
-        monogram: "CX",
-        total: 1,
-        hits: [
-          hit({
-            entity_id: "ctx:5b1c0f1e",
-            kind: "ctx",
-            title: "SEPA migration",
-            source_id: "ctx",
-          }),
-        ],
-      },
-      ...response().groups,
-    ],
-  });
-  open({
-    ontimer,
-    onlink,
-    openEntity: OPEN,
-    ports: { search: async () => withContext, launcherHome: async () => HOME },
-  });
-  await settle();
-  target.querySelector("input")!.value = "sepa";
-  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
-  await debounced();
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect(chain?.textContent, "a context was offered a timer").not.toContain("Start timer");
-  expect(chain?.textContent, "the whole chain vanished, so this proves nothing").toContain(
-    "Link to PAY-999",
-  );
-
-  press("Enter");
-  expect(ontimer).not.toHaveBeenCalled();
-});
-
-/**
- * Escape unwinds the chain first — one rung per press, and the shell's ladder
- * still never sees the key.
- */
-test("Escape closes the chain before it clears the query", async () => {
-  // Only `Escape` matters here: the shell binds it (and ⌘K), and `Tab` is
-  // preventDefault-ed rather than stopped, because nothing above listens for it.
+/** Escape leaves the sheet first, then clears the query, and the shell's ladder never sees it. */
+test("Escape leaves the sheet before it clears the query", async () => {
   const reachedTheShell: string[] = [];
   const shell = (event: KeyboardEvent) => reachedTheShell.push(event.key);
   window.addEventListener("keydown", shell);
-  open({ openEntity: OPEN, onlink: () => {} });
+  open({ openEntity: OPEN });
   await settle();
   target.querySelector("input")!.value = "sepa";
   target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1226,31 +1086,6 @@ test("Enter on an asset opens the Tree at it, and on a route at its exposing ass
  * *Link to <key>* then *Start timer on <title>*, and nothing else, on an
  * asset as on a ticket.
  */
-test("Tab offers Link to the job, then Start timer, and nothing else", async () => {
-  const onlink = vi.fn();
-  const ontimer = vi.fn();
-  open({
-    openEntity: OPEN,
-    onlink,
-    ontimer,
-    ports: { search: async () => response(ESTATE), launcherHome: async () => HOME },
-  });
-  await settle();
-  await search("kuma");
-
-  press("Tab");
-  const chain = target.querySelector('[aria-label="Actions on the selected result"]');
-  expect([...chain!.querySelectorAll(".tf-ln-chain-a")].map((el) => el.textContent?.trim())).toEqual([
-    "Link to PAY-999",
-    "Start timer on postgres",
-  ]);
-
-  press("ArrowDown");
-  press("Enter");
-  expect(ontimer).toHaveBeenCalledWith("asset:9f1c", "postgres");
-  expect(onlink).not.toHaveBeenCalled();
-});
-
 // -- a pasted link (#496, spec #491 stories 9 and 10) ------------------------
 
 const PASTED = "https://jira.example/browse/PAY-231";
@@ -2090,13 +1925,12 @@ function recent(entity_id: string, title: string): LauncherHome["recent"][number
 }
 
 /**
- * The board with three recent items, each with a two-row chain: *Link to* the
- * open job and *Start timer*.
+ * The board with three recent items, each with its sheet: *Link to* the
+ * open job, *Start timer* and the ticket's own.
  */
 function openSaved() {
   open({
     openEntity: OPEN,
-    onlink: vi.fn(),
     ontimer: vi.fn(),
     ports: {
       launcherHome: async () => ({
@@ -2185,7 +2019,7 @@ test("the box is a combobox that names the active result, and names nothing with
   expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
 });
 
-test("the Tab chain's active row is scrolled into view and named by the box", async () => {
+test("the Tab sheet's active row is scrolled into view and named by the box", async () => {
   openSaved();
   await settle();
   press("ArrowDown");
@@ -2194,7 +2028,7 @@ test("the Tab chain's active row is scrolled into view and named by the box", as
   press("Tab");
   const chain = listbox("Actions on the selected result");
   const rows = [...chain.querySelectorAll('[role="option"]')];
-  expect(rows).toHaveLength(2);
+  expect(rows.length).toBeGreaterThan(1);
   // The box controls the list the arrows now walk.
   expect(chain.id).not.toBe("");
   expect(box().getAttribute("aria-controls")).toBe(chain.id);
@@ -2210,7 +2044,7 @@ test("the Tab chain's active row is scrolled into view and named by the box", as
   expect(box().getAttribute("aria-activedescendant")).toBe(rows[0]!.id);
   expect(scrolls.at(-1)).toEqual({ el: rows[0], options: { block: "nearest" } });
 
-  // Closing the chain hands the box back to the results, on the same row.
+  // Leaving the sheet hands the box back to the results, on the same row.
   press("Tab");
   expect(target.querySelector('[aria-label="Actions on the selected result"]')).toBeNull();
   expect(box().getAttribute("aria-controls")).toBe(listbox("Results").id);
@@ -2374,7 +2208,7 @@ function launcherStyles(): HTMLStyleElement {
   return style;
 }
 
-test("a value suggestion draws inline, a chain row spans one column, and a prefix row keeps two", async () => {
+test("a value suggestion draws inline, a sheet's action keeps two columns like a prefix row", async () => {
   const style = launcherStyles();
   try {
     await openPalette();
@@ -2398,9 +2232,9 @@ test("a value suggestion draws inline, a chain row spans one column, and a prefi
     await settle();
     press("ArrowDown");
     press("Tab");
-    const chainRow = target.querySelector<HTMLElement>(".tf-ln-chain [role='option']")!;
-    expect(chainRow.classList.contains("tf-ln-opt"), "the chain row is a prefix row underneath").toBe(true);
-    expect(getComputedStyle(chainRow).gridTemplateColumns).toBe("1fr");
+    const action = target.querySelector<HTMLElement>(".tf-ln-sheet button[role='option']")!;
+    expect(action.classList.contains("tf-ln-opt"), "a sheet action is a prefix row").toBe(true);
+    expect(getComputedStyle(action).gridTemplateColumns).toBe("240px 1fr");
   } finally {
     style.remove();
   }

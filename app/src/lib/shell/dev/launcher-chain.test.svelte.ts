@@ -1,8 +1,8 @@
 /**
- * The launcher's `Tab` chain through the shell's own mount (#1500), over the
- * whole fake IPC (`?fake-ipc`'s handlers), so the row the launcher offers, the
- * job's link dialog it opens and the Connections drawer that shows the write
- * are the product's, not a test's stand-ins. It lives under `dev/` because
+ * The launcher's `Tab` sheet through the shell's own mount (#1500, #2426), over
+ * the whole fake IPC (`?fake-ipc`'s handlers), so the rows the launcher offers,
+ * the job they name on each page and the link the sheet writes are the
+ * product's, not a test's stand-ins. It lives under `dev/` because
  * only the harness may import the harness (`house-rules.test.ts`).
  */
 import { flushSync, mount, unmount } from "svelte";
@@ -10,7 +10,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import App from "../../../App.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
-import { currentJob, linkRequest } from "../../tf/job/current.svelte";
+import { currentJob } from "../../tf/job/current.svelte";
 import { until } from "../test-wait";
 import { chosenJob } from "../../tf/job/chosen.svelte";
 
@@ -45,9 +45,20 @@ function withTicketSearch(handlers: Record<string, Handler>): Record<string, Han
 
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
+/** Every `create_link` the sheet sent, as the backend received it. */
+let linked: Record<string, unknown>[] = [];
 
 beforeEach(() => {
-  installFakeTauri(withTicketSearch(demoHandlers()));
+  linked = [];
+  const handlers = withTicketSearch(demoHandlers());
+  const create = handlers["create_link"]!;
+  installFakeTauri({
+    ...handlers,
+    create_link: (args) => {
+      linked.push(args);
+      return create(args);
+    },
+  });
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -81,11 +92,14 @@ function press(key: string): void {
   flushSync();
 }
 
-/** The `Tab` chain's rows, in order, or `null` when no chain is drawn. */
+/** The `Tab` sheet's actions, in order, or `null` when no sheet is drawn. */
 function chain(): string[] | null {
   const strip = target.querySelector('[aria-label="Actions on the selected result"]');
-  return strip === null ? null : [...strip.querySelectorAll(".tf-ln-chain-a")].map((row) => row.textContent?.trim() ?? "");
+  return strip === null ? null : [...strip.querySelectorAll(".tf-ln-nm")].map((row) => row.textContent?.trim() ?? "");
 }
+
+/** A ticket's actions after the pair: the timer, the job, the key. */
+const TICKET_OWN = ["Start timer", "Work on this", "Copy key"];
 
 async function openOn(hash: string, drawn: string): Promise<void> {
   location.hash = hash;
@@ -93,21 +107,19 @@ async function openOn(hash: string, drawn: string): Promise<void> {
   await until(() => target.textContent?.includes(drawn) ?? false, `${hash} never drew ${drawn}`);
 }
 
-/** Another ticket than the job's, by its key: the first row `PAY-240` answers in the fixture. */
-const ANOTHER_TICKET = "Payout dashboard latency";
 
-test("over a job, Tab on another result offers Link to the job, then Start timer", async () => {
+test("over a job, Tab on another result offers Link to the job, then the ticket's own", async () => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-231", `Start timer on ${ANOTHER_TICKET}`]);
+  expect(chain()).toEqual(["Link to PAY-231", ...TICKET_OWN]);
 });
 
-test("on the job's own ticket only the timer row is offered", async () => {
+test("on the job's own ticket there is no Link row", async () => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   await search("PAY-231");
   press("Tab");
-  expect(chain()).toEqual(["Start timer on Retry failed SEPA payouts"]);
+  expect(chain()).toEqual(TICKET_OWN);
 });
 
 /**
@@ -127,14 +139,14 @@ test.each([
   await until(() => target.textContent?.includes(drawn) ?? false, `${hash} never drew ${drawn}`);
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-231", `Start timer on ${ANOTHER_TICKET}`]);
+  expect(chain()).toEqual(["Link to PAY-231", ...TICKET_OWN]);
 });
 
 test("with no chosen job, Link to is not offered on Builds: never a guessed job", async () => {
   await openOn("#/builds", "Builds");
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual([`Start timer on ${ANOTHER_TICKET}`]);
+  expect(chain()).toEqual(TICKET_OWN);
 });
 
 /** The job's key the shown page draws, or `null` where no job is drawn. */
@@ -148,16 +160,16 @@ test("starting the timer on a ticket makes it the chosen job: #/job draws it, an
   await until(() => target.textContent?.includes("No job is chosen yet") ?? false, "#/job never drew its empty state");
   await search("PAY-231");
   press("Tab");
-  expect(chain()).toEqual(["Start timer on Retry failed SEPA payouts"]);
+  expect(chain()).toEqual(TICKET_OWN);
   press("Enter");
   await until(() => jobOnScreen() === "PAY-231", "#/job never drew the ticket the timer started on");
   expect(location.hash, "#/job stays the home address").toBe("#/job");
-  press("Escape");
+  expect(launcher(), "Start timer closes the launcher").toBeNull();
   location.hash = "#/builds";
   await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim() === "Builds", "Builds never drew");
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-231", `Start timer on ${ANOTHER_TICKET}`]);
+  expect(chain()).toEqual(["Link to PAY-231", ...TICKET_OWN]);
 });
 
 test("running Start work on a ticket makes it the chosen job", async () => {
@@ -167,7 +179,7 @@ test("running Start work on a ticket makes it the chosen job", async () => {
   // Another ticket chosen meanwhile, by a timer started on it from the launcher.
   await search("PAY-231");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-240", "Start timer on Retry failed SEPA payouts"]);
+  expect(chain()).toEqual(["Link to PAY-240", ...TICKET_OWN]);
   press("ArrowDown");
   press("Enter");
   await until(() => chosenJob.id === "mock:PAY-231", "the timer's ticket never became the chosen job");
@@ -178,67 +190,36 @@ test("running Start work on a ticket makes it the chosen job", async () => {
   await until(() => chosenJob.id === "mock:PAY-240", "Start work never made its ticket the chosen job");
 });
 
-/** The job's link dialog, once it is up. */
-function linkDialog(): HTMLElement | null {
-  return [...target.querySelectorAll<HTMLElement>(".tf-dialog")].find((dialog) => dialog.querySelector("h2")?.textContent === "Link PAY-231 to…") ?? null;
-}
-
-test("Link to closes the launcher and opens the job's link dialog, whose write the Connections drawer shows", async () => {
+/**
+ * The pair writes itself (#2426): the relation picked by the arrows, the link
+ * drawn by the job's own mapping (from the job to the row), and the toast names
+ * both ends. No dialog: the 2026-10-21 hand-off is reversed.
+ */
+test("Link to writes the link with the relation picked inline, and the job's Connections count it", async () => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   await search("PAY-240");
   press("Tab");
+  // related → implements → documents → runs on
+  press("ArrowRight");
+  press("ArrowRight");
+  press("ArrowRight");
   press("Enter");
-  await until(() => linkDialog() !== null, "the job's link dialog never opened");
-  expect(launcher(), "the launcher stayed open over the dialog").toBeNull();
-
-  const dialog = linkDialog()!;
-  expect(dialog.querySelector(".tf-picked")?.textContent).toContain(ANOTHER_TICKET);
-  // The relation is still the reader's to pick.
-  const relation = dialog.querySelector<HTMLSelectElement>('select[aria-label="Relation"]')!;
-  expect(relation.disabled).toBe(false);
-  expect([...relation.options].map((option) => option.value)).toContain("runs-on");
-  relation.value = "runs-on";
-  relation.dispatchEvent(new Event("change", { bubbles: true }));
-  const link = [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Link")!;
-  expect(link.disabled).toBe(false);
-  link.click();
-
-  await until(() => linkDialog() === null, "the dialog never closed behind the write");
-  const drawer = target.querySelector<HTMLElement>('aside[aria-label="Connections"]');
-  await until(
-    () => drawer?.querySelector(".tf-dbody")?.textContent?.includes(ANOTHER_TICKET) ?? false,
-    "the Connections drawer never showed the new link",
-  );
+  await until(() => linked.length === 1, "the sheet never wrote the link");
+  expect(linked[0]).toMatchObject({ fromId: "mock:PAY-231", toId: "mock:PAY-240", relation: "runs-on" });
+  await until(() => launcher() === null, "the launcher stayed open after the write");
+  expect(target.textContent).toContain(`Linked PAY-240 to PAY-231 as runs on`);
 });
 
-test("from a view opened from the job, Link to opens the job with its link dialog", async () => {
+test("from Time, Link to writes against the chosen job and stays on the page", async () => {
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   location.hash = "#/time";
-  await until(() => target.querySelector(".tf-kept:not([hidden]) .tf-crumbs") !== null, "Time never drew its breadcrumb");
+  await until(() => currentJob.entityId === null, "Time never replaced the job");
   await search("PAY-240");
   press("Tab");
   press("Enter");
-  await until(() => linkDialog() !== null, "the job's link dialog never opened");
-  // The job's address lands on its ticket's page (spec #2396).
-  expect(location.hash).toBe("#/ticket/mock%3APAY-231");
-  expect(linkDialog()!.querySelector(".tf-picked")?.textContent).toContain(ANOTHER_TICKET);
-});
-
-/**
- * A request the job page never took (the reader went elsewhere before the job
- * drew) is dropped, so a later visit to that job does not open the dialog
- * unasked.
- */
-test("a link asked for and left behind does not open on a later visit to the job", async () => {
-  await openOn("#/time", "Time");
-  linkRequest.ask("PAY-231", { entity_id: "asset:knobas-estate", title: ANOTHER_TICKET, kind: "asset" });
-  location.hash = "#/tickets";
-  // Time stays mounted and hidden behind Tickets (keep-alive, #2247): its breadcrumb is not seen.
-  await until(() => target.querySelector(".tf-kept:not([hidden]) .tf-crumbs") === null, "Tickets never replaced Time");
-  location.hash = "#/job/PAY-231";
-  await until(() => currentJob.entityId !== null, "the job never drew");
-  flushSync();
-  expect(linkDialog(), "the dialog opened unasked").toBeNull();
+  await until(() => linked.length === 1, "the sheet never wrote the link");
+  expect(linked[0]).toMatchObject({ fromId: "mock:PAY-231", toId: "mock:PAY-240", relation: "related" });
+  expect(location.hash).toBe("#/time");
 });
 
 /**

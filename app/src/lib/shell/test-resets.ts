@@ -55,10 +55,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
   "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
-  // Three stores in one file, each cleared through its own public door.
+  // Two stores in one file, each cleared through its own public door.
   "tf/job/current.svelte.ts#entityId": async () => void (await import("../tf/job/current.svelte")).currentJob.set(null),
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
-  "tf/job/current.svelte.ts#asked": async () => (await import("../tf/job/current.svelte")).linkRequest.drop(),
   // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
   "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
   // The ticket page card's width (#2402), kept in `localStorage`: each test starts at the default.

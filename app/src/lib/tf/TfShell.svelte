@@ -86,7 +86,7 @@
   import { entityAddress, legacyAddress } from "./address";
   import { ticketRef } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
-  import { breadcrumbJob, currentJob, linkRequest } from "./job/current.svelte";
+  import { breadcrumbJob, currentJob } from "./job/current.svelte";
   import { chosenJob } from "./job/chosen.svelte";
   import { scopedTicket } from "./job/scoped.svelte";
   import { cardWidth } from "./job/card-width.svelte";
@@ -315,11 +315,6 @@
     const job = route.view === "job" || route.view === "ticket" ? (onScreen === null ? null : ticketRef(onScreen)) : chosen;
     breadcrumbJob.set(job);
     return () => breadcrumbJob.set(null);
-  });
-  // A link asked for a job is the job page's to take; leaving for any other
-  // page before it did drops it, so a later visit does not open the dialog.
-  $effect(() => {
-    if (route.view !== "job" && route.view !== "ticket") linkRequest.drop();
   });
 
   // ---- the status bar's reads, once the database can answer ----
