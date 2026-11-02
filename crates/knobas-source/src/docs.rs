@@ -24,6 +24,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod html;
 pub mod markdown;
 
 /// The entity kind the Docs frame draws: knobas' own word for a page since
