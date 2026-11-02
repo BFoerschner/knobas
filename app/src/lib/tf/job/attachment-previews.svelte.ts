@@ -57,6 +57,8 @@ export interface Previews {
   fetchImages(): void;
   /** Ask for one file and answer its `data:` image, or reject with its preview (`failed`, `too-large`). */
   load(id: string): Promise<string>;
+  /** As `load`, without asking: answers once something else (a `watch`) has asked and the answer is in. */
+  when(id: string): Promise<string>;
   /** Ask for one file once `node` is in view; at once where nothing can tell. Answers the stop. */
   watch(node: Element, id: string): () => void;
   /** *Try again*: forget every failure and ask again for what failed. */
@@ -109,7 +111,7 @@ export function createAttachmentPreviews({
 
   const settle = (id: string, preview: Preview) => {
     states.set(id, preview);
-    if (preview.state === "loading") return;
+    if (preview.state === "loading" || preview.state === "none") return;
     for (const done of waiting.get(id) ?? []) done(preview);
     waiting.delete(id);
   };
@@ -156,13 +158,16 @@ export function createAttachmentPreviews({
       for (const file of files) if (isImage(file)) previews.fetch(file.id);
     },
     load(id) {
+      previews.fetch(id);
+      return previews.when(id);
+    },
+    when(id) {
       return new Promise<string>((resolve, reject) => {
         const answer = (preview: Preview) => (preview.state === "ready" ? resolve(preview.src) : reject(preview));
         const now = previews.of(id);
-        if (now.state === "none") previews.fetch(id);
-        const then = previews.of(id);
-        if (then.state === "loading") waiting.set(id, [...(waiting.get(id) ?? []), answer]);
-        else answer(then);
+        const listed = files.some((file) => file.id === id);
+        if (listed && (now.state === "loading" || now.state === "none")) waiting.set(id, [...(waiting.get(id) ?? []), answer]);
+        else answer(now);
       });
     },
     watch(node, id) {

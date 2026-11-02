@@ -98,6 +98,18 @@ describe("attachment previews", () => {
     await expect(previews.load("3")).rejects.toEqual({ state: "too-large" });
   });
 
+  test("when waits for an answer something else asked for, and asks nothing itself", async () => {
+    const { asked, pending, read } = hand();
+    const previews = createAttachmentPreviews({ entityId: "jira:PAY-231", files: FILES, source: "Tidewater Jira", read });
+    const waited = previews.when("4");
+    await settle();
+    expect(asked).toEqual([]);
+    previews.fetch("4");
+    pending.get("4")!.resolve({ mime: "image/png", data: "QQ==" });
+    await expect(waited).resolves.toBe("data:image/png;base64,QQ==");
+    await expect(previews.when("49999")).rejects.toEqual({ state: "none" });
+  });
+
   test("an answer that arrives after the page dropped its previews is not kept", async () => {
     const { pending, read } = hand();
     const previews = createAttachmentPreviews({ entityId: "jira:PAY-231", files: FILES, source: "Tidewater Jira", read });

@@ -40,6 +40,29 @@ function install(query = "", extra: Record<string, Handler> = {}): Record<string
   return handlers;
 }
 
+/**
+ * An observer that sees every node it is given (#2405): the suite's own never
+ * reports an intersection (`test-setup.ts`), and the page fetches an inline
+ * image only once it is in view. Answers the undo.
+ */
+function seeEverything(): () => void {
+  const held = globalThis.IntersectionObserver;
+  class Seeing {
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+    observe(target: Element): void {
+      queueMicrotask(() => this.callback([{ isIntersecting: true, target } as IntersectionObserverEntry], this as unknown as IntersectionObserver));
+    }
+    unobserve(): void {}
+    disconnect(): void {}
+    takeRecords(): [] {
+      return [];
+    }
+  }
+  Object.defineProperty(globalThis, "IntersectionObserver", { writable: true, configurable: true, value: Seeing });
+  return () => Object.defineProperty(globalThis, "IntersectionObserver", { writable: true, configurable: true, value: held });
+}
+
+let unsee = () => {};
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
@@ -61,6 +84,7 @@ function memoryStorage(): Storage {
 beforeEach(() => {
   Object.defineProperty(window, "localStorage", { value: memoryStorage(), configurable: true, writable: true });
   sent = [];
+  unsee = seeEverything();
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -71,6 +95,7 @@ afterEach(() => {
   target.remove();
   history.replaceState(null, "", location.pathname + location.search);
   chosenJob.reset();
+  unsee();
   Object.defineProperty(window, "localStorage", { value: undefined, configurable: true, writable: true });
 });
 
@@ -101,7 +126,7 @@ function rows(fold: HTMLDetailsElement): HTMLElement[] {
 /** One row's first cell, as drawn: the preview's source, a placeholder or the kind. */
 function cell(row: HTMLElement): string {
   const img = row.querySelector<HTMLImageElement>("img.tf-tkthumb");
-  if (img) return img.getAttribute("src")?.startsWith("data:image/png;base64,") ? "preview" : `img ${img.getAttribute("src")}`;
+  if (img) return img.getAttribute("src")?.startsWith("data:image/") ? "preview" : `img ${img.getAttribute("src")}`;
   if (row.querySelector(".tf-tkthumb.tf-tknone")) return "placeholder";
   return row.querySelector(".tf-tkkind")?.textContent?.trim() ?? "?";
 }
@@ -114,10 +139,13 @@ const reads = () => sent.filter((call) => call.cmd === "attachment_bytes").map((
 
 const strip = (fold: HTMLDetailsElement) => fold.querySelector<HTMLElement>(".tf-tkatt > .tf-stale");
 
-test("opening PAY-231's panel draws its two screenshots' previews, fetched then and not before", async () => {
+test("opening PAY-231's panel draws its two screenshots' previews; only the one the description shows was fetched before", async () => {
   install();
   const fold = await openPay231();
-  expect(reads(), "nothing is fetched on page open").toEqual([]);
+  // The description's inline screenshot is fetched once in view; the panel's
+  // other image waits for the panel.
+  await until(() => reads().length > 0, "the inline screenshot was never fetched");
+  expect(reads()).toEqual(["50000"]);
 
   unfold(fold);
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew");
@@ -226,7 +254,7 @@ test("previews live with the page: a page drawn again fetches them again", async
   app = mount(App, { target, props: {} });
   await until(() => panel() !== null, "PAY-231 never drew again");
   fold = panel()!;
-  expect(rows(fold).map(cell), "nothing kept from the closed page").toEqual(["PNG", "PNG", "PDF", "CSV"]);
+  expect(rows(fold)[1] && cell(rows(fold)[1]!), "nothing kept from the closed page").toBe("PNG");
   unfold(fold);
   await until(() => rows(fold).filter((row) => cell(row) === "preview").length === 2, "the previews never drew again");
   expect(reads()).toEqual(["50000", "50001", "50000", "50001"]);

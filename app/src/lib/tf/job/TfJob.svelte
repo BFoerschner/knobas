@@ -175,11 +175,9 @@
   const inherited = $derived(reader.inherited);
   const sources = $derived(reader.sources);
   const repos = $derived(reader.repos);
-  /** The description's inline images (#2406): the ticket's attachments, read through the page's seam. */
+  /** The description's inline images (#2406): the ticket's attachments, read through the page's previews (#2405). */
   const inlineImages = $derived(
-    detail == null
-      ? null
-      : ticketImages(detail.row.entity_id, detail.attachments ?? [], detail.source.display_name, detail.web_url ?? null),
+    detail == null || previews === null ? null : ticketImages(previews, detail.source.display_name, detail.web_url ?? null),
   );
   /** The ticket's *Refresh* or *Sync now* (#2134). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
