@@ -37,6 +37,16 @@
   *Start timer* is a ticket's row alone, and the shell does the rest: it
   stops the running timer first and makes the ticket the chosen job.
 
+  ## Flows (#2427)
+
+  An action that asks something is a flow (`does.kind === "flow"`): the
+  sheet's `flow` holds its steps, the picks so far and the current step's
+  choices once read. The box, labelled with the step's title, narrows them;
+  Enter picks and the next step is read; the last pick runs what the flow's
+  `finish` makes of the picks, through `carry` like any other action. Esc or
+  Backspace on the empty box step back one step, and from the first back to
+  the actions; the row stays pinned throughout.
+
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
@@ -64,7 +74,18 @@
   import QueryBox from "./QueryBox.svelte";
   import Pinned from "./Pinned.svelte";
   import Results from "./Results.svelte";
-  import { type SheetAction, type SheetSubject, nameOf, narrowActions, sheetActions, subjectOf } from "./sheet";
+  import {
+    type Choice,
+    type SheetAction,
+    type SheetEffect,
+    type SheetSubject,
+    type Step,
+    nameOf,
+    narrowActions,
+    sheetActions,
+    subjectOf,
+  } from "./sheet";
+  import type { LinkSetRow, ViewAction } from "../ipc/entity";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
   import { drawn } from "../detail/relations";
   import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
@@ -245,8 +266,8 @@
    * The open sheet, or `null` (#2426). `row` is the row it lifted, `filter`
    * what the box holds while it is open (the search words wait in
    * `session.raw`), `relation` the index into `JOB_LINK_RELATIONS` the link
-   * row's chips stand on, and `renaming` a saved list's new name while the
-   * box asks for it.
+   * row's chips stand on, `renaming` a saved list's new name while the
+   * box asks for it, and `flow` the flow an action started (#2427).
    */
   let sheet = $state<{
     rowId: string;
@@ -256,7 +277,23 @@
     selected: number;
     relation: number;
     renaming: string | null;
+    flow: Flow | null;
   } | null>(null);
+
+  /**
+   * A flow in the sheet: `id` tells one flow's late answer from another's,
+   * `picks` are the steps answered, `asked` the choices each of them offered
+   * (so a step back draws them again without a read), and `choices` the
+   * current step's once read, `null` while reading.
+   */
+  interface Flow {
+    id: number;
+    steps: Step[];
+    finish: (picks: readonly string[]) => SheetEffect;
+    picks: string[];
+    asked: Choice[][];
+    choices: Choice[] | null;
+  }
 
   /**
    * Settings › Checkouts, the default first: *Open in ⟨app⟩*'s rows. Read the
@@ -268,20 +305,56 @@
   function readApplications() {
     if (applicationsRead) return;
     applicationsRead = true;
+    readLinkSets();
     void io.checkoutSettings().then(
       (settings) => (applications = menuOrder(settings).map(({ app }) => ({ id: app.id, name: app.name }))),
       () => (applications = []),
     );
   }
 
-  const sheetContext = $derived({ job: openEntity ?? null, canTime: ontimer !== undefined, apps: applications });
+  /** Every link set: *Add to a set…*'s choices, read with the applications. */
+  let linkSets = $state<LinkSetRow[]>([]);
+  function readLinkSets() {
+    void io.linkSets().then(
+      (sets) => (linkSets = sets),
+      () => (linkSets = []),
+    );
+  }
+
+  /** The declared merge of the pull request the sheet opened on, read once per sheet: *Merge…* follows it. */
+  let merge = $state<{ prId: string; action: ViewAction | null } | null>(null);
+  function readMerge(subject: SheetSubject) {
+    if (subject.kind !== "entity" || subject.entityKind !== "pr") return;
+    const prId = subject.entityId;
+    if (merge?.prId === prId) return;
+    merge = { prId, action: null };
+    void io.mergeAction(prId).then(
+      (action) => {
+        if (merge?.prId === prId) merge = { prId, action };
+      },
+      () => {},
+    );
+  }
+
+  const sheetContext = $derived({
+    job: openEntity ?? null,
+    canTime: ontimer !== undefined,
+    apps: applications,
+    sets: linkSets,
+    merge: sheet?.subject.kind === "entity" && merge?.prId === sheet.subject.entityId ? merge.action : null,
+    branches: io.branches,
+    now: now ?? new Date(),
+  });
   const inboxOps = (key: string) => inbox?.actions?.[key] ?? [];
   /** The actions of `row`, in the table's order; empty for a row nothing can be done to. */
   function actionsOf(row: LauncherRow | null): SheetAction[] {
     const subject = row ? subjectOf(row, inboxOps) : null;
     return subject ? sheetActions(subject, sheetContext) : [];
   }
-  const sheetShown = $derived(sheet ? narrowActions(sheetActions(sheet.subject, sheetContext), sheet.filter) : []);
+  const sheetShown = $derived(sheet && !sheet.flow ? narrowActions(sheetActions(sheet.subject, sheetContext), sheet.filter) : []);
+  /** The flow's current step's choices, as the box narrows them. */
+  const flowShown = $derived(sheet?.flow ? narrowActions(sheet.flow.choices ?? [], sheet.filter) : []);
+  const flowStep = $derived(sheet?.flow ? sheet.flow.steps[sheet.flow.picks.length] : undefined);
 
   /**
    * The ⌘? overlay (#2424), or `null`: the box holds `filter`, which narrows
@@ -336,6 +409,7 @@
       naming = null;
       sheet = null;
       applicationsRead = false;
+      merge = null;
     }
   });
 
@@ -345,7 +419,17 @@
    * Later modes (the sheet's Actions, Keys, New name, a flow's step) join here.
    */
   const boxLabel = $derived(
-    naming !== null ? "Name" : overlay ? "Filter" : sheet ? (sheet.renaming !== null ? "New name" : "Actions") : null,
+    naming !== null
+      ? "Name"
+      : overlay
+        ? "Filter"
+        : sheet
+          ? sheet.renaming !== null
+            ? "New name"
+            : sheet.flow
+              ? (flowStep?.title ?? "Pick")
+              : "Actions"
+          : null,
   );
   const placeholder = $derived(
     naming !== null
@@ -355,7 +439,9 @@
         : sheet
           ? sheet.renaming !== null
             ? "the list's new name"
-            : "narrow the actions"
+            : sheet.flow
+              ? "narrow the choices"
+              : "narrow the actions"
           : "⌘? for help",
   );
 
@@ -461,7 +547,9 @@
     if (!row || session.error) return undefined;
     return optionId(session.selected);
   });
-  const activeSheetOption = $derived(sheet && sheet.renaming === null && sheetShown.length > 0 ? sheetOptionId(sheet.selected) : undefined);
+  /** How many rows the sheet draws: the flow's choices while one is open, else the actions. */
+  const sheetCount = $derived(sheet?.flow ? flowShown.length : sheetShown.length);
+  const activeSheetOption = $derived(sheet && sheet.renaming === null && sheetCount > 0 ? sheetOptionId(sheet.selected) : undefined);
 
   /**
    * The list the box controls and the option it names: whichever list the
@@ -734,8 +822,9 @@
     const row = session.current;
     const subject = row ? subjectOf(row, inboxOps) : null;
     if (!row || !subject || sheetActions(subject, sheetContext).length === 0) return;
-    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null };
+    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null };
     readApplications();
+    readMerge(subject);
     box?.focus();
   }
 
@@ -757,11 +846,15 @@
     }
   }
 
-  /** Carry out one action of the open sheet: the one reader of `SheetEffect`. */
+  /** Carry out one action of the open sheet. */
   function perform(action: SheetAction) {
+    carry(action.does);
+  }
+
+  /** Carry out what an action, or a flow's last pick, does: the one reader of `SheetEffect`. */
+  function carry(does: SheetEffect) {
     if (!sheet) return;
     const { subject, relation } = sheet;
-    const does = action.does;
     const go = (hash: string) => {
       close();
       onnavigate(hash);
@@ -831,6 +924,16 @@
         box?.focus();
         void session.deleteList(subject.id).then((done) => done && push({ text: `Deleted ${subject.label}` }));
         return;
+      case "flow":
+        return startFlow(does.steps, does.finish);
+      case "save-set":
+        return void settled(() => io.saveLinkSet(does.draft), () => does.said);
+      case "snooze":
+        return void settled(() => io.inboxSnooze(does.key, does.until), () => does.said);
+      case "refused":
+        push({ text: does.said });
+        box?.focus();
+        return;
       case "inbox": {
         if (subject.kind !== "inbox") return;
         const { item } = subject;
@@ -842,6 +945,108 @@
         }
         return void settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
       }
+    }
+  }
+
+  /** Start a flow in the sheet: the box empties, and the first step's choices are read. */
+  let flows = 0;
+  function startFlow(steps: Step[], finish: Flow["finish"]) {
+    if (!sheet || steps.length === 0) return;
+    const flow: Flow = { id: ++flows, steps, finish, picks: [], asked: [], choices: null };
+    sheet.flow = flow;
+    sheet.filter = "";
+    sheet.selected = 0;
+    void readStep(flow.id, 0);
+    box?.focus();
+  }
+
+  /** Read step `at` of flow `id`: an answer for a flow or a step no longer open is dropped. */
+  async function readStep(id: number, at: number) {
+    const flow = sheet?.flow;
+    const step = flow?.steps[at];
+    if (!flow || !step) return;
+    const picks = [...flow.picks];
+    try {
+      const choices = await step.choices(picks);
+      const live = sheet?.flow;
+      if (live && live.id === id && live.picks.length === at && live.choices === null) live.choices = choices;
+    } catch (cause) {
+      if (sheet?.flow?.id !== id) return;
+      push({ text: ipcErrorMessage(cause), tone: "err" });
+      sheet.flow = null;
+      sheet.filter = "";
+      sheet.selected = 0;
+    }
+  }
+
+  /** Take `choice` for the current step: the next step's choices, or the last pick runs the flow's finish. */
+  function pick(current: NonNullable<typeof sheet>, flow: Flow, choice: Choice) {
+    const picks = [...flow.picks, choice.id];
+    if (picks.length >= flow.steps.length) {
+      const finished = flow.finish(picks);
+      current.flow = null;
+      current.filter = "";
+      current.selected = 0;
+      carry(finished);
+      return;
+    }
+    flow.asked = [...flow.asked, flow.choices ?? []];
+    flow.picks = picks;
+    flow.choices = null;
+    current.filter = "";
+    current.selected = 0;
+    void readStep(flow.id, picks.length);
+  }
+
+  /** One step back: the step before, its choices as they were, or from the first step the actions. */
+  function stepBack(current: NonNullable<typeof sheet>, flow: Flow) {
+    current.filter = "";
+    current.selected = 0;
+    if (flow.picks.length === 0) {
+      current.flow = null;
+    } else {
+      flow.picks = flow.picks.slice(0, -1);
+      flow.choices = flow.asked.at(-1) ?? null;
+      flow.asked = flow.asked.slice(0, -1);
+      if (flow.choices === null) void readStep(flow.id, flow.picks.length);
+    }
+    box?.focus();
+  }
+
+  /** A flow's keys: the arrows walk the choices, Enter picks, Esc or Backspace on the empty box step back, Tab leaves. */
+  function flowKey(event: KeyboardEvent, current: NonNullable<typeof sheet>, flow: Flow) {
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        current.selected = Math.min(flowShown.length - 1, current.selected + 1);
+        return;
+      case "ArrowUp":
+        event.preventDefault();
+        current.selected = Math.max(0, current.selected - 1);
+        return;
+      case "Enter": {
+        event.preventDefault();
+        const chosen = flowShown[current.selected];
+        if (chosen) pick(current, flow, chosen);
+        return;
+      }
+      case "Tab":
+        event.preventDefault();
+        leaveSheet();
+        return;
+      case "Escape":
+        // Never the dialog's: a step back.
+        event.preventDefault();
+        event.stopPropagation();
+        stepBack(current, flow);
+        return;
+      case "Backspace":
+        if (current.filter === "") {
+          event.preventDefault();
+          stepBack(current, flow);
+        }
+        return;
+      default:
     }
   }
 
@@ -867,6 +1072,7 @@
   /** The sheet's keys: the arrows walk, ← → pick the link's relation, Enter acts, Esc, Tab or Backspace on the empty box go back. */
   function sheetKey(event: KeyboardEvent, current: NonNullable<typeof sheet>) {
     if (current.renaming !== null) return renamingKey(event, current, current.renaming);
+    if (current.flow) return flowKey(event, current, current.flow);
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -1129,6 +1335,33 @@
             {onkeydown}
             onclick={() => box?.focus()}
           >
+            {#if current.flow}
+              {@const flow = current.flow}
+              <!-- A flow's step: its title, the picks so far, and its choices as the box narrows them. -->
+              <div class="tf-ln-h">
+                <span>{flowStep?.title ?? ""}</span>
+                {#if flow.picks.length > 0}<span class="tf-ln-s">{flow.picks.join(" → ")}</span>{/if}
+              </div>
+              {#each flowShown as choice, index (choice.id)}
+                <button
+                  id={sheetOptionId(index)}
+                  class="tf-ln-opt"
+                  class:tf-ln-on={index === current.selected}
+                  role="option"
+                  aria-selected={index === current.selected}
+                  onclick={() => pick(current, flow, choice)}
+                  onmouseenter={() => (current.selected = index)}
+                >
+                  <span class="tf-ln-nm">{choice.label}</span>
+                  <span class="tf-ln-s">{choice.detail}</span>
+                </button>
+              {/each}
+              {#if flow.choices === null}
+                <p class="tf-ln-none">Reading…</p>
+              {:else if flowShown.length === 0}
+                <p class="tf-ln-none">{current.filter === "" ? "Nothing to pick here." : `Nothing matches “${current.filter}”.`}</p>
+              {/if}
+            {/if}
             {#each sheetShown as action, index (action.id)}
               {#if action.does.kind === "link"}
                 <!-- Not a button: the relation chips inside it are buttons of their own. -->
@@ -1168,7 +1401,7 @@
                 </button>
               {/if}
             {/each}
-            {#if sheetShown.length === 0}
+            {#if !current.flow && sheetShown.length === 0}
               <p class="tf-ln-none">No action matches “{current.filter}”.</p>
             {/if}
           </div>

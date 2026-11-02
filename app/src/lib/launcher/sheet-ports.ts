@@ -4,13 +4,23 @@
  * commands, the ones the pages already send; a test passes fakes.
  */
 import { ackAlert } from "../ipc/assets";
-import { checkoutSettings, createLink, entityCheckout, listEntities, openCheckout, submitWrite } from "../ipc/entity";
-import type { CheckoutSettings, EntityFilter, OpenAt } from "../ipc/entity";
+import {
+  checkoutSettings,
+  createLink,
+  entityCheckout,
+  entityView,
+  linkSets,
+  listEntities,
+  openCheckout,
+  saveLinkSet,
+  submitWrite,
+} from "../ipc/entity";
+import type { CheckoutSettings, EntityFilter, LinkSetDraft, LinkSetRow, OpenAt, ViewAction } from "../ipc/entity";
 import type { WriteOpPayload } from "../ipc/sources";
 import { inbox } from "../inbox/inbox.svelte";
 import { clones } from "../tf/openin/clones.svelte";
 import { repoName } from "../tf/openin/openin";
-import { readAllRows, repoOfRow } from "../tf/repo/repo";
+import { branchOptions, readAllRows, repoOfRow } from "../tf/repo/repo";
 
 export interface SheetPorts {
   createLink: (fromId: string, toId: string, relation: string) => Promise<unknown>;
@@ -27,6 +37,15 @@ export interface SheetPorts {
   /** The Inbox page's own writes on a line (`inbox.svelte.ts`). */
   inboxAck: (key: string) => Promise<void>;
   inboxDone: (key: string) => Promise<void>;
+  /** The flows' (#2427): *Snooze…* through the Inbox page's store, so its stream and shelf follow. */
+  inboxSnooze: (key: string, until: Date) => Promise<void>;
+  /** Every link set, *Add to a set…*'s choices; read once per opening, on the first Tab. */
+  linkSets: () => Promise<LinkSetRow[]>;
+  saveLinkSet: (draft: LinkSetDraft) => Promise<unknown>;
+  /** A pull request's declared `merge_pull_request`, from its view, as the pull request page reads it; `null` for none. */
+  mergeAction: (prId: string) => Promise<ViewAction | null>;
+  /** A repository's branches, from its Branches view (`branchOptions`), in the view's order. */
+  branches: (repoId: string) => Promise<{ name: string; isDefault: boolean }[]>;
 }
 
 /** One read's rows, as the pull request page reads its repository (`TfPr.readRepo`). */
@@ -65,4 +84,15 @@ export const realSheetPorts: SheetPorts = {
   },
   inboxAck: (key) => inbox.ack(key),
   inboxDone: (key) => inbox.complete(key),
+  inboxSnooze: (key, until) => inbox.snooze(key, until),
+  linkSets: () => linkSets(),
+  saveLinkSet: (draft) => saveLinkSet(draft),
+  async mergeAction(prId) {
+    const view = await entityView(prId);
+    return view?.actions.find((action) => action.write_op === "merge_pull_request") ?? null;
+  },
+  async branches(repoId) {
+    const view = await entityView(repoId, "branches");
+    return branchOptions(view?.sections[0] ?? null).map(({ name, isDefault }) => ({ name, isDefault }));
+  },
 };

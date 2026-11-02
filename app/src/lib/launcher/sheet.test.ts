@@ -6,7 +6,8 @@
 import { expect, test } from "vitest";
 
 import type { InboxItem } from "../ipc/entity";
-import { narrowActions, sheetActions, type SheetContext, type SheetSubject } from "./sheet";
+import type { LinkSetRow } from "../ipc/entity";
+import { narrowActions, sheetActions, type SheetContext, type SheetEffect, type SheetSubject } from "./sheet";
 
 const JOB = { entityId: "jira:PAY-999", label: "PAY-999" };
 const CTX: SheetContext = {
@@ -111,12 +112,58 @@ const LINE: InboxItem = {
   snoozed_until: null,
 } as unknown as InboxItem;
 
-test("an inbox line: Open, Re-run where the source offers it, Acknowledge on an alert, Done", () => {
-  expect(ids({ kind: "inbox", item: LINE, ops: ["rerun_build"] })).toEqual(["open", "rerun", "done"]);
-  expect(ids({ kind: "inbox", item: LINE, ops: [] })).toEqual(["open", "done"]);
+test("an inbox line: Open, Re-run where the source offers it, Acknowledge on an alert, Snooze, Done", () => {
+  expect(ids({ kind: "inbox", item: LINE, ops: ["rerun_build"] })).toEqual(["open", "rerun", "snooze", "done"]);
+  expect(ids({ kind: "inbox", item: LINE, ops: [] })).toEqual(["open", "snooze", "done"]);
   const alert = { ...LINE, key: "alert:kuma:7", category: "alert", kind: "monitor", entity_id: "kuma:7" } as InboxItem;
-  expect(ids({ kind: "inbox", item: alert, ops: [] })).toEqual(["open", "ack", "done"]);
+  expect(ids({ kind: "inbox", item: alert, ops: [] })).toEqual(["open", "ack", "snooze", "done"]);
 });
+
+/** Run a flow's steps with `picks` and say what its last pick does. */
+async function finish(does: SheetEffect, picks: string[]): Promise<{ choices: string[][]; does: SheetEffect }> {
+  if (does.kind !== "flow") throw new Error(`not a flow: ${does.kind}`);
+  const choices: string[][] = [];
+  for (const [at, step] of does.steps.entries()) choices.push((await step.choices(picks.slice(0, at))).map((choice) => choice.id));
+  return { choices, does: does.finish(picks) };
+}
+
+const SET = {
+  id: "payments",
+  name: "Payments",
+  description: "",
+  members: [{ kind: "page", entity_id: "confluence:ENG:SEPA", title: null }],
+  patterns: [],
+  rules: [{ kind: "manual", value: "jira:PAY-231", title: null }],
+} as unknown as LinkSetRow;
+
+test("the set row sits with the pair, after the link, and a member or a manual rule already there is not added twice", async () => {
+  const ctx = { ...CTX, sets: [SET] };
+  expect(ids(entity("monitor", "kuma:7"), ctx).slice(0, 3)).toEqual(["link", "set", "ack"]);
+  expect(ids(entity("ticket", "jira:PAY-231"), ctx).slice(0, 3)).toEqual(["link", "set", "timer"]);
+  for (const kind of ["pr", "branch", "pipeline", "page", "asset", "repo"]) {
+    expect(ids(entity(kind, `x:${kind}`), ctx).includes("set"), kind).toBe(kind !== "pr" && kind !== "branch");
+  }
+  const page = sheetActions(entity("page", "confluence:ENG:SEPA"), ctx).find((a) => a.id === "set")!;
+  const added = await finish(page.does, ["payments"]);
+  expect(added.choices).toEqual([["payments"]]);
+  expect(added.does).toMatchObject({ kind: "save-set", draft: { members: [{ kind: "page", entity_id: "confluence:ENG:SEPA" }] } });
+  const ticket = sheetActions(entity("ticket", "jira:PAY-231"), ctx).find((a) => a.id === "set")!;
+  expect((await finish(ticket.does, ["payments"])).does).toMatchObject({ kind: "save-set", draft: { rules: [{ kind: "manual", value: "jira:PAY-231" }] } });
+});
+
+test("Create pull request: the head from every branch, the default first; the base without the head; the compare page with both", async () => {
+  const branches = async () => [
+    { name: "feature/x", isDefault: false },
+    { name: "main", isDefault: true },
+  ];
+  const row = sheetActions(entity("repo", "gitea:acme/svc"), { ...CTX, branches }).find((a) => a.id === "newpr")!;
+  expect(row.label).toBe("Create pull request…");
+  const run = await finish(row.does, ["feature/x", "main"]);
+  expect(run.choices).toEqual([["main", "feature/x"], ["main"]]);
+  expect(run.does).toEqual({ kind: "go", hash: "#/repo/gitea%3Aacme%2Fsvc/compare/main...feature%2Fx" });
+  expect(ids(entity("repo", "gitea:acme/svc"))).not.toContain("newpr");
+});
+
 
 test("the narrowing keeps every typed letter in order, the tightest match first", () => {
   const actions = sheetActions(entity("repo", "gitea:acme/svc"), CTX);
