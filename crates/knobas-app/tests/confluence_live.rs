@@ -959,7 +959,7 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
-    use knobas_source::docs::{DocBlock, Inline, PanelKind, TableCell};
+    use knobas_source::docs::{DocBlock, Inline, ListItem, PanelKind, TableCell};
 
     let env = env();
     let parent = env.page(PARENT);
@@ -988,6 +988,10 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             r#"<ac:structured-macro ac:name="tip" ac:schema-version="1"><ac:rich-text-body><p>A tip.</p></ac:rich-text-body></ac:structured-macro>"#,
             r#"<table><tbody><tr><th>Code</th><th>Retried?</th></tr><tr><td>HTTP 503</td><td>yes</td></tr></tbody></table>"#,
             r#"<ac:structured-macro ac:name="toc" ac:schema-version="1" />"#,
+            // Spec #2432: a task list, one task done, one not, one nested.
+            r#"<ac:task-list><ac:task><ac:task-id>1</ac:task-id><ac:task-status>complete</ac:task-status><ac:task-body>Drain the queue</ac:task-body></ac:task>"#,
+            r#"<ac:task><ac:task-id>2</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Restart the worker</ac:task-body></ac:task>"#,
+            r#"<ac:task-list><ac:task><ac:task-id>3</ac:task-id><ac:task-status>complete</ac:task-status><ac:task-body>eu-1</ac:task-body></ac:task></ac:task-list></ac:task-list>"#,
             // Spec #2432's tables (#2436): a merged cell, a header column, a list in a cell.
             r#"<table><tbody><tr><th colspan="2"><p>Rota</p></th></tr><tr><td><p>Mon</p></td><td rowspan="2"><p>Mara</p></td></tr><tr><td><p>Tue</p></td></tr></tbody></table>"#,
             r#"<table><tbody><tr><th><p>Primary</p></th><td><p>Mara</p></td></tr><tr><th><p>Backup</p></th><td><p>Jonas</p></td></tr></tbody></table>"#,
@@ -1108,6 +1112,71 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         &DocBlock::Placeholder { name: "toc".into() },
         "the unknown macro is named"
     );
+    // The task list as the server stored it: each item's state, the nested
+    // task inside the one it follows. Item words are compared as text, so
+    // the server's own wrapper spans and whitespace do not count.
+    let DocBlock::List { ordered, items } = rest[8] else {
+        panic!(
+            "the task list: {rest:#?}\nstored: {:?}",
+            mirrored(&state.pool, &id)
+                .await
+                .map(|p| p["body"]["storage"]["value"].clone())
+        )
+    };
+    fn words(blocks: &[DocBlock]) -> String {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                DocBlock::Paragraph { text } => Some(
+                    text.iter()
+                        .map(|i| match i {
+                            Inline::Text { text, .. } => text.as_str(),
+                            _ => "",
+                        })
+                        .collect::<String>(),
+                ),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+    type Task = (Option<bool>, String);
+    fn tasks(items: &[ListItem]) -> Vec<(Task, Vec<Task>)> {
+        items
+            .iter()
+            .map(|item| {
+                let nested = item
+                    .blocks
+                    .iter()
+                    .filter_map(|b| match b {
+                        DocBlock::List { items, .. } => Some(items),
+                        _ => None,
+                    })
+                    .flatten()
+                    .map(|inner| (inner.checked, words(&inner.blocks)))
+                    .collect();
+                ((item.checked, words(&item.blocks)), nested)
+            })
+            .collect()
+    }
+    assert!(!ordered);
+    assert_eq!(
+        tasks(items),
+        vec![
+            ((Some(true), "Drain the queue".to_owned()), vec![]),
+            (
+                (Some(false), "Restart the worker".to_owned()),
+                vec![(Some(true), "eu-1".to_owned())]
+            ),
+        ],
+        "the task list's states: {items:#?}\nstored: {:?}",
+        mirrored(&state.pool, &id)
+            .await
+            .map(|p| p["body"]["storage"]["value"].clone())
+    );
 
     // The tables as Confluence normalised them: spans, a header column, a list
     // in a cell, each cell's blocks as the reader reads them (#2436).
@@ -1116,7 +1185,7 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     };
     let cell = |header, words: &str| TableCell::new(header, vec![para(words)]);
     assert_eq!(
-        rest[8],
+        rest[9],
         &DocBlock::Table {
             rows: vec![
                 vec![TableCell {
@@ -1136,7 +1205,7 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         "the merged-cell table"
     );
     assert_eq!(
-        rest[9],
+        rest[10],
         &DocBlock::Table {
             rows: vec![
                 vec![cell(true, "Primary"), cell(false, "Mara")],
@@ -1146,14 +1215,17 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         "the header-column table"
     );
     assert_eq!(
-        rest[10],
+        rest[11],
         &DocBlock::Table {
             rows: vec![vec![TableCell::new(
                 false,
                 vec![
                     DocBlock::List {
                         ordered: false,
-                        items: vec![vec![para("drain")], vec![para("deploy")]],
+                        items: vec![
+                            ListItem::new(vec![para("drain")]),
+                            ListItem::new(vec![para("deploy")]),
+                        ],
                     },
                     para("then watch"),
                 ]

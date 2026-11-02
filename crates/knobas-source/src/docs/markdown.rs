@@ -8,7 +8,8 @@
 //! export (#952). Its output is GitHub-flavoured Markdown text:
 //!
 //! * a heading is `#` to `######`;
-//! * a list is `-` or `1.`, an item's further blocks indented under it;
+//! * a list is `-` or `1.`, an item's further blocks indented under it; a
+//!   task item opens with `[x] ` or `[ ] ` (spec #2432);
 //! * code is a fence longer than any run of backticks inside it;
 //! * a table is a pipe table, its first row the header, its cells' pipes
 //!   escaped, a cell's blocks its lines joined by `<br>`, and a spanned cell
@@ -27,7 +28,7 @@
 //! Pure and synchronous: no database, no files. The callers decide where the
 //! text goes.
 
-use super::{DocBlock, Inline, PanelKind, TableCell};
+use super::{DocBlock, Inline, ListItem, PanelKind, TableCell};
 
 /// A page as Markdown: `title` as a level-1 heading, then `blocks`, ending in
 /// one newline.
@@ -131,7 +132,7 @@ fn block(block: &DocBlock) -> String {
     }
 }
 
-fn list(ordered: bool, items: &[Vec<DocBlock>]) -> String {
+fn list(ordered: bool, items: &[ListItem]) -> String {
     items
         .iter()
         .enumerate()
@@ -142,9 +143,14 @@ fn list(ordered: bool, items: &[Vec<DocBlock>]) -> String {
                 "- ".to_owned()
             };
             let pad = " ".repeat(marker.len());
-            let body = join_blocks(item);
+            let task = match item.checked {
+                Some(true) => "[x] ",
+                Some(false) => "[ ] ",
+                None => "",
+            };
+            let body = join_blocks(&item.blocks);
             let mut lines = body.lines();
-            let mut out = format!("{marker}{}", lines.next().unwrap_or(""));
+            let mut out = format!("{marker}{task}{}", lines.next().unwrap_or(""));
             for line in lines {
                 out.push('\n');
                 if !line.is_empty() {

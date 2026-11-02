@@ -109,24 +109,57 @@ fn a_list_is_bulleted_or_numbered_and_nests_under_its_item() {
         DocBlock::List {
             ordered: false,
             items: vec![
-                vec![para("one")],
-                vec![
+                ListItem::new(vec![para("one")]),
+                ListItem::new(vec![
                     para("two"),
                     DocBlock::List {
                         ordered: true,
-                        items: vec![vec![para("a")], vec![para("b")]],
+                        items: vec![
+                            ListItem::new(vec![para("a")]),
+                            ListItem::new(vec![para("b")]),
+                        ],
                     },
-                ],
+                ]),
             ],
         },
         DocBlock::List {
             ordered: true,
-            items: vec![vec![para("first")], vec![para("second")]],
+            items: vec![
+                ListItem::new(vec![para("first")]),
+                ListItem::new(vec![para("second")]),
+            ],
         },
     ]);
     assert_eq!(
         md,
         "- one\n- two\n\n  1. a\n  2. b\n\n1. first\n2. second\n"
+    );
+}
+
+/// Spec #2432, story 40: a task item keeps its state as GitHub's task
+/// syntax; an ordinary item beside it stays a plain item.
+#[test]
+fn a_task_item_is_written_with_its_box_ticked_or_not() {
+    let md = body(&[DocBlock::List {
+        ordered: false,
+        items: vec![
+            ListItem::task(true, vec![para("Drain the queue")]),
+            ListItem::task(
+                false,
+                vec![
+                    para("Restart the worker"),
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![ListItem::task(false, vec![para("eu-1")])],
+                    },
+                ],
+            ),
+            ListItem::new(vec![para("Notes")]),
+        ],
+    }]);
+    assert_eq!(
+        md,
+        "- [x] Drain the queue\n- [ ] Restart the worker\n\n  - [ ] eu-1\n- Notes\n"
     );
 }
 
@@ -225,7 +258,10 @@ fn a_spanned_cell_leaves_its_places_empty_and_block_cells_keep_their_words() {
                     vec![
                         DocBlock::List {
                             ordered: false,
-                            items: vec![vec![para("Mara")], vec![para("Tomasz")]],
+                            items: vec![
+                                ListItem::new(vec![para("Mara")]),
+                                ListItem::new(vec![para("Tomasz")]),
+                            ],
                         },
                         para("On call"),
                         DocBlock::Table {

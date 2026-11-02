@@ -4,7 +4,9 @@
   this part in <source>* (story 134). The page's sections and their anchors
   are `TfDocBody`'s; a heading here is one inside a panel or a comment.
 
-  Recurses into lists, panels and table cells by importing itself.
+  Recurses into lists, panels and table cells by importing itself. A task item (spec
+  #2432) draws its state as the Markdown view's box: a picture, never a
+  control, so nothing here ticks a task.
 -->
 <script lang="ts">
   import Self from "./TfDocBlocks.svelte";
@@ -52,7 +54,14 @@
   {:else if block.type === "list"}
     <svelte:element this={block.ordered ? "ol" : "ul"}>
       {#each block.items as item, i (i)}
-        <li><Self blocks={item} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></li>
+        {#if item.checked === null}
+          <li><Self blocks={item.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></li>
+        {:else}
+          <li class="tf-task">
+            <span class={item.checked ? "tf-box tf-on" : "tf-box"} role="img" aria-label={item.checked ? "Done" : "Not done"}></span>
+            <div><Self blocks={item.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
+          </li>
+        {/if}
       {/each}
     </svelte:element>
   {:else if block.type === "code"}

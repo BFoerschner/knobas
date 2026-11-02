@@ -870,7 +870,8 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `heading`: A section heading. `level` is 1 to 6 as the source wrote it;
  *   the reader draws every level as a section head.
  * - `list`: A list. A nested list's items are drawn as a list inside their
- *   item.
+ *   item. An item may carry a checked state: a task list is a list whose
+ *   items say whether they are done ([`ListItem`]).
  * - `code`: A code block, verbatim, with the language the source named.
  * - `table`: A table, row by row; a header cell says so, and a cell holds
  *   blocks and may span columns and rows.
@@ -881,7 +882,7 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  *
  * Source text, never markup.
  */
-export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<Array<DocBlock>>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
+export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
 
 /**
  * One comment on a page.
@@ -970,6 +971,16 @@ matches: number, editor: string | null, editor_name: string | null, updated_at: 
  * - `break`: A hard line break inside a block.
  */
 export type DocInline = { "type": "text", text: string, strong: boolean, emphasis: boolean, code: boolean, } | { "type": "link", text: string, href: string, } | { "type": "page_link", text: string, title: string, space: string | null, entity_id: string | null, } | { "type": "issue", key: string, entity_id: string | null, title: string | null, status: string | null, } | { "type": "mention", user: string | null, name: string | null, me: boolean, } | { "type": "break" };
+
+/**
+ * One item of a [`DocBlock::List`]: its blocks, and for a task its checked
+ * state (spec #2432, *The vocabulary is the seam*).
+ *
+ * `checked` is `None` for an ordinary item, `Some(true)` for a task that is
+ * done and `Some(false)` for one that is not. The shell draws the state and
+ * never changes it.
+ */
+export type DocListItem = { checked: boolean | null, blocks: Array<DocBlock>, };
 
 /**
  * One page in a space's tree.

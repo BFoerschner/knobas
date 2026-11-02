@@ -40,7 +40,7 @@
 //! markup reads as the text it holds. Pure, synchronous, no dependency beyond
 //! `std`, so it compiles for `wasm32-wasip2` and the adapter SDK can carry it.
 
-use super::{DocBlock, Inline, TableCell};
+use super::{DocBlock, Inline, ListItem, TableCell};
 
 // -- the tree -----------------------------------------------------------------
 
@@ -644,7 +644,7 @@ impl<'a> Blocks<'a> {
                 let items = children
                     .iter()
                     .filter(|c| c.name() == Some("li"))
-                    .map(|li| blocks(li.children(), self.hook))
+                    .map(|li| ListItem::new(blocks(li.children(), self.hook)))
                     .collect();
                 self.block(DocBlock::List {
                     ordered: name == "ol",
