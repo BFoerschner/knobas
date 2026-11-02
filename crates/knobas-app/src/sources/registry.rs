@@ -330,11 +330,26 @@ impl Registry {
     }
 
     /// The Docs projection of an adapter kind (#859), `None` for a kind that
-    /// draws no pages or is not compiled in. A plain function over the
-    /// mirrored payload, so the reader needs no built source and no secret.
+    /// draws no pages or the registry does not hold. A compiled-in row's is a
+    /// plain function over the mirrored payload, so the reader needs no
+    /// built source and no secret. A loaded external adapter that exports
+    /// the docs projection (1.5.0, #2442) draws through its component,
+    /// which needs neither either: each call instantiates it afresh, so the
+    /// adapter loaded now draws every mirrored page, with no re-sync.
     #[must_use]
-    pub fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
-        ADAPTERS.iter().find(|a| a.kind == kind).and_then(|a| a.doc)
+    pub fn doc_projection(&self, kind: &str) -> Option<knobas_sync::scheduler::Projection> {
+        if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
+            return row.doc.map(knobas_sync::scheduler::Projection::from);
+        }
+        let external = self.read();
+        let adapter = external
+            .loaded
+            .iter()
+            .find(|a| a.kind() == kind && a.projects())?
+            .clone();
+        Some(knobas_sync::scheduler::Projection::new(
+            move |kind, payload| adapter.project(kind, payload),
+        ))
     }
 
     /// How the tree of `entity_kind`'s view names its sections by path, for
@@ -374,7 +389,7 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
         Some(self)
     }
 
-    fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
+    fn doc_projection(&self, kind: &str) -> Option<knobas_sync::scheduler::Projection> {
         Registry::doc_projection(self, kind)
     }
 

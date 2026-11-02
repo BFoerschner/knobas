@@ -10,8 +10,9 @@
 //!   parent is the innermost name of its chain, which a docs source keeps
 //!   unique inside a space (a Confluence title is);
 //! - **the body, comments, version and labels** are the adapter's projection
-//!   of the mirrored record (`knobas_source::docs::DocProjection`), read from
-//!   the registry by the source's adapter kind. No network and no credential:
+//!   of the mirrored record (`knobas_source::docs::DocProjection`, or an
+//!   external adapter's component, `knobas_sync::scheduler::Projection`),
+//!   read from the registry by the source's adapter kind. No network and no credential:
 //!   the reader opens from the mirror.
 //!
 //! What knobas adds to the projection is what only the mirror knows: which
@@ -250,7 +251,7 @@ select a.entity_id from knobas.activity a
 pub async fn tree(
     pool: &PgPool,
     declarations: &Declarations,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection>,
     me: &[String],
     fillers: &[String],
 ) -> Result<DocsTree, IpcError> {
@@ -333,7 +334,7 @@ select i.entity_id, i.payload, s.kind as adapter_kind, p.key
 async fn for_you(
     pool: &PgPool,
     declarations: &Declarations,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection>,
     me: &[String],
     fillers: &[String],
 ) -> Result<Vec<DocForYou>, IpcError> {
@@ -363,7 +364,7 @@ async fn for_you(
             let row = rows.get(&entity_id)?;
             let payload: serde_json::Value = row.get("payload");
             let by_name = project(&row.get::<String, _>("adapter_kind"))
-                .and_then(|project| project(PAGE_KIND, &payload))
+                .and_then(|project| project.project(PAGE_KIND, &payload))
                 .and_then(|content| mentioner(&content, me));
             Some(DocForYou {
                 space_key: row.get("key"),
@@ -462,7 +463,7 @@ select i.entity_id, i.kind, i.payload, s.kind as adapter_kind from sync.live_ite
 /// What the include fill reads the included pages with.
 struct Includes<'a> {
     pool: &'a PgPool,
-    project: &'a (dyn Fn(&str) -> Option<knobas_source::docs::DocProjection> + Sync),
+    project: &'a (dyn Fn(&str) -> Option<knobas_sync::scheduler::Projection> + Sync),
     source_id: &'a str,
 }
 
@@ -524,7 +525,7 @@ fn fill_includes<'f>(
             let kind: String = row.get("kind");
             let payload: serde_json::Value = row.get("payload");
             let Some(content) = (at.project)(&row.get::<String, _>("adapter_kind"))
-                .and_then(|projection| projection(&kind, &payload))
+                .and_then(|projection| projection.project(&kind, &payload))
             else {
                 *unfilled = Some(Unfilled::NotMirrored);
                 continue;
@@ -645,7 +646,7 @@ async fn backlinks(
 pub async fn page(
     pool: &PgPool,
     declarations: &Declarations,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection> + Sync,
+    project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection> + Sync,
     writes: impl Fn(&str) -> Vec<String>,
     me: &[String],
     entity_id: &str,
@@ -672,7 +673,7 @@ pub async fn page(
     let chain: Vec<String> =
         serde_json::from_value(row.get::<serde_json::Value, _>("ancestors")).unwrap_or_default();
 
-    let content = project(&adapter_kind).and_then(|projection| projection(&kind, &payload));
+    let content = project(&adapter_kind).and_then(|projection| projection.project(&kind, &payload));
     let readable = content.is_some();
     let mut content = content.unwrap_or(knobas_source::docs::DocContent {
         version: None,
@@ -1041,7 +1042,7 @@ select i.entity_id, i.body_text, i.author, i.payload, s.kind as adapter_kind, p.
 pub async fn search(
     pool: &PgPool,
     searcher: &knobas_search::Searcher,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection>,
     raw: &str,
     scope: Option<&DocsScope>,
     fillers: &[String],
@@ -1077,7 +1078,7 @@ pub async fn search(
             let adapter_kind: String = row.get("adapter_kind");
             let payload: serde_json::Value = row.get("payload");
             let editor_name = project(&adapter_kind)
-                .and_then(|projection| projection(PAGE_KIND, &payload))
+                .and_then(|projection| projection.project(PAGE_KIND, &payload))
                 .and_then(|c| c.editor_name);
             Some(DocHit {
                 entity_id: hit.row.entity_id.clone(),
@@ -1470,7 +1471,7 @@ pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
 pub async fn export(
     pool: &PgPool,
     declarations: &Declarations,
-    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection> + Sync,
+    project: impl Fn(&str) -> Option<knobas_sync::scheduler::Projection> + Sync,
     entity_id: &str,
     folder: &std::path::Path,
 ) -> Result<DocExport, IpcError> {

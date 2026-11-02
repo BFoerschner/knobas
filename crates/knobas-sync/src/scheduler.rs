@@ -46,6 +46,50 @@ use crate::{SyncError, run_backfill, run_from_stored_cursor};
 
 pub use crate::run_log::SourceSyncStatus;
 
+/// An adapter kind's Docs projection as a read calls it (ADR-0040, #2442):
+/// a compiled-in adapter's plain [`DocProjection`](knobas_source::docs::DocProjection),
+/// or an external adapter's call into its component. Cheap to clone.
+#[derive(Clone)]
+pub struct Projection(
+    Arc<dyn Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent> + Send + Sync>,
+);
+
+impl Projection {
+    /// A projection that calls `project`.
+    pub fn new(
+        project: impl Fn(&str, &serde_json::Value) -> Option<knobas_source::docs::DocContent>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        Self(Arc::new(project))
+    }
+
+    /// The record of entity kind `kind` whose payload is `payload`, drawn:
+    /// `None` for a kind the adapter draws no page for, or a payload it
+    /// cannot draw.
+    #[must_use]
+    pub fn project(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::docs::DocContent> {
+        (self.0)(kind, payload)
+    }
+}
+
+impl From<knobas_source::docs::DocProjection> for Projection {
+    fn from(project: knobas_source::docs::DocProjection) -> Self {
+        Self::new(project)
+    }
+}
+
+impl std::fmt::Debug for Projection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Projection")
+    }
+}
+
 /// Turns a stored configuration into a live adapter, and answers what each
 /// adapter kind declares.
 ///
@@ -64,8 +108,9 @@ pub trait AdapterRegistry: Send + Sync + 'static {
     fn descriptors(&self) -> Vec<SourceDescriptor>;
 
     /// The Docs projection of an adapter kind (#859), `None` for a kind that
-    /// draws no pages or that the registry does not hold.
-    fn doc_projection(&self, _kind: &str) -> Option<knobas_source::docs::DocProjection> {
+    /// draws no pages or that the registry does not hold. An external
+    /// adapter's calls into its component (#2442).
+    fn doc_projection(&self, _kind: &str) -> Option<Projection> {
         None
     }
 

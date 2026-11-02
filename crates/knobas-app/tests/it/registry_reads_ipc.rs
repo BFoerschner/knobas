@@ -97,8 +97,8 @@ impl AdapterRegistry for Probe {
         }]
     }
 
-    fn doc_projection(&self, kind: &str) -> Option<DocProjection> {
-        (kind == PROBE).then_some(project as DocProjection)
+    fn doc_projection(&self, kind: &str) -> Option<knobas_sync::scheduler::Projection> {
+        (kind == PROBE).then(|| (project as DocProjection).into())
     }
 
     fn build(
