@@ -221,7 +221,7 @@
    */
   function toggleScope() {
     scope.toggle();
-    if (session.raw.trim() !== "") session.set(session.raw);
+    if (session.raw.trim() !== "") session.rerun();
   }
 
   /**

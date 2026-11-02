@@ -617,3 +617,34 @@ test("the titles flag is read when each query is sent, and is off without a read
   await vi.advanceTimersByTimeAsync(0);
   expect(picker.mock.calls[0]?.[0]?.titles).toBe(false);
 });
+
+/**
+ * ⌘D (#2430) asks the same words again under the other mode. A saved list
+ * keeps the text and never the mode, so a list just saved from the box is
+ * still the query in it: the control keeps saying so, and a second save of
+ * the same text is not offered.
+ */
+test("asking again under the other mode keeps a list just saved as saved", async () => {
+  const search = vi.fn(async (q: SearchQuery) => answer(q.raw));
+  let titles = true;
+  const session = new Session({
+    ...ports(search),
+    titles: () => titles,
+    createSmartList: async (name: string, query: string) => ({ id: "list-1", name, query }) as never,
+  });
+  session.type("payments");
+  await vi.advanceTimersByTimeAsync(200);
+  await session.saveCurrent("Payments");
+  expect(session.savedId).toBe("list-1");
+
+  titles = false;
+  session.rerun();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(search.mock.calls.map(([q]) => [q.raw, q.titles])).toEqual([
+    ["payments", true],
+    ["payments", false],
+  ]);
+  expect(session.savedId).toBe("list-1");
+
+  session.dispose();
+});

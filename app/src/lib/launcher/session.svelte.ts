@@ -230,6 +230,17 @@ export class Session {
     void this.run();
   }
 
+  /**
+   * The same words asked again at once, under a mode that changed (*Titles*
+   * or *Everything*, #2430). Unlike {@link Session.set} the query is the one
+   * it was, so a list just saved from it stays saved: a saved list keeps the
+   * text, never the mode.
+   */
+  rerun(): void {
+    this.#cancel();
+    void this.run();
+  }
+
   /** Move the cursor, clamped. The list does not wrap: a launcher whose
    *  selection jumps from the last row back to the first loses the reader. */
   move(delta: number): void {
