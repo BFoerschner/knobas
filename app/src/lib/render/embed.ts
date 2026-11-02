@@ -112,8 +112,22 @@ export function embedUrl(url: string): { src: string } | null {
   return match !== null && !/\s/.test(url) ? { src: url } : null;
 }
 
-/** After an open the frame asked for, the next one in this window is asked of the reader (#2454). */
-export const EMBED_OPEN_GAP_MS = 1_000;
+/**
+ * After an open an embed asked for, the next one from any embed in this window
+ * within this gap is asked of the reader (#2454). It spans transient
+ * activation's lifetime (5 s in WebKit and Chromium), so one click, anywhere
+ * in the window, opens at most one tab: a 1 s gap let a frame's script open
+ * one tab a second for as long as a single click stayed active.
+ */
+export const EMBED_OPEN_GAP_MS = 5_000;
+
+/** When an embed's open last ran without asking, shared by every embed in the window, so two embeds don't each take one click (#2454). */
+export const embedOpens = {
+  last: -Infinity,
+  reset(): void {
+    this.last = -Infinity;
+  },
+};
 
 /**
  * What to do with a page the frame asks to open (#2454). The frame's script
@@ -122,7 +136,7 @@ export const EMBED_OPEN_GAP_MS = 1_000;
  * browser that passes a child frame's click up to its ancestors sets.
  *
  * - `open`: the reader clicked just now, and nothing opened in the last
- *   {@link EMBED_OPEN_GAP_MS}: one tab per click.
+ *   {@link EMBED_OPEN_GAP_MS} from any embed: one tab per click.
  * - `ask`: no click behind it (or a second open on one click): the reader is
  *   asked, and opens it with a click of their own.
  * - `drop`: the reader is being asked already; a loop asks once.

@@ -23,7 +23,7 @@
 
   import type { DocEmbedContent } from "../../ipc/entity";
   import { tauriBridge } from "../../render/command";
-  import { EMBED_SANDBOX, embedMessage, embedSource, embedUrl, openVerdict } from "../../render/embed";
+  import { EMBED_SANDBOX, embedMessage, embedOpens, embedSource, embedUrl, openVerdict } from "../../render/embed";
   import { EMBED_REPORT_MS, EMBED_URL_HEIGHT, embedsRun } from "./docs";
 
   let {
@@ -55,7 +55,6 @@
   let reported = $state(false);
   let silent = $state(false);
   let asked = $state<string | null>(null);
-  let lastOpen = -Infinity;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   // Each time the frame starts, it has EMBED_REPORT_MS to say it loaded.
@@ -83,9 +82,9 @@
   function wants(url: string): void {
     const now = Date.now();
     const activated = typeof navigator !== "undefined" && navigator.userActivation?.isActive === true;
-    const verdict = openVerdict({ activated, now, lastOpen, asking: asked !== null });
+    const verdict = openVerdict({ activated, now, lastOpen: embedOpens.last, asking: asked !== null });
     if (verdict === "open") {
-      lastOpen = now;
+      embedOpens.last = now;
       onopen(url);
     } else if (verdict === "ask") asked = url;
   }

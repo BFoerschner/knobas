@@ -38,6 +38,9 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The panel and the withdrawal subscribers, in one reset.
   "shell/write-queue.svelte.ts#writeQueuePanel": async () => (await import("./write-queue.svelte")).reset(),
   "shell/write-queue.svelte.ts#withdrawals": async () => (await import("./write-queue.svelte")).reset(),
+  // When an embed last opened a page unasked (#2454): each test starts with none.
+  // In a plain `.ts` file, listed by hand in {@link UNSCANNED}.
+  "render/embed.ts#embedOpens": async () => (await import("../render/embed")).embedOpens.reset(),
   "shell/health.svelte.ts#health": async () => (await import("./health.svelte")).health.reset(),
   "shell/kind-registry.svelte.ts#kindRegistry": async () => (await import("./kind-registry.svelte")).kindRegistry.reset(),
   // App.test.svelte.ts used to walk this one back by hand.
@@ -106,7 +109,7 @@ export const NOT_YET_RESET: readonly string[] = [];
  * `view-read.ts`) and components, not other plain `.ts` files. Each must still
  * be a key of {@link RESETS}.
  */
-export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores"];
+export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

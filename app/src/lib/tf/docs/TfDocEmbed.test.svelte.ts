@@ -185,6 +185,34 @@ test("one click opens one tab: a second open on it is asked", async () => {
   expect(target.querySelector(".tf-doc .tf-embed .tf-macro")?.textContent).toContain("wants to open https://api.example/b");
 });
 
+test("one click opens one tab across the page: a second embed's open on it is asked", async () => {
+  const two = page();
+  two.blocks = [...two.blocks, { type: "embed", name: "html", content: { kind: "html", html: "<p>second</p>" } }];
+  const io = await draw(two);
+  const frames = [...target.querySelectorAll<HTMLIFrameElement>(".tf-doc iframe")];
+  expect(frames).toHaveLength(2);
+  clicked(true);
+  say({ knobas: "embed", open: "https://api.example/a" }, frames[0]!.contentWindow);
+  say({ knobas: "embed", open: "https://api.example/b" }, frames[1]!.contentWindow);
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledTimes(1);
+  expect(io.openExternal).toHaveBeenCalledWith("https://api.example/a");
+  expect(target.querySelector(".tf-doc .tf-embed .tf-macro")?.textContent).toContain("wants to open https://api.example/b");
+});
+
+test("a click stays active for seconds, and opens one tab for all of them", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const io = await draw();
+  clicked(true);
+  say({ knobas: "embed", open: "https://api.example/a" });
+  // Transient activation lasts 5 s in WebKit and Chromium: a script waiting out a short gap gets no second tab.
+  vi.setSystemTime(Date.now() + 1_500);
+  say({ knobas: "embed", open: "https://api.example/b" });
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledTimes(1);
+  expect(target.querySelector(".tf-doc .tf-embed .tf-macro")?.textContent).toContain("wants to open https://api.example/b");
+});
+
 // -- A URL embed (#2441) -------------------------------------------------------
 
 const URL_EMBED = "https://grafana.example/d/abc?orgId=1";
