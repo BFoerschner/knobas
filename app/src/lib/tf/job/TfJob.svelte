@@ -73,7 +73,7 @@
   import TfSaveSet from "./TfSaveSet.svelte";
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
-  import { currentJob, linkRequest, type LinkTarget } from "./current.svelte";
+  import { currentJob } from "./current.svelte";
   import { chosenJob } from "./chosen.svelte";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { entityAddress } from "../address";
@@ -138,8 +138,6 @@
 
   let drawer = $state(false);
   let linking = $state(false);
-  /** The other end the launcher's *Link to <key>* chose (#1500), preset in the dialog. */
-  let preset = $state<LinkTarget | null>(null);
   /** *Apply a link set…* and *Save as a link set…* open (#869). */
   let applyingSet = $state(false);
   let savingSet = $state(false);
@@ -243,17 +241,6 @@
   });
   /** Whether the ticket is the chosen job: the card's yellow, else its sheet. */
   const pinned = $derived(resolvedId !== null && chosenJob.id === resolvedId);
-
-  // *Link to <key>* from the launcher (#1500): this job's own dialog, over its
-  // Connections drawer, with the result preset, once the job has drawn.
-  $effect(() => {
-    if (!detail || !pageShown()) return;
-    const asked = linkRequest.take(keyOf(detail.row.entity_id));
-    if (asked === null) return;
-    preset = asked;
-    drawer = true;
-    linking = true;
-  });
 
   $effect(() => {
     const wanted = segment;
@@ -628,7 +615,6 @@
       onclose={() => (drawer = false)}
       onunlink={(entry) => void unlinkEntry(entry)}
       onlinkto={() => {
-        preset = null;
         linking = true;
       }}
       onhide={(row) => void hideHere(row)}
@@ -664,7 +650,6 @@
     <TfLinkTo
       jobKey={key}
       entityId={detail.row.entity_id}
-      {preset}
       {ports}
       {layers}
       onclose={() => (linking = false)}

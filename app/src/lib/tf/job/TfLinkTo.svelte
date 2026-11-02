@@ -6,9 +6,6 @@
   the same debounce, sequencing and selection, over the job's ports. The link
   is written by `create_link` (BUILT) and stays in knobas, which the dialog
   says in one line (R-15.2).
-
-  The launcher's *Link to <key>* (#1500) opens it with the other end preset,
-  so only the relation and the note are left to pick.
 -->
 <script lang="ts">
   import { onMount } from "svelte";
@@ -26,7 +23,6 @@
   let {
     jobKey,
     entityId,
-    preset = null,
     ports,
     layers,
     onclose,
@@ -34,8 +30,6 @@
   }: {
     jobKey: string;
     entityId: string;
-    /** The other end, already chosen: the launcher's *Link to <key>* (#1500). */
-    preset?: LinkTarget | null;
     ports: Pick<SessionPorts, "search" | "launcherHome"> & {
       createLink: (fromId: string, toId: string, relation?: string, note?: string) => Promise<LinkRow>;
     };
@@ -54,9 +48,7 @@
   // debounce would otherwise fire a search for a dialog that is gone.
   onMount(() => () => session.dispose());
 
-  // svelte-ignore state_referenced_locally
-  // The preset is where the dialog starts; *Change* picks another.
-  let target = $state<LinkTarget | null>(preset);
+  let target = $state<LinkTarget | null>(null);
   let relation = $state("related");
   let note = $state("");
   let failure = $state<string | null>(null);
