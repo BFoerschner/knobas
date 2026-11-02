@@ -996,6 +996,8 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             r#"<table><tbody><tr><th colspan="2"><p>Rota</p></th></tr><tr><td><p>Mon</p></td><td rowspan="2"><p>Mara</p></td></tr><tr><td><p>Tue</p></td></tr></tbody></table>"#,
             r#"<table><tbody><tr><th><p>Primary</p></th><td><p>Mara</p></td></tr><tr><th><p>Backup</p></th><td><p>Jonas</p></td></tr></tbody></table>"#,
             r#"<table><tbody><tr><td><ul><li><p>drain</p></li><li><p>deploy</p></li></ul><p>then watch</p></td></tr></tbody></table>"#,
+            // Spec #2432 (#2438): an expand with a list in it.
+            r#"<ac:structured-macro ac:name="expand" ac:schema-version="1"><ac:parameter ac:name="title">Rollback</ac:parameter><ac:rich-text-body><ul><li><p>revert</p></li><li><p>page</p></li></ul></ac:rich-text-body></ac:structured-macro>"#,
         ),
         key = my_key,
         parent = parent.title,
@@ -1232,6 +1234,26 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             )]]
         },
         "the table with a list in a cell"
+    );
+
+    // The expand as Confluence stored it: a collapsible under its title,
+    // the list inside it a list (#2438).
+    let DocBlock::Collapsible { title, blocks } = rest[12] else {
+        panic!(
+            "the expand: {rest:#?}\nstored: {:?}",
+            mirrored(&state.pool, &id)
+                .await
+                .map(|p| p["body"]["storage"]["value"].clone())
+        )
+    };
+    assert_eq!(title, "Rollback");
+    let [DocBlock::List { ordered: false, items }] = blocks.as_slice() else {
+        panic!("the expand holds its list: {blocks:#?}")
+    };
+    assert_eq!(
+        items.iter().map(|i| words(&i.blocks)).collect::<Vec<_>>(),
+        vec!["revert", "page"],
+        "the expand's list items"
     );
 
     // The tree: the new page hangs under its parent.
