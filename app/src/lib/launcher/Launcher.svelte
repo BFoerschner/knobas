@@ -73,6 +73,7 @@
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
+  import Preview, { PREVIEW_DEBOUNCE_MS } from "./Preview.svelte";
   import QueryBox from "./QueryBox.svelte";
   import Results from "./Results.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
@@ -220,6 +221,28 @@
     scope.toggle();
     if (session.raw.trim() !== "") session.rerun();
   }
+
+  /**
+   * *Everything* with a preview (#2431): the dialog grows, and over a search
+   * the body splits, the results at the left and the selected row's
+   * excerpts at the right. Titles is the one list at the usual size.
+   */
+  const deep = $derived(scope.titles === false);
+  const split = $derived(deep && overlay === null && naming === null && session.mode === "results");
+
+  /**
+   * The row the pane draws: the selection, once it has rested for
+   * {@link PREVIEW_DEBOUNCE_MS}, so running the arrows down fifty rows draws
+   * one pane and not fifty. Kept by id and read back from the rows, so a new
+   * answer for the same row draws its new excerpts.
+   */
+  let previewed = $state<string | null>(null);
+  $effect(() => {
+    const id = split ? (session.current?.id ?? null) : null;
+    const timer = setTimeout(() => (previewed = id), PREVIEW_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  });
+  const previewRow = $derived(previewed === null ? null : (session.rows.find((row) => row.id === previewed) ?? null));
 
   /**
    * The credential health the chips and the result rows are drawn from.
@@ -892,7 +915,7 @@
     alone here: the box takes it for the action chain and says so with
     `preventDefault`.
   -->
-  <TfDialog title="Search and actions" className="tf-launch" onclose={close}>
+  <TfDialog title="Search and actions" className={deep ? "tf-launch tf-launch-deep" : "tf-launch"} onclose={close}>
     {#snippet body()}
       <!--
         The label is its own element in front of the box (#2424): what the box
@@ -956,6 +979,7 @@
         <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
+      <div class="tf-ln-split" class:tf-ln-two={split}>
       <div id={resultsId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Results">
         {#if overlay}
           <Help
@@ -1053,6 +1077,14 @@
         {:else}
           <p class="tf-ln-none">Searching…</p>
         {/if}
+      </div>
+      {#if split}
+        <Preview
+          title={previewRow?.kind === "hit" ? previewRow.hit.title : null}
+          excerpts={previewRow?.kind === "hit" ? previewRow.hit.excerpts : []}
+          onopen={() => previewRow && activate(previewRow)}
+        />
+      {/if}
       </div>
 
       {#if chain}

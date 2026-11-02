@@ -41,6 +41,23 @@
 /* The results, the board, the `?` card and the palette scroll here; the box and the hints stay. */
 .tf-ln-list { flex: 1; min-height: 0; overflow: auto; }
 
+/* Everything (#2431): the dialog grows, and over a search the body splits,
+   the results at the left and where the words appear at the right. */
+.tf-dialog.tf-launch.tf-launch-deep { width: min(1280px, calc(100vw - 32px)); height: min(840px, 92vh); }
+.tf-ln-split { flex: 1; min-height: 0; display: flex; }
+.tf-ln-split > .tf-ln-list { min-width: 0; }
+.tf-ln-split.tf-ln-two > .tf-ln-list { flex: 0 0 46%; border-right: 1px solid var(--rule); }
+.tf-ln-preview { flex: 1; min-width: 0; overflow: auto; padding: 8px 0 12px; }
+.tf-ln-pv-h { padding: 8px 18px 6px; font-size: var(--t-md); font-weight: 600; color: var(--ink); }
+.tf-ln-ex {
+  display: block; width: 100%; text-align: left; padding: 7px 18px; border-bottom: 1px solid var(--rule-2);
+  font-size: var(--t-sm); line-height: 1.5; color: var(--ink); background: none;
+}
+.tf-ln-ex:hover { background: var(--sheet-2); }
+.tf-ln-ex-at { display: block; margin-bottom: 2px; font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-ln-ex-t { white-space: normal; overflow-wrap: anywhere; }
+.tf-ln-ex mark { background: var(--mark); color: var(--ink); border-radius: 3px; padding: 0 1px; }
+
 /* A group heading: sticky over its rows, a label and nothing else (#2421). */
 .tf-ln-h {
   display: flex; align-items: center; gap: 8px; padding: 8px 18px 4px; position: sticky; top: 0; z-index: 1;

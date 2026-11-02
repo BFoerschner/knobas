@@ -4,11 +4,12 @@
  */
 import type { SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
-import { fakePipelines } from "./builds";
+import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeLinkSetLines } from "./link-sets";
+import { fakeLog } from "./run-reads";
 import { fakeListSearch } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
@@ -79,6 +80,7 @@ function actionPalette(raw: string): SearchResponse | null {
 function estateSearch(args: Record<string, unknown>): SearchResponse {
   const query = (args.query ?? {}) as {
     raw?: string;
+    titles?: boolean;
     filters?: { kinds?: string[] };
   };
   // `#l` and `#i` (#2423): the saved lists, and the kind the launcher
@@ -91,7 +93,7 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
   if (help !== null) return help;
   const byKey = ticketsByKey((query.raw ?? "").trim());
   if (byKey !== null) return byKey;
-  const words = wordSearch(query.raw ?? "");
+  const words = wordSearch(query.raw ?? "", query.titles !== false);
   if (words !== null) return words;
   if (!(query.filters?.kinds ?? []).includes("asset")) {
     throw {
@@ -171,11 +173,56 @@ const LEFT_OUT = new Set(["build", "commit", "jira_view"]);
 type Hit = SearchResponse["groups"][number]["hits"][number];
 
 /**
+ * Everything's excerpts (#2431) as the fixture makes them: each line (a run
+ * log's, numbered from `firstLine`) or sentence of `text` that holds a word,
+ * the words marked, a page's `\u001e` section and `\u001f` comment marks as
+ * places. **A substring match, fixture-only**: the engine's are
+ * `knobas_search::excerpt`'s, witnessed over PostgreSQL.
+ */
+function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
+  const out: Hit["excerpts"] = [];
+  let place: string | null = null;
+  const lines = text.startsWith(title) ? text.slice(title.length).split("\n") : text.split("\n");
+  lines.forEach((line, index) => {
+    if (line.startsWith("\u001e")) return void (place = line.slice(1).trim());
+    if (line.startsWith("\u001f")) return void (place = `Comment by ${line.slice(1).trim()}`);
+    if (line.startsWith("\u001d")) return;
+    const pieces = firstLine === null ? line.split(/(?<=[.!?])\s+/) : [line];
+    for (const piece of pieces) {
+      const lower = piece.toLowerCase();
+      if (out.length >= 8 || !words.some((word) => lower.includes(word))) continue;
+      const segments: Hit["snippet"] = [];
+      let at = 0;
+      while (at < piece.length) {
+        const next = words
+          .map((word) => [lower.indexOf(word, at), word.length] as const)
+          .filter(([found]) => found >= 0)
+          .sort((a, b) => a[0] - b[0])[0];
+        if (!next) break;
+        if (next[0] > at) segments.push({ text: piece.slice(at, next[0]), hit: false });
+        segments.push({ text: piece.slice(next[0], next[0] + next[1]), hit: true });
+        at = next[0] + next[1];
+      }
+      if (at < piece.length) segments.push({ text: piece.slice(at), hit: false });
+      out.push({ place: firstLine === null ? place : `line ${firstLine + index}`, segments });
+    }
+  });
+  return out;
+}
+
+/** A pipeline's newest run's log under the fixture, as `run_log` answers it. */
+function fixtureLogText(pipeline: ReturnType<typeof fakePipelines>[number]): string {
+  const newest = pipeline.recent[0];
+  const run = newest ? fixtureRun(newest.entity_id) : undefined;
+  return run ? fakeLog(run.config, run.no, run.st).lines.map((line) => line.text).join("\n") : "";
+}
+
+/**
  * The launcher's own kinds (#2422) as the fixture holds them: the ticket
  * views, the link sets and the pipelines, each with its path line, and a
  * pipeline in its newest run's state. Fixture-only, like the word search.
  */
-function launcherKindHits(): { haystack: string; hit: Hit }[] {
+function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
   const hit = (kind: string, entity_id: string, title: string, path: string, state: Hit["state"] = null): Hit => ({
     entity_id,
     kind,
@@ -194,6 +241,7 @@ function launcherKindHits(): { haystack: string; hit: Hit }[] {
     ...fakeLinkSetLines().map((set) => ({ haystack: `${set.name} ${set.description}`, hit: hit("set", set.id, set.name, set.path) })),
     ...fakePipelines().map((pipeline) => ({
       haystack: `${pipeline.name} ${pipeline.path.join(" ")}`,
+      log: fixtureLogText(pipeline),
       hit: { ...hit("pipeline", pipeline.entity_id, pipeline.name, pipeline.path.join(" › "), pipeline.recent[0]?.state ?? null), source_id: pipeline.source_id },
     })),
   ];
@@ -211,24 +259,28 @@ function launcherKindHits(): { haystack: string; hit: Hit }[] {
  * `knobas-search`'s integration tests. A query with a prefix or a `:` token
  * is not answered here.
  */
-function wordSearch(raw: string): SearchResponse | null {
+function wordSearch(raw: string, titles: boolean): SearchResponse | null {
   const text = raw.trim();
   if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
   const words = text.toLowerCase().split(/\s+/);
   const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
-  for (const { haystack, hit } of launcherKindHits()) {
-    if (!words.every((word) => haystack.toLowerCase().includes(word))) continue;
+  for (const { haystack, hit, log } of launcherKindHits()) {
+    // Everything (#2431): a pipeline is found by its newest run's log too.
+    const body = titles ? "" : (log ?? "");
+    if (!words.every((word) => `${haystack} ${body}`.toLowerCase().includes(word))) continue;
     const hits = byKind.get(hit.kind) ?? [];
-    hits.push({ ...hit, rank: 1 - hits.length / 100 });
+    hits.push({ ...hit, rank: 1 - hits.length / 100, excerpts: titles ? [] : fixtureExcerpts("", body, words, 1) });
     byKind.set(hit.kind, hits);
   }
   for (const entry of CORPUS) {
     if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
     const row = mirrorRow(entry);
-    const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""}`.toLowerCase();
+    const body = titles ? "" : entry.body_text;
+    const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${body}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
     const hits = byKind.get(entry.kind) ?? [];
-    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts: [] });
+    const excerpts = titles ? [] : fixtureExcerpts(entry.title, body, words);
+    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts });
     byKind.set(entry.kind, hits);
   }
   const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));
