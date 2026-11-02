@@ -11,7 +11,7 @@
 //! The layout, its parts joined by a blank line:
 //!
 //! * the title, then the body, one line per paragraph, list item, code line,
-//!   table cell and panel title, each top-level heading as its
+//!   block in a table cell and panel title, each top-level heading as its
 //!   [`section_line`] (a heading inside a panel, a list or a cell is a line of
 //!   words, as the reader does not start a section there);
 //! * each comment that draws any words, under its [`comment_line`];
@@ -105,9 +105,12 @@ impl Lines {
             }
             DocBlock::Code { code, .. } => self.push(code),
             DocBlock::Table { rows } => {
+                // A cell holds blocks (#2436): its words are theirs, and a
+                // heading in a cell starts no section.
                 for cell in rows.iter().flatten() {
-                    let words = self.inlines(&cell.text);
-                    self.push(&words);
+                    for inner in &cell.blocks {
+                        self.block(inner, false);
+                    }
                 }
             }
             DocBlock::Panel { title, blocks, .. } => {
@@ -263,12 +266,13 @@ mod tests {
     }
 
     /// A word only a table cell holds is in the section the table sits in,
-    /// each cell on a line of its own.
+    /// each cell's blocks on lines of their own (#2436): a list, a nested
+    /// table, a heading that starts no section, a page link that is a link
+    /// line.
     #[test]
     fn a_table_cells_words_are_in_its_section() {
-        let cell = |header: bool, words: &str| TableCell {
-            header,
-            text: vec![Inline::text(words)],
+        let cell = |header: bool, words: &str| {
+            TableCell::new(header, vec![para(vec![Inline::text(words)])])
         };
         let page = content(
             vec![
@@ -276,7 +280,34 @@ mod tests {
                 DocBlock::Table {
                     rows: vec![
                         vec![cell(true, "Queue"), cell(true, "Cap")],
-                        vec![cell(false, "payouts"), cell(false, "40 per minute")],
+                        vec![
+                            cell(false, "payouts"),
+                            TableCell {
+                                rowspan: 2,
+                                ..TableCell::new(
+                                    false,
+                                    vec![
+                                        DocBlock::List {
+                                            ordered: false,
+                                            items: vec![vec![para(vec![Inline::text(
+                                                "40 per minute",
+                                            )])]],
+                                        },
+                                        heading("Burst"),
+                                        DocBlock::Table {
+                                            rows: vec![vec![TableCell::new(
+                                                false,
+                                                vec![para(vec![page_link(
+                                                    "see backoff",
+                                                    "Backoff",
+                                                    None,
+                                                )])],
+                                            )]],
+                                        },
+                                    ],
+                                )
+                            },
+                        ],
                     ],
                 },
             ],
@@ -284,7 +315,11 @@ mod tests {
         );
         let read = read(&search_text("Runbook", "OPS", &page));
         assert_eq!(read.runs[1].part, Part::Section("Limits".into()));
-        assert_eq!(read.runs[1].text, "Queue\nCap\npayouts\n40 per minute");
+        assert_eq!(
+            read.runs[1].text,
+            "Queue\nCap\npayouts\n40 per minute\nBurst\nsee backoff"
+        );
+        assert_eq!(read.links, vec![("OPS".to_owned(), "Backoff".to_owned())]);
     }
 
     /// Lists, panels (title included) and code draw words; a placeholder draws
