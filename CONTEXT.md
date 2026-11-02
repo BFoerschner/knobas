@@ -82,8 +82,8 @@ The entity you can open that an item sits directly inside: a repo for a branch, 
 _Avoid_: container, scope, holder, repository (as the name of this fact)
 
 **State chip**:
-What a row shows of where its item stands, for a kind whose adapter declares one: a pull request's `open`, `merged` or `closed`, a build's `running`, `queued` or outcome. Declared as a [declared path](#declared-path) with a value map; each value is drawn with a [tone](#tone), and a value the map does not name is a [miss](#miss), so no chip. Not a ticket's status, which is a workflow column you can move a ticket to.
-_Avoid_: badge, status (a ticket's workflow word), state (alone)
+What a row shows of where its item stands, for a kind whose adapter declares one: a pull request's `open`, `merged` or `closed`, a build's `running`, `queued` or outcome, a ticket's status. Declared as a [declared path](#declared-path) with a value map; each value is drawn with a [tone](#tone), and a value the map does not name is a [miss](#miss), so no chip. A ticket's state is its status where the adapter declares a tone for the word: on Jira, Done and Resolved are `ok`, In Progress and In Review `info`, Closed `muted`. The status is still the workflow column you move a ticket to, and a status the map does not name, such as To Do, is a miss. The launcher row draws the state as its monogram's tone, not as a chip; room rows, set dots and job sections read it like any other declared state.
+_Avoid_: badge, status (the ticket's workflow word the state is read from, not this fact), state (alone)
 
 **Tone**:
 How loud a value is drawn, in five words the shell owns the colours of: `ok`, `warn`, `err`, `info`, `muted`. An adapter names a tone and never a colour.
