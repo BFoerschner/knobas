@@ -17,6 +17,7 @@ import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
 import { pageFor } from "../pages";
 import { parseTfHash } from "../route";
+import { linkRequest } from "./current.svelte";
 import type { JobPorts } from "./ports";
 import TfJob from "./TfJob.svelte";
 import { sourceFacts } from "./source-facts.fixture";
@@ -451,6 +452,48 @@ test("Unlink withdraws the link in knobas only and Undo draws it again", async (
   await settle();
   expect(calls.links).toEqual([[PR.link.from_id, ID, "implements", "why"]]);
   expect([...target.querySelectorAll(".tf-lk a")]).toHaveLength(2);
+});
+
+test("a link, an unlink and its Undo draw the card's sections again at once, the job not opened again", async () => {
+  let linked = false;
+  const pr = {
+    entity_id: "gitea:tidewater/payout-service#150",
+    kind: "pr",
+    source_id: "gitea",
+    title: "Retry window",
+    updated_at: "2026-10-15T09:00:00Z",
+    synced_at: "2026-10-15T09:00:00Z",
+    path: null,
+    state: null,
+  };
+  const base = ports();
+  const io = ports({
+    createLink: (from, to, relation, note) => ((linked = true), base.createLink(from, to, relation, note)),
+    unlink: (id) => ((linked = false), base.unlink(id)),
+    listEntities: (filter) => {
+      const rows = linked && filter.kinds.includes("pr") ? [pr] : [];
+      return Promise.resolve({ rows, total: rows.length, tally: null, groups: null });
+    },
+  });
+  const codeRow = () =>
+    [...target.querySelectorAll(".tf-tksecs a")].map((a) => squash(a)).find((row) => row.startsWith("Code")) ?? null;
+  linkRequest.ask("PAY-231", { entity_id: pr.entity_id, title: pr.title, kind: "pr" });
+  open({ ports: io });
+  await settle();
+  expect(codeRow()).toBeNull();
+
+  [...target.querySelectorAll<HTMLButtonElement>("[role='dialog'] button")].find((b) => squash(b) === "Link")!.click();
+  await settle();
+  expect(codeRow(), "the link's PR counts under Code").toBe("Code1›");
+
+  drawerOpen();
+  target.querySelector<HTMLButtonElement>("button[aria-label='Unlink Idempotent retry window']")!.click();
+  await settle();
+  expect(codeRow(), "the unlink takes it off again").toBeNull();
+
+  toasts.items.find((t) => t.text === "Unlinked in knobas only.")!.action!.run();
+  await settle();
+  expect(codeRow(), "Undo brings it back").toBe("Code1›");
 });
 
 test("Link to… opens a dialog over the drawer that says the link stays in knobas", async () => {

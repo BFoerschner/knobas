@@ -28,7 +28,9 @@
 
   **The conversation (#819)** is read once per page opened: `visit_entity`
   records this visit and answers the last one, `entity_thread` the thread.
-  A comment and a link are writes on any ticket, the chosen job or not.
+  A comment and a link are writes on any ticket, the chosen job or not. A
+  link made, withdrawn or put back re-reads the ticket and its reach, so the
+  card's sections count it at once (`rereadLinks`).
 
   **The Connections drawer (#820)** opens with `L` and from the card's *Link
   something to it* (#2401). **Link sets (#867)**:
@@ -331,11 +333,24 @@
     });
   }
 
+  /**
+   * After a link is made or withdrawn: the ticket for the drawer's rows, and
+   * the reach for the card's sections, which count what the link reaches.
+   * Nothing when the job on screen is not `id`.
+   */
+  function rereadLinks(id = detail?.row.entity_id) {
+    if (id === undefined) return;
+    reader.rereadDetail(id);
+    reader.rereadReach(id);
+  }
+
   async function unlinkEntry(entry: LinkEntry) {
     const { link } = entry;
+    // *Undo* re-reads the ticket it was unlinked on: its toast outlives a move to another job.
+    const id = detail?.row.entity_id;
     try {
       await ports.unlink(link.id);
-      reader.rereadDetail();
+      rereadLinks(id);
       push({
         text: "Unlinked in knobas only.",
         action: {
@@ -343,7 +358,7 @@
           run: () =>
             void ports
               .createLink(link.from_id, link.to_id, link.relation, link.note ?? undefined)
-              .then(() => reader.rereadDetail())
+              .then(() => rereadLinks(id))
               .catch((cause: unknown) => push({ text: `Could not link it again: ${ipcErrorMessage(cause)}`, tone: "err" })),
         },
       });
@@ -646,7 +661,7 @@
       onlinked={() => {
         linking = false;
         push({ text: "Linked in knobas" });
-        reader.rereadDetail();
+        rereadLinks();
       }}
     />
   {/if}
