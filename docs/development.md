@@ -119,8 +119,16 @@ gh workflow run release.yml --ref main -f tag=v1.2.0 -f platforms=all
 Name one platform when only one is in question. macOS minutes cost ten times
 Linux minutes.
 
-The workflow creates the release as a draft. Publish it once the legs you
-wanted have finished. Nothing is signed. macOS reports the app as damaged until
+The workflow creates the release as a draft. Its body is only the note on
+unsigned bundles; the patch notes are written by hand. Before publishing, put
+a `## What's new in vX.Y.Z` section above that note, with a `---` between
+them: one bold heading per spec or theme that shipped since the last tag, with
+bullets saying what changed for the user and the PR or spec numbers, then
+**Fixes**. `git log <last tag>..<tag> --oneline` lists what shipped, and the
+last release's body (`gh release view <last tag>`) shows the form. Write them
+with `gh release edit <tag> --notes-file <file>`. Then publish
+(`--draft=false --latest`) once the legs you wanted have finished. Nothing is
+signed. macOS reports the app as damaged until
 you run `xattr -dr com.apple.quarantine /Applications/knobas.app`, and Windows
 shows a SmartScreen warning. The Linux artifacts carry the runner's glibc
 floor.
