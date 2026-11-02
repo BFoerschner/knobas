@@ -1,38 +1,41 @@
 <!--
   PROTOTYPE: the ⌘K launcher rethought (clickdummy, 2026-11-02). Not production.
 
-  One question: does "⌘K again opens the selected item's actions" feel right,
-  and do findable views and lists, `d ` and `l `, and an inline link close the
-  gaps Björn named? Mounted by `App.svelte` instead of `Launcher.svelte` under
-  `?launcher-next` (dev only); everything else in the shell is the real thing.
+  One question: does "Tab on a row opens its actions in the same box" feel
+  right, and do findable views, sets and lists, the `#x` filters and an inline
+  link close the gaps Björn named? Mounted by `App.svelte` instead of
+  `Launcher.svelte` under `?launcher-next` (dev only); everything else in the
+  shell is the real thing.
 
-  Round 2 (Björn, 2026-11-02): `d ` for pages and `l ` for saved lists, one
-  letter and a space like `t `; no mirror footnote; no lists block on the
-  board (lists are `l `, renamed and deleted from the sheet); Esc in the sheet
-  closes the sheet, never the dialog; typing in the sheet filters its actions;
-  ⌘S saves the query as a list. Round 3b: the one box is the sheet's filter
-  and the rename field; the search words come back when the sheet closes.
+  Round 4 (Björn, 2026-11-02): an empty box shows the recent items and nothing
+  else; the box says only "? for help" and `?` draws this grammar's card; the
+  quick filters are `#t #p #r #b #m #d #l #i`, combinable (`#t #l sepa`); Tab
+  alone opens the actions (⌘K while open only gives the box its focus back);
+  *Start timer* is a ticket's row only, and starting it makes the ticket the
+  job (the shell already does that); a pull request can be merged, with the
+  style picked; a repository's *Create pull request* picks the head branch,
+  then the base, then opens the compare page; *Open in ⟨app⟩* is one row per
+  application configured under Settings › Checkouts. A pick is a **flow**: a
+  step's choices fill the sheet, the box narrows them, Enter takes one; the
+  same flow runs *Add to a set*, *Snooze* and *Merge*.
 
-  What is real here: `TfDialog`, `QueryBox`, `Chips`, `Results`, `Row`,
-  `Help`, the `Session`, the `>` palette, the `?` card, and every write
-  (`create_link`, `save_link_set`, the list writes) goes through the real IPC.
-  What is a shortcut, each marked PROTOTYPE below:
-    - `d ` is rewritten to `kind:page` and `l ` is answered here from the
-      board's saved lists (ruling P2 says the backend parses; the real change
-      is two prefixes in `query.rs`);
+  What is real here: `TfDialog`, `QueryBox`, `Chips`, `Results`, `Row`, the
+  `Session`, the `>` palette, and every write (`create_link`, `save_link_set`,
+  `submit_write` for approve, merge, re-run; `open_checkout`, `clone_repo`,
+  the inbox and list writes) goes through the real IPC. Shortcuts, each
+  marked PROTOTYPE below:
+    - the `#x` tokens are read here and rewritten to `kind:` filters; `#l` and
+      `#i` are answered here from the board's saved lists and the shell's
+      inbox store (ruling P2 says the backend parses);
     - the Views and Sets groups are built here from `ticket_views` and
       `link_sets` (the real change indexes both in `knobas-search`);
-    - the "Search Docs for …" row stores its words and opens `#/docs`; the
-      Docs page does not read them yet;
-    - the sheet's actions are a fixed list per kind, not adapter-declared;
-    - `BoardNext.svelte` is `Board.svelte` without the lists block.
-
-  Round 3 (Björn, 2026-11-02): no `/` for a source and no sources strip on
-  the board; one-letter prefixes for the kinds he reaches for (`p r b m d i
-  l`, `t` as shipped); actions per kind that are real addresses or real
-  writes of the app (a PR's Files changed, a repo's compare page for a new
-  pull request, re-run, approve, ack, snooze, done, open the checkout,
-  clone); ⌘K while open gives the box its focus back when a click took it.
+    - `?` draws a card written here, not `syntax.json`;
+    - the compare page takes the head branch from its address; the base is
+      stashed in `sessionStorage`, which the page does not read yet;
+    - *Merge* is offered on every pull request; the real row follows the
+      source's declared `merge_pull_request` action, as the PR page does;
+    - the sheet's rows are a fixed list per kind, not adapter-declared;
+    - `BoardNext.svelte` is the recent items alone.
 
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
@@ -42,11 +45,13 @@
 
   import {
     ackAlert,
+    checkoutSettings,
     cloneRepo,
     completeInboxItem,
     createLink,
     createSmartList as defaultCreateSmartList,
     deleteSmartList as defaultDeleteSmartList,
+    entityView,
     filterSuggestions as defaultFilterSuggestions,
     launcherHome as defaultHome,
     ipcErrorMessage,
@@ -59,15 +64,12 @@
     submitWrite,
     ticketViews,
   } from "../../ipc";
-  import type { InboxItem } from "../../ipc/entity";
-  import { pickedMorning, tomorrowValue } from "../../inbox/inbox.svelte";
-  import { prHash } from "../../tf/pr/pr";
-  import { repoHash } from "../../tf/repo/repo";
-  import { clockLabel } from "../../time/format";
+  import type { CheckoutApplication, InboxItem, LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
   import type { LauncherHome, ResultGroup, SearchHit, SearchQuery, SearchResponse, SmartListSummary, TicketViewRow } from "../../ipc/search";
-  import type { LinkSetMemberKind, LinkSetRow } from "../../ipc/entity";
+  import type { MergeStyle } from "../../ipc/sources";
   import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
   import { drawn } from "../../detail/relations";
+  import { snoozePresets } from "../../inbox/inbox.svelte";
   import type { HealthPhase } from "../../shell/health.svelte";
   import { canBeTarget } from "../../shell/timer";
   import { push } from "../../shell/toasts.svelte";
@@ -75,11 +77,12 @@
   import { counted } from "../../tf/counted";
   import { opener, sentence } from "../../tf/inbox/inbox";
   import type { LinkTarget } from "../../tf/job/current.svelte";
+  import { prHash } from "../../tf/pr/pr";
+  import { branchOptions, compareHash, repoHash } from "../../tf/repo/repo";
   import { jobHash } from "../../tf/route";
   import TfDialog from "../../tf/settings/TfDialog.svelte";
-  import { keyOf } from "../../time/format";
+  import { clockLabel, keyOf } from "../../time/format";
   import Chips from "../Chips.svelte";
-  import Help from "../Help.svelte";
   import QueryBox from "../QueryBox.svelte";
   import Results from "../Results.svelte";
   import Row from "../Row.svelte";
@@ -115,17 +118,19 @@
     onclose: () => void;
     /** The chosen job (`breadcrumbJob`), which the sheet links to. */
     openEntity?: { entityId: string; label: string } | undefined;
-    /** Unused: the sheet writes the link itself, which is the thing being tried. Declared so `App.svelte` mounts both launchers alike. */
+    /** Unused: the sheet writes the link itself. Declared so `App.svelte` mounts both launchers alike. */
     onlink?: ((target: LinkTarget) => void) | undefined;
     ontimer: ((targetId: string, targetTitle: string) => void) | undefined;
     ports?: Partial<SessionPorts>;
     now?: Date | undefined;
   } = $props();
+  // Unused since the board is the recent items alone; kept so `App.svelte` mounts both launchers alike.
   // svelte-ignore state_referenced_locally
   void onlink;
-  // Unused since round 3: the board draws no source strip. Kept so `App.svelte` mounts both launchers alike.
   // svelte-ignore state_referenced_locally
   void runs;
+  // svelte-ignore state_referenced_locally
+  void today;
 
   // ---- PROTOTYPE: the local corpus the backend does not index yet ----------
 
@@ -134,20 +139,24 @@
   /** The saved lists, as the board read them; the board itself no longer draws them. */
   let lists = $state<SmartListSummary[]>([]);
   let listsLoaded = false;
+  /** Settings › Checkouts: the applications *Open in ⟨app⟩* offers, and the default's id. */
+  let apps = $state<CheckoutApplication[]>([]);
+  let defaultApp = $state<string | null>(null);
 
   async function loadLocal() {
-    try {
-      [views, sets] = await Promise.all([ticketViews(), linkSets()]);
-    } catch {
-      views = [];
-      sets = [];
+    const [v, s, c] = await Promise.allSettled([ticketViews(), linkSets(), checkoutSettings()]);
+    views = v.status === "fulfilled" ? v.value : [];
+    sets = s.status === "fulfilled" ? s.value : [];
+    if (c.status === "fulfilled") {
+      apps = c.value.applications;
+      defaultApp = c.value.default_application;
     }
   }
 
   // svelte-ignore state_referenced_locally
   const realHome = ports?.launcherHome ?? defaultHome;
 
-  /** The board without lists: the saved ones are kept aside for `l `, the built-ins are gone. */
+  /** The board without lists: the saved ones are kept aside for `#l`, the built-ins are gone. */
   async function homeNext(): Promise<LauncherHome> {
     const home = await realHome();
     lists = home.smart_lists.filter((list) => list.saved);
@@ -156,6 +165,7 @@
   }
 
   const BLANK = { updated_at: null, state: null, rank: 1, snippet: [] as SearchHit["snippet"] };
+  const NO_FILTERS = { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] };
 
   function viewGroup(needle: string, at: string): ResultGroup | null {
     const hits: SearchHit[] = views
@@ -187,9 +197,8 @@
     return hits.length === 0 ? null : { kind: "set", label: "Set", plural: "Sets", monogram: "LS", total: hits.length, hits };
   }
 
-  /** `l ⟨text⟩`: the saved lists whose name or description holds the text; `l` alone is all of them. */
-  function listsAnswer(text: string, at: string): SearchResponse {
-    const needle = text.toLowerCase();
+  /** `#l ⟨text⟩`: the saved lists whose name or description holds the text; all of them for no text. */
+  function listGroup(needle: string, at: string): ResultGroup | null {
     const hits: SearchHit[] = lists
       .filter((list) => `${list.label} ${list.description}`.toLowerCase().includes(needle))
       .map((list) => ({
@@ -201,13 +210,35 @@
         synced_at: at,
         path: list.needs_attention ? `${list.description} · needs attention` : `${list.description} · ${counted(list.count, "item", "items")}`,
       }));
-    return {
-      interpreted: { text, prefix: "list", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
-      groups: hits.length === 0 ? [] : [{ kind: "list", label: "Saved list", plural: "Saved lists", monogram: "LI", total: hits.length, hits }],
-      total: hits.length,
-      took_ms: 0,
-      coverage: [],
-    };
+    return hits.length === 0 ? null : { kind: "list", label: "Saved list", plural: "Saved lists", monogram: "LI", total: hits.length, hits };
+  }
+
+  /** Which inbox item a row stands for, by the row's id. */
+  const inboxKeys = new Map<string, string>();
+
+  /** `#i ⟨text⟩`: the inbox's lines holding the text, newest first; all of them for no text. */
+  function inboxGroup(needle: string, at: string): ResultGroup | null {
+    const items = inbox?.items ?? [];
+    inboxKeys.clear();
+    const seen = new Map<string, number>();
+    const hits: SearchHit[] = items
+      .filter((item) => `${sentence(item)} ${item.reason}`.toLowerCase().includes(needle))
+      .map((item) => {
+        // The row's key column is the line's time; the item's own key is kept aside.
+        const when = clockLabel(item.occurred_at, now ?? new Date(), true);
+        const n = (seen.get(when) ?? 0) + 1;
+        seen.set(when, n);
+        const id = `inbox:${when}${n > 1 ? ` (${n})` : ""}`;
+        inboxKeys.set(id, item.key);
+        return { ...BLANK, entity_id: id, kind: "inbox", source_id: item.source_id, title: sentence(item), synced_at: at, path: item.reason };
+      });
+    return hits.length === 0 ? null : { kind: "inbox", label: "Inbox line", plural: "Inbox", monogram: "IN", total: hits.length, hits };
+  }
+
+  function inboxItemOf(row: LauncherRow): InboxItem | null {
+    if (row.kind !== "hit" || row.hit.kind !== "inbox") return null;
+    const key = inboxKeys.get(row.hit.entity_id);
+    return key === undefined ? null : (inbox?.items.find((item) => item.key === key) ?? null);
   }
 
   function docsRow(response: SearchResponse, at: string): SearchResponse {
@@ -229,72 +260,59 @@
   // svelte-ignore state_referenced_locally
   const realSearch = ports?.search ?? defaultSearch;
 
-  /**
-   * The one-letter prefixes, `t ` style: a letter, a space, the words. Five
-   * are a kind the backend already filters on; `l` and `i` are answered here.
-   */
-  const KIND_OF: Record<string, string> = { d: "page", r: "repo", p: "pr", b: "build", m: "monitor" };
-  const KINDED = /^([drpbm])(?:\s+|$)/i;
-  const LISTS = /^l(?:\s+|$)/i;
-  const INBOX = /^i(?:\s+|$)/i;
+  /** `#x`: one letter after the hash is a kind; the backend filters on six, two are answered here. */
+  const KIND_OF: Record<string, string> = { t: "ticket", p: "pr", r: "repo", b: "build", m: "monitor", d: "page" };
+  const LOCAL = new Set(["l", "i"]);
+  const TOKEN = /^#([a-z])$/i;
 
-  /** `i ⟨text⟩`: the inbox's items whose sentence holds the text, newest first; `i` alone is all of them. */
-  function inboxAnswer(text: string, at: string): SearchResponse {
-    const needle = text.toLowerCase();
-    const items = inbox?.items ?? [];
-    // The row's key column is the line's time, as the board shows it; the item's own key is kept aside.
-    inboxKeys.clear();
-    const seen = new Map<string, number>();
-    const hits: SearchHit[] = items
-      .filter((item) => `${sentence(item)} ${item.reason}`.toLowerCase().includes(needle))
-      .map((item) => {
-        const when = clockLabel(item.occurred_at, now ?? new Date(), true);
-        const n = (seen.get(when) ?? 0) + 1;
-        seen.set(when, n);
-        const id = `inbox:${when}${n > 1 ? ` (${n})` : ""}`;
-        inboxKeys.set(id, item.key);
-        return { ...BLANK, entity_id: id, kind: "inbox", source_id: item.source_id, title: sentence(item), synced_at: at, path: item.reason };
-      });
-    return {
-      interpreted: { text, prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
-      groups: hits.length === 0 ? [] : [{ kind: "inbox", label: "Inbox item", plural: "Inbox", monogram: "IN", total: hits.length, hits }],
-      total: hits.length,
-      took_ms: 0,
-      coverage: [],
-    };
-  }
-
-  /** Which inbox item a row stands for, by the row's id. */
-  const inboxKeys = new Map<string, string>();
-
-  function inboxItemOf(row: LauncherRow): InboxItem | null {
-    if (row.kind !== "hit" || row.hit.kind !== "inbox") return null;
-    const key = inboxKeys.get(row.hit.entity_id);
-    return key === undefined ? null : (inbox?.items.find((item) => item.key === key) ?? null);
-  }
-
-  /** The search port with the prototype's additions layered over the real answer. */
+  /** The search port with the prototype's grammar read first and its groups layered over the real answer. */
   async function searchNext(query: SearchQuery): Promise<SearchResponse> {
     const raw = query.raw.trim();
     const at = (now ?? new Date()).toISOString();
-    // PROTOTYPE: the frontend reads grammar here, against ruling P2.
-    if (LISTS.test(raw)) {
-      // The board's read may still be in flight on the first keystroke.
-      if (!listsLoaded) await homeNext();
-      return listsAnswer(raw.replace(LISTS, "").trim(), at);
+    if (raw.startsWith("?")) {
+      return { interpreted: { text: "", prefix: "help", filters: NO_FILTERS, unknown_tokens: [] }, groups: [], total: 0, took_ms: 0, coverage: [] };
     }
-    if (INBOX.test(raw)) return inboxAnswer(raw.replace(INBOX, "").trim(), at);
-    const letter = KINDED.exec(raw)?.[1]?.toLowerCase();
-    const kind = letter ? KIND_OF[letter] : undefined;
-    const sent = kind ? { ...query, raw: raw.replace(KINDED, `kind:${kind} `) } : query;
-    const response = await realSearch(sent);
-    if (kind === "page") return docsRow(response, at);
-    if (response.interpreted.prefix !== null) return response;
-    const needle = response.interpreted.text.trim().toLowerCase();
-    if (needle === "") return response;
-    const local = [viewGroup(needle, at), setGroup(needle, at)].filter((group): group is ResultGroup => group !== null);
-    if (local.length === 0) return response;
-    return { ...response, groups: [...local, ...response.groups], total: response.total + local.reduce((n, group) => n + group.total, 0) };
+    // PROTOTYPE: the frontend reads grammar here, against ruling P2.
+    const kinds: string[] = [];
+    const local: string[] = [];
+    const rest: string[] = [];
+    for (const token of raw.split(/\s+/).filter(Boolean)) {
+      const letter = TOKEN.exec(token)?.[1]?.toLowerCase();
+      if (letter && KIND_OF[letter]) kinds.push(KIND_OF[letter]);
+      else if (letter && LOCAL.has(letter)) local.push(letter);
+      else rest.push(token);
+    }
+    const text = rest.join(" ");
+    const needle = text.toLowerCase();
+    const localGroups: ResultGroup[] = [];
+    if (local.includes("l")) {
+      if (!listsLoaded) await homeNext();
+      const group = listGroup(needle, at);
+      if (group) localGroups.push(group);
+    }
+    if (local.includes("i")) {
+      const group = inboxGroup(needle, at);
+      if (group) localGroups.push(group);
+    }
+    if (kinds.length === 0 && local.length > 0) {
+      return {
+        interpreted: { text, prefix: null, filters: NO_FILTERS, unknown_tokens: [] },
+        groups: localGroups,
+        total: localGroups.reduce((n, group) => n + group.total, 0),
+        took_ms: 0,
+        coverage: [],
+      };
+    }
+    const sent = kinds.length === 0 ? query : { ...query, raw: [...kinds.map((kind) => `kind:${kind}`), text].join(" ") };
+    let response = await realSearch(sent);
+    if (kinds.length === 1 && kinds[0] === "page") response = docsRow(response, at);
+    if (localGroups.length > 0) {
+      response = { ...response, groups: [...response.groups, ...localGroups], total: response.total + localGroups.reduce((n, group) => n + group.total, 0) };
+    }
+    if (kinds.length > 0 || local.length > 0 || response.interpreted.prefix !== null || needle === "") return response;
+    const found = [viewGroup(needle, at), setGroup(needle, at)].filter((group): group is ResultGroup => group !== null);
+    if (found.length === 0) return response;
+    return { ...response, groups: [...found, ...response.groups], total: response.total + found.reduce((n, group) => n + group.total, 0) };
   }
 
   // svelte-ignore state_referenced_locally
@@ -313,7 +331,39 @@
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
 
-  // ---- the sheet: what the second ⌘K opens -------------------------------
+  // ---- the `?` card: this grammar, written here --------------------------
+
+  interface HelpEntry {
+    token: string;
+    insert: string;
+    summary: string;
+  }
+  const HELP: HelpEntry[] = [
+    { token: "#t", insert: "#t ", summary: "tickets · #t sepa" },
+    { token: "#p", insert: "#p ", summary: "pull requests" },
+    { token: "#r", insert: "#r ", summary: "repositories" },
+    { token: "#b", insert: "#b ", summary: "builds" },
+    { token: "#m", insert: "#m ", summary: "monitors" },
+    { token: "#d", insert: "#d ", summary: "pages, with a last row that searches the Docs area" },
+    { token: "#l", insert: "#l ", summary: "your saved lists; Enter applies one's filters here" },
+    { token: "#i", insert: "#i ", summary: "the inbox, newest first" },
+    { token: "#t #l", insert: "#t #l ", summary: "any of them together · #t #l sepa" },
+    { token: "#PAY-231", insert: "#", summary: "a ticket by its key" },
+    { token: ">", insert: "> ", summary: "go to a page of the app" },
+    { token: "@me", insert: "@me ", summary: "what your accounts wrote · @jonas for one person" },
+    { token: "t", insert: "t ", summary: "time: worklogs and the day" },
+    { token: "?", insert: "?", summary: "this card" },
+  ];
+  const KEYS: [string, string][] = [
+    ["↵", "open the row; a saved list applies its filters here"],
+    ["Tab", "the row's actions, narrowed by what you type; Esc brings the search back"],
+    ["⌘S", "save the search as a list"],
+    ["Esc", "clear the box, then close"],
+  ];
+  let helpSelected = $state(0);
+  const helpMode = $derived(session.response?.interpreted.prefix === "help");
+
+  // ---- the sheet: what Tab opens -----------------------------------------
 
   const RELATIONS: { id: string; label: string }[] = [
     { id: "related", label: "related" },
@@ -333,15 +383,33 @@
     run: () => void | Promise<void>;
   }
 
+  /** One step of a flow: what the sheet asks, and the choices the box narrows, given the picks so far. */
+  interface Step {
+    title: string;
+    choices: (picks: string[]) => Promise<SheetItem[]>;
+  }
+
+  /** A flow: steps asked in order, each pick kept; `finish` runs with all of them. */
+  interface Flow {
+    /** Which flow an answer belongs to: `sheet.flow` is a reactive proxy, so identity cannot say. */
+    id: number;
+    steps: Step[];
+    picks: string[];
+    finish: (picks: string[]) => void | Promise<void>;
+    /** The current step's choices once read; `null` while reading. */
+    choices: SheetItem[] | null;
+  }
+
   interface Sheet {
     rowId: string;
     row: LauncherRow;
     title: string;
     selected: number;
     relation: number;
-    /** `sets` picks a set; `rename` holds the field for a saved list's new name. */
-    level: "root" | "sets" | "rename";
-    /** What the box holds while the sheet is open: the fuzzy filter over its actions, or the new name. The search words wait in `session.raw`. */
+    /** `flow` asks the box for a pick; `rename` for a saved list's new name. */
+    level: "root" | "flow" | "rename";
+    flow: Flow | null;
+    /** What the box holds while the sheet is open: the filter, a pick's filter, or the new name. The search words wait in `session.raw`. */
     filter: string;
   }
 
@@ -413,14 +481,7 @@
     };
     if (member) draft.members.push({ kind: member, entity_id: entity.entityId });
     else draft.rules.push({ kind: "manual", value: entity.entityId });
-    try {
-      await saveLinkSet(draft);
-      push({ text: member ? `Added ${entity.title} to ${set.name}` : `${set.name} now shows on ${keyOf(entity.entityId)}` });
-      close();
-    } catch (cause) {
-      sheet = null;
-      session.error = ipcErrorMessage(cause);
-    }
+    await doing(member ? `Added ${entity.title} to ${set.name}` : `${set.name} now shows on ${keyOf(entity.entityId)}`, () => saveLinkSet(draft));
   }
 
   /** A write that answers at once, said in the toast; the launcher closes either way the write went. */
@@ -445,7 +506,6 @@
     close();
   }
 
-  /** A saved list's rename, committed from the sheet's field: the lists are re-read and the `l ` answer redrawn. */
   async function renameList(id: string, name: string) {
     const label = name.trim();
     sheet = null;
@@ -463,6 +523,72 @@
     await session.loadHome();
     session.set(session.raw);
     box?.focus();
+  }
+
+  /** Start a flow in the sheet: the first step's choices are read and the box narrows them. */
+  let flows = 0;
+  function startFlow(steps: Step[], finish: Flow["finish"]) {
+    if (!sheet) return;
+    const flow: Flow = { id: ++flows, steps, picks: [], finish, choices: null };
+    sheet = { ...sheet, level: "flow", flow, filter: "", selected: 0 };
+    void readStep(flow);
+  }
+
+  async function readStep(flow: Flow) {
+    const step = flow.steps[flow.picks.length];
+    if (!step) return;
+    try {
+      const choices = await step.choices(flow.picks);
+      if (sheet?.flow?.id === flow.id && sheet.flow.picks.length === flow.picks.length) sheet = { ...sheet, flow: { ...flow, choices } };
+    } catch (cause) {
+      sheet = null;
+      session.error = ipcErrorMessage(cause);
+    }
+  }
+
+  /** Take `pick` for the current step: the next step's choices, or the finish. */
+  function pick(flow: Flow, value: string) {
+    const picks = [...flow.picks, value];
+    if (picks.length >= flow.steps.length) {
+      sheet = null;
+      void flow.finish(picks);
+      return;
+    }
+    const next: Flow = { ...flow, picks, choices: null };
+    if (sheet) sheet = { ...sheet, flow: next, filter: "", selected: 0 };
+    void readStep(next);
+  }
+
+  /** One step over fixed choices, each `id` the pick. */
+  const fixed = (title: string, items: { id: string; label: string; detail: string }[]): Step => ({
+    title,
+    choices: () => Promise.resolve(items.map((item) => ({ ...item, run: () => {} }))),
+  });
+
+  /** The branches of a repository, from its view's Branches section, the default first; `except` names the pick to leave out. */
+  const branchesOf = (repoId: string, title: string, except?: (picks: string[]) => string | undefined): Step => ({
+    title,
+    choices: async (picks) => {
+      const view = await entityView(repoId, "branches");
+      const skip = except?.(picks);
+      return branchOptions(view?.sections[0] ?? null)
+        .filter((option) => option.name !== skip)
+        .map((option) => ({ id: option.name, label: option.name, detail: option.isDefault ? "the default branch" : "", run: () => {} }));
+    },
+  });
+
+  /** *Open in ⟨app⟩*: one row per application configured under Settings › Checkouts, the default first. */
+  function openInRows(entity: Entity, where: string): SheetItem[] {
+    const ordered = [...apps].sort((left, right) => Number(right.id === defaultApp) - Number(left.id === defaultApp));
+    if (ordered.length === 0) {
+      return [{ id: "open-default", label: "Open in editor", detail: where, run: () => doing(`Opened ${entity.title}`, () => openCheckout(entity.entityId)) }];
+    }
+    return ordered.map((app) => ({
+      id: `open-${app.id}`,
+      label: `Open in ${app.name}`,
+      detail: where,
+      run: () => doing(`Opened ${entity.title} in ${app.name}`, () => openCheckout(entity.entityId, { application: app.id })),
+    }));
   }
 
   /** The sheet's rows for `row`, in the order they are drawn. Empty: no sheet. */
@@ -512,9 +638,15 @@
       }
       items.push({
         id: "snooze",
-        label: "Snooze until tomorrow 9:00",
-        detail: "Back in the inbox then",
-        run: () => doing(`Snoozed ${item.title}`, () => snoozeInboxItem(item.key, (pickedMorning(tomorrowValue(now ?? new Date()), now) ?? new Date()).toISOString())),
+        label: "Snooze…",
+        detail: "Until tomorrow morning, or next Monday",
+        run: () => {
+          const presets = snoozePresets(now ?? new Date());
+          startFlow(
+            [fixed("Snooze until", presets.map((preset) => ({ id: preset.at.toISOString(), label: preset.label, detail: preset.at.toLocaleString() })))],
+            ([until]) => doing(`Snoozed ${item.title}`, () => snoozeInboxItem(item.key, until ?? "")),
+          );
+        },
       });
       items.push({ id: "done", label: "Done", detail: "Leaves the inbox", run: () => doing(`Done: ${item.title}`, () => completeInboxItem(item.key)) });
       return items;
@@ -536,13 +668,21 @@
           id: "set",
           label: member ? "Add to a set…" : `Show a set on ${key}…`,
           detail: member ? "A fixed member, shown on every ticket the set applies to" : "The set's members appear on this ticket",
-          run: () => { if (sheet) sheet = { ...sheet, level: "sets", selected: 0, filter: "" }; },
+          run: () =>
+            startFlow(
+              [fixed(member ? "Add to" : `Show on ${key}`, sets.map((set) => ({ id: set.id, label: set.name, detail: set.description })))],
+              ([setId]) => {
+                const set = sets.find((candidate) => candidate.id === setId);
+                if (set) void putInSet(set, entity);
+              },
+            ),
         });
       }
     }
-    if (ontimer && canBeTarget({ entityId: id })) {
+    // A ticket's own: the timer, which also makes it the job (the shell does that), and the job itself.
+    if (entity.kind === "ticket" && ontimer && canBeTarget({ entityId: id })) {
       const start = ontimer;
-      items.push({ id: "timer", label: "Start timer", detail: "Stops the running one first", run: () => { start(id, entity.title); close(); } });
+      items.push({ id: "timer", label: "Start timer", detail: `Stops the running one first; ${key} becomes the job`, run: () => { start(id, entity.title); close(); } });
     }
     // Then what the kind can do: a real address of the app, or a real write.
     const go = (hash: string) => () => { close(); onnavigate(hash); };
@@ -554,13 +694,43 @@
         items.push({ id: "diff", label: "Review the files", detail: "Files changed", run: go(prHash(id, "diff")) });
         items.push({ id: "talk", label: "Conversation", detail: "The review thread", run: go(prHash(id, "conversation")) });
         items.push({ id: "approve", label: "Approve", detail: "Queued as a write to the source", run: () => doing(`Approval queued for ${entity.title}`, () => submitWrite({ Approve: { entity: id, body: "" } })) });
-        items.push({ id: "editor", label: "Open in editor", detail: "The checkout, at this pull request's branch", run: () => doing(`Opened ${entity.title} in the editor`, () => openCheckout(id)) });
+        items.push({
+          id: "merge",
+          label: "Merge…",
+          detail: "Pick the style; queued as a write to the source",
+          run: () =>
+            startFlow(
+              [
+                fixed("Merge as", [
+                  { id: "merge", label: "Merge commit", detail: "Keeps every commit and adds one" },
+                  { id: "squash", label: "Squash", detail: "One commit on the base" },
+                  { id: "rebase", label: "Rebase", detail: "The commits replayed on the base" },
+                ]),
+              ],
+              ([style]) => doing(`Merge queued for ${entity.title}`, () => submitWrite({ MergePullRequest: { entity: id, style: (style ?? "merge") as MergeStyle, delete_branch: false } })),
+            ),
+        });
+        items.push(...openInRows(entity, "The checkout, at this pull request's branch"));
         break;
       case "repo":
-        items.push({ id: "newpr", label: "Create pull request", detail: "The compare page: pick the branch, open the request", run: go(repoHash(id, "compare")) });
+        items.push({
+          id: "newpr",
+          label: "Create pull request…",
+          detail: "Pick the branch with the change, then the branch it goes into",
+          run: () =>
+            startFlow(
+              [branchesOf(id, "From branch"), branchesOf(id, "Into branch", (picks) => picks[0])],
+              ([from, into]) => {
+                // PROTOTYPE: the compare page takes the head from its address; the base waits here for the page to learn to read it.
+                sessionStorage.setItem("knobas.prototype.compare-base", into ?? "");
+                close();
+                onnavigate(compareHash(id, from ?? ""));
+              },
+            ),
+        });
         items.push({ id: "prs", label: "Pull requests", detail: "Open ones first", run: go(repoHash(id, "prs")) });
         items.push({ id: "branches", label: "Branches", detail: "Every branch and where it stands", run: go(repoHash(id, "branches")) });
-        items.push({ id: "editor", label: "Open in editor", detail: "The checkout under the clones root", run: () => doing(`Opened ${entity.title} in the editor`, () => openCheckout(id)) });
+        items.push(...openInRows(entity, "The checkout under the clones root"));
         items.push({ id: "clone", label: "Clone", detail: "Into a new folder under the clones root", run: () => doing(`Cloning ${entity.title}`, () => cloneRepo(id)) });
         break;
       case "build":
@@ -571,7 +741,7 @@
         break;
       case "commit":
       case "branch":
-        items.push({ id: "editor", label: "Open in editor", detail: "The checkout, at this point", run: () => doing(`Opened ${entity.title} in the editor`, () => openCheckout(id)) });
+        items.push(...openInRows(entity, "The checkout, at this point"));
         break;
       default:
     }
@@ -579,13 +749,6 @@
     else items.push({ id: "copy", label: "Copy title", detail: entity.title, run: () => void copy(entity.title, "Copied the title") });
     return items;
   }
-
-  const setItems = $derived.by((): SheetItem[] => {
-    if (!sheet) return [];
-    const entity = entityOf(sheet.row);
-    if (!entity) return [];
-    return sets.map((set) => ({ id: `set:${set.id}`, label: set.name, detail: set.description, run: () => putInSet(set, entity) }));
-  });
 
   /**
    * The fuzzy filter: every typed character in order, somewhere in the label
@@ -608,15 +771,22 @@
     return scored.sort((left, right) => left.score - right.score).map((entry) => entry.item);
   }
 
-  /** The first level, derived live: the chosen job and the sets can arrive after the sheet opened. */
+  /** The first level, derived live: the chosen job, the sets and the applications can arrive after the sheet opened. */
   const rootItems = $derived(sheet ? itemsFor(sheet.row) : []);
-  const shown = $derived(sheet ? fuzzy(sheet.level === "sets" ? setItems : rootItems, sheet.filter) : []);
+  const shown = $derived(sheet ? fuzzy(sheet.level === "flow" ? (sheet.flow?.choices ?? []) : rootItems, sheet.filter) : []);
+  const step = $derived(sheet?.flow ? sheet.flow.steps[sheet.flow.picks.length] : undefined);
 
   function openSheet() {
     const row = session.current;
     if (!row) return;
     if (itemsFor(row).length === 0) return;
-    sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root", filter: "" };
+    sheet = { rowId: row.id, row, title: nameOf(row), selected: 0, relation: 0, level: "root", flow: null, filter: "" };
+  }
+
+  /** Leave the sheet: the box shows the search words again, untouched. */
+  function leaveSheet() {
+    sheet = null;
+    box?.focus();
   }
 
   // The sheet belongs to one row: moving off it closes it.
@@ -624,15 +794,17 @@
     if (sheet && session.current?.id !== sheet.rowId) sheet = null;
   });
 
-  // ---- ids, scrolling, the board's extras, the `>` palette ---------------
+  // ---- ids, scrolling, the `>` palette -----------------------------------
 
   const uid = $props.id();
   const optionId = (index: number) => `${uid}-opt-${index}`;
   const sheetOptionId = (index: number) => `${uid}-sheet-${index}`;
+  const helpOptionId = (index: number) => `${uid}-help-${index}`;
   const resultsId = `${uid}-results`;
   const sheetId = `${uid}-sheet`;
 
   const activeOption = $derived.by(() => {
+    if (helpMode) return helpOptionId(helpSelected);
     const row = session.current;
     if (!row || session.error) return undefined;
     return optionId(session.selected);
@@ -647,8 +819,9 @@
     if (sheet) document.getElementById(sheetOptionId(sheet.selected))?.scrollIntoView?.({ block: "nearest" });
   });
 
+  // The board is the recent items alone: no inbox rows, no time row.
   $effect.pre(() => {
-    session.extras = { inbox: inbox ?? null, today: today ?? null };
+    session.extras = { inbox: null, today: null };
   });
 
   $effect(() => {
@@ -667,11 +840,11 @@
     }
   });
 
-  // The inbox store seeds after the shell mounts: an `i` typed before that is asked again once it has.
+  // The inbox store seeds after the shell mounts: an `#i` typed before that is asked again once it has.
   let inboxSeen = 0;
   $effect(() => {
     const count = inbox?.items.length ?? 0;
-    if (count > 0 && inboxSeen === 0 && open && INBOX.test(session.raw.trim())) session.set(session.raw);
+    if (count > 0 && inboxSeen === 0 && open && /(^|\s)#i(\s|$)/i.test(session.raw)) session.set(session.raw);
     inboxSeen = count;
   });
 
@@ -679,7 +852,7 @@
   const params = new URLSearchParams(location.search);
   let autoSheet = params.has("launcher-sheet");
   $effect(() => {
-    if (autoSheet && open && session.mode === "results" && session.response && !sheet) {
+    if (autoSheet && open && session.mode === "results" && session.response && session.response.groups.length > 0 && !sheet) {
       autoSheet = false;
       session.selected = Number(params.get("launcher-sheet") || 0);
       openSheet();
@@ -690,20 +863,9 @@
     function onkeydown(event: KeyboardEvent) {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (!open) {
-          open = true;
-          return;
-        }
-        // A click on a chip or a row took the focus: the first ⌘K only gives it back.
-        if (!document.activeElement?.closest(".tf-ln-q")) {
-          box?.focus();
-          return;
-        }
-        if (sheet) {
-          leaveSheet();
-        } else {
-          openSheet();
-        }
+        // Opens; while open it only gives the box its focus back, wherever a click left it.
+        if (!open) open = true;
+        else box?.focus();
       }
     }
     window.addEventListener("keydown", onkeydown);
@@ -780,7 +942,7 @@
     onnavigate(hash);
   }
 
-  /** ⌘S: the query becomes a saved list, from either panel. `true` when the key was taken. */
+  /** ⌘S: the query becomes a saved list. `true` when the key was taken. */
   function saveKey(event: KeyboardEvent): boolean {
     if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "s") return false;
     event.preventDefault();
@@ -791,11 +953,7 @@
     return true;
   }
 
-  /** Leave the sheet: the box shows the search words again, untouched. */
-  function leaveSheet() {
-    sheet = null;
-    box?.focus();
-  }
+  const listId = $derived(sheet?.row.kind === "hit" && sheet.row.hit.kind === "list" ? keyOf(sheet.row.hit.entity_id) : null);
 
   function sheetKey(event: KeyboardEvent, current: Sheet) {
     if (current.level === "rename") {
@@ -823,33 +981,64 @@
       case "ArrowLeft":
         if (items[current.selected]?.link) {
           event.preventDefault();
-          const step = event.key === "ArrowRight" ? 1 : -1;
-          current.relation = (current.relation + step + RELATIONS.length) % RELATIONS.length;
+          const stepBy = event.key === "ArrowRight" ? 1 : -1;
+          current.relation = (current.relation + stepBy + RELATIONS.length) % RELATIONS.length;
         }
         return;
-      case "Enter":
+      case "Enter": {
         event.preventDefault();
-        void items[current.selected]?.run();
+        const chosen = items[current.selected];
+        if (!chosen) return;
+        if (current.level === "flow" && current.flow) {
+          void chosen.run();
+          pick(current.flow, chosen.id);
+        } else {
+          void chosen.run();
+        }
         return;
+      }
       case "Tab":
         event.preventDefault();
         leaveSheet();
         return;
       case "Escape":
-        // Never the dialog's: the set level goes back to the root, the root back to the results.
+        // Never the dialog's: a flow goes back to the row's actions, the actions back to the search.
         event.preventDefault();
         event.stopPropagation();
-        if (current.level === "sets") sheet = { ...current, level: "root", filter: "", selected: Math.max(0, rootItems.findIndex((item) => item.id === "set")) };
+        if (current.level === "flow") sheet = { ...current, level: "root", flow: null, filter: "", selected: 0 };
         else leaveSheet();
         return;
       case "Backspace":
-        // An empty box and one more Backspace: back to the results, the words still there.
+        // An empty box and one more Backspace: a step back, or back to the results with the words still there.
         if (current.filter === "") {
           event.preventDefault();
-          leaveSheet();
+          if (current.level === "flow") sheet = { ...current, level: "root", flow: null, selected: 0 };
+          else leaveSheet();
         }
         return;
       default:
+    }
+  }
+
+  function helpKey(event: KeyboardEvent): boolean {
+    if (!helpMode) return false;
+    switch (event.key) {
+      case "ArrowDown":
+        event.preventDefault();
+        helpSelected = Math.min(HELP.length - 1, helpSelected + 1);
+        return true;
+      case "ArrowUp":
+        event.preventDefault();
+        helpSelected = Math.max(0, helpSelected - 1);
+        return true;
+      case "Enter": {
+        event.preventDefault();
+        const entry = HELP[helpSelected];
+        if (entry) session.set(entry.insert);
+        return true;
+      }
+      default:
+        return false;
     }
   }
 
@@ -859,6 +1048,7 @@
       sheetKey(event, sheet);
       return;
     }
+    if (helpKey(event)) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -892,23 +1082,23 @@
     sheet
       ? sheet.level === "rename"
         ? "The list's new name"
-        : `Narrow the actions on ${sheet.title}`
-      : "Search everything · ? lists the prefixes · > # @ p r b m d i l t",
+        : sheet.level === "flow"
+          ? (step?.title ?? "")
+          : `Narrow the actions on ${sheet.title}`
+      : "? for help",
   );
   const interpreted = $derived(session.response?.interpreted ?? null);
-  const sheetHint = $derived.by(() => {
-    const row = session.current;
-    if (!row || sheet) return null;
-    return itemsFor(row).length > 0 ? nameOf(row) : null;
-  });
-  const pinned = $derived(sheet ? entityOf(sheet.row) : null);
   const pinnedHit = $derived.by(() => {
     if (!sheet) return null;
     if (sheet.row.kind === "hit") return sheet.row.hit;
     if (sheet.row.kind === "recent") return { ...sheet.row.row, snippet: [] };
     return null;
   });
-  const listId = $derived(sheet?.row.kind === "hit" && sheet.row.hit.kind === "list" ? keyOf(sheet.row.hit.entity_id) : null);
+  /** What the footer says Tab would open: the word alone, as asked, once a row with actions is under the cursor. */
+  const tabHint = $derived.by(() => {
+    const row = session.current;
+    return row !== null && !sheet && !helpMode && itemsFor(row).length > 0;
+  });
 </script>
 
 {#if open}
@@ -931,7 +1121,7 @@
       />
 
       {#if sheet}
-        <!-- The row the sheet acts on, lifted under the box; the box keeps its words. -->
+        <!-- The row the sheet acts on, lifted under the box; the box keeps its words aside. -->
         <div class="pinned">
           {#if pinnedHit}
             <Row
@@ -958,8 +1148,14 @@
         {:else}
           <!-- Keys from a clicked chip land here first, so Esc never reaches the dialog; a click gives the box its focus back. -->
           <div id={sheetId} class="sheet" role="listbox" tabindex="-1" aria-label="Actions on {sheet.title}" {onkeydown} onclick={() => box?.focus()}>
-            {#if sheet.level === "sets"}
-              <div class="tf-ln-h"><span class="tf-ln-lab">{pinned && memberKindOf(pinned.kind) ? "Add to" : "Show on this ticket"}</span></div>
+            {#if sheet.level === "flow" && sheet.flow}
+              <div class="tf-ln-h">
+                <span class="tf-ln-lab">{step?.title ?? ""}</span>
+                {#if sheet.flow.picks.length > 0}<span class="tf-ln-n">{sheet.flow.picks.join(" → ")}</span>{/if}
+              </div>
+              {#if sheet.flow.choices === null}
+                <p class="tf-ln-none">Reading…</p>
+              {/if}
             {/if}
             {#each shown as item, index (item.id)}
               {#if index > 0 && sheet.level === "root" && sheet.filter === "" && (item.id === "copy" || ["link", "set", "timer"].includes(shown[index - 1]?.id ?? "") !== ["link", "set", "timer"].includes(item.id))}
@@ -997,7 +1193,14 @@
                   class:tf-ln-on={index === sheet.selected}
                   role="option"
                   aria-selected={index === sheet.selected}
-                  onclick={() => void item.run()}
+                  onclick={() => {
+                    if (sheet?.level === "flow" && sheet.flow) {
+                      void item.run();
+                      pick(sheet.flow, item.id);
+                    } else {
+                      void item.run();
+                    }
+                  }}
                   onmouseenter={() => sheet && (sheet.selected = index)}
                 >
                   <span class="tf-ln-nm">{item.label}</span>
@@ -1005,11 +1208,37 @@
                 </button>
               {/if}
             {/each}
-            {#if shown.length === 0}
-              <p class="tf-ln-none">No action matches “{sheet.filter}”.</p>
+            {#if shown.length === 0 && !(sheet.level === "flow" && sheet.flow?.choices === null)}
+              <p class="tf-ln-none">{sheet.filter === "" ? "Nothing to pick here." : `Nothing matches “${sheet.filter}”.`}</p>
             {/if}
           </div>
         {/if}
+      {:else if helpMode}
+        <div class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Help">
+          <div class="tf-ln-h"><span class="tf-ln-lab">Narrow the search</span><span class="tf-ln-n">a row inserts itself</span></div>
+          <div class="tf-ln-help">
+            {#each HELP as entry, i (entry.token)}
+              <button
+                id={helpOptionId(i)}
+                class="tf-ln-opt tf-ln-syn"
+                class:tf-ln-on={i === helpSelected}
+                role="option"
+                aria-selected={i === helpSelected}
+                onclick={() => { session.set(entry.insert); box?.focus(); }}
+                onmouseenter={() => (helpSelected = i)}
+              >
+                <span class="tf-ln-tok">{entry.token}</span>
+                <span class="tf-ln-s">{entry.summary}</span>
+              </button>
+            {/each}
+          </div>
+          <div class="tf-ln-h"><span class="tf-ln-lab">Keys</span></div>
+          <div class="tf-ln-help">
+            {#each KEYS as [key, what] (key)}
+              <p class="tf-ln-opt tf-ln-syn keyrow"><kbd>{key}</kbd><span class="tf-ln-s">{what}</span></p>
+            {/each}
+          </div>
+        </div>
       {:else}
         {#if interpreted}
           <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
@@ -1028,7 +1257,6 @@
             {#if session.home}
               <BoardNext
                 home={session.home}
-                inboxCount={inbox?.count ?? 0}
                 sources={health}
                 rows={session.rows}
                 selected={session.selected}
@@ -1040,8 +1268,6 @@
             {:else}
               <p class="tf-ln-none">Reading the mirror…</p>
             {/if}
-          {:else if session.mode === "help"}
-            <Help rows={session.rows} selected={session.selected} {optionId} onopen={activate} onhover={(index) => (session.selected = index)} />
           {:else if session.mode === "actions"}
             <div class="tf-ln-h"><span class="tf-ln-lab">Go to</span></div>
             {#each session.rows as row, i (row.id)}
@@ -1063,10 +1289,8 @@
             {#if session.rows.length === 0}
               <p class="tf-ln-none">No action matches.</p>
             {/if}
-          {:else if session.response && session.response.interpreted.prefix === "list" && session.response.groups.length === 0}
-            <p class="tf-ln-none">{lists.length === 0 ? "No saved list yet. Search for something and press ⌘S." : "No saved list matches."}</p>
-          {:else if session.response && INBOX.test(session.raw.trim()) && session.response.groups.length === 0}
-            <p class="tf-ln-none">{(inbox?.items.length ?? 0) === 0 ? "The inbox is empty." : "No inbox line matches."}</p>
+          {:else if session.response && session.response.groups.length === 0 && /(^|\s)#[li](\s|$)/i.test(session.raw) && session.response.interpreted.filters.kinds.length === 0}
+            <p class="tf-ln-none">Nothing in your lists or the inbox matches.</p>
           {:else if session.response}
             <Results
               response={session.response}
@@ -1089,22 +1313,22 @@
       {#if sheet}
         <span><kbd>↑↓</kbd> move</span>
         {#if shown[sheet.selected]?.link}<span><kbd>←→</kbd> relation</span>{/if}
-        <span><kbd>↵</kbd> {shown[sheet.selected]?.link ? "link" : "do it"}</span>
+        <span><kbd>↵</kbd> {shown[sheet.selected]?.link ? "link" : sheet.level === "flow" ? "pick" : "do it"}</span>
         <span><kbd>Esc</kbd> {sheet.level === "root" ? "back to the search" : "back"}</span>
         <span class="tf-spacer"></span>
-        <span class="tf-ln-took">{sheet.title} · {counted(shown.length, "action", "actions")}</span>
+        <span class="tf-ln-took">{sheet.title}{#if sheet.level === "flow"} · {step?.title ?? ""}{:else} · {counted(shown.length, "action", "actions")}{/if}</span>
       {:else}
         <span><kbd>↑↓</kbd> move</span>
         <span><kbd>↵</kbd> open</span>
-        {#if sheetHint}
-          <span><kbd>⌘K</kbd> actions on {sheetHint}</span>
+        {#if tabHint}
+          <span><kbd>Tab</kbd> actions</span>
         {/if}
         {#if session.canSave}
           <span><kbd>⌘S</kbd> {session.savedId === null ? "save as list" : "saved as list"}</span>
         {/if}
         <span><kbd>Esc</kbd> back one step</span>
         <span class="tf-spacer"></span>
-        {#if session.response}
+        {#if session.response && !helpMode}
           <span class="tf-ln-took">{session.response.total} matches · {session.response.took_ms} ms</span>
         {/if}
       {/if}
@@ -1114,6 +1338,8 @@
 
 <style>
   /* PROTOTYPE rules. The shipped ones are `tf/css/launcher.css`; these would join them. */
+  /* The box's own ⌘K badge is gone (Björn, round 4); `QueryBox.svelte` would lose the element. */
+  :global(.tf-launch .tf-ln-q > kbd) { display: none; }
   .pinned { flex: none; border-bottom: 1px solid var(--rule); }
   .lead { padding: 10px 18px; font-size: var(--t-sm); color: var(--ink); }
   .sheet { flex: 1; min-height: 0; overflow: auto; padding: 0 0 4px; outline: none; }
@@ -1132,4 +1358,6 @@
   }
   .rel button:hover { border-color: var(--ink-2); color: var(--ink); }
   .rel .pick, .rel .pick:hover { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+  .keyrow { cursor: default; }
+  .keyrow kbd { justify-self: center; }
 </style>
