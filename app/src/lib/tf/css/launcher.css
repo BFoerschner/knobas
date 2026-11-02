@@ -1,9 +1,7 @@
 /* ---------- the ⌘K launcher (#1422): prototype-6's `.dialog.launch`, on TfDialog ----------
-   Wider than the prototype's 620 px: its launcher is a kind/title/source list, and this one also
-   draws the provenance column, the board and a box whose placeholder names five prefixes. Rules on
+   Wider than the prototype's 620 px: a box whose placeholder names the grammar, and three-cell rows. Rules on
    a button or an input name `.tf` too, or `.tf button { font: inherit; color: inherit }` wins. The height is fixed so the box does not jump as
-   answers replace each other. Mono only on a result row's key and path; everything else is
-   Archivo, counts with tabular figures. */
+   answers replace each other. Mono only on a ticket's key; everything else is Archivo. */
 .tf-dialog.tf-launch { width: min(840px, calc(100vw - 32px)); height: min(588px, 84vh); }
 /* The title names the dialog for a screen reader; the prototype draws no header. */
 .tf-launch > header {
@@ -14,21 +12,17 @@
   justify-content: flex-start; align-items: center; gap: 14px; padding: 7px 18px;
   font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden;
 }
-.tf-ln-took { font-variant-numeric: tabular-nums; }
 
-/* The box: borderless 17 px over a bottom rule. The bar at its left is the only "loading" sign. */
+/* The box: borderless 17 px over a bottom rule, and the close button (#2421: no footnote, badge or bar). */
 .tf-ln-q { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; border-bottom: 1px solid var(--rule); flex: none; }
-.tf-ln-caret { width: 3px; height: 26px; background: var(--ink); flex: none; }
-.tf-ln-caret.tf-ln-pending { background: var(--rule); }
 .tf .tf-ln-q input {
-  flex: 1; min-width: 120px; padding: 16px 0 16px 15px; font-size: var(--t-xl); color: var(--ink); background: var(--sheet);
+  flex: 1; min-width: 120px; padding: 16px 0 16px 18px; font-size: var(--t-xl); color: var(--ink); background: var(--sheet);
   border: 0; outline: none;
 }
 /* No ring on the box (#1422, prototype-6's `outline:none`): it holds focus for as long as the dialog is
-   open, and the ink bar beside it and the text caret mark it. */
+   open, and the text caret marks it. */
 .tf .tf-ln-q input:focus-visible { outline: none; }
 .tf .tf-ln-q input::placeholder { color: var(--ink-2); }
-.tf-ln-foot { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tf .tf-ln-x {
   width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px;
   color: var(--ink-2); flex: none;
@@ -39,18 +33,16 @@
 /* The results, the board, the `?` card and the palette scroll here; the box and the hints stay. */
 .tf-ln-list { flex: 1; min-height: 0; overflow: auto; }
 
-/* A group heading: sticky over its rows, a label and a count. */
+/* A group heading: sticky over its rows, a label and nothing else (#2421). */
 .tf-ln-h {
   display: flex; align-items: center; gap: 8px; padding: 8px 18px 4px; position: sticky; top: 0; z-index: 1;
   background: var(--sheet); font-size: var(--t-xs); color: var(--ink-2);
 }
 .tf-ln-lab { font-weight: 600; }
-.tf-ln-n { margin-left: auto; font-variant-numeric: tabular-nums; }
-.tf-ln-more { color: var(--ink-2); }
 
 /* A selected line is an ink bar on --sheet-2, whatever draws it. */
-.tf .tf-ln-opt:hover, .tf .tf-ln-res:hover, .tf-ln-slrow:hover { background: var(--sheet-2); }
-.tf .tf-ln-opt.tf-ln-on, .tf .tf-ln-res.tf-ln-on, .tf-ln-slrow.tf-ln-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
+.tf .tf-ln-opt:hover, .tf .tf-ln-res:hover { background: var(--sheet-2); }
+.tf .tf-ln-opt.tf-ln-on, .tf .tf-ln-res.tf-ln-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
 
 /* A line with a name and what it does: the palette, the board's Retry, a suggestion, a chain row. */
 .tf .tf-ln-opt {
@@ -80,30 +72,25 @@
 /* Greyed and dashed: a filter that did nothing reads as present but inert. */
 .tf-ln-fchip.tf-ln-off { color: var(--ink-2); border: 1px dashed var(--rule); font-weight: 400; }
 
-/* A result or recent row: kind, title (key, state, path, excerpt), provenance. */
+/* A result or recent row (#2421): three cells like a table, the monogram, the key cell and the title. */
 .tf .tf-ln-res {
-  display: grid; grid-template-columns: 28px 62px minmax(0, 1fr) 150px; gap: 10px; align-items: center; width: 100%;
-  text-align: left; min-height: 34px; padding: 5px 18px; font-size: var(--t-sm); color: var(--ink);
+  display: grid; grid-template-columns: 28px 118px minmax(0, 1fr); gap: 12px; align-items: center; width: 100%;
+  text-align: left; min-height: 38px; padding: 6px 18px; font-size: var(--t-md); color: var(--ink);
 }
-.tf-ln-res > * { min-width: 0; overflow: hidden; }
+.tf-ln-res > * { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-ln-mg {
-  display: inline-flex; align-items: center; justify-content: center; height: 18px; border: 1px solid var(--rule);
+  display: inline-flex; align-items: center; justify-content: center; height: 20px; border: 1px solid var(--rule);
   border-radius: 3px; font-size: var(--t-2xs); font-weight: 600; letter-spacing: .04em; color: var(--ink-2); flex: none;
 }
 .tf-ln-res .tf-ln-mg { width: 28px; }
-.tf-ln-ty, .tf-ln-sy { font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-ln-sy { text-align: right; }
-.tf-ln-sy.tf-ln-fail { color: var(--err); }
-.tf-ln-k { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); color: var(--ink-2); margin-right: 6px; }
-/* The path and the excerpt are second lines under the title; the excerpt is the reason the row matched. */
-.tf-ln-pa, .tf-ln-sn {
-  display: block; line-height: 1.35; margin-top: 1px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.tf-ln-pa { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-2xs); }
-.tf-ln-sn { font-size: var(--t-xs); }
-.tf-ln-sn mark { background: var(--mark); color: var(--ink); border-radius: 3px; }
-/* An item's state (#666): the shell's chip in the adapter's tone (`.tf-chip.tf-ok` and its siblings). */
-.tf-chip.tf-state { margin-left: 6px; vertical-align: 1px; }
+/* The state is the monogram's colour, in the chips' own tones (`.tf-chip.tf-ok` and its siblings). */
+.tf-ln-mg[data-tone="ok"] { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+.tf-ln-mg[data-tone="warn"] { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+.tf-ln-mg[data-tone="err"] { color: var(--err); background: var(--err-bg); border-color: transparent; }
+.tf-ln-mg[data-tone="info"] { color: var(--info); background: var(--info-bg); border-color: transparent; }
+.tf-ln-mg[data-tone="muted"] { color: var(--muted); background: var(--muted-bg); border-color: transparent; }
+.tf-ln-k { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-ln-k.tf-ln-mono { font-family: var(--mono); font-variant-ligatures: none; font-weight: 600; color: var(--ink); }
 
 /* An author or under: search a source cannot answer (#141): a fact about the corpus, not a fault. */
 .tf-ln-gap {
@@ -112,40 +99,6 @@
 }
 .tf-ln-gap-h, .tf-ln-gap-s { color: var(--ink); }
 .tf-ln-gap ul { margin: 2px 0 0; padding: 0; list-style: none; }
-
-/* The board's lines: a smart list (and a saved one's two controls), an inbox line, today's time. */
-.tf-ln-slrow { display: flex; align-items: stretch; }
-.tf .tf-ln-sl {
-  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: start; flex: 1; min-width: 0; text-align: left;
-  padding: 7px 18px; min-height: 34px; font-size: var(--t-sm); color: var(--ink);
-}
-.tf-ln-sl:disabled { cursor: default; }
-.tf-ln-sl .tf-ln-nm { min-width: 0; }
-.tf-ln-sl small { display: block; font-size: var(--t-xs); line-height: 1.35; color: var(--ink-2); margin-top: 2px; }
-.tf-ln-c { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tf-ln-c.tf-ln-chg, .tf-ln-c.tf-ln-warn { color: var(--warn); }
-.tf-ln-dot { margin-left: 4px; font-size: var(--t-2xs); }
-.tf-ln-att, .tf-ln-sl small.tf-ln-att, .tf-ln-errdot { color: var(--err); }
-.tf-ln-errdot { font-size: var(--t-2xs); }
-/* The rename field, sized like the row it replaces so the list does not jump. */
-.tf .tf-ln-ren {
-  flex: 1; min-width: 0; margin: 4px 18px; padding: 3px 7px; font-size: var(--t-sm); color: var(--ink);
-  background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
-}
-.tf-ln-own { display: flex; align-items: center; gap: 4px; padding-right: 18px; }
-.tf .tf-ln-mini { font-size: var(--t-2xs); color: var(--ink-2); padding: 1px 7px; border: 1px solid var(--rule); border-radius: 4px; }
-.tf .tf-ln-mini:hover { color: var(--ink); border-color: var(--ink-2); }
-.tf .tf-ln-mini.tf-ln-del:hover, .tf .tf-ln-mini.tf-ln-armed { color: var(--err); border-color: var(--err); }
-
-/* The source-health strip: a reading per source, not a target. */
-.tf-ln-strip { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 6px 18px 10px; }
-.tf-ln-src { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-ln-src .tf-ln-mg { padding: 0 4px; }
-.tf-ln-sid { color: var(--ink); font-weight: 600; }
-.tf-ln-src.tf-ln-fail, .tf-ln-src.tf-ln-fail .tf-ln-sid, .tf-ln-src.tf-ln-fail .tf-ln-mg { color: var(--err); }
-.tf-ln-src.tf-ln-fail .tf-ln-mg { border-color: var(--err); }
-.tf-ln-src.tf-ln-warn, .tf-ln-src.tf-ln-warn .tf-ln-sid, .tf-ln-src.tf-ln-warn .tf-ln-mg { color: var(--warn); }
-.tf-ln-src.tf-ln-warn .tf-ln-mg { border-color: var(--warn); }
 
 /* The `?` card: each token inserts itself. */
 .tf-ln-help { display: grid; gap: 1px; padding: 4px 0; }

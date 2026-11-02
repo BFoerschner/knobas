@@ -61,7 +61,7 @@
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
   } from "../ipc";
-  import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
+  import type { CredentialHealth } from "../ipc/sources";
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
@@ -74,8 +74,7 @@
   import QueryBox from "./QueryBox.svelte";
   import Results from "./Results.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
-  import { counted } from "../tf/counted";
-  import type { InboxPreview, LauncherRow, TodayTime } from "./rows";
+  import type { InboxPreview, LauncherRow } from "./rows";
   import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
@@ -83,10 +82,8 @@
   let {
     open = $bindable(false),
     sources,
-    runs = [],
     sourcesRead,
     inbox,
-    today,
     actions = [],
     onnavigate,
     onclose,
@@ -94,7 +91,6 @@
     onlink,
     ontimer,
     ports,
-    now,
     openExternal = realOpenExternal,
   }: {
     open?: boolean;
@@ -108,28 +104,16 @@
      */
     sources?: CredentialHealth[] | undefined;
     /**
-     * Each source's last run, from the shell's `sync:state` reading (#1581):
-     * what the board's strip reads beside credential health.
-     */
-    runs?: SourceSyncStatus[];
-    /**
      * How the shell's read of `sources` stands (#746). Omitted, the list is
      * taken as read. An empty `sources` is "none configured" only when `phase`
-     * is `ready`; while it waits or has failed the board and the chips say
-     * so, and `retry` is offered.
+     * is `ready`; while it waits or has failed the chips say so.
      */
     sourcesRead?: { phase: HealthPhase; error: string | null; retry: () => void } | undefined;
     /**
-     * The inbox the board previews (#1418, spec §4): the live store's count
-     * and its newest items, from the shell. Omitted or empty, the board draws
-     * no inbox block.
+     * The shell's live inbox (#1418): its count and items, newest first. The
+     * empty box does not draw it (#2421); `#i` answers from it (#2423).
      */
     inbox?: InboxPreview | undefined;
-    /**
-     * Today's tracked and to-log minutes, the Day view's figures, from the
-     * shell (#1418). Omitted or nothing tracked, the board draws no time block.
-     */
-    today?: TodayTime | undefined;
     /** Extras appended to `>` — things only the shell knows it can offer. */
     actions?: LauncherAction[];
     onnavigate: (hash: string) => void;
@@ -179,8 +163,6 @@
      * records above.
      */
     ports?: Partial<SessionPorts>;
-    /** Injectable clock, so the age column is testable. */
-    now?: Date | undefined;
     /**
      * How *Open in browser* on an unresolved paste reaches the OS. Injectable
      * for the same reason `AssetsView`'s is: the assertion is that the button
@@ -252,14 +234,6 @@
    */
   let chain = $state<{ rowId: string; actions: ChainAction[]; selected: number } | null>(null);
 
-  /**
-   * The saved list whose name is being edited on the board, or `null` (#506).
-   *
-   * Here rather than in `Board.svelte` because both ways of starting a rename
-   * end here: the row's own *Rename* button, and the `Tab` chain, which is the
-   * launcher's.
-   */
-  let renaming = $state<string | null>(null);
 
   /**
    * The value suggestions under the box (#601): the `kind:`, `source:` or
@@ -346,7 +320,6 @@
       case "action":
       case "syntax":
       case "inbox":
-      case "today":
         return null;
     }
   }
@@ -360,29 +333,6 @@
    * so offering the row would be offering an error.
    */
   function chainFor(row: LauncherRow): ChainAction[] {
-    // A saved smart list is not an entity and has its own two things to do
-    // (#506, story 58). They are in the chain because the chain is where every
-    // per-row action in this box lives, and because a launcher driven from the
-    // keyboard must be able to reach them without the pointer. A **built-in**
-    // list has no chain at all: it is code, and there is nothing to rename.
-    //
-    // *Delete* here goes straight through, where the row's own button arms
-    // first: reaching this row took `Tab`, an arrow and `Enter`, which is
-    // already the deliberate act the button's second press stands in for.
-    if (row.kind === "list") {
-      if (!row.list.saved) return [];
-      return [
-        { id: "rename", label: `Rename ${row.list.label}`, run: () => startRename(row.list.id) },
-        {
-          id: "delete",
-          label: `Delete ${row.list.label}`,
-          run: () => {
-            chain = null;
-            void session.deleteList(row.list.id);
-          },
-        },
-      ];
-    }
     const entity = entityOf(row);
     if (!entity) return [];
     const actions: ChainAction[] = [];
@@ -451,7 +401,6 @@
   const activeOption = $derived.by(() => {
     const row = session.current;
     if (!row || session.error) return undefined;
-    if (row.kind === "list" && row.list.id === renaming) return undefined;
     return optionId(session.selected);
   });
   const activeChainOption = $derived(chain ? chainOptionId(chain.selected) : undefined);
@@ -489,9 +438,9 @@
     document.getElementById(id)?.scrollIntoView?.({ block: "nearest" });
   }
 
-  /** The shell's inbox and today's time, as rows of the board (#1418). */
+  /** The shell's inbox, which `#i` answers from (#2423). */
   $effect.pre(() => {
-    session.extras = { inbox: inbox ?? null, today: today ?? null };
+    session.extras = { inbox: inbox ?? null };
   });
 
   /**
@@ -562,9 +511,6 @@
       // that has none to open.
       case "inbox":
         return opener(row.item)?.href ?? "#/inbox";
-      // Time › Day, which is today when the address names no day.
-      case "today":
-        return "#/time";
       // A list and a syntax row do not navigate: they rewrite the box, which
       // is what makes them a *filter* rather than a destination.
       case "list":
@@ -610,22 +556,6 @@
     } catch (cause) {
       session.error = ipcErrorMessage(cause);
     }
-  }
-
-  /** Open the row's name as a field, and close the chain that asked for it. */
-  function startRename(id: string) {
-    chain = null;
-    renaming = id;
-  }
-
-  /**
-   * End a rename. `label` is `null` for Escape and for the blur behind it,
-   * which abandons: a half-typed name is not a name anybody chose.
-   */
-  function finishRename(id: string, label: string | null) {
-    renaming = null;
-    if (label !== null && label.trim() !== "") void session.renameList(id, label);
-    box?.focus();
   }
 
   /**
@@ -737,9 +667,6 @@
 
   const placeholder =
     "Search everything, or type > for actions, #t tickets (letters combine), @ people, ? help";
-  const footnote = $derived(
-    `mirror · ${counted(session.home?.pending_writes ?? 0, "pending write", "pending writes")}`,
-  );
   /** The chips render from the answer; before one lands there is nothing to
       say about a query nobody has interpreted yet. */
   const interpreted = $derived(session.response?.interpreted ?? null);
@@ -762,7 +689,6 @@
         value={session.raw}
         {placeholder}
         pending={session.pending}
-        {footnote}
         controls={controlled.list}
         active={controlled.option}
         oninput={(value) => session.type(value)}
@@ -834,20 +760,11 @@
           {#if session.home}
             <Board
               home={session.home}
-              inboxCount={inbox?.count ?? 0}
-              sources={health}
-              {runs}
-              reading={sourcesRead}
               rows={session.rows}
               selected={session.selected}
-              {renaming}
               {optionId}
-              {now}
               onopen={activate}
               onhover={(index) => (session.selected = index)}
-              onstartrename={startRename}
-              onrename={finishRename}
-              ondelete={(id) => void session.deleteList(id)}
             />
           {:else}
             <p class="tf-ln-none">Reading the mirror…</p>
@@ -887,8 +804,6 @@
             rows={session.rows}
             selected={session.selected}
             {optionId}
-            sources={health}
-            {now}
             onopen={activate}
             onhover={(index) => (session.selected = index)}
           />
@@ -936,10 +851,6 @@
         <button class="tf-btn tf-sm tf-ln-save" onclick={saveAsList} disabled={session.savedId !== null}>
           {session.savedId === null ? "Save as list" : "Saved as list"}
         </button>
-      {/if}
-      <span class="tf-spacer"></span>
-      {#if session.response}
-        <span class="tf-ln-took">{session.response.total} matches · {session.response.took_ms} ms</span>
       {/if}
     {/snippet}
   </TfDialog>

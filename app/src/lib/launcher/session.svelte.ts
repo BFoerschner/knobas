@@ -139,7 +139,7 @@ export class Session {
    * of the board's list like the lists and the recent items, so the arrows
    * reach them.
    */
-  extras = $state<BoardExtras>({ inbox: null, today: null });
+  extras = $state<BoardExtras>({ inbox: null });
   /**
    * The id of the list the query in the box was just saved as, or `null`.
    *

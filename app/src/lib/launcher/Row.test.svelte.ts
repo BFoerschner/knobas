@@ -1,22 +1,9 @@
 /**
- * The launcher row's **path** segment (#284).
+ * The launcher row (#2421): three cells, the monogram coloured by the state's
+ * tone, and everything drawn as text.
  *
- * A Confluence page's title is not enough on its own: five spaces can each
- * hold a *Runbook*, and the thing that tells them apart is where the page
- * sits. The row draws an ancestor path under the title when the search hit
- * carries one — and, per ADR-0007's failure direction, nothing at all when it
- * does not. Since #596 the same line carries the parent chain any kind
- * declares (a Gitea commit's `owner/repo`), and the row cannot tell the two
- * apart, which is the point.
- *
- * The string itself is joined in SQL by `knobas_core::path_line_read!` and
- * arrives on `EntityRow.path`, so what is under test here is the row's own
- * contract: given a path it draws one, given none it draws none, and it draws
- * the string as **text** whatever a page title contains (roadmap §4 gotcha 7).
- *
- * Mounted directly rather than through `Launcher`, because the two wiring
- * lines that feed it (`Results.svelte`, `Board.svelte`) are one field access
- * each and the rendering rule is what can actually be got wrong.
+ * Mounted directly; the cell rule per kind is `cells.ts`'s and is witnessed
+ * through the launcher in `Launcher.test.svelte.ts`.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { expect, test, vi } from "vitest";
@@ -29,12 +16,10 @@ function render(over: Record<string, unknown> = {}) {
   const app = mount(Row, {
     target,
     props: {
-      entityId: "confluence:98307",
-      kind: "page",
-      sourceId: "confluence",
+      monogram: "PG",
+      kindName: "Page",
+      cell: "Engineering",
       title: "SEPA payout retry design",
-      syncedAt: "2026-08-22T14:30:00Z",
-      sources: [],
       id: "opt-0",
       selected: false,
       onopen: vi.fn(),
@@ -52,66 +37,37 @@ function render(over: Record<string, unknown> = {}) {
   };
 }
 
-test("a row whose hit carries an ancestor path draws it under the title", () => {
-  const screen = render({ path: "Engineering › Payments" });
-  expect(screen.target.querySelector(".tf-ln-pa")?.textContent).toBe("Engineering › Payments");
-  // The title is still the title: the path is an addition, not a replacement.
-  expect(screen.target.textContent).toContain("SEPA payout retry design");
-  screen.done();
+test("a row is the monogram, the key cell and the title, and nothing else", () => {
+  const { target, done } = render();
+  const row = target.querySelector(".tf-ln-res")!;
+  expect([...row.children].map((cell) => cell.textContent)).toEqual(["PG", "Engineering", "SEPA payout retry design"]);
+  done();
 });
 
-test("a row with no path draws none rather than an empty line", () => {
-  // Every spelling of "no path" a hit can arrive with: the field absent (an
-  // older stored row, which `#[serde(default)]` decodes), the ADR-0007 miss
-  // `null`, and the empty string a joined path can never actually be —
-  // `string_agg` over no rows is null — but which a future caller might pass.
-  for (const props of [{}, { path: null }, { path: "" }]) {
-    const screen = render(props);
-    expect(screen.target.querySelector(".tf-ln-pa"), JSON.stringify(props)).toBeNull();
-    screen.done();
-  }
+test("a cell or title that looks like markup is drawn as text", () => {
+  const { target, done } = render({ cell: "<b>ENG</b>", title: '<img src=x onerror="alert(1)">' });
+  expect(target.textContent).toContain("<b>ENG</b>");
+  expect(target.querySelectorAll("b, img")).toHaveLength(0);
+  done();
 });
 
-/**
- * A path is source text — page titles somebody typed, `<script>` included.
- * It is interpolated and Svelte escapes it; a row that rendered it as markup
- * would be gotcha 7 arriving through a field nobody was watching.
- */
-test("a path that looks like markup is drawn as text", () => {
-  const screen = render({ path: "Engineering › <img src=x onerror=alert(1)>" });
-  const path = screen.target.querySelector(".tf-ln-pa");
-  expect(path?.textContent).toBe("Engineering › <img src=x onerror=alert(1)>");
-  expect(path?.querySelector("img")).toBeNull();
-  screen.done();
+test("the monogram carries the tone it is given, and none without one", () => {
+  const toned = render({ tone: "ok", kindName: "Pull request: merged" });
+  const mg = toned.target.querySelector<HTMLElement>(".tf-ln-mg")!;
+  expect(mg.dataset["tone"]).toBe("ok");
+  expect(mg.getAttribute("aria-label")).toBe("Pull request: merged");
+  toned.done();
+
+  const plain = render();
+  expect(plain.target.querySelector(".tf-ln-mg")!.hasAttribute("data-tone")).toBe(false);
+  plain.done();
 });
 
-/**
- * A row draws its path even when its title already repeats it (#596): a
- * TeamCity build's title names its configuration, and the path line names it
- * again, because every row with a parent draws the parent the same way.
- */
-test("a path the title already repeats is still drawn", () => {
-  const screen = render({
-    entityId: "teamcity:1187",
-    kind: "build",
-    sourceId: "teamcity",
-    title: "Payments / Deploy #42",
-    path: "Payments / Deploy",
-  });
-  expect(screen.target.querySelector(".tf-ln-pa")?.textContent).toBe("Payments / Deploy");
-  screen.done();
-});
-
-/** The state chip (#666): drawn after the title with its tone, absent for the miss. */
-test("a row with a state draws its chip with its tone, and none without", () => {
-  const screen = render({ kind: "pr", state: { text: "merged", tone: "ok" } });
-  const chip = screen.target.querySelector<HTMLElement>(".tf-state");
-  expect(chip?.textContent).toBe("merged");
-  expect(chip?.dataset.tone).toBe("ok");
-  screen.done();
-  for (const props of [{}, { state: null }]) {
-    const none = render(props);
-    expect(none.target.querySelector(".tf-state"), JSON.stringify(props)).toBeNull();
-    none.done();
-  }
+test("only an identifier's cell is drawn in the mono face", () => {
+  const key = render({ cell: "PAY-231", mono: true });
+  expect(key.target.querySelector(".tf-ln-k")!.classList.contains("tf-ln-mono")).toBe(true);
+  key.done();
+  const place = render();
+  expect(place.target.querySelector(".tf-ln-k")!.classList.contains("tf-ln-mono")).toBe(false);
+  place.done();
 });

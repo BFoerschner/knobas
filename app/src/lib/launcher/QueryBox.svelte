@@ -1,6 +1,7 @@
 <!--
   The box itself: prototype-6's `.launch input`, borderless 17 px over a
-  bottom rule (#1422; the rules are `tf/css/launcher.css`).
+  bottom rule (#1422; the rules are `tf/css/launcher.css`). No footnote, no
+  ⌘K badge and no caret bar (#2421): the box and its close button alone.
 
   The input never loses focus while the overlay is open: everything else in the
   launcher is a list the keyboard walks, so a click that moved focus to a row
@@ -19,7 +20,6 @@
     value,
     placeholder,
     pending,
-    footnote,
     controls,
     active,
     oninput,
@@ -28,10 +28,8 @@
   }: {
     value: string;
     placeholder: string;
-    /** A query is in flight — the caret dims rather than the box jumping. */
+    /** A query is in flight: the box says so to a screen reader, and draws nothing for it (#2421). */
     pending: boolean;
-    /** The right-hand note: "mirror · 0 pending writes". */
-    footnote: string;
     /** The id of the listbox the arrows walk. */
     controls: string;
     /** The id of its active option, or `undefined` when no option is drawn for it. */
@@ -67,7 +65,6 @@
 </script>
 
 <div class="tf-ln-q">
-  <span class="tf-ln-caret" class:tf-ln-pending={pending}></span>
   <input
     bind:this={input}
     {value}
@@ -80,11 +77,10 @@
     aria-autocomplete="list"
     aria-controls={controls}
     aria-activedescendant={active}
+    aria-busy={pending}
     oninput={(event) => oninput(event.currentTarget.value)}
     {onkeydown}
   />
-  <span class="tf-ln-foot">{footnote}</span>
-  <kbd>⌘K</kbd>
   <button class="tf-ln-x" aria-label="Close" onclick={onclose}>
     <svg viewBox="0 0 16 16" aria-hidden="true">
       <path d="M4 4l8 8M12 4l-8 8" />

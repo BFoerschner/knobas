@@ -1,6 +1,5 @@
 <!--
-  The grouped answer (spec §4: "results grouped by type with source monogram
-  and sync age").
+  The grouped answer: one heading per kind, then three-cell rows (#2421).
 
   The group order is the **backend's** — `knobas_search::group` fixes it
   (tickets, PRs, builds, …, unknown kinds last), so a launcher that sorted its
@@ -10,10 +9,9 @@
 -->
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
-  import type { CredentialHealth } from "../ipc/sources";
   import Row from "./Row.svelte";
+  import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
-  import { sharesKey } from "./format";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -21,8 +19,6 @@
     rows,
     selected,
     optionId,
-    sources,
-    now,
     onopen,
     onhover,
   }: {
@@ -32,14 +28,10 @@
     selected: number;
     /** The element id of the option at a flat-list index (#1411). */
     optionId: (index: number) => string;
-    sources: CredentialHealth[];
-    now?: Date | undefined;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
 
-  /** Rows another source's row of the same key sits beside (#1476): they name their source. */
-  const shares = $derived(sharesKey(response.groups.flatMap((group) => group.hits)));
   /** Where each group's hits start in the flat list. */
   const offsets = $derived.by(() => {
     const out: number[] = [];
@@ -89,32 +81,21 @@
   </div>
 {/if}
 
+<!-- No count on a heading (#2421): the list is quiet, and the rows are what is read. -->
 {#each response.groups as group, g (group.kind)}
-  <div class="tf-ln-h">
-    <span class="tf-ln-lab">{group.plural}</span>
-    <span class="tf-ln-n">
-      {group.total}
-      {#if group.total > group.hits.length}
-        <span class="tf-ln-more">· {group.total - group.hits.length} more</span>
-      {/if}
-    </span>
-  </div>
+  <div class="tf-ln-h"><span class="tf-ln-lab">{group.plural}</span></div>
   {#each group.hits as hit, h (hit.entity_id)}
     {@const index = (offsets[g] ?? 0) + h}
     {@const row = rows[index]}
     {#if row}
+      {@const cells = cellsOf({ kind: hit.kind, entityId: hit.entity_id, title: hit.title, path: hit.path, kindWord: group.label })}
       <Row
-        entityId={hit.entity_id}
-        kind={hit.kind}
-        sourceId={hit.source_id}
-        title={hit.title}
-        syncedAt={hit.synced_at}
-        path={hit.path}
-        state={hit.state}
-        snippet={hit.snippet}
-        named={shares(hit)}
-        {sources}
-        {now}
+        monogram={group.monogram}
+        tone={hit.state?.tone ?? null}
+        kindName={hit.state ? `${group.label}: ${hit.state.text}` : group.label}
+        cell={cells.cell}
+        mono={cells.mono}
+        title={cells.title}
         id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}

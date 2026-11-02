@@ -30,7 +30,7 @@
   } = $props();
 </script>
 
-<div class="tf-ln-h"><span class="tf-ln-lab">Prefix syntax</span><span class="tf-ln-n">{rows.length}</span></div>
+<div class="tf-ln-h"><span class="tf-ln-lab">Prefix syntax</span></div>
 <div class="tf-ln-help">
   {#each rows as row, i (row.id)}
     {#if row.kind === "syntax"}

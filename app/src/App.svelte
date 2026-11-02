@@ -6,7 +6,7 @@
   import { alerts } from "./lib/assets/alerts.svelte";
   import { inbox } from "./lib/inbox/inbox.svelte";
   import { notifications } from "./lib/inbox/notify.svelte";
-  import { Launcher, type TodayTime } from "./lib/launcher";
+  import { Launcher } from "./lib/launcher";
   import Booting from "./lib/shell/Booting.svelte";
   import { startFollowingMerges } from "./lib/shell/follow-merges";
   import { health } from "./lib/shell/health.svelte";
@@ -19,7 +19,6 @@
   import { push } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
-  import { readTodayFigures } from "./lib/tf/time/day-read";
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
@@ -53,29 +52,6 @@
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
   let launcherOpen = $state(false);
-
-  /**
-   * Today's tracked and to-log time for the launcher's board (#1418), read on
-   * every opening as the board itself is, through the Day tab's own read so
-   * the two cannot disagree. A failed read leaves the block off the board:
-   * a figure is either the Day tab's or absent.
-   */
-  let todayTime = $state<TodayTime | undefined>(undefined);
-  $effect(() => {
-    if (!launcherOpen || !lifecycle.ready) return;
-    let live = true;
-    void readTodayFigures(new Date(), untrack(() => timer.current)).then(
-      (figures) => {
-        if (live) todayTime = figures;
-      },
-      () => {
-        if (live) todayTime = undefined;
-      },
-    );
-    return () => {
-      live = false;
-    };
-  });
 
   /** The address, read again on every change; the shell owns what it draws. */
   let hash = $state(location.hash);
@@ -369,7 +345,7 @@
     {timeRevision}
     ontimechanged={() => (timeRevision += 1)}
   >
-    {#snippet dialogs(runs)}
+    {#snippet dialogs()}
       {#if drafts.open}
         {#key drafts.open}
           <TfWorklogDraft
@@ -407,10 +383,8 @@
       <Launcher
         bind:open={launcherOpen}
         sources={health.all}
-        {runs}
         sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
         inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
-        today={todayTime}
         openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
         onlink={linkToJob}
         ontimer={startTimerOn}
