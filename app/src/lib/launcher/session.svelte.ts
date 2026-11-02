@@ -141,12 +141,10 @@ export class Session {
   selected = $state(0);
   actions = $state<LauncherAction[]>([]);
   /**
-   * The inbox preview and today's time the board draws beside {@link home}
-   * (#1418). The shell's live reads, set by the launcher from its props; rows
-   * of the board's list like the lists and the recent items, so the arrows
-   * reach them.
+   * The shell's live inbox (#1418), set by the launcher from its props. The
+   * empty box no longer draws it (#2421); `#i` answers from it (#2423).
    */
-  extras = $state<BoardExtras>({ inbox: null, today: null });
+  extras = $state<BoardExtras>({ inbox: null });
   /**
    * The id of the list the query in the box was just saved as, or `null`.
    *
