@@ -69,8 +69,16 @@ const TAKEN: Record<string, "launcher" | "shell" | "system"> = {
   M: "system",
 };
 
-/** ⌘? (⌘⇧/ as most keyboards send it): the box's filters, which is no letter and so no chord. */
-function isHelpPress(event: Mods & Pick<KeyboardEvent, "key">): boolean {
+/**
+ * ⌘`letter` (Ctrl off the Mac) with no other modifier, read by the
+ * character, or by `code` too where one is given: the box's own ⌘S, ⌘B, ⌘D.
+ */
+export function isBoxChord(event: Mods & Pick<KeyboardEvent, "key" | "code">, letter: string, code?: string): boolean {
+  return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && (event.key.toLowerCase() === letter || (code !== undefined && event.code === code));
+}
+
+/** ⌘? (⌘⇧/ as most keyboards send it): the box's filters (the overlay), which is no letter and so no chord. */
+export function isHelpPress(event: Mods & Pick<KeyboardEvent, "key">): boolean {
   return (event.metaKey || event.ctrlKey) && (event.key === "?" || (event.key === "/" && event.shiftKey));
 }
 

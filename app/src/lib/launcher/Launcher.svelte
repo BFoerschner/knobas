@@ -114,7 +114,7 @@
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
   import { addFilter, narrowFilters, overlayFilters } from "./syntax";
-  import { chordOf, heldOf, kindOf, kindWord, refusalOf } from "./keys";
+  import { chordOf, heldOf, isBoxChord, isHelpPress, kindOf, kindWord, refusalOf } from "./keys";
   import { type KeyStore, launcherKeys } from "./keys.svelte";
   import { push } from "../shell/toasts.svelte";
 
@@ -379,13 +379,18 @@
     );
   }
 
+  /** The declared merge read for `subject`, when it is the pull request read: *Merge…*'s source. */
+  function mergeOf(subject: SheetSubject | undefined): ViewAction | null {
+    return subject?.kind === "entity" && merge?.prId === subject.entityId ? merge.action : null;
+  }
+
   const sheetContext = $derived({
     job: openEntity ?? null,
     canTime: ontimer !== undefined,
     apps: applications,
     favourites,
     sets: linkSets,
-    merge: sheet?.subject.kind === "entity" && merge?.prId === sheet.subject.entityId ? merge.action : null,
+    merge: mergeOf(sheet?.subject),
     branches: io.branches,
     now: now ?? new Date(),
   });
@@ -860,14 +865,12 @@
     }
   }
 
-  /** ⌘? (⌘⇧/ as most keyboards send it): the overlay from any search, and back. */
-  function isHelpChord(event: KeyboardEvent): boolean {
-    return (event.metaKey || event.ctrlKey) && (event.key === "?" || (event.key === "/" && event.shiftKey));
-  }
-
   /** ⌘S, with no other modifier. */
-  function isSaveChord(event: KeyboardEvent): boolean {
-    return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "s";
+  const isSaveChord = (event: KeyboardEvent) => isBoxChord(event, "s");
+
+  /** A fresh sheet on `row`: the actions, unnarrowed, the first selected. */
+  function sheetOn(row: LauncherRow, subject: SheetSubject): NonNullable<typeof sheet> {
+    return { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, panel: null };
   }
 
   /** Tab on a row with actions: the sheet, the box emptied and labelled Actions. */
@@ -875,7 +878,7 @@
     const row = session.current;
     const subject = row ? subjectOf(row, inboxOps) : null;
     if (!row || !subject || sheetActions(subject, sheetContext).length === 0) return;
-    sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, panel: null };
+    sheet = sheetOn(row, subject);
     readApplications();
     readMerge(subject);
     box?.focus();
@@ -1198,10 +1201,8 @@
     }
   }
 
-  /** ⌘B (Ctrl+B off the Mac), with no other modifier: the key panel for the selected action. */
-  function isBindChord(event: KeyboardEvent): boolean {
-    return (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && (event.code === "KeyB" || event.key.toLowerCase() === "b");
-  }
+  /** ⌘B (Ctrl+B off the Mac), with no other modifier, by its character or its code: the key panel for the selected action. */
+  const isBindChord = (event: KeyboardEvent) => isBoxChord(event, "b", "KeyB");
 
   /** ⌘B on a selected action: the panel, on the chord the action has on this kind now. */
   function openKeyPanel(current: NonNullable<typeof sheet>) {
@@ -1335,10 +1336,7 @@
     readApplications();
     readMerge(subject);
     const find = () =>
-      sheetActions(subject, {
-        ...sheetContext,
-        merge: subject.kind === "entity" && merge?.prId === subject.entityId ? merge.action : null,
-      }).find((action) => action.id === id);
+      sheetActions(subject, { ...sheetContext, merge: mergeOf(subject) }).find((action) => action.id === id);
     let action = find();
     if (!action) {
       await Promise.all([applicationsReading, mergeReading]);
@@ -1352,7 +1350,7 @@
     }
     if (!["flow", "rename", "bind", "link"].includes(action.does.kind)) return carry(action.does, { subject, relation: 0 });
     if (!sheet || sheet.rowId !== row.id) {
-      sheet = { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, panel: null };
+      sheet = sheetOn(row, subject);
     }
     if (action.does.kind === "link") {
       // The relation is picked on the row with ← →; Enter writes it.
@@ -1365,27 +1363,19 @@
   }
 
   function activate(row: LauncherRow) {
-    if (row.kind === "favourite" && isListRow(row.row)) {
-      // A favourite list applies as its `#l` hit does, below.
-      if (row.row.state) {
-        push({ text: row.row.state.text });
+    const subject = subjectOf(row);
+    if (subject?.kind === "list") {
+      // A saved list, its `#l` hit or a favourite, applies by its own text
+      // (#2423, spec #2419 story 14): the filters and words go back into the
+      // box, with the space after them, and run; the reader stays in the box
+      // to see and change them. One whose text today's grammar refuses
+      // carries the reason as its state (`saved::plan`), and says it instead
+      // of applying.
+      if (subject.refusal !== null) {
+        push({ text: subject.refusal });
         return;
       }
-      session.set(`${row.row.path ?? ""} `);
-      box?.focus();
-      return;
-    }
-    if (row.kind === "hit" && row.hit.kind === "list") {
-      // A saved list applies by its own text (#2423, spec #2419 story 14):
-      // the filters and words go back into the box, with the space after
-      // them, and run; the reader stays in the box to see and change them.
-      // One whose text today's grammar refuses carries the reason as its
-      // state (`saved::plan`), and says it instead of applying.
-      if (row.hit.state) {
-        push({ text: row.hit.state.text });
-        return;
-      }
-      session.set(`${row.hit.path ?? ""} `);
+      session.set(`${subject.text} `);
       box?.focus();
       return;
     }
@@ -1403,7 +1393,7 @@
   function onkeydown(event: KeyboardEvent) {
     // The key panel takes every key first: its chords are what is being bound.
     if (sheet?.panel) return bindKey(event, sheet.panel);
-    if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "d") {
+    if (isBoxChord(event, "d")) {
       // Before the webview's own ⌘D (a bookmark) and anything else the box does.
       event.preventDefault();
       toggleScope();
@@ -1419,14 +1409,14 @@
     if (!overlay && !(sheet && (sheet.flow || sheet.renaming !== null)) && runChord(event)) return;
     if (sheet) {
       // The box's own chords are not the sheet's: ⌘S and ⌘? do nothing here.
-      if (isSaveChord(event) || isHelpChord(event)) event.preventDefault();
+      if (isSaveChord(event) || isHelpPress(event)) event.preventDefault();
       else if (isBindChord(event)) {
         event.preventDefault();
         openKeyPanel(sheet);
       } else sheetKey(event, sheet);
       return;
     }
-    if (isHelpChord(event)) {
+    if (isHelpPress(event)) {
       event.preventDefault();
       if (overlay) leaveOverlay();
       else openOverlay();
