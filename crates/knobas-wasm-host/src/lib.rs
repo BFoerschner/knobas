@@ -50,6 +50,7 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 pub mod allow;
 mod convert;
+pub mod docs_contract;
 pub mod limits;
 pub mod manifest;
 mod net;

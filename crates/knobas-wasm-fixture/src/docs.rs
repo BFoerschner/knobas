@@ -2,7 +2,7 @@
 //! *Harbour* space, and the projection that draws them.
 //!
 //! A page's payload carries its body as HTML, read with the shared reader
-//! (`knobas_source::docs::html`), and the fixture's own elements, all in the
+//! the SDK re-exports ([`knobas_adapter_sdk::html`]), and the fixture's own elements, all in the
 //! `hb:` namespace, through its hook, so that between them the two pages
 //! hold every block and every inline of the docs vocabulary:
 //!
@@ -24,9 +24,16 @@
 //! **The writes** (#2443): a section is what follows a top-level heading up
 //! to the next one, refused at the first part a text box cannot hold (a
 //! table, code, an `hb:` element, marks or links), else edited as plain
-//! text: a paragraph per block and `- ` per item, which
-//! [`body_from_text`] writes back as markup. The section edit misbehaves
-//! on the same payload keys as the projection.
+//! text: a paragraph per block and `- ` per item, which the SDK's
+//! [`html_from_text`] writes back as markup, as it makes a new page's body.
+//! The section edit misbehaves on the same payload keys as the projection.
+//!
+//! **The docs contract's breaches** (#2444), by the instance's
+//! `"docs_breach"`, which the sync writes into each page's payload as
+//! `"breach"`: `draws_any_kind` draws a page's payload as whatever kind it
+//! is asked for, `numbers_from_zero` numbers the sections from 0,
+//! `edits_refused_sections` edits a section the projection refuses, and
+//! `edits_another_version` edits against the version after the payload's.
 //!
 //! **The misbehaving projections**, by payload key, for the host's limits:
 //! `"fetch": "<url>"` sends a request first and traps when it is refused,
@@ -35,7 +42,8 @@
 
 use chrono::{TimeZone, Utc};
 use knobas_adapter_sdk::SyncItem;
-use knobas_adapter_sdk::spi::docs::html::{self, Hook, Hooked, Node, Reading};
+use knobas_adapter_sdk::html::{self, Node};
+use knobas_adapter_sdk::{Hook, Hooked, Reading, html_from_text};
 use knobas_adapter_sdk::spi::docs::{
     DocBlock, DocComment, DocContent, DocSection, EditRefused, EmbedContent, Inline, ListItem,
     PAGE_KIND, PanelKind, SectionEdit, SectionRefusal,
@@ -71,10 +79,12 @@ const HANDBOOK: &str = r#"<h2>Arrival</h2>
 <hb:frame src="javascript:alert(1)"></hb:frame>
 <hb:weather></hb:weather>"#;
 
-/// The rules: a page with an excerpt.
+/// The rules: a page with an excerpt, and a section the editor edits.
 const RULES: &str = r"<h2>Speed</h2>
 <hb:excerpt><p>Five knots inside the breakwater.</p></hb:excerpt>
-<p>Overtaking is forbidden.</p>";
+<p>Overtaking is forbidden.</p>
+<h2>Mooring</h2>
+<p>Two lines, fore and aft.</p>";
 
 /// `(key, title, body, parent title)` per page, in sync order.
 const PAGES: [(&str, &str, &str, Option<&str>); 2] = [
@@ -137,8 +147,9 @@ fn payload(key: &str, title: &str, body: &str, parent: Option<&str>) -> Value {
     })
 }
 
-/// Both pages, in sync order, for source `id`.
-pub fn pages(id: &str) -> Vec<SyncItem> {
+/// Both pages, in sync order, for source `id`, breaking the docs contract
+/// the `breach` way if one is named.
+pub fn pages(id: &str, breach: Option<&str>) -> Vec<SyncItem> {
     PAGES
         .iter()
         .map(|(key, title, body, parent)| SyncItem {
@@ -148,7 +159,13 @@ pub fn pages(id: &str) -> Vec<SyncItem> {
             body_text: SENT_BODY_TEXT.into(),
             author: Some("harbourmaster".into()),
             updated_at: Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).single(),
-            payload: payload(key, title, body, *parent),
+            payload: {
+                let mut payload = payload(key, title, body, *parent);
+                if let Some(breach) = breach {
+                    payload["breach"] = breach.into();
+                }
+                payload
+            },
             web_url: None,
             deleted: false,
         })
@@ -158,7 +175,7 @@ pub fn pages(id: &str) -> Vec<SyncItem> {
 /// The projection: a `page` payload drawn, `None` for any other kind or a
 /// payload with no body.
 pub fn project(kind: &str, payload: &Value) -> Option<DocContent> {
-    if kind != PAGE_KIND {
+    if kind != PAGE_KIND && !breaks(payload, "draws_any_kind") {
         return None;
     }
     misbehave(payload);
@@ -193,7 +210,7 @@ pub fn project(kind: &str, payload: &Value) -> Option<DocContent> {
         blocks,
         comments,
         excerpt,
-        sections: sections(body),
+        sections: sections(body, breaks(payload, "numbers_from_zero")),
         history: Vec::new(),
     })
 }
@@ -293,11 +310,17 @@ fn refusal(name: &str) -> SectionRefusal {
     }
 }
 
-/// The sections the projection names.
-fn sections(body: &str) -> Vec<DocSection> {
+/// Whether the page's payload says to break the docs contract `how`.
+fn breaks(payload: &Value, how: &str) -> bool {
+    payload["breach"] == how
+}
+
+/// The sections the projection names, from 1 (or from 0, to break the
+/// contract).
+fn sections(body: &str, from_zero: bool) -> Vec<DocSection> {
     spans(body)
         .into_iter()
-        .zip(1..)
+        .zip(u32::from(!from_zero)..)
         .map(|(span, number)| DocSection {
             number,
             refusal: span.verdict.as_ref().err().copied(),
@@ -329,63 +352,19 @@ pub fn edit_section(
         .into_iter()
         .nth(index)
         .ok_or(EditRefused::Missing)?;
-    span.verdict.map_err(EditRefused::Section)?;
+    if !breaks(payload, "edits_refused_sections") {
+        span.verdict.map_err(EditRefused::Section)?;
+    }
+    let base_version = base_version + i64::from(breaks(payload, "edits_another_version"));
     Ok(SectionEdit {
         body: format!(
             "{}{}{}",
             &body[..span.from],
-            body_from_text(text),
+            html_from_text(text),
             &body[span.to..]
         ),
         base_version,
     })
-}
-
-/// A body from the editor's plain text: `## ` an `h2`, consecutive `- `
-/// lines one `ul`, other consecutive lines one `p`, a blank line between.
-pub fn body_from_text(text: &str) -> String {
-    let mut out = String::new();
-    let mut paragraph: Vec<&str> = Vec::new();
-    let mut items: Vec<&str> = Vec::new();
-    let flush = |out: &mut String, paragraph: &mut Vec<&str>, items: &mut Vec<&str>| {
-        if !paragraph.is_empty() {
-            out.push_str(&format!("<p>{}</p>", escape(&paragraph.join(" "))));
-            paragraph.clear();
-        }
-        if !items.is_empty() {
-            out.push_str("<ul>");
-            for item in items.drain(..) {
-                out.push_str(&format!("<li>{}</li>", escape(item)));
-            }
-            out.push_str("</ul>");
-        }
-    };
-    for line in text.lines().map(str::trim) {
-        if let Some(heading) = line.strip_prefix("## ") {
-            flush(&mut out, &mut paragraph, &mut items);
-            out.push_str(&format!("<h2>{}</h2>", escape(heading)));
-        } else if let Some(item) = line.strip_prefix("- ") {
-            if !paragraph.is_empty() {
-                flush(&mut out, &mut paragraph, &mut items);
-            }
-            items.push(item);
-        } else if line.is_empty() {
-            flush(&mut out, &mut paragraph, &mut items);
-        } else {
-            if !items.is_empty() {
-                flush(&mut out, &mut paragraph, &mut items);
-            }
-            paragraph.push(line);
-        }
-    }
-    flush(&mut out, &mut paragraph, &mut items);
-    out
-}
-
-fn escape(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 /// What a payload's misbehaving keys ask for, before anything is drawn.

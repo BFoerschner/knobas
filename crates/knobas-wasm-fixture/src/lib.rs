@@ -48,6 +48,8 @@
 //!   1.0.0 and 1.3.0 builds have neither pages nor claim, so they sync the
 //!   five items they always did; a test byte-patches this build's `docs`
 //!   export away for a wiki claim without the export.
+//!   **`"docs_breach": "<how>"`** has the pages break the docs contract
+//!   (#2444) that way, for `knobas adapter check`'s ([`docs`] names them).
 //! * **The refresh** (1.4.0, #2101, ADR-0031): `refresh` reads one item by
 //!   id as the sync emits it, every kind, and the older run `older_runs`
 //!   answers; an id of this source it does not hold is *gone*.
@@ -182,6 +184,9 @@ pub struct Fixture {
     deleted: Option<String>,
     /// Whether the descriptor declares `Capability::Refresh` (#2101).
     declares_refresh: bool,
+    /// How the pages break the docs contract, if they do (#2444).
+    #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
+    docs_breach: Option<String>,
     /// The instance's address, where a page write is sent (#2443).
     #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
     base_url: String,
@@ -232,6 +237,7 @@ fn read_fault(value: &serde_json::Value) -> Result<Fault, String> {
             "performs_undeclared",
             "deleted",
             "declares_refresh",
+            "docs_breach",
             "mirror",
             "username",
         ]
@@ -324,7 +330,7 @@ impl Fixture {
         ));
         items.push(self.run(builds::RUN, "42"));
         #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
-        items.extend(docs::pages(&self.id));
+        items.extend(docs::pages(&self.id, self.docs_breach.as_deref()));
         items
     }
 
@@ -464,6 +470,10 @@ impl Adapter for Fixture {
                 .get("deleted")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
+            docs_breach: config
+                .get("docs_breach")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -558,6 +568,7 @@ impl Adapter for Fixture {
                     "performs_undeclared": { "type": "boolean" },
                     "deleted": { "type": "string" },
                     "declares_refresh": { "type": "boolean" },
+                    "docs_breach": { "type": "string" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
@@ -844,11 +855,8 @@ impl Adapter for Fixture {
         docs::edit_section(kind, payload, number, text)
     }
 
-    /// (#2443) A new page's body in the fixture's markup.
-    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
-    fn body_from_text(text: &str) -> String {
-        docs::body_from_text(text)
-    }
+    // (#2443) A new page's body: the SDK's default, its plain HTML of the
+    // text, which is the fixture's markup.
 
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
     fn refresh(&self, entity: &str) -> Result<knobas_adapter_sdk::RefreshAnswer, SourceError> {
