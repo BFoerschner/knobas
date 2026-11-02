@@ -43,8 +43,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use knobas_source::docs::{
-    DocBlock, DocComment, DocContent, DocSection, DocVersion, EditRefused, Inline, ListItem,
-    PanelKind, SectionEdit, SectionRefusal,
+    DocBlock, DocComment, DocContent, DocSection, DocVersion, EditRefused, EmbedContent, Inline,
+    ListItem, PanelKind, SectionEdit, SectionRefusal,
 };
 use serde_json::Value;
 
@@ -819,6 +819,15 @@ fn r#macro(node: &Node, reading: &Reading<'_>) -> Hooked {
                 .map(|body| reading.blocks(body.children()))
                 .unwrap_or_default(),
         },
+        // The body as written, scripts and all (#2440): the shell runs it in
+        // an isolated frame. A body of nothing is nothing to run.
+        "html" => match node.child("ac:plain-text-body").map(Node::text) {
+            Some(html) if !html.trim().is_empty() => DocBlock::Embed {
+                name,
+                content: EmbedContent::Html { html },
+            },
+            _ => placeholder("html"),
+        },
         "jira" => match param(node, "key") {
             Some(key) => {
                 return Hooked::Inlines(vec![Inline::Issue {
@@ -1217,6 +1226,67 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 },
                 para("since Monday."),
             ]
+        );
+    }
+
+    /// The `html` macro is an embed of its body as the author wrote it (#2440):
+    /// script, entities and a CDATA section Confluence split around `]]>`
+    /// come through byte for byte, and a sentence around it splits as for any
+    /// block macro.
+    #[test]
+    fn an_html_macro_is_an_embed_of_its_markup_byte_for_byte() {
+        let storage = concat!(
+            r#"<p>Try it: <ac:structured-macro ac:name="html" ac:schema-version="1" ac:macro-id="m1">"#,
+            r#"<ac:plain-text-body><![CDATA[<div id="ui"></div>"#,
+            "\n<script src=\"https://api.example.com/swagger-ui.js\"></script>\n",
+            r#"<script>if (a ]]]]><![CDATA[> b && c < d) SwaggerUIBundle({url: "/spec.json?x=1&amp;y"});</script>]]>"#,
+            r#"</ac:plain-text-body></ac:structured-macro> below.</p>"#,
+        );
+        assert_eq!(
+            blocks(storage),
+            vec![
+                para("Try it:"),
+                DocBlock::Embed {
+                    name: "html".into(),
+                    content: EmbedContent::Html {
+                        html: concat!(
+                            r#"<div id="ui"></div>"#,
+                            "\n<script src=\"https://api.example.com/swagger-ui.js\"></script>\n",
+                            r#"<script>if (a ]]> b && c < d) SwaggerUIBundle({url: "/spec.json?x=1&amp;y"});</script>"#,
+                        )
+                        .into()
+                    },
+                },
+                para("below."),
+            ]
+        );
+    }
+
+    /// A section holding an embed is edited in Confluence: a text box would
+    /// flatten the markup it runs (spec #2432, *Section editing*).
+    #[test]
+    fn a_section_holding_an_html_macro_refuses_as_a_macro() {
+        let storage = r#"<h2>API</h2><p>Below.</p><ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[<p>hi</p>]]></ac:plain-text-body></ac:structured-macro><h2>Plain</h2><p>Text.</p>"#;
+        assert_eq!(
+            sections(storage)
+                .into_iter()
+                .map(|s| s.refusal)
+                .collect::<Vec<_>>(),
+            vec![Some(SectionRefusal::Macro), None]
+        );
+    }
+
+    /// An `html` macro with no body holds nothing to run: a placeholder, so
+    /// the page still says something is there.
+    #[test]
+    fn an_empty_html_macro_is_a_placeholder() {
+        assert_eq!(
+            blocks(
+                r#"<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[  ]]></ac:plain-text-body></ac:structured-macro>"#
+            ),
+            vec![DocBlock::Placeholder {
+                name: "html".into()
+            }]
         );
     }
 

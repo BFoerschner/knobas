@@ -425,6 +425,8 @@ pub fn run() {
             commands::sources::list_sources,
             commands::sources::add_source,
             commands::sources::update_source,
+            commands::sources::run_embedded_html,
+            commands::sources::set_run_embedded_html,
             commands::sources::delete_source,
             commands::sources::set_source_secret,
             commands::sources::test_source,

@@ -65,6 +65,7 @@ import type {
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS, fakeRoleScope } from "./corpus";
+import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
 
 /** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
@@ -143,6 +144,31 @@ const META: Record<string, [string, string]> = {
   "Ledger reconciliation runbook": ["TW", "2026-08-19 09:00"],
 };
 
+/**
+ * An `html` macro's body (#2440): an endpoint list its script builds, so a
+ * frame that runs no script shows only the heading, and a line that says
+ * whether the script could reach the app's document (it cannot: the frame's
+ * origin is opaque).
+ */
+const EXPLORER = `<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 12px 16px; color: #1f2933; }
+  h3 { margin: 0 0 8px; } .ep { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid #e4e7eb; }
+  .m { font: 600 12px ui-monospace, monospace; width: 52px; color: #fff; border-radius: 3px; text-align: center; }
+  .GET { background: #2f80ed; } .POST { background: #27ae60; } .wall { color: #6b7785; margin-top: 10px; }
+</style>
+<h3>ledger-api 2.4</h3>
+<div id="eps"></div>
+<p class="wall" id="wall"></p>
+<script>
+  [["GET", "/balances/{account}"], ["POST", "/bookings"], ["GET", "/bookings/{id}"], ["POST", "/refunds"]].forEach(function (e) {
+    var row = document.createElement("div"); row.className = "ep";
+    row.innerHTML = '<span class="m ' + e[0] + '">' + e[0] + "</span><code>" + e[1] + "</code>";
+    document.getElementById("eps").appendChild(row);
+  });
+  var reached; try { reached = !!parent.document.title; } catch (e) { reached = false; }
+  document.getElementById("wall").textContent = reached ? "This frame reached the app." : "Runs in a sandbox: knobas is out of reach.";
+</script>`;
+
 /** A prototype body block. */
 type Proto =
   | { h: string }
@@ -162,7 +188,8 @@ type Proto =
   | { fold: string; blocks: Proto[] }
   /** An include (spec #2432): another page's body, or its excerpt, filled as the real read fills it. */
   | { include: string; excerpt?: boolean }
-  | { macro: string };
+  | { macro: string }
+  | { html: string };
 
 type Task = [done: boolean, text: string, under?: Task[]];
 
@@ -288,6 +315,9 @@ const BODIES: Record<string, Body> = {
       { h: "Data flow" },
       { p: "A payout starts as a booking in ledger-api, is picked up by payout-service at 13:00, and comes back as a settlement event the next morning." },
       { macro: "draw.io diagram" },
+      { h: "API reference" },
+      { p: "The ledger API's endpoints, from the embedded explorer the platform team hosts." },
+      { html: EXPLORER },
     ],
     comments: [],
   },
@@ -335,13 +365,16 @@ interface FakePage {
 }
 
 /**
- * The pages other modules name by id: the one read last, and PAY-231's two
- * pages, which `job-reach.ts` lists in what the job reaches (#863).
+ * The pages other modules name by id: the one read last, PAY-231's two
+ * pages, which `job-reach.ts` lists in what the job reaches (#863), and the
+ * one holding an embed (#2440).
  */
 const NAMED: Record<string, string> = {
   "SEPA payout retry design": "confluence:sepa",
   "Manual review queue": "confluence:manual-review",
   "PSP error codes": "confluence:psp-codes",
+  // Its embed is the one the shots and `scripts/embed-witness.mjs` open (#2440).
+  "Payments architecture overview": "confluence:architecture",
 };
 
 const PAGES: FakePage[] = [];
@@ -458,6 +491,7 @@ function block(b: Proto): DocBlock {
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
   if ("fold" in b) return { type: "collapsible", title: b.fold, blocks: b.blocks.map(block) };
+  if ("html" in b) return { type: "embed", name: "html", content: { kind: "html", html: b.html } };
   if ("include" in b) return include(b.include, b.excerpt ?? false);
   return { type: "placeholder", name: b.macro };
 }
@@ -542,7 +576,7 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
     for (const b of list) {
       if (b.type === "table") note("table");
       else if (b.type === "code") note("code");
-      else if (b.type === "placeholder" || b.type === "collapsible" || b.type === "include" || (b.type === "panel" && inPanel)) note("macro");
+      else if (b.type === "placeholder" || b.type === "collapsible" || b.type === "embed" || b.type === "include" || (b.type === "panel" && inPanel)) note("macro");
       else if (b.type === "panel") visit(b.blocks, true);
       else if (b.type === "paragraph") inlines(b.text);
       else if (b.type === "list") {
@@ -674,6 +708,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
     backlinks: backlinks(found.title),
     work: work(body.blocks.map(block)),
     writes: ["comment", "update_page", "create_page"],
+    run_embeds: !EMBEDS_OFF.has("confluence"),
   };
 }
 
@@ -802,13 +837,49 @@ function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrit
   };
 }
 
+/**
+ * `?fake-embed-host=<origin>` (#2440, `scripts/embed-witness.mjs`): every
+ * embed's HTML is the witness's probe instead. It loads `<origin>/lib.js`,
+ * fetches `<origin>/spec.json`, a host other than the app's, and tries to
+ * reach the app: its window, its document, its storage, Tauri's globals and
+ * the `ipc:` scheme. It writes what happened into `#knobas-witness` as JSON,
+ * for the witness to read from the frame.
+ */
+function witnessed(doc: DocPage, host: string | null): DocPage {
+  if (host === null) return doc;
+  // The bridge's call is spelt from two halves: house-rules' scan for a command
+  // called outside lib/ipc/ reads the word in any string, and this is a probe.
+  const call = ["inv", "oke"].join("");
+  const probe = `<p id="knobas-witness">running</p>
+<script src="${host}/lib.js"></script>
+<script>
+var call = "${call}";
+(async function () {
+  var out = { script: typeof window.witnessLib === "string" ? window.witnessLib : null };
+  try { out.spec = (await (await fetch("${host}/spec.json")).json()).openapi; } catch (e) { out.spec = "refused: " + e; }
+  var tryIt = function (name, f) { try { var v = f(); out[name] = v === undefined || v === null ? "unreachable" : "REACHED"; } catch (e) { out[name] = "refused"; } };
+  tryIt("parentTauri", function () { return parent.__TAURI_INTERNALS__; });
+  tryIt("topTauri", function () { return top.__TAURI_INTERNALS__; });
+  tryIt("ownTauri", function () { return window.__TAURI_INTERNALS__; });
+  tryIt("parentDocument", function () { return parent.document.title; });
+  tryIt("storage", function () { return localStorage.length; });
+  try { parent.__TAURI_INTERNALS__[call]("docs_page", { entityId: "confluence:sepa" }); out.ipcCall = "CALLED"; } catch (e) { out.ipcCall = "refused"; }
+  try { await fetch("ipc://localhost/docs_page"); out.ipcScheme = "REACHED"; } catch (e) { out.ipcScheme = "refused"; }
+  document.getElementById("knobas-witness").textContent = JSON.stringify(out);
+})();
+</script>`;
+  const swap = (blocks: DocBlock[]): DocBlock[] =>
+    blocks.map((b) => (b.type === "embed" ? { ...b, content: { kind: "html", html: probe } } : b));
+  return { ...doc, blocks: swap(doc.blocks) };
+}
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
   const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
-    docs_page: (args) => page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0),
+    docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
       const found = [...PAGES, ...bulk].find((p) => p.id === String(args["entityId"] ?? ""));

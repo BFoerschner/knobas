@@ -986,6 +986,36 @@ fi
 HOME_ID=$(printf '%s' "$API_BODY" | jq -r '.homepage.id // empty')
 [ -n "$HOME_ID" ] || die "space $SPACE_KEY has no home page"
 
+# The `html` macro (#2440): confluence_live's embed test stores pages holding
+# it, and Confluence ships it disabled. A storage body holding it is rendered
+# to `view`: an enabled macro draws the probe element, a disabled one an
+# "unknown macro" box. Off, the seed turns its module on through the plugin
+# manager once and renders again; still off, it stops here, naming it, and
+# never skips.
+html_macro_renders() {
+  conf POST /rest/api/contentbody/convert/view "$(jq -n '{representation: "storage",
+    value: "<ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<i id=\"knobas-html-probe\"></i>]]></ac:plain-text-body></ac:structured-macro>"}')"
+  expect "render a storage body holding the html macro" 200
+  printf '%s' "$API_BODY" | jq -e '.value | contains("knobas-html-probe")' >/dev/null
+}
+if html_macro_renders; then
+  skip "the html macro enabled"
+else
+  # The plugin manager answers a module only in its own media type; storage
+  # format's macro is `html-xhtml`, the wiki markup one `html`.
+  UPM_TYPE=application/vnd.atl.plugins.plugin.module+json
+  for _m in html-xhtml-key html-key; do
+    _path=/rest/plugins/1.0/confluence.macros.html-key/modules/$_m
+    _module=$(curl -sS -u "$ADMIN" -H "Accept: $UPM_TYPE" "$CONF_URL$_path" | jq -c '.enabled = true' 2>/dev/null) || _module=
+    [ -n "$_module" ] || continue
+    curl -sS -o /dev/null -u "$ADMIN" -X PUT -H "Content-Type: $UPM_TYPE" -d "$_module" "$CONF_URL$_path" || true
+  done
+  html_macro_renders || die "Confluence's html macro is disabled, and the knobas embed suite needs it
+  (#2440); turning it on through the plugin manager did not take. Enable it as an administrator:
+  Manage apps > System > Confluence HTML Macros > the 'html' modules, then seed again."
+  created "the html macro enabled"
+fi
+
 # The fixture's page body is a flat string of "## Heading — text" sections;
 # storage format wants <h2> and <p>, with `code` and *em* as their tags. A
 # page with no body is created empty. A comment is one <p>. Both escape the

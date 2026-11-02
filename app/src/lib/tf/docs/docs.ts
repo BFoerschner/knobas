@@ -24,6 +24,8 @@ import type {
   SectionRefusal,
   Unfilled,
 } from "../../ipc/entity";
+import { getContext, setContext } from "svelte";
+
 import { originLabel } from "../job/job";
 import { isDone } from "../tickets/tickets";
 
@@ -207,6 +209,8 @@ export function blockWords(block: DocBlock): string {
     // An include's words are the included page's, as in search (spec #2432).
     case "include":
     case "placeholder":
+    // What an embed shows is in its frame, not in the reader's words.
+    case "embed":
       return "";
   }
 }
@@ -221,6 +225,30 @@ export function revealMatch(match: Element): void {
     const title = fold.querySelector(":scope > summary");
     if (!title?.contains(match)) (fold as HTMLDetailsElement).open = true;
   }
+  }
+}
+
+/**
+ * How long an embed's frame has to say it loaded (#2440): its reporter
+ * speaks before the author's HTML runs, so a frame silent this long never
+ * loaded, and offers *Open in browser*.
+ */
+export const EMBED_REPORT_MS = 10_000;
+
+const EMBEDS = Symbol("docs-embeds");
+
+/**
+ * Say, for every embed `TfDocs` draws below, whether the page's source runs
+ * them (*Run embedded HTML*, `DocPage.run_embeds`): a context, so the blocks
+ * of a body and of each comment hear it without a prop through every level.
+ */
+export function provideEmbeds(runs: () => boolean): void {
+  setContext(EMBEDS, runs);
+}
+
+/** Whether embeds run here: what `TfDocs` said, and on where nothing said. */
+export function embedsRun(): () => boolean {
+  return getContext<(() => boolean) | undefined>(EMBEDS) ?? (() => true);
 }
 
 /**

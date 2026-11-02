@@ -147,6 +147,9 @@ fn block(block: &DocBlock) -> String {
             Some(_) => format!("<!-- include: {} -->", comment_safe(title)),
         },
         DocBlock::Placeholder { name } => format!("<!-- macro: {} -->", comment_safe(name)),
+        // Markup that runs has no Markdown spelling, and pasting its scripts
+        // into a file the reader opens elsewhere would run them there (#2440).
+        DocBlock::Embed { name, .. } => format!("<!-- embed: {} -->", comment_safe(name)),
     }
 }
 

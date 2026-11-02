@@ -134,6 +134,7 @@
     spaceLabel,
     spaceOfPage,
     stemsOf,
+    provideEmbeds,
   } from "./docs";
   import { pageVisible } from "../kept-pages.svelte";
   import { namePage } from "../page-name.svelte";
@@ -225,6 +226,8 @@
   let tree = $state.raw<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
+  // Whether the open page's source runs its embeds, for every embed drawn below (#2440).
+  provideEmbeds(() => page?.run_embeds ?? true);
   // What *Back to <name>* calls a doc page once it is left: its title (spec #2227).
   namePage(() => page?.title ?? null);
   let pageError = $state<string | null>(null);

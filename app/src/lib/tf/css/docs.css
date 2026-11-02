@@ -120,6 +120,9 @@
   color: var(--ink-2); margin: 0 0 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
 }
 .tf-macro .tf-btn { margin-left: auto; }
+/* An embed's frame (#2440): as tall as its document up to the window, scrolling inside itself past that. */
+.tf-embed { margin: 0 0 18px; }
+.tf-embed iframe { display: block; width: 100%; border: 1px solid var(--rule); border-radius: 6px; background: #fff; }
 /* An include (spec #2432): the other page's words in a light frame that says where they are from. */
 .tf-incl { border-left: 2px solid var(--rule-2); padding: 2px 0 2px 16px; margin: 0 0 18px; }
 .tf-incl-from { font: var(--t-xs) var(--sans); color: var(--ink-2); margin: 0 0 6px; }

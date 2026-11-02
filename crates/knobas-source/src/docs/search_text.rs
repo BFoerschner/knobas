@@ -18,6 +18,10 @@
 //! * one [`link_line`] per page the body links to, first mention first, in
 //!   `space` where the link names none.
 //!
+//! An embed's HTML contributes the words it shows, read by the shared HTML
+//! reader: never a script's or a style's contents, never markup, and a
+//! heading inside it opens no section (#2440).
+//!
 //! What a block draws as words is what it contributes. A placeholder
 //! contributes nothing: the reader draws only its name, which is the source's
 //! word for the construct and not the page's. Text inside a macro's
@@ -31,8 +35,20 @@
 //! The three mark characters never come from the page: one in the source's
 //! own text is read as a space, so no page can forge a section.
 
+use super::html::{Hook, Hooked, Node, Reading};
 use super::indexed::{comment_line, is_mark, link_line, section_line};
-use super::{DocBlock, DocContent, Inline};
+use super::{DocBlock, DocContent, EmbedContent, Inline};
+
+/// The reader's hook for an embed's HTML (#2440): an element it does not
+/// know (a `button`, a custom element, an `svg`) shows what it holds. The
+/// reader itself drops `script`, `style` and the rest it never draws.
+struct Shown;
+
+impl Hook for Shown {
+    fn element(&self, _: &Node, _: &Reading<'_>) -> Hooked {
+        Hooked::Unwrap
+    }
+}
 
 /// The `body_text` of the page titled `title` in the space `space`, whose
 /// record projects to `content`.
@@ -127,6 +143,14 @@ impl Lines {
                 self.push(title);
                 for inner in blocks {
                     self.block(inner, false);
+                }
+            }
+            DocBlock::Embed {
+                content: EmbedContent::Html { html },
+                ..
+            } => {
+                for inner in super::html::to_blocks(html, &Shown) {
+                    self.block(&inner, false);
                 }
             }
             // Included text is the included page's, found there and not on
@@ -401,6 +425,34 @@ mod tests {
         assert_eq!(
             search_text("Ops", "OPS", &page),
             "Ops\n\ndrain the queue\nrestart\nCareful\nInside\nNot twice.\nselect 1;\nselect 2;"
+        );
+    }
+
+    /// An embed's HTML is searched by what it shows (#2440): its text, a
+    /// button's and an element the reader does not know included, in the
+    /// section it sits in; never a script's or a style's contents, a
+    /// heading of its own as a section, nor its markup.
+    #[test]
+    fn an_embeds_visible_words_are_found_and_its_code_is_not() {
+        let html = "<style>.ui { color: red }</style><h1>Payments API</h1>\
+                    <div id=\"ui\"><p>Try the <b>refund</b> call.</p>\
+                    <button>Authorize</button>\n<swagger-tag>pets</swagger-tag></div>\
+                    <script>SwaggerUIBundle({ url: \"secretword.json\" });</script>";
+        let page = content(
+            vec![
+                heading("Reference"),
+                DocBlock::Embed {
+                    name: "html".into(),
+                    content: EmbedContent::Html { html: html.into() },
+                },
+            ],
+            vec![],
+        );
+        let read = read(&search_text("API", "ENG", &page));
+        assert_eq!(read.runs[1].part, Part::Section("Reference".into()));
+        assert_eq!(
+            read.runs[1].text,
+            "Payments API\nTry the refund call.\nAuthorize pets"
         );
     }
 

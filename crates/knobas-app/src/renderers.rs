@@ -449,6 +449,31 @@ pub const FRAME_SCHEME: &str = "knobas-render";
 /// else. No script runs and no request leaves the frame, whatever reaches it.
 pub const FRAME_CSP: &str = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
 
+/// Where a docs embed's document is served (#2440): `embed.` and the
+/// document, base64url without padding. A `.` is in no base64url document,
+/// so neither an asset nor a renderer's document is mistaken for one.
+pub const EMBED_PREFIX: &str = "embed.";
+
+/// The policy a docs embed runs under (#2440, spec #2432 *Embeds in the
+/// shell*): the HTML a page's author wrote, scripts included, loading
+/// scripts, styles, images, fonts, media and frames from any `http(s)` host
+/// and connecting to any, so a self-hosted Swagger UI loads its bundle and
+/// fetches its spec. Nothing else: no plugin, not the app's `ipc:` scheme,
+/// not this scheme. The frame is `sandbox="allow-scripts allow-forms
+/// allow-popups"`: an opaque origin, no storage, no top navigation, no reach
+/// into the app (`app/src/lib/render/embed.ts`). On Windows the app's IPC is
+/// `http://ipc.localhost`, which `http:` names. There the walls are Tauri's
+/// own (2.11, `ipc/protocol.rs`, `webview/mod.rs`): a request must carry the
+/// `Tauri-Invoke-Key` header, a secret only the main frame's injected script
+/// holds, and an `Origin` that parses as a URL, which a sandboxed frame's
+/// `null` does not.
+pub const EMBED_CSP: &str = "default-src 'none'; \
+                             script-src 'unsafe-inline' 'unsafe-eval' http: https:; \
+                             style-src 'unsafe-inline' http: https:; \
+                             img-src data: blob: http: https:; font-src data: blob: http: https:; \
+                             media-src data: blob: http: https:; frame-src http: https:; \
+                             connect-src http: https:; form-action http: https:; object-src 'none'";
+
 /// D2's frame page (#2381), an entry of the app's build (`app/d2-frame.html`).
 pub const D2_FRAME_PAGE: &str = "d2-frame.html";
 
@@ -477,6 +502,11 @@ pub const ENGINE_CSP: &str = "default-src 'none'; script-src knobas-render: http
 ///   is not there is a 404. Tauri's resolver answers a missing path with
 ///   `index.html`, so a script path whose asset is not JavaScript is missing
 ///   too: the app's own page never runs under the engine's policy.
+/// - `/embed.<document>`: a docs embed's document as the shell built it
+///   (the author's HTML and knobas' size reporter, `render/embed.ts`),
+///   base64url, served under [`EMBED_CSP`] (#2440). Not sanitized: running
+///   it as written is the point, and the sandbox and the policy are the
+///   walls. A path that is no document is a 400.
 ///
 /// base64url has no `.` and no `/`, so no document is mistaken for an asset.
 #[must_use]
@@ -485,7 +515,25 @@ pub fn frame_response(
     asset: impl FnOnce(&str) -> Option<(Vec<u8>, String)>,
 ) -> tauri::http::Response<Vec<u8>> {
     let path = path.trim_start_matches('/');
-    let built = if path == D2_FRAME_PAGE || engine_script(path) {
+    let built = if let Some(embed) = path.strip_prefix(EMBED_PREFIX) {
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        match URL_SAFE_NO_PAD
+            .decode(embed)
+            .ok()
+            .filter(|bytes| !bytes.is_empty())
+        {
+            Some(body) => tauri::http::Response::builder()
+                .status(200)
+                .header("content-type", "text/html; charset=utf-8")
+                .header("content-security-policy", EMBED_CSP)
+                .header("x-content-type-options", "nosniff")
+                .header("cache-control", "no-store")
+                .body(body),
+            None => tauri::http::Response::builder()
+                .status(400)
+                .body(Vec::new()),
+        }
+    } else if path == D2_FRAME_PAGE || engine_script(path) {
         match asset(path).filter(|(_, mime)| path == D2_FRAME_PAGE || mime.contains("javascript")) {
             Some((body, mime)) => tauri::http::Response::builder()
                 .status(200)
@@ -736,6 +784,79 @@ mod tests {
         assert!(conf.contains("style-src 'self';") && !conf.contains("unsafe-inline"));
 
         for bad in ["/not base64!", "/", "/%2F%2F"] {
+            let refused = frame_response(bad, |_| None);
+            assert_eq!(refused.status(), 400, "{bad}");
+            assert!(refused.body().is_empty());
+        }
+    }
+
+    /// A docs embed's document (#2440) is served as written under a policy
+    /// that runs its scripts and lets it load scripts, styles, images, fonts
+    /// and frames from, and connect to, any `http(s)` host (a self-hosted
+    /// Swagger UI loads its bundle and fetches its spec), and nothing else:
+    /// not the app's `ipc:` scheme, not this scheme, no plugin. A path that
+    /// is no document is a 400.
+    #[test]
+    fn an_embed_document_is_served_under_the_embed_policy() {
+        let doc = "<!doctype html><script src=\"https://cdn.example/ui.js\"></script>\
+                   <script>fetch(\"http://api.example/spec.json\")</script><p style=\"color: red\">é</p>";
+        let path = format!(
+            "/embed.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(doc)
+        );
+        let answer = frame_response(&path, |_| panic!("an embed is no asset"));
+        assert_eq!(answer.status(), 200);
+        assert_eq!(answer.body().as_slice(), doc.as_bytes());
+        let header = |name: &str| {
+            answer
+                .headers()
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            header("content-type").as_deref(),
+            Some("text/html; charset=utf-8")
+        );
+        assert_eq!(header("x-content-type-options").as_deref(), Some("nosniff"));
+        let policy = header("content-security-policy").expect("a policy");
+        let directive = |name: &str| -> Vec<String> {
+            policy
+                .split(';')
+                .map(str::trim)
+                .find_map(|d| d.strip_prefix(name).filter(|rest| rest.starts_with(' ')))
+                .unwrap_or_else(|| panic!("{name} in {policy}"))
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect()
+        };
+        assert_eq!(directive("default-src"), ["'none'"]);
+        assert_eq!(
+            directive("script-src"),
+            ["'unsafe-inline'", "'unsafe-eval'", "http:", "https:"]
+        );
+        assert_eq!(
+            directive("style-src"),
+            ["'unsafe-inline'", "http:", "https:"]
+        );
+        for name in ["img-src", "font-src", "media-src"] {
+            assert_eq!(
+                directive(name),
+                ["data:", "blob:", "http:", "https:"],
+                "{name}"
+            );
+        }
+        for name in ["frame-src", "connect-src", "form-action"] {
+            assert_eq!(directive(name), ["http:", "https:"], "{name}");
+        }
+        assert_eq!(directive("object-src"), ["'none'"]);
+        // Nothing names the app's own IPC or this scheme.
+        assert!(
+            !policy.contains("ipc") && !policy.contains("knobas-render"),
+            "{policy}"
+        );
+
+        for bad in ["/embed.", "/embed.not base64!", "/embed.%2F"] {
             let refused = frame_response(bad, |_| None);
             assert_eq!(refused.status(), 400, "{bad}");
             assert!(refused.body().is_empty());

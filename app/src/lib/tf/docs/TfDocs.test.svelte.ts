@@ -85,6 +85,7 @@ const PAGE: DocPage = {
   backlinks: [],
   work: [],
   writes: [],
+  run_embeds: true,
 };
 
 const QUEUED: QueuedWrite = {
