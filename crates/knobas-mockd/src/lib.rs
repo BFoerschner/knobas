@@ -273,7 +273,9 @@
 //!     PDF, and answers a user who may not browse the project with **200** and
 //!     its HTML *Access Denied* page rather than a 403. The adapter's reading
 //!     of that page is pinned by `tests/it/attachment_denied.rs` in
-//!     `knobas-source-jira`, and the rest by `live_jira_seeded`.
+//!     `knobas-source-jira`, and the rest by `live_jira_seeded`. Because the
+//!     adapter reads `text/html` without a disposition as that page, an HTML
+//!     file in mockd's fixture would read as refused; none is listed.
 //!
 //! ## The shared credentials
 //!

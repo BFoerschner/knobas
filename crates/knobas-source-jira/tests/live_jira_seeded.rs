@@ -4768,11 +4768,11 @@ impl knobas_source::run::DownloadSink for Kept {
     }
 }
 
-/// The seeded file `name`, as it is on disk under `testenv/`, and its
-/// content address on this Jira. The address is built here rather than read
+/// The seeded file `name`, as it is on disk under `testenv/`, its content
+/// address on this Jira, and the id Jira gave it. The address is built here rather than read
 /// from `seed-state.json`, so the list's `content` is checked against where
 /// Data Center serves a file and not against itself.
-fn seeded_file(seeded: &Seeded, name: &str) -> (Vec<u8>, String) {
+fn seeded_file(seeded: &Seeded, name: &str) -> (Vec<u8>, String, String) {
     let attachments = seeded.seed.attachments();
     let file = attachments
         .files
@@ -4787,6 +4787,7 @@ fn seeded_file(seeded: &Seeded, name: &str) -> (Vec<u8>, String) {
     (
         bytes,
         format!("{}/secure/attachment/{}/{name}", seeded.url, file.id),
+        file.id.clone(),
     )
 }
 
@@ -4809,8 +4810,8 @@ async fn the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_th
     let seeded = seeded();
     let attachments = seeded.seed.attachments();
     let entity = format!("jira:{}", attachments.issue);
-    let (png, png_url) = seeded_file(&seeded, SEEDED_PNG);
-    let (pdf, pdf_url) = seeded_file(&seeded, SEEDED_PDF);
+    let (png, png_url, png_id) = seeded_file(&seeded, SEEDED_PNG);
+    let (pdf, pdf_url, _) = seeded_file(&seeded, SEEDED_PDF);
 
     let source = seeded.source(serde_json::json!({}));
     let (items, _) = full(&*source).await;
@@ -4867,12 +4868,6 @@ async fn the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_th
     );
     // The thumbnail is a file of its own, `_thumb_{id}.png`, and a PDF has
     // none. mockd serves the file itself at `/secure/thumbnail/{id}/{name}`.
-    let png_id = &attachments
-        .files
-        .iter()
-        .find(|f| f.filename == SEEDED_PNG)
-        .expect("the PNG is seeded")
-        .id;
     let thumbnail = |name: &str| {
         files
             .iter()
@@ -4950,6 +4945,11 @@ async fn the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_th
     );
 }
 
+/// Whether `answer` is the refusal a file this account may not read gets.
+fn is_403<T>(answer: &Result<T, SourceError>) -> bool {
+    matches!(answer, Err(SourceError::Unauthorized { status: Some(403) }))
+}
+
 /// **A file the account may not see** (#2410): a user minted with Jira
 /// Software access, on OPS narrowed so that only administrators may browse
 /// it, asks for the seeded PNG with the address the mirror lists. Jira's
@@ -4970,7 +4970,7 @@ async fn an_attachment_on_a_project_the_account_may_not_browse_is_a_403() {
         attachments.issue
     );
     let entity = format!("jira:{}", attachments.issue);
-    let (png, png_url) = seeded_file(&seeded, SEEDED_PNG);
+    let (png, png_url, _) = seeded_file(&seeded, SEEDED_PNG);
     let narrowed = Narrowed::new(&seeded, &UNBROWSABLE).await;
     // What Jira itself answers, measured on 10.3.24: not a 403 but a 200 with
     // its Access Denied page, at the file's own address and with no
@@ -5003,29 +5003,14 @@ async fn an_attachment_on_a_project_the_account_may_not_browse_is_a_403() {
         .source()
         .attachment_bytes(&entity, &png_url, ATTACHMENT_CAP)
         .await;
-    assert!(
-        matches!(
-            refused,
-            Err(SourceError::Unauthorized {
-                status: Some(403),
-                ..
-            })
-        ),
-        "{MINTED} may not browse OPS: {refused:?}"
-    );
+    assert!(is_403(&refused), "{MINTED} may not browse OPS: {refused:?}");
     let mut kept = Kept::default();
     let refused_download = narrowed
         .source()
         .download_attachment(&entity, &png_url, SEEDED_PNG, &mut kept)
         .await;
     assert!(
-        matches!(
-            refused_download,
-            Err(SourceError::Unauthorized {
-                status: Some(403),
-                ..
-            })
-        ),
+        is_403(&refused_download),
         "{MINTED} may not download from OPS: {refused_download:?}"
     );
     assert!(kept.name.is_none(), "nothing reached the sink");

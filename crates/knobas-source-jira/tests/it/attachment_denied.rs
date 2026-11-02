@@ -19,6 +19,8 @@ use knobas_source::{AuthMethod, Source, SourceError};
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
+use crate::mockd::Kept;
+
 /// The head of the page Jira served, cut down.
 const ACCESS_DENIED: &str = "\n\n<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n\
     <title>Access Denied - knobas testenv</title>\n</head>\n<body></body>\n</html>\n";
@@ -49,25 +51,6 @@ fn source(base_url: &str) -> Box<dyn Source> {
     match knobas_source_jira::build(instance) {
         Ok(source) => source,
         Err(error) => panic!("the adapter must build: {error:?}"),
-    }
-}
-
-/// What a download handed its sink.
-#[derive(Default)]
-struct Kept {
-    name: Option<String>,
-    bytes: Vec<u8>,
-}
-
-#[async_trait::async_trait]
-impl knobas_source::run::DownloadSink for Kept {
-    async fn start(&mut self, file_name: &str) -> Result<(), SourceError> {
-        self.name = Some(file_name.to_owned());
-        Ok(())
-    }
-    async fn write(&mut self, bytes: &[u8]) -> Result<(), SourceError> {
-        self.bytes.extend_from_slice(bytes);
-        Ok(())
     }
 }
 

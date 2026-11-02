@@ -1132,10 +1132,11 @@ async fn an_incremental_run_delivers_the_widened_payload_for_what_it_returns() {
 
 /// What an attachment's bytes are recorded into for a download: the name the
 /// adapter suggested and every byte, in order.
+/// Shared with `attachment_denied.rs`.
 #[derive(Default)]
-struct Kept {
-    name: Option<String>,
-    bytes: Vec<u8>,
+pub(crate) struct Kept {
+    pub(crate) name: Option<String>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 #[async_trait::async_trait]

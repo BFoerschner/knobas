@@ -73,6 +73,9 @@ pub(crate) fn path_on(base_url: &str, url: &str) -> Result<String, SourceError> 
 /// page, at the file's own address. Every file it does send carries
 /// `Content-Disposition` (`inline` for an image, `attachment` for the rest, an
 /// HTML file included), and the page carries none. Measured on 10.3.24.
+/// The refusal it stands for is `Unauthorized { status: Some(403) }`, which
+/// the app reads as "this account may not read the file", never as a
+/// credential to re-enter.
 fn access_denied(headers: &HeaderMap) -> bool {
     let html = headers
         .get(CONTENT_TYPE)
@@ -84,13 +87,6 @@ fn access_denied(headers: &HeaderMap) -> bool {
                 .starts_with("text/html")
         });
     html && !headers.contains_key(CONTENT_DISPOSITION)
-}
-
-/// The refusal [`access_denied`] stands for: Jira's own word is a 403, and
-/// the app reads `Unauthorized { status: Some(403) }` as "this account may not
-/// read the file", never as a credential to re-enter.
-fn denied() -> SourceError {
-    SourceError::Unauthorized { status: Some(403) }
 }
 
 /// The file at `path` (from [`path_on`]), whole, or refused with its size
@@ -110,7 +106,7 @@ pub(crate) async fn bytes(
 ) -> Result<FileBytes, SourceError> {
     let mut response = http.send(http.request(Method::GET, path)).await?;
     if access_denied(response.headers()) {
-        return Err(denied());
+        return Err(SourceError::Unauthorized { status: Some(403) });
     }
     if let Some(size) = response.content_length().filter(|size| *size > cap) {
         return Ok(FileBytes::TooLarge { size });
@@ -150,7 +146,7 @@ pub(crate) async fn download(
         .send_streaming(http.request(Method::GET, path), knobas_http::STALL_TIMEOUT)
         .await?;
     if access_denied(body.headers()) {
-        return Err(denied());
+        return Err(SourceError::Unauthorized { status: Some(403) });
     }
     sink.start(name).await?;
     while let Some(chunk) = body.chunk().await.map_err(|error| {
