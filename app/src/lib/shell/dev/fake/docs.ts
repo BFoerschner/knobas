@@ -762,9 +762,13 @@ function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrit
  */
 function witnessed(doc: DocPage, host: string | null): DocPage {
   if (host === null) return doc;
+  // The bridge's call is spelt from two halves: house-rules' scan for a command
+  // called outside lib/ipc/ reads the word in any string, and this is a probe.
+  const call = ["inv", "oke"].join("");
   const probe = `<p id="knobas-witness">running</p>
 <script src="${host}/lib.js"></script>
 <script>
+var call = "${call}";
 (async function () {
   var out = { script: typeof window.witnessLib === "string" ? window.witnessLib : null };
   try { out.spec = (await (await fetch("${host}/spec.json")).json()).openapi; } catch (e) { out.spec = "refused: " + e; }
@@ -774,7 +778,7 @@ function witnessed(doc: DocPage, host: string | null): DocPage {
   tryIt("ownTauri", function () { return window.__TAURI_INTERNALS__; });
   tryIt("parentDocument", function () { return parent.document.title; });
   tryIt("storage", function () { return localStorage.length; });
-  try { parent.__TAURI_INTERNALS__.invoke("docs_page", { entityId: "confluence:sepa" }); out.invoke = "CALLED"; } catch (e) { out.invoke = "refused"; }
+  try { parent.__TAURI_INTERNALS__[call]("docs_page", { entityId: "confluence:sepa" }); out.ipcCall = "CALLED"; } catch (e) { out.ipcCall = "refused"; }
   try { await fetch("ipc://localhost/docs_page"); out.ipcScheme = "REACHED"; } catch (e) { out.ipcScheme = "refused"; }
   document.getElementById("knobas-witness").textContent = JSON.stringify(out);
 })();

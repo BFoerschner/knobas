@@ -147,7 +147,7 @@ for (let i = 0; i < 120 && probe === null; i++) {
 }
 
 console.log(JSON.stringify({ url, sandbox, probe }, null, 2));
-const reaches = ["parentTauri", "topTauri", "ownTauri", "parentDocument", "storage", "invoke", "ipcScheme"];
+const reaches = ["parentTauri", "topTauri", "ownTauri", "parentDocument", "storage", "ipcCall", "ipcScheme"];
 const ok =
   probe !== null &&
   sandbox === "allow-scripts allow-forms allow-popups" &&
