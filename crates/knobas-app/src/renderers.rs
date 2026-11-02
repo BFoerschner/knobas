@@ -462,8 +462,11 @@ pub const EMBED_PREFIX: &str = "embed.";
 /// not this scheme. The frame is `sandbox="allow-scripts allow-forms
 /// allow-popups"`: an opaque origin, no storage, no top navigation, no reach
 /// into the app (`app/src/lib/render/embed.ts`). On Windows the app's IPC is
-/// `http://ipc.localhost`, which `http:` names; there the wall is the
-/// opaque origin and Tauri's own check of who invokes.
+/// `http://ipc.localhost`, which `http:` names. There the walls are Tauri's
+/// own (2.11, `ipc/protocol.rs`, `webview/mod.rs`): a request must carry the
+/// `Tauri-Invoke-Key` header, a secret only the main frame's injected script
+/// holds, and an `Origin` that parses as a URL, which a sandboxed frame's
+/// `null` does not.
 pub const EMBED_CSP: &str = "default-src 'none'; \
                              script-src 'unsafe-inline' 'unsafe-eval' http: https:; \
                              style-src 'unsafe-inline' http: https:; \
