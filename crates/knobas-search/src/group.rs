@@ -38,6 +38,7 @@ pub(crate) const GROUP_ORDER: &[&str] = &[
     "branch",
     "route",
     "monitor",
+    "list",
 ];
 
 /// One row of the generated statement, exactly as it is projected.

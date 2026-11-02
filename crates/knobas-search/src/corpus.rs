@@ -702,6 +702,42 @@ pub const ROUTE: Corpus = Corpus {
     fields: &[],
 };
 
+/// The lists a reader saved (#2423, spec #2419 story 13), as kind `list`:
+/// what `#l` answers.
+///
+/// A list is no entity -- it has no `knobas.entity` row and no address -- so
+/// its id is the slug `rename_smart_list` and `delete_smart_list` take, and the
+/// kind tells it from anything else's id. Its **path line is its own text**,
+/// the query Enter puts back into the box; `state` is filled after the
+/// statement, by `Searcher::search`, for a text today's grammar refuses
+/// (`saved::plan`).
+///
+/// No migration and no index: `fts` is computed in the derived table, the
+/// name at weight A (what *Titles* reads) and the text at B, because the
+/// table holds at most [`crate::saved::MAX_SAVED_LISTS`] rows.
+pub const SAVED_LIST: Corpus = Corpus {
+    relation: "(select s.id, s.label, s.query, s.updated_at, \
+                setweight(to_tsvector('english', s.label), 'A') || \
+                setweight(to_tsvector('english', s.query), 'B') as fts \
+                from knobas.smart_list s) l",
+    entity_id: "l.id",
+    kind: "'list'",
+    source_id: "'list'",
+    title: "l.label",
+    named: None,
+    fts: "l.fts",
+    headline_text: "l.label || ' — ' || l.query",
+    // The reader's own, as a note is.
+    author: None,
+    updated_at: "l.updated_at",
+    synced_at: "l.updated_at",
+    path: "l.query",
+    state: "null::jsonb",
+    scope: None,
+    under: None,
+    fields: &[],
+};
+
 /// Every corpus the launcher searches.
 ///
 /// One list, so a corpus cannot be added to the crate and forgotten by the
@@ -711,12 +747,12 @@ pub const ROUTE: Corpus = Corpus {
 /// [`NOTE`]'s constant `'note'` is not; and an author filter excludes a corpus
 /// with no author column outright. So the union is always both branches and the
 /// answer is always the right one.
-pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE];
+pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE, &SAVED_LIST];
 
 /// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
 /// quick capture* is off (#940, R-13a.6). The note data and commands stay
 /// (D10); only the search leaves them out.
-pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE];
+pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &SAVED_LIST];
 
 #[cfg(test)]
 mod tests {

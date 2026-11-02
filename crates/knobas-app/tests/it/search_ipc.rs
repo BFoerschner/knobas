@@ -2215,3 +2215,64 @@ fn a_query_without_the_titles_flag_reads_as_everything() {
     .unwrap();
     assert!(!decoded.titles);
 }
+
+/// The hits of one kind in an answer, as `(entity_id, title, path)`.
+fn hits_of(response: &knobas_search::SearchResponse, kind: &str) -> Vec<(String, String, Option<String>)> {
+    response
+        .groups
+        .iter()
+        .filter(|group| group.kind == kind)
+        .flat_map(|group| group.hits.iter())
+        .map(|hit| (hit.row.entity_id.clone(), hit.row.title.clone(), hit.row.path.clone()))
+        .collect()
+}
+
+/// Saved lists are a kind in the index (#2423, spec #2419 story 13): `#l`
+/// answers every one, `#l <word>` the ones whose name or text holds it, and
+/// a list's path line is its own text, which Enter puts back into the box.
+#[tokio::test]
+async fn hash_l_answers_the_saved_lists_with_their_text_as_the_path_line() {
+    let pool = saved_pool("list-kind").await;
+    let t = token("lk");
+    let gitea = format!("#p {t} gitea");
+    let other = format!("#t {t} payouts");
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "Reviews", &gitea)
+        .await
+        .expect("a query the grammar runs");
+    create_smart_list_inner(&pool, &Registry::for_process(), "Payout tickets", &other)
+        .await
+        .expect("a query the grammar runs");
+
+    let every = search_inner(&pool, &Registry::for_process(), query("#l"))
+        .await
+        .expect("#l answers");
+    let mut lists = hits_of(&every, "list");
+    lists.sort();
+    assert_eq!(
+        lists,
+        [
+            ("payout-tickets".to_owned(), "Payout tickets".to_owned(), Some(other.clone())),
+            (made.id.clone(), "Reviews".to_owned(), Some(gitea.clone())),
+        ],
+        "{every:?}"
+    );
+    assert!(
+        every.groups.iter().all(|group| group.kind == "list"),
+        "#l narrows to lists: {every:?}"
+    );
+    let group = every.groups.iter().find(|g| g.kind == "list").unwrap();
+    assert_eq!(group.monogram, "LI");
+
+    // By the text, and by the name.
+    let by_text = search_inner(&pool, &Registry::for_process(), query("#l gitea"))
+        .await
+        .expect("#l gitea answers");
+    assert_eq!(hits_of(&by_text, "list"), [(made.id.clone(), "Reviews".to_owned(), Some(gitea.clone()))]);
+    let by_name = search_inner(&pool, &Registry::for_process(), query("#l payout"))
+        .await
+        .expect("#l payout answers");
+    assert_eq!(
+        hits_of(&by_name, "list").into_iter().map(|hit| hit.0).collect::<Vec<_>>(),
+        ["payout-tickets"]
+    );
+}
