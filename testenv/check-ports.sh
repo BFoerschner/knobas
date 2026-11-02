@@ -75,6 +75,7 @@ fi
 #    §5 map and collide with the defaults if anyone gets one wrong.
 # ---------------------------------------------------------------------------
 expected_all='confluence|127.0.0.1|8090|8090|tcp
+docs-assets|127.0.0.1|8095|8095|tcp
 forgejo|127.0.0.1|3002|3000|tcp
 gitea|127.0.0.1|3000|3000|tcp
 https-front|127.0.0.1|3443|3443|tcp

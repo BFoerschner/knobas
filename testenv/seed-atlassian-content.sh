@@ -373,8 +373,10 @@ verify_confluence() {
   # must come back from a search of the space, waited for up to 180 s. And
   # nothing else may (#2111): the adapter suite bounds a full sync by the
   # seeded pages and the home page, and a page the seed deleted leaves the
-  # index as late as a created one joins it.
-  _want=$(jq -r '[.confluence.pages[]?.id] | sort | join(" ")' "$STATE")
+  # index as late as a created one joins it. The Docs reader showcase's
+  # pages in this space (#2456) are seeded pages too.
+  _want=$(jq -r --arg k "$SPACE_KEY" '[.confluence.pages[]?.id] + [.confluence.showcase.pages[]? | select(.space == $k) | .id]
+    | sort | join(" ")' "$STATE")
   _home=$(jq -r '.confluence.home_page_id // empty' "$STATE")
   _waited=0
   while :; do
@@ -972,6 +974,8 @@ fi  # want jira
 if want confluence; then
 conf GET /rest/api/user/current
 expect "GET /rest/api/user/current as $ADMIN_USER" 200
+ME_KEY=$(printf '%s' "$API_BODY" | jq -r '.userKey // empty')
+[ -n "$ME_KEY" ] || die "GET /rest/api/user/current answered no userKey"
 
 conf GET "/rest/api/space/$SPACE_KEY?expand=homepage"
 if [ "$API_STATUS" = "200" ]; then
@@ -1105,6 +1109,125 @@ for row in $(jq -r --arg k "$SPACE_KEY" --arg n "$NESTED_PAGE" \
     '. + [{fixture_id: $f, title: $t, id: $i, parent_id: $p, comments: $c}]')
 done
 
+# -- the Docs reader showcase (#2456) ---------------------------------------
+# Björn's ruling on spec #2432 (docs/decisions/2026-11-02-spec-2432-docs-
+# whole-pages.md, ruling 6): every construct the Docs reader draws is standing
+# content he can open in knobas, not a page a live test makes and deletes.
+# The pages are confluence-showcase/*.xml in storage format, in the order and
+# under the parents its manifest.json names: "Docs reader showcase" under the
+# ENG home, its children under it, and one page in a SECOND space, ARCHIVE,
+# which no seeded knobas config syncs (`./seed --env`'s source, `just
+# live-sources` and the live suites all scope to ENG), so an include of it is
+# an include of a page knobas has not mirrored.
+#
+# Not the fixture's corpus: work.json and the mock adapter know nothing of
+# them, and they are recorded apart, under `confluence.showcase`, so the
+# adapter suite's per-page claims about `confluence.pages` stay claims about
+# the fixture. The space's full sync is both lists and the home page.
+#
+# Idempotent, and an edited file reaches the page: each page carries a
+# content property (`knobas-seed`) holding the sha256 of the storage the seed
+# last wrote. A page whose property matches is a skip; one that differs gets
+# the file's storage as a new version, under the manifest's parent. Labels
+# missing from a page are added. The embeds load their files from the
+# docs-assets server (docker-compose.yml, `docs-assets`), at
+# KNOBAS_DOCS_ASSETS_URL, http://127.0.0.1:8095 by default.
+SHOWCASE_DIR=confluence-showcase
+OUTSIDE_KEY=ARCHIVE
+OUTSIDE_NAME='Archive (not synced)'
+ASSETS_URL=${KNOBAS_DOCS_ASSETS_URL:-http://127.0.0.1:8095}
+[ -r "$SHOWCASE_DIR/manifest.json" ] || die "$SHOWCASE_DIR/manifest.json not found"
+
+conf GET "/rest/api/space/$OUTSIDE_KEY?expand=homepage"
+if [ "$API_STATUS" = "200" ]; then
+  skip "space $OUTSIDE_KEY"
+else
+  conf POST /rest/api/space "$(jq -n --arg k "$OUTSIDE_KEY" --arg n "$OUTSIDE_NAME" '{key: $k, name: $n}')"
+  expect "create space $OUTSIDE_KEY" 200 201
+  created "space $OUTSIDE_KEY ($OUTSIDE_NAME)"
+  conf GET "/rest/api/space/$OUTSIDE_KEY?expand=homepage"
+  expect "read space $OUTSIDE_KEY" 200
+fi
+OUTSIDE_HOME=$(printf '%s' "$API_BODY" | jq -r '.homepage.id // empty')
+[ -n "$OUTSIDE_HOME" ] || die "space $OUTSIDE_KEY has no home page"
+
+showcase_storage() {  # showcase_storage <slug>
+  sed -e "s|{{SPACE}}|$SPACE_KEY|g" -e "s|{{OUTSIDE}}|$OUTSIDE_KEY|g" \
+      -e "s|{{ASSETS}}|$ASSETS_URL|g" -e "s|{{ME}}|$ME_KEY|g" "$SHOWCASE_DIR/$1.xml"
+}
+
+SHOWCASE='[]'
+for row in $(jq -r '.pages[] | @base64' "$SHOWCASE_DIR/manifest.json"); do
+  d=$(printf '%s' "$row" | base64 -d)
+  slug=$(printf '%s' "$d" | jq -r .slug)
+  title=$(printf '%s' "$d" | jq -r .title)
+  under=$(printf '%s' "$d" | jq -r .parent)
+  case $(printf '%s' "$d" | jq -r .space) in
+    synced) key=$SPACE_KEY; home=$HOME_ID ;;
+    outside) key=$OUTSIDE_KEY; home=$OUTSIDE_HOME ;;
+    *) die "$SHOWCASE_DIR/manifest.json: page $slug has no space synced|outside" ;;
+  esac
+  if [ "$under" = home ]; then
+    parent=$home
+  else
+    parent=$(printf '%s' "$SHOWCASE" | jq -r --arg s "$under" 'map(select(.slug == $s)) | .[0].id // empty')
+    [ -n "$parent" ] || die "$SHOWCASE_DIR/manifest.json: $slug's parent $under comes after it"
+  fi
+  storage=$(showcase_storage "$slug")
+  digest=$(printf '%s' "$storage" | shasum -a 256 | cut -c1-64)
+
+  conf GET "/rest/api/content?spaceKey=$key&type=page&title=$(urlenc "$title")&expand=version"
+  expect "find page \"$title\"" 200
+  pid=$(printf '%s' "$API_BODY" | jq -r '.results[0].id // empty')
+  if [ -z "$pid" ]; then
+    conf POST /rest/api/content "$(jq -n --arg t "$title" --arg k "$key" --arg h "$parent" --arg s "$storage" \
+        '{type: "page", title: $t, space: {key: $k}, ancestors: [{id: $h}],
+          body: {storage: {value: $s, representation: "storage"}}}')"
+    expect "create page \"$title\"" 200
+    pid=$(printf '%s' "$API_BODY" | jq -r .id)
+    have=
+    created "showcase page \"$title\" (id $pid in $key)"
+  else
+    version=$(printf '%s' "$API_BODY" | jq -r '.results[0].version.number')
+    conf GET "/rest/api/content/$pid/property/knobas-seed"
+    have=
+    if [ "$API_STATUS" = 200 ]; then have=$(printf '%s' "$API_BODY" | jq -r '.value.digest // empty'); fi
+    if [ "$have" = "$digest" ]; then
+      skip "showcase page \"$title\" (id $pid)"
+    else
+      conf PUT "/rest/api/content/$pid" "$(jq -n --arg i "$pid" --arg t "$title" --arg h "$parent" \
+          --arg s "$storage" --argjson v "$((version + 1))" \
+          '{id: $i, type: "page", title: $t, ancestors: [{id: $h}], version: {number: $v},
+            body: {storage: {value: $s, representation: "storage"}}}')"
+      expect "update page \"$title\"" 200
+      created "showcase page \"$title\" updated from $SHOWCASE_DIR/$slug.xml (id $pid, version $((version + 1)))"
+    fi
+  fi
+  if [ "$have" != "$digest" ]; then
+    conf GET "/rest/api/content/$pid/property/knobas-seed"
+    if [ "$API_STATUS" = 200 ]; then
+      pv=$(printf '%s' "$API_BODY" | jq -r '.version.number')
+      conf PUT "/rest/api/content/$pid/property/knobas-seed" "$(jq -n --arg d "$digest" --argjson v "$((pv + 1))" \
+          '{key: "knobas-seed", value: {digest: $d}, version: {number: $v}}')"
+    else
+      conf POST "/rest/api/content/$pid/property" "$(jq -n --arg d "$digest" '{key: "knobas-seed", value: {digest: $d}}')"
+    fi
+    expect "the seed's digest on page \"$title\"" 200
+  fi
+
+  conf GET "/rest/api/content/$pid/label"
+  expect "labels of page \"$title\"" 200
+  missing=$(printf '%s' "$d" | jq -c --argjson have "$API_BODY" \
+    '[.labels[] | select(. as $l | [$have.results[].name] | index($l) | not) | {prefix: "global", name: .}]')
+  if [ "$missing" != "[]" ]; then
+    conf POST "/rest/api/content/$pid/label" "$missing"
+    expect "label page \"$title\"" 200
+    created "label(s) $(printf '%s' "$missing" | jq -r 'map(.name) | join(", ")') on \"$title\""
+  fi
+  SHOWCASE=$(printf '%s' "$SHOWCASE" | jq --arg s "$slug" --arg t "$title" --arg i "$pid" --arg k "$key" --arg p "$parent" \
+    '. + [{slug: $s, title: $t, id: $i, space: $k, parent_id: $p}]')
+done
+
 # -- pages the seed did not create go (#2111) --------------------------------
 # The space is the seed's: its home page and the pages just found or created
 # above, and nothing else. A suite that creates a page deletes it from a
@@ -1119,7 +1242,8 @@ done
 # again. The list is flat, every depth at once, so a stray's children are on
 # it beside their parent. On a fresh space, and on the second seed of every
 # window, nothing is deleted.
-KEEP=$(printf '%s' "$PAGE_IDS" | jq -c --arg h "$HOME_ID" '[$h] + map(.id)')
+KEEP=$(printf '%s' "$PAGE_IDS" | jq -c --arg h "$HOME_ID" --arg k "$SPACE_KEY" --argjson sc "$SHOWCASE" \
+  '[$h] + map(.id) + [$sc[] | select(.space == $k) | .id]')
 STRAYS=0
 stray=
 start=0
@@ -1147,6 +1271,11 @@ record '.confluence += {
   _comment: "Seeded by testenv/seed-atlassian-content.sh. Confluence assigns content ids; pages are found by title in the space. The fixture names no ancestors, so the seed decides the tree: every page sits under the space home page (`home_page_id`) except `sepa-design`, which is nested under `payments-architecture-overview` so that a launcher hit for it has a two-segment ancestor path. Each page records the content id it sits under as `parent_id` -- read back from the server for a page an earlier run had already created. Comments are authored by `author`."
 }' "$(jq -n --arg k "$SPACE_KEY" --arg h "$HOME_ID" --arg a "$ADMIN_USER" --argjson p "$PAGE_IDS" \
         '{space: $k, home: $h, author: $a, pages: $p}')"
+# shellcheck disable=SC2016
+record '.confluence += {showcase: $v}' "$(jq -n --arg k "$OUTSIDE_KEY" --arg n "$OUTSIDE_NAME" --arg h "$OUTSIDE_HOME" \
+    --arg a "$ASSETS_URL" --argjson p "$SHOWCASE" \
+    '{outside_space: {key: $k, name: $n, home_page_id: $h}, assets: $a, pages: $p,
+      _comment: "The Docs reader showcase (#2456): testenv/confluence-showcase/, one row per page with its slug and the space it is in. `outside_space` is the second space, which no seeded knobas config syncs. `assets` is the docs-assets server the embeds load from. Not the fixture'"'"'s corpus, which is `pages`."}')"
 fi  # want confluence
 
 say "wrote $STATE"

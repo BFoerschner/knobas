@@ -165,6 +165,24 @@ struct Seed {
     author: String,
     /// One row per fixture page, with the id Confluence assigned.
     pages: Vec<SeededPage>,
+    /// The Docs reader showcase (#2456): pages the seed adds beside the
+    /// fixture, in this space and in a second one. Not the fixture's corpus,
+    /// so nothing here asserts on them one by one; a full sync of the space
+    /// returns them too.
+    #[serde(default)]
+    showcase: Showcase,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct Showcase {
+    #[serde(default)]
+    pages: Vec<ShowcasePage>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ShowcasePage {
+    id: String,
+    space: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -369,6 +387,21 @@ impl Seeded {
     fn seeded_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self.seed.pages.iter().map(|p| p.id.clone()).collect();
         ids.sort();
+        ids
+    }
+
+    /// The ids of every page the seed made in this space: the fixture's and
+    /// the showcase's (#2456).
+    fn space_ids(&self) -> Vec<String> {
+        let mut ids = self.seeded_ids();
+        ids.extend(
+            self.seed
+                .showcase
+                .pages
+                .iter()
+                .filter(|p| p.space == self.seed.space)
+                .map(|p| p.id.clone()),
+        );
         ids
     }
 
@@ -906,16 +939,17 @@ async fn a_full_sync_mirrors_every_seeded_page_of_the_space() {
     let (items, cursor) = full(&*seeded.source(seeded.scoped())).await;
 
     let got = ids(&items);
-    for id in seeded.seeded_ids() {
+    for id in seeded.space_ids() {
         assert!(
             got.contains(&id),
             "the seed created page {id} and the full sync did not return it: {got:?}"
         );
     }
     // The home page is the only thing the seed did not create and the space
-    // does have, so this is the whole corpus of the space, not a window.
+    // does have, so this is the whole corpus of the space, not a window. The
+    // space holds the showcase's pages besides the fixture's (#2456).
     assert!(
-        got.len() <= seeded.seeded_ids().len() + 1,
+        got.len() <= seeded.space_ids().len() + 1,
         "the run returned pages the seed knows nothing about: {got:?}"
     );
 

@@ -1,0 +1,23 @@
+<p>Embedded content. knobas draws each in a sandboxed frame while the source's <em>Run embedded HTML</em> switch is on.</p>
+<h2>HTML with a script</h2>
+<ac:structured-macro ac:name="html" ac:schema-version="1"><ac:plain-text-body><![CDATA[<div style="font-family: sans-serif">
+<p>Settled today: <b id="settled">counting</b> payouts</p>
+<p id="ran">The script has not run.</p>
+</div>
+<script>
+document.getElementById("settled").textContent = String(6 * 7);
+document.getElementById("ran").textContent = "The script ran.";
+</script>]]></ac:plain-text-body></ac:structured-macro>
+<h2>The payouts API (Swagger UI)</h2>
+<ac:structured-macro ac:name="html" ac:schema-version="1"><ac:plain-text-body><![CDATA[<link rel="stylesheet" href="{{ASSETS}}/swagger-ui/swagger-ui.css">
+<div id="swagger-ui"></div>
+<script src="{{ASSETS}}/swagger-ui/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({ url: "{{ASSETS}}/openapi.json", dom_id: "#swagger-ui" });
+</script>]]></ac:plain-text-body></ac:structured-macro>
+<h2>A status page in an iframe</h2>
+<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="{{ASSETS}}/status.html" /></ac:parameter><ac:parameter ac:name="height">300</ac:parameter></ac:structured-macro>
+<h2>A video through the widget connector</h2>
+<ac:structured-macro ac:name="widget" ac:schema-version="1"><ac:parameter ac:name="url"><ri:url ri:value="https://www.youtube.com/embed/aqz-KE-bpKQ" /></ac:parameter></ac:structured-macro>
+<h2>An address knobas refuses to frame</h2>
+<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="javascript:alert(1)" /></ac:parameter></ac:structured-macro>

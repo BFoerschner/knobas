@@ -103,6 +103,21 @@ struct Env {
     password: String,
     space: String,
     pages: Vec<SeededPage>,
+    /// The space's home page, which the showcase hangs under.
+    home: String,
+    /// The Docs reader showcase (#2456): its pages, the second space's key,
+    /// and the docs-assets server its embeds load from.
+    showcase: Vec<ShowcasePage>,
+    outside: String,
+    assets: String,
+}
+
+#[derive(Clone, serde::Deserialize)]
+struct ShowcasePage {
+    slug: String,
+    title: String,
+    id: String,
+    space: String,
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -149,7 +164,25 @@ fn env() -> Env {
         "{}: the seed recorded no pages",
         state.display()
     );
+    let showcase = &seeded["showcase"];
+    let showcase_pages: Vec<ShowcasePage> = serde_json::from_value(showcase["pages"].clone())
+        .unwrap_or_else(|e| {
+            panic!(
+                "{}: no `confluence.showcase.pages` -- run `./seed-atlassian-content.sh`, which \
+                 seeds the Docs reader showcase (#2456): {e}",
+                state.display()
+            )
+        });
+    let text = |v: &serde_json::Value, what: &str| {
+        v.as_str()
+            .unwrap_or_else(|| panic!("{}: no `confluence.{what}`", state.display()))
+            .to_owned()
+    };
     Env {
+        home: text(&seeded["home_page_id"], "home_page_id"),
+        outside: text(&showcase["outside_space"]["key"], "showcase.outside_space.key"),
+        assets: text(&showcase["assets"], "showcase.assets"),
+        showcase: showcase_pages,
         url: need("KNOBAS_CONFLUENCE_URL")
             .trim_end_matches('/')
             .to_owned(),
@@ -166,6 +199,14 @@ impl Env {
             .iter()
             .find(|p| p.fixture_id == fixture_id)
             .unwrap_or_else(|| panic!("seed-state.json records no page {fixture_id}"))
+            .clone()
+    }
+
+    fn showcase(&self, slug: &str) -> ShowcasePage {
+        self.showcase
+            .iter()
+            .find(|p| p.slug == slug)
+            .unwrap_or_else(|| panic!("seed-state.json records no showcase page {slug}"))
             .clone()
     }
 
@@ -945,120 +986,130 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
     drop(state);
 }
 
-/// **The Docs reader's blocks, from a page Confluence itself stored** (#859,
-/// ADR-0022): each mapped macro comes back from the real server's storage
-/// format as its block, a macro the reader does not draw is the named
-/// placeholder, and the declarations around the body -- the space, the
-/// parent chain, the version, the labels and a mention of the account --
-/// resolve on the record the adapter really fetched. Three tables (#2436)
-/// read with their spans, a header column, and a list in a cell.
-///
-/// The page is made through Confluence's REST API, not through knobas, so the
-/// storage format is the server's own after its own normalisation; it is
-/// deleted again by [`Litter`].
-#[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
-async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
-    use knobas_source::docs::{DocBlock, Inline, ListItem, PanelKind, TableCell};
+// -- the Docs reader showcase (#2456) ----------------------------------------
+//
+// Björn's ruling on spec #2432 (docs/decisions/2026-11-02-spec-2432-docs-
+// whole-pages.md, ruling 6): the constructs the reader draws are standing
+// pages the seed makes (`testenv/confluence-showcase/`), so he can open them in
+// knobas himself, and these tests read those pages rather than making their
+// own. The storage is Confluence's own after its normalisation, as before; what
+// changed is that nobody deletes it afterwards.
 
-    let env = env();
-    let parent = env.page(PARENT);
-    let mut litter = Litter::default();
-
-    let (status, me) = env
-        .call(reqwest::Method::GET, "rest/api/user/current", None)
-        .await;
-    assert_eq!(status, 200, "who am I: {me}");
-    let my_key = me["userKey"]
-        .as_str()
-        .expect("the account has a user key")
-        .to_owned();
-
-    let title = format!("Docs reader blocks [{LITTER}]");
-    let storage = format!(
-        concat!(
-            r#"<p>Owner <ac:link><ri:user ri:userkey="{key}" /></ac:link>, see "#,
-            r#"<ac:link><ri:page ri:content-title="{parent}" /></ac:link> and "#,
-            r#"<ac:structured-macro ac:name="jira" ac:schema-version="1"><ac:parameter ac:name="key">PAY-231</ac:parameter></ac:structured-macro>.</p>"#,
-            r#"<h2>Backoff</h2>"#,
-            r#"<ac:structured-macro ac:name="code" ac:schema-version="1"><ac:parameter ac:name="language">sql</ac:parameter><ac:plain-text-body><![CDATA[select 1 < 2;]]></ac:plain-text-body></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="info" ac:schema-version="1"><ac:rich-text-body><p>In review.</p></ac:rich-text-body></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="warning" ac:schema-version="1"><ac:rich-text-body><p>No SLA yet.</p></ac:rich-text-body></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="note" ac:schema-version="1"><ac:rich-text-body><p>A note.</p></ac:rich-text-body></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="tip" ac:schema-version="1"><ac:rich-text-body><p>A tip.</p></ac:rich-text-body></ac:structured-macro>"#,
-            r#"<table><tbody><tr><th>Code</th><th>Retried?</th></tr><tr><td>HTTP 503</td><td>yes</td></tr></tbody></table>"#,
-            r#"<ac:structured-macro ac:name="toc" ac:schema-version="1" />"#,
-            // Spec #2432: a task list, one task done, one not, one nested.
-            r#"<ac:task-list><ac:task><ac:task-id>1</ac:task-id><ac:task-status>complete</ac:task-status><ac:task-body>Drain the queue</ac:task-body></ac:task>"#,
-            r#"<ac:task><ac:task-id>2</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Restart the worker</ac:task-body></ac:task>"#,
-            r#"<ac:task-list><ac:task><ac:task-id>3</ac:task-id><ac:task-status>complete</ac:task-status><ac:task-body>eu-1</ac:task-body></ac:task></ac:task-list></ac:task-list>"#,
-            // Spec #2432's tables (#2436): a merged cell, a header column, a list in a cell.
-            r#"<table><tbody><tr><th colspan="2"><p>Rota</p></th></tr><tr><td><p>Mon</p></td><td rowspan="2"><p>Mara</p></td></tr><tr><td><p>Tue</p></td></tr></tbody></table>"#,
-            r#"<table><tbody><tr><th><p>Primary</p></th><td><p>Mara</p></td></tr><tr><th><p>Backup</p></th><td><p>Jonas</p></td></tr></tbody></table>"#,
-            r#"<table><tbody><tr><td><ul><li><p>drain</p></li><li><p>deploy</p></li></ul><p>then watch</p></td></tr></tbody></table>"#,
-            // Spec #2432 (#2438): an expand with a list in it.
-            r#"<ac:structured-macro ac:name="expand" ac:schema-version="1"><ac:parameter ac:name="title">Rollback</ac:parameter><ac:rich-text-body><ul><li><p>revert</p></li><li><p>page</p></li></ul></ac:rich-text-body></ac:structured-macro>"#,
-        ),
-        key = my_key,
-        parent = parent.title,
-    );
-    let (status, made) = env
-        .call(
-            reqwest::Method::POST,
-            "rest/api/content",
-            Some(json!({
-                "type": "page",
-                "title": title,
-                "space": { "key": env.space },
-                "ancestors": [{ "id": parent.id }],
-                "body": { "storage": { "value": storage, "representation": "storage" } },
-            })),
+/// The app, synced until every showcase page of the synced space is mirrored:
+/// an include is filled from the mirror, so its target has to be there too.
+async fn showcase_app(name: &str, env: &Env) -> SourcesState {
+    let state = app(name, env).await;
+    for page in env.showcase.iter().filter(|p| p.space == env.space) {
+        sync_until(
+            &state,
+            &page.id,
+            &format!("the showcase page {:?}", page.title),
+            |_| true,
         )
         .await;
-    assert_eq!(status, 200, "creating the page: {made}");
-    let id = made["id"].as_str().expect("the new page's id").to_owned();
-    litter.created.push(id.clone());
-    let (status, labelled) = env
-        .call(
-            reqwest::Method::POST,
-            &format!("rest/api/content/{id}/label"),
-            Some(json!([{ "prefix": "global", "name": "knobas-docs" }])),
-        )
-        .await;
-    assert_eq!(status, 200, "labelling the page: {labelled}");
+    }
+    state
+}
 
-    let state = app("confluence_live_docs", &env).await;
-    sync_until(&state, &id, "the new page with its label", |payload| {
-        payload["metadata"]["labels"]["results"]
-            .as_array()
-            .is_some_and(|l| l.iter().any(|x| x["name"] == "knobas-docs"))
-    })
-    .await;
-
-    let entity = format!("{CONFLUENCE}:{id}");
-    let page = knobas_app::commands::entity::docs_page_inner(
+/// One showcase page as the Docs reader reads it.
+async fn showcase_page(state: &SourcesState, env: &Env, slug: &str) -> knobas_app::docs::DocPage {
+    let page = env.showcase(slug);
+    knobas_app::commands::entity::docs_page_inner(
         &state.pool,
         &Registry::for_process(),
-        &entity,
+        &format!("{CONFLUENCE}:{}", page.id),
     )
     .await
-    .expect("the reader reads the page");
+    .unwrap_or_else(|e| panic!("the reader reads {:?}: {e:?}", page.title))
+}
+
+/// The markup inside every `html` macro of a showcase file, in order, with the
+/// docs-assets address the seed put in: what the page must hand the embed
+/// frame byte for byte.
+fn showcase_html(env: &Env, slug: &str) -> Vec<String> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testenv/confluence-showcase")
+        .join(format!("{slug}.xml"));
+    let raw = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    raw.split(r#"<ac:structured-macro ac:name="html""#)
+        .skip(1)
+        .map(|macro_on| {
+            let body = macro_on
+                .split_once("<![CDATA[")
+                .and_then(|(_, rest)| rest.split_once("]]>"))
+                .unwrap_or_else(|| panic!("{}: an html macro with no CDATA body", path.display()))
+                .0;
+            body.replace("{{ASSETS}}", &env.assets)
+        })
+        .collect()
+}
+
+/// The words of some blocks, every kind of block deep, but not inside an
+/// include: what a reader sees of them, whitespace collapsed.
+fn words(blocks: &[knobas_source::docs::DocBlock]) -> String {
+    use knobas_source::docs::{DocBlock, Inline};
+    fn inlines(text: &[Inline], out: &mut Vec<String>) {
+        for i in text {
+            match i {
+                Inline::Text { text, .. } => out.push(text.clone()),
+                Inline::Issue { key, .. } => out.push(key.clone()),
+                _ => {}
+            }
+        }
+    }
+    fn walk(blocks: &[DocBlock], out: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => inlines(text, out),
+                DocBlock::List { items, .. } => items.iter().for_each(|i| walk(&i.blocks, out)),
+                DocBlock::Table { rows } => rows
+                    .iter()
+                    .flatten()
+                    .for_each(|c| walk(&c.blocks, out)),
+                DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
+                    walk(blocks, out)
+                }
+                DocBlock::Code { code, .. } => out.push(code.clone()),
+                _ => {}
+            }
+            out.push(" ".into());
+        }
+    }
+    let mut out = Vec::new();
+    walk(blocks, &mut out);
+    out.concat().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// **The Docs reader's blocks, from the seeded showcase page** (#859,
+/// ADR-0022, #2456): each mapped macro comes back from the real server's
+/// storage format as its block, a macro the reader does not draw is the named
+/// placeholder, and the declarations around the body -- the space, the parent
+/// chain, the version, the label and a mention of the account -- resolve on
+/// the record the adapter really fetched.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
+    use knobas_source::docs::{DocBlock, Inline, PanelKind};
+
+    let env = env();
+    let showcase = env.showcase("showcase");
+    let design = env.page(EDITED);
+    let state = showcase_app("confluence_live_docs", &env).await;
+    let page = showcase_page(&state, &env, "showcase").await;
+
     assert!(page.readable);
     assert_eq!(
         page.space.as_ref().map(|s| s.key.as_str()),
         Some(env.space.as_str())
     );
     assert_eq!(
-        page.ancestors.last().map(|a| a.title.as_str()),
-        Some(parent.title.as_str()),
-        "the declared chain ends at the parent"
-    );
-    assert_eq!(
         page.ancestors.last().and_then(|a| a.entity_id.clone()),
-        Some(format!("{CONFLUENCE}:{}", parent.id)),
-        "the parent is the mirrored page"
+        Some(format!("{CONFLUENCE}:{}", env.home)),
+        "the declared chain ends at the space home, the mirrored parent"
     );
-    assert_eq!(page.version, Some(1));
+    let (_, version) = env.body_and_version(&showcase.id).await;
+    assert_eq!(page.version, Some(version as u64), "the version Confluence holds");
     assert_eq!(page.labels, vec!["knobas-docs"]);
     assert!(page.web_url.is_some());
 
@@ -1072,8 +1123,8 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         "the mention of the account resolves by key to it, and is mine: {text:?}"
     );
     assert!(
-        text.iter().any(|i| matches!(i, Inline::PageLink { entity_id: Some(e), .. } if *e == format!("{CONFLUENCE}:{}", parent.id))),
-        "the page link names the mirrored parent: {text:?}"
+        text.iter().any(|i| matches!(i, Inline::PageLink { entity_id: Some(e), .. } if *e == format!("{CONFLUENCE}:{}", design.id))),
+        "the page link names the mirrored design page: {text:?}"
     );
     assert!(
         text.iter()
@@ -1081,9 +1132,13 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         "the Jira macro is a ticket chip: {text:?}"
     );
     let rest: Vec<&DocBlock> = page.blocks.iter().skip(1).collect();
-    assert!(matches!(rest[0], DocBlock::Heading { .. }), "{rest:#?}");
+    let DocBlock::List { items, .. } = rest[0] else {
+        panic!("the list of showcase pages: {rest:#?}")
+    };
+    assert_eq!(items.len(), 4, "one item per showcase page: {items:#?}");
+    assert!(matches!(rest[1], DocBlock::Heading { .. }), "{rest:#?}");
     assert_eq!(
-        rest[1],
+        rest[2],
         &DocBlock::Code {
             code: "select 1 < 2;".into(),
             language: Some("sql".into())
@@ -1105,51 +1160,202 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             PanelKind::Tip
         ]
     );
-    let DocBlock::Table { rows } = rest[6] else {
+    let DocBlock::Table { rows } = rest[7] else {
         panic!("the table: {rest:#?}")
     };
     assert!(rows[0].iter().all(|c| c.header) && !rows[1][0].header);
     assert_eq!(
-        rest[7],
+        rest[8],
         &DocBlock::Placeholder { name: "toc".into() },
         "the unknown macro is named"
     );
-    // The task list as the server stored it: each item's state, the nested
-    // task inside the one it follows. Item words are compared as text, so
-    // the server's own wrapper spans and whitespace do not count.
-    let DocBlock::List { ordered, items } = rest[8] else {
-        panic!(
-            "the task list: {rest:#?}\nstored: {:?}",
-            mirrored(&state.pool, &id)
-                .await
-                .map(|p| p["body"]["storage"]["value"].clone())
-        )
-    };
-    fn words(blocks: &[DocBlock]) -> String {
-        blocks
+
+    // The tree: the showcase hangs under the space home, its pages under it.
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool, &Registry::for_process())
+        .await
+        .expect("the tree reads");
+    let parent_of = |id: &str| {
+        tree.spaces
             .iter()
-            .filter_map(|b| match b {
-                DocBlock::Paragraph { text } => Some(
-                    text.iter()
-                        .map(|i| match i {
-                            Inline::Text { text, .. } => text.as_str(),
-                            _ => "",
-                        })
-                        .collect::<String>(),
-                ),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-    }
+            .flat_map(|s| &s.pages)
+            .find(|p| p.entity_id == format!("{CONFLUENCE}:{id}"))
+            .unwrap_or_else(|| panic!("page {id} is in the tree"))
+            .parent
+            .clone()
+    };
+    assert_eq!(
+        parent_of(&showcase.id),
+        Some(format!("{CONFLUENCE}:{}", env.home))
+    );
+    assert_eq!(
+        parent_of(&env.showcase("tables").id),
+        Some(format!("{CONFLUENCE}:{}", showcase.id))
+    );
+
+    drop(state);
+}
+
+/// **The showcase's tables** (spec #2432, #2436, #2456): a merged cell, a
+/// header column, cells holding a list, paragraphs, code, a panel, a nested
+/// table, an expand, an include and an embed, and a table wider than the
+/// page, each read with its spans and its cells' blocks as Confluence stored
+/// them.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn the_showcase_tables_read_with_their_spans_and_rich_cells() {
+    use knobas_source::docs::{DocBlock, EmbedContent, Inline, ListItem, PanelKind, TableCell};
+
+    let env = env();
+    let state = showcase_app("confluence_live_tables", &env).await;
+    let page = showcase_page(&state, &env, "tables").await;
+    let tables: Vec<&Vec<Vec<TableCell>>> = page
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            DocBlock::Table { rows } => Some(rows),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tables.len(), 4, "four tables: {:#?}", page.blocks);
+
+    let para = |words: &str| DocBlock::Paragraph {
+        text: vec![Inline::text(words)],
+    };
+    let cell = |header, words: &str| TableCell::new(header, vec![para(words)]);
+    assert_eq!(
+        tables[0],
+        &vec![
+            vec![TableCell {
+                colspan: 2,
+                ..cell(true, "Rota")
+            }],
+            vec![
+                cell(false, "Mon"),
+                TableCell {
+                    rowspan: 2,
+                    ..cell(false, "Mara")
+                }
+            ],
+            vec![cell(false, "Tue")],
+        ],
+        "the merged-cell table"
+    );
+    assert_eq!(
+        tables[1],
+        &vec![
+            vec![cell(true, "Primary"), cell(false, "Mara")],
+            vec![cell(true, "Backup"), cell(false, "Jonas")],
+        ],
+        "the header-column table"
+    );
+
+    // The rich cells, one row each, the cell in the second column.
+    let rich: Vec<(String, &Vec<DocBlock>)> = tables[2]
+        .iter()
+        .skip(1)
+        .map(|row| (words(&row[0].blocks), &row[1].blocks))
+        .collect();
+    let held = |what: &str| -> &Vec<DocBlock> {
+        rich.iter()
+            .find(|(w, _)| w == what)
+            .unwrap_or_else(|| panic!("no row {what:?}: {rich:#?}"))
+            .1
+    };
+    assert_eq!(
+        held("A list"),
+        &vec![
+            DocBlock::List {
+                ordered: false,
+                items: vec![
+                    ListItem::new(vec![para("drain")]),
+                    ListItem::new(vec![para("deploy")]),
+                ],
+            },
+            para("then watch"),
+        ]
+    );
+    assert_eq!(held("Paragraphs").len(), 3, "{:#?}", held("Paragraphs"));
+    assert_eq!(
+        held("Code"),
+        &vec![DocBlock::Code {
+            code: "kubectl rollout restart deploy/payouts".into(),
+            language: Some("bash".into())
+        }]
+    );
+    assert!(
+        matches!(held("A panel").as_slice(), [DocBlock::Panel { kind: PanelKind::Warning, .. }]),
+        "{:#?}",
+        held("A panel")
+    );
+    let [DocBlock::Table { rows: nested }] = held("A nested table").as_slice() else {
+        panic!("the nested table: {:#?}", held("A nested table"))
+    };
+    assert_eq!(nested.len(), 3);
+    assert!(
+        matches!(held("An expand").as_slice(), [DocBlock::Collapsible { title, .. }] if title == "Escalation path"),
+        "{:#?}",
+        held("An expand")
+    );
+    let [DocBlock::Include { excerpt: true, entity_id: Some(_), blocks, unfilled: None, .. }] =
+        held("An include").as_slice()
+    else {
+        panic!("the include in a cell is filled: {:#?}", held("An include"))
+    };
+    assert_eq!(
+        words(blocks),
+        "Retry a failed payout with exponential backoff, at most five attempts."
+    );
+    assert_eq!(
+        held("An embed"),
+        &vec![DocBlock::Embed {
+            name: "html".into(),
+            content: EmbedContent::Html {
+                html: showcase_html(&env, "tables").remove(0)
+            },
+        }]
+    );
+
+    // The wide table: a header row of fourteen and two of data.
+    assert_eq!(
+        tables[3].iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![14, 14, 14]
+    );
+
+    drop(state);
+}
+
+/// **The showcase's task lists and expands** (spec #2432, #2437, #2438,
+/// #2456): each task's state, the nested tasks inside the one they follow,
+/// and expands titled and untitled holding a list, a table and a panel, whose
+/// words a Docs search finds.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn the_showcase_task_lists_and_expands_read_as_the_reader_draws_them() {
+    use knobas_source::docs::{DocBlock, ListItem};
+
+    let env = env();
+    let state = showcase_app("confluence_live_tasks", &env).await;
+    let page = showcase_page(&state, &env, "tasks-expands").await;
+
+    let task_list = page
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            DocBlock::List { items, .. } if items.iter().any(|i| i.checked.is_some()) => Some(items),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("the task list: {:#?}", page.blocks));
     type Task = (Option<bool>, String);
     fn tasks(items: &[ListItem]) -> Vec<(Task, Vec<Task>)> {
         items
             .iter()
             .map(|item| {
+                let own: Vec<DocBlock> = item
+                    .blocks
+                    .iter()
+                    .filter(|b| !matches!(b, DocBlock::List { .. }))
+                    .cloned()
+                    .collect();
                 let nested = item
                     .blocks
                     .iter()
@@ -1160,209 +1366,100 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
                     .flatten()
                     .map(|inner| (inner.checked, words(&inner.blocks)))
                     .collect();
-                ((item.checked, words(&item.blocks)), nested)
+                ((item.checked, words(&own)), nested)
             })
             .collect()
     }
-    assert!(!ordered);
     assert_eq!(
-        tasks(items),
+        tasks(task_list),
         vec![
             ((Some(true), "Drain the queue".to_owned()), vec![]),
             (
                 (Some(false), "Restart the worker".to_owned()),
-                vec![(Some(true), "eu-1".to_owned())]
-            ),
-        ],
-        "the task list's states: {items:#?}\nstored: {:?}",
-        mirrored(&state.pool, &id)
-            .await
-            .map(|p| p["body"]["storage"]["value"].clone())
-    );
-
-    // The tables as Confluence normalised them: spans, a header column, a list
-    // in a cell, each cell's blocks as the reader reads them (#2436).
-    let para = |words: &str| DocBlock::Paragraph {
-        text: vec![Inline::text(words)],
-    };
-    let cell = |header, words: &str| TableCell::new(header, vec![para(words)]);
-    assert_eq!(
-        rest[9],
-        &DocBlock::Table {
-            rows: vec![
-                vec![TableCell {
-                    colspan: 2,
-                    ..cell(true, "Rota")
-                }],
                 vec![
-                    cell(false, "Mon"),
-                    TableCell {
-                        rowspan: 2,
-                        ..cell(false, "Mara")
-                    }
-                ],
-                vec![cell(false, "Tue")],
-            ]
-        },
-        "the merged-cell table"
-    );
-    assert_eq!(
-        rest[10],
-        &DocBlock::Table {
-            rows: vec![
-                vec![cell(true, "Primary"), cell(false, "Mara")],
-                vec![cell(true, "Backup"), cell(false, "Jonas")],
-            ]
-        },
-        "the header-column table"
-    );
-    assert_eq!(
-        rest[11],
-        &DocBlock::Table {
-            rows: vec![vec![TableCell::new(
-                false,
-                vec![
-                    DocBlock::List {
-                        ordered: false,
-                        items: vec![
-                            ListItem::new(vec![para("drain")]),
-                            ListItem::new(vec![para("deploy")]),
-                        ],
-                    },
-                    para("then watch"),
+                    (Some(true), "eu-1".to_owned()),
+                    (Some(false), "eu-2".to_owned())
                 ]
-            )]]
-        },
-        "the table with a list in a cell"
+            ),
+            ((Some(false), "Write the post-mortem".to_owned()), vec![]),
+        ],
+        "the task list's states: {task_list:#?}"
     );
 
-    // The expand as Confluence stored it: a collapsible under its title,
-    // the list inside it a list (#2438).
-    let DocBlock::Collapsible { title, blocks } = rest[12] else {
-        panic!(
-            "the expand: {rest:#?}\nstored: {:?}",
-            mirrored(&state.pool, &id)
-                .await
-                .map(|p| p["body"]["storage"]["value"].clone())
-        )
-    };
-    assert_eq!(title, "Rollback");
-    let [
-        DocBlock::List {
-            ordered: false,
-            items,
-        },
-    ] = blocks.as_slice()
-    else {
-        panic!("the expand holds its list: {blocks:#?}")
-    };
-    assert_eq!(
-        items.iter().map(|i| words(&i.blocks)).collect::<Vec<_>>(),
-        vec!["revert", "page"],
-        "the expand's list items"
-    );
-
-    // The tree: the new page hangs under its parent.
-    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool, &Registry::for_process())
-        .await
-        .expect("the tree reads");
-    let node = tree
-        .spaces
+    let expands: Vec<(&String, &Vec<DocBlock>)> = page
+        .blocks
         .iter()
-        .flat_map(|s| &s.pages)
-        .find(|p| p.entity_id == entity)
-        .expect("the new page is in the tree");
-    assert_eq!(node.parent, Some(format!("{CONFLUENCE}:{}", parent.id)));
+        .filter_map(|b| match b {
+            DocBlock::Collapsible { title, blocks } => Some((title, blocks)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(expands.len(), 4, "{expands:#?}");
+    assert_eq!(expands[0].0, "Rollback");
+    assert!(matches!(expands[0].1.as_slice(), [DocBlock::List { .. }]), "{expands:#?}");
+    assert_eq!(expands[1].0, "Retry budget per PSP");
+    assert!(matches!(expands[1].1.as_slice(), [DocBlock::Table { .. }]), "{expands:#?}");
+    assert_eq!(expands[2].0, "Quarantine ledger");
+    assert!(matches!(expands[2].1.as_slice(), [DocBlock::Panel { .. }]), "{expands:#?}");
+    assert!(
+        !expands[3].0.is_empty() && !["Rollback", "Retry budget per PSP", "Quarantine ledger"].contains(&expands[3].0.as_str()),
+        "the untitled expand gets the reader's own title: {expands:#?}"
+    );
+
+    // The words inside the expands are found by the Docs search, and land on
+    // this page.
+    let entity = format!("{CONFLUENCE}:{}", env.showcase("tasks-expands").id);
+    for query in ["quarantine ledger", "settlement drift"] {
+        let found = knobas_app::commands::entity::docs_search_inner(
+            &state.pool,
+            &Registry::for_process(),
+            query,
+            None,
+        )
+        .await
+        .expect("the search runs")
+        .expect("words are a query");
+        assert!(
+            found.hits.iter().any(|h| h.entity_id == entity),
+            "{query:?} finds the expands page: {:#?}",
+            found.hits.iter().map(|h| &h.entity_id).collect::<Vec<_>>()
+        );
+    }
 
     drop(state);
 }
 
-/// **The `html` macro against the real Confluence** (#2440): a page made
-/// through Confluence's REST API with one `html` macro holding a script that
-/// loads a bundle and fetches JSON from another host, and one holding plain
-/// markup, reads as two embeds of that HTML byte for byte after Confluence's
-/// own normalisation; the page's `body_text` holds the words the plain one
-/// shows and none of the script's. The seed turned the macro on
-/// (`seed-atlassian-content.sh`), so a disabled macro fails there, by name.
+/// **The showcase's embeds** (#2440, #2441, #2456): two `html` macros -- one
+/// with words and a script, one loading the self-hosted Swagger UI that
+/// fetches its spec from the docs-assets server -- read as embeds of their
+/// markup byte for byte after Confluence's normalisation; the page's
+/// `body_text` holds the words the first shows and none of either script. The
+/// seed turned the macro on (`seed-atlassian-content.sh`), so a disabled
+/// macro fails there, by name.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
 async fn html_macros_read_as_embeds_of_their_markup() {
     use knobas_source::docs::{DocBlock, EmbedContent};
 
     let env = env();
-    let parent = env.page(PARENT);
-    let mut litter = Litter::default();
-
-    let scripted = concat!(
-        "<div id=\"swagger-ui\"></div>\n",
-        "<script src=\"https://unpkg.example/swagger-ui-bundle.js\"></script>\n",
-        "<script>if (1 < 2 && true) fetch(\"http://api.example:8080/openapi.json?a=1&b=2\")",
-        ".then(r => r.json()).then(spec => SwaggerUIBundle({ spec, dom_id: \"#swagger-ui\" }));",
-        "</script>",
-    );
-    let plain = "<table><tr><td>Escalation <b>quokkaword</b></td></tr></table>";
-    let title = format!("Embedded HTML [{LITTER}]");
-    let storage = format!(
-        concat!(
-            r#"<p>The API, live:</p>"#,
-            r#"<ac:structured-macro ac:name="html" ac:schema-version="1"><ac:plain-text-body><![CDATA[{scripted}]]></ac:plain-text-body></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="html" ac:schema-version="1"><ac:plain-text-body><![CDATA[{plain}]]></ac:plain-text-body></ac:structured-macro>"#,
-        ),
-        scripted = scripted,
-        plain = plain,
-    );
-    let (status, made) = env
-        .call(
-            reqwest::Method::POST,
-            "rest/api/content",
-            Some(json!({
-                "type": "page",
-                "title": title,
-                "space": { "key": env.space },
-                "ancestors": [{ "id": parent.id }],
-                "body": { "storage": { "value": storage, "representation": "storage" } },
-            })),
-        )
-        .await;
-    assert_eq!(status, 200, "creating the page: {made}");
-    let id = made["id"].as_str().expect("the new page's id").to_owned();
-    litter.created.push(id.clone());
-
-    let state = app("confluence_live_embeds", &env).await;
-    sync_until(&state, &id, "the page with its html macros", |payload| {
-        payload["body"]["storage"]["value"]
-            .as_str()
-            .is_some_and(|s| s.contains("quokkaword"))
-    })
-    .await;
-
-    let entity = format!("{CONFLUENCE}:{id}");
-    let page = knobas_app::commands::entity::docs_page_inner(
-        &state.pool,
-        &Registry::for_process(),
-        &entity,
-    )
-    .await
-    .expect("the reader reads the page");
-    let embeds: Vec<&DocBlock> = page
+    let state = showcase_app("confluence_live_embeds", &env).await;
+    let page = showcase_page(&state, &env, "embeds").await;
+    let html: Vec<&DocBlock> = page
         .blocks
         .iter()
-        .filter(|b| matches!(b, DocBlock::Embed { .. }))
+        .filter(|b| matches!(b, DocBlock::Embed { name, .. } if name == "html"))
         .collect();
+    let want: Vec<DocBlock> = showcase_html(&env, "embeds")
+        .into_iter()
+        .map(|html| DocBlock::Embed {
+            name: "html".into(),
+            content: EmbedContent::Html { html },
+        })
+        .collect();
+    assert_eq!(want.len(), 2, "the showcase file holds two html macros");
     assert_eq!(
-        embeds,
-        vec![
-            &DocBlock::Embed {
-                name: "html".into(),
-                content: EmbedContent::Html {
-                    html: scripted.into()
-                },
-            },
-            &DocBlock::Embed {
-                name: "html".into(),
-                content: EmbedContent::Html { html: plain.into() },
-            },
-        ],
+        html,
+        want.iter().collect::<Vec<_>>(),
         "both macros are embeds of their markup as written: {:#?}",
         page.blocks
     );
@@ -1371,14 +1468,15 @@ async fn html_macros_read_as_embeds_of_their_markup() {
         "a source runs its embeds until told otherwise"
     );
 
+    let entity = format!("{CONFLUENCE}:{}", env.showcase("embeds").id);
     let body_text: String =
         sqlx::query_scalar("select body_text from sync.item where entity_id = $1")
             .bind(&entity)
             .fetch_one(&state.pool)
             .await
             .expect("the page's search text");
-    assert!(body_text.contains("Escalation quokkaword"), "{body_text:?}");
-    for code in ["SwaggerUIBundle", "openapi.json", "swagger-ui-bundle"] {
+    assert!(body_text.contains("Settled today"), "{body_text:?}");
+    for code in ["getElementById", "SwaggerUIBundle", "openapi.json", "swagger-ui-bundle"] {
         assert!(
             !body_text.contains(code),
             "{code} is script, not words: {body_text:?}"
@@ -1388,79 +1486,42 @@ async fn html_macros_read_as_embeds_of_their_markup() {
     drop(state);
 }
 
-/// **The `iframe` macro and the widget connector against the real
-/// Confluence** (#2441): a page made through Confluence's REST API with an
-/// `iframe` macro, a widget connector, and an `iframe` naming a
-/// `javascript:` URL reads, after Confluence's own normalisation of the
-/// storage, as two URL embeds of their URLs and the macro's placeholder. The
-/// page's `body_text` holds neither URL.
+/// **The showcase's `iframe` macro and widget connector** (#2441, #2456): an
+/// `iframe` of the docs-assets server's status page and a widget connector
+/// of a video read, after Confluence's own normalisation of the storage, as
+/// URL embeds of their URLs, and an `iframe` naming a `javascript:` URL as the
+/// macro's placeholder. The page's `body_text` holds none of the URLs.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
 async fn iframe_and_widget_macros_read_as_url_embeds() {
     use knobas_source::docs::{DocBlock, EmbedContent};
 
     let env = env();
-    let parent = env.page(PARENT);
-    let mut litter = Litter::default();
-
-    let board = "https://grafana.example/d/quokkaboard?orgId=1&kiosk=tv";
-    let video = "https://www.youtube.com/embed/quokkavideo";
-    let title = format!("Framed pages [{LITTER}]");
-    let storage = format!(
-        concat!(
-            r#"<p>Framed wombatword:</p>"#,
-            r#"<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="{board}" /></ac:parameter><ac:parameter ac:name="height">400</ac:parameter></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="widget" ac:schema-version="1"><ac:parameter ac:name="url"><ri:url ri:value="{video}" /></ac:parameter></ac:structured-macro>"#,
-            r#"<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="javascript:alert(1)" /></ac:parameter></ac:structured-macro>"#,
-        ),
-        board = board.replace('&', "&amp;"),
-        video = video,
-    );
-    let (status, made) = env
-        .call(
-            reqwest::Method::POST,
-            "rest/api/content",
-            Some(json!({
-                "type": "page",
-                "title": title,
-                "space": { "key": env.space },
-                "ancestors": [{ "id": parent.id }],
-                "body": { "storage": { "value": storage, "representation": "storage" } },
-            })),
-        )
-        .await;
-    assert_eq!(status, 200, "creating the page: {made}");
-    let id = made["id"].as_str().expect("the new page's id").to_owned();
-    litter.created.push(id.clone());
-
-    let state = app("confluence_live_url_embeds", &env).await;
-    sync_until(&state, &id, "the page with its framed pages", |payload| {
-        payload["body"]["storage"]["value"]
-            .as_str()
-            .is_some_and(|s| s.contains("wombatword"))
-    })
-    .await;
-
-    let entity = format!("{CONFLUENCE}:{id}");
-    let page = knobas_app::commands::entity::docs_page_inner(
-        &state.pool,
-        &Registry::for_process(),
-        &entity,
-    )
-    .await
-    .expect("the reader reads the page");
+    let state = showcase_app("confluence_live_url_embeds", &env).await;
+    let page = showcase_page(&state, &env, "embeds").await;
+    let framed: Vec<&DocBlock> = page
+        .blocks
+        .iter()
+        .filter(|b| match b {
+            DocBlock::Embed { name, .. } => name != "html",
+            DocBlock::Placeholder { name } => name == "iframe",
+            _ => false,
+        })
+        .collect();
+    let status = format!("{}/status.html", env.assets);
+    let video = "https://www.youtube.com/embed/aqz-KE-bpKQ";
     assert_eq!(
-        page.blocks[1..],
-        [
-            DocBlock::Embed {
+        framed,
+        vec![
+            &DocBlock::Embed {
                 name: "iframe".into(),
-                content: EmbedContent::Url { url: board.into() },
+                content: EmbedContent::Url { url: status.clone() },
             },
-            DocBlock::Embed {
+            &DocBlock::Embed {
                 name: "widget".into(),
                 content: EmbedContent::Url { url: video.into() },
             },
-            DocBlock::Placeholder {
+            &DocBlock::Placeholder {
                 name: "iframe".into()
             },
         ],
@@ -1468,181 +1529,133 @@ async fn iframe_and_widget_macros_read_as_url_embeds() {
         page.blocks
     );
 
+    let entity = format!("{CONFLUENCE}:{}", env.showcase("embeds").id);
     let body_text: String =
         sqlx::query_scalar("select body_text from sync.item where entity_id = $1")
             .bind(&entity)
             .fetch_one(&state.pool)
             .await
             .expect("the page's search text");
-    assert!(body_text.contains("Framed wombatword"), "{body_text:?}");
-    for url in ["quokkaboard", "quokkavideo", "javascript"] {
+    for url in ["status.html", "aqz-KE-bpKQ", "javascript"] {
         assert!(!body_text.contains(url), "{url}: {body_text:?}");
     }
 
     drop(state);
 }
 
-/// **Includes, from pages Confluence itself stored** (spec #2432, stories
-/// 13 to 19): an `include` and an `excerpt-include` of a page in the synced
-/// space are filled from the mirror, the page's `excerpt` draws as its
-/// contents on its own page, and an include of a page in a space the source
-/// does not sync says it is not mirrored. Both pages are made through the
-/// REST API, so the storage format is the server's own, and are deleted
-/// again by [`Litter`].
+/// **The showcase's includes** (spec #2432, stories 13 to 19, #2456): an
+/// `include` and an `excerpt-include` of a page in the synced space are
+/// filled from the mirror; that page draws its `excerpt` as its contents on
+/// its own page; an include of a page in the second space, which exists but
+/// the source does not sync, says it is not mirrored; an excerpt include of a
+/// page with no excerpt says so; a chain of includes four deep stops past
+/// three; and a cycle stops where it comes round.
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
 async fn includes_are_filled_from_the_mirror_and_say_why_when_they_cannot_be() {
-    use knobas_source::docs::{DocBlock, Inline, Unfilled};
+    use knobas_source::docs::{DocBlock, Unfilled};
 
     let env = env();
-    let parent = env.page(PARENT);
-    let mut litter = Litter::default();
-    let mut create = async |title: &str, storage: String| {
-        let (status, made) = env
-            .call(
-                reqwest::Method::POST,
-                "rest/api/content",
-                Some(json!({
-                    "type": "page",
-                    "title": title,
-                    "space": { "key": env.space },
-                    "ancestors": [{ "id": parent.id }],
-                    "body": { "storage": { "value": storage, "representation": "storage" } },
-                })),
-            )
-            .await;
-        assert_eq!(status, 200, "creating {title}: {made}");
-        let id = made["id"].as_str().expect("the new page's id").to_owned();
-        litter.created.push(id.clone());
-        id
-    };
-    let target_title = format!("Docs reader included page [{LITTER}]");
-    let target = create(
-        &target_title,
-        concat!(
-            r#"<p>Whole body.</p>"#,
-            r#"<ac:structured-macro ac:name="excerpt" ac:schema-version="1"><ac:rich-text-body><p>The excerpt.</p></ac:rich-text-body></ac:structured-macro>"#,
+    // The outside target is a real page in a real space, so "not mirrored"
+    // is about the source's scope and not about a page that is not there.
+    let outside = env.showcase("retired-runbook");
+    assert_eq!(outside.space, env.outside);
+    let (status, there) = env
+        .call(
+            reqwest::Method::GET,
+            &format!("rest/api/content/{}", outside.id),
+            None,
         )
-        .to_owned(),
-    )
-    .await;
-    // A space the source is not configured to sync: what the mirror cannot
-    // hold, whether or not the server has it.
-    let outside = "KNOBASOUTSIDE";
-    let include = |name: &str, space: &str, title: &str| {
-        format!(
-            r#"<ac:structured-macro ac:name="{name}" ac:schema-version="1"><ac:parameter ac:name=""><ac:link><ri:page ri:space-key="{space}" ri:content-title="{title}" /></ac:link></ac:parameter></ac:structured-macro>"#
-        )
-    };
-    let reader = create(
-        &format!("Docs reader includes [{LITTER}]"),
-        format!(
-            "<p>Ours.</p>{}{}{}",
-            include("include", &env.space, &target_title),
-            include("excerpt-include", &env.space, &target_title),
-            include("include", outside, "Elsewhere"),
-        ),
-    )
-    .await;
+        .await;
+    assert_eq!(status, 200, "the outside page is on the server: {there}");
 
-    let state = app("confluence_live_includes", &env).await;
-    for id in [&target, &reader] {
-        sync_until(&state, id, "the new page", |_| true).await;
-    }
-    let page = knobas_app::commands::entity::docs_page_inner(
-        &state.pool,
-        &Registry::for_process(),
-        &format!("{CONFLUENCE}:{reader}"),
-    )
-    .await
-    .expect("the reader reads the page");
-    let stored = mirrored(&state.pool, &reader)
-        .await
-        .map(|p| p["body"]["storage"]["value"].clone());
+    let state = showcase_app("confluence_live_includes", &env).await;
+    let page = showcase_page(&state, &env, "includes").await;
+    let entity = |slug: &str| Some(format!("{CONFLUENCE}:{}", env.showcase(slug).id));
 
-    fn words(blocks: &[DocBlock]) -> String {
+    fn includes(blocks: &[DocBlock]) -> Vec<&DocBlock> {
         blocks
             .iter()
-            .filter_map(|b| match b {
-                DocBlock::Paragraph { text } => Some(
-                    text.iter()
-                        .map(|i| match i {
-                            Inline::Text { text, .. } => text.as_str(),
-                            _ => "",
-                        })
-                        .collect::<String>(),
-                ),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
+            .filter(|b| matches!(b, DocBlock::Include { .. }))
+            .collect()
     }
-    type Seen = (
-        String,
-        Option<String>,
-        bool,
-        Option<String>,
-        String,
-        Option<Unfilled>,
-    );
-    let includes: Vec<Seen> = page
-        .blocks
-        .iter()
-        .filter_map(|b| match b {
-            DocBlock::Include {
-                title,
-                space,
-                excerpt,
-                entity_id,
-                blocks,
-                unfilled,
-            } => Some((
-                title.clone(),
-                space.clone(),
-                *excerpt,
-                entity_id.clone(),
-                words(blocks),
-                *unfilled,
-            )),
-            _ => None,
-        })
-        .collect();
-    let target_entity = Some(format!("{CONFLUENCE}:{target}"));
+    type Seen = (String, Option<String>, bool, Option<String>, Option<Unfilled>);
+    let seen = |b: &DocBlock| -> Seen {
+        let DocBlock::Include { title, space, excerpt, entity_id, unfilled, .. } = b else {
+            unreachable!()
+        };
+        (title.clone(), space.clone(), *excerpt, entity_id.clone(), *unfilled)
+    };
+    let top = includes(&page.blocks);
+    let synced = Some(env.space.clone());
     assert_eq!(
-        includes,
+        top.iter().map(|b| seen(b)).collect::<Vec<_>>(),
         vec![
+            ("Showcase: payout runbook".to_owned(), synced.clone(), false, entity("runbook"), None),
+            ("Showcase: payout runbook".to_owned(), synced.clone(), true, entity("runbook"), None),
             (
-                target_title.clone(),
-                Some(env.space.clone()),
-                false,
-                target_entity.clone(),
-                "Whole body. The excerpt.".to_owned(),
-                None
-            ),
-            (
-                target_title.clone(),
-                Some(env.space.clone()),
-                true,
-                target_entity,
-                "The excerpt.".to_owned(),
-                None
-            ),
-            (
-                "Elsewhere".to_owned(),
-                Some(outside.to_owned()),
+                outside.title.clone(),
+                Some(env.outside.clone()),
                 false,
                 None,
-                String::new(),
                 Some(Unfilled::NotMirrored)
             ),
+            ("Showcase: on-call glossary".to_owned(), synced.clone(), true, entity("glossary"), Some(Unfilled::NoExcerpt)),
+            ("Showcase: include depth 1".to_owned(), synced.clone(), false, entity("depth-1"), None),
+            ("Showcase: include cycle A".to_owned(), synced.clone(), false, entity("cycle-a"), None),
         ],
-        "the includes: {:#?}\nstored: {stored:?}",
+        "the includes: {:#?}",
         page.blocks
     );
-    drop(litter);
+    let filled = |b: &DocBlock| -> Vec<DocBlock> {
+        let DocBlock::Include { blocks, .. } = b else { unreachable!() };
+        blocks.clone()
+    };
+    let excerpt = "Retry a failed payout with exponential backoff, at most five attempts.";
+    assert!(
+        words(&filled(top[0])).contains(excerpt) && words(&filled(top[0])).contains("Check the PSP status page."),
+        "the whole runbook: {:#?}",
+        filled(top[0])
+    );
+    assert_eq!(words(&filled(top[1])), excerpt, "the excerpt alone");
+
+    // Four deep: depth 1, 2 and 3 are filled, and 4 is past the limit.
+    let mut level = filled(top[4]);
+    for n in 2..=3 {
+        let inner = includes(&level).into_iter().cloned().collect::<Vec<_>>();
+        let [one] = inner.as_slice() else {
+            panic!("depth {} holds one include: {level:#?}", n - 1)
+        };
+        assert_eq!(seen(one).4, None, "depth {n} is filled: {one:#?}");
+        level = filled(one);
+    }
+    let inner = includes(&level).into_iter().cloned().collect::<Vec<_>>();
+    assert_eq!(
+        inner.iter().map(|b| seen(b)).collect::<Vec<_>>(),
+        vec![("Showcase: include depth 4".to_owned(), synced.clone(), false, entity("depth-4"), Some(Unfilled::TooDeep))],
+        "depth 4 is past the limit"
+    );
+
+    // The cycle: A holds B, and B's include of A comes round.
+    let a = filled(top[5]);
+    let [b] = includes(&a).into_iter().cloned().collect::<Vec<_>>().try_into().unwrap_or_else(|v: Vec<DocBlock>| panic!("A holds B: {v:#?}"));
+    assert_eq!(seen(&b).4, None, "B is filled inside A");
+    let back = filled(&b);
+    assert_eq!(
+        includes(&back).iter().map(|b| seen(b).4).collect::<Vec<_>>(),
+        vec![Some(Unfilled::Cycle)],
+        "B's include of A is the cycle: {back:#?}"
+    );
+
+    // The runbook's excerpt draws as its contents on its own page.
+    let runbook = showcase_page(&state, &env, "runbook").await;
+    assert!(
+        words(&runbook.blocks).contains(excerpt),
+        "the excerpt on its own page: {:#?}",
+        runbook.blocks
+    );
+
+    drop(state);
 }
 
 /// **The Docs search's sync-time marks against the real Confluence** (#860,
