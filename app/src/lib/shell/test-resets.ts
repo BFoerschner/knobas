@@ -30,6 +30,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/diff/diff-layout.svelte.ts#diffLayout": async () => (await import("../tf/diff/diff-layout.svelte")).diffLayout.reset(),
   // Titles or Everything (#2430), stored in `localStorage`: each test starts on Titles.
   "launcher/scope.svelte.ts#launcherScope": async () => (await import("../launcher/scope.svelte")).launcherScope.reset(),
+  // The keys bound (#2429), read from the backend: each test starts with none.
+  "launcher/keys.svelte.ts#launcherKeys": async () => (await import("../launcher/keys.svelte")).launcherKeys.reset(),
   // *Run pipelines on diffs* (#2270), stored in `localStorage`: each test starts with it on.
   "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
   // The source list's role claims (#1196), held once per window.

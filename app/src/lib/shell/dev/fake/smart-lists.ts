@@ -1,14 +1,15 @@
 /**
  * `?fake-ipc`: the lists a reader saved (#506, #2423): `#l` and `#i` in the
  * box, `smart_lists` and the three writes; and the favourites (#2428), which
- * name a saved list or an entity and are drawn at the top of the empty box.
+ * name a saved list or an entity and are drawn at the top of the empty box;
+ * and the keys (#2429), a saved list's chord and an action's chord per kind.
  *
  * The built-in smart lists are gone (spec #2419), so this is saved lists
  * alone: what `#l` answers as kind `list`, and what Settings reads to know a
  * list exists.
  */
 import type { EntityRow } from "../../../ipc/entity";
-import type { FavouriteTarget, SearchResponse } from "../../../ipc/search";
+import type { ActionKey, FavouriteTarget, Keys, SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
@@ -146,6 +147,9 @@ function fakeDeleteSmartList(args: Record<string, unknown>) {
   FIXTURE_SAVED.splice(at, 1);
   const favourite = FIXTURE_FAVOURITES.findIndex((target) => "list" in target && target.list === id);
   if (favourite >= 0) FIXTURE_FAVOURITES.splice(favourite, 1);
+  // ...and its key, as `0070`'s cascade does.
+  const key = FIXTURE_LIST_KEYS.findIndex((bound) => bound.list_id === id);
+  if (key >= 0) FIXTURE_LIST_KEYS.splice(key, 1);
   return null;
 }
 
@@ -192,6 +196,49 @@ function fakeRemoveFavourite(args: Record<string, unknown>) {
   return null;
 }
 
+/**
+ * The keys (#2429) -- **fixture-only**, mutable: *SEPA payouts* opens on ⌘1,
+ * and *Approve* runs on a pull request on ⌘⇧P, so the rows draw their chords
+ * under `?fake-ipc`. The tables' rules (one chord per list and per action on
+ * a kind, the cascade, the chord's spelling) are witnessed over a real
+ * database in `tests/it/keys_ipc.rs`.
+ */
+const FIXTURE_LIST_KEYS: { list_id: string; chord: string }[] = [{ list_id: "sepa-payouts", chord: "⌘1" }];
+const FIXTURE_ACTION_KEYS: ActionKey[] = [{ kind: "pr", chord: "⌘⇧P", action_id: "approve" }];
+
+/** `keys`: each list's chord with its name and text, the actions' by kind then chord. */
+function fakeKeys(): Keys {
+  return {
+    lists: FIXTURE_LIST_KEYS.flatMap((key) => {
+      const list = FIXTURE_SAVED.find((saved) => saved.id === key.list_id);
+      return list ? [{ ...key, label: list.label, text: list.query }] : [];
+    }),
+    actions: [...FIXTURE_ACTION_KEYS].sort((a, b) => a.kind.localeCompare(b.kind) || a.chord.localeCompare(b.chord)),
+  };
+}
+
+/** `bind_list_key`: the chord moves to this list; `null` takes it away; a list nobody saved is `not_found`. */
+function fakeBindListKey(args: Record<string, unknown>) {
+  const listId = String(args["listId"] ?? "");
+  const chord = (args["chord"] as string | null) ?? null;
+  if (!FIXTURE_SAVED.some((list) => list.id === listId)) {
+    throw { code: "not_found", message: `no saved list ${listId}`, source_id: null };
+  }
+  const kept = FIXTURE_LIST_KEYS.filter((key) => key.list_id !== listId && key.chord !== chord);
+  FIXTURE_LIST_KEYS.splice(0, FIXTURE_LIST_KEYS.length, ...kept, ...(chord ? [{ list_id: listId, chord }] : []));
+  return null;
+}
+
+/** `bind_action_key`: on the kind, the chord moves to this action and the action holds one chord. */
+function fakeBindActionKey(args: Record<string, unknown>) {
+  const kind = String(args["kind"] ?? "");
+  const actionId = String(args["actionId"] ?? "");
+  const chord = (args["chord"] as string | null) ?? null;
+  const kept = FIXTURE_ACTION_KEYS.filter((key) => key.kind !== kind || (key.action_id !== actionId && key.chord !== chord));
+  FIXTURE_ACTION_KEYS.splice(0, FIXTURE_ACTION_KEYS.length, ...kept, ...(chord ? [{ kind, chord, action_id: actionId }] : []));
+  return null;
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {
@@ -204,7 +251,10 @@ export function handlers(): Handlers {
     favourites: () => fakeFavourites(),
     add_favourite: (args) => fakeAddFavourite(args),
     remove_favourite: (args) => fakeRemoveFavourite(args),
+    keys: () => fakeKeys(),
+    bind_list_key: (args) => fakeBindListKey(args),
+    bind_action_key: (args) => fakeBindActionKey(args),
   };
 }
 
-keepSeed(FIXTURE_SAVED, FIXTURE_FAVOURITES);
+keepSeed(FIXTURE_SAVED, FIXTURE_FAVOURITES, FIXTURE_LIST_KEYS, FIXTURE_ACTION_KEYS);
