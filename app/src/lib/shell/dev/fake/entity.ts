@@ -198,12 +198,12 @@ function refreshesKind(adapterKind: string, kind: string): boolean {
 
 let bridge: FakeBridge | null = null;
 
-/** Hold the bridge, so a refresh can end on `item:refreshed` (#2107). */
 /** The description's inline images (#2406): drawn, or failing with `?fake-attachments=unreachable`. */
 export function seed(params: URLSearchParams): void {
   fakeAttachmentImages(params.get("fake-attachments") === "unreachable" ? "unreachable" : "reachable");
 }
 
+/** Hold the bridge, so a refresh can end on `item:refreshed` (#2107). */
 export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
