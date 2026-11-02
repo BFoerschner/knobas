@@ -52,6 +52,15 @@ test("the shell's and the system's chords are refused too, and every other chord
   expect(refusalOf(press("Digit1", { metaKey: true }, "1"))).toBeNull();
 });
 
+test("a chord is refused when the character its key types is taken, as on a German board", () => {
+  // Undo is ⌘ on KeyY there, which types z: the chord reads ⌘Y, the system reads ⌘Z.
+  expect(refusalOf(press("KeyY", { metaKey: true }, "z"))).toBe("⌘Y is the system's own");
+  // History's ⌘[ is ⌘⌥5 there (`shell/keys.ts`), which the shell answers first.
+  expect(refusalOf(press("Digit5", { metaKey: true, altKey: true }, "["))).toBe("⌘⌥5 is the shell's own");
+  expect(refusalOf(press("Digit6", { metaKey: true, altKey: true }, "]"))).toBe("⌘⌥6 is the shell's own");
+  expect(refusalOf(press("Digit5", { metaKey: true, altKey: true }, "5")), "⌘⌥5 typing a digit is free").toBeNull();
+});
+
 test("a key is kept per kind: an entity's own kind, else the row's", () => {
   expect(kindOf({ kind: "entity", entityId: "gitea:r", entityKind: "repo", title: "r", sourceId: "gitea", path: null })).toBe("repo");
   expect(kindOf({ kind: "list", id: "l", label: "L", text: "#t", refusal: null })).toBe("list");

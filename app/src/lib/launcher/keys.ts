@@ -79,7 +79,12 @@ export function refusalOf(event: Mods & Pick<KeyboardEvent, "code" | "key">): st
   if (isHelpPress(event)) return `${event.metaKey ? "⌘" : "⌃"}? is the launcher's own`;
   const chord = chordOf(event);
   if (chord === null || !(event.metaKey || event.ctrlKey)) return null;
-  const owner = TAKEN[chord.slice(-1)];
+  // ⌘[ and ⌘] are history's (`shell/keys.ts`), typed with ⌥ and a digit on a
+  // German board, so they are a chord there.
+  if (event.key === "[" || event.key === "]") return `${chord} is the shell's own`;
+  // The owners read the character, the chord reads the code: on a German
+  // board undo is ⌘ on KeyY. Either reading refuses.
+  const owner = TAKEN[chord.slice(-1)] ?? (event.key.length === 1 ? TAKEN[event.key.toUpperCase()] : undefined);
   return owner ? `${chord} is the ${owner}'s own` : null;
 }
 
