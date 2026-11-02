@@ -17,7 +17,7 @@
   import type { SearchHit } from "../../ipc/search";
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
   import { linkFailureMessage } from "../../detail/links";
-  import { drawn } from "../../detail/relations";
+  import { JOB_LINK_RELATIONS, drawn } from "../../detail/relations";
   import { kindSingular } from "../../shell/kinds";
   import type { Layers } from "../layers.svelte";
   import type { LinkTarget } from "./current.svelte";
@@ -44,15 +44,8 @@
     onlinked: (target: LinkTarget) => void;
   } = $props();
 
-  /** The relations prototype-6 offers, as `create_link` stores them. */
-  const OFFERED = [
-    { id: "related", label: "related" },
-    { id: "implements", label: "implements" },
-    { id: "documents", label: "documents" },
-    { id: "runs-on", label: "runs on" },
-    { id: "blocks", label: "blocks" },
-    { id: "depends-on", label: "depends on" },
-  ];
+  /** The relations a job's link offers, one list with the launcher's *Link to ⟨job⟩* (#2426). */
+  const OFFERED = JOB_LINK_RELATIONS;
 
   // svelte-ignore state_referenced_locally
   // Read once: a `Session` owns a debounce timer and a request counter.
