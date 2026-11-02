@@ -369,22 +369,16 @@ pub(crate) async fn project(
     payload: &serde_json::Value,
 ) -> Option<DocContent> {
     let payload = convert::to_json(payload);
-    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
-        let mut store = docs_store(adapter);
-        let func = project_func(adapter, &mut store).await?;
-        let (answer,) = func
-            .call_async(&mut store, (kind, &payload))
-            .await
-            .map_err(|e| failed(adapter, &e))?;
-        Ok(answer)
-    })
-    .await;
-    let text = docs_answer(
+    let text: Option<String> = docs_call(
         adapter,
+        adapter.inner.project.as_ref(),
+        "project",
+        (kind, payload.as_str()),
         &format!("the docs projection of a {kind}"),
         "it draws as the source's failure",
-        answer,
-    )??;
+    )
+    .await?;
+    let text = text?;
     match serde_json::from_str::<DocContent>(&text) {
         Ok(mut content) => {
             settle(&mut content);
@@ -420,6 +414,35 @@ fn docs_deadline(adapter: &WasmAdapter) -> std::time::Duration {
 
 /// A docs call's answer, or `None` for a failure, logged as `what` failed
 /// and `so` follows.
+/// One docs call (1.5.0): export `name` of a fresh instance, in a store
+/// that allows no host, called with `params` under the docs deadline and the
+/// adapter's memory cap. `None` for every failure, logged as `what` failed,
+/// so `so`.
+async fn docs_call<P, T: 'static>(
+    adapter: &WasmAdapter,
+    index: Option<&ComponentExportIndex>,
+    name: &str,
+    params: P,
+    what: &str,
+    so: &str,
+) -> Option<T>
+where
+    P: ComponentNamedList + Lower + Send + Sync,
+    (T,): ComponentNamedList + Lift + Send + Sync,
+{
+    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
+        let mut store = docs_store(adapter);
+        let func = optional_func::<P, (T,)>(adapter, &mut store, index, name).await?;
+        let (answer,) = func
+            .call_async(&mut store, params)
+            .await
+            .map_err(|e| failed(adapter, &e))?;
+        Ok(answer)
+    })
+    .await;
+    docs_answer(adapter, what, so, answer)
+}
+
 fn docs_answer<T>(
     adapter: &WasmAdapter,
     what: &str,
@@ -522,22 +545,15 @@ pub(crate) async fn edit_section(
     text: &str,
 ) -> Option<Result<SectionEdit, EditRefused>> {
     let payload = convert::to_json(payload);
-    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
-        let mut store = docs_store(adapter);
-        let func = edit_section_func(adapter, &mut store).await?;
-        let (answer,) = func
-            .call_async(&mut store, (kind, &payload, number, text))
-            .await
-            .map_err(|e| failed(adapter, &e))?;
-        Ok(answer)
-    })
-    .await;
-    let answer = docs_answer(
+    let answer: Result<WitSectionEdit, WitEditRefused> = docs_call(
         adapter,
+        adapter.inner.edit_section.as_ref(),
+        "edit-section",
+        (kind, payload.as_str(), number, text),
         &format!("the section edit of a {kind}"),
         "it is not made",
-        answer,
-    )?;
+    )
+    .await?;
     Some(
         answer
             .map(|edit| SectionEdit {
@@ -559,17 +575,15 @@ pub(crate) async fn edit_section(
 /// A new page's body from the editor's text (1.5.0, #2443), or `None` for
 /// a failure, which is logged. Called as [`project`] is.
 pub(crate) async fn body_from_text(adapter: &WasmAdapter, text: &str) -> Option<String> {
-    let answer = limits::bounded_by(adapter, docs_deadline(adapter), async {
-        let mut store = docs_store(adapter);
-        let func = body_from_text_func(adapter, &mut store).await?;
-        let (answer,) = func
-            .call_async(&mut store, (text,))
-            .await
-            .map_err(|e| failed(adapter, &e))?;
-        Ok(answer)
-    })
-    .await;
-    docs_answer(adapter, "the body of a new page", "it is not made", answer)
+    docs_call(
+        adapter,
+        adapter.inner.body_from_text.as_ref(),
+        "body-from-text",
+        (text,),
+        "the body of a new page",
+        "it is not made",
+    )
+    .await
 }
 
 /// What a component's docs content may not say, cleared: what knobas fills
