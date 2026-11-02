@@ -3066,7 +3066,7 @@ test("two sources' PAY-231: each row names its source before its age, a unique k
   expect(onnavigate).toHaveBeenCalledWith("#/ticket/jira%3APAY-231");
 });
 
-// ── Reopening selects the kept query (#1480) ───────────────────────────────
+// ── ⌘K always opens empty; a section's keys open with its filter (#2425) ──
 
 /** Close by the ×, which leaves the session's query in place (Esc empties it first). */
 function closeByX() {
@@ -3081,8 +3081,9 @@ async function reopen() {
   await settle();
 }
 
-test("⌘K reopens on the kept query with the whole of it selected", async () => {
-  open();
+test("⌘K opens with an empty box every time, never the last query (#2425)", async () => {
+  const searched: string[] = [];
+  open({ ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME } });
   await settle();
   await search("PAY-231");
   closeByX();
@@ -3090,27 +3091,36 @@ test("⌘K reopens on the kept query with the whole of it selected", async () =>
   await reopen();
 
   const input = target.querySelector("input")!;
-  expect(input.value, "the session keeps what was searched for").toBe("PAY-231");
+  expect(input.value).toBe("");
   expect(document.activeElement).toBe(input);
-  expect(input.selectionStart).toBe(0);
-  expect(input.selectionEnd).toBe("PAY-231".length);
-});
+  expect(target.textContent, "the board, not the last answer").not.toContain("Retry failed SEPA payouts");
 
-test("typing after a reopen replaces the kept query instead of appending to it", async () => {
-  open();
-  await settle();
-  await search("PAY-231");
+  await search("ledger");
   closeByX();
   await reopen();
+  expect(target.querySelector("input")!.value, "and again on the next opening").toBe("");
+  expect(searched).toEqual(["PAY-231", "ledger"]);
+});
 
-  // Typing replaces whatever is selected; jsdom does not insert text for a
-  // keydown, so the test does what the WebView does with a keystroke.
+test("opened with a section's filter, the box starts with it, the caret after it, and asks for it (#2425)", async () => {
+  const searched: string[] = [];
+  open({
+    query: "#b ",
+    ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME },
+  });
+  await settle();
+  await debounced();
   const input = target.querySelector("input")!;
-  input.setRangeText("x", input.selectionStart!, input.selectionEnd!, "end");
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
+  expect(input.value).toBe("#b ");
+  expect(document.activeElement).toBe(input);
+  expect(input.selectionStart, "typing goes after the filter, not over it").toBe(3);
+  expect(input.selectionEnd).toBe(3);
+  expect(searched).toEqual(["#b "]);
 
-  expect(input.value).toBe("x");
+  // ⌘K after that is the global search: empty, whatever the last opening held.
+  closeByX();
+  await reopen();
+  expect(target.querySelector("input")!.value).toBe("");
 });
 
 test("an empty box opens with the caret in it and nothing to select", async () => {
