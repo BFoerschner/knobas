@@ -1506,7 +1506,8 @@
     window.addEventListener("keydown", onkeydown);
     // `/` and ⌘/ on a page opened its own search field; they open this box with the page's filter instead. Capture phase, before the page's handler.
     function onslash(event: KeyboardEvent) {
-      if (event.key !== "/" || event.altKey || event.shiftKey || open) return;
+      // `event.key`, not the code: on a German layout `/` is ⇧7, so Shift may well be held.
+      if (event.key !== "/" || event.altKey || open) return;
       const target = event.target as HTMLElement | null;
       if (!event.metaKey && !event.ctrlKey && target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return;
       event.preventDefault();
