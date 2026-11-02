@@ -7,7 +7,9 @@
  * {@link noFilters} stay hand-written.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { EntityRow } from "./generated/entity";
 import type {
+  FavouriteTarget,
   FilterSuggestions,
   LauncherHome,
   QueryTranslation,
@@ -22,6 +24,7 @@ import type {
 
 export type {
   CardField,
+  FavouriteTarget,
   FieldSuggestion,
   FilterAnswer,
   FilterCoverage,
@@ -102,6 +105,26 @@ export function renameSmartList(id: string, label: string): Promise<void> {
 /** Forget a saved smart list. */
 export function deleteSmartList(id: string): Promise<void> {
   return invoke<void>("delete_smart_list", { id });
+}
+
+/**
+ * Every favourite (#2428), in the order they were favourited: the block the
+ * empty box draws above the recent items, which `launcher_home` also carries.
+ * A saved list's row is its `#l` hit's: kind and source `list`, its text as
+ * `path`, the refusal as `state`.
+ */
+export function favourites(): Promise<EntityRow[]> {
+  return invoke<EntityRow[]>("favourites");
+}
+
+/** *Favourite* an entity or a saved list, last in the block (#2428). */
+export function addFavourite(target: FavouriteTarget): Promise<void> {
+  return invoke<void>("add_favourite", { target });
+}
+
+/** *Unfavourite* an entity or a saved list (#2428); not a favourite is no error. */
+export function removeFavourite(target: FavouriteTarget): Promise<void> {
+  return invoke<void>("remove_favourite", { target });
 }
 
 /**

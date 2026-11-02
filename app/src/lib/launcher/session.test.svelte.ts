@@ -55,6 +55,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
 
 const EMPTY_HOME: LauncherHome = {
   recent: [],
+  favourites: [],
   sources: [],
   pending_writes: 0,
   notes_shown: true,

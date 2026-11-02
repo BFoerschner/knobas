@@ -99,7 +99,7 @@ function chain(): string[] | null {
 }
 
 /** A ticket's actions after the pair: the timer, the job, the key. */
-const TICKET_OWN = ["Start timer", "Work on this", "Copy key"];
+const TICKET_OWN = ["Start timer", "Work on this", "Favourite", "Copy key"];
 
 async function openOn(hash: string, drawn: string): Promise<void> {
   location.hash = hash;

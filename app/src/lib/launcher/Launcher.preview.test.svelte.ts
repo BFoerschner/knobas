@@ -72,7 +72,7 @@ function response(raw: string): SearchResponse {
   };
 }
 
-const HOME = { recent: [], sources: [], pending_writes: 0, notes_shown: true } as unknown as LauncherHome;
+const HOME = { recent: [], favourites: [], sources: [], pending_writes: 0, notes_shown: true } as unknown as LauncherHome;
 
 function storage(value: string | null) {
   const kept = new Map<string, string>();

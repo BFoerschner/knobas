@@ -42,11 +42,13 @@
   import { onMount, tick, untrack } from "svelte";
 
   import {
+    addFavourite as defaultAddFavourite,
     createSmartList as defaultCreateSmartList,
     deleteSmartList as defaultDeleteSmartList,
     filterSuggestions as defaultFilterSuggestions,
     launcherHome as defaultHome,
     ipcErrorMessage,
+    removeFavourite as defaultRemoveFavourite,
     renameSmartList as defaultRenameSmartList,
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
@@ -64,7 +66,7 @@
   import QueryBox from "./QueryBox.svelte";
   import Pinned from "./Pinned.svelte";
   import Results from "./Results.svelte";
-  import { type SheetAction, type SheetSubject, nameOf, narrowActions, sheetActions, subjectOf } from "./sheet";
+  import { type SheetAction, type SheetSubject, favouriteKeys, isListRow, nameOf, narrowActions, sheetActions, subjectOf } from "./sheet";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
   import { drawn } from "../detail/relations";
   import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
@@ -191,6 +193,8 @@
     createSmartList: defaultCreateSmartList,
     renameSmartList: defaultRenameSmartList,
     deleteSmartList: defaultDeleteSmartList,
+    addFavourite: defaultAddFavourite,
+    removeFavourite: defaultRemoveFavourite,
     filterSuggestions: defaultFilterSuggestions,
     ...ports,
     titles: () => scope.titles,
@@ -274,7 +278,9 @@
     );
   }
 
-  const sheetContext = $derived({ job: openEntity ?? null, canTime: ontimer !== undefined, apps: applications });
+  /** What is a favourite now (#2428): the board's block, so the sheet offers *Unfavourite* on it. */
+  const favourites = $derived(favouriteKeys(session.home?.favourites ?? []));
+  const sheetContext = $derived({ job: openEntity ?? null, canTime: ontimer !== undefined, apps: applications, favourites });
   const inboxOps = (key: string) => inbox?.actions?.[key] ?? [];
   /** The actions of `row`, in the table's order; empty for a row nothing can be done to. */
   function actionsOf(row: LauncherRow | null): SheetAction[] {
@@ -578,6 +584,9 @@
         return row.hit.kind === "list" ? null : entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
       case "recent":
         return entityAddress(row.row.kind, row.row.entity_id, row.row.title);
+      // A favourite list does not navigate either: it applies (#2428).
+      case "favourite":
+        return isListRow(row.row) ? null : entityAddress(row.row.kind, row.row.entity_id, row.row.title);
       case "action":
         return row.action.hash;
       // The Inbox page's own link for the line, and the Inbox page for a line
@@ -831,6 +840,18 @@
         box?.focus();
         void session.deleteList(subject.id).then((done) => done && push({ text: `Deleted ${subject.label}` }));
         return;
+      case "favourite": {
+        // Back to the results or the board, which redraws with the block as
+        // the backend now has it; the launcher stays open.
+        sheet = null;
+        box?.focus();
+        const name = nameOf(subject);
+        void session.favourite(does.target, does.on).then((done) => {
+          if (done) push({ text: `${does.on ? "Favourited" : "Unfavourited"} ${name}` });
+          else push({ text: session.error ?? "The favourite was not kept.", tone: "err" });
+        });
+        return;
+      }
       case "inbox": {
         if (subject.kind !== "inbox") return;
         const { item } = subject;
@@ -911,6 +932,16 @@
   }
 
   function activate(row: LauncherRow) {
+    if (row.kind === "favourite" && isListRow(row.row)) {
+      // A favourite list applies as its `#l` hit does, below.
+      if (row.row.state) {
+        push({ text: row.row.state.text });
+        return;
+      }
+      session.set(`${row.row.path ?? ""} `);
+      box?.focus();
+      return;
+    }
     if (row.kind === "hit" && row.hit.kind === "list") {
       // A saved list applies by its own text (#2423, spec #2419 story 14):
       // the filters and words go back into the box, with the space after

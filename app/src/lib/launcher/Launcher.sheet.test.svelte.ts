@@ -64,7 +64,7 @@ function response(raw: string): SearchResponse {
   };
 }
 
-const HOME = { recent: [], sources: [], pending_writes: 0, notes_shown: true } as unknown as LauncherHome;
+const HOME = { recent: [], favourites: [], sources: [], pending_writes: 0, notes_shown: true } as unknown as LauncherHome;
 
 const APPS: CheckoutSettings = {
   applications: [
@@ -215,7 +215,7 @@ test("Tab lifts the row under the box, labels the box Actions and empties it; th
   const pinned = target.querySelector(".tf-ln-pinned .tf-ln-res");
   expect(pinned?.querySelector(".tf-ln-t")?.textContent).toBe("svc");
   expect(pinned?.querySelector(".tf-ln-k")?.textContent).toBe("acme");
-  expect(labels()).toEqual(["Link to PAY-999", "Pull requests", "Branches", "Open in VS Code", "Open in IntelliJ", "Clone", "Copy title"]);
+  expect(labels()).toEqual(["Link to PAY-999", "Pull requests", "Branches", "Open in VS Code", "Open in IntelliJ", "Clone", "Favourite", "Copy title"]);
 });
 
 test("the pinned row draws the key cell the engine sends (#2452)", async () => {
@@ -325,7 +325,7 @@ test("a ticket: Start timer, Work on this, Copy key; Start timer hands the ticke
   const calls = mountIt();
   await settle();
   await sheetOn("ticket");
-  expect(labels()).toEqual(["Link to PAY-999", "Start timer", "Work on this", "Copy key"]);
+  expect(labels()).toEqual(["Link to PAY-999", "Start timer", "Work on this", "Favourite", "Copy key"]);
   press("ArrowDown");
   press("Enter");
   await settle();
@@ -355,7 +355,7 @@ test("a pull request: the files, the conversation, Approve queued as a write", a
   const calls = mountIt();
   await settle();
   await sheetOn("pr");
-  expect(labels()).toEqual(["Link to PAY-999", "Review the files", "Conversation", "Approve", "Open in VS Code", "Open in IntelliJ", "Copy title"]);
+  expect(labels()).toEqual(["Link to PAY-999", "Review the files", "Conversation", "Approve", "Open in VS Code", "Open in IntelliJ", "Favourite", "Copy title"]);
   narrow("approve");
   press("Enter");
   await settle();
@@ -398,7 +398,7 @@ test("a branch opens in each application", async () => {
   const calls = mountIt();
   await settle();
   await sheetOn("branch");
-  expect(labels()).toEqual(["Link to PAY-999", "Open in VS Code", "Open in IntelliJ", "Copy title"]);
+  expect(labels()).toEqual(["Link to PAY-999", "Open in VS Code", "Open in IntelliJ", "Favourite", "Copy title"]);
   narrow("code");
   press("Enter");
   await settle();
@@ -472,7 +472,7 @@ test("a saved list applies its text, renames in the box and deletes", async () =
   const calls = mountIt();
   await settle();
   await sheetOn("list");
-  expect(labels()).toEqual(["Apply", "Rename", "Delete"]);
+  expect(labels()).toEqual(["Apply", "Rename", "Delete", "Favourite"]);
   press("ArrowDown");
   press("Enter");
   await settle();

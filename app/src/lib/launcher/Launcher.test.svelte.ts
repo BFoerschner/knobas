@@ -125,6 +125,7 @@ const HOME: LauncherHome = {
       state: null,
     },
   ],
+  favourites: [],
   sources: [],
   pending_writes: 0,
   notes_shown: true,

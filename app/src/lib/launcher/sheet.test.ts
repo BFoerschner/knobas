@@ -6,7 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { InboxItem } from "../ipc/entity";
-import { narrowActions, sheetActions, type SheetContext, type SheetSubject } from "./sheet";
+import { favouriteKeys, narrowActions, sheetActions, type SheetContext, type SheetSubject } from "./sheet";
 
 const JOB = { entityId: "jira:PAY-999", label: "PAY-999" };
 const CTX: SheetContext = {
@@ -16,6 +16,7 @@ const CTX: SheetContext = {
     { id: "code", name: "VS Code" },
     { id: "idea", name: "IntelliJ" },
   ],
+  favourites: new Set(),
 };
 
 const entity = (entityKind: string, entityId: string, title = "Title"): SheetSubject => ({
@@ -30,7 +31,7 @@ const entity = (entityKind: string, entityId: string, title = "Title"): SheetSub
 const ids = (subject: SheetSubject, ctx: SheetContext = CTX) => sheetActions(subject, ctx).map((action) => action.id);
 
 test("a ticket: the link first, then the timer, Work on this and Copy key", () => {
-  expect(ids(entity("ticket", "jira:PAY-231"))).toEqual(["link", "timer", "work", "copy"]);
+  expect(ids(entity("ticket", "jira:PAY-231"))).toEqual(["link", "timer", "work", "fav", "copy"]);
   const actions = sheetActions(entity("ticket", "jira:PAY-231"), CTX);
   expect(actions[0]?.label).toBe("Link to PAY-999");
   expect(actions.find((a) => a.id === "work")?.does).toEqual({ kind: "go", hash: "#/job/jira%3APAY-231" });
@@ -60,6 +61,7 @@ test("a pull request: the files, the conversation, Approve, one Open in per appl
     "Approve",
     "Open in VS Code",
     "Open in IntelliJ",
+    "Favourite",
     "Copy title",
   ]);
   expect(actions[1]?.does).toEqual({ kind: "go", hash: "#/pr/gitea%3Aacme%2Fsvc%23142/diff" });
@@ -68,15 +70,15 @@ test("a pull request: the files, the conversation, Approve, one Open in per appl
 });
 
 test("a repository: Pull requests, Branches, Open in, Clone", () => {
-  expect(ids(entity("repo", "gitea:acme/svc"))).toEqual(["link", "prs", "branches", "open-code", "open-idea", "clone", "copy"]);
+  expect(ids(entity("repo", "gitea:acme/svc"))).toEqual(["link", "prs", "branches", "open-code", "open-idea", "clone", "fav", "copy"]);
 });
 
 test("no application configured: no Open in row", () => {
-  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, apps: [] })).toEqual(["link", "prs", "branches", "clone", "copy"]);
+  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, apps: [] })).toEqual(["link", "prs", "branches", "clone", "fav", "copy"]);
 });
 
 test("a branch opens in each application; a pipeline runs; a monitor is acknowledged", () => {
-  expect(ids(entity("branch", "gitea:acme/svc@main"))).toEqual(["link", "open-code", "open-idea", "copy"]);
+  expect(ids(entity("branch", "gitea:acme/svc@main"))).toEqual(["link", "open-code", "open-idea", "fav", "copy"]);
   const run = sheetActions(entity("pipeline", "teamcity:Pay_Build"), CTX).find((a) => a.id === "run");
   expect(run?.does).toMatchObject({ kind: "write", payload: { TriggerBuild: { entity: "teamcity:Pay_Build" } } });
   const ack = sheetActions(entity("monitor", "kuma:7"), CTX).find((a) => a.id === "ack");
@@ -84,7 +86,7 @@ test("a branch opens in each application; a pipeline runs; a monitor is acknowle
 });
 
 test("a page, an asset or anything else: the pair and Copy title", () => {
-  expect(ids(entity("page", "confluence:ENG:SEPA"))).toEqual(["link", "copy"]);
+  expect(ids(entity("page", "confluence:ENG:SEPA"))).toEqual(["link", "fav", "copy"]);
 });
 
 test("a view opens and copies its address; a set opens; a saved list applies, renames and deletes", () => {
@@ -96,6 +98,7 @@ test("a view opens and copies its address; a set opens; a saved list applies, re
     "apply",
     "rename",
     "delete",
+    "fav",
   ]);
 });
 
@@ -128,4 +131,26 @@ test("the narrowing keeps every typed letter in order, the tightest match first"
   expect(narrowActions(actions, "co").map((a) => a.id).slice(0, 2)).toEqual(["copy", "open-code"]);
   expect(narrowActions(actions, "zzz")).toEqual([]);
   expect(narrowActions(actions, "O I").map((a) => a.id)).toContain("open-idea");
+});
+
+test("Favourite on an entity and a saved list, Unfavourite on one that is a favourite (#2428)", () => {
+  const ticket = entity("ticket", "jira:PAY-231");
+  const list: SheetSubject = { kind: "list", id: "sepa", label: "sepa payouts", text: "sepa payouts", refusal: null };
+  const fav = (subject: SheetSubject, ctx: SheetContext = CTX) => sheetActions(subject, ctx).find((a) => a.id === "fav");
+  expect(fav(ticket)).toMatchObject({ label: "Favourite", does: { kind: "favourite", target: { entity: "jira:PAY-231" }, on: true } });
+  expect(fav(list)).toMatchObject({ label: "Favourite", does: { kind: "favourite", target: { list: "sepa" }, on: true } });
+
+  // The keys the board's block holds: a list row by its list id, any other row by its entity id.
+  const kept = favouriteKeys([
+    { kind: "list", source_id: "list", entity_id: "sepa" },
+    { kind: "ticket", source_id: "jira", entity_id: "jira:PAY-231" },
+  ]);
+  expect(fav(ticket, { ...CTX, favourites: kept })).toMatchObject({ label: "Unfavourite", does: { on: false } });
+  expect(fav(list, { ...CTX, favourites: kept })).toMatchObject({ label: "Unfavourite", does: { on: false } });
+  // A ticket whose id is a list's id is still not that list.
+  expect(fav(entity("ticket", "sepa"), { ...CTX, favourites: kept })?.label).toBe("Favourite");
+  // Views, sets and inbox lines are not favourites.
+  expect(ids({ kind: "view", id: "my-open", title: "My open" })).not.toContain("fav");
+  expect(ids({ kind: "set", id: "payments", title: "Payments" })).not.toContain("fav");
+  expect(ids({ kind: "inbox", item: LINE, ops: [] })).not.toContain("fav");
 });

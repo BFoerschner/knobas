@@ -10,7 +10,7 @@ import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeLinkSetLines } from "./link-sets";
 import { fakeLog } from "./run-reads";
-import { fakeListSearch } from "./smart-lists";
+import { fakeFavourites, fakeListSearch } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
 import { fakeTicketViewLines } from "./ticket-views";
 import { FIXTURE_QUEUE } from "./write-queue";
@@ -328,6 +328,8 @@ export function handlers(): Handlers {
         )
         .slice(0, 8)
         .map(mirrorRow),
+      // What the reader favourited (#2428), above the recent rows.
+      favourites: fakeFavourites(),
       sources: FIXTURE_SOURCES.map((source) => source.health),
       pending_writes: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
       notes_shown: fakeNotesAreShown(),

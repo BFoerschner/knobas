@@ -17,6 +17,7 @@
  * suffix are compiled by `vite-plugin-svelte`.
  */
 import {
+  type FavouriteTarget,
   type FilterSuggestions,
   type LauncherHome,
   type SearchQuery,
@@ -68,6 +69,13 @@ export interface SessionPorts {
   createSmartList?(label: string, query: string): Promise<SmartListSummary>;
   renameSmartList?(id: string, label: string): Promise<void>;
   deleteSmartList?(id: string): Promise<void>;
+  /**
+   * *Favourite* and *Unfavourite* (#2428) — `add_favourite`,
+   * `remove_favourite`. Optional as a pair, as the list writes are: the link
+   * pickers pass none and favourite nothing.
+   */
+  addFavourite?(target: FavouriteTarget): Promise<void>;
+  removeFavourite?(target: FavouriteTarget): Promise<void>;
   /**
    * The values the box suggests after `kind:`, `source:` and `under:` —
    * `filter_suggestions` (#601).
@@ -310,6 +318,27 @@ export class Session {
       await remove(id);
       if (this.savedId === id) this.savedId = null;
     });
+  }
+
+  /**
+   * Favourite (`on`) or unfavourite `target`, then read the board again, so
+   * the empty box draws the block as the backend now has it (#2428). The
+   * board, whatever the box holds: the favourites are the board's, and the
+   * sheet's *Favourite* or *Unfavourite* reads them. Whether the backend took
+   * it; a refusal is in {@link Session.error}.
+   */
+  async favourite(target: FavouriteTarget, on: boolean): Promise<boolean> {
+    const write = on ? this.#ports.addFavourite : this.#ports.removeFavourite;
+    if (!write) return false;
+    try {
+      await write(target);
+      this.error = null;
+    } catch (cause) {
+      this.error = ipcErrorMessage(cause);
+      return false;
+    }
+    await this.loadHome();
+    return true;
   }
 
   /**

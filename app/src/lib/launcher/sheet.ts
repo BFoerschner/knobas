@@ -8,8 +8,8 @@
  * (#2429) binds to an `id`, and a flow (#2427) is one more `does` kind.
  *
  * The order is the spec's: the pair with the chosen job first (*Link to
- * ⟨job⟩*), *Start timer* on a ticket, then what the kind can do, then *Copy
- * key* or *Copy title*. This reverses the 2026-10-21 ruling on #1416 (the
+ * ⟨job⟩*), *Start timer* on a ticket, then what the kind can do, then
+ * *Favourite* (#2428), then *Copy key* or *Copy title*. This reverses the 2026-10-21 ruling on #1416 (the
  * two-row chain and the hand-off to the job's dialog); see
  * `docs/decisions/2026-11-02-launcher-sheet.md`.
  *
@@ -17,7 +17,8 @@
  * `does` is a `write` of the op the source declares. Today's are the
  * declared ops the app already builds (`Approve`, `TriggerBuild`, `RerunBuild`).
  */
-import type { InboxItem } from "../ipc/entity";
+import type { EntityRow, InboxItem } from "../ipc/entity";
+import type { FavouriteTarget } from "../ipc/search";
 import type { WriteOpPayload } from "../ipc/sources";
 import { canBeTarget } from "../shell/timer";
 import { entityAddress } from "../tf/address";
@@ -56,7 +57,9 @@ export type SheetEffect =
   | { kind: "rename" }
   | { kind: "delete" }
   /** The inbox page's own writes on the line. */
-  | { kind: "inbox"; op: "ack" | "done" | "rerun" };
+  | { kind: "inbox"; op: "ack" | "done" | "rerun" }
+  /** *Favourite* (`on`) or *Unfavourite* the subject (#2428); the empty box redraws. */
+  | { kind: "favourite"; target: FavouriteTarget; on: boolean };
 
 export interface SheetAction {
   /** Stable per kind: what an action key (#2429) is kept under. */
@@ -74,6 +77,38 @@ export interface SheetContext {
   canTime: boolean;
   /** Settings › Checkouts' applications, the default first (`menuOrder`). */
   apps: readonly { id: string; name: string }[];
+  /** What is a favourite now, as {@link favouriteKeys} reads the board's block: *Unfavourite* on those. */
+  favourites: ReadonlySet<string>;
+}
+
+/** A saved list's row on the board: its `#l` hit's shape, kind and source `list`. */
+export function isListRow(row: Pick<EntityRow, "kind" | "source_id">): boolean {
+  return row.kind === "list" && row.source_id === "list";
+}
+
+/** A favourite's key: the column it is kept in and its id, so a list and an entity never share one. */
+function keyOfTarget(target: FavouriteTarget): string {
+  return "list" in target ? `list:${target.list}` : `entity:${target.entity}`;
+}
+
+/**
+ * The keys of the board's favourites block (`LauncherHome.favourites`): a
+ * saved list's row is its `#l` hit's (kind and source `list`), every other
+ * row an entity.
+ */
+export function favouriteKeys(rows: readonly Pick<EntityRow, "kind" | "source_id" | "entity_id">[]): Set<string> {
+  return new Set(
+    rows.map((row) =>
+      keyOfTarget(isListRow(row) ? { list: row.entity_id } : { entity: row.entity_id }),
+    ),
+  );
+}
+
+/** *Favourite* or *Unfavourite* on what can be one: an entity or a saved list (#2428, spec #2419 story 39). */
+function favouriteAction(target: FavouriteTarget, ctx: SheetContext): SheetAction {
+  return ctx.favourites.has(keyOfTarget(target))
+    ? { id: "fav", label: "Unfavourite", detail: "Leaves the top of the empty box", does: { kind: "favourite", target, on: false } }
+    : { id: "fav", label: "Favourite", detail: "At the top of the empty box", does: { kind: "favourite", target, on: true } };
 }
 
 /** The sheet's subject for a row, or `null` for a row nothing can be done to. */
@@ -88,8 +123,12 @@ export function subjectOf(row: LauncherRow, inboxOps: (key: string) => readonly 
       if (hit.kind === "set") return { kind: "set", id: hit.entity_id, title: hit.title };
       return { kind: "entity", entityId: hit.entity_id, entityKind: hit.kind, title: hit.title, sourceId: hit.source_id, path: hit.path };
     }
+    case "favourite":
     case "recent": {
       const item = row.row;
+      if (row.kind === "favourite" && isListRow(item)) {
+        return { kind: "list", id: item.entity_id, label: item.title, text: item.path ?? "", refusal: item.state?.text ?? null };
+      }
       return { kind: "entity", entityId: item.entity_id, entityKind: item.kind, title: item.title, sourceId: item.source_id, path: item.path };
     }
     case "inbox":
@@ -132,6 +171,7 @@ export function sheetActions(subject: SheetSubject, ctx: SheetContext): SheetAct
         },
         { id: "rename", label: "Rename", detail: "The box takes the new name; Enter keeps it", does: { kind: "rename" } },
         { id: "delete", label: "Delete", detail: "The saved search is gone", does: { kind: "delete" } },
+        favouriteAction({ list: subject.id }, ctx),
       ];
     case "view": {
       const hash = entityAddress("view", subject.id, subject.title);
@@ -225,6 +265,7 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
   if (kind === "repo") {
     actions.push({ id: "clone", label: "Clone", detail: "Into a folder under the clones root", does: { kind: "clone" } });
   }
+  actions.push(favouriteAction({ entity: id }, ctx));
   actions.push(
     kind === "ticket"
       ? { id: "copy", label: "Copy key", detail: key, does: { kind: "copy", text: key, said: `Copied ${key}` } }

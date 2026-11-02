@@ -58,6 +58,7 @@ function response(raw: string): SearchResponse {
 
 const HOME: LauncherHome = {
   recent: [],
+  favourites: [],
   sources: [],
   pending_writes: 0,
   notes_shown: true,

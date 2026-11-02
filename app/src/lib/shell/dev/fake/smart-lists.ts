@@ -1,15 +1,17 @@
 /**
  * `?fake-ipc`: the lists a reader saved (#506, #2423): `#l` and `#i` in the
- * box, `smart_lists` and the three writes.
+ * box, `smart_lists` and the three writes; and the favourites (#2428), which
+ * name a saved list or an entity and are drawn at the top of the empty box.
  *
  * The built-in smart lists are gone (spec #2419), so this is saved lists
  * alone: what `#l` answers as kind `list`, and what Settings reads to know a
  * list exists.
  */
-import type { SearchResponse } from "../../../ipc/search";
+import type { EntityRow } from "../../../ipc/entity";
+import type { FavouriteTarget, SearchResponse } from "../../../ipc/search";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
-import { SYNCED_AT } from "./corpus";
+import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 
 /**
  * The lists a reader saved -- **fixture-only**, and mutable, because saving
@@ -136,12 +138,57 @@ function fakeRenameSmartList(args: Record<string, unknown>) {
   return null;
 }
 
-/** `delete_smart_list`. */
+/** `delete_smart_list`; its favourite goes with it, as `0069`'s cascade does. */
 function fakeDeleteSmartList(args: Record<string, unknown>) {
   const id = String(args["id"] ?? "");
   const at = FIXTURE_SAVED.findIndex((list) => list.id === id);
   if (at < 0) throw { code: "not_found", message: `no saved list ${id}`, source_id: null };
   FIXTURE_SAVED.splice(at, 1);
+  const favourite = FIXTURE_FAVOURITES.findIndex((target) => "list" in target && target.list === id);
+  if (favourite >= 0) FIXTURE_FAVOURITES.splice(favourite, 1);
+  return null;
+}
+
+/**
+ * The favourites (#2428) -- **fixture-only**, mutable, in the order they
+ * were favourited: one saved list and one page, so the empty box shows the
+ * block under `?fake-ipc`. Order, the cascade and the unknown entity are
+ * witnessed over a real database in `tests/it/favourites_ipc.rs`.
+ */
+const FIXTURE_FAVOURITES: FavouriteTarget[] = [{ list: "sepa-payouts" }, { entity: "confluence:sepa" }];
+
+/** `favourites`: each target as the board's row, a list as its `#l` hit is drawn; what resolves nowhere is skipped. */
+export function fakeFavourites(): EntityRow[] {
+  return FIXTURE_FAVOURITES.flatMap((target): EntityRow[] => {
+    if ("list" in target) {
+      const list = FIXTURE_SAVED.find((saved) => saved.id === target.list);
+      if (!list) return [];
+      const state = list.broken ? { text: BROKEN, tone: "warn" as const } : null;
+      return [{ entity_id: list.id, kind: "list", source_id: "list", title: list.label, updated_at: null, synced_at: SYNCED_AT, path: list.query, state, cell: null }];
+    }
+    const entry = CORPUS.find((row) => row.entity_id === target.entity && row.deleted_at === null);
+    return entry ? [mirrorRow(entry) as EntityRow] : [];
+  });
+}
+
+const sameTarget = (a: FavouriteTarget, b: FavouriteTarget) =>
+  ("list" in a && "list" in b && a.list === b.list) || ("entity" in a && "entity" in b && a.entity === b.entity);
+
+/** `add_favourite`: last in the block, once; a list nobody saved is `not_found`. */
+function fakeAddFavourite(args: Record<string, unknown>) {
+  const target = args["target"] as FavouriteTarget;
+  if ("list" in target && !FIXTURE_SAVED.some((list) => list.id === target.list)) {
+    throw { code: "not_found", message: `no saved list ${target.list}`, source_id: null };
+  }
+  if (!FIXTURE_FAVOURITES.some((kept) => sameTarget(kept, target))) FIXTURE_FAVOURITES.push(target);
+  return null;
+}
+
+/** `remove_favourite`: not a favourite is no error. */
+function fakeRemoveFavourite(args: Record<string, unknown>) {
+  const target = args["target"] as FavouriteTarget;
+  const at = FIXTURE_FAVOURITES.findIndex((kept) => sameTarget(kept, target));
+  if (at >= 0) FIXTURE_FAVOURITES.splice(at, 1);
   return null;
 }
 
@@ -154,7 +201,10 @@ export function handlers(): Handlers {
     create_smart_list: (args) => fakeCreateSmartList(args),
     rename_smart_list: (args) => fakeRenameSmartList(args),
     delete_smart_list: (args) => fakeDeleteSmartList(args),
+    favourites: () => fakeFavourites(),
+    add_favourite: (args) => fakeAddFavourite(args),
+    remove_favourite: (args) => fakeRemoveFavourite(args),
   };
 }
 
-keepSeed(FIXTURE_SAVED);
+keepSeed(FIXTURE_SAVED, FIXTURE_FAVOURITES);

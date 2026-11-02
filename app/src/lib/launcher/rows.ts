@@ -35,6 +35,11 @@ export interface BoardExtras {
 export type LauncherRow =
   | { kind: "hit"; id: string; group: ResultGroup; hit: SearchHit }
   | { kind: "recent"; id: string; row: EntityRow }
+  /**
+   * One of the board's favourites (#2428): an entity, or a saved list drawn
+   * as its `#l` hit is (kind and source `list`, its text as `path`).
+   */
+  | { kind: "favourite"; id: string; row: EntityRow }
   /** A line of the shell's inbox, behind `#i` (#2423): not an entity, a row of the inbox store. */
   | { kind: "inbox"; id: string; item: InboxItem }
   | { kind: "action"; id: string; action: LauncherAction }
@@ -107,10 +112,15 @@ export function flatten(input: {
     case "board": {
       const home = input.home;
       if (!home) return [];
-      // The recent items alone (#2421): no lists, no inbox, no time.
-      return home.recent.map(
-        (row): LauncherRow => ({ kind: "recent", id: `recent:${row.entity_id}`, row }),
-      );
+      // The favourites in their order (#2428), then the recent items
+      // (#2421): no smart lists, no inbox, no time. A favourite that is also
+      // recent is in both, under its own id in each.
+      return [
+        ...home.favourites.map(
+          (row): LauncherRow => ({ kind: "favourite", id: `favourite:${row.kind === "list" ? "list" : "entity"}:${row.entity_id}`, row }),
+        ),
+        ...home.recent.map((row): LauncherRow => ({ kind: "recent", id: `recent:${row.entity_id}`, row })),
+      ];
     }
     case "results": {
       const response = input.response;

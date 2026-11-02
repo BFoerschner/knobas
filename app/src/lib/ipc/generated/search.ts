@@ -25,6 +25,14 @@ place: string | null,
 segments: Array<Segment>, };
 
 /**
+ * What a favourite names: an entity (`knobas.entity.id`) or a saved list
+ * (`knobas.smart_list.id`, the `list` hit's `entity_id`).
+ *
+ * On the wire `{ "entity": "<id>" }` or `{ "list": "<id>" }`.
+ */
+export type FavouriteTarget = { "entity": string } | { "list": string };
+
+/**
  * One value a ticket key can take (#811).
  */
 export type FieldSuggestion = { 
@@ -195,6 +203,14 @@ export type LauncherHome = {
  * if the two ever stop agreeing.
  */
 recent: Array<EntityRow>, 
+/**
+ * What the reader favourited (#2428, spec #2419 stories 39 and 40),
+ * in the order they were favourited, drawn above `recent` under one
+ * heading: an entity as `recent` draws one, a saved list as its `list`
+ * hit (kind and source `list`, its text as `path`, the refusal as
+ * `state`). The rows of [`favourites`].
+ */
+favourites: Array<EntityRow>, 
 /**
  * Stream F's credential health, read straight from `knobas.source_config`
  * -- **not** a second copy of the type (interfaces §2.2, open question

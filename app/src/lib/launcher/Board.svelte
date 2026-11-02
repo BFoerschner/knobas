@@ -1,9 +1,10 @@
 <!--
-  What an empty box shows (#2421, spec #2419): the recent items, nothing else.
-  No smart lists, no inbox block, no time block, no source strip. Favourites
-  join above the recents under their own heading (#2428).
+  What an empty box shows (#2421, spec #2419): the favourites under one
+  heading, lists and entities in the order they were favourited (#2428), then
+  the recent items. No smart lists, no inbox block, no time block, no source
+  strip.
 
-  The recent items are drawn by the same `Row` the results use, so a row reads
+  Both blocks are drawn by the same `Row` the results use, so a row reads
   the same on the board as in an answer.
 -->
 <script lang="ts">
@@ -32,15 +33,18 @@
   } = $props();
 </script>
 
-{#if home.recent.length > 0}
-  <div class="tf-ln-h"><span class="tf-ln-lab">Recent</span></div>
-{/if}
 {#each rows as row, index (row.id)}
-  {#if row.kind === "recent"}
+  {#if row.kind === "favourite" || row.kind === "recent"}
     {@const item = row.row}
     {@const info = kindRegistry.info(item.kind)}
     {@const word = kindSingular(item.kind, info)}
     {@const cells = cellsOf({ kind: item.kind, entityId: item.entity_id, title: item.title, path: item.path, cell: item.cell, kindWord: word })}
+    {#if index === 0 && row.kind === "favourite"}
+      <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span></div>
+    {/if}
+    {#if row.kind === "recent" && rows[index - 1]?.kind !== "recent"}
+      <div class="tf-ln-h"><span class="tf-ln-lab">Recent</span></div>
+    {/if}
     <Row
       monogram={kindMonogram(item.kind, info)}
       tone={item.state?.tone ?? null}
