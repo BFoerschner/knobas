@@ -12,10 +12,7 @@ fn para(words: &str) -> DocBlock {
 }
 
 fn cell(words: &str) -> TableCell {
-    TableCell {
-        header: false,
-        text: text(words),
-    }
+    TableCell::new(false, vec![para(words)])
 }
 
 /// The body alone, as a page titled `T` writes it.
@@ -172,6 +169,53 @@ fn a_table_is_a_pipe_table_headed_by_its_first_row() {
         "a header wider than every row sets the width"
     );
     assert_eq!(page("T", &[DocBlock::Table { rows: vec![] }]), "# T\n");
+}
+
+/// A pipe table has no spans and no blocks (#2436): a spanned cell keeps its
+/// place and leaves the places it covers empty, so the columns still line up,
+/// and a cell's blocks are its lines joined by `<br>`. No word is lost.
+#[test]
+fn a_spanned_cell_leaves_its_places_empty_and_block_cells_keep_their_words() {
+    let md = body(&[DocBlock::Table {
+        rows: vec![
+            vec![
+                TableCell {
+                    colspan: 2,
+                    ..cell("Owner")
+                },
+                TableCell {
+                    rowspan: 2,
+                    ..cell("Notes")
+                },
+            ],
+            vec![
+                cell("Team"),
+                TableCell::new(
+                    false,
+                    vec![
+                        DocBlock::List {
+                            ordered: false,
+                            items: vec![vec![para("Mara")], vec![para("Tomasz")]],
+                        },
+                        para("On call"),
+                        DocBlock::Table {
+                            rows: vec![vec![cell("in"), cell("ner")]],
+                        },
+                    ],
+                ),
+            ],
+            vec![cell("Ops"), cell("x"), cell("y")],
+        ],
+    }]);
+    assert_eq!(
+        md,
+        concat!(
+            "| Owner |  | Notes |\n",
+            "| --- | --- | --- |\n",
+            "| Team | - Mara<br>- Tomasz<br><br>On call<br><br>\\| in \\| ner \\|<br>\\| --- \\| --- \\| |  |\n",
+            "| Ops | x | y |\n",
+        )
+    );
 }
 
 #[test]

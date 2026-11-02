@@ -13,7 +13,7 @@
 //! | `h1` to `h6` | heading |
 //! | `p`, loose text | paragraph |
 //! | `ul`, `ol` (nested too) | list |
-//! | `table` with `th` / `td` | table |
+//! | `table` with `th` / `td` | table, each cell's blocks and `colspan` / `rowspan` |
 //! | `pre`, the `code` and `noformat` macros | code, with the macro's `language` |
 //! | the `info`, `note`, `warning`, `tip` and `panel` macros | panel |
 //! | the `jira` macro with a `key` | an issue chip (inline) |
@@ -863,16 +863,71 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     #[test]
     fn a_table_keeps_header_cells_and_rows() {
         let storage = "<table><colgroup><col /><col /></colgroup><tbody><tr><th><p>After</p></th><th><p>Who</p></th></tr><tr><td><p>15 min</p></td><td>second on-call</td></tr></tbody></table>";
-        let cell = |header, text: &str| TableCell {
-            header,
-            text: vec![Inline::text(text)],
-        };
+        let cell = |header, text: &str| TableCell::new(header, vec![para(text)]);
         assert_eq!(
             blocks(storage),
             vec![DocBlock::Table {
                 rows: vec![
                     vec![cell(true, "After"), cell(true, "Who")],
                     vec![cell(false, "15 min"), cell(false, "second on-call")],
+                ]
+            }]
+        );
+    }
+
+    /// Spec #2432 stories 27 to 32 (#2436): a merged cell keeps its spans, a
+    /// header cell opening each row is a header column, and a cell holds
+    /// blocks: a list, two paragraphs, a nested table, a panel, and a macro
+    /// knobas does not draw as a placeholder block, never `[name]` text.
+    #[test]
+    fn a_cell_keeps_its_spans_header_column_and_blocks() {
+        let storage = concat!(
+            r#"<table class="relative-table"><colgroup><col /><col /></colgroup><tbody>"#,
+            r#"<tr><th colspan="2"><p>Rota</p></th></tr>"#,
+            r#"<tr><th rowspan="2"><p>Mon</p></th><td><ul><li><p>Mara</p></li><li>Tomasz</li></ul></td></tr>"#,
+            r#"<tr><td><p>One.</p><p>Two.</p><table><tbody><tr><td>inner</td></tr></tbody></table></td></tr>"#,
+            r#"<tr><th>Tue</th><td><ac:structured-macro ac:name="info" ac:schema-version="1"><ac:rich-text-body><p>Swap.</p></ac:rich-text-body></ac:structured-macro><ac:structured-macro ac:name="toc" ac:schema-version="1" /></td></tr>"#,
+            "</tbody></table>",
+        );
+        let td = |blocks| TableCell::new(false, blocks);
+        assert_eq!(
+            blocks(storage),
+            vec![DocBlock::Table {
+                rows: vec![
+                    vec![TableCell {
+                        colspan: 2,
+                        ..TableCell::new(true, vec![para("Rota")])
+                    }],
+                    vec![
+                        TableCell {
+                            rowspan: 2,
+                            ..TableCell::new(true, vec![para("Mon")])
+                        },
+                        td(vec![DocBlock::List {
+                            ordered: false,
+                            items: vec![vec![para("Mara")], vec![para("Tomasz")]],
+                        }]),
+                    ],
+                    vec![td(vec![
+                        para("One."),
+                        para("Two."),
+                        DocBlock::Table {
+                            rows: vec![vec![td(vec![para("inner")])]],
+                        },
+                    ])],
+                    vec![
+                        TableCell::new(true, vec![para("Tue")]),
+                        td(vec![
+                            DocBlock::Panel {
+                                kind: PanelKind::Info,
+                                title: None,
+                                blocks: vec![para("Swap.")],
+                            },
+                            DocBlock::Placeholder {
+                                name: "toc".into(),
+                            },
+                        ]),
+                    ],
                 ]
             }]
         );
@@ -1149,7 +1204,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     fn sections_are_numbered_by_heading_and_say_whether_knobas_edits_them() {
         let storage = "<p>Lead.</p>\
             <h2>Text</h2><p>One <br/>two.</p><ul><li>a</li><li>b</li></ul>\
-            <h2>Table</h2><table><tr><td>x</td></tr></table>\
+            <h2>Table</h2><table><tr><td><ul><li>x</li></ul><ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[y]]></ac:plain-text-body></ac:structured-macro></td></tr></table>\
             <h2>Code</h2><ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>\
             <h2>Panel</h2><ac:structured-macro ac:name=\"info\"><ac:rich-text-body><p>i</p></ac:rich-text-body></ac:structured-macro>\
             <h2>Bold</h2><p>a <strong>b</strong></p>\
