@@ -1,7 +1,7 @@
-//! The incremental position: `{"v":3,…}`, opaque to everything but this crate.
+//! The incremental position: `{"v":4,…}`, opaque to everything but this crate.
 //!
 //! ```text
-//! {"v":3,
+//! {"v":4,
 //!  "modified_to":"2026-08-22T10:40:00Z",  // the newest lastmodified delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
 //!  "seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}],
@@ -32,8 +32,10 @@ use knobas_source::watermark::{self, Advanced, Bounds, Cql, Entry, MinuteLiteral
 /// carries the Docs search's marks: one full sync re-indexes every page that
 /// was mirrored before them, where an incremental one would only reach the
 /// pages edited since. Bumped to 3 by #953 for the same reason: one full sync
-/// gives every mirrored page its `position` and its `mentioned_users`.
-pub(crate) const CURSOR_VERSION: u8 = 3;
+/// gives every mirrored page its `position` and its `mentioned_users`. Bumped
+/// to 4 by #2435, whose `body_text` is built from the page's blocks: one full
+/// sync rebuilds every mirrored page's search text.
+pub(crate) const CURSOR_VERSION: u8 = 4;
 
 // The overlap, the daylight-saving widening and the seen cap are
 // `knobas_source::watermark`'s (#1622), shared with Jira: CQL's
@@ -289,13 +291,13 @@ mod tests {
         // arithmetic and none of the envelope, so no stored cursor re-syncs.
         assert_eq!(
             encoded,
-            r#"{"v":3,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}]}"#
+            r#"{"v":4,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}]}"#
         );
         assert_eq!(
             good.clone()
                 .with_positions(Positions::from([("98307".to_owned(), 0)]))
                 .encode(),
-            r#"{"v":3,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}],"positions":{"98307":0}}"#
+            r#"{"v":4,"modified_to":"2026-08-22T10:40:00Z","tz_offset_secs":7200,"seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}],"positions":{"98307":0}}"#
         );
         assert_eq!(ConfluenceCursor::parse(&encoded), Some(good));
         assert_eq!(ConfluenceCursor::parse("not json"), None);
@@ -306,6 +308,10 @@ mod tests {
         assert_eq!(ConfluenceCursor::parse(&old.to_string()), None);
         // So is one from before #953's positions and looked-up users.
         old["v"] = serde_json::json!(2);
+        assert_eq!(ConfluenceCursor::parse(&old.to_string()), None);
+        // So is one from before #2435's search text from the blocks: one full
+        // sync rebuilds every page's `body_text`.
+        old["v"] = serde_json::json!(3);
         assert_eq!(ConfluenceCursor::parse(&old.to_string()), None);
         // A TeamCity or Jira cursor handed to this adapter is not this
         // adapter's cursor, and reads as a full sync rather than as a position.

@@ -26,6 +26,9 @@ use serde::{Deserialize, Serialize};
 
 pub mod html;
 pub mod markdown;
+mod search_text;
+
+pub use search_text::search_text;
 
 /// The entity kind the Docs frame draws: knobas' own word for a page since
 /// migration `0001`. A docs source emits its pages as this kind.
@@ -405,6 +408,9 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
 /// * [`LINK`], the linked page's space key, [`LINK`], its title, [`LINK`]:
 ///   one line per page the body links to, last, so a backlink is a substring
 ///   ([`link_line`]).
+///
+/// A docs page's lines are written by one function, [`search_text`](super::search_text),
+/// from the page's projection (#2435), so no source writes them by hand.
 pub mod indexed {
     /// Opens a section's heading line.
     pub const SECTION: char = '\u{1E}';
