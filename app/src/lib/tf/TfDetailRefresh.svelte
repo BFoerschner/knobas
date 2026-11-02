@@ -1,7 +1,6 @@
 <!--
   An item's detail's *Refresh* or *Sync now* (#2107), drawn in the detail's
-  header toolbar, at the end of the job page's tab bar (#2134), or in a
-  monitor's roster row (#2138)
+  header toolbar or in a monitor's roster row (#2138)
   (`tf/refresh.svelte.ts`). *Refresh* reads the one item and
   says *Refreshing…* meanwhile; *Sync now* runs the item's source, shared with
   every detail of it, and the detail is read again once that run ends. Neither
@@ -29,11 +28,11 @@
     reread: () => Promise<void> | void;
     /**
      * Whether this is the page's own button, which ⌘R presses while it is
-     * drawn (#2156): a detail page's header or tab bar says so. A monitor's
+     * drawn (#2156): a detail page's header says so. A monitor's
      * roster row does not; that page's is the header's *Sync now*.
      */
     page?: boolean;
-    /** Drawn at the small size: in a page body, as the job's tab strip draws it (#2294). */
+    /** Drawn at the small size: in a page body, as a monitor's roster row draws it (#2294). */
     small?: boolean;
     /** Drawn as a ghost, beside the other ghost actions of a monitor's row (#2138). */
     ghost?: boolean;

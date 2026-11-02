@@ -507,7 +507,7 @@ export function deleteDepView(viewId: string): Promise<DepViews> {
   return invoke<DepViews>("delete_dep_view", { viewId });
 }
 
-/** Choose which view opens from a ticket's Map tab and which from the top bar. */
+/** Choose which view opens from a ticket's page and which from the top bar. */
 export function setDepViewDefaults(fromTicket: string, fromTop: string): Promise<DepViews> {
   return invoke<DepViews>("set_dep_view_defaults", { fromTicket, fromTop });
 }

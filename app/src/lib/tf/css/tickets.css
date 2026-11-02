@@ -84,7 +84,7 @@
   display: flex; flex-direction: column; gap: 14px; min-height: 0;
 }
 .tf-preview .tf-k { font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
-/* The ticket's title: the preview's `h2` and the ticket page's `h1` (spec #2227). */
+/* The ticket's title: the preview's `h2` (spec #2227). */
 .tf-preview .tf-ticket-title { font-size: var(--t-2xl); line-height: 1.2; margin: 2px 0 0; font-weight: 600; font-variation-settings: "wdth" 90; }
 .tf-preview p { color: var(--ink-2); }
 p.tf-desc { white-space: pre-line; }

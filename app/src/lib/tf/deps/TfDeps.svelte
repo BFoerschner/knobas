@@ -27,7 +27,7 @@
   dialog, with *Delete…*.
 
   **From a ticket (#874, R-11.10)**: with `ticket` set (`#/deps/job/<key>`;
-  the ticket page's Map tab went with #2399) the same read is kept to what the
+  the ticket page's sections row links it since #2399) the same read is kept to what the
   ticket reaches (`reach.ts`, over `job_reach` and `job_pipelines`), in the
   view set as *opens from a ticket*. The scope buttons, drawn while a job is
   open, switch between *This job <key>* and *Everything* (`#/deps`).

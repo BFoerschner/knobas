@@ -209,8 +209,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       const rows = await readSection(ports.listEntities, id, section);
       return mine === token ? rows : null;
     } catch {
-      // A section that cannot be read draws as having nothing; the Work tab's
-      // line says when the reads themselves fail.
+      // A section that cannot be read draws as having nothing.
       return mine === token ? [] : null;
     }
   }

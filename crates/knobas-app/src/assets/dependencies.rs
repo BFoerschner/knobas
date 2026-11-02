@@ -906,7 +906,7 @@ pub async fn delete_view(pool: &PgPool, id: &str) -> Result<DepViews, IpcError> 
     views(pool).await
 }
 
-/// Choose which view opens from a ticket's Map tab and which from the top bar.
+/// Choose which view opens from a ticket's page and which from the top bar.
 ///
 /// # Errors
 ///

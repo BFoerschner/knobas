@@ -254,9 +254,9 @@
   /**
    * The chosen job (spec #2227, `job/chosen.svelte.ts`), read from the
    * browser storage when the shell mounts, as a restart does. It replaces the
-   * "job you were last in" (#2230): the Job tab, the pages' *This job* and
-   * the launcher's job elsewhere than on a job page read it. `key` is what
-   * the tab names; `entityId` is where every way back to it goes, so a key
+   * "job you were last in" (#2230): `#/job`, the pages' *This job* and the
+   * launcher's job elsewhere than on a ticket page read it. `key` is what
+   * the pages name; `entityId` is where every way back to it goes, so a key
    * two sources hold returns to the one that was chosen (#1525).
    */
   chosenJob.load();
@@ -288,7 +288,7 @@
     return targetReading(target);
   });
   /**
-   * The Job tab's job (R-1.2, spec #2227): the chosen job, else the ticket a
+   * The job the shell's pages default to (R-1.2, spec #2227): the chosen job, else the ticket a
    * timer runs on that was not started here (a start chooses its ticket),
    * with its entity id, which `create_block` needs (#1027). Both are ids
    * already, so nothing is read for it.

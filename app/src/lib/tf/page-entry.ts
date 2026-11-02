@@ -20,8 +20,8 @@
  *
  * - **One page per address key**: the entry plus {@link TfPageEntry.address}.
  *   Two addresses with the same key are one page drawn again with new props
- *   (the job's tabs); two keys are two pages, even of one component (two
- *   repositories). A page without `address` is one page wherever it is.
+ *   (a key that leaves part of the address out); two keys are two pages, even
+ *   of one component (two repositories). A page without `address` is one page wherever it is.
  * - **`visible`** on the context is `true` for the shown page and `false` for a
  *   hidden one. A hidden page keeps the props of the address it was left at.
  *   A page that reads `visible` pauses its focus re-reads, polling and timers
@@ -67,7 +67,7 @@ export interface TfPageContext {
   back: EscTarget | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
-  /** The Job tab's job (the chosen job, else the timer's ticket) with its entity id, or `null`. */
+  /** The job the shell's pages default to (the chosen job, else the timer's ticket) with its entity id, or `null`. */
   navJob: { key: string; entityId: string } | null;
   timer: Pick<Timer, "current" | "elapsed">;
   layers: Layers;
