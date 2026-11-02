@@ -1,5 +1,7 @@
 # ⌘K rethought: a clickdummy
 
+The spec written from it is #2419.
+
 **Throwaway.** This directory lives on the `prototype-launcher-next` branch and
 never on `main`. It answers one question: does the launcher below feel right,
 so that a spec can be written from it?
