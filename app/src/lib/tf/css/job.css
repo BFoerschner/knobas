@@ -155,7 +155,7 @@
    frame. One that cannot be fetched is the same frame dashed and empty, as `.tf-md-noimg` draws a missing image. The
    panel then leads with the stale strip and its *Try again*. */
 .tf-tkthumb { width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2); object-fit: cover; display: block; }
-.tf-tkthumb.tf-tknone { display: grid; place-items: center; border-style: dashed; background: none; font: 600 var(--t-2xs) var(--mono); color: var(--ink-2); }
+.tf-tkthumb.tf-tknone { display: grid; place-items: center; border-style: dashed; background: none; color: var(--ink-2); }
 .tf-tkatt .tf-stale { margin: 10px 12px 2px; }
 .tf-tkatt .tf-stale .tf-btn { margin-left: auto; }
 

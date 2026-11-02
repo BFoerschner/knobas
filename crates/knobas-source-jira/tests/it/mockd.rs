@@ -1187,6 +1187,14 @@ async fn an_attachments_bytes_come_through_the_credential_and_stop_at_the_cap() 
         .await
         .unwrap();
     assert_eq!(capped, Some(FileBytes::TooLarge { size: 98_304 }));
+    // The size is the one Jira announces, believed before a byte is read: a
+    // read cut at 1 KiB of a 182 KB file could not know it.
+    let trace = timeline_url(&jira).replace("50001/retry-timeline", "50000/psp-409-trace");
+    let announced = source
+        .attachment_bytes("jira:PAY-231", &trace, 1024)
+        .await
+        .unwrap();
+    assert_eq!(announced, Some(FileBytes::TooLarge { size: 186_368 }));
 
     jira.assert_no_violations();
 }
