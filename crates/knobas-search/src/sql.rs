@@ -595,12 +595,7 @@ fn bind_dimensions(
     let hidden = (!filters.hidden_kinds.is_empty())
         .then(|| builder.param(Bind::Texts(filters.hidden_kinds.clone())));
     // A `pipeline` filter takes in every kind that is answered as one.
-    let mut kinds = filters.kinds.clone();
-    if kinds.iter().any(|k| k == crate::frames::PIPELINE) {
-        for kind in &filters.pipeline_kinds {
-            crate::query::push_unique(&mut kinds, kind);
-        }
-    }
+    let kinds = filters.kind_scope();
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),

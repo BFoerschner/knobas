@@ -225,3 +225,38 @@ async fn a_configuration_is_answered_as_a_pipeline_in_its_newest_builds_state() 
         )]
     );
 }
+
+/// Coverage reads the kind scope the statement reads (#2422): `#b` takes in
+/// TeamCity's configurations, which are answered as pipelines, so TeamCity
+/// is listed as answering `under:` and not left out as having no rows in a
+/// kind scope of `pipeline` alone.
+#[tokio::test]
+async fn hash_b_under_a_configuration_reports_the_source_it_answered_from() {
+    let pool = pool().await;
+    let t = token();
+    let project = format!("Payments{t}");
+    let name = format!("Deploy{t}");
+    let ours = configuration(
+        &pool,
+        &t,
+        &project,
+        &format!("Payments{t}_Deploy"),
+        &name,
+        [41, 42],
+    )
+    .await;
+
+    let response = searcher(&pool)
+        .await
+        .search(q(&format!("#b under:{name}")))
+        .await
+        .unwrap();
+    assert_eq!(ids(&response), vec![ours[0].clone()]);
+    let under = response
+        .coverage
+        .iter()
+        .find(|c| c.dimension == knobas_search::FilterDimension::Under)
+        .expect("an under: query reports its coverage");
+    let sources: Vec<&str> = under.sources.iter().map(|s| s.source_id.as_str()).collect();
+    assert_eq!(sources, ["teamcity"], "{:?}", response.coverage);
+}

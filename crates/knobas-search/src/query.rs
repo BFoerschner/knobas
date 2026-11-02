@@ -270,6 +270,24 @@ impl EffectiveFilters {
         out
     }
 
+    /// The kinds the kind predicate admits: [`Self::kinds`], and every kind in
+    /// [`Self::pipeline_kinds`] when `pipeline` is among them (#2422), since
+    /// those are answered as one. Empty means every kind.
+    ///
+    /// One spelling for the statement and for coverage, for
+    /// [`Self::filters_by_author`]'s reason: `#b @me` must not report on a
+    /// kind scope the statement had widened past.
+    #[must_use]
+    pub fn kind_scope(&self) -> Vec<String> {
+        let mut kinds = self.kinds.clone();
+        if kinds.iter().any(|k| k == crate::frames::PIPELINE) {
+            for kind in &self.pipeline_kinds {
+                push_unique(&mut kinds, kind);
+            }
+        }
+        kinds
+    }
+
     /// Whether this query put anything into the author predicate.
     ///
     /// **Reads `mine` and the *named* people, never [`Self::identity_authors`]**,
@@ -1045,7 +1063,7 @@ fn push_unique_value(into: &mut Vec<String>, value: &str) {
 /// Order matters beyond tidiness: it is the order the generated SQL binds its
 /// arrays in, so a stable one keeps the query text -- and therefore the plan
 /// cache and every test expectation -- deterministic.
-pub(crate) fn push_unique(into: &mut Vec<String>, value: &str) {
+fn push_unique(into: &mut Vec<String>, value: &str) {
     if !into.iter().any(|existing| existing == value) {
         into.push(value.to_owned());
     }

@@ -621,3 +621,49 @@ async fn kind_suggestions_offer_the_launchers_kinds_and_none_it_leaves_out() {
         );
     }
 }
+
+/// Coverage leaves out what the answer leaves out (#2422): a source whose
+/// only authored rows are commits contributed nothing to an `author:`
+/// query's answer, so it is not listed as answering it.
+#[tokio::test]
+async fn a_source_with_only_commits_is_not_in_an_author_querys_coverage() {
+    let pool = pool().await;
+    let t = token();
+    let source = format!("gitea-{t}");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'gitea', $1, 'http://x', 'Pat')",
+    )
+    .bind(&source)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let id = format!("{source}:tidewater/payout-service@{t}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'commit',$2)")
+        .bind(&id)
+        .bind(format!("Bump {t}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                author, item_updated_at, synced_at)
+         values ($1,$2,'commit',$3,'','{}',$4,now(),now())",
+    )
+    .bind(&id)
+    .bind(&source)
+    .bind(format!("Bump {t}"))
+    .bind(format!("alice{t}"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let response = search(&pool, &format!("author:alice{t} {t}"), false).await;
+    assert!(ids(&response).is_empty(), "{:?}", ids(&response));
+    let listed: Vec<&str> = response
+        .coverage
+        .iter()
+        .flat_map(|c| c.sources.iter().map(|s| s.source_id.as_str()))
+        .collect();
+    assert!(!listed.contains(&source.as_str()), "{listed:?}");
+}
