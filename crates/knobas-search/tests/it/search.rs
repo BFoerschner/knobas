@@ -250,7 +250,7 @@ async fn finds_by_full_text_and_groups_by_kind_in_a_fixed_order() {
 ///
 /// Every row carries the token once, in its title, so the ranking has nothing
 /// to say about which group comes first -- and the DB's row order, which is
-/// alphabetical (`branch`, `build`, `build_config`, `commit`, `pr`, `repo`),
+/// alphabetical (`branch`, `build`, `build_config`, `pr`, `repo`),
 /// puts every child before its parent. Only the fixed order can get this right.
 #[tokio::test]
 async fn a_parent_kinds_group_comes_before_its_child_kinds() {
@@ -262,7 +262,6 @@ async fn a_parent_kinds_group_comes_before_its_child_kinds() {
         ("gitea:tidewater/{t}", "repo", "gitea"),
         ("gitea:tidewater/{t}@refs/heads/main", "branch", "gitea"),
         ("gitea:tidewater/{t}#7", "pr", "gitea"),
-        ("gitea:tidewater/{t}@abc123", "commit", "gitea"),
         ("teamcity:{t}_Deploy", "build_config", "teamcity"),
         ("teamcity:{t}_Deploy#42", "build", "teamcity"),
     ] {
@@ -287,7 +286,8 @@ async fn a_parent_kinds_group_comes_before_its_child_kinds() {
             .position(|k| *k == kind)
             .unwrap_or_else(|| panic!("no {kind} group in {kinds:?}"))
     };
-    for child in ["branch", "pr", "commit"] {
+    // No commit: a commit is in no launcher answer (#2422).
+    for child in ["branch", "pr"] {
         assert!(at("repo") < at(child), "repo after {child}: {kinds:?}");
     }
     assert!(at("build_config") < at("build"), "{kinds:?}");

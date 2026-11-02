@@ -156,7 +156,7 @@ fn expected() -> [Option<StateChip>; 4] {
 /// What each id's row carries, among the rows a read answered with.
 fn states<'a>(
     rows: impl IntoIterator<Item = &'a knobas_search::EntityRow>,
-    ids: &[String; 4],
+    ids: &[String],
 ) -> Vec<Option<StateChip>> {
     let rows: Vec<&knobas_search::EntityRow> = rows.into_iter().collect();
     ids.iter()
@@ -168,6 +168,17 @@ fn states<'a>(
                 .clone()
         })
         .collect()
+}
+
+/// The ids and chips the launcher's own answer holds: all but the build. A
+/// run is in neither a search's answer nor the board's newest rows (#2422);
+/// its colour is its pipeline's, which `launcher_kinds.rs` witnesses.
+fn without_the_run(ids: &[String; 4]) -> (Vec<String>, Vec<Option<StateChip>>) {
+    let keep = |at: &usize| *at != 2;
+    (
+        (0..4).filter(keep).map(|at| ids[at].clone()).collect(),
+        (0..4).filter(keep).map(|at| expected()[at].clone()).collect(),
+    )
 }
 
 #[tokio::test]
@@ -186,8 +197,10 @@ async fn a_search_hit_carries_its_state_chip() {
         })
         .await
         .unwrap();
-    let hits = response.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row);
-    assert_eq!(states(hits, &ids), expected());
+    let hits: Vec<_> = response.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row).collect();
+    assert!(hits.iter().all(|row| row.entity_id != ids[2]), "a run is in no answer");
+    let (ids, want) = without_the_run(&ids);
+    assert_eq!(states(hits, &ids), want);
 }
 
 /// A ticket's hit carries its status as a state in the tone Jira's descriptor
@@ -262,7 +275,9 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
     let at = newest.unwrap_or_else(Utc::now).max(Utc::now()) + chrono::Duration::seconds(1);
     let ids = four(&pool, &t, at).await;
     let board = searcher(&pool).await.launcher_board().await.unwrap();
-    assert_eq!(states(&board.recent, &ids), expected());
+    assert!(board.recent.iter().all(|row| row.entity_id != ids[2]), "a run is not on the board");
+    let (ids, want) = without_the_run(&ids);
+    assert_eq!(states(&board.recent, &ids), want);
 }
 
 #[tokio::test]

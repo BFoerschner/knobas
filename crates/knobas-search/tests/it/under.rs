@@ -93,9 +93,12 @@ async fn item(
     id
 }
 
-/// One Gitea repo and a branch, a pull request and a commit in it, stored the
-/// way the adapter stores them. Answers with the four entity ids, repo first.
-async fn repo(pool: &sqlx::PgPool, owner: &str, name: &str, commit_message: &str) -> Vec<String> {
+/// One Gitea repo and two branches and a pull request in it, stored the way
+/// the adapter stores them; the second branch's text is `work_text`, as a
+/// branch's last commit message would be. Answers with the four entity ids,
+/// repo first. Branches and not commits: a commit is in no launcher answer
+/// (#2422), while a commit carries its parent the way a branch does.
+async fn repo(pool: &sqlx::PgPool, owner: &str, name: &str, work_text: &str) -> Vec<String> {
     let full = format!("{owner}/{name}");
     let repository = serde_json::json!({ "full_name": full, "name": name });
     let sha = uuid::Uuid::new_v4().simple().to_string();
@@ -133,11 +136,11 @@ async fn repo(pool: &sqlx::PgPool, owner: &str, name: &str, commit_message: &str
         item(
             pool,
             "gitea",
-            "commit",
-            &format!("{full}@{sha}"),
-            commit_message,
-            commit_message,
-            serde_json::json!({ "sha": sha, "repository": repository }),
+            "branch",
+            &format!("{full}@refs/heads/work-{sha}"),
+            work_text,
+            work_text,
+            serde_json::json!({ "name": format!("work-{sha}"), "repository": repository }),
         )
         .await,
     ]
@@ -160,10 +163,10 @@ fn sorted(mut ids: Vec<String>) -> Vec<String> {
 }
 
 /// The tracer bullet: the full name and the bare name, in any case, return the
-/// repo's branch, pull request and commit **and** the repo itself -- and
+/// repo's branches and pull request **and** the repo itself -- and
 /// nothing of the repo beside it.
 #[tokio::test]
-async fn under_a_repo_returns_its_branches_prs_and_commits_and_the_repo() {
+async fn under_a_repo_returns_its_branches_and_prs_and_the_repo() {
     let pool = pool().await;
     let t = token();
     // Stored in mixed case, as a Gitea repo may be named: a fold on only one
@@ -259,11 +262,11 @@ async fn repeated_values_are_a_union_and_an_unmatched_one_is_unknown() {
     assert_eq!(mixed.interpreted.unknown_tokens, [nope]);
 }
 
-/// The repo's name left the commit's text, and `under:` is what still finds
-/// the commit about jitter in that repo -- words after the filter search
+/// The repo's name left the branch's text, and `under:` is what still finds
+/// the branch about jitter in that repo -- words after the filter search
 /// inside it.
 #[tokio::test]
-async fn under_a_repo_with_words_finds_the_commit_that_mentions_them() {
+async fn under_a_repo_with_words_finds_the_branch_that_mentions_them() {
     let pool = pool().await;
     let t = token();
     let name = format!("payout-{t}");

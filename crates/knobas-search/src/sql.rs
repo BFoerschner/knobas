@@ -235,7 +235,9 @@ pub fn search_sql(
         let _ = writeln!(
             sql,
             "  select {} as entity_id, {} as kind, {rank} as rank, {named} as named,\n         {} as item_updated_at, {index} as corpus",
-            corpus.entity_id, corpus.kind, corpus.updated_at
+            corpus.entity_id,
+            answered_kind(corpus, &bound),
+            corpus.updated_at
         );
         let _ = write!(sql, "    from {}", corpus.relation);
         if text.is_some() {
@@ -508,6 +510,11 @@ struct BoundFilters {
     declarations: Option<String>,
     /// [`EffectiveFilters::titles`]: no bind, a fixed weight filter.
     titles: bool,
+    /// [`EffectiveFilters::pipeline_kinds`]' placeholder: the mirror's
+    /// pipeline-framed kinds, which the match stage answers as `pipeline`.
+    pipelines: Option<String>,
+    /// [`EffectiveFilters::hidden_kinds`]' placeholder (#2422).
+    hidden: Option<String>,
 }
 
 /// One ticket-key condition's placeholders.
@@ -582,11 +589,22 @@ fn bind_dimensions(
     let reach = filters
         .filters_by_reach()
         .then(|| bind_lowered(builder, &filters.reach));
+    // Read by the match stage's select list, before any `where` (#2422).
+    let pipelines = (!filters.pipeline_kinds.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.pipeline_kinds.clone())));
+    let hidden = (!filters.hidden_kinds.is_empty())
+        .then(|| builder.param(Bind::Texts(filters.hidden_kinds.clone())));
+    // A `pipeline` filter takes in every kind that is answered as one.
+    let mut kinds = filters.kinds.clone();
+    if kinds.iter().any(|k| k == crate::frames::PIPELINE) {
+        for kind in &filters.pipeline_kinds {
+            crate::query::push_unique(&mut kinds, kind);
+        }
+    }
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),
-        kinds: (!filters.kinds.is_empty())
-            .then(|| builder.param(Bind::Texts(filters.kinds.clone()))),
+        kinds: (!kinds.is_empty()).then(|| builder.param(Bind::Texts(kinds))),
         days: filters
             .updated_within_days
             .map(|days| builder.param(Bind::I32(clamp_days(days)))),
@@ -615,6 +633,22 @@ fn bind_dimensions(
         fields: Vec::new(),
         declarations: None,
         titles: filters.titles,
+        pipelines,
+        hidden,
+    }
+}
+
+/// The kind a corpus's row is answered as (#2422): its own, except that a
+/// mirrored kind declaring the Builds frame's `pipeline` is `pipeline`. A
+/// corpus whose kind is a quoted constant is knobas' own and never renamed.
+fn answered_kind(corpus: &Corpus, bound: &BoundFilters) -> String {
+    match &bound.pipelines {
+        Some(pipelines) if !corpus.kind.starts_with('\'') => format!(
+            "case when {kind} = any({pipelines}) then '{word}' else {kind} end",
+            kind = corpus.kind,
+            word = crate::frames::PIPELINE
+        ),
+        _ => corpus.kind.to_owned(),
     }
 }
 
@@ -650,6 +684,9 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     }
     if let Some(scope) = corpus.scope {
         predicates.push(scope.to_owned());
+    }
+    if let Some(hidden) = &bound.hidden {
+        predicates.push(format!("{} <> all({hidden})", corpus.kind));
     }
     if let Some(sources) = &bound.sources {
         predicates.push(format!("{} = any({sources})", corpus.source_id));
@@ -1253,6 +1290,12 @@ mod tests {
         "review-for-me",
         "review asked of you",
         "warn",
+        // A pipeline's path line and state (#2422, `corpus::mirror_path!` and
+        // `mirror_state!`): the frame key and word, its chain of groups, and the
+        // declaration key its runs name it by.
+        "frame",
+        "pipeline",
+        "group_path",
     ];
 
     fn filters(

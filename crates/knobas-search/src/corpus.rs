@@ -471,6 +471,69 @@ macro_rules! estate_subtree {
 /// back in the launcher. Migration `0012` put the *disabled-source* filter in
 /// the same place for the same reason (issue #202), so reading the base table
 /// now also puts back items from a source the user switched off.
+/// The Builds frame a mirrored row's kind declares (`pipeline`, `run`), or
+/// null; `$decl` holds the declarations and the row is `i`.
+macro_rules! mirror_frame {
+    ($decl:literal) => {
+        concat!("(", $decl, "::jsonb #>> array[i.source_id, i.kind, 'frame'])")
+    };
+}
+
+/// A mirrored row's path line (#2422): a pipeline's chain of groups, its
+/// project and the projects above it joined by ` › ` as the Builds view and
+/// a set's member row draw it (`group_path`), else the parent chain its kind
+/// declares (`knobas_core::path_line_read!`), the line every other row draws.
+#[macro_export]
+#[doc(hidden)]
+macro_rules! mirror_path {
+    ($decl:literal) => {
+        concat!(
+            "(case when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select string_agg(btrim(e.elem #>> c.entry_segs), \
+             ' \u{203a} ' order by e.ord) from ",
+            knobas_core::declared_list_candidates!($decl, "group_path"),
+            " c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) \
+             = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord) \
+             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
+               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null), ",
+            knobas_core::path_line_read!($decl),
+            ") else ",
+            knobas_core::path_line_read!($decl),
+            " end)"
+        )
+    };
+}
+
+/// A mirrored row's state (#2422): a pipeline's is its newest run's, read
+/// from the head of its range of `sync.item_pipeline` as the Builds view and
+/// a set's member rows read it (`knobas_core::newest_runs!`), and its own
+/// declared state when it has no run that carries one; every other row's is
+/// its own (`knobas_core::declared_state!`).
+#[macro_export]
+#[doc(hidden)]
+macro_rules! mirror_state {
+    ($decl:literal) => {
+        concat!(
+            "(case when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select (select ",
+            knobas_core::declared_state!($decl),
+            " from sync.live_item i where i.entity_id = n.entity_id) from (select i.source_id, ",
+            knobas_core::declared_string!($decl, "pipeline"),
+            " as pkey, (select sc.kind from knobas.source_config sc where sc.id = i.source_id) \
+             as adapter_kind) pl cross join lateral ",
+            knobas_core::newest_runs!("pl", "1"),
+            " n), ",
+            knobas_core::declared_state!($decl),
+            ") else ",
+            knobas_core::declared_state!($decl),
+            " end)"
+        )
+    };
+}
+pub(crate) use mirror_frame;
+
 pub const LIVE_ITEM: Corpus = Corpus {
     relation: "sync.live_item i",
     entity_id: "i.entity_id",
@@ -497,8 +560,8 @@ pub const LIVE_ITEM: Corpus = Corpus {
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
-    path: knobas_core::path_line_read!("pd.d"),
-    state: knobas_core::declared_state!("pd.d"),
+    path: mirror_path!("pd.d"),
+    state: mirror_state!("pd.d"),
     scope: None,
     under: Some(
         "i.entity_id in (select ip.entity_id from sync.item_parent ip \

@@ -295,3 +295,243 @@ async fn an_empty_set_counts_nothing_in_the_singular_and_plural_it_reads() {
         vec![("set".to_owned(), id, Some("1 item · 0 patterns · 0 tickets".to_owned()))]
     );
 }
+
+/// A TeamCity configuration `<t>_Deploy` under *Root › Payouts*, with an
+/// older passing run and a newer failing one, the way the adapter stores
+/// them. Answers with the configuration's and the two runs' ids.
+async fn pipeline(pool: &sqlx::PgPool, t: &str, at: DateTime<Utc>) -> (String, [String; 2]) {
+    let config = format!("{t}_Deploy");
+    let id = item(
+        pool,
+        "teamcity",
+        "build_config",
+        &config,
+        &format!("Deploy {t}"),
+        serde_json::json!({
+            "id": config, "name": format!("Deploy {t}"),
+            "projectId": "Payouts", "projectName": "Payouts",
+            "projectPath": [{ "id": "Root", "name": "Root" }, { "id": "Payouts", "name": "Payouts" }],
+        }),
+        at,
+    )
+    .await;
+    let run = |n: i64, status: &str| {
+        serde_json::json!({
+            "buildTypeId": config, "number": n.to_string(), "state": "finished", "status": status,
+            "buildType": { "id": config, "name": format!("Deploy {t}"), "projectId": "Payouts" },
+        })
+    };
+    let older = item(
+        pool,
+        "teamcity",
+        "build",
+        &format!("{t}1"),
+        &format!("Deploy {t} #1"),
+        run(1, "SUCCESS"),
+        at - chrono::Duration::hours(2),
+    )
+    .await;
+    let newer = item(
+        pool,
+        "teamcity",
+        "build",
+        &format!("{t}2"),
+        &format!("Deploy {t} #2"),
+        run(2, "FAILURE"),
+        at - chrono::Duration::hours(1),
+    )
+    .await;
+    (id, [older, newer])
+}
+
+#[tokio::test]
+async fn hash_b_answers_a_configuration_as_a_pipeline_coloured_by_its_newest_run() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let (id, _) = pipeline(&pool, &t, Utc::now()).await;
+
+    let response = search(&pool, &format!("#b {t}"), false).await;
+    assert_eq!(
+        hits(&response),
+        vec![("pipeline".to_owned(), id, Some("Root › Payouts".to_owned()))]
+    );
+    let group = &response.groups[0];
+    assert_eq!(
+        (group.label.as_str(), group.plural.as_str(), group.monogram.as_str()),
+        ("Pipeline", "Pipelines", "PL")
+    );
+    assert_eq!(
+        group.hits[0].row.state,
+        Some(StateChip {
+            text: "FAILURE".to_owned(),
+            tone: Tone::Err
+        })
+    );
+}
+
+#[tokio::test]
+async fn a_pipeline_with_no_run_carries_no_state() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let config = format!("{t}_Quiet");
+    item(
+        &pool,
+        "teamcity",
+        "build_config",
+        &config,
+        &format!("Quiet {t}"),
+        serde_json::json!({ "id": config, "name": format!("Quiet {t}") }),
+        Utc::now(),
+    )
+    .await;
+    let response = search(&pool, &format!("#b {t}"), false).await;
+    assert_eq!(response.groups[0].hits[0].row.state, None);
+}
+
+#[tokio::test]
+async fn combined_letters_answer_tickets_and_pipelines() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let (config, _) = pipeline(&pool, &t, Utc::now()).await;
+    let ticket = item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{t}-9"),
+        &format!("Fix {t}"),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+    for raw in [format!("#t #b {t}"), format!("#tb {t}")] {
+        let response = search(&pool, &raw, false).await;
+        let mut got: Vec<(String, String)> = hits(&response)
+            .into_iter()
+            .map(|(kind, id, _)| (kind, id))
+            .collect();
+        got.sort();
+        assert_eq!(
+            got,
+            vec![
+                ("pipeline".to_owned(), config.clone()),
+                ("ticket".to_owned(), ticket.clone())
+            ],
+            "{raw}"
+        );
+    }
+}
+
+/// A run, a commit and a Jira board's mirror row, each holding the word,
+/// beside the configuration and a ticket that hold it too.
+async fn everything(pool: &sqlx::PgPool, t: &str, at: DateTime<Utc>) -> (Vec<String>, Vec<String>) {
+    let (config, runs) = pipeline(pool, t, at).await;
+    let ticket = item(pool, "jira", "ticket", &format!("{t}-1"), &format!("Fix {t}"), serde_json::json!({}), at).await;
+    let commit = item(
+        pool,
+        "gitea",
+        "commit",
+        &format!("tidewater/payout-service@{t}"),
+        &format!("Bump {t}"),
+        serde_json::json!({}),
+        at,
+    )
+    .await;
+    let board = item(
+        pool,
+        "jira",
+        "jira_view",
+        &format!("board-{t}"),
+        &format!("Board {t}"),
+        serde_json::json!({}),
+        at,
+    )
+    .await;
+    let [older, newer] = runs;
+    (vec![config, ticket], vec![older, newer, commit, board])
+}
+
+#[tokio::test]
+async fn runs_commits_and_jira_boards_are_in_no_answer_whatever_the_query() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let (kept, left_out) = everything(&pool, &t, Utc::now()).await;
+
+    let mut found = ids(&search(&pool, &t, false).await);
+    found.sort();
+    let mut want = kept.clone();
+    want.sort();
+    assert_eq!(found, want);
+    for raw in [
+        format!("kind:build {t}"),
+        format!("kind:commit {t}"),
+        format!("kind:jira_view {t}"),
+        format!("Deploy {t} #2"),
+    ] {
+        let found = ids(&search(&pool, &raw, false).await);
+        assert!(
+            found.iter().all(|id| !left_out.contains(id)),
+            "{raw} answered {found:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn runs_commits_and_jira_boards_are_not_among_the_boards_newest_rows() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let searcher = searcher(&pool).await;
+    let t = token();
+    // Newer than anything another test of this file writes.
+    let (kept, left_out) = everything(&pool, &t, Utc::now() + chrono::Duration::days(1)).await;
+
+    let board = searcher.launcher_board().await.unwrap();
+    let recent: Vec<(&str, &str)> = board
+        .recent
+        .iter()
+        .map(|row| (row.kind.as_str(), row.entity_id.as_str()))
+        .collect();
+    for id in &left_out {
+        assert!(recent.iter().all(|(_, r)| r != id), "{id} is among {recent:?}");
+    }
+    assert!(recent.contains(&("pipeline", kept[0].as_str())), "{recent:?}");
+    assert!(recent.contains(&("ticket", kept[1].as_str())), "{recent:?}");
+    let config = board.recent.iter().find(|row| row.entity_id == kept[0]).unwrap();
+    assert_eq!(config.path.as_deref(), Some("Root › Payouts"));
+    assert_eq!(config.state.as_ref().map(|s| s.tone), Some(Tone::Err));
+}
+
+/// `kind:` offers what the answer can hold (#2422): a view, a set and a
+/// pipeline under the shell's word, and never a kind the answer leaves out,
+/// so no suggested value leads nowhere.
+#[tokio::test]
+async fn kind_suggestions_offer_the_launchers_kinds_and_none_it_leaves_out() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let searcher = searcher(&pool).await;
+    let t = token();
+    view(&pool, &format!("{t}-v"), &format!("V {t}"), "G", "").await;
+    link_set(&pool, &format!("{t}-s"), &format!("S {t}"), "").await;
+    everything(&pool, &t, Utc::now()).await;
+
+    let suggestions = searcher.filter_suggestions("").await.unwrap();
+    let kinds: Vec<(&str, &str)> = suggestions
+        .kinds
+        .iter()
+        .map(|k| (k.kind.as_str(), k.label.as_str()))
+        .collect();
+    for wanted in [
+        ("pipeline", "Pipeline"),
+        ("set", "Link set"),
+        ("ticket", "Ticket"),
+        ("view", "Ticket view"),
+    ] {
+        assert!(kinds.contains(&wanted), "{wanted:?} among {kinds:?}");
+    }
+    for left_out in ["build", "build_config", "commit", "jira_view"] {
+        assert!(kinds.iter().all(|(k, _)| *k != left_out), "{left_out} among {kinds:?}");
+    }
+}

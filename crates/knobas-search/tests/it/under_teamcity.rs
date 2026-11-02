@@ -1,5 +1,7 @@
-//! `under:<build configuration>` returns its builds, against a real PostgreSQL
-//! (ADR-0018, #597).
+//! `under:<build configuration>` against a real PostgreSQL (ADR-0018, #597):
+//! it scoped a search to the configuration's builds, and since #2422 a build
+//! is in no launcher answer, so it answers with the configuration alone, as
+//! the pipeline it is.
 //!
 //! TeamCity declares a build's configuration as its parent, read off the
 //! `buildType` object every build record nests, answered to by its `name` and
@@ -135,16 +137,12 @@ fn ids(response: &SearchResponse) -> Vec<String> {
     out
 }
 
-fn sorted(mut ids: Vec<String>) -> Vec<String> {
-    ids.sort();
-    ids
-}
-
 /// The configuration's name (the title TeamCity gives it) and its id, matched
-/// ignoring case, both return its builds **and** the configuration itself,
-/// and nothing of the configuration beside it, though the two share a project.
+/// ignoring case, both return the configuration itself and none of its builds
+/// (#2422), and nothing of the configuration beside it, though the two share
+/// a project.
 #[tokio::test]
-async fn under_a_configuration_by_name_or_id_returns_its_builds_and_itself() {
+async fn under_a_configuration_by_name_or_id_returns_itself_and_none_of_its_builds() {
     let pool = pool().await;
     let t = token();
     let project = format!("Payments{t}");
@@ -168,7 +166,7 @@ async fn under_a_configuration_by_name_or_id_returns_its_builds_and_itself() {
         format!("under:{}", id.to_lowercase()),
     ] {
         let response = searcher(&pool).await.search(q(&raw)).await.unwrap();
-        assert_eq!(ids(&response), sorted(ours.clone()), "{raw}");
+        assert_eq!(ids(&response), vec![ours[0].clone()], "{raw}");
         assert!(
             response.interpreted.unknown_tokens.is_empty(),
             "{raw} names a configuration and is not unknown: {:?}",
@@ -177,25 +175,22 @@ async fn under_a_configuration_by_name_or_id_returns_its_builds_and_itself() {
     }
 }
 
-/// A build hit carries its configuration on its path line -- the
-/// configuration's name, the first name TeamCity declares -- and keeps its
-/// title, which already names the configuration (ADR-0018: a title may name
-/// its parent where it means nothing without it). The configuration declares
-/// no parent and carries no path.
+/// The configuration's hit is the pipeline (#2422): kind `pipeline`, its own
+/// title, no path line where TeamCity gave it no chain of projects, and its
+/// newest build's state; the builds themselves are not hits.
 #[tokio::test]
-async fn a_build_carries_its_configuration_as_path_and_keeps_its_title() {
+async fn a_configuration_is_answered_as_a_pipeline_in_its_newest_builds_state() {
     let pool = pool().await;
     let t = token();
     let project = format!("Payments{t}");
     let name = format!("Deploy{t}");
-    let builds = [41, 42];
     let ours = configuration(
         &pool,
         &t,
         &project,
         &format!("Payments{t}_Deploy"),
         &name,
-        builds,
+        [41, 42],
     )
     .await;
 
@@ -204,33 +199,29 @@ async fn a_build_carries_its_configuration_as_path_and_keeps_its_title() {
         .search(q(&format!("under:{name}")))
         .await
         .unwrap();
-    let mut rows: Vec<(String, String, Option<String>)> = response
+    let rows: Vec<_> = response
         .groups
         .iter()
         .flat_map(|g| {
             g.hits.iter().map(|h| {
                 (
+                    h.row.kind.clone(),
                     h.row.entity_id.clone(),
                     h.row.title.clone(),
                     h.row.path.clone(),
+                    h.row.state.as_ref().map(|s| s.text.clone()),
                 )
             })
         })
         .collect();
-    rows.sort();
-    let mut expected = vec![
-        (ours[0].clone(), format!("{project} / {name}"), None),
-        (
-            ours[1].clone(),
-            format!("{project} / {name} #{}", builds[0]),
-            Some(name.clone()),
-        ),
-        (
-            ours[2].clone(),
-            format!("{project} / {name} #{}", builds[1]),
-            Some(name.clone()),
-        ),
-    ];
-    expected.sort();
-    assert_eq!(rows, expected);
+    assert_eq!(
+        rows,
+        vec![(
+            "pipeline".to_owned(),
+            ours[0].clone(),
+            format!("{project} / {name}"),
+            None,
+            Some("SUCCESS".to_owned())
+        )]
+    );
 }

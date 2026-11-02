@@ -142,9 +142,10 @@ fn days_ago(n: i64) -> DateTime<Utc> {
 ///
 /// In each kind the title match is the older row, and the body match mentions
 /// the word exactly once -- the comparable item the criterion asks for. A
-/// ticket and a commit are both mirror rows; the note (`knobas.note`), the
-/// asset (`knobas.asset`) and the route (`knobas.route`) are corpora of their
-/// own, so "every kind" is asserted across the weighting of every relation
+/// ticket and a pull request are both mirror rows; the note (`knobas.note`),
+/// the asset (`knobas.asset`), the route (`knobas.route`), the ticket view
+/// (`knobas.ticket_view`) and the link set (`knobas.link_set`, #2422) are
+/// corpora of their own, so "every kind" is asserted across the weighting of every relation
 /// `corpus::ALL` searches. Every mirrored kind shares `sync.item`'s one `fts`,
 /// so the two mirror kinds stand for all of them.
 ///
@@ -179,7 +180,7 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
     seed(
         &pool,
         &format!("gitea:{t}-title"),
-        "commit",
+        "pr",
         &format!("{t}: jitter in backoff"),
         "Cap at five attempts.",
         days_ago(30),
@@ -188,12 +189,49 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
     seed(
         &pool,
         &format!("gitea:{t}-body"),
-        "commit",
+        "pr",
         "Tidy the changelog",
         &format!("Follow-up to the {t} change."),
         days_ago(1),
     )
     .await;
+
+    // A view named for the word against one whose conditions hold it, and a
+    // set named for it against one whose description does; the body match
+    // is the newer of each pair.
+    for (id, name, group, query, days) in [
+        (format!("{t}-title-view"), format!("{t} board"), "Team", String::new(), 30),
+        (format!("{t}-body-view"), "Payouts".to_owned(), "Team", format!("#t {t}"), 1),
+    ] {
+        sqlx::query(
+            "insert into knobas.ticket_view (id, name, view_group, position, query, updated_at)
+             values ($1, $2, $3, 0, $4, now() - make_interval(days => $5))",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(group)
+        .bind(query)
+        .bind(days)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    for (id, name, description, days) in [
+        (format!("{t}-title-set"), format!("{t} stack"), String::new(), 30),
+        (format!("{t}-body-set"), "Payout stack".to_owned(), format!("For the {t} work"), 1),
+    ] {
+        sqlx::query(
+            "insert into knobas.link_set (id, name, description, updated_at)
+             values ($1, $2, $3, now() - make_interval(days => $4))",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(description)
+        .bind(days)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
 
     // Created in order, so the body match is the newer note.
     let title_note = knobas_core::note::create(
@@ -278,7 +316,17 @@ async fn a_title_match_ranks_above_a_body_match_in_every_kind() {
         "{r:?}"
     );
     assert_eq!(
-        group_ids(&r, "commit"),
+        group_ids(&r, "view"),
+        [format!("{t}-title-view"), format!("{t}-body-view")],
+        "{r:?}"
+    );
+    assert_eq!(
+        group_ids(&r, "set"),
+        [format!("{t}-title-set"), format!("{t}-body-set")],
+        "{r:?}"
+    );
+    assert_eq!(
+        group_ids(&r, "pr"),
         [format!("gitea:{t}-title"), format!("gitea:{t}-body")],
         "{r:?}"
     );

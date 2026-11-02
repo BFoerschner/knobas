@@ -36,6 +36,7 @@
 //! spells it out.
 
 pub mod corpus;
+pub mod frames;
 pub(crate) mod coverage;
 pub mod group;
 pub mod home;
@@ -344,8 +345,12 @@ impl Searcher {
         // and it is said before the echo is built so the greyed-out token
         // rides back with everything else the parse reported.
         under::report_unknown(&self.pool, &mut parsed).await?;
+        // Pipelines under the shell's word, and no runs or commits (#2422).
+        let frames = frames::LauncherFrames::of(&vocab.declarations);
         let filters = EffectiveFilters {
             titles: query.titles,
+            pipeline_kinds: frames.pipelines,
+            hidden_kinds: frames.left_out,
             ..query::merge(&parsed, &query.filters)
         };
         let interpreted = ParsedQuery {

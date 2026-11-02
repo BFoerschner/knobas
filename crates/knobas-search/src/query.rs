@@ -244,6 +244,15 @@ pub struct EffectiveFilters {
     /// ticket's key. Not a filter [`Self::is_empty`] counts: Titles over an
     /// empty box is still the board.
     pub titles: bool,
+    /// The kinds declaring the Builds frame's `pipeline` (#2422,
+    /// [`crate::frames`]): each is answered as kind `pipeline`, and a
+    /// `pipeline` kind filter takes them in. Set by the launcher's search
+    /// alone; empty, every kind is answered as itself.
+    pub pipeline_kinds: Vec<String>,
+    /// The kinds the launcher's answer leaves out (#2422, [`crate::frames`]):
+    /// runs, commits and a Jira view's mirror row. Set by the launcher's
+    /// search alone; empty leaves nothing out.
+    pub hidden_kinds: Vec<String>,
 }
 
 impl EffectiveFilters {
@@ -475,6 +484,9 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
             .collect(),
         // The grammar has no word for it; the query sets it (`Searcher::search`).
         titles: false,
+        // The launcher's search sets these from the declarations (#2422).
+        pipeline_kinds: Vec::new(),
+        hidden_kinds: Vec::new(),
     }
 }
 
@@ -1033,7 +1045,7 @@ fn push_unique_value(into: &mut Vec<String>, value: &str) {
 /// Order matters beyond tidiness: it is the order the generated SQL binds its
 /// arrays in, so a stable one keeps the query text -- and therefore the plan
 /// cache and every test expectation -- deterministic.
-fn push_unique(into: &mut Vec<String>, value: &str) {
+pub(crate) fn push_unique(into: &mut Vec<String>, value: &str) {
     if !into.iter().any(|existing| existing == value) {
         into.push(value.to_owned());
     }

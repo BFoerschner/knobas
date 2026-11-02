@@ -37,8 +37,7 @@ use crate::types::{
 };
 use crate::{FieldKey, SearchError, Vocabulary};
 
-/// Every kind with at least one row, over the four corpora the launcher
-/// unions.
+/// Every kind with at least one row, over the corpora the launcher unions.
 ///
 /// The mirror's kinds are `sync.live_item`'s -- a withdrawn item or a disabled
 /// source does not vouch for a kind the corpus no longer has -- but read
@@ -86,6 +85,8 @@ select k.kind from (
   union select 'asset' where exists (select 1 from knobas.asset)
   union select 'route' where exists (
     select 1 from knobas.route r join knobas.asset ra on ra.id = r.asset_id)
+  union select 'view' where exists (select 1 from knobas.ticket_view)
+  union select 'set' where exists (select 1 from knobas.link_set)
 ) k
  order by k.kind";
 
@@ -376,6 +377,16 @@ pub(crate) async fn read(
     if !notes_shown {
         kinds.retain(|kind| kind != "note");
     }
+    // What the answer holds (#2422): no kind it leaves out, and a pipeline
+    // under the shell's word, once however many kinds the sources call one.
+    let frames = crate::frames::LauncherFrames::of(&vocab.declarations);
+    let mut kinds: Vec<String> = kinds
+        .iter()
+        .filter(|kind| !frames.leaves_out(kind))
+        .map(|kind| frames.answered_as(kind).to_owned())
+        .collect();
+    kinds.sort();
+    kinds.dedup();
     let parents = parents(pool, under).await?;
     let enabled: Vec<&str> = vocab
         .sources

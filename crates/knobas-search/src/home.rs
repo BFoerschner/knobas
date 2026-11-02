@@ -64,10 +64,10 @@ macro_rules! recent_sql {
             "      select i.entity_id, i.kind, i.source_id, i.title,\n",
             "             i.item_updated_at, i.synced_at,\n",
             "             ",
-            knobas_core::path_line_read!("$3"),
+            $crate::mirror_path!("$3"),
             " as path,\n",
             "             ",
-            knobas_core::declared_state!("$3"),
+            $crate::mirror_state!("$3"),
             " as state\n",
             "        from sync.item i\n",
             "       where i.kind = k.kind\n",
@@ -194,7 +194,15 @@ pub async fn recent(
     limit: u32,
     declarations: &knobas_core::payload::Declarations,
 ) -> Result<Vec<EntityRow>, SearchError> {
-    let kinds = kinds(pool).await?;
+    // No runs, commits or Jira views' mirror rows, and pipelines under the
+    // shell's word (#2422, `crate::frames`): the kinds left out are never
+    // read, so they cannot crowd the newest rows off the board either.
+    let frames = crate::frames::LauncherFrames::of(declarations);
+    let kinds: Vec<String> = kinds(pool)
+        .await?
+        .into_iter()
+        .filter(|kind| !frames.leaves_out(kind))
+        .collect();
     let rows = sqlx::query_as::<_, RecentRow>(RECENT_SQL)
         .bind(&kinds)
         .bind(i64::from(limit))
@@ -205,7 +213,7 @@ pub async fn recent(
         .into_iter()
         .map(|row| EntityRow {
             entity_id: row.entity_id,
-            kind: row.kind,
+            kind: frames.answered_as(&row.kind).to_owned(),
             source_id: row.source_id,
             title: row.title,
             updated_at: row.updated_at,
