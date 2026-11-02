@@ -121,6 +121,23 @@ fn pre_is_code_and_script_and_style_say_nothing() {
 }
 
 #[test]
+fn a_script_holding_markup_opens_and_closes_nothing() {
+    assert_eq!(
+        plain(
+            "<div><SCRIPT>if (a<b) { s = \"</div><p>x</p>\"; }</Script>kept</div><style>a>b{}</style><p>after</p>"
+        ),
+        vec![para("kept"), para("after")]
+    );
+    // An unclosed script runs to the end, as an unclosed element does.
+    assert_eq!(plain("<p>before</p><script>if (a<b)"), vec![para("before")]);
+}
+
+#[test]
+fn an_empty_attribute_name_finds_nothing() {
+    assert_eq!(attr("a href=\"x\"", ""), None);
+}
+
+#[test]
 fn broken_markup_reads_as_the_text_it_holds() {
     assert_eq!(
         plain("<p>One</em> and <b>two<ul><li>three"),

@@ -203,6 +203,32 @@ pub fn parse(markup: &str) -> Vec<Node> {
             );
             continue;
         }
+        if matches!(name.as_str(), "script" | "style") {
+            // Raw text: a `<` in a script opens nothing and closes nothing, so
+            // the contents run to the first `</script` (any case). ASCII
+            // lowercasing keeps every byte offset.
+            let end_tag = format!("</{name}");
+            let inside = rest
+                .to_ascii_lowercase()
+                .find(&end_tag)
+                .unwrap_or(rest.len());
+            let children = if inside == 0 {
+                vec![]
+            } else {
+                vec![Node::Text(rest[..inside].to_owned())]
+            };
+            rest = split_tag(&rest[inside..]).map_or("", |(_, tail)| tail);
+            push(
+                &mut stack,
+                Node::Element {
+                    name,
+                    tag: tag.to_owned(),
+                    children,
+                    span: (start, at(rest)),
+                },
+            );
+            continue;
+        }
         stack.push((name, tag.to_owned(), vec![], start));
     }
     let end = at(rest);
@@ -247,6 +273,10 @@ pub fn split_tag(rest: &str) -> Option<(&str, &str)> {
 /// malformed tag yields no attribute rather than an error.
 #[must_use]
 pub fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    if name.is_empty() {
+        // `find("")` matches at 0 forever: no name, no attribute.
+        return None;
+    }
     let mut rest = tag;
     loop {
         let at = rest.find(name)?;
