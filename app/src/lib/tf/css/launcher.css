@@ -18,6 +18,14 @@
 
 /* The box: borderless 17 px over a bottom rule. The bar at its left is the only "loading" sign. */
 .tf-ln-q { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; border-bottom: 1px solid var(--rule); flex: none; }
+/* The label in front of the box (#2424): what the box asks for, never part of its text. The rule
+   moves from the box to the row so it runs under the label too. */
+.tf-ln-boxrow { display: flex; align-items: center; border-bottom: 1px solid var(--rule); flex: none; }
+.tf-ln-boxrow > .tf-ln-q { flex: 1; min-width: 0; border-bottom: 0; }
+.tf-ln-mode {
+  flex: none; margin-left: 15px; padding: 2px 8px; border-radius: 3px; font-size: var(--t-sm); font-weight: 600;
+  background: var(--info-bg); color: var(--info); white-space: nowrap; user-select: none;
+}
 .tf-ln-caret { width: 3px; height: 26px; background: var(--ink); flex: none; }
 .tf-ln-caret.tf-ln-pending { background: var(--rule); }
 .tf .tf-ln-q input {
@@ -151,5 +159,7 @@
 .tf-ln-help { display: grid; gap: 1px; padding: 4px 0; }
 .tf .tf-ln-opt.tf-ln-syn { grid-template-columns: 74px 1fr; padding: 4px 18px; }
 .tf-ln-tok { font-weight: 600; color: var(--info); text-align: center; border: 1px solid var(--rule); border-radius: 3px; padding: 0 2px; }
+/* The keys the box answers, at the bottom of the ⌘? overlay. */
+.tf-ln-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-top: 1px solid var(--rule); font-size: var(--t-xs); color: var(--ink-2); }
 /* A token the parser reports rather than honours, drawn as the chip bar draws one. */
 .tf-ln-greyed .tf-ln-tok { color: var(--ink-2); border-style: dashed; }
