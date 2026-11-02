@@ -280,8 +280,15 @@ breaks only in a bundled build: `tauri dev` loads the Vite server over
   class or a native `<progress>`.
 - No `{@html}`. All displayed text comes from source systems, and
   `ts_headline` output is not XSS-safe.
-- No network at runtime. `default-src 'self'`, and fonts are bundled from npm.
-  Loopback and the RFC 2606 reserved names are the only exemptions.
+- No network at runtime from the app's own document. `default-src 'self'`,
+  and fonts are bundled from npm. Loopback and the RFC 2606 reserved names are
+  the only exemptions. A page's embed is the one thing that reaches the
+  network (spec #2432): the app's `frame-src` allows `http:` and `https:` so a
+  URL embed can be framed (#2441), and an HTML embed runs from the
+  `knobas-render` scheme under its own policy, `EMBED_CSP` in
+  `crates/knobas-app/src/renderers.rs`, which lets its scripts load and
+  connect over `http(s)` (#2440). Both frames are sandboxed with no same
+  origin (`app/src/lib/render/embed.ts`), so neither reaches the app.
 - Every `listen()` is cleaned up, including when the component unmounts before
   the promise resolves. `lib/shell/residue.test.svelte.ts` mounts each
   component with an effect twice and fails on leftovers.

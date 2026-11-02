@@ -22,6 +22,6 @@ Extends [ADR-0022](0022-the-shell-draws-builds-and-docs-over-declared-kinds.md) 
 ## Consequences
 
 - ADR-0022 stands: the Docs frame is still drawn over `DocContent`. This ADR states how that `DocContent` is made, when it is made, and that it is never stored.
-- ADR-0028 stands: the WIT world gains the docs projection and the docs writes (`DocWrites`' section edit and new-page body) as a minor, additive version and a §10.8 entry. The descriptor's static checks accept a docs-source claim only from a component that exports the projection, and `knobas adapter check` runs the docs contract.
+- ADR-0028 stands: the WIT world gains the docs projection and the docs writes (`DocWrites`' section edit and new-page body) as a minor, additive version and a §10.8 entry. The descriptor's static checks accept a docs-source claim only from a component that exports the projection, and the docs contract is `docs_contract::check` in `knobas-wasm-host`, which an adapter check would run on a component that claims the wiki role; `knobas adapter check` was not built (#2029, closed as not planned; #2444).
 - The Confluence adapter is rebuilt on the shared reader, keeping only its `ac:`/`ri:` mapping as the hook, and its storage-to-text scan stops writing page search text. Its cursor version is bumped, so the first sync after the upgrade is full and every page's `body_text` is rebuilt.
 - Every page open runs a projection, and an include runs one per target. No projection is cached in memory; a cache would come under ADR-0032 only if opening pages proves slow.
