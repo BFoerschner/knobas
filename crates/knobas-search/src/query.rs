@@ -239,6 +239,11 @@ pub struct EffectiveFilters {
     pub identity_authors: Vec<String>,
     /// The ticket-key conditions (#811), `@me` resolved: every one must hold.
     pub fields: Vec<FieldFilter>,
+    /// *Titles* (#2430, [`SearchQuery::titles`](crate::SearchQuery::titles)):
+    /// the words match a row's weight-A lexemes only, its title and a
+    /// ticket's key. Not a filter [`Self::is_empty`] counts: Titles over an
+    /// empty box is still the board.
+    pub titles: bool,
 }
 
 impl EffectiveFilters {
@@ -468,6 +473,8 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
                 }
             })
             .collect(),
+        // The grammar has no word for it; the query sets it (`Searcher::search`).
+        titles: false,
     }
 }
 

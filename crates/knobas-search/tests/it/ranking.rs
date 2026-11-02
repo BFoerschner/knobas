@@ -21,6 +21,7 @@ use knobas_search::{
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 30,
         filters: SearchFilters::default(),

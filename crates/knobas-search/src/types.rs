@@ -17,6 +17,19 @@ pub struct SearchQuery {
     pub raw: String,
     pub limit: u32,
     pub filters: SearchFilters,
+    /// *Titles* rather than *Everything* (spec #2419, #2430): match only what
+    /// a row shows, its title or its key (a ticket's key), never its body.
+    /// Every corpus indexes exactly those at weight A, so the engine matches
+    /// the A lexemes alone. Off answers as before, bodies included.
+    ///
+    /// The reader's choice, sent with every query from the launcher and never
+    /// stored with a saved list: a saved list answers as Everything.
+    ///
+    /// `#[serde(default)]` because it was **added** to a frozen struct
+    /// (§10.8), as [`SearchFilters::authors`] was: a caller written before it
+    /// sends none and is answered as Everything.
+    #[serde(default)]
+    pub titles: bool,
 }
 
 /// The filters a query is narrowed by, whether typed inline or clicked.

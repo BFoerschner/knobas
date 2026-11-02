@@ -304,6 +304,7 @@ async fn every_builtin_runs_and_decodes() {
     // Typed, it is a half-typed state: empty answer, the id echoed as unknown.
     let typed = s
         .search(knobas_search::SearchQuery {
+            titles: false,
             raw: "list:nope".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters::default(),
@@ -538,6 +539,7 @@ async fn typing_a_list_in_the_box_answers_like_the_command() {
 
     let typed = s
         .search(knobas_search::SearchQuery {
+            titles: false,
             raw: "list:MINE".to_owned(),
             limit: 20,
             filters: knobas_search::SearchFilters::default(),

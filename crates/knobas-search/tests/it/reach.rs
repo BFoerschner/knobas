@@ -82,6 +82,7 @@ async fn search(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
         .await
         .unwrap()
         .search(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 200,
             filters: SearchFilters::default(),

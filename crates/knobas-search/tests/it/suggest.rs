@@ -132,6 +132,7 @@ fn parent(name: &str, kind: &str) -> ParentSuggestion {
 async fn leads_somewhere(searcher: &Searcher, raw: &str) {
     let response = searcher
         .search(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 30,
             filters: SearchFilters::default(),
@@ -632,6 +633,7 @@ async fn the_parents_alone_are_the_parents_of_the_full_read_without_its_lists() 
 async fn under_knows(searcher: &Searcher, name: &str) -> bool {
     searcher
         .search(SearchQuery {
+            titles: false,
             raw: typed_under(name),
             limit: 1,
             filters: SearchFilters::default(),
@@ -880,6 +882,7 @@ async fn under_scopes_to_a_parent_whose_name_lowercases_differently_in_rust() {
 
     let response = searcher
         .search(SearchQuery {
+            titles: false,
             raw: typed_under(&name),
             limit: 30,
             filters: SearchFilters::default(),

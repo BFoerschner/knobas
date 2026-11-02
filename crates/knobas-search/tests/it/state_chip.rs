@@ -179,6 +179,7 @@ async fn a_search_hit_carries_its_state_chip() {
     let response = searcher(&pool)
         .await
         .search(SearchQuery {
+            titles: false,
             raw: t.clone(),
             limit: 30,
             filters: SearchFilters::default(),

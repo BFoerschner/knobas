@@ -506,6 +506,8 @@ struct BoundFilters {
     /// The declarations' placeholder, once a filter has bound it: `under:`
     /// and the ticket keys share it, and so does the detail stage's path.
     declarations: Option<String>,
+    /// [`EffectiveFilters::titles`]: no bind, a fixed weight filter.
+    titles: bool,
 }
 
 /// One ticket-key condition's placeholders.
@@ -612,6 +614,7 @@ fn bind_dimensions(
             .then(|| builder.param(Bind::Texts(filters.names.clone()))),
         fields: Vec::new(),
         declarations: None,
+        titles: filters.titles,
     }
 }
 
@@ -636,6 +639,14 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     let mut predicates: Vec<String> = Vec::new();
     if let Some(fts) = fts {
         predicates.push(format!("{} @@ {fts}", corpus.fts));
+        if bound.titles {
+            // *Titles* (#2430): every corpus indexes what a row shows -- its
+            // title, a ticket's key -- at weight A and its body below, so the
+            // words must match the A lexemes alone. Beside the plain match,
+            // never instead of it: that one is what the GIN index answers,
+            // and this filters the rows it found.
+            predicates.push(format!("ts_filter({}, '{{a}}') @@ {fts}", corpus.fts));
+        }
     }
     if let Some(scope) = corpus.scope {
         predicates.push(scope.to_owned());

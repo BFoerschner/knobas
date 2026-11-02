@@ -344,7 +344,10 @@ impl Searcher {
         // and it is said before the echo is built so the greyed-out token
         // rides back with everything else the parse reported.
         under::report_unknown(&self.pool, &mut parsed).await?;
-        let filters = query::merge(&parsed, &query.filters);
+        let filters = EffectiveFilters {
+            titles: query.titles,
+            ..query::merge(&parsed, &query.filters)
+        };
         let interpreted = ParsedQuery {
             filters: filters.echo(),
             ..parsed.query.clone()
@@ -448,6 +451,7 @@ impl Searcher {
         kind: &str,
     ) -> Result<Option<Vec<String>>, SearchError> {
         let query = validate(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 1,
             filters: SearchFilters::default(),
@@ -495,6 +499,7 @@ impl Searcher {
         const PAGE: &str = "page";
         let started = Instant::now();
         let query = validate(SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit,
             filters: SearchFilters::default(),
@@ -576,6 +581,7 @@ impl Searcher {
             Vec::new();
         for raw in raws {
             if let Err(error) = validate(SearchQuery {
+                titles: false,
                 raw: (*raw).to_owned(),
                 limit: 1,
                 filters: SearchFilters::default(),
@@ -984,6 +990,7 @@ mod tests {
 
     fn query(raw: &str) -> SearchQuery {
         SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 30,
             filters: SearchFilters::default(),
@@ -998,6 +1005,7 @@ mod tests {
     fn the_limit_is_clamped_rather_than_refused() {
         assert_eq!(
             validate(SearchQuery {
+                titles: false,
                 limit: 0,
                 ..query("sepa")
             })
@@ -1007,6 +1015,7 @@ mod tests {
         );
         assert_eq!(
             validate(SearchQuery {
+                titles: false,
                 limit: 10_000,
                 ..query("sepa")
             })
@@ -1016,6 +1025,7 @@ mod tests {
         );
         assert_eq!(
             validate(SearchQuery {
+                titles: false,
                 limit: 30,
                 ..query("sepa")
             })
@@ -1056,6 +1066,7 @@ mod tests {
             },
         ] {
             let refused = validate(SearchQuery {
+                titles: false,
                 filters,
                 ..query("sepa")
             });
@@ -1064,6 +1075,7 @@ mod tests {
         let at_cap: Vec<String> = (0..MAX_FILTER_VALUES).map(|n| n.to_string()).collect();
         assert!(
             validate(SearchQuery {
+                titles: false,
                 filters: SearchFilters {
                     sources: at_cap,
                     ..SearchFilters::default()

@@ -1153,6 +1153,7 @@ async fn what_the_reader_waits_on() {
                 pool,
                 &registry,
                 knobas_search::SearchQuery {
+                    titles: false,
                     raw: raw.clone(),
                     limit: 50,
                     filters: Default::default(),
@@ -1249,6 +1250,7 @@ async fn what_the_reader_waits_on() {
                 pool,
                 &registry,
                 knobas_search::SearchQuery {
+                    titles: false,
                     raw: raw.into(),
                     limit: 50,
                     filters: Default::default(),
@@ -1260,6 +1262,7 @@ async fn what_the_reader_waits_on() {
     // The word that matches most of the mirror (#1849): the ranking and the
     // count run over every match, not the few a prefix of `payment` reaches.
     let common = knobas_search::SearchQuery {
+        titles: false,
         raw: COMMON_WORD.into(),
         limit: 50,
         filters: Default::default(),

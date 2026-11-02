@@ -74,6 +74,7 @@ async fn keys(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
         pool,
         &Registry::for_process(),
         SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 50,
             filters: SearchFilters::default(),

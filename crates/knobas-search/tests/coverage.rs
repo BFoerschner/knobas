@@ -18,6 +18,7 @@ use knobas_search::{
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 30,
         filters: SearchFilters::default(),
@@ -285,6 +286,7 @@ async fn mine_is_an_author_query_even_when_nobody_is_configured() {
 
     let response = searcher(&pool)
         .search(SearchQuery {
+            titles: false,
             raw: format!("{t} source:{source}"),
             limit: 30,
             filters: SearchFilters {

@@ -98,6 +98,7 @@ pub async fn search(pool: &sqlx::PgPool, source: &str, raw: &str) -> Found {
         .await
         .expect("the searcher is built the app's way")
         .search(knobas_search::SearchQuery {
+            titles: false,
             raw: raw.to_owned(),
             limit: 200,
             filters: knobas_search::SearchFilters::default(),

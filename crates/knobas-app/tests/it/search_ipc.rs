@@ -92,6 +92,7 @@ async fn seed(pool: &sqlx::PgPool, tag: &str) -> String {
 
 fn query(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 20,
         filters: SearchFilters::default(),
@@ -105,6 +106,7 @@ async fn open_list(
     limit: u32,
 ) -> Result<knobas_search::SearchResponse, knobas_app::IpcError> {
     let open = SearchQuery {
+        titles: false,
         raw: format!("list:{id}"),
         limit,
         filters: SearchFilters::default(),
@@ -516,6 +518,7 @@ async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
         .value;
 
     let browse = SearchQuery {
+        titles: false,
         raw: String::new(),
         limit: 50,
         filters: SearchFilters {
@@ -2137,4 +2140,78 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
             (t.clone(), "repo".to_owned())
         ]
     );
+}
+
+/// *Titles* (spec #2419 story 51, #2430): with the query's `titles` flag on,
+/// the engine answers only rows whose title or key holds every word, so a
+/// ticket is found by its key and by its summary and not by a word only its
+/// description holds. With the flag off it answers as it always has, bodies
+/// included.
+#[tokio::test]
+async fn titles_matches_the_title_and_the_key_and_never_the_body() {
+    let pool = pool().await;
+    let key = format!("{}-210", token("key"));
+    let named = token("named");
+    let written = token("written");
+    let id = format!("jira:{key}");
+    mirror_row(
+        &pool,
+        &id,
+        "ticket",
+        &format!("Payouts {named} retry"),
+        "mara",
+        "-4 minutes",
+    )
+    .await;
+    sqlx::query("update sync.item set body_text = $2 where entity_id = $1")
+        .bind(&id)
+        .bind(format!("The batch {written} gives up after one retry."))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    async fn ids(pool: &sqlx::PgPool, raw: &str, titles: bool) -> Vec<String> {
+        let asked = SearchQuery {
+            titles,
+            ..query(raw)
+        };
+        search_inner(pool, &Registry::for_process(), asked)
+            .await
+            .unwrap()
+            .groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+            .collect()
+    }
+    let ours = vec![id.clone()];
+
+    // The key, the title, and the two together: on screen, found either way.
+    for raw in [key.clone(), named.clone(), format!("{key} {named}")] {
+        assert_eq!(ids(&pool, &raw, true).await, ours, "titles: {raw}");
+        assert_eq!(ids(&pool, &raw, false).await, ours, "everything: {raw}");
+    }
+    // A word only the body holds: Everything finds it, Titles does not, and
+    // neither does a title word beside it.
+    assert_eq!(ids(&pool, &written, false).await, ours);
+    assert!(ids(&pool, &written, true).await.is_empty());
+    assert!(
+        ids(&pool, &format!("{named} {written}"), true)
+            .await
+            .is_empty()
+    );
+    // The last word half-typed is still a prefix under Titles.
+    assert_eq!(ids(&pool, &named[..named.len() - 4], true).await, ours);
+}
+
+/// The flag is optional on the wire, as `authors` is (§10.8): a caller
+/// written before it sends none and is answered as Everything.
+#[test]
+fn a_query_without_the_titles_flag_reads_as_everything() {
+    let decoded: SearchQuery = serde_json::from_value(serde_json::json!({
+        "raw": "pay-210",
+        "limit": 20,
+        "filters": { "sources": [], "kinds": [], "updated_within_days": null, "mine": false },
+    }))
+    .unwrap();
+    assert!(!decoded.titles);
 }

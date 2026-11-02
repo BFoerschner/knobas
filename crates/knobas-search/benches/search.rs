@@ -53,6 +53,7 @@ const CASES: &[(&str, &str)] = &[
 
 fn query(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 40,
         filters: SearchFilters::default(),

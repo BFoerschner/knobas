@@ -352,6 +352,7 @@ pub fn plan(raw: &str, vocab: &Vocabulary) -> Result<Runnable, Refusal> {
     // the same commit. The limit it clamps is irrelevant here (nothing is
     // fetched) and its refusal is what this needs.
     crate::validate(crate::SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 1,
         filters: SearchFilters::default(),

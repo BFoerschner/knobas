@@ -19,6 +19,7 @@ use knobas_search::{SearchFilters, SearchQuery, SearchResponse, Searcher};
 
 fn q(raw: &str) -> SearchQuery {
     SearchQuery {
+        titles: false,
         raw: raw.to_owned(),
         limit: 30,
         filters: SearchFilters::default(),
