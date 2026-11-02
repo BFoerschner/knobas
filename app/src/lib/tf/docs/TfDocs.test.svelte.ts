@@ -400,10 +400,12 @@ test("arriving on a search hit inside a collapsible opens it and leaves the othe
     collapsible("Other", [para("Nothing here.")]),
   ];
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
-  const input = type("ledger");
+  search("ledger");
   await settle();
   location.hash = "";
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  expect(location.hash).toBe("#/page/confluence%3A2");
+  shown!.rest = ["confluence:2"];
   await settle();
   expect(target.querySelector(".tf-rd-page mark.tf-cur")?.textContent).toBe("ledger");
   expect(collapsibles().map((d) => [d.querySelector(":scope > summary")?.textContent, d.open])).toEqual([
@@ -422,7 +424,7 @@ test("a hit picked from another page opens the page with the collapsible around 
   view = mount(TfDocs, { target, props });
   await settle();
   expect(collapsibles().map((d) => d.open)).toEqual([]);
-  type("ledger");
+  props.rest = ["search", "ledger"];
   await settle();
   target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
   expect(location.hash).toBe("#/page/confluence%3A2");
@@ -440,9 +442,10 @@ test("a hit picked from another page opens the page with the collapsible around 
 test("a match in a collapsible's title does not open it; stepping to a match inside it does (spec #2432)", async () => {
   const blocks: DocPage["blocks"] = [para("The ledger."), collapsible("Ledger rules", [para("Close the ledger daily.")])];
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
-  const input = type("ledger");
+  search("ledger");
   await settle();
-  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  shown!.rest = ["confluence:2"];
   await settle();
   const bar = () => target.querySelector(".tf-findbar")!;
   expect(bar().textContent).toContain("1 of 3");
