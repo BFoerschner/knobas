@@ -155,14 +155,22 @@ function favouriteAction(target: FavouriteTarget, ctx: SheetContext): SheetActio
     : { id: "fav", label: "Favourite", detail: "At the top of the empty box", does: { kind: "favourite", target, on: true } };
 }
 
+/**
+ * The saved list a row is, or `null`: a `#l` hit (kind `list`), or a
+ * favourite drawn as one ({@link isListRow}). The one place that asks.
+ */
+export function savedListOf(row: LauncherRow): Extract<SheetSubject, { kind: "list" }> | null {
+  const item = row.kind === "hit" && row.hit.kind === "list" ? row.hit : row.kind === "favourite" && isListRow(row.row) ? row.row : null;
+  return item && { kind: "list", id: item.entity_id, label: item.title, text: item.path ?? "", refusal: item.state?.text ?? null };
+}
+
 /** The sheet's subject for a row, or `null` for a row nothing can be done to. */
 export function subjectOf(row: LauncherRow, inboxOps: (key: string) => readonly string[] = () => []): SheetSubject | null {
+  const list = savedListOf(row);
+  if (list) return list;
   switch (row.kind) {
     case "hit": {
       const { hit } = row;
-      if (hit.kind === "list") {
-        return { kind: "list", id: hit.entity_id, label: hit.title, text: hit.path ?? "", refusal: hit.state?.text ?? null };
-      }
       if (hit.kind === "view") return { kind: "view", id: hit.entity_id, title: hit.title };
       if (hit.kind === "set") return { kind: "set", id: hit.entity_id, title: hit.title };
       return { kind: "entity", entityId: hit.entity_id, entityKind: hit.kind, title: hit.title, sourceId: hit.source_id, path: hit.path };
@@ -170,9 +178,6 @@ export function subjectOf(row: LauncherRow, inboxOps: (key: string) => readonly 
     case "favourite":
     case "recent": {
       const item = row.row;
-      if (row.kind === "favourite" && isListRow(item)) {
-        return { kind: "list", id: item.entity_id, label: item.title, text: item.path ?? "", refusal: item.state?.text ?? null };
-      }
       return { kind: "entity", entityId: item.entity_id, entityKind: item.kind, title: item.title, sourceId: item.source_id, path: item.path };
     }
     case "inbox":

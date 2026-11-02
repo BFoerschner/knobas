@@ -95,7 +95,7 @@
     type SheetSubject,
     type Step,
     favouriteKeys,
-    isListRow,
+    savedListOf,
     nameOf,
     narrowActions,
     sheetActions,
@@ -716,14 +716,13 @@
   function addressOf(row: LauncherRow): string | null {
     switch (row.kind) {
       // A ticket opens by its entity id, which names its source (#1476, #1977).
-      // A saved list does not navigate: it is applied in the box (#2423).
+      // A saved list, a `#l` hit or a favourite, does not navigate: it is
+      // applied in the box (#2423, #2428).
       case "hit":
-        return row.hit.kind === "list" ? null : entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
+        return savedListOf(row) ? null : entityAddress(row.hit.kind, row.hit.entity_id, row.hit.title);
       case "recent":
-        return entityAddress(row.row.kind, row.row.entity_id, row.row.title);
-      // A favourite list does not navigate either: it applies (#2428).
       case "favourite":
-        return isListRow(row.row) ? null : entityAddress(row.row.kind, row.row.entity_id, row.row.title);
+        return savedListOf(row) ? null : entityAddress(row.row.kind, row.row.entity_id, row.row.title);
       case "action":
         return row.action.hash;
       // The Inbox page's own link for the line, and the Inbox page for a line
@@ -1363,8 +1362,8 @@
   }
 
   function activate(row: LauncherRow) {
-    const subject = subjectOf(row);
-    if (subject?.kind === "list") {
+    const subject = savedListOf(row);
+    if (subject) {
       // A saved list, its `#l` hit or a favourite, applies by its own text
       // (#2423, spec #2419 story 14): the filters and words go back into the
       // box, with the space after them, and run; the reader stays in the box
@@ -1484,9 +1483,8 @@
 
   /** The chord drawn on a saved list's row in the results and on the board. */
   function listChord(row: LauncherRow): string | null {
-    if (row.kind === "hit" && row.hit.kind === "list") return keys.chordOfList(row.hit.entity_id);
-    if (row.kind === "favourite" && isListRow(row.row)) return keys.chordOfList(row.row.entity_id);
-    return null;
+    const list = savedListOf(row);
+    return list && keys.chordOfList(list.id);
   }
 
   /** The keys the box answers, at the bottom of the ⌘? overlay. */
