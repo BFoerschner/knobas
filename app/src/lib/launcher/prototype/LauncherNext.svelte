@@ -61,6 +61,12 @@
   binding a key is a panel that shows the keys as they are pressed, until
   Enter or OK keeps them.
 
+  Round 8 (Björn, 2026-11-02): one Favourites block, lists and items alike;
+  and a readability pass on the rows, as `:global` rules here that would move
+  to `tf/css/launcher.css`: the kind word column is gone (the monogram names
+  the kind), the key is as large as the title and in ink, the second line is
+  the sans at 12 px, the provenance column is as wide as its text.
+
   Screenshots: `?launcher-open=sepa` opens with that query, `&launcher-sheet=1`
   opens the sheet on the row at that index once results land.
 -->
@@ -1776,6 +1782,16 @@
 
 <style>
   /* PROTOTYPE rules. The shipped ones are `tf/css/launcher.css`; these would join them. */
+  /* The rows, round 8: three columns instead of four, one size for the key and the title, one grey for the rest. */
+  :global(.tf .tf-launch .tf-ln-res) { grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; min-height: 40px; padding: 7px 18px; }
+  :global(.tf-launch .tf-ln-res .tf-ln-ty) { display: none; }
+  :global(.tf-launch .tf-ln-res .tf-ln-t) { font-size: var(--t-md); line-height: 1.35; }
+  :global(.tf-launch .tf-ln-res .tf-ln-k) { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin-right: 8px; }
+  :global(.tf-launch .tf-ln-res .tf-ln-pa) { font-family: var(--sans); font-size: var(--t-xs); margin-top: 2px; }
+  :global(.tf-launch .tf-ln-res .tf-ln-sn) { font-size: var(--t-xs); margin-top: 2px; }
+  :global(.tf-launch .tf-ln-res .tf-ln-sy) { font-size: var(--t-2xs); padding-left: 6px; max-width: 160px; }
+  :global(.tf-launch .tf-ln-res .tf-chip.tf-state) { margin-left: 8px; }
+  :global(.tf-launch .tf-ln-h) { padding-top: 10px; }
   /* The box's own ⌘K badge is gone (Björn, round 4); `QueryBox.svelte` would lose the element. */
   :global(.tf-launch .tf-ln-q > kbd) { display: none; }
   .boxrow { display: flex; align-items: center; flex: none; border-bottom: 1px solid var(--rule); }

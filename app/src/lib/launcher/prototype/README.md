@@ -35,7 +35,7 @@ results land. End the address with `#/job/mock:PAY-231` to have a chosen job.
 | ⌘S on any query | The box asks for the list's name, the query prefilled, with a highlighted **Name** label in front of the box that is not part of the text; Enter saves, Esc keeps searching. The same label names every other thing the box asks for: Filter, Actions, Keys, New name, a flow's step. |
 | A key on a saved list | Tab on the list, *Assign key…*: a panel shows the keys as you press them, large; Enter or OK keeps them, Backspace clears, Esc leaves things as they were. From then on that chord opens the list from anywhere, launcher closed or not. |
 | A key on an action | Tab on a row, select the action, ⌘B: the same panel, the keys shown as you press them, Enter or OK keeps them. From then on that chord runs the action on whatever row of that **kind** is selected, without opening the actions. The same chord can mean another action on another kind: ⌘⇧O is *Open in VS Code* on repositories and *Approve* on pull requests if you bind it so. The row shows its chord. |
-| *Favourite* on any entity or saved list | Puts it at the top of the empty box, lists first, then entities, then the recents; *Unfavourite* takes it out. |
+| *Favourite* on any entity or saved list | Puts it at the top of the empty box under one **Favourites** heading, lists and items alike, then the recents; *Unfavourite* takes it out. |
 | `#d sepa` | Pages only, path and excerpt, and a last row *Search Docs for "sepa"* that opens `#/docs`. |
 
 ### The sheet, per kind
@@ -70,6 +70,18 @@ Where a flow fits elsewhere: *Link to ⟨job⟩* could become one (relation,
 then an optional note) instead of the inline chips; *Re-run* on a pipeline
 could pick a run preset; *Change status* could pick the transition the
 source offers and then open the ticket page's dialog with it set.
+
+### The rows
+
+A readability pass (round 8), as `:global` rules in the component that
+would move to `tf/css/launcher.css`:
+
+- three columns, not four: the monogram names the kind, the word beside it is gone, the title gets the room;
+- the key is as large as the title and in ink, 600 weight, mono: it is what the eye looks for;
+- the title is 14 px regular ink; the state chip follows it;
+- one second line at 12 px in the sans, one grey: the path, or the excerpt with its mark;
+- the provenance is as wide as its text, 11 px, at the right;
+- rows are 40 px high with 7 px of padding, headings get 2 px more air.
 
 ## What is real and what is a shortcut
 

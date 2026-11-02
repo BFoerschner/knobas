@@ -37,26 +37,23 @@
   const shares = $derived(sharesKey(home.recent));
 </script>
 
-{#if home.smart_lists.length > 0}
-  <div class="tf-ln-h"><span class="tf-ln-lab">Favourite lists</span><span class="tf-ln-n">{home.smart_lists.length}</span></div>
-  {#each home.smart_lists as list, i (list.id)}
-    {@const row = rows[i]}
-    <div class="tf-ln-slrow" class:tf-ln-on={i === selected} role="presentation" onmouseenter={() => onhover(i)}>
-      <button id={optionId(i)} class="tf-ln-sl" role="option" aria-selected={i === selected} disabled={list.needs_attention} onclick={() => row && onopen(row)}>
-        <span class="tf-ln-nm">
-          {list.label}
-          <small class:tf-ln-att={list.needs_attention}>{list.description}</small>
-        </span>
-        <span class="tf-ln-c" class:tf-ln-chg={list.changed}>
-          {#if list.needs_attention}<span class="tf-ln-att">Needs attention</span>{:else}{list.count}{/if}
-        </span>
-      </button>
-    </div>
-  {/each}
+{#if home.smart_lists.length + favourites > 0}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span><span class="tf-ln-n">{home.smart_lists.length + favourites}</span></div>
 {/if}
-{#if favourites > 0}
-  <div class="tf-ln-h"><span class="tf-ln-lab">Favourites</span><span class="tf-ln-n">{favourites}</span></div>
-{/if}
+{#each home.smart_lists as list, i (list.id)}
+  {@const row = rows[i]}
+  <div class="tf-ln-slrow" class:tf-ln-on={i === selected} role="presentation" onmouseenter={() => onhover(i)}>
+    <button id={optionId(i)} class="tf-ln-sl" role="option" aria-selected={i === selected} disabled={list.needs_attention} onclick={() => row && onopen(row)}>
+      <span class="tf-ln-nm">
+        {list.label}
+        <small class:tf-ln-att={list.needs_attention}>{list.description}</small>
+      </span>
+      <span class="tf-ln-c" class:tf-ln-chg={list.changed}>
+        {#if list.needs_attention}<span class="tf-ln-att">Needs attention</span>{:else}{list.count}{/if}
+      </span>
+    </button>
+  </div>
+{/each}
 {#each home.recent as item, i (item.entity_id)}
   {@const index = recentFrom + i}
   {@const row = rows[index]}
