@@ -190,7 +190,11 @@ async fn an_unknown_list_is_refused_and_an_unknown_entity_waits() {
         .execute(&pool)
         .await
         .unwrap();
-    assert_eq!(block(&pool).await, Vec::new(), "a withdrawn entity is not drawn");
+    assert_eq!(
+        block(&pool).await,
+        Vec::new(),
+        "a withdrawn entity is not drawn"
+    );
 }
 
 /// A saved list whose text today's grammar refuses is drawn with the refusal
@@ -198,10 +202,12 @@ async fn an_unknown_list_is_refused_and_an_unknown_entity_waits() {
 #[tokio::test]
 async fn a_favourite_list_that_needs_attention_says_why() {
     let pool = pool("fav-attention").await;
-    sqlx::query("insert into knobas.smart_list (id, label, query) values ('old', 'Old', 'list:payouts')")
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "insert into knobas.smart_list (id, label, query) values ('old', 'Old', 'list:payouts')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     add_favourite_inner(&pool, &Registry::for_process(), &list("old"))
         .await
         .expect("favourite");

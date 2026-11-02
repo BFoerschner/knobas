@@ -1049,13 +1049,18 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     // **The favourites arrived in their order** (#2428), and the far machine
     // draws them: the list as its list, the ticket from the address book the
     // links brought, before any sync of its own has mirrored it.
-    let favourites = knobas_app::commands::search::favourites_inner(there, &Registry::for_process())
-        .await
-        .expect("the colleague's favourites");
+    let favourites =
+        knobas_app::commands::search::favourites_inner(there, &Registry::for_process())
+            .await
+            .expect("the colleague's favourites");
     assert_eq!(
         favourites
             .iter()
-            .map(|row| (row.kind.as_str(), row.entity_id.as_str(), row.title.as_str()))
+            .map(|row| (
+                row.kind.as_str(),
+                row.entity_id.as_str(),
+                row.title.as_str()
+            ))
             .collect::<Vec<_>>(),
         vec![
             ("list", estate.saved_list.as_str(), SAVED_LABEL),
