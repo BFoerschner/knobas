@@ -335,9 +335,10 @@ macro_rules! review_request {
 /// Prose kinds only, and a window. A mention lives in a blob of text that has
 /// no state saying it was answered, so nothing at the source ever resolves it;
 /// without the window, switching the inbox on would produce every ticket that
-/// ever named you. [`WINDOW_DAYS`] on the item's own timestamp is the stated
-/// limit, and *done* is what clears an older one -- and lets it come back when
-/// somebody says something new.
+/// ever named you. [`WINDOW_DAYS`] on the mention's own date
+/// ([`mentioned_at!`]) is the stated limit, and *done* is what clears an
+/// older one -- and lets it come back when somebody names you again, not
+/// whenever the item moves.
 ///
 /// **The names are looked for through an index** (#1170). Read item by item
 /// (#785's `strpos` ahead of the expression, per name in an `exists`), the
@@ -363,14 +364,16 @@ macro_rules! mention {
         concat!(
             r"select 'mention', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                      'you are mentioned here',
-                     coalesce(i.item_updated_at, i.synced_at), i.web_url
+                     m.at, i.web_url
                 from sync.item i
+               cross join lateral ",
+            mentioned_at!(),
+            r" m
                where ",
             $crate::live_by_exclusion!("i"),
             r"
                  and i.kind in ('ticket','pr','page','note')
-                 and coalesce(i.item_updated_at, i.synced_at)
-                       >= $2 - make_interval(days => ",
+                 and m.at >= $2 - make_interval(days => ",
             window_days!(),
             r")
                  and cardinality($1::text[]) > 0
@@ -380,6 +383,71 @@ macro_rules! mention {
                  and i.body_text ~ any (array(select ",
             mention_of!("u"),
             r" from unnest($1::text[]) as u))"
+        )
+    };
+}
+
+/// **When I was mentioned**, as a one-row relation `(at)` for the row `i`:
+/// the moment a mention entered the item, not the moment the item last moved.
+///
+/// Before this, a mention was dated by the item's `updated`, so any move of a
+/// ticket that had ever named me -- a worklog, a transition, a field edit, a
+/// comment naming somebody else -- raised "you are mentioned here" afresh,
+/// past *done* and inside the window, and opening it showed nothing new.
+///
+/// Where the record carries a thread, in either spelling the conversation
+/// reads (`knobas_app::conversation`'s `COMMENTS`: Jira's
+/// `fields.comment.comments[]` with `body` and `created`, the mock adapter's
+/// `comments[]` with `text` and `when`):
+///
+/// 1. the newest dated comment that names me, by the rule's own per-name
+///    expression;
+/// 2. else the item's declared `created` (Jira's `fields.created`): the
+///    mention is in the title or the description, which has no date of its
+///    own. A mention edited into an old ticket's description is missed --
+///    ADR-0007's direction, the one the trailing-`.` exclusion also takes --
+///    rather than raised on every move of the ticket;
+/// 3. else the item's own date, as before.
+///
+/// An item with no thread in the payload (Gitea, whose comments are folded
+/// into `body_text` only; Confluence, whose comment walk re-emits the page)
+/// keeps the item's date: nothing finer is on the record. A stamp that is not
+/// a timestamp is no stamp (`pg_input_is_valid`), so one bad record cannot
+/// fail the stream.
+macro_rules! mentioned_at {
+    () => {
+        concat!(
+            r"(select case when t.comments is null
+                          then coalesce(i.item_updated_at, i.synced_at)
+                          else coalesce(
+                            (select max(coalesce(", stamp_of!("e.entry->>'created'"), ", ", stamp_of!("e.entry->>'when'"), r"))
+                               from jsonb_array_elements(t.comments) as e(entry)
+                              where coalesce(e.entry->>'body', e.entry->>'text') ~ any (array(select ",
+            mention_of!("u"),
+            r" from unnest($1::text[]) as u))),
+                            ",
+            stamp_of!($crate::declared_string!("$4", "created")),
+            r",
+                            coalesce(i.item_updated_at, i.synced_at))
+                     end as at
+                from (select coalesce(
+                        case when jsonb_typeof(i.payload #> '{fields,comment,comments}') = 'array'
+                             then i.payload #> '{fields,comment,comments}' end,
+                        case when jsonb_typeof(i.payload -> 'comments') = 'array'
+                             then i.payload -> 'comments' end) as comments) t)"
+        )
+    };
+}
+
+/// A text as a `timestamptz`, or null where it is not one.
+macro_rules! stamp_of {
+    ($text:expr) => {
+        concat!(
+            "(case when pg_input_is_valid(",
+            $text,
+            ", 'timestamptz') then (",
+            $text,
+            ")::timestamptz end)"
         )
     };
 }

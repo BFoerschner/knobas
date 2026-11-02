@@ -110,6 +110,7 @@ fn declarations() -> knobas_core::payload::Declarations {
                     PayloadPath::of(["fields", "assignee", "name"]),
                     PayloadPath::of(["fields", "assignee", "key"]),
                 ],
+                created: vec![PayloadPath::of(["fields", "created"])],
                 ..KindPaths::default()
             }],
         )
@@ -1452,6 +1453,210 @@ async fn an_item_marked_done_leaves_and_returns_when_its_subject_moves() {
     assert!(
         keys(&stream_at(pool, now() + Duration::hours(2)).await).contains(&key),
         "somebody said something new: that is a fresh demand, not a handled one"
+    );
+}
+
+/// Jira Data Center's stamp, `2026-08-12T09:14:00.000+0200`: an offset with
+/// no colon, in a zone that is not UTC.
+fn jira_time(at: DateTime<Utc>) -> String {
+    at.with_timezone(&chrono::FixedOffset::east_opt(2 * 3600).unwrap())
+        .format("%Y-%m-%dT%H:%M:%S%.3f%z")
+        .to_string()
+}
+
+/// A Jira ticket with a description, a creation date and dated comments, as
+/// Jira Data Center's search answers it: `body_text` is title, description and
+/// comment bodies joined, the way `knobas-source-jira`'s `map` builds it.
+async fn discussed_ticket(
+    pool: &PgPool,
+    key: &str,
+    description: &str,
+    created: DateTime<Utc>,
+    comments: &[(&str, DateTime<Utc>)],
+    updated: DateTime<Utc>,
+) -> String {
+    let body = std::iter::once(key)
+        .chain(std::iter::once(description))
+        .chain(comments.iter().map(|(text, _)| *text))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let comments: Vec<_> = comments
+        .iter()
+        .map(|(text, at)| {
+            serde_json::json!({
+                "author": { "name": THEM },
+                "body": text,
+                "created": jira_time(*at),
+            })
+        })
+        .collect();
+    item(
+        pool,
+        Mirrored {
+            source: "jira",
+            kind: "ticket",
+            key,
+            author: Some(THEM),
+            body: &body,
+            payload: serde_json::json!({
+                "fields": {
+                    "assignee": serde_json::Value::Null,
+                    "description": description,
+                    "created": jira_time(created),
+                    "comment": { "comments": comments, "total": comments.len() },
+                },
+            }),
+            updated,
+        },
+    )
+    .await
+}
+
+/// Move a ticket at the source without a word of new text -- a worklog, a
+/// transition, a field edit: Jira bumps `updated` and nothing else.
+async fn touch(pool: &PgPool, id: &str, at: DateTime<Utc>) {
+    sqlx::query("update sync.item set item_updated_at = $2 where entity_id = $1")
+        .bind(id)
+        .bind(at)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// **A mention is dated by the comment that holds it**, not by the ticket.
+/// An old comment naming me is not a new demand because somebody logged work
+/// on the ticket today: before this, every move of a ticket that had ever
+/// named me raised "you are mentioned here" afresh, and opening it showed no
+/// new mention.
+#[tokio::test]
+async fn an_old_mention_on_a_ticket_that_moved_today_is_not_a_new_mention() {
+    let pool = &scratch().await;
+    let old = discussed_ticket(
+        pool,
+        "PAY-1",
+        "Retry failed payouts",
+        days_ago(60),
+        &[("[~mara.lindqvist] can you look?", days_ago(40))],
+        days_ago(0),
+    )
+    .await;
+    let fresh = discussed_ticket(
+        pool,
+        "PAY-2",
+        "Retry failed payouts",
+        days_ago(60),
+        &[
+            ("[~mara.lindqvist] can you look?", days_ago(40)),
+            ("still waiting, [~mara.lindqvist]", days_ago(1)),
+        ],
+        days_ago(0),
+    )
+    .await;
+
+    let items = stream(pool).await;
+    let keys = keys(&items);
+    assert!(
+        !keys.contains(&format!("mention:{old}")),
+        "a mention forty days old is outside the window however recently the ticket moved: {keys:?}"
+    );
+    let item = items
+        .iter()
+        .find(|i| i.key == format!("mention:{fresh}"))
+        .unwrap_or_else(|| panic!("yesterday's mention is on the stream: {keys:?}"));
+    assert_eq!(
+        item.occurred_at,
+        days_ago(1),
+        "the item is dated by the newest comment that names me"
+    );
+}
+
+/// *Done* holds until somebody names me again. A worklog, a transition or a
+/// comment that does not mention me moves the ticket and leaves the item
+/// handled; a new comment that does mention me brings it back.
+#[tokio::test]
+async fn a_handled_mention_returns_for_a_new_mention_and_not_for_a_moved_ticket() {
+    let pool = &scratch().await;
+    let id = discussed_ticket(
+        pool,
+        "PAY-1",
+        "Retry failed payouts",
+        days_ago(10),
+        &[("[~mara.lindqvist] can you look?", days_ago(2))],
+        days_ago(2),
+    )
+    .await;
+    let key = format!("mention:{id}");
+    inbox::complete(pool, &key, now()).await.unwrap();
+
+    touch(pool, &id, now() + Duration::hours(1)).await;
+    assert!(
+        !keys(&stream_at(pool, now() + Duration::hours(2)).await).contains(&key),
+        "nobody named me again: the ticket only moved"
+    );
+
+    let comments = serde_json::json!([
+        { "author": { "name": THEM }, "body": "[~mara.lindqvist] can you look?",
+          "created": jira_time(days_ago(2)) },
+        { "author": { "name": THEM }, "body": "ping [~mara.lindqvist]",
+          "created": jira_time(now() + Duration::hours(3)) },
+    ]);
+    sqlx::query(
+        "update sync.item
+            set item_updated_at = $2,
+                body_text = body_text || E'\\n\\nping [~mara.lindqvist]',
+                payload = jsonb_set(payload, '{fields,comment,comments}', $3)
+          where entity_id = $1",
+    )
+    .bind(&id)
+    .bind(now() + Duration::hours(3))
+    .bind(comments)
+    .execute(pool)
+    .await
+    .unwrap();
+    assert!(
+        keys(&stream_at(pool, now() + Duration::hours(4)).await).contains(&key),
+        "a new comment naming me is a fresh demand"
+    );
+}
+
+/// A mention in the description has no comment to date it: the ticket's own
+/// creation date does, as the source declares it. A ticket filed last week
+/// naming me is on the stream; one filed months ago that only moved today is
+/// not.
+#[tokio::test]
+async fn a_mention_in_the_description_is_dated_by_the_ticket_and_not_by_its_last_move() {
+    let pool = &scratch().await;
+    let recent = discussed_ticket(
+        pool,
+        "PAY-1",
+        "[~mara.lindqvist] please own this",
+        days_ago(3),
+        &[("looks fine", days_ago(1))],
+        days_ago(0),
+    )
+    .await;
+    let old = discussed_ticket(
+        pool,
+        "PAY-2",
+        "[~mara.lindqvist] please own this",
+        days_ago(90),
+        &[("looks fine", days_ago(1))],
+        days_ago(0),
+    )
+    .await;
+
+    let items = stream(pool).await;
+    let keys = keys(&items);
+    let item = items
+        .iter()
+        .find(|i| i.key == format!("mention:{recent}"))
+        .unwrap_or_else(|| {
+            panic!("a ticket filed three days ago naming me is a mention: {keys:?}")
+        });
+    assert_eq!(item.occurred_at, days_ago(3));
+    assert!(
+        !keys.contains(&format!("mention:{old}")),
+        "a description written ninety days ago is not a new mention: {keys:?}"
     );
 }
 
