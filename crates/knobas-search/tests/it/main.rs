@@ -16,6 +16,7 @@ mod declaring;
 mod help_card;
 mod home;
 mod item_parent;
+mod key_cell;
 mod launcher_kinds;
 mod lists;
 mod name_glob;

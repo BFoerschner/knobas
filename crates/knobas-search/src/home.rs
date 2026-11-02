@@ -56,11 +56,11 @@ macro_rules! recent_sql {
         concat!(
             $prefix,
             "select s.entity_id, s.kind, s.source_id, s.title,\n",
-            "       s.item_updated_at as updated_at, s.synced_at, s.path, s.state\n",
+            "       s.item_updated_at as updated_at, s.synced_at, s.path, s.state, s.key_cell as cell\n",
             "  from unnest($1::text[]) as k(kind)\n",
             "  cross join lateral (\n",
             "      select i.entity_id, i.kind, i.source_id, i.title,\n",
-            "             i.item_updated_at, i.synced_at,\n",
+            "             i.item_updated_at, i.synced_at, i.key_cell,\n",
             "             ",
             $crate::mirror_path!("$3"),
             " as path,\n",
@@ -179,6 +179,8 @@ struct RecentRow {
     path: Option<String>,
     /// The row's state chip (#666); null for a kind that declares none.
     state: Option<sqlx::types::Json<knobas_core::payload::StateChip>>,
+    /// The key cell (#2452), `sync.item.key_cell`.
+    cell: Option<String>,
 }
 
 /// The newest items across every kind the mirror holds.
@@ -217,6 +219,7 @@ pub async fn recent(
             synced_at: row.synced_at,
             path: row.path,
             state: row.state.map(|chip| chip.0),
+            cell: row.cell,
         })
         .collect())
 }

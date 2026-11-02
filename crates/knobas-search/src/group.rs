@@ -72,6 +72,8 @@ pub struct RawHit {
     /// The row's state chip (#666), `declared_state!`'s `jsonb`. Null for a
     /// group header, a kind that declares no state, and a corpus knobas owns.
     state: Option<sqlx::types::Json<knobas_core::payload::StateChip>>,
+    /// The key cell (#2452). Null for a group header and a corpus knobas owns.
+    cell: Option<String>,
     rank: Option<f32>,
     snippet: Option<String>,
 }
@@ -127,6 +129,7 @@ fn hit(row: RawHit) -> Option<SearchHit> {
             synced_at,
             path: row.path,
             state: row.state.map(|chip| chip.0),
+            cell: row.cell,
         },
         rank: row.rank.unwrap_or_default(),
         snippet: row
@@ -160,6 +163,7 @@ mod tests {
             synced_at: None,
             path: None,
             state: None,
+            cell: None,
             rank: None,
             snippet: None,
         }
@@ -176,6 +180,7 @@ mod tests {
             synced_at: Some(Utc::now()),
             path: None,
             state: None,
+            cell: None,
             rank: Some(rank),
             snippet: Some(format!(
                 "{}sepa{} batch",

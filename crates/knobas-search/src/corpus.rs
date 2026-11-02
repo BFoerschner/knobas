@@ -180,6 +180,13 @@ pub struct Corpus {
     /// relation `path` reads, and nothing else: one answer to "what state is
     /// this in", as `path_line_read!` is one to "where is this".
     pub(crate) state: &'static str,
+    /// The row's key cell as `text` (#2452), or `null::text` for a corpus
+    /// whose rows have none. For the mirror it is the stored
+    /// `sync.item.key_cell` (migration `0066`), resolved from the
+    /// declarations when the row is written -- the same text `fts` holds at
+    /// weight A, so what *Titles* matches and what the key column draws are
+    /// one value.
+    pub(crate) cell: &'static str,
     /// An extra `where` fragment scoping the corpus, for a relation that holds
     /// more than one kind of thing. `None` for [`LIVE_ITEM`].
     pub(crate) scope: Option<&'static str>,
@@ -528,6 +535,52 @@ macro_rules! mirror_state {
         )
     };
 }
+/// A mirrored row's key cell (#2451, #2452, spec #2419 story 19): the text a
+/// person reads beside the title to know where the thing sits, resolved from
+/// the declarations alone.
+///
+/// - a ticket: none, its key is its id (`0048` indexes it);
+/// - a pipeline-framed kind: its nearest project, the last entry of its
+///   declared `group_path` (the last segment of [`mirror_path!`]'s chain),
+///   else its declared `project_name`, else its innermost parent;
+/// - any other kind: its declared `monitor_type`, else its declared
+///   `project_name` (a page's space), else its outermost parent's first name
+///   past its last `/` (a pull request's or a branch's repository).
+///
+/// **Not read per query.** Migration `0066` pastes this expansion with
+/// `$decl` = `d.decl` into `sync.key_cell_of`, which writes
+/// `sync.item.key_cell` when a row is written or its declarations change,
+/// and `fts` folds that column in at weight A.
+/// `the_stored_key_cell_is_this_expansion` holds the migration's text to this
+/// expansion: a change here fails it until a migration restates the function.
+/// Only that test expands it: the readers read the stored column.
+#[cfg(test)]
+macro_rules! key_cell {
+    ($decl:literal) => {
+        concat!(
+            "(case when i.kind = 'ticket' then null when ",
+            $crate::corpus::mirror_frame!($decl),
+            " = 'pipeline' then coalesce((select btrim(e.elem #>> c.entry_segs) from ",
+            knobas_core::declared_list_candidates!($decl, "group_path"),
+            " c cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> c.at_segs) \
+             = 'array' then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord) \
+             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
+               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null \
+             order by e.ord desc limit 1), ",
+            knobas_core::declared_string!($decl, "project_name"),
+            ", (select pn.name from ",
+            knobas_core::declared_parent_names!($decl),
+            " pn order by pn.pos desc, pn.name_ord limit 1)) else coalesce(",
+            knobas_core::declared_string!($decl, "monitor_type"),
+            ", ",
+            knobas_core::declared_string!($decl, "project_name"),
+            ", (select nullif(btrim(split_part(pn.name, '/', -1)), '') from ",
+            knobas_core::declared_parent_names!($decl),
+            " pn order by pn.pos, pn.name_ord limit 1)) end)"
+        )
+    };
+}
+
 pub(crate) use mirror_frame;
 
 /// The synced mirror: M1's only corpus.
@@ -566,6 +619,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
     synced_at: "i.synced_at",
     path: mirror_path!("pd.d"),
     state: mirror_state!("pd.d"),
+    cell: "i.key_cell",
     scope: None,
     under: Some(
         "i.entity_id in (select ip.entity_id from sync.item_parent ip \
@@ -620,6 +674,7 @@ pub const NOTE: Corpus = Corpus {
     // string would draw an empty path line on every note in the launcher.
     path: "null::text",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     // A note is knobas' own and sits inside nothing (see `path`), so it is
     // beneath no parent `under:` could name.
@@ -678,6 +733,7 @@ pub const ASSET: Corpus = Corpus {
     synced_at: "a.updated_at",
     path: "nullif(a.path_text, '')",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     // Knobas' own rows declare no parent through a payload: an asset's parent
     // is its `parent_id` column (ADR-0014), read directly (#600).
@@ -761,6 +817,7 @@ pub const ROUTE: Corpus = Corpus {
     synced_at: "r.updated_at",
     path: "case when ra.path_text = '' then ra.name else ra.path_text || ' / ' || ra.name end",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     // A route's parent is the asset exposing it (ADR-0014): it is beneath
     // whatever that asset is beneath, and beneath the asset itself (#600).
@@ -797,6 +854,7 @@ pub const VIEW: Corpus = Corpus {
     synced_at: "v.updated_at",
     path: "v.view_group || coalesce(' · ' || nullif(btrim(v.query), ''), '')",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     under: None,
     fields: &[],
@@ -846,6 +904,7 @@ pub const SET: Corpus = Corpus {
         ") c)"
     ),
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     under: None,
     fields: &[],
@@ -882,6 +941,7 @@ pub const SAVED_LIST: Corpus = Corpus {
     synced_at: "l.updated_at",
     path: "l.query",
     state: "null::jsonb",
+    cell: "null::text",
     scope: None,
     under: None,
     fields: &[],
@@ -906,6 +966,23 @@ pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE, &VIEW, &SET,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Migration `0066` stores the key cell through `sync.key_cell_of`, which
+    /// pastes [`key_cell!`]'s expansion over `d.decl` (#2451). This holds the
+    /// pasted text to the macro and the macros it is built of, so a change to
+    /// any of them fails here until a new migration restates the function --
+    /// the way `tests/it/item_parent.rs` holds `0028`'s walk.
+    #[test]
+    fn the_stored_key_cell_is_this_expansion() {
+        let migration = include_str!(
+            "../../knobas-db/migrations/0066_a_row_is_found_by_where_it_sits.sql"
+        );
+        assert!(
+            migration.contains(key_cell!("d.decl")),
+            "0066 no longer holds key_cell!(\"d.decl\"):\n{}",
+            key_cell!("d.decl")
+        );
+    }
 
     /// A kind knobas owns is searchable, or "notes are a first-class
     /// searchable kind" is a claim with nothing behind it.
