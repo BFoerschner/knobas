@@ -265,17 +265,3 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
     assert_eq!(states(&board.recent, &ids), expected());
 }
 
-#[tokio::test]
-async fn a_built_in_lists_rows_carry_their_state_chip() {
-    let _guard = SERIAL.lock().await;
-    let pool = pool().await;
-    let t = token();
-    let ids = four(&pool, &t, Utc::now()).await;
-    let list = searcher(&pool)
-        .await
-        .smart_list_items("just-synced", 500)
-        .await
-        .unwrap();
-    let rows = list.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row);
-    assert_eq!(states(rows, &ids), expected());
-}

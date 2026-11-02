@@ -624,7 +624,11 @@ async fn a_saved_list_of_ticket_keys_counts_what_it_lists() {
         .await
         .unwrap();
     assert_eq!(saved.count, 1);
-    let rows = s.smart_list_items(&saved.id, 10).await.unwrap();
+    // Applied the way the launcher applies one: its own text, searched.
+    let rows = s
+        .search(q(&format!("project:{p} -status:\"To Do\"")))
+        .await
+        .unwrap();
     assert_eq!(ids(&rows), vec![done]);
     let rail = s.smart_lists().await.unwrap();
     assert_eq!(

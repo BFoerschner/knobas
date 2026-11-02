@@ -59,29 +59,46 @@
 
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use crate::corpus;
-use crate::lists::{self, SmartListSummary};
 use crate::query::{self, EffectiveFilters};
 use crate::sql::{self, SavedQuery};
 use crate::types::{Prefix, SearchFilters};
 use crate::vocab::Vocabulary;
 use crate::{MAX_FILTER_VALUES, SearchError};
 
+/// One saved list as `smart_lists` and `create_smart_list` answer it
+/// (interfaces §2.4): Settings reads whether any exist, and *Save as list*
+/// reads back the row it made.
+///
+/// One kind of list since #2423: the built-in ones are gone, so nothing tells
+/// a saved list from another, and nothing badges one (`changed` and `saved`
+/// went with them). In the launcher a list is a `list` hit, found behind `#l`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "search.ts")]
+pub struct SmartListSummary {
+    /// The slug [`create`] made; what rename and delete take, and the `list`
+    /// hit's entity id.
+    pub id: String,
+    pub label: String,
+    /// How many items the list answers with right now.
+    pub count: i64,
+    /// The query the list stands for, or the reason it needs attention.
+    pub description: String,
+    /// The saved query cannot be run by today's grammar (#506, story 60).
+    /// [`Self::count`] is `0` on such a row -- nothing was asked -- and
+    /// [`Self::description`] carries [`NEEDS_ATTENTION`] and the rule that
+    /// refused it.
+    pub needs_attention: bool,
+}
+
 /// What the rail says instead of a count when a saved query no longer runs.
 ///
-/// Public so that this module, the seam tests and the Rust-side pin on the
-/// `?fake-ipc` fixture (`lists::the_builtin_registry_matches_its_typescript_fixture`)
-/// compare against **one** wording rather than four copies of it --
-/// `lists::describe_missing_identity` exists for the same reason.
-///
-/// **The panel is not one of them, and cannot be**: `Board.svelte` draws these
-/// two words as its own literal, because no Rust constant crosses the bridge.
-/// What holds them together is `Launcher.test.svelte.ts`'s
-/// *a saved list that needs attention says so and does not open*, which reads
-/// them off the rendered count cell.
+/// Public so that this module and the seam tests compare against **one**
+/// wording. The launcher draws none of it as its own literal: a `list` hit
+/// that needs attention carries [`Refusal::description`] as its state, and
+/// that text is what the launcher says when Enter refuses to apply it.
 pub const NEEDS_ATTENTION: &str = "Needs attention";
 
 /// Longest id [`create`] will generate.
@@ -240,8 +257,12 @@ pub enum Refusal {
         dimension: &'static str,
         values: usize,
     },
-    /// The query names a smart list, so running it would be a list of a list.
+    /// The query opens with `list:<id>`, which opened another list until
+    /// #2423 retired the prefix; today it would search for its own marker.
     NamesAnotherList,
+    /// A word is `/` and a source (`/ji`), which named the source until
+    /// spec #2419's grammar (#2420); today it is the word. Carries the word.
+    OldSourceMarker(String),
     /// The prefix names no corpus at all -- `t `, `>`, `?` (`empty_corpus`).
     ///
     /// Carries the prefix so that [`Refusal::on_create`] can name the one the
@@ -285,7 +306,7 @@ impl Refusal {
     #[must_use]
     pub fn on_create(&self) -> String {
         match self {
-            Self::NamesAnotherList => "A smart list cannot save another list.".to_owned(),
+            Self::NamesAnotherList => "A saved list cannot open another list.".to_owned(),
             Self::NotASearch(prefix) => match prefix {
                 Prefix::Time => "`t` is not a search.",
                 Prefix::Action => "`>` is not a search.",
@@ -293,7 +314,7 @@ impl Refusal {
                 // `empty_corpus` admits only the three above. Listed rather
                 // than a wildcard, so a prefix added to `Prefix` is a compile
                 // error here and someone decides its sentence.
-                Prefix::Person | Prefix::Source | Prefix::Note | Prefix::List | Prefix::Asset => {
+                Prefix::Person | Prefix::Source | Prefix::Note | Prefix::Asset => {
                     "That prefix is not a search."
                 }
             }
@@ -316,7 +337,15 @@ impl Refusal {
                 "the saved query narrows by {values} {dimension} and the launcher accepts \
                  {MAX_FILTER_VALUES}"
             ),
-            Self::NamesAnotherList => "the saved query names another smart list".to_owned(),
+            Self::NamesAnotherList => {
+                "the saved query opens another list with `list:`, which the launcher no longer reads"
+                    .to_owned()
+            }
+            Self::OldSourceMarker(word) => format!(
+                "the saved query names a source as `{word}`, which the launcher now reads as a \
+                 word; today that is `source:{}`",
+                word.trim_start_matches('/')
+            ),
             Self::NotASearch(_) => {
                 "the saved query starts with a prefix that is not a search".to_owned()
             }
@@ -367,10 +396,20 @@ pub fn plan(raw: &str, vocab: &Vocabulary) -> Result<Runnable, Refusal> {
         })
     })?;
 
-    let parsed = query::parse(raw, vocab);
-    if parsed.list_id.is_some() {
+    // The grammar before spec #2419, which today's reads as words (#2423):
+    // `list:<id>` opened a list and `/ji` named a source. Read off the text,
+    // since the parse has no marker left to report either by.
+    if raw.trim_start().to_lowercase().starts_with("list:") {
         return Err(Refusal::NamesAnotherList);
     }
+    if let Some(word) = raw.split_whitespace().find(|word| {
+        word.strip_prefix('/')
+            .is_some_and(|source| !vocab.resolve_source(source).is_empty())
+    }) {
+        return Err(Refusal::OldSourceMarker(word.to_owned()));
+    }
+
+    let parsed = query::parse(raw, vocab);
     // `crate::empty_corpus` and not a second copy of its list: that function is
     // where "this prefix names no corpus at all" is decided, and a prefix that
     // leaves it -- as `note:` did with #46 and `asset:` with #436 -- must stop
@@ -501,10 +540,9 @@ pub async fn create(
 
 /// Give a saved list a different name.
 ///
-/// **The id does not move.** It is what `list:<id>` names and what the
-/// seen-stamp behind the change badge is keyed on, so re-deriving it from the
-/// new label would silently un-read the list and break any `list:` the reader
-/// had learned to type.
+/// **The id does not move.** It is the `list` hit's entity id, which a
+/// favourite or a key bound to the list holds (spec #2419), so re-deriving it
+/// from the new label would orphan them.
 ///
 /// # Errors
 ///
@@ -551,24 +589,19 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<(), SearchError> {
 struct SavedCount {
     list_id: String,
     total: i64,
-    /// `null` for a list with nothing in it, which is exactly the state
-    /// [`lists::changed`] reads as *no badge*.
-    newest: Option<DateTime<Utc>>,
 }
 
-/// Every saved list's summary, in the shape the rail draws built-ins in.
+/// Every saved list's summary.
 ///
-/// **One round trip to read the table, and two more only if it had anything in
-/// it**: the counts -- one statement for every runnable list however many
-/// there are, `union all`-ed by [`sql::saved_summary_sql`] -- and the
-/// seen-stamps. So a launcher with nothing saved costs the board exactly one
-/// small select, and a list whose query is refused costs it nothing beyond
-/// that: it is not in the counting statement at all, which is what makes one
+/// **One round trip to read the table, and one more only if it had anything in
+/// it**: the counts, one statement for every runnable list however many there
+/// are, `union all`-ed by [`sql::saved_summary_sql`]. A list whose query is
+/// refused is not in the counting statement at all, which is what makes one
 /// broken row cheap rather than fatal.
 ///
 /// # Errors
 ///
-/// [`SearchError::Db`] if the table, the counts or the stamps cannot be read.
+/// [`SearchError::Db`] if the table or the counts cannot be read.
 pub async fn summaries(
     pool: &PgPool,
     vocab: &Vocabulary,
@@ -607,7 +640,6 @@ pub async fn summaries(
             counted.insert(row.list_id.clone(), row);
         }
     }
-    let seen = lists::seen_stamps(pool).await?;
 
     Ok(planned
         .into_iter()
@@ -615,31 +647,20 @@ pub async fn summaries(
             // The query itself is the description: a saved list's blurb is
             // what it searches for, and a reader who has forgotten what
             // `#@me updated:7d` meant is one glance from the answer.
-            Ok(_) => {
-                let count = counted.get(&row.id);
-                SmartListSummary {
-                    count: count.map_or(0, |row| row.total),
-                    changed: lists::changed(
-                        count.and_then(|row| row.newest),
-                        seen.get(&row.id).map(String::as_str),
-                    ),
-                    description: row.query,
-                    id: row.id,
-                    label: row.label,
-                    saved: true,
-                    needs_attention: false,
-                }
-            }
+            Ok(_) => SmartListSummary {
+                count: counted.get(&row.id).map_or(0, |row| row.total),
+                description: row.query,
+                id: row.id,
+                label: row.label,
+                needs_attention: false,
+            },
             Err(refusal) => SmartListSummary {
                 id: row.id,
                 label: row.label,
-                // Nothing was asked, so there is nothing to count and nothing
-                // to badge. A `0` here means *not measured*, and the
-                // description is what says so.
+                // Nothing was asked, so there is nothing to count. A `0` here
+                // means *not measured*, and the description is what says so.
                 count: 0,
-                changed: false,
                 description: refusal.description(),
-                saved: true,
                 needs_attention: true,
             },
         })
@@ -690,7 +711,7 @@ async fn free_id(pool: &PgPool, slug: &str) -> Result<String, SearchError> {
             .await?;
     let mut candidate = slug.to_owned();
     let mut suffix = 1_u32;
-    while lists::find(&candidate).is_some() || taken.iter().any(|id| id == &candidate) {
+    while taken.iter().any(|id| id == &candidate) {
         suffix += 1;
         candidate = format!("{slug}-{suffix}");
     }
@@ -746,6 +767,31 @@ mod tests {
         }
     }
 
+    /// A list saved under the grammar before spec #2419 that now means
+    /// something else needs attention rather than quietly searching for its
+    /// own markers (#2423): `list:` opened another list, and `/ji` named a
+    /// source. A word that merely starts with `/` and names no source is a
+    /// word, as the box reads it.
+    #[test]
+    fn a_list_saved_under_the_old_grammar_needs_attention() {
+        let v = Vocabulary::fixture();
+        assert_eq!(plan("list:mine", &v).unwrap_err(), Refusal::NamesAnotherList);
+        assert_eq!(plan("  LIST:mine sepa", &v).unwrap_err(), Refusal::NamesAnotherList);
+        assert_eq!(
+            plan("/ji sepa", &v).unwrap_err(),
+            Refusal::OldSourceMarker("/ji".to_owned())
+        );
+        assert_eq!(
+            plan("sepa /gitea", &v).unwrap_err(),
+            Refusal::OldSourceMarker("/gitea".to_owned())
+        );
+        assert!(plan("/nowhere sepa", &v).is_ok());
+        assert!(plan("source:ji sepa", &v).is_ok());
+        assert!(plan("#t sepa", &v).is_ok());
+        let said = Refusal::OldSourceMarker("/ji".to_owned()).description();
+        assert!(said.contains("`/ji`") && said.contains("`source:ji`"), "{said}");
+    }
+
     /// Every refusal says which rule it is, and says it under one heading.
     ///
     /// The heading is the wording the rail draws and the IPC-seam test asserts
@@ -760,6 +806,7 @@ mod tests {
                 values: 40,
             },
             Refusal::NamesAnotherList,
+            Refusal::OldSourceMarker("/ji".to_owned()),
             Refusal::NotASearch(Prefix::Time),
             Refusal::NothingToSearchFor,
         ];
@@ -795,6 +842,7 @@ mod tests {
                 values: 40,
             },
             Refusal::NamesAnotherList,
+            Refusal::OldSourceMarker("/ji".to_owned()),
             Refusal::NotASearch(Prefix::Time),
             Refusal::NotASearch(Prefix::Action),
             Refusal::NotASearch(Prefix::Help),

@@ -92,6 +92,11 @@
 //!
 //! ## The rail carries the saved-list cap (#533)
 //!
+//! **Since #2423 (spec #2419) there is no rail on ⌘K**: the built-in lists are
+//! gone, `launcher_board` reads the recent items alone, and `smart_lists`
+//! (saved lists only) is read by Settings and after a save. The readings
+//! below are kept as the ceiling they were; the history is #533's.
+//!
 //! `knobas.smart_list` was **empty in this fixture** when #506 added it: with
 //! nothing saved, `saved::summaries` returns on its first read, so the
 //! `smart_lists` assertion below covered the **built-in half of the rail and
@@ -400,7 +405,7 @@ async fn fill_the_rail(pool: &sqlx::PgPool, count: i64) {
 /// aggregate over nothing.
 async fn assert_the_rail_is_counted(searcher: &Searcher, expected: i64) -> i64 {
     let rail = searcher.smart_lists().await.expect("the rail reads");
-    let saved: Vec<&SmartListSummary> = rail.iter().filter(|list| list.saved).collect();
+    let saved: Vec<&SmartListSummary> = rail.iter().collect();
     assert_eq!(
         i64::try_from(saved.len()).expect("a rail smaller than a machine word"),
         expected,
@@ -898,7 +903,7 @@ async fn the_artifact_this_harness_is_built_to_avoid() {
 /// the report's and nothing else's: a reordered `corpus::ALL` would print the
 /// wrong names beside the right numbers, and every assertion below is per branch
 /// either way.
-const BRANCHES: [&str; 4] = ["mirror", "notes", "assets", "routes"];
+const BRANCHES: [&str; 5] = ["mirror", "notes", "assets", "routes", "lists"];
 
 /// Every branch the launcher unions holds rows, read through the launcher's own
 /// statement -- and how many of them the pinned query matches, printed.
@@ -1036,6 +1041,14 @@ async fn the_match_set_is_not_joined_row_by_row() {
     // tag of its own would put a second estate beside the first and make the
     // other test's report a reading of two.
     testing::seed_estate(&pool, "bench").await.unwrap();
+    // A saved list, so the lists' branch (#2423) is a relation with a row in it.
+    sqlx::query(
+        "insert into knobas.smart_list (id, label, query)
+         values ('bench-ledger', 'Ledger', 'ledger') on conflict (id) do nothing",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     assert_every_branch_has_rows(&pool, "ledger").await;
 
     let built = sql::search_sql(

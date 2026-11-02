@@ -195,8 +195,8 @@ async fn reach_returns_the_same_ids_as_the_read() {
         read
     );
 
-    // A saved list holding it: the rail's count is the read's, from the one
-    // walk its statement makes for every corpus (#1653), and so are its rows.
+    // A saved list holding it: its count is the read's, from the one walk its
+    // statement makes for every corpus (#1653), and so are its rows.
     let searcher = Searcher::declaring(pool.clone(), [knobas_source_jira::descriptor_template()])
         .await
         .unwrap();
@@ -205,13 +205,8 @@ async fn reach_returns_the_same_ids_as_the_read() {
         .await
         .unwrap();
     assert_eq!(saved.count, i64::try_from(read.len()).unwrap(), "{saved:?}");
-    let opened = searcher.smart_list_items(&saved.id, 200).await.unwrap();
-    let mut listed: Vec<String> = opened
-        .groups
-        .iter()
-        .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
-        .collect();
-    listed.sort();
+    // Applied the way the launcher applies one: its own text, searched.
+    let listed = search(&pool, &saved.description).await;
     assert_eq!(listed, read);
 }
 

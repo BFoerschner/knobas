@@ -259,11 +259,10 @@ async fn a_kind_that_declares_no_parent_carries_no_path() {
     assert_eq!(paths(&blind), vec![(ids[3].clone(), None)]);
 }
 
-/// The board's newest rows and a built-in list's rows are launcher rows too,
-/// and draw the same line a search draws: one answer to "where is this",
-/// wherever the row comes from.
+/// The board's newest rows are launcher rows too, and draw the same line a
+/// search draws: one answer to "where is this", wherever the row comes from.
 #[tokio::test]
-async fn the_boards_and_a_lists_rows_carry_the_same_path() {
+async fn the_boards_rows_carry_the_same_path() {
     let pool = pool().await;
     let t = token();
     // Far enough ahead that no other test's rows outrank these on the board.
@@ -277,25 +276,4 @@ async fn the_boards_and_a_lists_rows_carry_the_same_path() {
         .find(|row| row.entity_id == ids[3])
         .expect("the newest commit is on the board");
     assert_eq!(commit.path, Some(format!("tidewater/board-{t}")));
-
-    // Just synced: everything the mirror saw in the last hour, newest first.
-    let listed = searcher(&pool)
-        .await
-        .search(q("list:just-synced"))
-        .await
-        .unwrap();
-    let in_list: Vec<(String, Option<String>)> = paths(&listed)
-        .into_iter()
-        .filter(|(id, _)| ids.contains(id))
-        .collect();
-    let line = Some(format!("tidewater/board-{t}"));
-    assert_eq!(
-        in_list,
-        vec![
-            (ids[0].clone(), None),
-            (ids[2].clone(), line.clone()),
-            (ids[3].clone(), line.clone()),
-            (ids[1].clone(), line),
-        ]
-    );
 }

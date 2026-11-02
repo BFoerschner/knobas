@@ -1,6 +1,6 @@
 //! The empty-query board, against a real PostgreSQL.
 //!
-//! Like the smart lists, the board is a whole-corpus read: "the newest twenty
+//! The board is a whole-corpus read: "the newest twenty
 //! items" is not something a per-test token can isolate, so the tests take
 //! [`SERIAL`] and one of them deliberately loads the mirror up.
 //!
@@ -16,7 +16,7 @@ use std::collections::HashSet;
 use std::sync::LazyLock;
 
 use chrono::{DateTime, Duration, Utc};
-use knobas_search::{KindCatalog, Searcher, lists};
+use knobas_search::{KindCatalog, Searcher};
 use tokio::sync::Mutex;
 
 /// The board reads the whole mirror, so these cannot run concurrently against
@@ -91,7 +91,7 @@ async fn newest_base(pool: &sqlx::PgPool) -> DateTime<Utc> {
 ///
 /// Returned rather than asserted so that the guard itself can be given a
 /// positive control: a probe that always answers "clean" is not evidence that
-/// anything was clean. `the_board_is_smart_lists_and_the_newest_of_every_kind`
+/// anything was clean. `the_board_is_the_newest_of_every_kind`
 /// shows it counting a row it should count before relying on it counting none.
 ///
 /// `count`, not `max`: a tie at the same microsecond is still a row that could
@@ -108,7 +108,7 @@ async fn rows_newer_than(pool: &sqlx::PgPool, id: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn the_board_is_smart_lists_and_the_newest_of_every_kind() {
+async fn the_board_is_the_newest_of_every_kind() {
     let _guard = SERIAL.lock().await;
     let pool = pool().await;
     let t = token("board");
@@ -150,7 +150,6 @@ async fn the_board_is_smart_lists_and_the_newest_of_every_kind() {
     }
 
     let board = searcher(&pool).launcher_board().await.unwrap();
-    assert_eq!(board.smart_lists.len(), lists::BUILTINS.len());
     assert!(board.recent.len() <= 20);
     assert!(!board.recent.is_empty());
 
