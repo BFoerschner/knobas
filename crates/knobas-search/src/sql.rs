@@ -216,6 +216,16 @@ pub fn search_sql(
 
     // One narrow row per match. MATERIALIZED because `totals` and `top` both
     // read it and the scan must happen once.
+    // Where the mirror's detail branch is, for a corpus whose matches are
+    // mirror rows (`Corpus::drawn_as_mirror`, #2431).
+    let mirror = corpora
+        .iter()
+        .position(|corpus| std::ptr::eq(*corpus, &crate::corpus::LIVE_ITEM));
+    let drawn_by = |index: usize, corpus: &Corpus| match mirror {
+        Some(mirror) if corpus.drawn_as_mirror => mirror,
+        _ => index,
+    };
+
     sql.push_str("m as materialized (\n");
     for (index, corpus) in corpora.iter().enumerate() {
         if index > 0 {
@@ -234,10 +244,11 @@ pub fn search_sql(
         };
         let _ = writeln!(
             sql,
-            "  select {} as entity_id, {} as kind, {rank} as rank, {named} as named,\n         {} as item_updated_at, {index} as corpus",
+            "  select {} as entity_id, {} as kind, {rank} as rank, {named} as named,\n         {} as item_updated_at, {} as corpus",
             corpus.entity_id,
             answered_kind(corpus, &bound),
-            corpus.updated_at
+            corpus.updated_at,
+            drawn_by(index, corpus)
         );
         let _ = write!(sql, "    from {}", corpus.relation);
         if text.is_some() {
@@ -275,10 +286,15 @@ pub fn search_sql(
 
     // Titles and excerpts, on the rows that survived and no others.
     sql.push_str("detail as (\n");
+    let mut first = true;
     for (index, corpus) in corpora.iter().enumerate() {
-        if index > 0 {
+        if drawn_by(index, corpus) != index {
+            continue;
+        }
+        if !first {
             sql.push_str("  union all\n");
         }
+        first = false;
         let snippet = match &headline_opts {
             Some(opts) => format!(
                 "ts_headline('english', {}, q.tsq, {opts})",
@@ -1950,6 +1966,7 @@ mod tests {
             excerpt: "null::text",
             excerpt_line: "null::bigint",
             unless: None,
+            drawn_as_mirror: false,
             author: None,
             updated_at: "o.updated_at",
             synced_at: "o.synced_at",

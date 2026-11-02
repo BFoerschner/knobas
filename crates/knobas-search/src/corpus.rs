@@ -148,6 +148,12 @@ pub struct Corpus {
     /// another corpus holds, [`PIPELINE_LOG`], leaves out the rows that one
     /// already matched, so a pipeline is one hit.
     pub(crate) unless: Option<&'static str>,
+    /// Whether a match here is a row of [`LIVE_ITEM`], drawn by its detail
+    /// branch rather than one of its own (#2431): [`PIPELINE_LOG`]'s hits are
+    /// live pipelines, and a second detail branch spelling the mirror's path
+    /// and state again cost every keystroke about 3 ms of planning, over an
+    /// empty table too (2,500 items, `just responsiveness-probe`).
+    pub(crate) drawn_as_mirror: bool,
     /// The author column, if the corpus has one. `None` means the corpus can
     /// hold nothing of anybody's, so an author filter excludes it entirely
     /// rather than silently ignoring the filter.
@@ -578,6 +584,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
     excerpt: "coalesce((select pl.body from sync.pipeline_log pl where pl.pipeline_id = i.entity_id), i.body_text)",
     excerpt_line: "(select pl.first_line from sync.pipeline_log pl where pl.pipeline_id = i.entity_id)",
     unless: None,
+    drawn_as_mirror: false,
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
@@ -630,6 +637,7 @@ pub const NOTE: Corpus = Corpus {
     excerpt: "n.body_md",
     excerpt_line: "null::bigint",
     unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "n.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -695,6 +703,7 @@ pub const ASSET: Corpus = Corpus {
     excerpt: "null::text",
     excerpt_line: "null::bigint",
     unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "a.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -781,6 +790,7 @@ pub const ROUTE: Corpus = Corpus {
     excerpt: "null::text",
     excerpt_line: "null::bigint",
     unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "r.updated_at",
     // A local table is never behind itself: what knobas holds *is* the source.
@@ -821,6 +831,7 @@ pub const VIEW: Corpus = Corpus {
     excerpt: "null::text",
     excerpt_line: "null::bigint",
     unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "v.updated_at",
     synced_at: "v.updated_at",
@@ -856,6 +867,7 @@ pub const SET: Corpus = Corpus {
     excerpt: "null::text",
     excerpt_line: "null::bigint",
     unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "s.updated_at",
     synced_at: "s.updated_at",
@@ -912,6 +924,7 @@ pub const SAVED_LIST: Corpus = Corpus {
     excerpt: "null::text",
     excerpt_line: "null::bigint",
     unless: None,
+    drawn_as_mirror: false,
     author: None,
     updated_at: "l.updated_at",
     synced_at: "l.updated_at",
@@ -956,6 +969,7 @@ pub const PIPELINE_LOG: Corpus = Corpus {
     excerpt: "pl.body",
     excerpt_line: "pl.first_line",
     unless: Some("i.fts"),
+    drawn_as_mirror: true,
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",
