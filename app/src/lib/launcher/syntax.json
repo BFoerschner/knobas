@@ -3,6 +3,7 @@
     "token": ">",
     "insert": ">",
     "summary": "actions — where the app can take you",
+    "word": "go to",
     "probe": ">",
     "prefix": "action",
     "expect": "recognised"
@@ -83,6 +84,7 @@
     "token": "@me",
     "insert": "@me ",
     "summary": "items your configured accounts wrote",
+    "word": "mine",
     "probe": "@me",
     "prefix": "person",
     "expect": "recognised"
@@ -99,6 +101,7 @@
     "token": "t",
     "insert": "t ",
     "summary": "time — worklogs and the day review",
+    "word": "time",
     "probe": "t today",
     "prefix": "time",
     "expect": "recognised"
