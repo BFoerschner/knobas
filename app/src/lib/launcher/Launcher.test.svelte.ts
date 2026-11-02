@@ -39,6 +39,7 @@ function hit(over: {
   synced_at?: string;
   path?: string | null;
   state?: StateChip | null;
+  cell?: string;
 }) {
   return {
     entity_id: over.entity_id,
@@ -48,6 +49,7 @@ function hit(over: {
     synced_at: over.synced_at ?? "2026-08-25T11:56:00Z",
     path: over.path ?? null,
     state: over.state ?? null,
+    ...(over.cell === undefined ? {} : { cell: over.cell }),
     title: over.title,
     rank: 1,
     snippet: over.snippet ?? [],
@@ -2567,6 +2569,40 @@ test("a result row is three cells, the key cell following the kind's rule", asyn
   // Only a ticket's key is an identifier, drawn in the mono face.
   const mono = [...target.querySelectorAll(".tf-ln-res .tf-ln-k")].map((cell) => cell.classList.contains("tf-ln-mono"));
   expect(mono).toEqual([true, false, false, false, false, false, false, false]);
+});
+
+/**
+ * The engine's key cell (#2452): a hit or a recent row that carries `cell`
+ * draws it, ahead of what its path line says. A monitor's type is on no path
+ * line, and a page's space is not its top ancestor page.
+ */
+test("a row draws the key cell the engine sends, on a hit and on the board", async () => {
+  open({
+    ports: {
+      search: async () =>
+        response({
+          groups: [
+            oneOf("page", "Page", "PG", { entity_id: "confluence:98307", kind: "page", title: "SEPA retry design", path: "Handbook › Payments", cell: "Engineering" }),
+            oneOf("monitor", "Monitor", "MO", { entity_id: "kuma:8", kind: "monitor", title: "payout health", path: null, cell: "http" }),
+          ],
+          total: 2,
+        }),
+      launcherHome: async () => ({
+        ...HOME,
+        recent: [
+          { entity_id: "kuma:9", kind: "monitor", source_id: "kuma", title: "ledger health", updated_at: null, synced_at: "2026-08-25T11:58:00Z", path: null, state: null, cell: "keyword" },
+        ],
+      }),
+    },
+  });
+  await settle();
+  expect(cells()).toEqual([["MO", "keyword", "ledger health"]]);
+
+  await search("health");
+  expect(cells()).toEqual([
+    ["PG", "Engineering", "SEPA retry design"],
+    ["MO", "http", "payout health"],
+  ]);
 });
 
 test("a row draws no second line, no provenance and no state chip", async () => {

@@ -523,6 +523,8 @@ mod tests {
             text: "FAILURE".to_owned(),
             tone: knobas_core::tone::Tone::Err,
         });
+        // #2452: a value, for `path`'s reason; it is skipped when absent.
+        let cell = Some("Payments".to_owned());
         let search = serde_json::to_value(knobas_search::EntityRow {
             entity_id: "jira:PAY-231".to_owned(),
             kind: "ticket".to_owned(),
@@ -532,6 +534,7 @@ mod tests {
             synced_at: at,
             path: path.clone(),
             state: state.clone(),
+            cell: cell.clone(),
         })
         .expect("serializes");
         let room = serde_json::to_value(knobas_core::entity_list::EntityRow {
@@ -543,6 +546,7 @@ mod tests {
             synced_at: at,
             path,
             state,
+            cell,
         })
         .expect("serializes");
 

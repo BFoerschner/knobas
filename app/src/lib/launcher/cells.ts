@@ -7,10 +7,14 @@
  * better is known. A repository's own name moves to the title, so the owner
  * is not said twice.
  *
- * Read off the hit's `path`, the one line `knobas_core::path_line_read!`
- * joins (` › ` between ancestors). A kind whose path misses falls back to its
- * word, as ADR-0007's miss fails toward a row that says less, not something
- * wrong.
+ * The engine resolves it from the kind's declarations and sends it as the
+ * row's `cell` (#2452), the same text *Titles* matches (#2451); a row that
+ * carries one draws it, whatever its kind, save a ticket (its key) and a
+ * repository (its owner, out of its title). A row without one is read off
+ * its `path`, the one line `knobas_core::path_line_read!` joins (` › `
+ * between ancestors), as a view's is. A kind whose path misses falls back to
+ * its word, as ADR-0007's miss fails toward a row that says less, not
+ * something wrong.
  */
 import { keyOf } from "../time/format";
 
@@ -29,6 +33,8 @@ export interface CellSource {
   entityId: string;
   title: string;
   path: string | null;
+  /** The engine's key cell (#2452), absent where it resolved none. */
+  cell?: string | undefined;
   /** The kind's word, singular: *Pull request*. Drawn lower-case. */
   kindWord: string;
 }
@@ -39,8 +45,10 @@ const parts = (path: string, sep: string) =>
     .map((part) => part.trim())
     .filter(Boolean);
 
-export function cellsOf({ kind, entityId, title, path, kindWord }: CellSource): Cells {
+export function cellsOf({ kind, entityId, title, path, cell, kindWord }: CellSource): Cells {
   const word: Cells = { cell: kindWord.toLowerCase(), mono: false, title };
+  const sent = cell?.trim();
+  if (sent && kind !== "ticket" && kind !== "repo") return { cell: sent, mono: false, title };
   const at = (pick: (all: string[]) => string | undefined, sep: string): Cells => {
     const found = path ? pick(parts(path, sep)) : undefined;
     return found ? { cell: found, mono: false, title } : word;

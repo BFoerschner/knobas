@@ -92,7 +92,7 @@
     {@const index = (offsets[g] ?? 0) + h}
     {@const row = rows[index]}
     {#if row}
-      {@const cells = cellsOf({ kind: hit.kind, entityId: hit.entity_id, title: hit.title, path: hit.path, kindWord: group.label })}
+      {@const cells = cellsOf({ kind: hit.kind, entityId: hit.entity_id, title: hit.title, path: hit.path, cell: hit.cell, kindWord: group.label })}
       <Row
         monogram={group.monogram}
         tone={hit.state?.tone ?? null}
