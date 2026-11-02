@@ -151,6 +151,13 @@
   display: grid; place-items: center; font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2);
 }
 .tf-tkatt .tf-rend .tf-btn { color: var(--ink-2); }
+/* An image's preview (#2405): the file's bytes, fetched when the panel opens and drawn as a data image, cropped to the
+   frame. One that cannot be fetched is the same frame dashed and empty, as `.tf-md-noimg` draws a missing image. The
+   panel then leads with the stale strip and its *Try again*. */
+.tf-tkthumb { width: 56px; height: 40px; border-radius: 4px; border: 1px solid var(--rule); background: var(--sheet-2); object-fit: cover; display: block; }
+.tf-tkthumb.tf-tknone { display: grid; place-items: center; border-style: dashed; background: none; font: 600 var(--t-2xs) var(--mono); color: var(--ink-2); }
+.tf-tkatt .tf-stale { margin: 10px 12px 2px; }
+.tf-tkatt .tf-stale .tf-btn { margin-left: auto; }
 
 .tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
 .tf-work > * { flex: none; }

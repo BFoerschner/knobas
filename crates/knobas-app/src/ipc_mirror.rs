@@ -73,6 +73,7 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::link::LinkEnd::export_all(cfg)?;
     knobas_core::link::LinkEntry::export_all(cfg)?;
     crate::commands::entity::EntityDetail::export_all(cfg)?;
+    crate::commands::entity::AttachmentBytes::export_all(cfg)?;
     knobas_core::builds::RunRow::export_all(cfg)?;
     knobas_core::builds::PipelineRow::export_all(cfg)?;
     crate::commands::entity::PipelineReason::export_all(cfg)?;
