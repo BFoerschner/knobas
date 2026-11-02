@@ -146,6 +146,11 @@ impl Lines {
                     self.block(&inner, false);
                 }
             }
+            // A framed page's words are that page's, not this one's (#2441).
+            DocBlock::Embed {
+                content: EmbedContent::Url { .. },
+                ..
+            } => {}
             // Included text is the included page's, found there and not on
             // every page that includes it (spec #2432, story 22).
             DocBlock::Include { .. } | DocBlock::Placeholder { .. } => {}
@@ -412,6 +417,25 @@ mod tests {
             read.runs[1].text,
             "Payments API\nTry the refund call.\nAuthorize pets"
         );
+    }
+
+    /// A URL embed's words are the framed page's, and its URL is not a word
+    /// the page shows (#2441): it writes nothing, not even the URL.
+    #[test]
+    fn a_url_embed_writes_nothing() {
+        let page = content(
+            vec![
+                para(vec![Inline::text("Board.")]),
+                DocBlock::Embed {
+                    name: "iframe".into(),
+                    content: EmbedContent::Url {
+                        url: "https://grafana.example/d/quokka".into(),
+                    },
+                },
+            ],
+            vec![],
+        );
+        assert_eq!(search_text("Ops", "ENG", &page), "Ops\n\nBoard.");
     }
 
     /// Spec #2432, story 22: included text is found on the page it belongs

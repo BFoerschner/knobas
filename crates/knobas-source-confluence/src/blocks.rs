@@ -618,6 +618,20 @@ fn param(node: &Node, key: &str) -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// A macro's URL parameter by name: the `ri:url` resource storage keeps a
+/// URL in (entities decoded), or the parameter's text where it holds none.
+fn url_param(node: &Node, key: &str) -> Option<String> {
+    let found = node
+        .children()
+        .iter()
+        .find(|c| c.name() == Some("ac:parameter") && c.attr("ac:name") == Some(key))?;
+    match found.child("ri:url") {
+        Some(url) => url.attr("ri:value").map(html::decode_entities),
+        None => param(node, key),
+    }
+    .filter(|v| !v.trim().is_empty())
+}
+
 /// A storage body as the reader's blocks: the shared HTML reader
 /// (`knobas_source::docs::html`) with [`Storage`] as its hook.
 pub(crate) fn to_blocks(storage: &str, people: &People) -> Vec<DocBlock> {
@@ -807,6 +821,16 @@ fn r#macro(node: &Node, reading: &Reading<'_>) -> Hooked {
                 content: EmbedContent::Html { html },
             },
             _ => placeholder("html"),
+        },
+        // A framed page (#2441): the URL as the macro names it, and only an
+        // `http(s)` one; anything else is the macro's placeholder.
+        "iframe" | "widget" => match ["src", "url"]
+            .into_iter()
+            .find_map(|key| url_param(node, key))
+            .and_then(|url| EmbedContent::url(&url))
+        {
+            Some(content) => DocBlock::Embed { name, content },
+            None => placeholder(&name),
         },
         "jira" => match param(node, "key") {
             Some(key) => {
@@ -1267,6 +1291,74 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
             vec![DocBlock::Placeholder {
                 name: "html".into()
             }]
+        );
+    }
+
+    /// The `iframe` macro and the widget connector are embeds of the URL they
+    /// name (#2441), whichever way storage spells it: a `ri:url` resource or
+    /// the bare text, under `src` or `url`.
+    #[test]
+    fn an_iframe_macro_and_a_widget_connector_are_embeds_of_their_url() {
+        let storage = concat!(
+            r#"<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="https://grafana.example/d/abc?orgId=1&amp;kiosk" /></ac:parameter><ac:parameter ac:name="height">400</ac:parameter></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="widget" ac:schema-version="1"><ac:parameter ac:name="url"><ri:url ri:value="https://www.youtube.com/embed/dQw4w9WgXcQ" /></ac:parameter></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="iframe"><ac:parameter ac:name="url"> HTTP://docs.example/slides </ac:parameter></ac:structured-macro>"#,
+        );
+        let url = |name: &str, url: &str| DocBlock::Embed {
+            name: name.into(),
+            content: EmbedContent::Url { url: url.into() },
+        };
+        assert_eq!(
+            blocks(storage),
+            vec![
+                url("iframe", "https://grafana.example/d/abc?orgId=1&kiosk"),
+                url("widget", "https://www.youtube.com/embed/dQw4w9WgXcQ"),
+                url("iframe", "HTTP://docs.example/slides"),
+            ]
+        );
+    }
+
+    /// Only `http` and `https` are framed (spec #2432): a `javascript:`,
+    /// `file:` or custom-scheme URL, a relative one, or none at all is a
+    /// placeholder naming the macro.
+    #[test]
+    fn a_url_embed_of_another_scheme_is_a_placeholder() {
+        for src in [
+            "javascript:alert(document.domain)",
+            " JavaScript:alert(1)",
+            "file:///etc/passwd",
+            "vscode://open?file=x",
+            "data:text/html,<script>1</script>",
+            "//cdn.example/x",
+            "/wiki/x",
+            "https:",
+            "",
+        ] {
+            for name in ["iframe", "widget"] {
+                let key = if name == "iframe" { "src" } else { "url" };
+                let storage = format!(
+                    r#"<ac:structured-macro ac:name="{name}"><ac:parameter ac:name="{key}"><ri:url ri:value="{src}" /></ac:parameter></ac:structured-macro>"#
+                );
+                assert_eq!(
+                    blocks(&storage),
+                    vec![DocBlock::Placeholder { name: name.into() }],
+                    "{name} {src:?}"
+                );
+            }
+        }
+    }
+
+    /// A section holding a URL embed is edited in Confluence, as one holding
+    /// an HTML embed is.
+    #[test]
+    fn a_section_holding_an_iframe_macro_refuses_as_a_macro() {
+        let storage = r#"<h2>Board</h2><ac:structured-macro ac:name="iframe"><ac:parameter ac:name="src"><ri:url ri:value="https://x.example/" /></ac:parameter></ac:structured-macro><h2>Plain</h2><p>Text.</p>"#;
+        assert_eq!(
+            sections(storage)
+                .into_iter()
+                .map(|s| s.refusal)
+                .collect::<Vec<_>>(),
+            vec![Some(SectionRefusal::Macro), None]
         );
     }
 

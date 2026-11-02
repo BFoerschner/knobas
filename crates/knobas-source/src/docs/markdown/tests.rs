@@ -339,6 +339,21 @@ fn an_html_embed_is_a_comment_naming_it_and_not_its_markup() {
     assert_eq!(md, "<!-- embed: html -->\n");
 }
 
+/// A URL embed is a link to the page it frames (spec #2432, story 40).
+#[test]
+fn a_url_embed_is_a_link_to_its_url() {
+    let md = body(&[DocBlock::Embed {
+        name: "iframe".to_owned(),
+        content: crate::docs::EmbedContent::Url {
+            url: "https://grafana.example/d/1?a=b".to_owned(),
+        },
+    }]);
+    assert_eq!(
+        md,
+        "[https://grafana.example/d/1?a=b](https://grafana.example/d/1?a=b)\n"
+    );
+}
+
 #[test]
 fn markdown_goes_through_as_it_is_refs_included() {
     assert_eq!(

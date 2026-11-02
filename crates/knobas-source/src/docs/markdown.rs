@@ -31,7 +31,7 @@
 //! Pure and synchronous: no database, no files. The callers decide where the
 //! text goes.
 
-use super::{DocBlock, Inline, ListItem, PanelKind, TableCell};
+use super::{DocBlock, EmbedContent, Inline, ListItem, PanelKind, TableCell};
 
 /// A page as Markdown: `title` as a level-1 heading, then `blocks`, ending in
 /// one newline.
@@ -145,9 +145,20 @@ fn block(block: &DocBlock) -> String {
             Some(_) => format!("<!-- include: {} -->", comment_safe(title)),
         },
         DocBlock::Placeholder { name } => format!("<!-- macro: {} -->", comment_safe(name)),
+        // A framed page is a link to it (spec #2432, story 40; #2441).
+        DocBlock::Embed {
+            content: EmbedContent::Url { url },
+            ..
+        } => inline(&Inline::Link {
+            text: url.clone(),
+            href: url.clone(),
+        }),
         // Markup that runs has no Markdown spelling, and pasting its scripts
         // into a file the reader opens elsewhere would run them there (#2440).
-        DocBlock::Embed { name, .. } => format!("<!-- embed: {} -->", comment_safe(name)),
+        DocBlock::Embed {
+            name,
+            content: EmbedContent::Html { .. },
+        } => format!("<!-- embed: {} -->", comment_safe(name)),
     }
 }
 

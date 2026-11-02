@@ -1044,6 +1044,49 @@ async fn an_html_macro_reads_as_an_embed_and_its_source_says_whether_it_runs() {
     );
 }
 
+/// An `iframe` macro and a widget connector read as embeds of their URL
+/// (#2441), and one naming a `javascript:` URL as the macro's placeholder.
+#[tokio::test]
+async fn an_iframe_macro_and_a_widget_connector_read_as_url_embeds() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let word = word();
+    let storage = format!(
+        "<p>Board {word}.</p>\
+         <ac:structured-macro ac:name=\"iframe\"><ac:parameter ac:name=\"src\">\
+         <ri:url ri:value=\"https://grafana.example/d/{word}?a=1&amp;b=2\" /></ac:parameter></ac:structured-macro>\
+         <ac:structured-macro ac:name=\"widget\"><ac:parameter ac:name=\"url\">\
+         <ri:url ri:value=\"https://www.youtube.com/embed/xyz\" /></ac:parameter></ac:structured-macro>\
+         <ac:structured-macro ac:name=\"iframe\"><ac:parameter ac:name=\"src\">\
+         <ri:url ri:value=\"javascript:alert(1)\" /></ac:parameter></ac:structured-macro>"
+    );
+    let id = page(&pool, &src, "1", "Board", "ENG", &[], &storage).await;
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks[1..],
+        [
+            DocBlock::Embed {
+                name: "iframe".into(),
+                content: EmbedContent::Url {
+                    url: format!("https://grafana.example/d/{word}?a=1&b=2"),
+                },
+            },
+            DocBlock::Embed {
+                name: "widget".into(),
+                content: EmbedContent::Url {
+                    url: "https://www.youtube.com/embed/xyz".into(),
+                },
+            },
+            DocBlock::Placeholder {
+                name: "iframe".into()
+            },
+        ]
+    );
+    assert!(doc.run_embeds, "one switch runs every embed kind");
+}
+
 /// Every word must appear, the snippet is the best sentence and says its
 /// section, and a hit carries its space, path, match count and editor.
 #[tokio::test]

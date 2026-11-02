@@ -927,8 +927,11 @@ at: string | null, blocks: Array<DocBlock>, };
  *   included: the shell serves it from its own origin under a policy of its
  *   own, in a sandboxed frame (#2440). Source markup, never drawn in the
  *   app's document.
+ * - `url`: A page the author framed (#2441): an absolute `http` or `https`
+ *   URL, the shell's frame `src`, in the same sandbox. Built only through
+ *   [`EmbedContent::url`], which refuses any other scheme.
  */
-export type DocEmbedContent = { "kind": "html", html: string, };
+export type DocEmbedContent = { "kind": "html", html: string, } | { "kind": "url", url: string, };
 
 /**
  * What *Export as Markdown* wrote.

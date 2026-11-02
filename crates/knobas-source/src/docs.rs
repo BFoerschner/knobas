@@ -264,11 +264,30 @@ pub enum DocBlock {
 ///   included: the shell serves it from its own origin under a policy of its
 ///   own, in a sandboxed frame (#2440). Source markup, never drawn in the
 ///   app's document.
+/// - `url`: A page the author framed (#2441): an absolute `http` or `https`
+///   URL, the shell's frame `src`, in the same sandbox. Built only through
+///   [`EmbedContent::url`], which refuses any other scheme.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts", rename = "DocEmbedContent")]
 pub enum EmbedContent {
     Html { html: String },
+    Url { url: String },
+}
+
+impl EmbedContent {
+    /// A URL embed of `raw`, trimmed, when it is an absolute `http(s)` URL
+    /// with a host; `None` for anything else (`javascript:`, `file:`, a
+    /// custom scheme, a relative or scheme-relative URL), which the adapter
+    /// draws as a placeholder (spec #2432: only `http` and `https` are framed).
+    pub fn url(raw: &str) -> Option<Self> {
+        let url = raw.trim();
+        let (scheme, rest) = url.split_once("://")?;
+        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let framed = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
+        let clean = !url.chars().any(|c| c.is_whitespace() || c.is_control());
+        (framed && clean && !host.is_empty()).then(|| Self::Url { url: url.to_owned() })
+    }
 }
 
 /// Why knobas could not fill a [`DocBlock::Include`] when the reader was read.
@@ -776,6 +795,41 @@ mod tests {
             },
         ];
         assert_eq!(inlines_mut(&mut blocks).len(), 3);
+    }
+
+    /// A URL embed (#2441) crosses as `{kind: "url", url}`, and is made only
+    /// of an absolute `http(s)` URL with a host.
+    #[test]
+    fn a_url_embed_crosses_naming_its_url_and_takes_only_http_and_https() {
+        let block = DocBlock::Embed {
+            name: "iframe".into(),
+            content: EmbedContent::url(" https://grafana.example/d/1 ").unwrap(),
+        };
+        assert_eq!(
+            serde_json::to_value(&block).unwrap(),
+            serde_json::json!({
+                "type": "embed", "name": "iframe",
+                "content": { "kind": "url", "url": "https://grafana.example/d/1" },
+            })
+        );
+        for good in ["http://a.example", "HTTPS://a.example:8443/x?y#z"] {
+            assert!(EmbedContent::url(good).is_some(), "{good}");
+        }
+        for bad in [
+            "javascript:alert(1)",
+            "javascript://%0aalert(1)",
+            "file:///etc/passwd",
+            "ftp://a.example/",
+            "knobas://x",
+            "//a.example/",
+            "/wiki",
+            "https://",
+            "https:///path",
+            "https://a.example/\nx",
+            "",
+        ] {
+            assert_eq!(EmbedContent::url(bad), None, "{bad:?}");
+        }
     }
 
     /// Spec #2432: an include crosses naming its page, with nothing filled
