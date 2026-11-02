@@ -397,7 +397,9 @@ fn an_implied_end_stops_at_a_table_a_nested_list_and_a_namespaced_element() {
     // An item's search stops at a quote or a section too, as a browser's
     // stops at any special element but `address`, `div` and `p`.
     assert_eq!(
-        shape(&parse("<ul><li>a<blockquote><li>b</blockquote><li>c<div><li>d</ul>")),
+        shape(&parse(
+            "<ul><li>a<blockquote><li>b</blockquote><li>c<div><li>d</ul>"
+        )),
         "ul[li[blockquote[li[]]] li[div[]] li[]]"
     );
     assert_eq!(
