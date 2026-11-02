@@ -24,7 +24,7 @@ import { SYNCED_AT } from "./corpus";
  * database in `crates/knobas-app/tests/it/search_ipc.rs`.
  */
 const FIXTURE_SAVED: { id: string; label: string; query: string; broken?: boolean }[] = [
-  { id: "sepa-tickets", label: "SEPA tickets", query: "#t sepa" },
+  { id: "sepa-payouts", label: "SEPA payouts", query: "sepa payouts" },
   { id: "my-reviews", label: "My reviews", query: "#p @me" },
   { id: "old-gitea", label: "Old Gitea search", query: "/gitea payout", broken: true },
 ];

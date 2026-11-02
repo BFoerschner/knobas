@@ -641,7 +641,7 @@ test("the fixture's board has no lists and hash l answers the saved ones", () =>
   expect(hits.filter((hit) => hit.state?.tone === "warn").map((hit) => hit.entity_id)).toEqual(["old-gitea"]);
 
   const narrowed = handlers["search"]!({ query: { raw: "#l sepa", filters: {} } }) as typeof lists;
-  expect(narrowed.groups[0]!.hits.map((hit) => hit.entity_id)).toEqual(["sepa-tickets"]);
+  expect(narrowed.groups[0]!.hits.map((hit) => hit.entity_id)).toEqual(["sepa-payouts"]);
 
   const inbox = handlers["search"]!({ query: { raw: "#i review", filters: {} } }) as typeof lists & {
     interpreted: { text: string };
@@ -651,7 +651,7 @@ test("the fixture's board has no lists and hash l answers the saved ones", () =>
   expect(inbox.groups).toEqual([]);
 
   // `list:` is retired: no list opens by it.
-  expect(() => handlers["search"]!({ query: { raw: "list:sepa-tickets", filters: {} } })).toThrow();
+  expect(() => handlers["search"]!({ query: { raw: "list:sepa-payouts", filters: {} } })).toThrow();
 });
 
 /**
