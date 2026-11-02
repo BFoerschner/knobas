@@ -8,8 +8,9 @@
  * mirror.
  *
  * Fetching is asked for, never done on page open: the Attachments panel
- * asks for its image rows when it opens (`fetchImages`), and an inline image
- * in the description asks once it is in view (`watch`). Each file is asked at
+ * asks for its image rows when it opens (`fetchImages`), an inline image
+ * asks once it is in view (`watch`), and the attachment preview asks for the
+ * image or PDF it shows (#2415). Each file is asked at
  * most once until *Try again* (`retry`) forgets the failures. A file the list
  * says is over the 5 MiB cap is never asked.
  */
@@ -70,13 +71,39 @@ export interface Previews {
   watch(node: Element, id: string): () => void;
   /** *Try again*: forget every failure and ask again for what failed. */
   retry(): void;
-  /** The page closed: forget everything, and keep no answer still on its way. */
+  /** The page closed: forget everything, keep no answer still on its way, and ask nothing more. */
   drop(): void;
 }
 
 /** Whether a file is drawn as a picture: its media type says image. */
 export function isImage(file: Pick<Attachment, "mime">): boolean {
   return file.mime?.startsWith("image/") ?? false;
+}
+
+/** Whether a file is previewed as a PDF (#2415): its media type says so, or, with none, its name ends `.pdf`. */
+export function isPdf(file: Pick<Attachment, "name" | "mime">): boolean {
+  const mime = file.mime?.trim() ?? "";
+  return mime === "" ? /\.pdf$/i.test(file.name) : mime.toLowerCase() === "application/pdf";
+}
+
+/** A preview's `data:…;base64,` URL as the file's bytes (#2415): what the PDF viewer reads. */
+export function dataBytes(src: string): Uint8Array {
+  const binary = atob(src.slice(src.indexOf(",") + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let at = 0; at < binary.length; at++) bytes[at] = binary.charCodeAt(at);
+  return bytes;
+}
+
+/** Media types drawn as text beside `text/*`: what a ticket's log, trace or data file is sent as. */
+const TEXT_TYPES = /^(text\/|application\/(json|xml|x-ndjson|x-yaml|yaml|csv|x-sh)\b)|\+(json|xml)\b/;
+/** File extensions drawn as text where the media type says nothing better (`application/octet-stream`, none). */
+const TEXT_NAMES = /\.(txt|log|csv|tsv|json|ndjson|xml|ya?ml|md|ini|toml|conf|cfg|sql|sh|diff|patch)$/i;
+
+/** Whether a file is drawn as text: its media type says so, or its name does when the type is missing or generic. */
+export function isText(file: Pick<Attachment, "mime" | "name">): boolean {
+  const mime = file.mime?.trim().toLowerCase() ?? "";
+  if (TEXT_TYPES.test(mime)) return true;
+  return (mime === "" || mime === "application/octet-stream") && TEXT_NAMES.test(file.name);
 }
 
 /** The reason a rejected read gives. */
@@ -112,6 +139,8 @@ export function createAttachmentPreviews({
   const states = new SvelteMap<string, Preview>();
   /** Bumped by `drop` and `retry`: an answer for an older round is not kept. */
   let round = 0;
+  /** The page closed (`drop`): a watch or a click that comes after asks nothing. */
+  let dropped = false;
   let attempt = $state(0);
   const waiting = new Map<string, ((preview: Preview) => void)[]>();
 
@@ -148,7 +177,7 @@ export function createAttachmentPreviews({
     },
     of: (id) => states.get(id) ?? NONE,
     fetch(id) {
-      if (peek(id).state !== "none") return;
+      if (dropped || peek(id).state !== "none") return;
       const file = files.find((candidate) => candidate.id === id);
       if (!file) return;
       if (file.size !== null && file.size > PREVIEW_CAP) {
@@ -210,6 +239,7 @@ export function createAttachmentPreviews({
       for (const id of [...failed, ...loading]) previews.fetch(id);
     },
     drop() {
+      dropped = true;
       round += 1;
       states.clear();
       waiting.clear();

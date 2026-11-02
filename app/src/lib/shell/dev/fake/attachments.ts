@@ -1,7 +1,8 @@
 /**
  * `?fake-ipc`'s attachment bytes and download (spec #2396, #2405):
  * `attachment_bytes` answers PAY-231's two screenshots with a drawn picture
- * of a log panel each (#2406's, moved here when the two joined), and the other files with a line of text; `download_attachment`
+ * of a log panel each (#2406's, moved here when the two joined), its PDF
+ * with a short PDF (#2415's preview), and the other files with a line of text; `download_attachment`
  * answers the path a download would land at. Both look the file up in the
  * fixture's attachment list, as the real commands look it up in the mirror's.
  *
@@ -11,6 +12,7 @@
  */
 import type { Attachment, AttachmentBytes } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { SPEC_PDF } from "../../../render/pdf-fixture";
 import { CORPUS } from "./corpus";
 
 /** The cap the real command reads under: 5 MiB (`ATTACHMENT_CAP`). */
@@ -53,6 +55,16 @@ function picture(seed: number): string {
 
 type Failing = "unreachable" | "forbidden" | null;
 
+/** A text attachment's lines (#2415): what the viewer draws for PAY-231's CSV. */
+const BATCH_CSV = [
+  "payout_id,iban,amount_eur,reason_code,attempts,last_attempt",
+  "PO-130041,DE89370400440532013000,1240.00,AC04,3,2026-08-13T22:41:07Z",
+  "PO-130057,NL91ABNA0417164300,86.50,AM04,1,2026-08-13T22:41:09Z",
+  "PO-130102,FR1420041010050500013M02606,3015.75,MS03,5,2026-08-13T22:41:15Z",
+  "PO-130118,ES9121000418450200051332,412.20,AC04,3,2026-08-13T22:41:18Z",
+  "",
+].join("\n");
+
 /** The file `attachmentId` of `entityId` as the fixture lists it, or the real command's refusal. */
 function listed(entityId: string, attachmentId: string): Attachment {
   const entry = CORPUS.find((candidate) => candidate.entity_id === entityId);
@@ -85,6 +97,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
         throw { code: "invalid", message: `${file.name} is over 5 MiB; knobas previews an attachment up to 5 MiB`, source_id: null };
       const mime = file.mime ?? "application/octet-stream";
       if (mime.startsWith("image/")) return { mime: "image/bmp", data: picture(Number(file.id) || 0).slice("data:image/bmp;base64,".length) };
+      if (mime === "application/pdf") return { mime, data: btoa(String.fromCharCode(...SPEC_PDF())) };
+      if (mime === "text/csv") return { mime, data: btoa(BATCH_CSV) };
       return { mime, data: btoa(`${file.name}\n`) };
     },
     download_attachment: (args) => {

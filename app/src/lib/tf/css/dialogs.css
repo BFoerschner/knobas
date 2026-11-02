@@ -9,11 +9,31 @@
 }
 .tf-dialog header { padding: 14px 18px; border-bottom: 1px solid var(--rule); }
 .tf-dialog header h2 { font-size: var(--t-xl); }
-/* TfDialog's title line: the title block on the left, an optional Close on the right. The negative margin
-   keeps the 32px icon button from growing the header: placement only, no size. */
+/* TfDialog's title line: the title block on the left, an optional Close on the right. The negative margin keeps the
+   32px icon button from growing the header: placement only, no size. */
 .tf-dhead { display: flex; align-items: flex-start; gap: 10px; }
 .tf-dtitle { flex: 1; min-width: 0; }
-.tf-dhead .tf-dclose { margin: -5px -8px -5px 0; }
+.tf-dhead > .tf-dclose { margin: -5px -8px -5px 0; }
+/* With actions (the file viewer's Download, #2415): the actions, a rule and the Close are one cluster, every control
+   the default height, centred on the title block whether it has a sub line or not. The Close sits flush with the
+   header's right padding, as the lone Close does. */
+.tf-dctl { display: flex; align-items: center; gap: var(--control-gap); flex: none; align-self: center; margin-right: -8px; }
+.tf-dctl .tf-acts { display: flex; gap: var(--control-gap); }
+.tf-dsep { width: 1px; height: 20px; margin: 0 2px; background: var(--rule); }
+
+/* The file viewer (`TfFileViewer`, #2415): a wide dialog whose body is the stage, a recessed surface edge to edge under
+   the title line that the file sits on. An image floats on it whole; a PDF and text fill its width; a file with no
+   preview, or one whose bytes are missing, is a short centred column. */
+.tf-dialog.tf-viewer { width: min(1040px, calc(100vw - 32px)); }
+.tf-dialog.tf-viewer .tf-body { padding: 0; gap: 0; background: var(--sheet-2); }
+.tf-vglyph { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.tf-vstage { display: flex; flex-direction: column; min-height: 220px; }
+.tf-vstage[data-shows="image"] { align-items: center; justify-content: center; padding: 24px; }
+.tf-vstage > img { display: block; max-width: 100%; max-height: 66vh; object-fit: contain; border-radius: 3px; box-shadow: var(--shadow); }
+.tf-vstage > pre { background: var(--sheet); padding: 10px 0; flex: 1; }
+.tf-vnote { padding: 8px 18px; font-size: var(--t-xs); color: var(--ink-2); border-top: 1px solid var(--rule); }
+.tf-vempty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 32px 18px; text-align: center; }
+.tf-vempty p { max-width: 52ch; }
 .tf-dclose svg { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; }
 /* The import dialog's width (a dialog of its own width passes `className` to TfDialog). */
 .tf-dialog.tf-dwide { width: min(820px, calc(100vw - 32px)); }

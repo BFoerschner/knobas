@@ -5,8 +5,9 @@
   - A folder folds, says how many files it holds and offers *Download
     folder* (a zip). The top-level folders start open; a deeper one is read
     when it is opened.
-  - A file shows its size, *Preview* for a text file (`artifact_preview`,
-    drawn under the tree) and *Download*.
+  - A file shows its size and *Download*; its name opens it in the app's
+    file viewer (`TfFileViewer`, #2415): the head of a text file
+    (`artifact_preview`), else *No preview*, with *Download* on its title line.
   - *Download all as zip*. Every download streams through knobas with the
     stored credential into the downloads folder (`download_run_file`).
 -->
@@ -15,6 +16,8 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { ArtifactEntry, ArtifactPreview, DownloadTarget } from "../../ipc/entity";
+  import { attachmentKind } from "../job/attachments";
+  import TfFileViewer, { type ViewerContent } from "../render/TfFileViewer.svelte";
   import type { RunPorts } from "./pipeline-ports";
   import { downloadAndSay, filesText, previewable, sizeText } from "./run-reads";
 
@@ -40,7 +43,7 @@
   type Folder = ArtifactEntry[] | "reading" | { failed: string };
   let folders = $state<Record<string, Folder>>({});
   let open = $state<Record<string, boolean>>({});
-  let preview = $state<{ path: string; answer: ArtifactPreview | "reading" | { failed: string } } | null>(null);
+  let preview = $state<{ entry: ArtifactEntry; answer: ArtifactPreview | "reading" | { failed: string } } | null>(null);
   let token = 0;
 
   function readFolder(path: string) {
@@ -102,17 +105,32 @@
 
   const download = (target: DownloadTarget, what: string) => downloadAndSay(ports.download, runId, target, what);
 
-  function showPreview(path: string) {
-    preview = { path, answer: "reading" };
+  /** Open one file in the viewer: a text file's head is read, any other file has no preview. */
+  function showPreview(entry: ArtifactEntry) {
+    if (!previewable(entry)) {
+      preview = { entry, answer: { text: null, truncated: false } };
+      return;
+    }
+    preview = { entry, answer: "reading" };
     const mine = token;
+    const path = entry.path;
     ports.preview(runId, path).then(
       (answer) => {
-        if (mine === token && preview?.path === path) preview = { path, answer: answer ?? { text: null, truncated: false } };
+        if (mine === token && preview?.entry.path === path) preview = { entry, answer: answer ?? { text: null, truncated: false } };
       },
       (cause: unknown) => {
-        if (mine === token && preview?.path === path) preview = { path, answer: { failed: ipcErrorMessage(cause) } };
+        if (mine === token && preview?.entry.path === path) preview = { entry, answer: { failed: ipcErrorMessage(cause) } };
       },
     );
+  }
+
+  /** What the viewer shows for the open file. */
+  function viewerContent(open: NonNullable<typeof preview>): ViewerContent {
+    const answer = open.answer;
+    if (answer === "reading") return { kind: "reading" };
+    if ("failed" in answer) return { kind: "missing", why: `${open.entry.name} could not be read: ${answer.failed}`, retry: () => showPreview(open.entry) };
+    if (answer.text === null) return { kind: "none" };
+    return { kind: "text", text: answer.text, truncated: answer.truncated };
   }
 </script>
 
@@ -141,12 +159,9 @@
         {#if isOpen}{@render tree(entry.path, depth + 1)}{/if}
       {:else}
         <div class={`tf-arow ${indent}`}>
-          <span class="tf-nm">{entry.name}</span>
+          <button type="button" class="tf-nm tf-aopen" title="Open {entry.name}" onclick={() => showPreview(entry)}>{entry.name}</button>
           <span class="tf-sz">{entry.size === null ? "" : sizeText(entry.size)}</span>
           <span class="tf-acts">
-            {#if previewable(entry)}
-              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => showPreview(entry.path)}>Preview</button>
-            {/if}
             <button type="button" class="tf-btn tf-sm" onclick={() => download({ kind: "file", path: entry.path }, entry.name)}>Download</button>
           </span>
         </div>
@@ -172,27 +187,15 @@
 {/if}
 
 {#if preview !== null}
-  {@const answer = preview.answer}
-  {@const name = preview.path.split("/").at(-1) ?? preview.path}
-  <div class="tf-apreview">
-    <div class="tf-fileview">
-      <header>
-        <span class="tf-p">{preview.path}</span>
-        <span class="tf-trail">
-          <button type="button" class="tf-btn tf-sm" onclick={() => preview && download({ kind: "file", path: preview.path }, name)}>Download</button>
-          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (preview = null)}>Close</button>
-        </span>
-      </header>
-      {#if answer === "reading"}
-        <p class="tf-fpad tf-dim">Reading {name}…</p>
-      {:else if "failed" in answer}
-        <p class="tf-fpad tf-dim">{name} could not be read: {answer.failed}</p>
-      {:else if answer.text === null}
-        <p class="tf-fpad tf-dim">{name} is not text. Download it to open it.</p>
-      {:else}
-        <pre class="tf-code">{#each answer.text.split("\n") as text, i (i)}<div class="tf-l"><span>{i + 1}</span><span>{text || " "}</span></div>{/each}</pre>
-        {#if answer.truncated}<p class="tf-fpad tf-dim">The first 256 KB. Download it for the rest.</p>{/if}
-      {/if}
-    </div>
-  </div>
+  {@const entry = preview.entry}
+  <TfFileViewer
+    name={entry.name}
+    line={[entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/") + 1) : null, entry.size === null ? null : sizeText(entry.size)]
+      .filter((part) => part !== null)
+      .join(", ") || null}
+    kind={attachmentKind({ name: entry.name, mime: null })}
+    content={viewerContent(preview)}
+    download={() => void download({ kind: "file", path: entry.path }, entry.name)}
+    onclose={() => (preview = null)}
+  />
 {/if}

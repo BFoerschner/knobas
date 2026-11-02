@@ -107,11 +107,12 @@ export const CORPUS: {
       { who: "mara", seconds: 2400 },
     ],
     // Jira wiki markup, unlike the mock adapter's Markdown (#2308): a demo
-    // divergence, so the page draws the wiki's inline screenshot and its
-    // `(/)` `(x)` checklist under `?fake-ipc` (#2406).
+    // divergence, so the page draws the wiki's inline screenshot, its
+    // `(/)` `(x)` checklist (#2406) and its `[^name]` link to an attachment
+    // (#2415) under `?fake-ipc`.
     markup: "jira_wiki",
     description:
-      "Payouts to two SEPA banks fail with a *409* on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n!psp-409-trace.png|thumbnail!\n\n* (/) Retry only the transient codes ({{AC04}} is final)\n* (x) Cap the retry budget",
+      "Payouts to two SEPA banks fail with a *409* on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n!psp-409-trace.png|thumbnail!\n\nThe codes are in [^sepa-error-codes.pdf].\n\n* (/) Retry only the transient codes ({{AC04}} is final)\n* (x) Cap the retry budget",
     comments: [{ by: "mara" }, { by: "jonas" }],
     // The ticket page's attachment list (#2404), as `get_entity` answers it:
     // the four files the Tidewater fixture gives PAY-231, at the addresses

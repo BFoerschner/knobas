@@ -60,7 +60,13 @@
 .tf-arow.tf-ad6 .tf-nm, .tf-arow.tf-ad6 > .tf-fold { padding-left: 108px; }
 .tf-aall { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
 .tf-aall .tf-dim { font-size: var(--t-sm); }
-.tf-apreview { margin-top: 12px; }
+/* A file's name opens it in the file viewer (#2415): the name drawn as it was, a link's underline under the pointer. */
+.tf-arow > button.tf-aopen {
+  all: unset; cursor: pointer; font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tf-arow > button.tf-aopen:hover { text-decoration: underline; text-underline-offset: 3px; }
+.tf-arow > button.tf-aopen:focus-visible { outline: 2px solid var(--focus); }
 .tf-tres { margin-top: 10px; }
 .tf-trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-trow:first-child { border-top: 0; }

@@ -12,8 +12,8 @@
  * and `\\`. `{color}` and `{panel}` tags are dropped, their text kept.
  * `!name.ext|…!` is an image when the ticket's attachment list holds a file
  * of that name (`attachment:<id>`, which the Markdown component fills through
- * the surface, #2406); `(/)` and `(x)` at a list item's start are a done and
- * an open task box.
+ * the surface, #2406), and `[^name]` a link to it there (#2415); `(/)` and
+ * `(x)` at a list item's start are a done and an open task box.
  * Anything else stays as written. A single line break is a line break, as
  * Jira draws it, and raw HTML is text, as Jira treats it: the Markdown
  * engine would otherwise parse it.
@@ -187,23 +187,32 @@ function inlineMarkup(text: string, files: ReadonlyMap<string, string>): string 
     .join("");
 }
 
-/** `!name!` or `!name|params!`: no space just inside either `!`. */
-const IMAGE = /!(?=[^\s!|])([^!|\n]*[^\s!|])(?:\|[^!\n]*)?!/g;
+/**
+ * `!name!` or `!name|params!` (an image: no space just inside either `!`), or
+ * `[^name]` (Jira's link to an attachment, #2415).
+ */
+const ATTACHMENT = /!(?=[^\s!|])([^!|\n]*[^\s!|])(?:\|[^!\n]*)?!|\[\^([^\]\n]+)\]/g;
 
-/** A text's `!name!` images whose name the attachment list holds, as Markdown images; the rest, and anything else, as words. */
+/**
+ * A text's `!name!` images and `[^name]` links whose name the attachment list
+ * holds, as Markdown images and links to `attachment:<id>`; the rest, and
+ * anything else, as words.
+ */
 function images(text: string, files: ReadonlyMap<string, string>): string {
   let out = "";
   let from = 0;
-  for (const match of text.matchAll(IMAGE)) {
-    const id = files.get(match[1]!);
+  for (const match of text.matchAll(ATTACHMENT)) {
+    const name = match[1] ?? match[2]!;
+    const id = files.get(name);
     if (id === undefined) continue;
-    out += words(text.slice(from, match.index)) + `![${altText(match[1]!)}](attachment:${encodeURIComponent(id)})`;
+    const bang = match[1] === undefined ? "" : "!";
+    out += words(text.slice(from, match.index)) + `${bang}[${altText(name)}](attachment:${encodeURIComponent(id)})`;
     from = match.index + match[0].length;
   }
   return out + words(text.slice(from));
 }
 
-/** A file name as an image's alt text: the characters Markdown reads there escaped. */
+/** A file name as an image's alt text or a link's text: the characters Markdown reads there escaped. */
 function altText(name: string): string {
   return name.replace(/[\\[\]*_`<>]/g, (c) => (c === "<" ? "&lt;" : `\\${c}`));
 }

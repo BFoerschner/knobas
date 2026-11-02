@@ -13,12 +13,15 @@
   write, or a run's end) holds its words. *Edit and resend* on a held or
   refused one puts its words back in the box. A comment whose source writes
   markup (`markdown`, `jira_wiki`, #2308) is drawn with the Markdown
-  component. A comment the source's credential cannot make (`refused`, #2052)
-  draws *Comment* disabled with the reason under the box, and queues nothing.
+  component, its `!name!` images and `[^name]` links resolved against the
+  ticket's attachments and drawn as the description's are (#2415). A
+  comment the source's credential cannot make (`refused`, #2052) draws
+  *Comment* disabled with the reason under the box, and queues nothing.
   The box is one line until it is used (`job.css`).
 -->
 <script lang="ts">
-  import type { Thread } from "../../ipc/entity";
+  import type { Attachment, Thread } from "../../ipc/entity";
+  import type { AttachmentImages } from "../../render/markdown";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { proseMarkdown } from "../../render/prose";
   import { refusedAttrs } from "../../shell/refused-writes";
@@ -36,6 +39,8 @@
     now,
     refused = null,
     oncomment,
+    attachments = [],
+    images = null,
   }: {
     jobKey: string;
     /** The ticket's entity id, which *Edit and resend* names. */
@@ -53,6 +58,10 @@
     refused?: string | null;
     /** Queue a comment; resolves whether it was queued, so the box keeps a refused text. */
     oncomment: (body: string) => Promise<boolean>;
+    /** The ticket's attachments, which a wiki comment's `!name!` and `[^name]` name (#2415). */
+    attachments?: readonly Attachment[];
+    /** How those draw and open: the page's inline images. */
+    images?: AttachmentImages | null;
   } = $props();
 
   let draft = $state("");
@@ -91,7 +100,7 @@
   {:else}
     {#each drawn.entries as entry, index (index)}
       {@const comment = entry.comment}
-      {@const markdown = proseMarkdown(comment.body, comment.markup)}
+      {@const markdown = proseMarkdown(comment.body, comment.markup, attachments)}
       {#if index === drawn.newAt && lastVisit !== null}
         <div class="tf-newline">New since your last visit, {since(lastVisit, now)}</div>
       {/if}
@@ -103,7 +112,7 @@
             {#if comment.mentions_me}<span class="tf-chip tf-chip-mention">mentions you</span>{/if}
           </div>
           {#if markdown !== null}
-            <TfMarkdown text={markdown} />
+            <TfMarkdown text={markdown} attachments={images} />
           {:else}
             <p>
               {#each mentionRuns(comment.body, thread.me) as run, at (at)}{#if run.at}<span class="tf-at">{run.text}</span>{:else}{run.text}{/if}{/each}

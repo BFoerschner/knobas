@@ -2,6 +2,9 @@
   The app's one dialog shell (#830, review of #2238): prototype-6's `.dialog`,
   a header, a body and a footer of buttons over a scrim. A dialog of its own
   width passes `className`; the asset tree's dialogs ask for a header Close.
+  A dialog that acts on what it shows puts that action on its title line
+  (`actions`: the file viewer's *Download*, #2415); with a Close beside it,
+  the two are one cluster centred on the title block, a rule between them.
   A title with markup in it (the worklog draft's ticket key in mono) is a
   snippet. A dialog whose body is a form keeps the `<form>` in the body and
   points its footer's submit at it with `form=` (`TfApplySet`, `TfBlockDialog`).
@@ -33,6 +36,7 @@
     footer,
     className = "",
     closeButton = false,
+    actions,
   }: {
     /** Text, or a snippet when the title holds markup (#2346); either way it names the dialog. */
     title: string | Snippet;
@@ -46,6 +50,8 @@
     className?: string;
     /** A Close icon button on the right of the title line. */
     closeButton?: boolean;
+    /** Buttons on the right of the title line, before the Close: the title line is the dialog's header. */
+    actions?: Snippet;
   } = $props();
 
   const uid = $props.id();
@@ -121,10 +127,18 @@
         <h2 id={titleId}>{#if typeof title === "string"}{title}{:else}{@render title()}{/if}</h2>
         {#if subtitle}<p class="tf-dsub">{subtitle}</p>{/if}
       </div>
-      {#if closeButton}
+      {#snippet close()}
         <button type="button" class="tf-iconbtn tf-dclose" aria-label="Close" onclick={onclose}>
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
         </button>
+      {/snippet}
+      {#if actions}
+        <div class="tf-dctl">
+          <div class="tf-acts">{@render actions()}</div>
+          {#if closeButton}<span class="tf-dsep" aria-hidden="true"></span>{@render close()}{/if}
+        </div>
+      {:else if closeButton}
+        {@render close()}
       {/if}
     </header>
     <div class="tf-body">{@render body()}</div>

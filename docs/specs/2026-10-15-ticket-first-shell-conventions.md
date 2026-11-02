@@ -100,6 +100,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A list header that sorts is a `th` carrying `aria-sort` with a button inside; CSS draws ▴ or ▾ on the sorted one. A column that does not sort is a plain `th`. (#813)
 - A signal is drawn through `tickets/Signals.svelte`: a `tf-dot` in its tone, then its words. Cards and list rows draw the read's signals and nothing else. (#815)
 - A saved view's words name its ticket system, `saved_view_source.system` (*Jira decides which tickets*, *Open in Jira*), never the word Jira; a group is the source's when one of its views has a `saved_view_source`, never by its name; Settings' *Boards and filters* names the adapter's declaration (`savedViewSystem`). `lib/shell/house-rules.test.ts` keeps Jira out of what `tf/tickets/` and `TfBoardsAndFilters.svelte` draw. (#2032)
+- A ticket's attachment opens in the one attachment preview, `tf/job/TfAttachmentPreview.svelte` (a `TfDialog` viewer), from its Attachments row, a `[^name]` link or an inline `!name!` image in the description or a comment; its bytes are the page's previews (`attachment-previews.svelte.ts`). Nothing hands an attachment's address to the browser: *Download* in the preview is the way out. (#2415)
 - A control that needs a role's optional read (*Make an editable copy* needs `translate_query`) is drawn only where the source's claim names that read (`sourceRoles.answers`); while the claims are unread it is not drawn. The surface itself still shows. (#1208)
 
 ## Writes and undo

@@ -12,7 +12,8 @@
  *   stylesheet or a component;
  * - (c) a row of buttons (an actions container: `.tf-acts`, a local `…acts` row or the bare `.acts`,
  *   `.tf-trail`, a dialog footer; or a row that holds controls under another name: the filter bar
- *   `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, a `…-btns` row) has a
+ *   `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, a `…-btns` row, a dialog's
+ *   title-line cluster `.tf-dctl`) has a
  *   `gap` other than `var(--control-gap)`;
  * - (f) a field in a row of buttons (the filter bar's `.tf-fsearch`, or a `select` or `input` in a
  *   row of buttons or a `.tf-fsel`) is sized by vertical padding or a literal height: it takes the
@@ -74,9 +75,10 @@ const ACTIONS_CLASS = /\.(?:(?:[\w-]+(?<![fF]))?acts|tf-trail|dlg-f)(?![\w-])/;
 const DIALOG = /\.(?:[\w-]*dialog[\w-]*|tf-steps)(?![\w-])/;
 /**
  * Rows of controls not named for actions (rule c, review of #2238): the filter bar, the pill
- * toggles, the link review's large decision and a `…-btns` row (the view editor's `.tf-vw-btns`).
+ * toggles, the link review's large decision, a `…-btns` row (the view editor's `.tf-vw-btns`) and a
+ * dialog's title-line cluster of actions and Close (`.tf-dctl`, #2415).
  */
-const BUTTON_ROW = /\.(?:tf-fbar|tf-fchips|tf-decide|[\w-]+-btns)(?![\w-])/;
+const BUTTON_ROW = /\.(?:tf-fbar|tf-fchips|tf-decide|tf-dctl|[\w-]+-btns)(?![\w-])/;
 
 /** Every `.css` and `.svelte` file under `root`, relative, sorted. */
 function files(root: string): string[] {
@@ -493,6 +495,8 @@ test("(c) a row of buttons with a gap other than the control gap fails", () => {
     ".tf-fchips { display: inline-flex; gap: 4px; }",
     ".tf-decide { display: flex; gap: 10px; }",
     ".tf-vw-btns { display: flex; gap: 8px; }",
+    // A dialog's title-line cluster of actions and Close (#2415).
+    ".tf-dhead .tf-dctl { display: flex; gap: 6px; }",
   ]) {
     const failures = planted({ "lib/tf/css/view.css": css });
     expect(failures, css).toHaveLength(1);

@@ -11,7 +11,8 @@
  *   frame, style or class of the author's. The classes the fragment carries
  *   are set after the sanitizer, from markers only this module writes and the
  *   sanitizer lets through (`data-md-fence`, `data-md-task`, `data-md-attachment`); an author who
- *   writes a marker by hand gets a fence or a task box, nothing more.
+ *   writes a marker by hand gets a fence, a task box, or a link to the surface's preview of an
+ *   attachment it already holds, nothing more.
  * - **Links** are classified by {@link resolveLink}: repository-relative ones
  *   resolve against the file's directory and take the href the surface gives
  *   (`fileLink`), or draw as text where it gives none; `http(s)` ones are
@@ -22,7 +23,8 @@
  *   remote ones); a relative one keeps its resolved path in `data-md-path`
  *   for the byte read (#2256), and an `attachment:<id>` one (the Jira wiki's
  *   `!name!`, #2406) keeps its id in `data-md-attachment` for the surface's
- *   attachment read. No element but `<a>` keeps an `href` and none
+ *   attachment read, as an `attachment:<id>` link (`[^name]`, #2415) does
+ *   for the surface's preview, with no `href` until the surface gives one. No element but `<a>` keeps an `href` and none
  *   but `<img>` a `src` (`<area>`, `<video>`, `<audio>`, `<source>`, `<track>`).
  * - **Fences** are `.tf-fence` blocks. {@link drawFences} hands each to the
  *   renderer the registry names for its language (`renderersForFence`) that
@@ -49,6 +51,12 @@ export interface AttachmentImages {
    */
   watch?(node: Element, id: string): () => void;
   load(id: string): Promise<string>;
+  /**
+   * Where the surface previews a file (#2415): an attachment link, and an
+   * attachment image, open it. Without it the link is its text and the image
+   * only a picture.
+   */
+  open?(id: string): void;
   missing(name: string, error: unknown): { text: string; link: { href: string; label: string } | null };
 }
 
@@ -139,6 +147,18 @@ engine.renderer.rules.image = (tokens, idx, options, env, self) => {
   return image(tokens, idx, options, env, self);
 };
 
+// An `attachment:<id>` link (the Jira wiki's `[^name]`, #2415) carries its id the same way, for the surface's preview.
+const linkOpen = engine.renderer.rules.link_open ?? ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+engine.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+  const token = tokens[idx]!;
+  const attachment = /^attachment:(.+)$/i.exec(String(token.attrGet("href") ?? "").trim());
+  if (attachment) {
+    token.attrSet("href", "");
+    token.attrSet("data-md-attachment", decode(attachment[1]!));
+  }
+  return linkOpen(tokens, idx, options, env, self);
+};
+
 // Task lists: a list item whose text starts `[ ] ` or `[x] ` is marked, and the box drawn after the sanitizer.
 engine.core.ruler.push("tf-tasks", (state) => {
   const tokens = state.tokens;
@@ -191,6 +211,10 @@ function finish(root: DocumentFragment, links: MarkdownLinks) {
     const href = anchor.getAttribute("href");
     const to = href === null ? ({ kind: "none" } as const) : resolveLink(href, links.base);
     anchor.removeAttribute("href");
+    if (anchor.dataset["mdAttachment"] !== undefined) {
+      anchor.classList.add("tf-md-attlink");
+      continue;
+    }
     if (to.kind === "external") {
       anchor.setAttribute("href", to.url);
       anchor.className = "tf-ext";

@@ -143,6 +143,9 @@ vi.mock("../ipc/entity", () => ({
   submitWrite: () => Promise.reject(new Error("no write in this test")),
   // The asset editor's *Depends on* links (#875). Nothing here saves one.
   createLink: () => Promise.reject(new Error("no link in this test")),
+  // The attachment preview's Download and the previews' default read (#2415). The case hands its own; these refuse.
+  downloadAttachment: () => Promise.reject(new Error("no download in this test")),
+  attachmentBytes: () => Promise.reject(new Error("no attachment read in this test")),
   // The pipeline page's two live reads (#851), answering late.
   pipelineSettings: () => deferred(null),
   olderPipelineRuns: () => deferred([]),
@@ -432,6 +435,8 @@ const TfSetPicker = (await import("../tf/sets/TfSetPicker.svelte")).default;
 const TfSetPattern = (await import("../tf/sets/TfSetPattern.svelte")).default;
 const TfApplySet = (await import("../tf/job/TfApplySet.svelte")).default;
 const TfSaveSet = (await import("../tf/job/TfSaveSet.svelte")).default;
+const TfAttachmentPreview = (await import("../tf/job/TfAttachmentPreview.svelte")).default;
+const { createAttachmentPreviews } = await import("../tf/job/attachment-previews.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
@@ -1327,6 +1332,36 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /** The attachment preview (#2415): its dialog's layer, and the PDF's bytes asked and answered late. */
+    name: "TfAttachmentPreview",
+    source: "lib/tf/job/TfAttachmentPreview.svelte",
+    open: (target) => {
+      const file = {
+        id: "50002",
+        name: "codes.pdf",
+        mime: "application/pdf",
+        size: 4,
+        author: null,
+        created: null,
+        content_url: "https://jira.example/secure/attachment/50002/codes.pdf",
+        thumbnail_url: null,
+      };
+      const previews = createAttachmentPreviews({
+        entityId: "jira:PAY-231",
+        files: [file],
+        source: "Tidewater Jira",
+        read: () => deferred({ mime: "application/pdf", data: "JVBERg==" }),
+        observe: null,
+      });
+      return {
+        app: mount(TfAttachmentPreview, {
+          target,
+          props: { file, previews, source: "Tidewater Jira", layers: createLayers(), download: () => deferred("/tmp/codes.pdf"), onclose: () => {} },
+        }),
+      };
+    },
   },
   {
     /** A PDF's diff (#2282): both documents answer late, their pages compared, a page drawn through a held observer. */
