@@ -148,8 +148,8 @@ impl Source for ConfluenceSource {
             secret_expires_at: None,
             // No connection note: the display name and user key said nothing
             // `account` does not, and a note is for what nothing else on the
-            // report says (#326). The key stays what the sync compares a
-            // mention tag against (`storage::mentioned_name`).
+            // report says (#326). The key stays what the sync resolves a
+            // mention of the credential's own account by (`users::Directory`).
             detail: None,
             // Nothing per-instance for the dialog to fill: this adapter's
             // config keys are spaces and tuning, all of them the reader's own

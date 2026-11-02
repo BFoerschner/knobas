@@ -24,6 +24,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod html;
 pub mod markdown;
 mod search_text;
 
