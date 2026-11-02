@@ -68,7 +68,7 @@ export interface TfPageContext {
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
   /** The job the shell's pages default to (the chosen job, else the timer's ticket) with its entity id, or `null`. */
-  navJob: { key: string; entityId: string } | null;
+  defaultJob: { key: string; entityId: string } | null;
   timer: Pick<Timer, "current" | "elapsed">;
   layers: Layers;
   /** The colour theme the top bar toggles and Settings › Appearance sets. */

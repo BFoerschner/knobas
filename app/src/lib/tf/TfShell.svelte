@@ -293,7 +293,7 @@
    * with its entity id, which `create_block` needs (#1027). Both are ids
    * already, so nothing is read for it.
    */
-  const navJobId = $derived.by(() => {
+  const defaultJob = $derived.by(() => {
     if (chosen !== null) return chosen;
     const target = timer.current?.target ?? null;
     return timedTicket === null || target === null || target.kind !== "entity" ? null : { key: timedTicket, entityId: target.entity_id };
@@ -557,7 +557,7 @@
         jobAt: chosen?.entityId ?? null,
         back,
         timedTicket,
-        navJob: navJobId,
+        defaultJob,
         timer,
         layers,
         theme,

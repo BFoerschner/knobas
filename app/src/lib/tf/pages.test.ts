@@ -127,8 +127,8 @@ test("the job page hands TfJob the address's key, and no tab: the page has none 
 
 test("the deps page opens from the ticket its address names, with the open job's id when it is that ticket", () => {
   type Ctx = Parameters<typeof depsPage.props>[0];
-  const props = (hash: string, navJob: Ctx["navJob"]) =>
-    depsPage.props({ route: parseTfHash(hash), ready: true, job: "PAY-231", navJob } as Ctx);
+  const props = (hash: string, defaultJob: Ctx["defaultJob"]) =>
+    depsPage.props({ route: parseTfHash(hash), ready: true, job: "PAY-231", defaultJob } as Ctx);
   const nav = { key: "PAY-231", entityId: "jira:PAY-231" };
   expect(props("#/deps/job/PAY-231", nav)).toMatchObject({ ticket: "PAY-231", ticketId: "jira:PAY-231", job: "PAY-231" });
   expect(props("#/deps/job/PAY-228", nav)).toMatchObject({ ticket: "PAY-228", ticketId: null });

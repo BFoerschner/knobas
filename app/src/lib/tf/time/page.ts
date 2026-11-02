@@ -9,9 +9,9 @@ export const page = definePage({
   matches: (route): route is TimeRoute => route.view === "full" && route.section === "time",
   component: TfTime,
   crumbs: true,
-  props: ({ route, ready, timer, ontimer, onlog, timeRevision, ontimechanged, navJob }) => ({
+  props: ({ route, ready, timer, ontimer, onlog, timeRevision, ontimechanged, defaultJob }) => ({
     ready,
-    job: navJob,
+    job: defaultJob,
     rest: route.rest,
     timer,
     ontimer,
