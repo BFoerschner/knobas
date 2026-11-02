@@ -222,7 +222,12 @@ async fn a_tickets_hit_carries_its_declared_status_tone() {
         })
         .await
         .unwrap();
-    let hits: Vec<_> = response.groups.iter().flat_map(|g| &g.hits).map(|h| &h.row).collect();
+    let hits: Vec<_> = response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| &h.row)
+        .collect();
     let tone = |id: &String| {
         hits.iter()
             .find(|row| &row.entity_id == id)

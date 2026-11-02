@@ -651,12 +651,19 @@ mod tests {
             .expect("the ticket kind declares its paths");
         let chip = |status: &str| {
             let payload = serde_json::json!({ "fields": { "status": { "name": status } } });
-            knobas_core::payload::resolve_state(&payload, &ticket.state).map(|chip| (chip.text, chip.tone))
+            knobas_core::payload::resolve_state(&payload, &ticket.state)
+                .map(|chip| (chip.text, chip.tone))
         };
         assert_eq!(chip("Done"), Some(("Done".to_owned(), Tone::Ok)));
         assert_eq!(chip("Resolved"), Some(("Resolved".to_owned(), Tone::Ok)));
-        assert_eq!(chip("In Progress"), Some(("In Progress".to_owned(), Tone::Info)));
-        assert_eq!(chip("In Review"), Some(("In Review".to_owned(), Tone::Info)));
+        assert_eq!(
+            chip("In Progress"),
+            Some(("In Progress".to_owned(), Tone::Info))
+        );
+        assert_eq!(
+            chip("In Review"),
+            Some(("In Review".to_owned(), Tone::Info))
+        );
         assert_eq!(chip("Closed"), Some(("Closed".to_owned(), Tone::Muted)));
         assert_eq!(chip("To Do"), None);
         assert_eq!(chip("Open"), None);
