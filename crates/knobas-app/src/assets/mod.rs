@@ -903,6 +903,11 @@ pub struct MonitorRow {
     /// roster that dropped it would say nothing about a monitor somebody
     /// silenced.
     pub tombstoned: bool,
+    /// Whether the reader hid it (`knobas.monitor_hidden`, [`set_monitor_hidden`]):
+    /// the tab draws it only under its *Hidden* chip, and its alerts reach no
+    /// inbox and so raise no desktop notification. Knobas-local; Uptime Kuma
+    /// goes on checking it.
+    pub hidden: bool,
     /// The assets this monitor is attached to by a `monitored-by` link, by
     /// name -- with the path that tells two containers called `postgres`
     /// apart. Empty for a monitor nothing is attached to, which the tab says
@@ -2048,7 +2053,9 @@ const BAR_WINDOW_HOURS: i32 = 24;
 /// By name, then by id: the tab is a list a person reads down, and two
 /// monitors named the same still draw in a fixed order.
 const ROSTER: &str = "select i.entity_id, i.source_id, i.title, i.payload, i.web_url, i.synced_at,
-                             e.deleted_at is not null as tombstoned, s.kind as adapter_kind
+                             e.deleted_at is not null as tombstoned, s.kind as adapter_kind,
+                             exists (select 1 from knobas.monitor_hidden h
+                                      where h.entity_id = i.entity_id) as hidden
   from sync.item i
   join knobas.entity e on e.id = i.entity_id
   left join knobas.source_config s on s.id = i.source_id
@@ -2201,6 +2208,7 @@ pub async fn monitor_roster(
                 cert_days_remaining: reading.cert_days_remaining,
                 web_url: row.try_get("web_url")?,
                 tombstoned: row.try_get("tombstoned")?,
+                hidden: row.try_get("hidden")?,
                 assets: attached.remove(&entity_id).unwrap_or_default(),
                 // Filled by `offer_actions`, which needs the keychain and so
                 // cannot happen inside a read over a pool. Empty here means
@@ -2218,6 +2226,55 @@ pub async fn monitor_roster(
             })
         })
         .collect()
+}
+
+/// Hide one monitor from the Monitors tab, or show it again; answers whether
+/// it is hidden now.
+///
+/// Knobas-local and not a [write-back](knobas_source::WriteOp): nothing goes
+/// to Uptime Kuma, which goes on checking it, and its alert still opens and
+/// closes. What hiding changes is two reads: the roster's
+/// [`MonitorRow::hidden`], and `knobas_core::inbox`'s alert rule, which takes
+/// no alert of a hidden monitor, so it raises no desktop notification.
+///
+/// Hiding twice is one hide and keeps the first `hidden_at`; showing a monitor
+/// that is not hidden writes nothing.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] when `monitor_id` is no monitor in the mirror.
+pub async fn set_monitor_hidden(
+    pool: &PgPool,
+    monitor_id: &str,
+    hidden: bool,
+) -> Result<bool, IpcError> {
+    let known: bool = sqlx::query_scalar(
+        "select exists (select 1 from sync.item where entity_id = $1 and kind = $2)",
+    )
+    .bind(monitor_id)
+    .bind(MONITOR_KIND)
+    .fetch_one(pool)
+    .await?;
+    if !known {
+        return Err(IpcError::not_found(format!(
+            "no monitor {monitor_id:?} in the mirror"
+        )));
+    }
+    if hidden {
+        sqlx::query(
+            "insert into knobas.monitor_hidden (entity_id) values ($1)
+             on conflict (entity_id) do nothing",
+        )
+        .bind(monitor_id)
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query("delete from knobas.monitor_hidden where entity_id = $1")
+            .bind(monitor_id)
+            .execute(pool)
+            .await?;
+    }
+    Ok(hidden)
 }
 
 /// Fill in each row's [`actions`](MonitorRow::actions) from what each source
@@ -6994,6 +7051,7 @@ mod tests {
             cert_days_remaining: None,
             web_url: None,
             tombstoned,
+            hidden: false,
             assets: Vec::new(),
             actions: Vec::new(),
             refreshes: true,

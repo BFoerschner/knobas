@@ -51,6 +51,7 @@ function monitor(name: string, state: string | null, tombstoned = false): Monito
     cert_days_remaining: null,
     web_url: null,
     tombstoned,
+    hidden: false,
     assets: [],
     samples: [],
   };

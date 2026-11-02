@@ -1033,6 +1033,26 @@ pub async fn ack_alert<R: tauri::Runtime>(
     Ok(written.value)
 }
 
+/// Hide one monitor from the Monitors tab, or show it again; answers whether
+/// it is hidden now. A hidden monitor's alerts reach no inbox, so it raises no
+/// desktop notification. `assets::set_monitor_hidden` argues the rest.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when the id is no monitor in
+/// the mirror, and [`Internal`](crate::IpcErrorCode::Internal) if a write
+/// fails.
+#[tauri::command]
+pub async fn set_monitor_hidden(
+    lifecycle: State<'_, Lifecycle>,
+    monitor_id: String,
+    hidden: bool,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::set_monitor_hidden(&pool, &monitor_id, hidden).await
+}
+
 async fn read_monitoring(pool: &sqlx::PgPool) -> Result<MonitoringSettings, IpcError> {
     use knobas_sync::samples;
     Ok(MonitoringSettings {
@@ -1057,7 +1077,7 @@ mod tests {
     /// and nothing else in the tree noticing.
     #[test]
     fn the_mirror_invokes_the_commands_by_their_registered_names() {
-        crate::commands::mirror::assert_mirrors("assets", MIRROR, "app/src/lib/ipc/assets.ts", 20);
+        crate::commands::mirror::assert_mirrors("assets", MIRROR, "app/src/lib/ipc/assets.ts", 21);
     }
 
     /// **Every producer the chooser can send is one this build declares.**
@@ -1171,6 +1191,8 @@ mod tests {
             ("produce_estate_file", "landUnder"),
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
+            ("set_monitor_hidden", "monitorId"),
+            ("set_monitor_hidden", "hidden"),
         ] {
             let body = crate::commands::mirror::invocation(MIRROR, call);
             assert!(

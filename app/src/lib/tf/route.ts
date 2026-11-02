@@ -210,6 +210,13 @@ export function jobHash(segment: string | null): string {
 }
 
 /**
+ * The ticket page's one meaningful `/<tab>` (the page has no tabs, #2399):
+ * `#/ticket/<id>/mention` draws the same page, brought to the newest comment
+ * that mentions the reader. What an inbox mention opens.
+ */
+export const MENTION_TAB = "mention";
+
+/**
  * A ticket's page (spec #2396) by its entity id, on `tab` when one is named.
  * Going there chooses nothing; {@link jobHash} is the address that chooses.
  */

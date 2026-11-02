@@ -202,6 +202,25 @@ function fakeAck(args: Record<string, unknown>) {
   return { ...alert, acked_at: new Date().toISOString() };
 }
 
+/** The monitors a reader hid this session (`set_monitor_hidden`); a reload clears it. */
+const FIXTURE_HIDDEN = new Set<string>();
+
+/** The monitors hidden now, for the fake inbox's alert rule. */
+export function fakeHiddenMonitors(): ReadonlySet<string> {
+  return FIXTURE_HIDDEN;
+}
+
+/** `set_monitor_hidden`: hide one roster monitor or show it again; `not_found` for an id the roster does not hold. */
+function fakeSetHidden(args: Record<string, unknown>): boolean {
+  const monitorId = typeof args.monitorId === "string" ? args.monitorId : "";
+  if (!fakeMonitorRoster().some((row) => row.entity_id === monitorId)) {
+    throw { code: "not_found", message: `no monitor ${monitorId} in the mirror`, source_id: null };
+  }
+  if (args.hidden === true) FIXTURE_HIDDEN.add(monitorId);
+  else FIXTURE_HIDDEN.delete(monitorId);
+  return args.hidden === true;
+}
+
 /**
  * `unmonitored_assets`: every asset in the file for which it names no Uptime
  * Kuma monitor.
@@ -330,6 +349,7 @@ export function fakeMonitorRoster() {
       cert_days_remaining: index === 0 ? 9 : null,
       web_url: tombstoned ? null : `http://localhost:3001/dashboard/${index + 1}`,
       tombstoned,
+      hidden: FIXTURE_HIDDEN.has(`kuma:${index + 1}`),
       assets: entry.watching.map((asset) => ({
         id: asset.id,
         name: asset.name,
@@ -393,6 +413,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // reader makes themselves — a fixture that answered the same list after
     // the click would make the button look broken.
     ack_alert: (args) => fakeAck(args),
+    // The row's *Hide* / *Unhide*: knobas-local, so remembered here.
+    set_monitor_hidden: (args) => fakeSetHidden(args),
     // The Monitors tab's *Not monitored* roster (#449), derived from the same
     // file: an asset the estate names no Uptime Kuma monitor for is an asset
     // nothing watches, which is exactly what the backend's read answers.
@@ -400,4 +422,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(FIXTURE_CREATES, FIXTURE_ACKED);
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_HIDDEN);

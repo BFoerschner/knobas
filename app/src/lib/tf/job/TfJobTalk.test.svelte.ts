@@ -187,11 +187,12 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
   };
 }
 
-function open(over: { ports?: JobPorts; layers?: Layers; follower?: WriteFollower } = {}) {
+function open(over: { ports?: JobPorts; layers?: Layers; follower?: WriteFollower; toMention?: boolean } = {}) {
   job = mount(TfJob, {
     target,
     props: {
       segment: "PAY-231",
+      ...(over.toMention ? { toMention: true } : {}),
       timer: { current: null, elapsed: null },
       layers: over.layers ?? createLayers(),
       ontimer: () => {},
@@ -243,6 +244,41 @@ test("the thread is drawn whole with no fold and no filter, marks the last visit
   const drawnEntries = [...target.querySelectorAll(".tf-convo > .tf-msg")];
   expect(drawnEntries).toHaveLength(11);
   expect(drawnEntries.every((entry) => entry.tagName === "ARTICLE")).toBe(true);
+});
+
+/** The elements `scrollIntoView` was called on while `run` ran; jsdom draws no layout, so the call is the witness. */
+async function scrolledDuring(run: () => Promise<void>): Promise<Element[]> {
+  const scrolled: Element[] = [];
+  const had = Object.prototype.hasOwnProperty.call(Element.prototype, "scrollIntoView");
+  const before = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this);
+  };
+  try {
+    await run();
+  } finally {
+    if (had) Element.prototype.scrollIntoView = before;
+    else delete (Element.prototype as Partial<Element>).scrollIntoView;
+  }
+  return scrolled;
+}
+
+test("opened from a mention, the page brings the newest comment that mentions the reader into view", async () => {
+  const scrolled = await scrolledDuring(async () => {
+    open({ toMention: true });
+    await settle();
+  });
+  const mentions = [...target.querySelectorAll(".tf-convo .tf-msg.tf-mention")];
+  expect(mentions.length).toBeGreaterThan(0);
+  expect(scrolled).toEqual([mentions[mentions.length - 1]]);
+});
+
+test("opened any other way, the page scrolls to no comment", async () => {
+  const scrolled = await scrolledDuring(async () => {
+    open();
+    await settle();
+  });
+  expect(scrolled.filter((element) => element.closest(".tf-convo") !== null)).toEqual([]);
 });
 
 test("Comment queues a Comment write and clears the box; a refused one keeps the text", async () => {

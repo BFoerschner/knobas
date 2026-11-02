@@ -116,10 +116,10 @@ describe("where a row opens", () => {
       href: "#/ticket/jira%3APAY-240",
     });
   });
-  test("a mention opens where it was said", () => {
+  test("a mention opens where it was said, at the mention on a ticket", () => {
     expect(opener(item({ category: "mention", entity_id: "jira:PAY-231", kind: "ticket" }))).toEqual({
       label: "Open conversation",
-      href: "#/ticket/jira%3APAY-231",
+      href: "#/ticket/jira%3APAY-231/mention",
     });
     expect(opener(item({ category: "mention", entity_id: "conf:SEPA", kind: "page" }))).toEqual({
       label: "Open page",

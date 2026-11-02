@@ -3,7 +3,9 @@
   thread in the reading column, oldest first, with no fold and no filter, and
   the compose box at its end. A blue rule marks where the reader's last visit
   ends; new comments are edged blue, mentions edged yellow with a chip and the
-  `@name` in blue. The thread is the ticket's comments and nothing else
+  `@name` in blue. Opened from a mention (`toMention`, the ticket's
+  `/mention` address) it brings the newest comment that mentions the reader
+  into view once the thread is drawn. The thread is the ticket's comments and nothing else
   (#2163). The rules are `conversation.ts`'s; this draws them.
 
   The comment box at the end queues a `Comment` write on any ticket, the
@@ -20,6 +22,8 @@
   The box is one line until it is used (`job.css`).
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import type { Attachment, Thread } from "../../ipc/entity";
   import type { AttachmentImages } from "../../render/markdown";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
@@ -38,6 +42,7 @@
     failure,
     now,
     refused = null,
+    toMention = false,
     oncomment,
     attachments = [],
     images = null,
@@ -56,6 +61,8 @@
     now: Date;
     /** Why the source's credential cannot comment here (#2052), or `null`. */
     refused?: string | null;
+    /** Opened from a mention: bring the newest comment that mentions the reader into view, once. */
+    toMention?: boolean;
     /** Queue a comment; resolves whether it was queued, so the box keeps a refused text. */
     oncomment: (body: string) => Promise<boolean>;
     /** The ticket's attachments, which a wiki comment's `!name!` and `[^name]` name (#2415). */
@@ -80,6 +87,26 @@
   const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? thread?.me[0] ?? null);
   const drawn = $derived(thread === null ? null : wholeThread(thread, lastVisit));
 
+  let convo = $state<HTMLDivElement | null>(null);
+  /** Whether this opening has been brought to its mention: once a thread, so a re-read does not scroll again. */
+  let broughtTo = $state(false);
+
+  // Opened from a mention: the newest comment that mentions the reader, once
+  // the thread is drawn. A mention in the description has no comment, and
+  // the page opens at its top, where the description is.
+  $effect(() => {
+    if (!toMention) {
+      broughtTo = false;
+      return;
+    }
+    if (drawn === null || convo === null || untrack(() => broughtTo)) return;
+    const mentions = convo.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
+    const newest = mentions[mentions.length - 1];
+    if (newest === undefined) return;
+    broughtTo = true;
+    newest.scrollIntoView?.({ block: "center" });
+  });
+
   async function send() {
     const body = draft.trim();
     if (body === "" || sending || refused !== null) return;
@@ -92,7 +119,7 @@
   }
 </script>
 
-<div class="tf-convo">
+<div class="tf-convo" bind:this={convo}>
   {#if failure !== null}
     <p class="tf-dim">Could not read the conversation: {failure}</p>
   {:else if thread === null || drawn === null}

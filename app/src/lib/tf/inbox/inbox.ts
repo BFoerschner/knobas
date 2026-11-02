@@ -11,7 +11,7 @@
 import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
-import { ticketHash } from "../route";
+import { MENTION_TAB, ticketHash } from "../route";
 
 /** The word each category reads as: the kind chips' and the second line's. */
 const KIND: Record<InboxCategory, string> = {
@@ -107,8 +107,9 @@ export interface Opener {
  * The row's first action, a link to the item's own view (R-4.10's
  * `itemHash`), worded by what it opens as prototype-6 words it. A ticket
  * assigned to the reader opens its ticket page (spec #2227), to read before
- * taking it on; a mention on a ticket opens the job's Conversation, the one
- * place the thread is drawn, so it builds the job's address on purpose.
+ * taking it on; a mention on a ticket opens the ticket's `/mention` address,
+ * which draws the same page brought to the newest comment that mentions the
+ * reader (`TfConversation`'s `toMention`).
  */
 export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id">): Opener | null {
   // Both are about the source itself, whose page holds *Re-enter* (#1571).
@@ -129,7 +130,7 @@ export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" |
     default:
       break;
   }
-  if (kind === "ticket") return { label: "Open conversation", href: ticketHash(item.entity_id) };
+  if (kind === "ticket") return { label: "Open conversation", href: ticketHash(item.entity_id, MENTION_TAB) };
   if (kind === "pr") return { label: "Open PR", href };
   if (kind === "page") return { label: "Open page", href };
   return { label: "Open", href };

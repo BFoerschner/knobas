@@ -125,6 +125,14 @@ test("the job page hands TfJob the address's key, and no tab: the page has none 
   expect(props).not.toHaveProperty("tab");
 });
 
+test("a ticket's `/mention` address asks the page for the mention, and no other address does", () => {
+  const props = (hash: string) => jobPage.props({ route: parseTfHash(hash) } as Parameters<typeof jobPage.props>[0]);
+  expect(props("#/ticket/jira%3APAY-231/mention")).toMatchObject({ segment: "jira:PAY-231", toMention: true });
+  expect(props("#/ticket/jira%3APAY-231")).toMatchObject({ toMention: false });
+  expect(props("#/ticket/jira%3APAY-231/conversation")).toMatchObject({ toMention: false });
+  expect(props("#/job/PAY-231/mention")).toMatchObject({ toMention: false });
+});
+
 test("the deps page opens from the ticket its address names, with the open job's id when it is that ticket", () => {
   type Ctx = Parameters<typeof depsPage.props>[0];
   const props = (hash: string, defaultJob: Ctx["defaultJob"]) =>
