@@ -279,6 +279,11 @@ for (const [space, tops] of Object.entries(TREE)) {
   }
 }
 
+/** PROTOTYPE (`?launcher-next`): the fixture's pages for `dev/launcher-next-search.ts`, the space named for a path line. */
+export function fakeDocPages(): { id: string; title: string; space: string; parentTitle: string | null }[] {
+  return PAGES.map((p) => ({ id: p.id, title: p.title, space: SPACES[p.space] ?? p.space, parentTitle: p.parentTitle }));
+}
+
 /** The key of the space `?fake-docs-pages=<n>` adds (#2200). */
 const BULK_KEY = "BULK";
 const BULK_NAME = "Bulk pages";

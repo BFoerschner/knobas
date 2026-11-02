@@ -11,6 +11,7 @@ import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
 import { FIXTURE_SOURCES } from "./sources";
 import { FIXTURE_QUEUE } from "./write-queue";
 import { keyOf } from "../../../time/format";
+import { launcherNextSearch } from "../launcher-next-search";
 
 /**
  * `search` for a ticket key the corpus holds (#1476), `PAY-231`: every
@@ -137,7 +138,7 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
 }
 
 /** This feature's commands. */
-export function handlers(): Handlers {
+export function handlers(params: URLSearchParams): Handlers {
   return {
     // The launcher board (#504). Until now `launcher_home` had no handler at
     // all, so `⌘K` under `?fake-ipc` drew a red "command not found" over the
@@ -174,7 +175,8 @@ export function handlers(): Handlers {
     // mirror to search. A handler that answered everything with assets would
     // make a QA pass over the launcher look like it worked. `>` is answered
     // (#1417) because the backend answers it without a corpus too.
-    search: (args) => estateSearch(args),
+    // PROTOTYPE (`?launcher-next`): free text answered over the fixture, for the launcher clickdummy.
+    search: (args) => (params.has("launcher-next") ? launcherNextSearch(args, estateSearch) : estateSearch(args)),
     // The query box's suggestions (#601). **Fixture-only**: the kinds the
     // corpus holds and the configured sources, so `kind:` and `source:` can be
     // looked at under `?fake-ipc`; no parents, because this corpus declares

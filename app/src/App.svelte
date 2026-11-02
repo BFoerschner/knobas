@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { type Component, type ComponentProps, onMount, untrack } from "svelte";
   import { goWithoutOpener } from "./lib/tf/opener";
   import { listen } from "@tauri-apps/api/event";
 
@@ -53,6 +53,18 @@
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
   let launcherOpen = $state(false);
+
+  /**
+   * PROTOTYPE (`?launcher-next`, dev only): the launcher clickdummy in
+   * `lib/launcher/prototype/`, mounted in place of the shipped one with the
+   * same props. Imported dynamically so a bundle never holds it.
+   */
+  let LauncherNext = $state<Component<ComponentProps<typeof Launcher>> | null>(null);
+  onMount(() => {
+    if (import.meta.env.DEV && new URLSearchParams(location.search).has("launcher-next")) {
+      void import("./lib/launcher/prototype/LauncherNext.svelte").then((module) => (LauncherNext = module.default));
+    }
+  });
 
   /**
    * Today's tracked and to-log time for the launcher's board (#1418), read on
@@ -404,6 +416,21 @@
         about* (#36). `openEntity` is the page's job (`breadcrumbJob`), which *Link to
         <key>* needs as its other end (#1500).
       -->
+      {#if LauncherNext}
+        <LauncherNext
+          bind:open={launcherOpen}
+          sources={health.all}
+          {runs}
+          sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
+          inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item) }}
+          today={todayTime}
+          openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
+          onlink={linkToJob}
+          ontimer={startTimerOn}
+          onnavigate={navigate}
+          onclose={() => {}}
+        />
+      {:else}
       <Launcher
         bind:open={launcherOpen}
         sources={health.all}
@@ -417,6 +444,7 @@
         onnavigate={navigate}
         onclose={() => {}}
       />
+      {/if}
     {/snippet}
   </TfShell>
 {:else}
