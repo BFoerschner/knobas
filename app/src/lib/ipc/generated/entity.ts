@@ -872,7 +872,8 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `list`: A list. A nested list's items are drawn as a list inside their
  *   item.
  * - `code`: A code block, verbatim, with the language the source named.
- * - `table`: A table, row by row; a header cell says so.
+ * - `table`: A table, row by row; a header cell says so, and a cell holds
+ *   blocks and may span columns and rows.
  * - `panel`: An info, note, warning or tip panel, with the blocks inside it.
  * - `placeholder`: Something the source has that the reader does not draw: the
  *   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
@@ -3799,9 +3800,14 @@ total: number,
 more: Array<SuggestionMore>, };
 
 /**
- * One cell of a [`DocBlock::Table`].
+ * One cell of a [`DocBlock::Table`] (#2436): the blocks it holds, as a page
+ * body's are (paragraphs, lists, code, panels, a nested table, a
+ * placeholder), and the columns and rows it spans, each at least 1.
+ *
+ * `header` is per cell: a first row of header cells is the table's header
+ * row, and a header cell opening a body row heads that row (a header column).
  */
-export type TableCell = { header: boolean, text: Array<DocInline>, };
+export type TableCell = { header: boolean, blocks: Array<DocBlock>, colspan: number, rowspan: number, };
 
 /**
  * How one test came out in one run: its history, newest first (#855).

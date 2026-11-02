@@ -4,14 +4,14 @@
   this part in <source>* (story 134). The page's sections and their anchors
   are `TfDocBody`'s; a heading here is one inside a panel or a comment.
 
-  Recurses into lists and panels by importing itself.
+  Recurses into lists, panels and table cells by importing itself.
 -->
 <script lang="ts">
   import Self from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
   import TfMarked from "./TfMarked.svelte";
-  import type { DocBlock } from "../../ipc/entity";
-  import { headed, panelLabel, panelTone } from "./docs";
+  import type { DocBlock, TableCell } from "../../ipc/entity";
+  import { headed, headerColumn, panelLabel, panelTone } from "./docs";
 
   let {
     blocks,
@@ -31,7 +31,18 @@
     /** What the find bar marks (#860). */
     stems?: string[];
   } = $props();
+
+  /** A span as the attribute draws it: none for one. */
+  function span(n: number): number | undefined {
+    return n > 1 ? n : undefined;
+  }
 </script>
+
+{#snippet th(cell: TableCell, scope: "col" | "row" | undefined)}
+  <th {scope} colspan={span(cell.colspan)} rowspan={span(cell.rowspan)}
+    ><Self blocks={cell.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></th
+  >
+{/snippet}
 
 {#each blocks as block, index (index)}
   {#if block.type === "heading"}
@@ -55,27 +66,34 @@
       <pre><code><TfMarked text={code} {stems} /></code></pre>
     </div>
   {:else if block.type === "table"}
+    <!-- A cell holds blocks and spans what it spans; a header row heads columns and a header column rows (#2436).
+         A table wider than the reader scrolls inside its frame, never widening the page. -->
     {@const head = headed(block.rows)}
-    <table>
-      {#if head}
-        <thead>
-          <tr>
-            {#each block.rows[0] ?? [] as cell, c (c)}<th><TfDocInlines text={cell.text} {onopen} {stems} /></th>{/each}
-          </tr>
-        </thead>
-      {/if}
-      <tbody>
-        {#each head ? block.rows.slice(1) : block.rows as row, r (r)}
-          <tr>
-            {#each row as cell, c (c)}
-              {#if cell.header}<th><TfDocInlines text={cell.text} {onopen} {stems} /></th>{:else}<td
-                  ><TfDocInlines text={cell.text} {onopen} {stems} /></td
-                >{/if}
-            {/each}
-          </tr>
-        {/each}
-      </tbody>
-    </table>
+    {@const rowHeads = headerColumn(block.rows, head ? 1 : 0)}
+    <div class="tf-doc-tbl">
+      <table>
+        {#if head}
+          <thead>
+            <tr>
+              {#each block.rows[0] ?? [] as cell, c (c)}{@render th(cell, "col")}{/each}
+            </tr>
+          </thead>
+        {/if}
+        <tbody>
+          {#each head ? block.rows.slice(1) : block.rows as row, r (r)}
+            <tr>
+              {#each row as cell, c (c)}
+                {#if cell.header}{@render th(cell, rowHeads && c === 0 ? "row" : undefined)}{:else}<td
+                    colspan={span(cell.colspan)}
+                    rowspan={span(cell.rowspan)}
+                    ><Self blocks={cell.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></td
+                  >{/if}
+              {/each}
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
   {:else if block.type === "panel"}
     <div class="tf-callout tf-{panelTone(block.kind)}">
       <span class="tf-lbl">{panelLabel(block)}</span>
