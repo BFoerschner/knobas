@@ -950,7 +950,8 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
 /// format as its block, a macro the reader does not draw is the named
 /// placeholder, and the declarations around the body -- the space, the
 /// parent chain, the version, the labels and a mention of the account --
-/// resolve on the record the adapter really fetched.
+/// resolve on the record the adapter really fetched. Three tables (#2436)
+/// read with their spans, a header column, and a list in a cell.
 ///
 /// The page is made through Confluence's REST API, not through knobas, so the
 /// storage format is the server's own after its own normalisation; it is
@@ -958,7 +959,7 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
-    use knobas_source::docs::{DocBlock, Inline, PanelKind};
+    use knobas_source::docs::{DocBlock, Inline, PanelKind, TableCell};
 
     let env = env();
     let parent = env.page(PARENT);
@@ -987,6 +988,10 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             r#"<ac:structured-macro ac:name="tip" ac:schema-version="1"><ac:rich-text-body><p>A tip.</p></ac:rich-text-body></ac:structured-macro>"#,
             r#"<table><tbody><tr><th>Code</th><th>Retried?</th></tr><tr><td>HTTP 503</td><td>yes</td></tr></tbody></table>"#,
             r#"<ac:structured-macro ac:name="toc" ac:schema-version="1" />"#,
+            // Spec #2432's tables (#2436): a merged cell, a header column, a list in a cell.
+            r#"<table><tbody><tr><th colspan="2"><p>Rota</p></th></tr><tr><td><p>Mon</p></td><td rowspan="2"><p>Mara</p></td></tr><tr><td><p>Tue</p></td></tr></tbody></table>"#,
+            r#"<table><tbody><tr><th><p>Primary</p></th><td><p>Mara</p></td></tr><tr><th><p>Backup</p></th><td><p>Jonas</p></td></tr></tbody></table>"#,
+            r#"<table><tbody><tr><td><ul><li><p>drain</p></li><li><p>deploy</p></li></ul><p>then watch</p></td></tr></tbody></table>"#,
         ),
         key = my_key,
         parent = parent.title,
@@ -1102,6 +1107,59 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         rest[7],
         &DocBlock::Placeholder { name: "toc".into() },
         "the unknown macro is named"
+    );
+
+    // The tables as Confluence normalised them: spans, a header column, a list
+    // in a cell, each cell's blocks as the reader reads them (#2436).
+    let para = |words: &str| DocBlock::Paragraph {
+        text: vec![Inline::text(words)],
+    };
+    let cell = |header, words: &str| TableCell::new(header, vec![para(words)]);
+    assert_eq!(
+        rest[8],
+        &DocBlock::Table {
+            rows: vec![
+                vec![TableCell {
+                    colspan: 2,
+                    ..cell(true, "Rota")
+                }],
+                vec![
+                    cell(false, "Mon"),
+                    TableCell {
+                        rowspan: 2,
+                        ..cell(false, "Mara")
+                    }
+                ],
+                vec![cell(false, "Tue")],
+            ]
+        },
+        "the merged-cell table"
+    );
+    assert_eq!(
+        rest[9],
+        &DocBlock::Table {
+            rows: vec![
+                vec![cell(true, "Primary"), cell(false, "Mara")],
+                vec![cell(true, "Backup"), cell(false, "Jonas")],
+            ]
+        },
+        "the header-column table"
+    );
+    assert_eq!(
+        rest[10],
+        &DocBlock::Table {
+            rows: vec![vec![TableCell::new(
+                false,
+                vec![
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![vec![para("drain")], vec![para("deploy")]],
+                    },
+                    para("then watch"),
+                ]
+            )]]
+        },
+        "the table with a list in a cell"
     );
 
     // The tree: the new page hangs under its parent.

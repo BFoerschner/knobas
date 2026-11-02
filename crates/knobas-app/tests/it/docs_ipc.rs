@@ -1090,6 +1090,67 @@ async fn export_writes_the_page_as_markdown() {
     assert!(text.contains("<!-- macro: roadmap -->"), "{text}");
 }
 
+/// A table with a merged cell, a header column and blocks in its cells reads
+/// with them through the page read (spec #2432, #2436), the mirror's fill-in
+/// reaching a mention inside a cell's list, and its Markdown export loses no
+/// word of it.
+#[tokio::test]
+async fn a_table_reads_with_spans_header_column_and_block_cells_and_exports_every_word() {
+    use knobas_source::docs::TableCell;
+
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let storage = concat!(
+        r#"<table><tbody><tr><th colspan="2">Rota</th></tr>"#,
+        r#"<tr><th rowspan="2">Mon</th><td><ul><li><ac:link><ri:user ri:username="mara" /></ac:link></li><li>Tomasz</li></ul></td></tr>"#,
+        r#"<tr><td><p>Swap first.</p><p>Then page.</p><table><tbody><tr><td>inner</td></tr></tbody></table></td></tr>"#,
+        r#"<tr><th>Tue</th><td><ac:structured-macro ac:name="roadmap" /></td></tr></tbody></table>"#,
+    );
+    let id = page(&pool, &src, "1", "On-call rota", "OPS", &[], storage).await;
+    let read = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    let [DocBlock::Table { rows }] = &read.blocks[..] else {
+        panic!("one table: {:#?}", read.blocks)
+    };
+    assert_eq!((rows[0][0].colspan, rows[0][0].header), (2, true));
+    assert_eq!((rows[1][0].rowspan, rows[1][0].header), (2, true));
+    assert!(rows[3][0].header, "the header column's last cell");
+    let [DocBlock::List { items, .. }] = &rows[1][1].blocks[..] else {
+        panic!("a list in the cell: {:#?}", rows[1][1])
+    };
+    let DocBlock::Paragraph { text } = &items[0][0] else {
+        panic!("{items:#?}")
+    };
+    assert!(
+        matches!(&text[0], Inline::Mention { me: true, .. }),
+        "the mention inside the cell is filled in as mine: {text:?}"
+    );
+    assert_eq!(rows[2][0].blocks.len(), 3, "two paragraphs and a table");
+    assert_eq!(
+        rows[3][1],
+        TableCell::new(
+            false,
+            vec![DocBlock::Placeholder {
+                name: "roadmap".into()
+            }]
+        ),
+        "a macro in a cell is a placeholder block, not text"
+    );
+
+    let folder =
+        std::env::temp_dir().join(format!("knobas-export-{}", uuid::Uuid::new_v4().simple()));
+    let done = docs_export_markdown_inner(&pool, &Registry::for_process(), &id, &folder)
+        .await
+        .unwrap();
+    let text = std::fs::read_to_string(folder.join(&done.file)).unwrap();
+    std::fs::remove_dir_all(&folder).ok();
+    for word in ["Rota", "Mon", "Tomasz", "Swap first.", "Then page.", "inner", "Tue"] {
+        assert!(text.contains(word), "{word} in {text}");
+    }
+    assert!(text.contains("<!-- macro: roadmap -->"), "{text}");
+}
+
 /// *Export as Markdown* never replaces a file already in the folder (#1454):
 /// a taken name gets ` (1)`, then ` (2)`, as a download does, and the answer
 /// names the file written. Two same-titled pages end up as two files.
