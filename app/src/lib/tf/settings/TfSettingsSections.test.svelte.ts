@@ -109,6 +109,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     shareExport: vi.fn(() => Promise.resolve({ taken_at: NOW.toISOString(), file: "knobas-share-new.knobas", bytes: 1024 })),
     restoreBackup: vi.fn(() => Promise.resolve()),
     smartLists: vi.fn(() => Promise.resolve([])),
+    favourites: vi.fn(() => Promise.resolve([])),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
@@ -363,7 +364,15 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
 
 test("a saved smart list draws its tick, on by default", async () => {
   const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ id: "sepa" }])) }));
-  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Smart lists");
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists and favourites");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("a favourite with no saved list draws the same tick, and the part goes on (#2428)", async () => {
+  const p = await open("backup", sectionPorts({ favourites: vi.fn(() => Promise.resolve([{ entity_id: "jira:PAY-231" }])) }));
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Saved lists and favourites");
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));

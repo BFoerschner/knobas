@@ -164,7 +164,7 @@ export function fakeFavourites(): EntityRow[] {
       const list = FIXTURE_SAVED.find((saved) => saved.id === target.list);
       if (!list) return [];
       const state = list.broken ? { text: BROKEN, tone: "warn" as const } : null;
-      return [{ entity_id: list.id, kind: "list", source_id: "list", title: list.label, updated_at: null, synced_at: SYNCED_AT, path: list.query, state, cell: null }];
+      return [{ entity_id: list.id, kind: "list", source_id: "list", title: list.label, updated_at: null, synced_at: SYNCED_AT, path: list.query, state }];
     }
     const entry = CORPUS.find((row) => row.entity_id === target.entity && row.deleted_at === null);
     return entry ? [mirrorRow(entry) as EntityRow] : [];

@@ -566,6 +566,7 @@ function sectionPorts() {
     shareExport: () => new Promise<never>(() => {}),
     restoreBackup: () => new Promise<never>(() => {}),
     smartLists: () => deferred([]),
+    favourites: () => deferred([]),
     ticketViews: () => deferred([]),
     linkSets: () => deferred([]),
     appStatus: () => deferred({ app_version: "1.6.0" }),

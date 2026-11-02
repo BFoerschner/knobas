@@ -47,6 +47,7 @@
       | "shareExport"
       | "restoreBackup"
       | "smartLists"
+      | "favourites"
       | "ticketViews"
       | "linkSets"
       | "openBackupFolder"
@@ -112,10 +113,10 @@
 
   $effect(() => {
     void load();
-    void ports
-      .smartLists()
-      .then((lists) => {
-        savedLists = lists.length > 0;
+    // A saved list or a favourite (#2428): the favourites ride in this part.
+    void Promise.all([ports.smartLists(), ports.favourites()])
+      .then(([lists, favourites]) => {
+        savedLists = lists.length > 0 || favourites.length > 0;
         parts = { ...parts, smart_lists: savedLists };
       })
       // Not knowing is the safe half: no tick, and the part goes off.
