@@ -52,6 +52,7 @@ function asset(entityId: string, title: string, path: string | null): SearchHit 
     state: null,
     rank: 0,
     snippet: [],
+    excerpts: [],
   };
 }
 

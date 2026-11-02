@@ -73,6 +73,7 @@ export function fakeListSearch(raw: string): SearchResponse | null {
         state: list.broken ? { text: BROKEN, tone: "warn" as const } : null,
         rank: 1 - index / 10,
         snippet: [],
+        excerpts: [],
       }))
     : [];
   return {

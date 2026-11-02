@@ -19,6 +19,7 @@ import type {
   LauncherHome,
   SearchQuery,
   SearchResponse,
+  Excerpt,
   Segment,
 } from "../ipc";
 import type { InboxItem, StateChip } from "../ipc/entity";
@@ -36,6 +37,7 @@ function hit(over: {
   title: string;
   source_id?: string;
   snippet?: Segment[];
+  excerpts?: Excerpt[];
   synced_at?: string;
   path?: string | null;
   state?: StateChip | null;
@@ -51,6 +53,7 @@ function hit(over: {
     title: over.title,
     rank: 1,
     snippet: over.snippet ?? [],
+    excerpts: over.excerpts ?? [],
   };
 }
 

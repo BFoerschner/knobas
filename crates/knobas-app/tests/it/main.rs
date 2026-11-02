@@ -77,6 +77,7 @@ mod repo_detail_ipc;
 mod responsiveness_probe;
 mod run_pipeline;
 mod run_presets_ipc;
+mod pipeline_logs_ipc;
 mod run_reads_ipc;
 mod run_ticket_ipc;
 mod search_ipc;

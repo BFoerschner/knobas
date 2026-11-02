@@ -8,6 +8,23 @@ import type { CredentialHealth } from "./sources";
 export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | "labels";
 
 /**
+ * One place the words appear in a hit's text (#2431).
+ */
+export type Excerpt = { 
+/**
+ * Where in the row it sits, as the reader finds it there: a page's
+ * section heading, `Comment by <name>`, a run log's `line <n>`. `None`
+ * for text the index keeps no place for: a page's lead, a ticket's,
+ * pull request's or note's text.
+ */
+place: string | null, 
+/**
+ * The text around the words, the words flagged (raw source text, as
+ * [`Segment`] says).
+ */
+segments: Array<Segment>, };
+
+/**
  * One value a ticket key can take (#811).
  */
 export type FieldSuggestion = { 
@@ -446,7 +463,17 @@ authors: Array<string>, };
 /**
  * One result: a row, its rank, and the excerpt with the match marked.
  */
-export type SearchHit = { rank: number, snippet: Array<Segment>, entity_id: string, kind: string, source_id: string, title: string, 
+export type SearchHit = { rank: number, snippet: Array<Segment>, 
+/**
+ * Where the words appear in the row's text, each with its place
+ * (#2431): what the launcher's preview draws under *Everything*, so the
+ * preview is this list and no second read. Empty under *Titles*, for a
+ * browse, and for a row whose text holds none of the words (a hit by its
+ * title alone). Read from the index: a page's section and comment marks
+ * (`knobas_source::docs::indexed`), a pipeline's stored latest run log
+ * (migration `0067`), a ticket's, pull request's or note's text.
+ */
+excerpts: Array<Excerpt>, entity_id: string, kind: string, source_id: string, title: string, 
 /**
  * When the source says the item changed, an RFC 3339 timestamp; `None`
  * if the source never dated the item.

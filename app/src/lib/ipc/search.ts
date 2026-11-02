@@ -41,6 +41,7 @@ export type {
   ResultGroup,
   SavedViewSource,
   SearchFilters,
+  Excerpt,
   SearchHit,
   SearchQuery,
   SearchResponse,

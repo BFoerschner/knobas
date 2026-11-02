@@ -43,6 +43,7 @@ function answer(raw: string, titles: string[] = ["one"]): SearchResponse {
           title,
           rank: 1,
           snippet: [],
+          excerpts: [],
         })),
       },
     ],

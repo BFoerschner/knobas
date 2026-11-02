@@ -45,6 +45,7 @@ function response(raw: string): SearchResponse {
             title: "Retry failed SEPA payouts",
             rank: 1,
             snippet: [],
+            excerpts: [],
           },
         ],
       },

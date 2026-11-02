@@ -27,7 +27,7 @@ function ticketsByKey(raw: string): SearchResponse | null {
   const key = raw.toUpperCase();
   const hits = CORPUS.filter(
     (entry) => entry.kind === "ticket" && entry.deleted_at === null && keyOf(entry.entity_id) === key,
-  ).map((entry, index) => ({ ...mirrorRow(entry), rank: 1 - index / 10, snippet: [] }));
+  ).map((entry, index) => ({ ...mirrorRow(entry), rank: 1 - index / 10, snippet: [], excerpts: [] }));
   if (hits.length === 0) return null;
   return {
     interpreted: {
@@ -114,6 +114,7 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
     state: null,
     rank: 1 - index / 10,
     snippet: [],
+    excerpts: [],
   }));
   return {
     interpreted: {
@@ -186,6 +187,7 @@ function launcherKindHits(): { haystack: string; hit: Hit }[] {
     state,
     rank: 1,
     snippet: [],
+    excerpts: [],
   });
   return [
     ...fakeTicketViewLines().map((view) => ({ haystack: `${view.name} ${view.path}`, hit: hit("view", view.id, view.name, view.path) })),
@@ -226,7 +228,7 @@ function wordSearch(raw: string): SearchResponse | null {
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""}`.toLowerCase();
     if (!words.every((word) => haystack.includes(word))) continue;
     const hits = byKind.get(entry.kind) ?? [];
-    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [] });
+    hits.push({ ...row, rank: 1 - hits.length / 100, snippet: [], excerpts: [] });
     byKind.set(entry.kind, hits);
   }
   const at = (kind: string) => (GROUP_ORDER.indexOf(kind) < 0 ? GROUP_ORDER.length : GROUP_ORDER.indexOf(kind));
