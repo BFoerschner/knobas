@@ -631,8 +631,15 @@ pub async fn summaries(
         })
         .collect();
 
+    // What a list holds is items: the lists' own corpus (#2423) is left out,
+    // or a list would count itself and every list whose text shares a word.
+    let items: Vec<&corpus::Corpus> = corpora
+        .iter()
+        .copied()
+        .filter(|corpus| corpus.kind != corpus::SAVED_LIST.kind)
+        .collect();
     let mut counted: HashMap<String, SavedCount> = HashMap::new();
-    if let Some(built) = sql::saved_summary_sql(corpora, &queries) {
+    if let Some(built) = sql::saved_summary_sql(&items, &queries) {
         for row in sql::query_as_with::<SavedCount>(built)
             .fetch_all(pool)
             .await?

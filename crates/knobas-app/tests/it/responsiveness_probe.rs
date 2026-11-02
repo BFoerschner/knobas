@@ -1205,10 +1205,6 @@ async fn what_the_reader_waits_on() {
         launcher_home_inner(pool, &registry)
     })
     .await;
-    time("open launcher", "smart_lists", runs, || {
-        smart_lists_inner(pool, &registry)
-    })
-    .await;
     // Opening the box on a filter token reads the kinds, the sources and the
     // parents once (#601); each keystroke after it only the parents (#768).
     time(
@@ -1244,6 +1240,9 @@ async fn what_the_reader_waits_on() {
         // The `#` letters (#2420): one kind, and two combined.
         "#t payment",
         "#tp payment retry",
+        // The saved lists behind `#l` (#2423), all and narrowed.
+        "#l",
+        "#l payment",
     ] {
         // Everything under the label it has always had, and Titles (#2430),
         // the launcher's first choice, beside it.

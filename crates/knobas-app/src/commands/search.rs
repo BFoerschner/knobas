@@ -31,7 +31,7 @@ use crate::{IpcError, Lifecycle};
 ///
 /// **The one DTO in this stream that composes two streams' data**, which is
 /// why it lives in the command module rather than in `knobas-search`:
-/// `smart_lists` and `recent` are the search crate's [`LauncherBoard`],
+/// `recent` is the search crate's [`LauncherBoard`],
 /// `sources` is stream F's [`CredentialHealth`], and `pending_writes` counts
 /// stream G's write queue. `knobas-search` takes a `PgPool` and deliberately
 /// depends on none of those crates.
@@ -40,8 +40,10 @@ use crate::{IpcError, Lifecycle};
 /// [`CredentialHealth`]: knobas_sync::CredentialHealth
 #[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "search.ts")]
+///
+/// No lists since #2423 (spec #2419): a saved list is a `list` hit behind
+/// `#l`, and the built-in ones are gone.
 pub struct LauncherHome {
-    pub smart_lists: Vec<knobas_search::SmartListSummary>,
     /// `knobas_search::EntityRow`, a *different Rust struct* from
     /// `knobas_core::entity_list::EntityRow` with the same eight fields on
     /// the wire. The shell has one type for both, the room's, which is the
@@ -76,8 +78,8 @@ pub struct LauncherHome {
 ///
 /// The whole mapping, in one place, because it is the only decision this
 /// module makes: a malformed query is the caller's fault (`invalid`), a
-/// `list:` nobody ships is `not_found` -- which is what lets the box say *no
-/// such list* rather than *something went wrong* -- and a database failure is
+/// saved list nobody saved is `not_found` (a rename or a delete of one already
+/// gone), and a database failure is
 /// `internal`, because nothing downstream can do anything about it.
 impl From<knobas_search::SearchError> for IpcError {
     fn from(error: knobas_search::SearchError) -> Self {
@@ -103,9 +105,8 @@ impl From<knobas_search::SearchError> for IpcError {
 ///
 /// # Errors
 ///
-/// `invalid` for a query outside the engine's bounds, `not_found` for a
-/// `list:` nobody ships, `not_ready` before the database is up, `internal` for
-/// anything else.
+/// `invalid` for a query outside the engine's bounds, `not_ready` before the
+/// database is up, `internal` for anything else.
 #[tauri::command]
 pub async fn search(
     lifecycle: State<'_, Lifecycle>,
@@ -114,8 +115,8 @@ pub async fn search(
     search_inner(&lifecycle.pool()?, lifecycle.registry(), query).await
 }
 
-/// What the launcher shows before anything is typed: the smart lists, the
-/// newest items, and the health of every configured source.
+/// What the launcher shows before anything is typed: the newest items, and
+/// the health of every configured source.
 ///
 /// # Errors
 ///
@@ -125,11 +126,10 @@ pub async fn launcher_home(lifecycle: State<'_, Lifecycle>) -> Result<LauncherHo
     launcher_home_inner(&lifecycle.pool()?, lifecycle.registry()).await
 }
 
-/// Every smart list -- built-in and saved -- with its count and its change
-/// badge.
+/// Every saved list, with its count or the reason it needs attention.
 ///
-/// The rail on its own, for a launcher refreshing it without re-reading the
-/// whole board, which is what it does after a save, a rename or a delete.
+/// Settings reads it to know whether there is any list to share; the launcher
+/// finds lists through `search` (`#l`, #2423).
 ///
 /// # Errors
 ///
@@ -167,10 +167,8 @@ pub async fn create_smart_list(
 ///
 /// # Errors
 ///
-/// `invalid` for a blank name, `not_found` if nobody saved a list by that id
-/// -- **including every built-in id**, which is not a saved list and cannot be
-/// renamed -- `not_ready` before the database is up, `internal` if the write
-/// fails.
+/// `invalid` for a blank name, `not_found` if nobody saved a list by that id,
+/// `not_ready` before the database is up, `internal` if the write fails.
 #[tauri::command]
 pub async fn rename_smart_list(
     lifecycle: State<'_, Lifecycle>,
@@ -405,7 +403,6 @@ pub async fn launcher_home_inner(
     let board = searcher(pool, registry).await?.launcher_board().await?;
     let notes_shown = crate::capture::shown(pool).await?;
     Ok(LauncherHome {
-        smart_lists: board.smart_lists,
         recent: board.recent,
         sources: knobas_sync::config::health_all(pool).await?,
         // Pending only -- see the field's own doc for why the other two open
