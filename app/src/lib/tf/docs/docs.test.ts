@@ -4,6 +4,7 @@ import { expect, test } from "vitest";
 import type { DocBlock, DocPage, DocsTree } from "../../ipc/entity";
 import {
   childrenByParent,
+  docsSearchHash,
   foldsHolding,
   mentionText,
   pageToOpen,
@@ -15,6 +16,7 @@ import {
   spaceOfPage,
   statusTone,
 } from "./docs";
+import { parseTfHash } from "../route";
 
 const TREE: DocsTree = {
   spaces: [
@@ -40,6 +42,22 @@ test("the three addresses read as the page read last, a space, and a page with i
   expect(placeOf(["space", "wiki:OPS"])).toEqual({ kind: "space", source: "wiki", key: "OPS" });
   expect(placeOf(["confluence:3"])).toEqual({ kind: "page", id: "confluence:3", section: null });
   expect(placeOf(["confluence:3", "2"])).toEqual({ kind: "page", id: "confluence:3", section: 2 });
+});
+
+test("#/docs/search/<words> carries a search, and opens the page read last under its hits (#2425)", () => {
+  expect(placeOf(["search", "sepa retry"])).toEqual({ kind: "search", words: "sepa retry" });
+  expect(placeOf(["search"])).toEqual({ kind: "last" });
+  expect(pageToOpen({ kind: "search", words: "sepa" }, TREE)).toBe("confluence:5");
+  expect(pageToOpen({ kind: "search", words: "sepa" }, { ...TREE, last_read: null })).toBe("confluence:9");
+});
+
+test("a search's address round-trips through the router whatever the words hold (#2425)", () => {
+  for (const words of ["sepa retry", "a/b", "\"exact phrase\" -draft", "100% #1 ?x=y"]) {
+    const hash = docsSearchHash(words);
+    expect(hash.startsWith("#/docs/search/")).toBe(true);
+    const route = parseTfHash(hash);
+    expect(route.view === "full" && route.section === "docs" ? placeOf(route.rest) : null).toEqual({ kind: "search", words });
+  }
 });
 
 test("#/docs opens the page read last, else the first space's first top page", () => {

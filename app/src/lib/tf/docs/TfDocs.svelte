@@ -4,13 +4,15 @@
   `renderDocs` → `renderPage`.
 
   **Left**, the space picker (*All spaces (N)*, then every space with its page
-  count; it follows the open page's space until you pick one or start
-  searching), the search field that names its scope (`/` focuses it), its
-  one line of syntax, and under it *For you* and the page tree, or, with text
-  in the field, the hits (R-10.1 to R-10.4, R-10.8). *New page* is at the
+  count; it follows the open page's space until you pick one or a search
+  starts), and under it *For you* and the page tree, or, while a search is
+  on, its words with *Clear* and the hits (R-10.1 to R-10.4, R-10.8). Docs
+  draws no search field (#2425): `/` opens the launcher on `#d`, whose
+  *Search Docs for …* row opens `#/docs/search/<words>`, a search over every
+  space; a label chip searches for itself. *New page* is at the
   bottom. Below 900px (`READER_DRAWER`, through `MediaQuery`) it is a drawer
-  over the page (#2084, R-10.9): *Pages* at the start of the breadcrumb row,
-  `/` and a label chip open it; `Esc` (it is a `drawer` layer), the backdrop
+  over the page (#2084, R-10.9): *Pages* at the start of the breadcrumb row
+  and a label chip open it; `Esc` (it is a `drawer` layer), the backdrop
   and a page picked in it close it, and focus goes back to what opened it.
 
   **Right**, the page in the reading face, nothing in it capped in width
@@ -134,7 +136,7 @@
     spaceOfPage,
     stemsOf,
   } from "./docs";
-  import { pageVisible } from "../kept-pages.svelte";
+  import { replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
   import type { EscTarget } from "../escape";
 
@@ -230,13 +232,13 @@
   /** The picked space (`spaceId`), `*` for all, or `null` to follow the page. */
   let picked = $state<string | null>(null);
 
-  /** The search field's text (#860). */
+  /** The search's words (#860): the address's (#2425) or a label chip's. */
   let query = $state("");
   let found = $state<DocsHits | null>(null);
   let searchError = $state<string | null>(null);
   /** What the find bar marks: the needles a hit was opened with. */
   let find = $state("");
-  let field = $state<HTMLInputElement | null>(null);
+  let treeNav = $state<HTMLElement | null>(null);
 
   // ---- *This job* (#863) ----
   const filter = sessionFilter("docs");
@@ -487,14 +489,24 @@
     }
   }
 
-  function typed(event: Event): void {
-    const value = (event.currentTarget as HTMLInputElement).value;
-    // Typing keeps the search in the space the picker shows, so opening a hit
-    // in another space does not narrow the hits under the reader.
-    if (!jobOn && picked === null && value.trim() !== "" && shownSpace) picked = spaceId(shownSpace);
-    query = value;
-    // Clearing the field brings the tree back and drops the highlighting.
-    if (value.trim() === "") find = "";
+  // `#/docs/search/<words>` (#2425): the address's words are the search, over
+  // every space, as the launcher's `#d` was. Once per address: opening a hit
+  // keeps the search, and *Clear* ends it.
+  $effect(() => {
+    if (place.kind !== "search") return;
+    const words = place.words;
+    untrack(() => {
+      query = words;
+      find = "";
+      picked = "*";
+    });
+  });
+
+  /** End the search: the tree is back, the highlighting gone, and a search's address becomes the page's. */
+  function clearSearch(): void {
+    query = "";
+    find = "";
+    if (place.kind === "search") replaceAddress(current === null ? "#/docs" : pageHash(current));
   }
 
   /** Open a hit with its query carried over. */
@@ -503,23 +515,10 @@
     location.hash = pageHash(entityId);
   }
 
-  function onsearchkey(event: KeyboardEvent): void {
-    const list = hits?.hits ?? [];
-    if (!searching || list.length === 0) return;
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
-    event.preventDefault();
-    const at = list.findIndex((h) => h.entity_id === current);
-    const to =
-      event.key === "Enter"
-        ? Math.max(at, 0)
-        : Math.max(0, Math.min(list.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)));
-    openHit(list[to]!.entity_id);
-  }
-
   function searchLabel(label: string, chip: HTMLElement): void {
     query = label;
     find = "";
-    openSearch(chip);
+    openTree(chip);
   }
 
   // ---- below 900px the tree is a drawer over the page (#2084) ----
@@ -542,14 +541,11 @@
     if (back !== null && document.contains(back)) back.focus();
   }
 
-  /**
-   * The search field takes focus, below 900px in the drawer, opened from
-   * `from`, once it is drawn: a hidden field takes none.
-   */
-  function openSearch(from: Element | null): void {
-    if (drawerBand.current) openDrawer(from);
-    if (drawer) void tick().then(() => field?.focus());
-    else field?.focus();
+  /** Below 900px, the drawer opened from `from`, with focus in it once it is drawn; wider, the tree is in its column already. */
+  function openTree(from: Element | null): void {
+    if (!drawerBand.current) return;
+    openDrawer(from);
+    void tick().then(() => treeNav?.focus());
   }
 
   // Widening the window past 900px resets the drawer: the tree is back in its column.
@@ -576,23 +572,6 @@
   function ondrawerclick(event: MouseEvent): void {
     if (drawer && event.target instanceof Element && event.target.closest("a[href]")) closeDrawer();
   }
-
-  // `/` focuses the search from anywhere in Docs, opening the drawer first below 900px.
-  const pageShown = pageVisible();
-  $effect(() => {
-    const onkey = (event: KeyboardEvent) => {
-      // A page keep-alive holds hidden (#2247) takes no keys.
-      if (!pageShown()) return;
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
-      const at = document.activeElement;
-      if (at instanceof HTMLInputElement || at instanceof HTMLTextAreaElement || at instanceof HTMLSelectElement) return;
-      if (at instanceof HTMLElement && at.isContentEditable) return;
-      event.preventDefault();
-      openSearch(at);
-    };
-    window.addEventListener("keydown", onkey);
-    return () => window.removeEventListener("keydown", onkey);
-  });
 
   // ---- the find bar (R-10.12) ----
   const stems = $derived(stemsOf(find));
@@ -912,7 +891,15 @@
 
 <div class="tf-rd" class:tf-rd-drawer={drawer}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <nav id="tf-docs-tree" class="tf-rd-tree" aria-label="Docs" onkeydown={ondrawerkey} onclick={ondrawerclick}>
+  <nav
+    id="tf-docs-tree"
+    class="tf-rd-tree"
+    aria-label="Docs"
+    tabindex="-1"
+    bind:this={treeNav}
+    onkeydown={ondrawerkey}
+    onclick={ondrawerclick}
+  >
     <div class="tf-dl-head">
       {#if job !== null}
         <div class="tf-seg tf-dl-scope" role="group" aria-label="Scope">
@@ -930,23 +917,9 @@
           {/each}
         </select>
       {/if}
-      <label class="tf-fsearch">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
-          ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-        >
-        <input
-          bind:this={field}
-          value={query}
-          oninput={typed}
-          onkeydown={onsearchkey}
-          data-filter
-          placeholder="Search {searchScope}"
-          aria-label="Search pages"
-          autocomplete="off"
-        />
-        <kbd>/</kbd>
-      </label>
-      <div class="tf-dl-hint"><code>"…"</code> phrase, <code>-word</code> leave out, <code>by:</code> <code>updated:7d</code></div>
+      {#if searching}
+        <p class="tf-dl-q">Search <b>{query.trim()}</b> <button type="button" class="tf-linkish" onclick={clearSearch}>Clear</button></p>
+      {/if}
     </div>
     <div class="tf-dl-body">
       {#if treeError !== null}
@@ -1062,7 +1035,7 @@
                 class="tf-btn tf-sm tf-rd-pages"
                 aria-controls="tf-docs-tree"
                 aria-expanded={drawer}
-                onclick={(event) => openSearch(event.currentTarget)}
+                onclick={(event) => openTree(event.currentTarget)}
                 ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
                   ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
                 >Pages</button
