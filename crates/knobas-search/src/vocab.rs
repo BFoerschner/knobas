@@ -539,16 +539,17 @@ fn owned_kinds() -> BTreeMap<String, KindInfo> {
 
 /// The kinds the launcher answers with that are neither an adapter's nor an
 /// entity knobas owns (#2422, spec #2419), `(id, label, plural, monogram)`:
-/// a saved ticket view, a link set, and the shell's word for what a CI source
-/// runs, which a hit of any kind declaring the Builds frame's `pipeline` is
-/// grouped under (ADR-0022). Not `knobas_core::entity::OWNED_KINDS`: those
-/// are entity namespaces (migration `0006`), and a view or a set is no
+/// a saved ticket view, a link set, a saved list (#2423), and the shell's
+/// word for what a CI source runs, which a hit of any kind declaring the
+/// Builds frame's `pipeline` is grouped under (ADR-0022). Not `knobas_core::entity::OWNED_KINDS`: those
+/// are entity namespaces (migration `0006`), and a view, a set or a list is no
 /// entity. Ahead of the declared kinds in [`KindCatalog::info`], so a group
 /// says *Pipeline* whatever an adapter calls its own.
 pub const LAUNCHER_KINDS: &[(&str, &str, &str, &str)] = &[
     ("view", "Ticket view", "Ticket views", "VW"),
     ("set", "Link set", "Link sets", "LS"),
     ("pipeline", "Pipeline", "Pipelines", "PL"),
+    ("list", "List", "Lists", "LI"),
 ];
 
 fn launcher_kind(kind: &str) -> Option<KindInfo> {

@@ -667,3 +667,22 @@ async fn a_source_with_only_commits_is_not_in_an_author_querys_coverage() {
         .collect();
     assert!(!listed.contains(&source.as_str()), "{listed:?}");
 }
+
+/// A saved list counts what applying its text answers (#2422 with #2423):
+/// `#b` counts the configuration as the pipeline it is, and the word alone
+/// counts neither of its runs.
+#[tokio::test]
+async fn a_saved_lists_count_is_the_answer_its_text_applies() {
+    let pool = pool().await;
+    let searcher = searcher(&pool).await;
+    let t = token();
+    pipeline(&pool, &t, Utc::now()).await;
+
+    let pipelines = searcher
+        .save_list(&format!("Pipelines {t}"), &format!("#b {t}"))
+        .await
+        .unwrap();
+    assert_eq!(pipelines.count, 1, "{pipelines:?}");
+    let word = searcher.save_list(&format!("Word {t}"), &t).await.unwrap();
+    assert_eq!(word.count, 1, "{word:?}");
+}

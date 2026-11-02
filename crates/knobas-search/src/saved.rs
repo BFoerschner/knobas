@@ -437,6 +437,15 @@ pub fn plan(raw: &str, vocab: &Vocabulary) -> Result<Runnable, Refusal> {
     if text.is_none() && filters.is_empty() {
         return Err(Refusal::NothingToSearchFor);
     }
+    // What the box answers when the text is applied (#2422,
+    // `crate::frames`): pipelines under the shell's word, no runs or commits,
+    // so a list's count is the answer Enter puts in front of the reader.
+    let frames = crate::frames::LauncherFrames::of(&vocab.declarations);
+    let filters = EffectiveFilters {
+        pipeline_kinds: frames.pipelines,
+        hidden_kinds: frames.left_out,
+        ..filters
+    };
 
     Ok(Runnable {
         interpreted: crate::types::ParsedQuery {
