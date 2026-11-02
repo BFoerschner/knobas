@@ -223,28 +223,6 @@
   }
 
   /**
-   * *Everything* with a preview (#2431): the dialog grows, and over a search
-   * the body splits, the results at the left and the selected row's
-   * excerpts at the right. Titles is the one list at the usual size.
-   */
-  const deep = $derived(scope.titles === false);
-  const split = $derived(deep && overlay === null && naming === null && session.mode === "results");
-
-  /**
-   * The row the pane draws: the selection, once it has rested for
-   * {@link PREVIEW_DEBOUNCE_MS}, so running the arrows down fifty rows draws
-   * one pane and not fifty. Kept by id and read back from the rows, so a new
-   * answer for the same row draws its new excerpts.
-   */
-  let previewed = $state<string | null>(null);
-  $effect(() => {
-    const id = split ? (session.current?.id ?? null) : null;
-    const timer = setTimeout(() => (previewed = id), PREVIEW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  });
-  const previewRow = $derived(previewed === null ? null : (session.rows.find((row) => row.id === previewed) ?? null));
-
-  /**
    * The credential health the chips and the result rows are drawn from.
    *
    * **Two rounds of review live in this one line, so both are recorded.**
@@ -308,6 +286,28 @@
    * the name; the query being saved waits in `session.raw`.
    */
   let naming = $state<string | null>(null);
+
+  /**
+   * *Everything* with a preview (#2431): the dialog grows, and over a search
+   * the body splits, the results at the left and the selected row's
+   * excerpts at the right. Titles is the one list at the usual size.
+   */
+  const deep = $derived(scope.titles === false);
+  const split = $derived(deep && overlay === null && naming === null && session.mode === "results");
+
+  /**
+   * The row the pane draws: the selection, once it has rested for
+   * {@link PREVIEW_DEBOUNCE_MS}, so running the arrows down fifty rows draws
+   * one pane and not fifty. Kept by id and read back from the rows, so a new
+   * answer for the same row draws its new excerpts.
+   */
+  let previewed = $state<string | null>(null);
+  $effect(() => {
+    const id = split ? (session.current?.id ?? null) : null;
+    const timer = setTimeout(() => (previewed = id), PREVIEW_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  });
+  const previewRow = $derived(previewed === null ? null : (session.rows.find((row) => row.id === previewed) ?? null));
 
   /**
    * A close ends the mode: the launcher stays mounted, so without this the
