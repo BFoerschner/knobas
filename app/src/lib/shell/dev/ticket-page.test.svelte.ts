@@ -14,6 +14,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import App from "../../../App.svelte";
 import { chosenJob } from "../../tf/job/chosen.svelte";
 import { demoHandlers, installFakeTauri, type Handler } from "./fake-tauri";
+import { fakeAttachmentImages } from "./fake-attachment-images";
 import { until } from "../test-wait";
 
 /** Every command the app sent, in order, with its arguments. */
@@ -669,4 +670,49 @@ test("OPS-77 has no attachments and draws no Attachments section", async () => {
   await until(() => reading()?.querySelector("section[aria-labelledby='tf-tktalk']") !== null, "the reading column never drew");
   expect(attachments()).toBeNull();
   expect(reading()!.textContent).not.toContain("Attachments");
+});
+
+// ---- the description's inline images and task boxes (#2406) ----
+
+test("PAY-231's description draws its inline screenshot where the wiki put it, and its checklist as task boxes", async () => {
+  const undo = fakeAttachmentImages("reachable");
+  try {
+    await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+    await pageOf("PAY-231");
+    const desc = () => reading()?.querySelector(".tf-tkdesc .tf-md");
+    await until(() => desc()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline image never drew");
+    const img = desc()!.querySelector("img.tf-md-att")!;
+    expect(img.getAttribute("alt")).toBe("psp-409-trace.png");
+    const blocks = [...desc()!.children];
+    expect(blocks.findIndex((block) => block.contains(img)), "after the first paragraph, before the list").toBe(1);
+    expect(desc()!.textContent).not.toContain("!psp-409-trace.png");
+    const tasks = [...desc()!.querySelectorAll("li.tf-task")].map((item) => [item.querySelector(".tf-box")?.getAttribute("aria-label"), item.textContent?.trim()]);
+    expect(tasks).toEqual([
+      ["Done", "Retry only the transient codes (AC04 is final)"],
+      ["Not done", "Cap the retry budget"],
+    ]);
+  } finally {
+    undo();
+  }
+});
+
+test("with the fake's attachment read failing, PAY-231's inline screenshot is the placeholder with a link to the ticket in the source", async () => {
+  sent = [];
+  installFakeTauri(recorded({ ...withTicketSearch(demoHandlers()), "plugin:opener|open_url": () => null }));
+  const undo = fakeAttachmentImages("unreachable");
+  try {
+    await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
+    await pageOf("PAY-231");
+    const missing = () => reading()?.querySelector<HTMLElement>(".tf-tkdesc .tf-md-noimg");
+    await until(() => missing() != null, "the placeholder never drew");
+    expect(reading()!.querySelector(".tf-tkdesc img")).toBeNull();
+    expect(missing()!.textContent).toMatch(/^psp-409-trace\.png, not reachable in .+ right now\. Open in /);
+    const link = missing()!.querySelector<HTMLAnchorElement>("a.tf-ext")!;
+    expect(link.getAttribute("href")).toBe("http://127.0.0.1:5399/browse/PAY-231");
+    link.click();
+    await until(() => sent.some((call) => call.cmd === "plugin:opener|open_url"), "the link never reached the opener");
+    expect(sent.find((call) => call.cmd === "plugin:opener|open_url")!.args["url"]).toBe("http://127.0.0.1:5399/browse/PAY-231");
+  } finally {
+    undo();
+  }
 });

@@ -6,6 +6,7 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
+import { fakeAttachmentImages } from "../fake-attachment-images";
 import { CORPUS, fakeEpicEntry, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
@@ -198,6 +199,11 @@ function refreshesKind(adapterKind: string, kind: string): boolean {
 let bridge: FakeBridge | null = null;
 
 /** Hold the bridge, so a refresh can end on `item:refreshed` (#2107). */
+/** The description's inline images (#2406): drawn, or failing with `?fake-attachments=unreachable`. */
+export function seed(params: URLSearchParams): void {
+  fakeAttachmentImages(params.get("fake-attachments") === "unreachable" ? "unreachable" : "reachable");
+}
+
 export function attach(installed: FakeBridge): void {
   bridge = installed;
 }
@@ -297,9 +303,10 @@ function getEntity(args: Record<string, unknown>) {
     // Gitea declares both (#2307, #2298): the repository page's demo rows are
     // Gitea-shaped (`repoView`).
     ...(entry.kind === "repo" ? repoDeclared(entry.payload) : {}),
-    // The mock adapter declares a ticket's `description` as Markdown (#2308).
+    // The mock adapter declares a ticket's `description` as Markdown (#2308);
+    // a row may say `markup: "jira_wiki"` to draw as Jira's (#2406).
     description: entry.kind === "ticket" ? fakeText(entry.payload["description"]) : null,
-    markup: entry.kind === "ticket" ? ("markdown" as const) : ("text" as const),
+    markup: entry.kind !== "ticket" ? ("text" as const) : entry.payload["markup"] === "jira_wiki" ? ("jira_wiki" as const) : ("markdown" as const),
   };
 }
 

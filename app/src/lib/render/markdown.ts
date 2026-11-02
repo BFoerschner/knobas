@@ -125,7 +125,7 @@ engine.renderer.rules.s_close = () => "</del>";
 const image = engine.renderer.rules.image!;
 engine.renderer.rules.image = (tokens, idx, options, env, self) => {
   const token = tokens[idx]!;
-  const attachment = /^attachment:(.+)$/i.exec((token.attrGet("src") ?? "").trim());
+  const attachment = /^attachment:(.+)$/i.exec(String(token.attrGet("src") ?? "").trim());
   if (attachment) {
     token.attrSet("src", "");
     token.attrSet("data-md-attachment", decode(attachment[1]!));
