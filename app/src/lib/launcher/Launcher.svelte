@@ -65,7 +65,8 @@
   import Results from "./Results.svelte";
   import { type SheetAction, type SheetSubject, nameOf, narrowActions, sheetActions, subjectOf } from "./sheet";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
-  import { JOB_LINK_RELATIONS, drawn } from "../detail/relations";
+  import { drawn } from "../detail/relations";
+  import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
   import { linkFailureMessage } from "../detail/links";
   import { argvText, menuOrder } from "../tf/openin/openin";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";

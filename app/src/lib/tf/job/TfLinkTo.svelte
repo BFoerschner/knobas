@@ -14,7 +14,8 @@
   import type { SearchHit } from "../../ipc/search";
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
   import { linkFailureMessage } from "../../detail/links";
-  import { JOB_LINK_RELATIONS, drawn } from "../../detail/relations";
+  import { drawn } from "../../detail/relations";
+  import { JOB_LINK_RELATIONS } from "./link-relations";
   import { kindSingular } from "../../shell/kinds";
   import type { Layers } from "../layers.svelte";
   import type { LinkTarget } from "./current.svelte";

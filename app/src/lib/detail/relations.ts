@@ -166,21 +166,6 @@ export const RELATIONS: readonly Relation[] = [
   { id: CAPTURED_FROM, forward: "captured from", inverse: "captured from here" },
 ];
 
-/**
- * The relations a job's link offers, in its order (prototype-6's six): the
- * job's *Link to…* dialog (`TfLinkTo`) and the launcher's inline *Link to
- * ⟨job⟩* (#2426) pick from this one list, and both store the pick through
- * {@link drawn}, so a link made either way is the same row.
- */
-export const JOB_LINK_RELATIONS: readonly { id: string; label: string }[] = [
-  { id: "related", label: "related" },
-  { id: "implements", label: "implements" },
-  { id: "documents", label: "documents" },
-  { id: "runs-on", label: "runs on" },
-  { id: "blocks", label: "blocks" },
-  { id: "depends-on", label: "depends on" },
-];
-
 /** One link about to be written: the ends, in order, and the stored word. */
 export interface DrawnLink {
   fromId: string;
