@@ -1360,6 +1360,100 @@ async fn html_macros_read_as_embeds_of_their_markup() {
     drop(state);
 }
 
+/// **The `iframe` macro and the widget connector against the real
+/// Confluence** (#2441): a page made through Confluence's REST API with an
+/// `iframe` macro, a widget connector, and an `iframe` naming a
+/// `javascript:` URL reads, after Confluence's own normalisation of the
+/// storage, as two URL embeds of their URLs and the macro's placeholder. The
+/// page's `body_text` holds neither URL.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn iframe_and_widget_macros_read_as_url_embeds() {
+    use knobas_source::docs::{DocBlock, EmbedContent};
+
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+
+    let board = "https://grafana.example/d/quokkaboard?orgId=1&kiosk=tv";
+    let video = "https://www.youtube.com/embed/quokkavideo";
+    let title = format!("Framed pages [{LITTER}]");
+    let storage = format!(
+        concat!(
+            r#"<p>Framed wombatword:</p>"#,
+            r#"<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="{board}" /></ac:parameter><ac:parameter ac:name="height">400</ac:parameter></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="widget" ac:schema-version="1"><ac:parameter ac:name="url"><ri:url ri:value="{video}" /></ac:parameter></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="javascript:alert(1)" /></ac:parameter></ac:structured-macro>"#,
+        ),
+        board = board.replace('&', "&amp;"),
+        video = video,
+    );
+    let (status, made) = env
+        .call(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(json!({
+                "type": "page",
+                "title": title,
+                "space": { "key": env.space },
+                "ancestors": [{ "id": parent.id }],
+                "body": { "storage": { "value": storage, "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "creating the page: {made}");
+    let id = made["id"].as_str().expect("the new page's id").to_owned();
+    litter.created.push(id.clone());
+
+    let state = app("confluence_live_url_embeds", &env).await;
+    sync_until(&state, &id, "the page with its framed pages", |payload| {
+        payload["body"]["storage"]["value"]
+            .as_str()
+            .is_some_and(|s| s.contains("wombatword"))
+    })
+    .await;
+
+    let entity = format!("{CONFLUENCE}:{id}");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &entity,
+    )
+    .await
+    .expect("the reader reads the page");
+    assert_eq!(
+        page.blocks[1..],
+        [
+            DocBlock::Embed {
+                name: "iframe".into(),
+                content: EmbedContent::Url { url: board.into() },
+            },
+            DocBlock::Embed {
+                name: "widget".into(),
+                content: EmbedContent::Url { url: video.into() },
+            },
+            DocBlock::Placeholder {
+                name: "iframe".into()
+            },
+        ],
+        "Confluence stored: {:#?}",
+        page.blocks
+    );
+
+    let body_text: String =
+        sqlx::query_scalar("select body_text from sync.item where entity_id = $1")
+            .bind(&entity)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the page's search text");
+    assert!(body_text.contains("Framed wombatword"), "{body_text:?}");
+    for url in ["quokkaboard", "quokkavideo", "javascript"] {
+        assert!(!body_text.contains(url), "{url}: {body_text:?}");
+    }
+
+    drop(state);
+}
+
 /// **Includes, from pages Confluence itself stored** (spec #2432, stories
 /// 13 to 19): an `include` and an `excerpt-include` of a page in the synced
 /// space are filled from the mirror, the page's `excerpt` draws as its
