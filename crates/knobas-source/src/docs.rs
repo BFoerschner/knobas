@@ -822,7 +822,8 @@ mod tests {
     /// The include fill finds an include wherever the page draws one, and
     /// not inside what an include holds: that is the included page's.
     #[test]
-    fn the_include_fill_reaches_includes_in_lists_cells_panels_and_collapsibles_but_not_inside_one() {
+    fn the_include_fill_reaches_includes_in_lists_cells_panels_and_collapsibles_but_not_inside_one()
+    {
         let filled = DocBlock::Include {
             title: "A".into(),
             space: None,
