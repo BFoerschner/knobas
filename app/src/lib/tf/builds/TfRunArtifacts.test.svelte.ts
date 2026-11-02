@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { ArtifactEntry, DownloadTarget } from "../../ipc/entity";
+import type { ArtifactEntry, ArtifactPreview, DownloadTarget } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
 import TfRunArtifacts from "./TfRunArtifacts.svelte";
 
@@ -48,7 +48,11 @@ interface Drawn {
   downloads: DownloadTarget[];
 }
 
-function draw(tree: Record<string, ArtifactEntry[]> = TREE): Drawn {
+/** The head of a file: `.xml` is text, anything else is not. */
+const textHeads = (path: string): Promise<ArtifactPreview | null> =>
+  Promise.resolve({ text: path.endsWith(".xml") ? "<testsuites>\n</testsuites>" : null, truncated: false });
+
+function draw(tree: Record<string, ArtifactEntry[]> = TREE, head: (path: string) => Promise<ArtifactPreview | null> = textHeads): Drawn {
   const drawn: Drawn = { read: [], previewed: [], downloads: [] };
   page = mount(TfRunArtifacts, {
     target,
@@ -60,7 +64,7 @@ function draw(tree: Record<string, ArtifactEntry[]> = TREE): Drawn {
           drawn.read.push(path);
           return Promise.resolve(tree[path] ?? []);
         },
-        preview: (_id, path) => (drawn.previewed.push(path), Promise.resolve({ text: path.endsWith(".xml") ? "<testsuites>\n</testsuites>" : null, truncated: false })),
+        preview: (_id, path) => (drawn.previewed.push(path), head(path)),
         download: (_id, what) => {
           drawn.downloads.push(what);
           const name = what.kind === "all" ? "Payout_IntegrationTests-1187-artifacts.zip" : what.kind === "folder" ? `${what.path}.zip` : what.kind === "file" ? what.path.split("/").at(-1)! : "log";
@@ -160,6 +164,25 @@ test("a file that is not text opens with No preview, and one with no text extens
   expect(viewer()?.querySelector(".tf-vstage")?.getAttribute("data-shows")).toBe("none");
   expect(viewer()?.querySelector(".tf-tkkind")?.textContent).toBe("GZ");
   expect(drawn.previewed).toEqual(["SHA256SUMS"]);
+});
+
+test("a head that cannot be read says why in the viewer and offers Try again, which reads it again; a cut head says so", async () => {
+  let fails = true;
+  const drawn = draw(TREE, (path) =>
+    fails ? Promise.reject(new Error("TeamCity answered 503")) : Promise.resolve({ text: `<testsuites>\n${path}`, truncated: true }),
+  );
+  await settle();
+  nameButton("junit.xml").click();
+  await settle();
+  const stage = () => viewer()!.querySelector(".tf-vstage")!;
+  expect(stage().getAttribute("data-shows")).toBe("missing");
+  expect(stage().querySelector(".tf-vempty p")?.textContent).toContain("junit.xml could not be read:");
+  fails = false;
+  [...stage().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Try again")!.click();
+  await settle();
+  expect(drawn.previewed).toEqual(["test-report/junit.xml", "test-report/junit.xml"]);
+  expect([...stage().querySelectorAll(".tf-code .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2test-report/junit.xml"]);
+  expect(stage().querySelector(".tf-vnote")?.textContent).toBe("The first 256 KB. Download it for the rest.");
 });
 
 test("a run with no artifacts says so and offers no zip", async () => {
