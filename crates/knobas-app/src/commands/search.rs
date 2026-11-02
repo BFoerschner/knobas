@@ -51,6 +51,13 @@ pub struct LauncherHome {
     /// if the two ever stop agreeing.
     #[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]
     pub recent: Vec<knobas_search::EntityRow>,
+    /// What the reader favourited (#2428, spec #2419 stories 39 and 40),
+    /// in the order they were favourited, drawn above `recent` under one
+    /// heading: an entity as `recent` draws one, a saved list as its `list`
+    /// hit (kind and source `list`, its text as `path`, the refusal as
+    /// `state`). The rows of [`favourites`].
+    #[ts(as = "Vec<knobas_core::entity_list::EntityRow>")]
+    pub favourites: Vec<knobas_search::EntityRow>,
     /// Stream F's credential health, read straight from `knobas.source_config`
     /// -- **not** a second copy of the type (interfaces §2.2, open question
     /// **E-Q5**, resolved: `knobas_sync::CredentialHealth` has merged, so the
@@ -190,6 +197,49 @@ pub async fn delete_smart_list(
     id: String,
 ) -> Result<(), IpcError> {
     delete_smart_list_inner(&lifecycle.pool()?, lifecycle.registry(), &id).await
+}
+
+/// Every favourite (#2428), in the order they were favourited: the block
+/// the empty box draws above the recent items, which `launcher_home` also
+/// carries.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn favourites(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<knobas_search::EntityRow>, IpcError> {
+    favourites_inner(&lifecycle.pool()?, lifecycle.registry()).await
+}
+
+/// Favourite an entity or a saved list (#2428, story 39), last in the block;
+/// favouriting one twice leaves it in its place.
+///
+/// # Errors
+///
+/// `not_found` for a saved list nobody saved, `not_ready` before the database
+/// is up, `internal` if the write fails.
+#[tauri::command]
+pub async fn add_favourite(
+    lifecycle: State<'_, Lifecycle>,
+    target: knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    add_favourite_inner(&lifecycle.pool()?, lifecycle.registry(), &target).await
+}
+
+/// Unfavourite an entity or a saved list (#2428); not a favourite is no
+/// error.
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if the delete fails.
+#[tauri::command]
+pub async fn remove_favourite(
+    lifecycle: State<'_, Lifecycle>,
+    target: knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    remove_favourite_inner(&lifecycle.pool()?, lifecycle.registry(), &target).await
 }
 
 /// Every ticket view (#812, R-3.2, R-3.3), in list order, each with its count
@@ -404,6 +454,7 @@ pub async fn launcher_home_inner(
     let notes_shown = crate::capture::shown(pool).await?;
     Ok(LauncherHome {
         recent: board.recent,
+        favourites: board.favourites,
         sources: knobas_sync::config::health_all(pool).await?,
         // Pending only -- see the field's own doc for why the other two open
         // states stay with `write_queue_counts`. `count(*)` is an `i64` and
@@ -491,6 +542,50 @@ pub async fn delete_smart_list_inner(
     id: &str,
 ) -> Result<(), IpcError> {
     Ok(searcher(pool, registry).await?.delete_list(id).await?)
+}
+
+/// [`favourites`], against a pool and a registry.
+///
+/// # Errors
+///
+/// See [`favourites`].
+pub async fn favourites_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+) -> Result<Vec<knobas_search::EntityRow>, IpcError> {
+    Ok(searcher(pool, registry).await?.favourites().await?)
+}
+
+/// [`add_favourite`], against a pool and a registry.
+///
+/// # Errors
+///
+/// See [`add_favourite`].
+pub async fn add_favourite_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    target: &knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .add_favourite(target)
+        .await?)
+}
+
+/// [`remove_favourite`], against a pool and a registry.
+///
+/// # Errors
+///
+/// See [`remove_favourite`].
+pub async fn remove_favourite_inner(
+    pool: &PgPool,
+    registry: &dyn AdapterRegistry,
+    target: &knobas_search::FavouriteTarget,
+) -> Result<(), IpcError> {
+    Ok(searcher(pool, registry)
+        .await?
+        .remove_favourite(target)
+        .await?)
 }
 
 #[cfg(test)]

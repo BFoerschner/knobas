@@ -158,6 +158,9 @@ const EXPLAIN_RECENT_KINDS_SQL: &str = recent_kinds_sql!("explain (analyze false
 /// this crate's to read.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LauncherBoard {
+    /// What the reader favourited, in that order (#2428,
+    /// [`crate::favourites`]): entities and saved lists, one block.
+    pub favourites: Vec<EntityRow>,
     pub recent: Vec<EntityRow>,
 }
 

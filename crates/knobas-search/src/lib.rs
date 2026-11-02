@@ -38,6 +38,7 @@
 pub mod corpus;
 pub(crate) mod coverage;
 pub mod excerpt;
+pub mod favourites;
 pub mod frames;
 pub mod group;
 pub mod home;
@@ -57,6 +58,7 @@ use std::time::Instant;
 
 use sqlx::PgPool;
 
+pub use favourites::FavouriteTarget;
 pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use query::{
@@ -627,7 +629,7 @@ impl Searcher {
             .collect())
     }
 
-    /// What an empty box answers with: the newest items.
+    /// What an empty box answers with: the favourites, then the newest items.
     ///
     /// Spec §4's board. Deliberately not a search: a query with no text and no
     /// filter would scan the whole mirror to return nothing, and the read here
@@ -641,8 +643,40 @@ impl Searcher {
         // The newest rows' path line reads the declarations (#596).
         let vocab = self.vocabulary().await?;
         Ok(LauncherBoard {
+            favourites: favourites::list(&self.pool, &vocab).await?,
             recent: home::recent(&self.pool, home::RECENT_LIMIT, &vocab.declarations).await?,
         })
+    }
+
+    /// Every favourite, in the order they were favourited (#2428): what the
+    /// board draws above the recent items. See [`favourites::list`].
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if a read fails.
+    pub async fn favourites(&self) -> Result<Vec<EntityRow>, SearchError> {
+        let vocab = self.vocabulary().await?;
+        favourites::list(&self.pool, &vocab).await
+    }
+
+    /// Favourite an entity or a saved list, last in the block (#2428).
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::UnknownList`] for a list nobody saved,
+    /// [`SearchError::Db`] if the write fails.
+    pub async fn add_favourite(&self, target: &FavouriteTarget) -> Result<(), SearchError> {
+        favourites::add(&self.pool, target).await
+    }
+
+    /// Unfavourite an entity or a saved list (#2428); not a favourite is no
+    /// error.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the delete fails.
+    pub async fn remove_favourite(&self, target: &FavouriteTarget) -> Result<(), SearchError> {
+        favourites::remove(&self.pool, target).await
     }
 
     /// The values the query box suggests after `kind:`, `source:` and

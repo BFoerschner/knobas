@@ -305,6 +305,8 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     // No longer reached through `LauncherHome` (#2423); `smart_lists` and
     // `create_smart_list` still answer it.
     knobas_search::SmartListSummary::export_all(cfg)?;
+    // What `add_favourite` and `remove_favourite` take (#2428).
+    knobas_search::FavouriteTarget::export_all(cfg)?;
     knobas_search::FilterSuggestions::export_all(cfg)?;
     knobas_source::query::Translation::export_all(cfg)?;
     crate::ticket_views::TicketView::export_all(cfg)?;
