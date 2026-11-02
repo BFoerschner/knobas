@@ -47,7 +47,7 @@ pub async fn refresh(
     source_id: &str,
     source: &dyn Source,
 ) -> Result<usize, sqlx::Error> {
-    let owed = owed(pool, source_id, source).await?;
+    let owed = owed(pool, source_id).await?;
     if owed.is_empty() {
         return Ok(0);
     }
@@ -88,13 +88,27 @@ pub async fn refresh(
 /// `(pipeline, run)` for every live pipeline of the source whose newest run
 /// has finished and is not the run its stored log is of, in the Builds view's
 /// order.
-async fn owed(
-    pool: &PgPool,
-    source_id: &str,
-    source: &dyn Source,
-) -> Result<Vec<(String, String)>, sqlx::Error> {
-    let declarations = knobas_core::payload::Declarations::empty()
-        .with(source_id, source.descriptor().payload_paths);
+///
+/// The declarations are the stored ones (`sync.parent_declaration`, written
+/// from the registry at start), not the adapter's `descriptor()`: a run reads
+/// that once (#1701). A source with no run under any pipeline
+/// (`sync.item_pipeline`) costs one index probe and nothing else.
+async fn owed(pool: &PgPool, source_id: &str) -> Result<Vec<(String, String)>, sqlx::Error> {
+    let stored: Option<sqlx::types::Json<Vec<knobas_core::payload::KindPaths>>> =
+        sqlx::query_scalar(
+            "select pd.payload_paths
+           from knobas.source_config sc
+           join sync.parent_declaration pd on pd.adapter_kind = sc.kind
+          where sc.id = $1
+            and exists (select 1 from sync.item_pipeline ip where ip.source_id = $1)",
+        )
+        .bind(source_id)
+        .fetch_optional(pool)
+        .await?;
+    let Some(sqlx::types::Json(paths)) = stored else {
+        return Ok(Vec::new());
+    };
+    let declarations = knobas_core::payload::Declarations::empty().with(source_id, paths);
     let pipelines =
         match knobas_core::builds::pipelines(pool, &declarations, &[], &[source_id.to_owned()])
             .await
