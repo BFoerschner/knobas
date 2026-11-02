@@ -124,6 +124,7 @@
     placeOf,
     reachedPages,
     readingMinutes,
+    revealMatch,
     scopeName,
     SEARCH_PAUSE_MS,
     sectionKind,
@@ -618,7 +619,9 @@
     if (all.length === 0) return;
     at = (at + step + all.length) % all.length;
     markCurrent(all);
-    all[at]?.scrollIntoView?.({ block: "center" });
+    const current = all[at];
+    if (current) revealMatch(current);
+    current?.scrollIntoView?.({ block: "center" });
   }
 
   /** The page and the query the find bar last started on. */

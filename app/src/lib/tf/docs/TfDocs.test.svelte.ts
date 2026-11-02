@@ -366,6 +366,68 @@ test("a task list draws each item's state, nested too, beside an ordinary list, 
   expect(doc.querySelectorAll("li input, li button, li [tabindex]"), "a task's box is drawn, never a control").toHaveLength(0);
 });
 
+const collapsible = (title: string, blocks: DocPage["blocks"]): DocPage["blocks"][number] => ({ type: "collapsible", title, blocks });
+const collapsibles = () => [...target.querySelectorAll<HTMLDetailsElement>(".tf-doc details.tf-collapse")];
+
+test("a collapsible draws closed under its title, and the lists, tables and panels inside it draw as anywhere (spec #2432)", async () => {
+  const blocks: DocPage["blocks"] = [
+    collapsible("Rollback steps", [
+      { type: "list", ordered: false, items: [{ checked: null, blocks: [para("Revert the flag")] }] },
+      { type: "table", rows: [[{ header: false, blocks: [para("eu-1")], colspan: 1, rowspan: 1 }]] },
+      { type: "panel", kind: "warning", title: null, blocks: [para("Slow.")] },
+    ]),
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const [only, ...rest] = collapsibles();
+  expect(rest).toHaveLength(0);
+  expect(only!.open).toBe(false);
+  expect(only!.querySelector(":scope > summary")?.textContent).toBe("Rollback steps");
+  expect(only!.querySelector("li p")?.textContent).toBe("Revert the flag");
+  expect(only!.querySelector("table td")?.textContent).toBe("eu-1");
+  expect(only!.querySelector(".tf-callout.tf-warn")?.textContent).toContain("Slow.");
+});
+
+test("arriving on a search hit inside a collapsible opens it and leaves the others closed (spec #2432)", async () => {
+  const blocks: DocPage["blocks"] = [
+    para("Intro."),
+    collapsible("Steps", [collapsible("Inner", [para("Post to the ledger.")])]),
+    collapsible("Other", [para("Nothing here.")]),
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
+  const input = type("ledger");
+  await settle();
+  location.hash = "";
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  await settle();
+  expect(target.querySelector(".tf-rd-page mark.tf-cur")?.textContent).toBe("ledger");
+  expect(collapsibles().map((d) => [d.querySelector(":scope > summary")?.textContent, d.open])).toEqual([
+    ["Steps", true],
+    ["Inner", true],
+    ["Other", false],
+  ]);
+  location.hash = "";
+});
+
+test("a match in a collapsible's title does not open it; stepping to a match inside it does (spec #2432)", async () => {
+  const blocks: DocPage["blocks"] = [para("The ledger."), collapsible("Ledger rules", [para("Close the ledger daily.")])];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
+  const input = type("ledger");
+  await settle();
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  const bar = () => target.querySelector(".tf-findbar")!;
+  expect(bar().textContent).toContain("1 of 3");
+  const next = () => bar().querySelector<HTMLButtonElement>("button[aria-label='Next']")!.click();
+  next();
+  await settle();
+  expect(bar().textContent).toContain("2 of 3");
+  expect(collapsibles()[0]!.open, "the title is drawn while closed").toBe(false);
+  next();
+  await settle();
+  expect(collapsibles()[0]!.open).toBe(true);
+  location.hash = "";
+});
+
 test("Copy copies the code, and the placeholder and Open in Confluence open the page", async () => {
   const io = await draw(["confluence:2"]);
   const copy = [...target.querySelectorAll("button")].find((b) => b.textContent === "Copy")!;

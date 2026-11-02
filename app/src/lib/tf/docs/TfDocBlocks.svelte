@@ -4,7 +4,7 @@
   this part in <source>* (story 134). The page's sections and their anchors
   are `TfDocBody`'s; a heading here is one inside a panel or a comment.
 
-  Recurses into lists, panels and table cells by importing itself. A task item (spec
+  Recurses into lists, panels, collapsibles and table cells by importing itself. A task item (spec
   #2432) draws its state as the Markdown view's box: a picture, never a
   control, so nothing here ticks a task.
 -->
@@ -108,6 +108,12 @@
       <span class="tf-lbl">{panelLabel(block)}</span>
       <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
     </div>
+  {:else if block.type === "collapsible"}
+    <!-- Closed, as the source draws it (spec #2432); the find bar opens it when it steps to a match inside (`revealMatch`). -->
+    <details class="tf-collapse">
+      <summary><TfMarked text={block.title} {stems} /></summary>
+      <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
+    </details>
   {:else if block.type === "placeholder"}
     <div class="tf-macro">
       <span>This part is a {sourceName} <b>{block.name}</b> macro, which knobas does not draw.</span>

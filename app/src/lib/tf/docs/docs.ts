@@ -201,8 +201,22 @@ export function blockWords(block: DocBlock): string {
         .join(" ");
     case "panel":
       return block.blocks.map(blockWords).join(" ");
+    case "collapsible":
+      return [block.title, ...block.blocks.map(blockWords)].join(" ");
     case "placeholder":
       return "";
+  }
+}
+
+/**
+ * Open every collapsible (`details.tf-collapse`) that hides `match`, so the
+ * find bar's current match is on screen (spec #2432). A match in a
+ * collapsible's own title is drawn while it is closed and opens nothing.
+ */
+export function revealMatch(match: Element): void {
+  for (let fold = match.parentElement?.closest("details.tf-collapse"); fold; fold = fold.parentElement?.closest("details.tf-collapse")) {
+    const title = fold.querySelector(":scope > summary");
+    if (!title?.contains(match)) (fold as HTMLDetailsElement).open = true;
   }
 }
 
