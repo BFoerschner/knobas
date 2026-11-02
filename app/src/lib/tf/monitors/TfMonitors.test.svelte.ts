@@ -1,7 +1,8 @@
 /**
  * Monitors (#864, R-11.3, R-11.4), mounted over stand-in reads: the header and
  * tabs, the roster's order and columns, the scopes, *Ack*, *Pause* and
- * *Resume*, *Assets nothing watches*, and *Create monitor*'s two writes.
+ * *Resume*, *Hide* and the *Hidden* chip, *Assets nothing watches*, and
+ * *Create monitor*'s two writes.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -12,6 +13,7 @@ import { EVENTS } from "../../ipc";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import type { Hear } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { forgetFilters } from "../filter/filter-state.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
@@ -33,6 +35,7 @@ function monitor(entity_id: string, name: string, over: Partial<MonitorRow> = {}
     cert_days_remaining: null,
     web_url: null,
     tombstoned: false,
+    hidden: false,
     assets: [],
     actions: ["pause_monitor"],
     refreshes: true,
@@ -89,6 +92,8 @@ let writes: WriteOpPayload[];
 let edits: [string, AssetEdit[]][];
 let routeEdits: [string, RouteEdit[]][];
 let acks: string[];
+/** Each `set_monitor_hidden` the page made: the monitor, and hidden or not. */
+let hides: [string, boolean][];
 /** The write follows the page holds, by write id: a test tells each what the queue says. */
 let heard: Map<number, Hear>;
 /** The page's `sync:state` listeners. */
@@ -104,6 +109,8 @@ beforeEach(() => {
   edits = [];
   routeEdits = [];
   acks = [];
+  hides = [];
+  forgetFilters();
   heard = new Map();
   syncListeners = new Set();
   refreshes = new Set();
@@ -128,6 +135,10 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
     ackAlert: async (id) => {
       acks.push(id);
       return {} as never;
+    },
+    setMonitorHidden: async (id, hidden) => {
+      hides.push([id, hidden]);
+      return hidden;
     },
     submitWrite: async (payload) => {
       writes.push(payload);
@@ -268,6 +279,64 @@ test("Pause and Resume queue the source's op for that monitor", async () => {
     "Queued: pause payouts /health.",
     "Queued: resume yard-planner.",
   ]);
+});
+
+/** The filter bar's *Hidden* chip. */
+const hiddenChip = () => target.querySelector<HTMLButtonElement>('[role="group"][aria-label="Hidden"] button')!;
+const names = () => rows().map((tr) => text(tr.querySelector("td")).replace(/ HTTP$| TCP$/, ""));
+
+test("Hide takes a monitor off the roster by its id, and the Hidden chip shows it with Unhide", async () => {
+  let roster = ROSTER;
+  const stand = ports({
+    monitorRoster: async () => roster,
+    setMonitorHidden: async (id, hidden) => {
+      hides.push([id, hidden]);
+      roster = roster.map((row) => (row.entity_id === id ? { ...row, hidden } : row));
+      return hidden;
+    },
+  });
+  await draw([], "PAY-231", stand);
+  expect(text(hiddenChip())).toBe("Hidden");
+  const down = rows().find((tr) => text(tr.querySelector("td")).startsWith("flows-stage"))!;
+  button(down, "Hide")!.click();
+  await settle();
+  expect(hides).toEqual([["kuma:2", true]]);
+  expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health"]);
+  expect(text(hiddenChip())).toBe("Hidden 1");
+  expect(toasts.items.map((t) => t.text)).toContain(
+    "Hid flows-stage. Its alerts no longer reach the inbox or notify; the Hidden chip shows it.",
+  );
+
+  hiddenChip().click();
+  await settle();
+  expect(hiddenChip().getAttribute("aria-pressed")).toBe("true");
+  expect(names()).toEqual(["flows-stage"]);
+  button(rows()[0]!, "Unhide")!.click();
+  await settle();
+  expect(hides).toEqual([
+    ["kuma:2", true],
+    ["kuma:2", false],
+  ]);
+  expect(rows()).toEqual([]);
+  expect(text(target.querySelector(".tf-empty"))).toBe("No monitor is hidden.");
+});
+
+test("a monitor the read says is hidden is drawn only under the Hidden chip", async () => {
+  await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((row) => (row.entity_id === "kuma:1" ? { ...row, hidden: true } : row)) }));
+  expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner"]);
+  hiddenChip().click();
+  await settle();
+  expect(names()).toEqual(["payouts /health"]);
+  expect(button(rows()[0]!, "Unhide")).toBeDefined();
+  expect(button(rows()[0]!, "Hide")).toBeUndefined();
+});
+
+test("a hide the backend refuses keeps the row and says why", async () => {
+  await draw([], "PAY-231", ports({ setMonitorHidden: async () => Promise.reject({ code: "not_found", message: "no monitor \"kuma:1\" in the mirror" }) }));
+  button(rows().at(-1)!, "Hide")!.click();
+  await settle();
+  expect(names()).toContain("payouts /health");
+  expect(toasts.items.some((t) => t.tone === "err")).toBe(true);
 });
 
 test("This job keeps the monitors watching what the job reaches; My jobs and All offer the rest", async () => {
@@ -609,6 +678,7 @@ test("a row's Refresh is a small button in the row's trailing group, last after 
   const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-trail")!;
   expect([...trail.querySelectorAll("button")].map((b) => [text(b), b.className])).toEqual([
     ["Pause", "tf-btn tf-sm tf-ghost"],
+    ["Hide", "tf-btn tf-sm tf-ghost"],
     ["Refresh", "tf-btn tf-sm tf-ghost tf-refresh"],
   ]);
 });

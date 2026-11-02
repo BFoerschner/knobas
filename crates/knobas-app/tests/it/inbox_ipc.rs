@@ -1081,6 +1081,61 @@ impl Harness {
     }
 }
 
+/// **A hidden monitor's alert reaches no inbox, so it notifies nobody; shown
+/// again, it is back.** The alert itself stays open throughout: hiding is
+/// about the reader's screen, not the estate.
+#[tokio::test]
+async fn a_hidden_monitors_alert_leaves_the_inbox_and_comes_back_when_shown() {
+    let harness = harness().await;
+    let estate = harness.estate(now() - Duration::hours(3)).await;
+    let key = format!("alert:{}", estate.monitor);
+    let in_inbox = |stream: Vec<InboxEntry>| stream.iter().any(|entry| entry.item.key == key);
+    assert!(
+        in_inbox(harness.stream().await),
+        "the alert starts in the inbox"
+    );
+
+    assert!(
+        knobas_app::assets::set_monitor_hidden(harness.pool(), &estate.monitor, true)
+            .await
+            .expect("the hide")
+    );
+    assert!(
+        !in_inbox(harness.stream().await),
+        "a hidden monitor's alert is no inbox item"
+    );
+    assert_eq!(
+        inbox_count_inner(harness.pool(), harness.registry.as_ref(), now())
+            .await
+            .expect("the count reads"),
+        0
+    );
+    assert_eq!(
+        harness.alert_state(&estate.monitor).await,
+        Some((false, false)),
+        "the alert stays open and un-acked"
+    );
+    // Hiding twice is one hide.
+    knobas_app::assets::set_monitor_hidden(harness.pool(), &estate.monitor, true)
+        .await
+        .expect("a second hide");
+
+    assert!(
+        !knobas_app::assets::set_monitor_hidden(harness.pool(), &estate.monitor, false)
+            .await
+            .expect("the unhide")
+    );
+    assert!(
+        in_inbox(harness.stream().await),
+        "shown again, its open alert is back in the inbox"
+    );
+
+    let refused = knobas_app::assets::set_monitor_hidden(harness.pool(), "kuma:nothing", true)
+        .await
+        .expect_err("no such monitor");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::NotFound);
+}
+
 /// The ticket's IPC criterion, end to end: **ack from the inbox; the alert
 /// reads acked and open; after recovery the item is gone and the asset's
 /// history shows both lines.**

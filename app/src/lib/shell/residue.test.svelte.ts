@@ -2008,6 +2008,7 @@ const CASES: Case[] = [
             unmonitoredAssets: () => deferred([]),
             openAlerts: () => deferred([]),
             ackAlert: () => deferred({} as never),
+            setMonitorHidden: () => deferred(false),
             submitWrite: () => deferred({ id: 1 } as never),
             getAsset: () => deferred({} as never),
             editAsset: () => deferred({} as never),

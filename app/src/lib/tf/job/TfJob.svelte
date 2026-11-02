@@ -113,11 +113,14 @@
     sets = bridgeSetPorts,
     registry = kindRegistry,
     follower = writeFollower(),
+    toMention = false,
   }: {
     /** What the address names: a key (`PAY-231`) or an entity id. */
     segment: string;
     /** A `#/job/<…>` address: choose the ticket as the job once read, and land on its own address. */
     choose?: boolean;
+    /** A `#/ticket/<id>/mention` address: bring the newest comment that mentions the reader into view. */
+    toMention?: boolean;
     /** Where `Esc` goes, which the breadcrumb's hint names (#2228); `null` where it does nothing. */
     back?: EscTarget | null;
     timer: Pick<Timer, "current" | "elapsed">;
@@ -606,6 +609,7 @@
               failure={threadFailure}
               now={today()}
               refused={commentRefused}
+              {toMention}
               oncomment={comment}
               attachments={detail.attachments ?? []}
               images={inlineImages}
