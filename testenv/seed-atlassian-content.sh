@@ -986,6 +986,35 @@ fi
 HOME_ID=$(printf '%s' "$API_BODY" | jq -r '.homepage.id // empty')
 [ -n "$HOME_ID" ] || die "space $SPACE_KEY has no home page"
 
+# The `html` macro (#2440): confluence_live's embed test stores pages holding
+# it, and Confluence ships it disabled. A storage body holding it is rendered
+# to `view`: an enabled macro draws the probe element, a disabled one an
+# "unknown macro" box. Off, the seed turns its module on through the plugin
+# manager once and renders again; still off, it stops here, naming it, and
+# never skips.
+html_macro_renders() {
+  conf POST /rest/api/contentbody/convert/view "$(jq -n '{representation: "storage",
+    value: "<ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<i id=\"knobas-html-probe\"></i>]]></ac:plain-text-body></ac:structured-macro>"}')"
+  expect "render a storage body holding the html macro" 200
+  printf '%s' "$API_BODY" | jq -e '.value | contains("knobas-html-probe")' >/dev/null
+}
+if html_macro_renders; then
+  skip "the html macro enabled"
+else
+  UPM_MODULE=/rest/plugins/1.0/confluence.macros.html-key/modules/html-key
+  conf GET "$UPM_MODULE"
+  if [ "$API_STATUS" = "200" ]; then
+    _module=$(printf '%s' "$API_BODY" | jq -c '.enabled = true')
+    curl -sS -o /dev/null -u "$ADMIN" -X PUT \
+         -H 'Content-Type: application/vnd.atl.plugins.plugin.module+json' \
+         -d "$_module" "$CONF_URL$UPM_MODULE" || true
+  fi
+  html_macro_renders || die "Confluence's html macro is disabled, and the knobas embed suite needs it
+  (#2440). Enable it as an administrator: Manage apps > System > Confluence HTML Macros > the
+  'html' module, then seed again."
+  created "the html macro enabled"
+fi
+
 # The fixture's page body is a flat string of "## Heading — text" sections;
 # storage format wants <h2> and <p>, with `code` and *em* as their tags. A
 # page with no body is created empty. A comment is one <p>. Both escape the
