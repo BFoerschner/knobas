@@ -1897,7 +1897,9 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     /// `aside`, `details`…) is drawn, so it is numbered as one of the page's.
     #[test]
     fn a_heading_inside_any_wrapper_the_reader_reads_through_is_numbered() {
-        for wrapper in ["article", "aside", "header", "footer", "main", "nav", "figure", "details"] {
+        for wrapper in [
+            "article", "aside", "header", "footer", "main", "nav", "figure", "details",
+        ] {
             let storage =
                 format!("<h2>Top</h2><p>a</p><{wrapper}><h2>Inside</h2><p>b</p></{wrapper}>");
             let drawn = blocks(&storage)

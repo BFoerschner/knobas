@@ -201,7 +201,10 @@ fn a_table_is_a_pipe_table_headed_by_its_first_row() {
         "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n",
         "a header wider than every row sets the width"
     );
-    assert_eq!(page("T", None, &[DocBlock::Table { rows: vec![] }]), "# T\n");
+    assert_eq!(
+        page("T", None, &[DocBlock::Table { rows: vec![] }]),
+        "# T\n"
+    );
 }
 
 /// A pipe in a nested table's cell is escaped once, by the inner table, and
