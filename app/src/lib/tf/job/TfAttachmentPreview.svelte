@@ -1,14 +1,14 @@
 <!--
   The attachment preview (#2415): one attachment of the ticket page, opened
-  from its Attachments row, a `[^name]` link or an inline image. The page's
-  `TfDialog`, a header of the file's name, its line, *Download* and ×; the
-  body by kind:
+  from its Attachments row, a `[^name]` link or an inline image, in the app's
+  file viewer (`TfFileViewer`). This says what the viewer shows:
 
-  - an image, whole, scaled to fit;
-  - a PDF (`isPdf`), in the file viewer's PDF component over the same bytes;
-  - anything else, its kind and *No preview*, with *Download*;
-  - a file over the 5 MiB cap, or a read that failed, says why in the words
-    the inline images' placeholders use, with *Try again* for a failed read.
+  - an image, from the page's previews;
+  - a PDF (`isPdf`), its bytes from the same previews;
+  - text (`isText`): its lines, the first 256 KB of them;
+  - anything else, *No preview*;
+  - a file over the 5 MiB cap, or a read that failed, why, in the words the
+    inline images' placeholders use, with *Try again* for a failed read.
 
   The bytes are the page's previews (`attachment-previews.svelte.ts`): asked
   once, kept while the page is open, never in the mirror. *Download* waits
@@ -20,10 +20,9 @@
   import { push } from "../../shell/toasts.svelte";
   import { savedText } from "../builds/run-reads";
   import type { Layers } from "../layers.svelte";
-  import TfPdf from "../render/TfPdf.svelte";
-  import TfDialog from "../settings/TfDialog.svelte";
+  import TfFileViewer, { type ViewerContent } from "../render/TfFileViewer.svelte";
   import { missingWords } from "./attachment-image";
-  import { dataBytes, isImage, isPdf, type Previews } from "./attachment-previews.svelte";
+  import { dataBytes, isImage, isPdf, isText, type Previews } from "./attachment-previews.svelte";
   import { attachmentKind, attachmentLine } from "./attachments";
 
   let {
@@ -45,13 +44,26 @@
     onclose: () => void;
   } = $props();
 
-  const shows = $derived(isImage(file) ? "image" : isPdf(file) ? "pdf" : "none");
+  /** The most of a text file the viewer draws, as an artifact's preview does. */
+  const TEXT_HEAD = 256 * 1024;
+
+  const shows = $derived(isImage(file) ? "image" : isPdf(file) ? "pdf" : isText(file) ? "text" : "none");
   const preview = $derived(previews.of(file.id));
   const failure = $derived(previews.failure);
-  const pdfBytes = $derived(shows === "pdf" && preview.state === "ready" ? dataBytes(preview.src) : null);
-  const readPdf = $derived.by(() => {
-    const bytes = pdfBytes;
-    return () => (bytes === null ? Promise.reject(new Error("not read")) : Promise.resolve(bytes));
+
+  const content = $derived.by((): ViewerContent => {
+    if (shows === "none") return { kind: "none" };
+    if (preview.state === "too-large" || preview.state === "failed") {
+      return { kind: "missing", why: missingWords(file.name, source, preview), retry: preview.state === "failed" ? () => previews.retry() : null };
+    }
+    if (preview.state !== "ready") return { kind: "reading" };
+    if (shows === "image") return { kind: "image", src: preview.src };
+    const bytes = dataBytes(preview.src);
+    if (shows === "text") {
+      const head = bytes.subarray(0, TEXT_HEAD);
+      return { kind: "text", text: new TextDecoder().decode(head, { stream: bytes.length > TEXT_HEAD }), truncated: bytes.length > TEXT_HEAD };
+    }
+    return { kind: "pdf", read: () => Promise.resolve(bytes), size: bytes.length };
   });
 
   $effect(() => {
@@ -67,36 +79,13 @@
   }
 </script>
 
-{#snippet downloadButton(className: string)}
-  <button
-    type="button"
-    class={className}
-    disabled={failure !== null}
-    title={failure !== null ? `Waits until ${failure.source} can be read` : `Save ${file.name} to Downloads`}
-    onclick={() => void save()}>Download</button
-  >
-{/snippet}
-
-<TfDialog title={file.name} subtitle={attachmentLine(file)} {onclose} {layers} className="tf-attdlg" closeButton>
-  {#snippet actions()}{@render downloadButton("tf-btn")}{/snippet}
-  {#snippet body()}
-    <div class="tf-attview">
-      {#if shows === "none"}
-        <span class="tf-tkkind">{attachmentKind(file)}</span>
-        <p>No preview for this kind of file.</p>
-        {@render downloadButton("tf-btn tf-sm")}
-      {:else if preview.state === "ready" && shows === "image"}
-        <img src={preview.src} alt={file.name} />
-      {:else if pdfBytes !== null}
-        <TfPdf read={readPdf} size={pdfBytes.length} />
-      {:else if preview.state === "too-large" || preview.state === "failed"}
-        <p>{missingWords(file.name, source, preview)}</p>
-        {#if preview.state === "failed"}
-          <button type="button" class="tf-btn tf-sm" onclick={() => previews.retry()}>Try again</button>
-        {/if}
-      {:else}
-        <p class="tf-dim">Reading {file.name}…</p>
-      {/if}
-    </div>
-  {/snippet}
-</TfDialog>
+<TfFileViewer
+  name={file.name}
+  line={attachmentLine(file) || null}
+  kind={attachmentKind(file)}
+  {content}
+  download={() => void save()}
+  downloadWaits={failure !== null ? `Waits until ${failure.source} can be read` : null}
+  {layers}
+  {onclose}
+/>

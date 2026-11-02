@@ -94,6 +94,18 @@ export function dataBytes(src: string): Uint8Array {
   return bytes;
 }
 
+/** Media types drawn as text beside `text/*`: what a ticket's log, trace or data file is sent as. */
+const TEXT_TYPES = /^(text\/|application\/(json|xml|x-ndjson|x-yaml|yaml|csv|x-sh)\b)|\+(json|xml)\b/;
+/** File extensions drawn as text where the media type says nothing better (`application/octet-stream`, none). */
+const TEXT_NAMES = /\.(txt|log|csv|tsv|json|ndjson|xml|ya?ml|md|ini|toml|conf|cfg|sql|sh|diff|patch)$/i;
+
+/** Whether a file is drawn as text: its media type says so, or its name does when the type is missing or generic. */
+export function isText(file: Pick<Attachment, "mime" | "name">): boolean {
+  const mime = file.mime?.trim().toLowerCase() ?? "";
+  if (TEXT_TYPES.test(mime)) return true;
+  return (mime === "" || mime === "application/octet-stream") && TEXT_NAMES.test(file.name);
+}
+
 /** The reason a rejected read gives. */
 export function failureOf(error: unknown): PreviewFailure {
   if (!isIpcError(error)) return "unreachable";

@@ -1,7 +1,8 @@
 /**
  * The run page's Artifacts tab (#856) over `run_artifacts`,
  * `artifact_preview` and `download_run_file`: the tree with its folds and
- * counts, a deeper folder read when opened, *Preview* for text, and every
+ * counts, a deeper folder read when opened, a file's name opening it in the
+ * file viewer (#2415), and every
  * download through knobas.
  */
 import { flushSync, mount, unmount } from "svelte";
@@ -42,11 +43,13 @@ const TREE: Record<string, ArtifactEntry[]> = {
 
 interface Drawn {
   read: string[];
+  /** The paths whose head was asked for. */
+  previewed: string[];
   downloads: DownloadTarget[];
 }
 
 function draw(tree: Record<string, ArtifactEntry[]> = TREE): Drawn {
-  const drawn: Drawn = { read: [], downloads: [] };
+  const drawn: Drawn = { read: [], previewed: [], downloads: [] };
   page = mount(TfRunArtifacts, {
     target,
     props: {
@@ -57,7 +60,7 @@ function draw(tree: Record<string, ArtifactEntry[]> = TREE): Drawn {
           drawn.read.push(path);
           return Promise.resolve(tree[path] ?? []);
         },
-        preview: (_id, path) => Promise.resolve({ text: path.endsWith(".xml") ? "<testsuites>\n</testsuites>" : null, truncated: false }),
+        preview: (_id, path) => (drawn.previewed.push(path), Promise.resolve({ text: path.endsWith(".xml") ? "<testsuites>\n</testsuites>" : null, truncated: false })),
         download: (_id, what) => {
           drawn.downloads.push(what);
           const name = what.kind === "all" ? "Payout_IntegrationTests-1187-artifacts.zip" : what.kind === "folder" ? `${what.path}.zip` : what.kind === "file" ? what.path.split("/").at(-1)! : "log";
@@ -74,7 +77,7 @@ const rows = () =>
 const button = (row: number, name: string) =>
   [...target.querySelectorAll(".tf-arow")[row]!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name);
 
-test("the tree opens its top-level folders, counts them, sizes the files and offers Preview only for text", async () => {
+test("the tree opens its top-level folders, counts them, sizes the files, and each file's name opens it", async () => {
   const drawn = draw();
   await settle();
   expect(drawn.read).toEqual(["", "test-report"]);
@@ -85,9 +88,8 @@ test("the tree opens its top-level folders, counts them, sizes the files and off
     ["SHA256SUMS", "1.0 KB", "tf-ad0"],
     ["payout-service.tar.gz", "6.2 MB", "tf-ad0"],
   ]);
-  expect(button(1, "Preview")).toBeDefined();
-  expect(button(3, "Preview")).toBeDefined();
-  expect(button(4, "Preview")).toBeUndefined();
+  expect([...target.querySelectorAll(".tf-arow > button.tf-aopen")].map((b) => b.textContent)).toEqual(["junit.xml", "SHA256SUMS", "payout-service.tar.gz"]);
+  expect(target.querySelector(".tf-arow button")?.textContent).not.toBe("Preview");
   expect(target.querySelector(".tf-aall .tf-dim")?.textContent).toBe(
     "Downloads go through knobas with the Tidewater TeamCity sign-in it already has, into ~/Downloads.",
   );
@@ -123,20 +125,41 @@ test("every download goes through knobas: a file, a folder as a zip, and all as 
   ]);
 });
 
-test("Preview draws the text with line numbers under the tree, and says when a file is not text", async () => {
-  draw();
+const viewer = () => target.querySelector<HTMLElement>(".tf-modal [role='dialog'].tf-viewer");
+const nameButton = (name: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-arow > button.tf-aopen")].find((b) => b.textContent === name)!;
+
+test("a file's name opens the viewer: a text file's lines, its folder and size, Download on the title line, × closes", async () => {
+  const drawn = draw();
   await settle();
-  button(1, "Preview")!.click();
+  nameButton("junit.xml").click();
   await settle();
-  const view = target.querySelector(".tf-apreview .tf-fileview")!;
-  expect(view.querySelector(".tf-p")?.textContent).toBe("test-report/junit.xml");
-  expect([...view.querySelectorAll(".tf-code .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2</testsuites>"]);
-  button(3, "Preview")!.click();
+  const view = viewer()!;
+  expect(view.querySelector("h2")?.textContent).toBe("junit.xml");
+  expect(view.querySelector(".tf-dsub")?.textContent).toBe("test-report/, 14.2 KB");
+  expect([...view.querySelectorAll(".tf-vstage .tf-code .tf-l")].map((l) => l.textContent)).toEqual(["1<testsuites>", "2</testsuites>"]);
+  const download = view.querySelector<HTMLButtonElement>(".tf-dhead .tf-dctl .tf-acts .tf-btn")!;
+  expect(download.textContent?.trim()).toBe("Download");
+  download.click();
   await settle();
-  expect(target.querySelector(".tf-apreview")?.textContent).toContain("SHA256SUMS is not text.");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-apreview button")].find((b) => b.textContent === "Close")!.click();
+  expect(drawn.downloads).toEqual([{ kind: "file", path: "test-report/junit.xml" }]);
+  view.querySelector<HTMLButtonElement>(".tf-dctl .tf-dclose")!.click();
   flushSync();
-  expect(target.querySelector(".tf-apreview")).toBeNull();
+  expect(viewer()).toBeNull();
+});
+
+test("a file that is not text opens with No preview, and one with no text extension is not read at all", async () => {
+  const drawn = draw();
+  await settle();
+  nameButton("SHA256SUMS").click();
+  await settle();
+  expect(viewer()?.querySelector(".tf-vempty")?.textContent).toContain("No preview for this kind of file.");
+  viewer()!.querySelector<HTMLButtonElement>(".tf-dclose")!.click();
+  flushSync();
+  nameButton("payout-service.tar.gz").click();
+  flushSync();
+  expect(viewer()?.querySelector(".tf-vstage")?.getAttribute("data-shows")).toBe("none");
+  expect(viewer()?.querySelector(".tf-tkkind")?.textContent).toBe("GZ");
+  expect(drawn.previewed).toEqual(["SHA256SUMS"]);
 });
 
 test("a run with no artifacts says so and offers no zip", async () => {

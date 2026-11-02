@@ -8,7 +8,7 @@ import { flushSync } from "svelte";
 import { describe, expect, test } from "vitest";
 
 import type { Attachment, AttachmentBytes } from "../../ipc/entity";
-import { createAttachmentPreviews, dataBytes, isPdf } from "./attachment-previews.svelte";
+import { createAttachmentPreviews, dataBytes, isPdf, isText } from "./attachment-previews.svelte";
 
 function file(id: string, name: string, mime: string | null, size: number | null): Attachment {
   return { id, name, mime, size, author: null, created: null, content_url: `https://jira.example/secure/attachment/${id}/${name}`, thumbnail_url: null };
@@ -139,6 +139,17 @@ describe("attachment previews", () => {
     expect(isPdf({ name: "codes.pdf", mime: "" })).toBe(true);
     expect(isPdf({ name: "codes.pdf", mime: "text/plain" })).toBe(false);
     expect(isPdf({ name: "codes.pdf.txt", mime: null })).toBe(false);
+  });
+
+  test("the text test: a text media type, or a text name where the type is missing or generic (#2415)", () => {
+    expect(isText({ name: "batch.csv", mime: "text/csv" })).toBe(true);
+    expect(isText({ name: "x", mime: "application/json" })).toBe(true);
+    expect(isText({ name: "x", mime: "application/vnd.api+json" })).toBe(true);
+    expect(isText({ name: "trace.log", mime: "application/octet-stream" })).toBe(true);
+    expect(isText({ name: "TRACE.LOG", mime: null })).toBe(true);
+    expect(isText({ name: "trace.log", mime: "image/png" })).toBe(false);
+    expect(isText({ name: "bundle.zip", mime: "application/zip" })).toBe(false);
+    expect(isText({ name: "notes.txt.gz", mime: null })).toBe(false);
   });
 
   test("a preview's data URL is the file's bytes (#2415)", () => {

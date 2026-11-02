@@ -134,7 +134,7 @@ The title block on the left and `.tf-acts` on the right, on the title line, top-
 3. "Open in <source>", always a ghost button;
 4. *Sync now* / *Refresh*, always last.
 
-A section heading that carries an action puts it on the right of the heading line at the small size. A dialog that shows a thing and decides nothing (the attachment preview, #2415) is a viewer: its action is on its title line at the default size, in `TfDialog`'s `actions` before the Close, and it has no footer. The ticket page has no header: its key, status and actions are on its card ([below](#the-ticket-pages-card)), and its title heads the reading column.
+A section heading that carries an action puts it on the right of the heading line at the small size. A dialog that shows a thing and decides nothing (the file viewer, `TfFileViewer`, #2415) is a viewer: its action is on its title line at the default size, in `TfDialog`'s `actions`, and it has no footer. The action, a 1 px rule and the Close are one cluster (`.tf-dctl`), each control the default height, centred on the title block; *Download* carries its tray glyph at the Close's stroke. The ticket page has no header: its key, status and actions are on its card ([below](#the-ticket-pages-card)), and its title heads the reading column.
 
 ### The ticket page's card
 

@@ -3,7 +3,7 @@
  * through the app's own mount over the whole fake IPC: opening the panel
  * fetches PAY-231's two screenshots through `attachment_bytes` and draws them
  * as data images. A row opens the attachment's preview (#2415): the image,
- * the PDF, or its kind and *No preview*; its *Download* saves through
+ * the PDF, a text file's lines, or its kind and *No preview*; its *Download* saves through
  * `download_attachment`. With the read failing
  * (`?fake-attachments=unreachable`), the panel leads with the stale strip,
  * the image rows draw dashed placeholders, *Download* waits, the preview
@@ -136,7 +136,7 @@ function cell(row: HTMLElement): string {
 
 /** The open attachment preview, if one is open. */
 function modal(): HTMLElement | null {
-  return target.querySelector<HTMLElement>(".tf-modal [role='dialog'].tf-attdlg");
+  return target.querySelector<HTMLElement>(".tf-modal [role='dialog'].tf-viewer");
 }
 
 /** A button of the preview by its words. */
@@ -191,7 +191,7 @@ test("a row opens the preview of its file: an image draws whole, Escape closes i
   expect(inModal("Download")).toBeDefined();
   expect(inModal("Close")).toBeDefined();
   expect(shown.querySelector("a[href]"), "no Open").toBeNull();
-  await until(() => shown.querySelector<HTMLImageElement>(".tf-attview img")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the image never drew");
+  await until(() => shown.querySelector<HTMLImageElement>(".tf-vstage img")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the image never drew");
   expect(shown.contains(document.activeElement)).toBe(true);
 
   shown.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
@@ -220,20 +220,21 @@ test("a PDF's preview is the PDF viewer over the file's bytes", async () => {
   const fold = await openPay231();
   unfold(fold);
   const shown = preview(rows(fold)[2]!);
-  await until(() => shown.querySelector(".tf-attview .tf-fpdf, .tf-attview .tf-empty") !== null, "no PDF viewer");
+  await until(() => shown.querySelector(".tf-vstage .tf-fpdf, .tf-vstage .tf-empty") !== null, "no PDF viewer");
   expect(reads()).toContain("50002");
 });
 
-test("a file with no preview says its kind and No preview, and offers Download", async () => {
+test("a text file draws its lines, read through attachment_bytes", async () => {
   install();
   const fold = await openPay231();
   unfold(fold);
   const shown = preview(rows(fold)[3]!);
-  const body = shown.querySelector(".tf-attview")!;
-  expect(squash(body.querySelector(".tf-tkkind"))).toBe("CSV");
-  expect(squash(body)).toContain("No preview for this kind of file");
-  expect(body.querySelector("button")?.textContent?.trim()).toBe("Download");
-  expect(reads()).not.toContain("50003");
+  await until(() => shown.querySelector(".tf-vstage .tf-code .tf-l") !== null, "the CSV never drew");
+  const lines = [...shown.querySelectorAll(".tf-vstage .tf-code .tf-l")].map((line) => line.textContent);
+  expect(lines[0]).toBe("1payout_id,iban,amount_eur,reason_code,attempts,last_attempt");
+  expect(lines).toHaveLength(5);
+  expect(shown.querySelector(".tf-vnote")).toBeNull();
+  expect(reads()).toContain("50003");
 });
 
 test("Download in the preview saves the file through download_attachment and says where", async () => {
@@ -263,8 +264,8 @@ test("with the source unreachable, the strip leads, images are placeholders, the
   expect(reads()).toEqual(["50000", "50001"]);
 
   const shown = preview(rows(fold)[1]!);
-  await until(() => squash(shown.querySelector(".tf-attview")).includes("not reachable"), "the preview never said why");
-  expect(squash(shown.querySelector(".tf-attview p"))).toBe("retry-timeline.png, not reachable in Tidewater (mock) right now.");
+  await until(() => squash(shown.querySelector(".tf-vstage")).includes("not reachable"), "the preview never said why");
+  expect(squash(shown.querySelector(".tf-vstage p"))).toBe("retry-timeline.png, not reachable in Tidewater (mock) right now.");
   const download = inModal("Download")!;
   expect(download.disabled).toBe(true);
   expect(download.title).toBe("Waits until Tidewater (mock) can be read");
@@ -273,7 +274,7 @@ test("with the source unreachable, the strip leads, images are placeholders, the
   const reachable = demoHandlers();
   installFakeTauri(recorded({ ...handlers, attachment_bytes: reachable["attachment_bytes"]! }));
   inModal("Try again")!.click();
-  await until(() => shown.querySelector<HTMLImageElement>(".tf-attview img")?.getAttribute("src")?.startsWith("data:image/") ?? false, "Try again drew no image");
+  await until(() => shown.querySelector<HTMLImageElement>(".tf-vstage img")?.getAttribute("src")?.startsWith("data:image/") ?? false, "Try again drew no image");
   await until(() => strip(fold) === null, "the strip stayed");
   expect(inModal("Download")!.disabled).toBe(false);
   inModal("Close")!.click();
@@ -295,8 +296,8 @@ test("a 403 reads not permitted, in the strip and in the preview", async () => {
   );
   expect(rows(fold).map(cell)).toEqual(["placeholder", "placeholder", "PDF", "CSV"]);
   const shown = preview(rows(fold)[2]!);
-  await until(() => squash(shown.querySelector(".tf-attview")).includes("not permitted"), "the PDF's preview never said why");
-  expect(squash(shown.querySelector(".tf-attview p"))).toBe("sepa-error-codes.pdf, not permitted in Tidewater (mock).");
+  await until(() => squash(shown.querySelector(".tf-vstage")).includes("not permitted"), "the PDF's preview never said why");
+  expect(squash(shown.querySelector(".tf-vstage p"))).toBe("sepa-error-codes.pdf, not permitted in Tidewater (mock).");
 });
 
 test("an image over the 5 MiB cap gets no preview, is never fetched, and its preview says so with Download", async () => {
@@ -323,7 +324,7 @@ test("an image over the 5 MiB cap gets no preview, is never fetched, and its pre
   const last = rows(fold)[4]!;
   expect(cell(last)).toBe("PNG");
   const shown = preview(last);
-  expect(squash(shown.querySelector(".tf-attview p"))).toBe("full-trace.png is over the 5 MB preview cap.");
+  expect(squash(shown.querySelector(".tf-vstage p"))).toBe("full-trace.png is over the 5 MB preview cap.");
   expect(inModal("Try again")).toBeUndefined();
   expect(inModal("Download")!.disabled).toBe(false);
   expect(reads()).not.toContain("50009");
