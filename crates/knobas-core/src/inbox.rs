@@ -686,7 +686,10 @@ macro_rules! failed_sign_in {
 ///
 /// Four statements, each of which is the difference between this and noise.
 ///
-/// **Which alerts.** Open (`closed_at is null`) and **un-acked**. Ack is
+/// **Which alerts.** Open (`closed_at is null`), **un-acked**, and of a
+/// monitor nobody **hid** (`knobas.monitor_hidden`, `0066`): a hidden monitor
+/// raises no inbox item and so no desktop notification, while its alert still
+/// opens and closes for every estate surface. Ack is
 /// knobas-local and is *seen*, not *fixed* (story 62), so an acked alert leaves
 /// the inbox and stays in the Assets view; recovery closes the row and takes
 /// the item with it **by construction** (story 64) rather than by anybody
@@ -747,7 +750,9 @@ macro_rules! alert {
                       limit 1
                    ) watched
               where a.closed_at is null
-                and a.acked_at is null"
+                and a.acked_at is null
+                and not exists (select 1 from knobas.monitor_hidden h
+                                 where h.entity_id = a.entity_id)"
         )
     };
 }

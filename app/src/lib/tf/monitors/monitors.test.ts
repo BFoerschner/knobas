@@ -39,6 +39,7 @@ function row(over: Partial<MonitorRow>): MonitorRow {
     cert_days_remaining: null,
     web_url: null,
     tombstoned: false,
+    hidden: false,
     assets: [{ id: "asset:r1", name: "payouts", path: "edge", type_label: "Service" }],
     actions: ["pause_monitor"],
     refreshes: true,
@@ -152,12 +153,13 @@ describe("the filter", () => {
     row({ entity_id: "kuma:1", name: "flows-stage", monitor_type: "http", state: "down", assets: [{ id: "asset:a", name: "flows", path: null, type_label: "Route" }] }),
     row({ entity_id: "kuma:2", name: "pg", monitor_type: "port", assets: [{ id: "asset:db", name: "payments", path: null, type_label: "Database" }] }),
     row({ entity_id: "kuma:3", name: "vm ping", monitor_type: "ping", tombstoned: true, assets: [] }),
+    row({ entity_id: "kuma:4", name: "noisy", monitor_type: "http", state: "down", hidden: true, assets: [] }),
   ];
   const index = jobIndex([
     { id: "jira:PAY-231", reached: [{ entity_id: "kuma:1" }] },
     { id: "jira:PAY-200", reached: [{ entity_id: "asset:db" }] },
   ]);
-  const base = { scope: "all" as const, job: null, states: [] as string[], type: "", text: "" };
+  const base = { scope: "all" as const, job: null, states: [] as string[], type: "", text: "", hidden: false };
   const names = (kept: MonitorRow[]) => kept.map((r) => r.name);
 
   test("This job keeps what the job reaches, by the monitor or the asset it watches", () => {
@@ -172,6 +174,12 @@ describe("the filter", () => {
   test("state chips and the type keep their own", () => {
     expect(names(visibleMonitors(rows, { ...base, states: ["Down", "Paused"] }, index))).toEqual(["flows-stage", "vm ping"]);
     expect(names(visibleMonitors(rows, { ...base, type: "TCP" }, index))).toEqual(["pg"]);
+  });
+
+  test("a hidden monitor is kept only under the Hidden chip, and the other filters still apply to it", () => {
+    expect(names(visibleMonitors(rows, base, index))).toEqual(["flows-stage", "pg", "vm ping"]);
+    expect(names(visibleMonitors(rows, { ...base, hidden: true }, index))).toEqual(["noisy"]);
+    expect(names(visibleMonitors(rows, { ...base, hidden: true, states: ["Up"] }, index))).toEqual([]);
   });
 
   test("the words match the monitor, the asset and the type", () => {

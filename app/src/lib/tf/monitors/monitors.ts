@@ -125,6 +125,8 @@ export interface MonitorFilter {
   /** The type chosen, in {@link kindWord}'s words; `""` is *Any*. */
   type: string;
   text: string;
+  /** The *Hidden* chip: on keeps only the monitors the reader hid, off only the others. */
+  hidden: boolean;
 }
 
 /** The ids a row is reached by: the monitor's own, and every asset it watches. */
@@ -133,6 +135,7 @@ const idsOf = (row: MonitorRow) => [row.entity_id, ...row.assets.map((asset) => 
 /** The rows the filter keeps, in the order given. */
 export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilter, index: JobIndex): MonitorRow[] {
   return rows.filter((row) => {
+    if (row.hidden !== filter.hidden) return false;
     if (filter.scope === "job") {
       const job = filter.job;
       if (job === null || !idsOf(row).some((id) => index.holds(job, { entity_id: id }))) return false;

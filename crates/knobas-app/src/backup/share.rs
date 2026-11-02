@@ -451,6 +451,9 @@ mod tests {
         for forbidden in [
             // *Hide here* is one reader's choice about one ticket (#870).
             "link_set_hidden",
+            // *Hide* on the Monitors tab: one reader's choice about their
+            // own screen and their own notifications.
+            "monitor_hidden",
             "activity",
             "write_queue",
             "sync_run",

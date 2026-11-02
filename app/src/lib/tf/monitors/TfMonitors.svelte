@@ -7,8 +7,11 @@
     roster sorted down, warning, paused, up. Each row: the monitor and its
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
-    *Ack* on a down monitor, and *Pause* or *Resume* where the source offers
-    it; while a pause or resume is on its way its echo (*queued*, then *sent*,
+    *Ack* on a down monitor, *Pause* or *Resume* where the source offers
+    it, and *Hide* (*Unhide* under the *Hidden* chip). A hidden monitor is off
+    the roster until that chip is on, and its alerts reach no inbox, so it
+    raises no desktop notification; knobas-local, Uptime Kuma goes on checking
+    it. While a pause or resume is on its way its echo (*queued*, then *sent*,
     `tf/queued.svelte.ts`, #2105) stands in the button's place until the
     roster reads the new state.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
@@ -40,7 +43,7 @@
 
   Over `monitor_roster`, `open_alerts` (only for each down row's `acked_at`, so
   an ack outlives the visit; the tab draws no alert of its own, #1296), `ack_alert`, `submit_write` (`PauseMonitor`,
-  `ResumeMonitor`, `CreateMonitor`), `unmonitored_assets`, `get_asset` and
+  `ResumeMonitor`, `CreateMonitor`), `set_monitor_hidden`, `unmonitored_assets`, `get_asset` and
   `edit_asset` for the create, `list_sources` for the header's source name,
   `refresh_entity` and the source's run for a row's *Refresh* or *Sync now*,
   and `job_reach` (`job/open-jobs.ts`) for the scopes. Knobas reads monitors
@@ -70,6 +73,7 @@
     unmonitoredAssets: () => Promise<UnmonitoredAsset[]>;
     openAlerts: () => Promise<OpenAlert[]>;
     ackAlert: (monitorId: string) => Promise<OpenAlert>;
+    setMonitorHidden: (monitorId: string, hidden: boolean) => Promise<boolean>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     getAsset: (assetId: string) => Promise<AssetDetail>;
     editAsset: (assetId: string, edits: AssetEdit[]) => Promise<AssetRow>;
@@ -90,7 +94,17 @@
   import type { RoleFrameProps } from "../page-entry";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, openAlerts, unmonitoredAssets } from "../../ipc/assets";
+  import {
+    ackAlert,
+    editAsset,
+    editRoute,
+    getAsset,
+    getRoute,
+    monitorRoster,
+    openAlerts,
+    setMonitorHidden,
+    unmonitoredAssets,
+  } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
@@ -134,6 +148,7 @@
       unmonitoredAssets: () => unmonitoredAssets(),
       openAlerts: () => openAlerts(),
       ackAlert: (monitorId) => ackAlert(monitorId),
+      setMonitorHidden: (monitorId, hidden) => setMonitorHidden(monitorId, hidden),
       submitWrite: (payload) => submitWrite(payload),
       getAsset: (assetId) => getAsset(assetId),
       editAsset: (assetId, edits) => editAsset(assetId, edits),
@@ -351,6 +366,11 @@
   // -- the filter bar --------------------------------------------------------
 
   const filter = sessionFilter("monitors");
+  /** The one value of the *Hidden* chip group. */
+  const HIDDEN_CHIP = "Hidden";
+  const hiddenCount = $derived((roster ?? []).filter((row) => row.hidden).length);
+  const hiddenLabel = $derived(hiddenCount > 0 ? `Hidden ${hiddenCount}` : HIDDEN_CHIP);
+  const showHidden = $derived((filter.chips["hid"] ?? []).includes(HIDDEN_CHIP));
   // Prototype-6 opens Monitors on *All*.
   if (filter.scope === null) filter.scope = "all";
   $effect(() => {
@@ -369,7 +389,10 @@
       { id: "mine", label: "My jobs", query: "" },
       { id: "all", label: "All", query: "" },
     ],
-    chips: [{ key: "st", label: "State", options: STATE_CHIPS.map((value) => ({ value, label: value })) }],
+    chips: [
+      { key: "st", label: "State", options: STATE_CHIPS.map((value) => ({ value, label: value })) },
+      { key: "hid", label: "Hidden", options: [{ value: HIDDEN_CHIP, label: hiddenLabel }] },
+    ],
     dropdowns: [{ key: "type", label: "Type", options: types.map((value) => ({ value, label: value })) }],
   });
   const scope = $derived<"job" | "mine" | "all">(
@@ -380,7 +403,14 @@
       ? []
       : visibleMonitors(
           sorted(roster),
-          { scope, job, states: filter.chips["st"] ?? [], type: filter.dropdowns["type"] ?? "", text: filter.text },
+          {
+            scope,
+            job,
+            states: filter.chips["st"] ?? [],
+            type: filter.dropdowns["type"] ?? "",
+            text: filter.text,
+            hidden: showHidden,
+          },
           index,
         ),
   );
@@ -445,6 +475,26 @@
       const alert = await ports.ackAlert(row.entity_id);
       acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
       push({ text: "Acked in knobas. The alert stays open until the monitor recovers." });
+    } catch (error) {
+      push({ text: ipcErrorMessage(error), tone: "err" });
+    } finally {
+      delete pressing[row.entity_id];
+    }
+  }
+
+  /** *Hide* or *Unhide*: knobas-local, so the row moves at once and the roster is read again. */
+  async function setHidden(row: MonitorRow, hidden: boolean) {
+    if (pressing[row.entity_id]) return;
+    pressing[row.entity_id] = true;
+    try {
+      await ports.setMonitorHidden(row.entity_id, hidden);
+      if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
+      push({
+        text: hidden
+          ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; the Hidden chip shows it.`
+          : `${row.name} is back on the roster, and its alerts reach the inbox again.`,
+      });
+      revision += 1;
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     } finally {
@@ -630,6 +680,13 @@
                       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                     {/each}
                   {/if}
+                  <button
+                    type="button"
+                    class="tf-btn tf-sm tf-ghost"
+                    disabled={pressing[row.entity_id] === true}
+                    title={row.hidden ? "Show it on the roster and let its alerts reach the inbox again" : "Take it off the roster; its alerts stop reaching the inbox and stop notifying"}
+                    onclick={() => void setHidden(row, !row.hidden)}>{row.hidden ? "Unhide" : "Hide"}</button
+                  >
                   {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small ghost />{/if}
                 </div></td>
               </tr>
@@ -642,7 +699,7 @@
       <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
     {:else}
       <div class="tf-empty">
-        No monitor matches.
+        {showHidden && hiddenCount === 0 ? "No monitor is hidden." : "No monitor matches."}
         {#if scope === "job"}
           <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
         {/if}

@@ -5147,6 +5147,39 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     assert_eq!(drifted.state, None, "and no state was invented either");
 }
 
+/// **A hidden monitor stays on the roster, flagged** -- the tab decides what
+/// to draw under its *Hidden* chip -- and *Unhide* clears the flag.
+#[tokio::test]
+async fn a_hidden_monitor_is_on_the_roster_flagged_hidden() {
+    let pool = pool("monitors-roster-hidden").await;
+    let id = kuma_monitor(&pool, "kuma", "noisy", serde_json::json!({}), None).await;
+    kuma_monitor(&pool, "kuma", "quiet", serde_json::json!({}), None).await;
+
+    let hidden = |roster: &[assets::MonitorRow]| {
+        roster
+            .iter()
+            .filter(|row| row.hidden)
+            .map(|row| row.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let registry = Registry::for_process();
+    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    assert!(hidden(&roster).is_empty(), "nothing starts hidden");
+
+    assets::set_monitor_hidden(&pool, &id, true).await.unwrap();
+    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    assert_eq!(
+        names(&roster),
+        ["noisy", "quiet"],
+        "a hidden monitor is still read"
+    );
+    assert_eq!(hidden(&roster), ["noisy"]);
+
+    assets::set_monitor_hidden(&pool, &id, false).await.unwrap();
+    let roster = assets::monitor_roster(&pool, &registry).await.unwrap();
+    assert!(hidden(&roster).is_empty(), "unhidden, it reads as before");
+}
+
 /// **The reading is read where the source declares it** (#1224). The
 /// payload under Uptime Kuma's declaration draws it. A source whose adapter
 /// declares no response time -- an unconfigured source, so no adapter at all

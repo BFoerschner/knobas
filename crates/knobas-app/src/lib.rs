@@ -502,6 +502,9 @@ pub fn run() {
             // #446's ack, appended after that: the one write on this surface
             // that leaves its subject open on purpose.
             commands::assets::ack_alert,
+            // Hiding a monitor from the Monitors tab and from the inbox,
+            // beside the ack it is the quieter cousin of.
+            commands::assets::set_monitor_hidden,
             // #449's *Not monitored* roster, appended after that: the other
             // list the Monitors tab draws, and a list of assets rather than
             // of monitors.

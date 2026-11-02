@@ -1010,6 +1010,13 @@ web_url: string | null,
  */
 tombstoned: boolean, 
 /**
+ * Whether the reader hid it (`knobas.monitor_hidden`, [`set_monitor_hidden`]):
+ * the tab draws it only under its *Hidden* chip, and its alerts reach no
+ * inbox and so raise no desktop notification. Knobas-local; Uptime Kuma
+ * goes on checking it.
+ */
+hidden: boolean, 
+/**
  * The assets this monitor is attached to by a `monitored-by` link, by
  * name -- with the path that tells two containers called `postgres`
  * apart. Empty for a monitor nothing is attached to, which the tab says

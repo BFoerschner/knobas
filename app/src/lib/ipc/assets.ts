@@ -440,6 +440,19 @@ export function ackAlert(monitorId: string): Promise<OpenAlert> {
 }
 
 /**
+ * Hide one monitor from the Monitors tab, or show it again; resolves to
+ * whether it is hidden now.
+ *
+ * Knobas-local, not a write-back: Uptime Kuma goes on checking it. A hidden
+ * monitor is drawn only under the tab's *Hidden* chip, and its alerts reach
+ * no inbox, so it raises no desktop notification. Rejects with `not_found`
+ * when the id is no monitor in the mirror.
+ */
+export function setMonitorHidden(monitorId: string, hidden: boolean): Promise<boolean> {
+  return invoke<boolean>("set_monitor_hidden", { monitorId, hidden });
+}
+
+/**
  * Every asset with no confirmed `monitored-by` link to a monitor.
  *
  * **A statement about attachment, not about attention.** An asset whose only
