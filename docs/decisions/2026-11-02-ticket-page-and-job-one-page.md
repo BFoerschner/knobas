@@ -27,14 +27,14 @@ Tickets preview keeps its count lines; aligning it with the card is a later tick
 
 The two pages looked almost the same and differed in the wrong things. To see which build failed
 on a ticket being read, the reader pressed *Open job*, which quietly made that ticket the job.
-Merged, the page carries what the reader needs either way, and the card's colour says at a glance
-whether this is the ticket being worked on.
+On one page the reader sees the failing build without choosing the ticket, and the card's colour
+says whether this is the ticket being worked on.
 
 The counts-not-links ruling existed because opening a section meant opening the job, and opening
 the job chose it. The section views now take a ticket scope without choosing a job
 (`tf/job/scoped.svelte.ts`, #2401): the row holds its ticket for that section while the section
-is on screen and forgets it on leaving. With that, a link from a row costs the reader nothing,
-and the reason for the ruling is gone.
+is on screen and forgets it on leaving. A row can link without choosing the ticket, so the
+ruling has no reason left.
 
 ## Cost of reversing
 
