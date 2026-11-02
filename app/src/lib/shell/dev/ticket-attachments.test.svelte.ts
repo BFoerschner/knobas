@@ -202,6 +202,10 @@ test("with the source unreachable, the strip leads, images are placeholders, Dow
   expect(reads()).toEqual(["50000", "50001", "50000", "50001"]);
   expect(strip(fold)).toBeNull();
   expect((button(rows(fold)[0]!, "Download") as HTMLButtonElement).disabled).toBe(false);
+  // The description's placeholder asks again too, and draws the screenshot.
+  const inline = () => target.querySelector(".tf-kept:not([hidden]) .tf-tkdesc .tf-md");
+  await until(() => inline()?.querySelector("img.tf-md-att")?.getAttribute("src")?.startsWith("data:image/") ?? false, "the inline screenshot stayed a placeholder");
+  expect(inline()!.querySelector(".tf-md-noimg")).toBeNull();
 });
 
 test("a 403 reads not permitted", async () => {

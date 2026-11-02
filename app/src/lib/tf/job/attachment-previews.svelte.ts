@@ -3,8 +3,9 @@
  * attachment fetched live through the source's credential
  * (`attachment_bytes`), drawn as a `data:` image, and kept in memory for as
  * long as the page is open. One object per open ticket page: the page makes
- * it, hands it to its tree through Svelte context, and drops it when it
- * closes, so nothing outlives the page and nothing reaches the mirror.
+ * it, hands it to the panel and the description's inline images, and drops
+ * it when it closes, so nothing outlives the page and nothing reaches the
+ * mirror.
  *
  * Fetching is asked for, never done on page open: the Attachments panel
  * asks for its image rows when it opens (`fetchImages`), and an inline image
@@ -12,7 +13,7 @@
  * most once until *Try again* (`retry`) forgets the failures. A file the list
  * says is over the 5 MiB cap is never asked.
  */
-import { getContext, setContext } from "svelte";
+import { untrack } from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 
 import { isIpcError } from "../../ipc";
@@ -49,6 +50,12 @@ export interface Previews {
   readonly files: readonly Attachment[];
   /** What the stale strip says, `null` while no fetch has failed. */
   readonly failure: PreviewsFailure | null;
+  /**
+   * How often *Try again* was pressed (reactive). A surface that drew a
+   * failure as its own placeholder, as the description's inline images do,
+   * draws again when it moves.
+   */
+  readonly attempt: number;
   /** One file's preview (reactive). */
   of(id: string): Preview;
   /** Ask for one file, unless it is ready, under way, too large or failed. */
@@ -63,8 +70,6 @@ export interface Previews {
   watch(node: Element, id: string): () => void;
   /** *Try again*: forget every failure and ask again for what failed. */
   retry(): void;
-  /** The first file listed under exactly `name`. */
-  byName(name: string): Attachment | undefined;
   /** The page closed: forget everything, and keep no answer still on its way. */
   drop(): void;
 }
@@ -107,7 +112,15 @@ export function createAttachmentPreviews({
   const states = new SvelteMap<string, Preview>();
   /** Bumped by `drop` and `retry`: an answer for an older round is not kept. */
   let round = 0;
+  let attempt = $state(0);
   const waiting = new Map<string, ((preview: Preview) => void)[]>();
+
+  /**
+   * One file's preview, read without subscribing: `fetch` and `when` run
+   * inside the description's paint, which would otherwise draw the whole
+   * text again on every answer.
+   */
+  const peek = (id: string): Preview => untrack(() => states.get(id) ?? NONE);
 
   const settle = (id: string, preview: Preview) => {
     states.set(id, preview);
@@ -130,9 +143,12 @@ export function createAttachmentPreviews({
     get failure() {
       return failure;
     },
+    get attempt() {
+      return attempt;
+    },
     of: (id) => states.get(id) ?? NONE,
     fetch(id) {
-      if ((states.get(id) ?? NONE).state !== "none") return;
+      if (peek(id).state !== "none") return;
       const file = files.find((candidate) => candidate.id === id);
       if (!file) return;
       if (file.size !== null && file.size > PREVIEW_CAP) {
@@ -164,7 +180,7 @@ export function createAttachmentPreviews({
     when(id) {
       return new Promise<string>((resolve, reject) => {
         const answer = (preview: Preview) => (preview.state === "ready" ? resolve(preview.src) : reject(preview));
-        const now = previews.of(id);
+        const now = peek(id);
         const listed = files.some((file) => file.id === id);
         if (listed && (now.state === "loading" || now.state === "none")) waiting.set(id, [...(waiting.get(id) ?? []), answer]);
         else answer(now);
@@ -185,6 +201,7 @@ export function createAttachmentPreviews({
     },
     retry() {
       round += 1;
+      attempt += 1;
       const failed = [...states].filter(([, preview]) => preview.state === "failed").map(([id]) => id);
       for (const id of failed) states.delete(id);
       // Under way when the round moved: its answer is dropped, so ask again.
@@ -192,7 +209,6 @@ export function createAttachmentPreviews({
       for (const id of loading) states.delete(id);
       for (const id of [...failed, ...loading]) previews.fetch(id);
     },
-    byName: (name) => files.find((file) => file.name === name),
     drop() {
       round += 1;
       states.clear();
@@ -200,20 +216,4 @@ export function createAttachmentPreviews({
     },
   };
   return previews;
-}
-
-const KEY = Symbol("attachment-previews");
-
-/**
- * Hand the page's previews to its tree (the description's inline images read
- * them), as a getter: the page makes a new object when it reads another
- * ticket or another list, and the tree reads whichever is current.
- */
-export function setAttachmentPreviews(current: () => Previews | null): void {
-  setContext(KEY, current);
-}
-
-/** The ticket page's current previews, `undefined` outside one or before it has read its ticket. */
-export function attachmentPreviewsOf(): Previews | undefined {
-  return getContext<(() => Previews | null) | undefined>(KEY)?.() ?? undefined;
 }
