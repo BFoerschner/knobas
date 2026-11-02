@@ -289,7 +289,12 @@ pub fn search_sql(
         let _ = writeln!(
             sql,
             "  select p.kind as kind, p.entity_id as entity_id, p.rank as rank, p.named as named,\n         p.item_updated_at as item_updated_at,\n         {} as source_id, {} as title, {} as synced_at,\n         {} as path, {} as state, {} as cell,\n         {snippet} as snippet",
-            corpus.source_id, corpus.title, corpus.synced_at, corpus.path, corpus.state, corpus.cell
+            corpus.source_id,
+            corpus.title,
+            corpus.synced_at,
+            corpus.path,
+            corpus.state,
+            corpus.cell
         );
         let _ = write!(sql, "    from picked p\n    join {}", corpus.relation);
         let _ = write!(sql, " on {} = p.entity_id", corpus.entity_id);

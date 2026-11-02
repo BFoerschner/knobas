@@ -974,9 +974,8 @@ mod tests {
     /// the way `tests/it/item_parent.rs` holds `0028`'s walk.
     #[test]
     fn the_stored_key_cell_is_this_expansion() {
-        let migration = include_str!(
-            "../../knobas-db/migrations/0066_a_row_is_found_by_where_it_sits.sql"
-        );
+        let migration =
+            include_str!("../../knobas-db/migrations/0066_a_row_is_found_by_where_it_sits.sql");
         assert!(
             migration.contains(key_cell!("d.decl")),
             "0066 no longer holds key_cell!(\"d.decl\"):\n{}",
