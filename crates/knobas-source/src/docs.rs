@@ -58,6 +58,12 @@ pub struct DocContent {
     pub blocks: Vec<DocBlock>,
     /// The page's comments, oldest first.
     pub comments: Vec<DocComment>,
+    /// What the source marks as the page's excerpt, the part another page's
+    /// excerpt include draws (spec #2432, *Include resolution in knobas*), or
+    /// `None` where the page marks none. Its blocks are also in
+    /// [`DocContent::blocks`] where the source draws them on the page itself.
+    #[serde(default)]
+    pub excerpt: Option<Vec<DocBlock>>,
     /// The page's sections in the order of its top-level headings, numbered
     /// from 1 as the reader numbers them, each with whether knobas edits it
     /// (#862, R-10.13).
@@ -189,6 +195,12 @@ pub struct DocComment {
 /// - `table`: A table, row by row; a header cell says so, and a cell holds
 ///   blocks and may span columns and rows.
 /// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+/// - `include`: Another page of the source drawn in place (spec #2432): the
+///   page by `title` and `space` as a page link names one, and whether only
+///   its `excerpt` is wanted. The adapter leaves the rest empty; knobas fills
+///   it when the reader is read, from the mirror as it is now: `entity_id`
+///   the mirrored page, `blocks` what it includes, or `unfilled` why it
+///   could not ([`Unfilled`]).
 /// - `placeholder`: Something the source has that the reader does not draw: the
 ///   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
 ///   so a page with a part knobas cannot draw says so (story 134).
@@ -226,6 +238,17 @@ pub enum DocBlock {
         title: Option<String>,
         blocks: Vec<DocBlock>,
     },
+    Include {
+        title: String,
+        space: Option<String>,
+        excerpt: bool,
+        #[serde(default)]
+        entity_id: Option<String>,
+        #[serde(default)]
+        blocks: Vec<DocBlock>,
+        #[serde(default)]
+        unfilled: Option<Unfilled>,
+    },
     Placeholder {
         name: String,
     },
@@ -246,6 +269,43 @@ pub enum DocBlock {
 #[ts(export_to = "entity.ts", rename = "DocEmbedContent")]
 pub enum EmbedContent {
     Html { html: String },
+}
+
+/// Why knobas could not fill a [`DocBlock::Include`] when the reader was read.
+///
+/// - `not_mirrored`: The mirror holds no page of that title in that space of
+///   the same source (another space, no access, deleted).
+/// - `no_excerpt`: The page is mirrored, but marks no excerpt.
+/// - `too_deep`: The include sits more than [`INCLUDE_DEPTH`] includes deep.
+/// - `cycle`: The page is already on the way here: a page including itself,
+///   or one including a page that includes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum Unfilled {
+    NotMirrored,
+    NoExcerpt,
+    TooDeep,
+    Cycle,
+}
+
+/// How many includes deep knobas fills: an include on the page read is one
+/// deep, an include inside what it includes two, and so on.
+pub const INCLUDE_DEPTH: usize = 3;
+
+impl DocBlock {
+    /// An include as the adapter emits it: the page named, nothing filled.
+    #[must_use]
+    pub fn include(title: impl Into<String>, space: Option<String>, excerpt: bool) -> Self {
+        DocBlock::Include {
+            title: title.into(),
+            space,
+            excerpt,
+            entity_id: None,
+            blocks: Vec::new(),
+            unfilled: None,
+        }
+    }
 }
 
 /// One item of a [`DocBlock::List`]: its blocks, and for a task its checked
@@ -425,12 +485,54 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
                 }
             }
         }
-        DocBlock::Panel { blocks, .. } => {
+        // What knobas filled an include with is drawn here, so its links,
+        // chips and mentions are filled like the page's own.
+        DocBlock::Panel { blocks, .. } | DocBlock::Include { blocks, .. } => {
             for inner in blocks {
                 collect(inner, out);
             }
         }
         DocBlock::Code { .. } | DocBlock::Placeholder { .. } | DocBlock::Embed { .. } => {}
+    }
+}
+
+/// Every include in `blocks`, depth first, for knobas' include fill: those
+/// in lists, table cells and panels, not those inside an include.
+pub fn includes_mut(blocks: &mut [DocBlock]) -> Vec<&mut DocBlock> {
+    let mut out = Vec::new();
+    for block in blocks {
+        includes(block, &mut out);
+    }
+    out
+}
+
+fn includes<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut DocBlock>) {
+    match block {
+        DocBlock::Include { .. } => out.push(block),
+        DocBlock::List { items, .. } => {
+            for item in items {
+                for inner in &mut item.blocks {
+                    includes(inner, out);
+                }
+            }
+        }
+        DocBlock::Table { rows } => {
+            for cell in rows.iter_mut().flatten() {
+                for inner in &mut cell.blocks {
+                    includes(inner, out);
+                }
+            }
+        }
+        DocBlock::Panel { blocks, .. } => {
+            for inner in blocks {
+                includes(inner, out);
+            }
+        }
+        DocBlock::Heading { .. }
+        | DocBlock::Paragraph { .. }
+        | DocBlock::Code { .. }
+        | DocBlock::Placeholder { .. }
+        | DocBlock::Embed { .. } => {}
     }
 }
 
@@ -674,6 +776,89 @@ mod tests {
             },
         ];
         assert_eq!(inlines_mut(&mut blocks).len(), 3);
+    }
+
+    /// Spec #2432: an include crosses naming its page, with nothing filled
+    /// until knobas fills it; a reason crosses in snake case.
+    #[test]
+    fn an_include_crosses_naming_its_page_and_why_it_is_unfilled() {
+        let wire = serde_json::to_value(DocBlock::include("Retry budget", None, true)).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "type": "include", "title": "Retry budget", "space": null, "excerpt": true,
+                "entity_id": null, "blocks": [], "unfilled": null,
+            })
+        );
+        let missed: DocBlock = serde_json::from_value(serde_json::json!({
+            "type": "include", "title": "Gone", "space": "OPS", "excerpt": false,
+            "unfilled": "not_mirrored",
+        }))
+        .unwrap();
+        let DocBlock::Include {
+            unfilled, blocks, ..
+        } = missed
+        else {
+            panic!("an include")
+        };
+        assert_eq!(unfilled, Some(Unfilled::NotMirrored));
+        assert!(blocks.is_empty());
+        assert_eq!(
+            serde_json::to_value(Unfilled::TooDeep).unwrap(),
+            serde_json::json!("too_deep")
+        );
+    }
+
+    /// The include fill finds an include wherever the page draws one, and
+    /// not inside what an include holds: that is the included page's.
+    #[test]
+    fn the_include_fill_reaches_includes_in_lists_cells_and_panels_but_not_inside_one() {
+        let filled = DocBlock::Include {
+            title: "A".into(),
+            space: None,
+            excerpt: false,
+            entity_id: Some("c:1".into()),
+            blocks: vec![DocBlock::include("Inner", None, false)],
+            unfilled: None,
+        };
+        let mut blocks = vec![
+            DocBlock::List {
+                ordered: false,
+                items: vec![ListItem::new(vec![DocBlock::include("B", None, true)])],
+            },
+            DocBlock::Panel {
+                kind: PanelKind::Info,
+                title: None,
+                blocks: vec![DocBlock::include("C", Some("OPS".into()), false)],
+            },
+            DocBlock::Table {
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::include("D", None, false)],
+                )]],
+            },
+            filled,
+        ];
+        let titles: Vec<String> = includes_mut(&mut blocks)
+            .into_iter()
+            .map(|b| match b {
+                DocBlock::Include { title, .. } => title.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(titles, ["B", "C", "D", "A"]);
+        // What an include was filled with is drawn, so it is filled in too.
+        let mut drawn = vec![DocBlock::Include {
+            title: "A".into(),
+            space: None,
+            excerpt: false,
+            entity_id: None,
+            blocks: vec![DocBlock::Paragraph {
+                text: vec![Inline::text("x")],
+            }],
+            unfilled: None,
+        }];
+        assert_eq!(inlines_mut(&mut drawn).len(), 1);
     }
 
     #[test]

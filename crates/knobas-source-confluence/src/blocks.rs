@@ -18,6 +18,8 @@
 //! | `pre`, the `code` and `noformat` macros | code, with the macro's `language` |
 //! | the `info`, `note`, `warning`, `tip` and `panel` macros | panel |
 //! | the `jira` macro with a `key` | an issue chip (inline) |
+//! | the `include` and `excerpt-include` macros naming a page | include, filled by knobas at read time |
+//! | the `excerpt` macro | its contents, in its place (none when `hidden`); the page's excerpt |
 //! | `ac:link` to `ri:user` | a mention (inline) |
 //! | `ac:link` to `ri:page` | a page link (inline) |
 //! | `a href` | a link (inline) |
@@ -37,6 +39,7 @@
 //! the section numbering and *Edit section*'s byte spans (#862). Nothing here
 //! fails: a body that would not parse still reads as the text it holds.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use knobas_source::docs::{
@@ -74,6 +77,7 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
     }
     let storage = payload.pointer("/body/storage/value")?.as_str()?;
     let people = people(payload);
+    let (blocks, excerpt) = read(storage, &people);
     let version = payload.pointer("/version/number").and_then(Value::as_u64);
     let labels = payload
         .pointer("/metadata/labels/results")
@@ -106,10 +110,11 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
         version,
         editor_name,
         labels,
-        blocks: to_blocks(storage, &people),
+        blocks,
         comments,
         sections: sections(storage),
         history: history(payload),
+        excerpt,
     })
 }
 
@@ -173,6 +178,12 @@ fn headings<'a>(nodes: &'a [Node], top: bool, out: &mut Vec<(&'a Node, bool)>) {
         match node.name() {
             Some(name) if is_heading(name) => out.push((node, top)),
             Some(name) if is_transparent(name) => headings(node.children(), false, out),
+            // A drawn excerpt's headings are the page's (spec #2432).
+            Some("ac:structured-macro" | "ac:macro")
+                if macro_name(node) == "excerpt" && !is_hidden(node) =>
+            {
+                headings(node.children(), false, out);
+            }
             _ => {}
         }
     }
@@ -610,18 +621,99 @@ fn param(node: &Node, key: &str) -> Option<String> {
 /// A storage body as the reader's blocks: the shared HTML reader
 /// (`knobas_source::docs::html`) with [`Storage`] as its hook.
 pub(crate) fn to_blocks(storage: &str, people: &People) -> Vec<DocBlock> {
-    html::to_blocks(storage, &Storage { people })
+    read(storage, people).0
+}
+
+/// A storage body's blocks and its excerpt: the body of its first `excerpt`
+/// macro, as an `excerpt-include` of the page draws it (spec #2432).
+fn read(storage: &str, people: &People) -> (Vec<DocBlock>, Option<Vec<DocBlock>>) {
+    let hook = Storage {
+        people,
+        excerpt: RefCell::new(None),
+    };
+    let blocks = html::to_blocks(storage, &hook);
+    (blocks, hook.excerpt.into_inner())
 }
 
 /// The `ac:` / `ri:` half of storage format: what plain HTML does not have.
 struct Storage<'a> {
     people: &'a People,
+    /// The first `excerpt` macro's blocks, once the reader has met one.
+    excerpt: RefCell<Option<Vec<DocBlock>>>,
+}
+
+/// A macro's name as storage format spells it, lower case.
+fn macro_name(node: &Node) -> String {
+    node.attr("ac:name")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+/// An `excerpt` macro the page does not draw: `hidden` set, as Confluence's
+/// *Hide excerpted content* writes it.
+fn is_hidden(node: &Node) -> bool {
+    param(node, "hidden").is_some_and(|v| v.eq_ignore_ascii_case("true"))
+}
+
+/// The page an `include` or `excerpt-include` names: the `ri:page` in one of
+/// its parameters (title, and space where it says one), or the default
+/// parameter's text as a title.
+fn included_page(node: &Node) -> Option<(String, Option<String>)> {
+    let params = || {
+        node.children()
+            .iter()
+            .filter(|c| c.name() == Some("ac:parameter"))
+    };
+    for p in params() {
+        let page = p
+            .child("ri:page")
+            .or_else(|| p.child("ac:link").and_then(|l| l.child("ri:page")));
+        if let Some(page) = page {
+            let title = page
+                .attr("ri:content-title")
+                .map(decode_entities)
+                .filter(|t| !t.trim().is_empty())?;
+            let space = page
+                .attr("ri:space-key")
+                .map(decode_entities)
+                .filter(|s| !s.trim().is_empty());
+            return Some((title, space));
+        }
+    }
+    params()
+        .find(|p| p.attr("ac:name") == Some("") && p.children().iter().all(|c| c.name().is_none()))
+        .map(|p| collapse(&p.text()))
+        .filter(|t| !t.is_empty())
+        .map(|title| (title, None))
 }
 
 impl Hook for Storage<'_> {
     fn element(&self, node: &Node, reading: &Reading<'_>) -> Hooked {
         match node.name().unwrap_or_default() {
-            "ac:structured-macro" | "ac:macro" => r#macro(node, reading),
+            "ac:structured-macro" | "ac:macro" => match macro_name(node).as_str() {
+                name @ ("include" | "excerpt-include") => {
+                    Hooked::Blocks(vec![match included_page(node) {
+                        Some((title, space)) => {
+                            DocBlock::include(title, space, name == "excerpt-include")
+                        }
+                        None => placeholder(name),
+                    }])
+                }
+                // Transparent on its own page (spec #2432, story 15), and
+                // the page's excerpt.
+                "excerpt" => {
+                    let blocks = node
+                        .child("ac:rich-text-body")
+                        .map(|body| reading.blocks(body.children()))
+                        .unwrap_or_default();
+                    let mut excerpt = self.excerpt.borrow_mut();
+                    if excerpt.is_none() {
+                        *excerpt = Some(blocks.clone());
+                    }
+                    Hooked::Blocks(if is_hidden(node) { Vec::new() } else { blocks })
+                }
+                _ => r#macro(node, reading),
+            },
             "ac:image" => Hooked::Blocks(vec![placeholder("image")]),
             "ac:task-list" => Hooked::Blocks(vec![task_list(node, reading)]),
             "ac:layout" | "ac:layout-section" | "ac:layout-cell" | "ac:rich-text-body" => {
@@ -685,10 +777,7 @@ fn task_list(node: &Node, reading: &Reading<'_>) -> DocBlock {
 }
 
 fn r#macro(node: &Node, reading: &Reading<'_>) -> Hooked {
-    let name = node
-        .attr("ac:name")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let name = macro_name(node);
     let block = match name.as_str() {
         "code" | "noformat" => DocBlock::Code {
             code: node
@@ -1307,6 +1396,122 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 blocks: vec![done]
             }]
         );
+    }
+
+    fn include(name: &str, page: &str) -> String {
+        format!(
+            r#"<ac:structured-macro ac:name="{name}" ac:schema-version="1"><ac:parameter ac:name="nopanel">true</ac:parameter><ac:parameter ac:name=""><ac:link>{page}</ac:link></ac:parameter></ac:structured-macro>"#
+        )
+    }
+
+    /// Spec #2432, stories 13 and 14: `include` and `excerpt-include` name
+    /// their page as a page link does, by title and the space where they say
+    /// one; nothing is filled, that is knobas' at read time.
+    #[test]
+    fn an_include_and_an_excerpt_include_name_their_page() {
+        let storage = format!(
+            "<p>Before {}</p>{}{}",
+            include(
+                "include",
+                r#"<ri:page ri:space-key="OPS" ri:content-title="Retry &amp; budget" />"#
+            ),
+            include(
+                "excerpt-include",
+                r#"<ri:page ri:content-title="Ledger" />"#
+            ),
+            r#"<ac:structured-macro ac:name="include"><ac:parameter ac:name="">Plain title</ac:parameter></ac:structured-macro>"#,
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![
+                para("Before"),
+                DocBlock::include("Retry & budget", Some("OPS".into()), false),
+                DocBlock::include("Ledger", None, true),
+                DocBlock::include("Plain title", None, false),
+            ]
+        );
+    }
+
+    /// An include that names no page is a placeholder, never a hole.
+    #[test]
+    fn an_include_naming_no_page_is_a_placeholder() {
+        let storage = format!(
+            "{}{}",
+            include("include", r#"<ri:attachment ri:filename="a.png" />"#),
+            r#"<ac:structured-macro ac:name="excerpt-include"></ac:structured-macro>"#,
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![placeholder("include"), placeholder("excerpt-include")]
+        );
+    }
+
+    /// Spec #2432, story 15: `excerpt` draws as its contents on its own page,
+    /// and those contents are the page's excerpt. A hidden excerpt is not
+    /// drawn on the page, as in Confluence, and is still its excerpt.
+    #[test]
+    fn an_excerpt_draws_as_its_contents_and_is_the_pages_excerpt() {
+        let excerpt = |hidden: &str| {
+            format!(
+                r#"<p>Lead.</p><ac:structured-macro ac:name="excerpt">{hidden}<ac:rich-text-body><h2>Inside</h2><p>The <strong>short</strong> story.</p></ac:rich-text-body></ac:structured-macro><ac:structured-macro ac:name="excerpt"><ac:rich-text-body><p>Second.</p></ac:rich-text-body></ac:structured-macro>"#
+            )
+        };
+        let inside = vec![
+            DocBlock::Heading {
+                level: 2,
+                text: vec![Inline::text("Inside")],
+            },
+            DocBlock::Paragraph {
+                text: vec![
+                    Inline::text("The "),
+                    Inline::Text {
+                        text: "short".into(),
+                        strong: true,
+                        emphasis: false,
+                        code: false,
+                    },
+                    Inline::text(" story."),
+                ],
+            },
+        ];
+        let shown = doc_content("page", &page(&excerpt(""))).unwrap();
+        let mut drawn = vec![para("Lead.")];
+        drawn.extend(inside.clone());
+        drawn.push(para("Second."));
+        assert_eq!(shown.blocks, drawn);
+        assert_eq!(shown.excerpt, Some(inside.clone()), "the first excerpt");
+        // The heading inside is one of the page's, numbered as the reader
+        // numbers it.
+        assert_eq!(shown.sections.len(), 1);
+
+        let hidden = doc_content(
+            "page",
+            &page(&excerpt(
+                r#"<ac:parameter ac:name="hidden">true</ac:parameter>"#,
+            )),
+        )
+        .unwrap();
+        assert_eq!(hidden.blocks, vec![para("Lead."), para("Second.")]);
+        assert_eq!(hidden.excerpt, Some(inside));
+        assert!(hidden.sections.is_empty());
+
+        let none = doc_content("page", &page("<p>No excerpt.</p>")).unwrap();
+        assert_eq!(none.excerpt, None);
+    }
+
+    /// Spec #2432, story 34: a section holding an include refuses as a macro.
+    #[test]
+    fn a_section_holding_an_include_refuses_as_a_macro() {
+        let storage = format!(
+            "<h2>Pulled in</h2><p>a</p>{}<h2>Plain</h2><p>b</p>",
+            include(
+                "excerpt-include",
+                r#"<ri:page ri:content-title="Ledger" />"#
+            )
+        );
+        let got: Vec<Option<SectionRefusal>> =
+            sections(&storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(got, vec![Some(SectionRefusal::Macro), None]);
     }
 
     #[test]

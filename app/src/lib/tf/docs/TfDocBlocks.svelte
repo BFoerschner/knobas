@@ -5,7 +5,12 @@
   (`TfDocEmbed`, #2440). The page's sections and their anchors
   are `TfDocBody`'s; a heading here is one inside a panel or a comment.
 
-  Recurses into lists, panels and table cells by importing itself. A task item (spec
+  An include draws the page it includes in a light frame reading "from
+  <title>", the title a link to that page; one knobas could not fill is a
+  placeholder saying why, naming the page and linking it where the mirror
+  holds it, else offering the source.
+
+  Recurses into lists, panels, table cells and includes by importing itself. A task item (spec
   #2432) draws its state as the Markdown view's box: a picture, never a
   control, so nothing here ticks a task.
 -->
@@ -15,7 +20,7 @@
   import TfDocInlines from "./TfDocInlines.svelte";
   import TfMarked from "./TfMarked.svelte";
   import type { DocBlock, TableCell } from "../../ipc/entity";
-  import { headed, headerColumn, panelLabel, panelTone } from "./docs";
+  import { headed, headerColumn, includeMiss, pageHash, panelLabel, panelTone } from "./docs";
 
   let {
     blocks,
@@ -110,6 +115,29 @@
       <span class="tf-lbl">{panelLabel(block)}</span>
       <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
     </div>
+  {:else if block.type === "include"}
+    <!-- Another page drawn in place (spec #2432), as knobas filled it from the mirror when the page was read. -->
+    {#if block.unfilled === null}
+      <div class="tf-incl">
+        <div class="tf-incl-from">
+          from {#if block.entity_id}<a class="tf-pgl" href={pageHash(block.entity_id)}><em>{block.title}</em></a
+            >{:else}<em>{block.title}</em>{/if}
+        </div>
+        <Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} />
+      </div>
+    {:else}
+      <div class="tf-macro">
+        <span
+          >{includeMiss(block.unfilled).before}{#if block.entity_id}<a class="tf-pgl" href={pageHash(block.entity_id)}
+              ><b>{block.title}</b></a
+            >{:else}<b>{block.title}</b>{/if}{includeMiss(block.unfilled).after}</span
+        >
+        {#if !block.entity_id && webUrl}
+          {@const url = webUrl}
+          <button type="button" class="tf-btn tf-sm" onclick={() => onopen(url)}>Open this part in {sourceName}</button>
+        {/if}
+      </div>
+    {/if}
   {:else if block.type === "placeholder"}
     <div class="tf-macro">
       <span>This part is a {sourceName} <b>{block.name}</b> macro, which knobas does not draw.</span>

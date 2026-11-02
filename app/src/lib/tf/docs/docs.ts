@@ -22,6 +22,7 @@ import type {
   PanelKind,
   Reached,
   SectionRefusal,
+  Unfilled,
 } from "../../ipc/entity";
 import { getContext, setContext } from "svelte";
 
@@ -203,6 +204,8 @@ export function blockWords(block: DocBlock): string {
         .join(" ");
     case "panel":
       return block.blocks.map(blockWords).join(" ");
+    // An include's words are the included page's, as in search (spec #2432).
+    case "include":
     case "placeholder":
     // What an embed shows is in its frame, not in the reader's words.
     case "embed":
@@ -231,6 +234,23 @@ export function provideEmbeds(runs: () => boolean): void {
 /** Whether embeds run here: what `TfDocs` said, and on where nothing said. */
 export function embedsRun(): () => boolean {
   return getContext<(() => boolean) | undefined>(EMBEDS) ?? (() => true);
+}
+
+/**
+ * Why an include is a placeholder (spec #2432), as the words before and after
+ * the page's title.
+ */
+export function includeMiss(why: Unfilled): { before: string; after: string } {
+  switch (why) {
+    case "not_mirrored":
+      return { before: "This part includes ", after: ", which knobas does not mirror." };
+    case "no_excerpt":
+      return { before: "This part includes the excerpt of ", after: ", which has none." };
+    case "too_deep":
+      return { before: "This part includes ", after: " more than three includes deep, so knobas stops here." };
+    case "cycle":
+      return { before: "This part includes ", after: ", which includes this page again, so knobas stops here." };
+  }
 }
 
 /** The place a queued edit of section `number` draws in (`tf/queued.svelte.ts`). */

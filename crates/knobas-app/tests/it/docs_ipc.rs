@@ -17,7 +17,7 @@ use knobas_app::commands::entity::{
 use knobas_app::docs::DocsScope;
 use knobas_app::sources::Registry;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
-use knobas_source::docs::{DocBlock, EmbedContent, Inline, ListItem};
+use knobas_source::docs::{DocBlock, EmbedContent, Inline, ListItem, Unfilled};
 use serde_json::{Value, json};
 
 async fn pool() -> sqlx::PgPool {
@@ -516,6 +516,284 @@ async fn what_the_mirror_does_not_hold_stays_unresolved() {
             ]
         }]
     );
+}
+
+/// An `include` or `excerpt-include` macro naming `title` (in `space`).
+fn include_macro(name: &str, title: &str, space: Option<&str>) -> String {
+    let space = space.map_or(String::new(), |s| format!(r#" ri:space-key="{s}""#));
+    format!(
+        r#"<ac:structured-macro ac:name="{name}"><ac:parameter ac:name=""><ac:link><ri:page ri:content-title="{title}"{space} /></ac:link></ac:parameter></ac:structured-macro>"#
+    )
+}
+
+fn excerpt_macro(inner: &str) -> String {
+    format!(
+        r#"<ac:structured-macro ac:name="excerpt"><ac:rich-text-body>{inner}</ac:rich-text-body></ac:structured-macro>"#
+    )
+}
+
+fn filled(
+    title: &str,
+    space: Option<&str>,
+    excerpt: bool,
+    target: &str,
+    blocks: Vec<DocBlock>,
+) -> DocBlock {
+    DocBlock::Include {
+        title: title.into(),
+        space: space.map(str::to_owned),
+        excerpt,
+        entity_id: Some(target.to_owned()),
+        blocks,
+        unfilled: None,
+    }
+}
+
+fn unfilled(title: &str, excerpt: bool, target: Option<&str>, why: Unfilled) -> DocBlock {
+    DocBlock::Include {
+        title: title.into(),
+        space: None,
+        excerpt,
+        entity_id: target.map(str::to_owned),
+        blocks: Vec::new(),
+        unfilled: Some(why),
+    }
+}
+
+fn words(text: &str) -> DocBlock {
+    DocBlock::Paragraph {
+        text: vec![Inline::text(text)],
+    }
+}
+
+/// Spec #2432, stories 13, 14 and 17: an include draws the included page's
+/// body and an excerpt include its excerpt, both from the mirror as it is now,
+/// in another space too; a link inside them is to the included page's space.
+#[tokio::test]
+async fn an_include_and_an_excerpt_include_are_filled_from_the_mirror() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let ledger = page(&pool, &src, "1", "Ledger", "ENG", &[], "<p>L</p>").await;
+    let budget_body = |version: &str| {
+        format!(
+            "<p>Intro {version}.</p>{}<p>See <ac:link><ri:page ri:content-title=\"Ledger\" /></ac:link></p>",
+            excerpt_macro("<p>Thirty retries.</p>")
+        )
+    };
+    let budget = page(
+        &pool,
+        &src,
+        "2",
+        "Retry budget",
+        "ENG",
+        &[],
+        &budget_body("one"),
+    )
+    .await;
+    let storage = format!(
+        "<p>Ours.</p>{}{}",
+        include_macro("include", "Retry budget", Some("ENG")),
+        include_macro("excerpt-include", "Retry budget", Some("ENG")),
+    );
+    let reader = page(&pool, &src, "3", "Payout runbook", "OPS", &[], &storage).await;
+
+    let body = |version: &str| {
+        vec![
+            words(&format!("Intro {version}.")),
+            words("Thirty retries."),
+            DocBlock::Paragraph {
+                text: vec![
+                    Inline::text("See "),
+                    Inline::PageLink {
+                        text: "Ledger".into(),
+                        title: "Ledger".into(),
+                        space: Some("ENG".into()),
+                        entity_id: Some(ledger.clone()),
+                    },
+                ],
+            },
+        ]
+    };
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &reader)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks,
+        vec![
+            words("Ours."),
+            filled("Retry budget", Some("ENG"), false, &budget, body("one")),
+            filled(
+                "Retry budget",
+                Some("ENG"),
+                true,
+                &budget,
+                vec![words("Thirty retries.")]
+            ),
+        ]
+    );
+    assert!(doc.work.is_empty());
+
+    // The included page changes in the mirror; the page including it is not
+    // synced again, and draws it as it is now.
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&budget)
+        .bind(page_payload("ENG", &[], &budget_body("two")))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &reader)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks[1],
+        filled("Retry budget", Some("ENG"), false, &budget, body("two"))
+    );
+}
+
+/// Spec #2432, stories 19 to 21: an include knobas cannot fill says why, a
+/// mirrored page's still names that page, and a cycle or a chain past three
+/// stops rather than looping.
+#[tokio::test]
+async fn an_include_it_cannot_fill_says_why_and_never_loops() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let inc = |title: &str| include_macro("include", title, None);
+    let plain = page(&pool, &src, "1", "Plain", "OPS", &[], "<p>No excerpt.</p>").await;
+    let gaps = page(
+        &pool,
+        &src,
+        "2",
+        "Gaps",
+        "OPS",
+        &[],
+        &format!(
+            "{}{}{}",
+            inc("Gone"),
+            include_macro("excerpt-include", "Plain", None),
+            inc("Gaps")
+        ),
+    )
+    .await;
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &gaps)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks,
+        vec![
+            unfilled("Gone", false, None, Unfilled::NotMirrored),
+            unfilled("Plain", true, Some(&plain), Unfilled::NoExcerpt),
+            unfilled("Gaps", false, Some(&gaps), Unfilled::Cycle),
+        ]
+    );
+
+    // A includes B, B includes A: reading A, B's include of A is the cycle.
+    let a = page(
+        &pool,
+        &src,
+        "3",
+        "Alpha",
+        "OPS",
+        &[],
+        &format!("<p>a</p>{}", inc("Beta")),
+    )
+    .await;
+    let b = page(
+        &pool,
+        &src,
+        "4",
+        "Beta",
+        "OPS",
+        &[],
+        &format!("<p>b</p>{}", inc("Alpha")),
+    )
+    .await;
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &a)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks,
+        vec![
+            words("a"),
+            filled(
+                "Beta",
+                None,
+                false,
+                &b,
+                vec![
+                    words("b"),
+                    unfilled("Alpha", false, Some(&a), Unfilled::Cycle)
+                ]
+            ),
+        ]
+    );
+
+    // A chain one through five: read from one, the fourth level (four's
+    // include of five) is too deep.
+    let mut ids = Vec::new();
+    for n in 1..=5 {
+        let next = if n < 5 {
+            inc(&format!("Level {}", n + 1))
+        } else {
+            String::new()
+        };
+        ids.push(
+            page(
+                &pool,
+                &src,
+                &format!("1{n}"),
+                &format!("Level {n}"),
+                "OPS",
+                &[],
+                &format!("<p>{n}</p>{next}"),
+            )
+            .await,
+        );
+    }
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &ids[0])
+        .await
+        .unwrap();
+    let nested = |level: usize, inner: DocBlock| DocBlock::Include {
+        title: format!("Level {level}"),
+        space: None,
+        excerpt: false,
+        entity_id: Some(ids[level - 1].clone()),
+        blocks: vec![words(&level.to_string()), inner],
+        unfilled: None,
+    };
+    let five = unfilled("Level 5", false, Some(&ids[4]), Unfilled::TooDeep);
+    assert_eq!(
+        doc.blocks,
+        vec![words("1"), nested(2, nested(3, nested(4, five)))]
+    );
+}
+
+/// Spec #2432, story 22: a word only on the included page finds the included
+/// page and not the page including it.
+#[tokio::test]
+async fn a_search_finds_included_words_on_their_own_page_only() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let target_storage = format!("<p>The {w} budget.</p>");
+    let target = page(&pool, &src, "1", "Budget", "OPS", &[], &target_storage).await;
+    let reader_storage = format!("<p>Ours.</p>{}", include_macro("include", "Budget", None));
+    let reader = page(&pool, &src, "2", "Runbook", "OPS", &[], &reader_storage).await;
+    for (id, title, storage) in [
+        (&target, "Budget", &target_storage),
+        (&reader, "Runbook", &reader_storage),
+    ] {
+        let content =
+            knobas_source_confluence::doc_content("page", &page_payload("OPS", &[], storage))
+                .expect("a page projects");
+        let body = knobas_source::docs::search_text(title, "OPS", &content);
+        indexed(&pool, id, &[body], "tomasz", 1).await;
+    }
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .expect("a word is a query");
+    let hits: Vec<&str> = found.hits.iter().map(|h| h.entity_id.as_str()).collect();
+    assert_eq!(hits, [target.as_str()]);
 }
 
 /// Queue a comment write on `page`; it stays pending.

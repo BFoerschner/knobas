@@ -142,6 +142,7 @@ fn project(kind: &str, _payload: &Value) -> Option<DocContent> {
         comments: Vec::new(),
         sections: Vec::new(),
         history: Vec::new(),
+        excerpt: None,
     })
 }
 

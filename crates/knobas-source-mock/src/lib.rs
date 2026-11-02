@@ -781,6 +781,7 @@ pub fn doc_content(
         comments,
         sections: Vec::new(),
         history: Vec::new(),
+        excerpt: None,
     })
 }
 

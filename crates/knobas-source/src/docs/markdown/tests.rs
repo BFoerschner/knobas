@@ -374,3 +374,31 @@ fn a_file_name_stays_in_its_folder_and_writable() {
         "no dash before the extension: {long}"
     );
 }
+
+/// Spec #2432, story 40: a filled include is its contents, after a comment
+/// naming the page they are from; an unfilled one is a comment naming it.
+#[test]
+fn an_include_is_its_contents_and_an_unfilled_one_a_comment_naming_it() {
+    let md = body(&[
+        DocBlock::Include {
+            title: "Retry -- budget".to_owned(),
+            space: None,
+            excerpt: false,
+            entity_id: Some("c:1".to_owned()),
+            blocks: vec![para("Thirty."), para("Then stop.")],
+            unfilled: None,
+        },
+        DocBlock::Include {
+            title: "Gone".to_owned(),
+            space: None,
+            excerpt: true,
+            entity_id: None,
+            blocks: vec![],
+            unfilled: Some(super::super::Unfilled::NotMirrored),
+        },
+    ]);
+    assert_eq!(
+        md,
+        "<!-- from: Retry - - budget -->\n\nThirty.\n\nThen stop.\n\n<!-- include: Gone -->\n"
+    );
+}
