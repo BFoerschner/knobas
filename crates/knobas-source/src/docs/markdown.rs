@@ -12,7 +12,8 @@
 //!   task item opens with `[x] ` or `[ ] ` (spec #2432);
 //! * code is a fence longer than any run of backticks inside it;
 //! * a table is a pipe table, its first row the header, its cells' pipes
-//!   escaped;
+//!   escaped, a cell's blocks its lines joined by `<br>`, and a spanned cell
+//!   at its first place with the places it covers empty;
 //! * a panel is a quote that opens with its kind in bold (the spelling
 //!   [`DocSection::text`](super::DocSection::text) edits, #975);
 //! * a link to another page is a relative `.md` link, named by
@@ -193,25 +194,22 @@ fn fenced(language: Option<&str>, code: &str) -> String {
 
 /// A pipe table cannot be drawn without a header, so the first row is it,
 /// whether or not the source marked its cells as header cells.
+///
+/// A pipe table has no spans (#2436): a spanned cell is written at its first
+/// place and the places it covers are left empty, so the columns below a
+/// merged cell still line up. A cell's blocks are written as a page's are,
+/// their lines joined by `<br>`.
 fn table(rows: &[Vec<TableCell>]) -> String {
-    let Some((header, rows)) = rows.split_first() else {
+    let grid = grid(rows);
+    let Some((header, rows)) = grid.split_first() else {
         return String::new();
     };
-    let width = rows
-        .iter()
-        .map(Vec::len)
-        .chain(std::iter::once(header.len()))
-        .max()
-        .unwrap_or(0);
-    let line = |cells: &[TableCell]| {
+    let width = grid.iter().map(Vec::len).max().unwrap_or(0);
+    let line = |cells: &[String]| {
         let mut out = String::from("|");
         for column in 0..width {
-            let cell = cells
-                .get(column)
-                .map(|cell| inlines(&cell.text))
-                .unwrap_or_default();
             out.push(' ');
-            out.push_str(&table_cell(&cell));
+            out.push_str(cells.get(column).map_or("", String::as_str));
             out.push_str(" |");
         }
         out
@@ -221,12 +219,55 @@ fn table(rows: &[Vec<TableCell>]) -> String {
     out.join("\n")
 }
 
+/// The table's rows as places: each cell's text at the first free place of
+/// its row, the places its spans cover empty. A span past the last row stops
+/// there.
+fn grid(rows: &[Vec<TableCell>]) -> Vec<Vec<String>> {
+    let mut grid: Vec<Vec<Option<String>>> = vec![Vec::new(); rows.len()];
+    for (r, row) in rows.iter().enumerate() {
+        let mut column = 0;
+        for cell in row {
+            while grid[r].get(column).is_some_and(Option::is_some) {
+                column += 1;
+            }
+            // HTML's own cap; a source that sends more is not drawn wider.
+            let colspan = cell.colspan.clamp(1, 1_000) as usize;
+            let last_row = (r + cell.rowspan.max(1) as usize).min(rows.len());
+            for (down, places) in grid[r..last_row].iter_mut().enumerate() {
+                if places.len() < column + colspan {
+                    places.resize(column + colspan, None);
+                }
+                for (across, place) in places[column..column + colspan].iter_mut().enumerate() {
+                    *place = Some(if down == 0 && across == 0 {
+                        table_cell(&join_blocks(&cell.blocks))
+                    } else {
+                        String::new()
+                    });
+                }
+            }
+            column += colspan;
+        }
+    }
+    grid.into_iter()
+        .map(|row| row.into_iter().map(Option::unwrap_or_default).collect())
+        .collect()
+}
+
+/// A cell's text on one line: its lines joined by `<br>`, each pipe escaped.
+/// A pipe already escaped (an odd run of backslashes before it, as a nested
+/// table's cell writes it, #2436) is kept: escaping it again would make its
+/// backslash the escaped character and the pipe a column break.
 fn table_cell(text: &str) -> String {
-    text.trim()
-        .replace('|', "\\|")
-        .lines()
-        .collect::<Vec<_>>()
-        .join("<br>")
+    let mut out = String::with_capacity(text.len());
+    let mut backslashes = 0;
+    for ch in text.trim().chars() {
+        if ch == '|' && backslashes % 2 == 0 {
+            out.push('\\');
+        }
+        backslashes = if ch == '\\' { backslashes + 1 } else { 0 };
+        out.push(ch);
+    }
+    out.lines().collect::<Vec<_>>().join("<br>")
 }
 
 fn panel(kind: PanelKind, title: Option<&str>, blocks: &[DocBlock]) -> String {

@@ -61,6 +61,7 @@ import type {
   DocsTree,
   DocSpace,
   SectionRefusal,
+  TableCell,
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS, fakeRoleScope } from "./corpus";
@@ -152,6 +153,8 @@ type Proto =
   | { tasks: Task[] }
   | { code: string; lang?: string }
   | { table: string[][] }
+  /** A table drawn as written: spans, a header column, blocks in cells (#2436). */
+  | { grid: () => TableCell[][] }
   | { info: string }
   | { warn: string }
   | { note: string }
@@ -169,6 +172,51 @@ interface Body {
   excerpt?: Proto[];
   comments: [string, string, string][];
 }
+
+/** A table cell for [`rota`]: its blocks, and the columns and rows it spans. */
+function gridCell(header: boolean, blocks: DocBlock[], colspan = 1, rowspan = 1): TableCell {
+  return { header, blocks, colspan, rowspan };
+}
+
+/**
+ * The rota (#2436): a header row with a merged cell, a header column whose
+ * first cell spans two rows, a list, two paragraphs and code in cells, a
+ * placeholder in a cell, and more columns than the reader is wide. A
+ * function, as `para` reads the corpus declared below.
+ */
+const rota = (): TableCell[][] => [
+  [
+    gridCell(true, [para("Week")]),
+    gridCell(true, [para("Primary")]),
+    gridCell(true, [para("Backup")]),
+    gridCell(true, [para("Handover")], 2),
+    gridCell(true, [para("Escalation contacts outside business hours")]),
+    gridCell(true, [para("Notes")]),
+  ],
+  [
+    gridCell(true, [para("Week 44")], 1, 2),
+    gridCell(false, [para("Mara Lindqvist")]),
+    gridCell(false, [para("Jonas Berg")]),
+    gridCell(false, [para("Tuesday 10:00")]),
+    gridCell(false, [{ type: "list", ordered: false, items: [{ checked: null, blocks: [para("read the open incidents")] }, { checked: null, blocks: [para("check the review queue")] }] }]),
+    gridCell(false, [para("Priya Nair, then Tomasz Wójcik")], 1, 2),
+    gridCell(false, [para("Restore drill on Thursday."), para("Expect the replica to lag while it runs.")]),
+  ],
+  [
+    gridCell(false, [para("Tomasz Wójcik")]),
+    gridCell(false, [para("Mara Lindqvist")]),
+    gridCell(false, [para("Tuesday 10:00")]),
+    gridCell(false, [{ type: "code", code: "kuma ack --all", language: "sh" }]),
+    gridCell(false, [{ type: "placeholder", name: "expand" }]),
+  ],
+  [
+    gridCell(true, [para("Week 45")]),
+    gridCell(false, [para("Jonas Berg")], 2),
+    gridCell(false, [para("Swapped, see the channel.")], 2),
+    gridCell(false, [para("Priya Nair")]),
+    gridCell(false, [{ type: "panel", kind: "info", title: null, blocks: [para("Finance close week.")] }]),
+  ],
+];
 
 /** prototype-6's `BODIES`, the pages it writes out. */
 const BODIES: Record<string, Body> = {
@@ -241,6 +289,7 @@ const BODIES: Record<string, Body> = {
       { warn: "Parts of this page describe the old ledger topology. Tomasz is updating it in [[OPS-77]]." },
       { h: "Rota" },
       { p: "On-call rotates weekly on Tuesdays at 10:00. The current person is in the #oncall channel topic." },
+      { grid: rota },
       { h: "When an alert fires" },
       { ol: ["Acknowledge it in Uptime Kuma within 15 minutes.", "Check the runbook linked from the monitor.", "If prod payouts are affected, tell finance in #payments-ops."] },
       { h: "Ledger" },
@@ -392,9 +441,10 @@ function block(b: Proto): DocBlock {
   if ("table" in b) {
     return {
       type: "table",
-      rows: b.table.map((row, r) => row.map((cell) => ({ header: r === 0, text: inl(cell) }))),
+      rows: b.table.map((row, r) => row.map((cell) => ({ header: r === 0, blocks: [para(cell)], colspan: 1, rowspan: 1 }))),
     };
   }
+  if ("grid" in b) return { type: "table", rows: b.grid() };
   if ("info" in b) return { type: "panel", kind: "info", title: null, blocks: [para(b.info)] };
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
@@ -540,7 +590,7 @@ function work(blocks: DocBlock[]): DocPage["work"] {
     if (b.type === "heading" || b.type === "paragraph") walk(b.text);
     else if (b.type === "list") b.items.flatMap((item) => item.blocks).forEach(visit);
     else if (b.type === "panel") b.blocks.forEach(visit);
-    else if (b.type === "table") b.rows.flat().forEach((c) => walk(c.text));
+    else if (b.type === "table") b.rows.flat().forEach((c) => c.blocks.forEach(visit));
   };
   blocks.forEach(visit);
   return out;

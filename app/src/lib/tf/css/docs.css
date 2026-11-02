@@ -91,9 +91,14 @@
   font: var(--t-md)/1.55 var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule);
   border-top: 0; border-radius: 0 0 6px 6px; padding: 12px 14px; overflow: auto; margin: 0; white-space: pre;
 }
-.tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: var(--t-md); line-height: 1.45; margin: 0 0 18px; }
+/* A table scrolls sideways inside its frame, so a wide one never widens the page (#2436). */
+.tf-doc-tbl { overflow-x: auto; margin: 0 0 18px; }
+.tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: var(--t-md); line-height: 1.45; }
 .tf-doc th, .tf-doc td { border: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
 .tf-doc th { background: var(--sheet-2); font-weight: 600; }
+/* A cell holds blocks (#2436): they keep their gaps between them, none after the last. */
+.tf-doc :is(th, td) > :last-child { margin-bottom: 0; }
+.tf-doc :is(th, td) :is(p, ul, ol) { margin-bottom: 8px; }
 .tf-callout {
   display: flex; gap: 10px; border-radius: 6px; padding: 11px 14px; margin: 0 0 18px; font-family: var(--sans);
   font-size: var(--t-lg); line-height: 1.5; border-left: 4px solid;

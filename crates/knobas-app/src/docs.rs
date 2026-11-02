@@ -1636,10 +1636,7 @@ mod markdown_golden {
     }
 
     fn cell(header: bool, words: &str) -> TableCell {
-        TableCell {
-            header,
-            text: text(words),
-        }
+        TableCell::new(header, vec![para(words)])
     }
 
     fn panel(kind: PanelKind, title: Option<&str>, blocks: Vec<DocBlock>) -> DocBlock {

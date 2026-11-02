@@ -192,7 +192,8 @@ pub struct DocComment {
 ///   item. An item may carry a checked state: a task list is a list whose
 ///   items say whether they are done ([`ListItem`]).
 /// - `code`: A code block, verbatim, with the language the source named.
-/// - `table`: A table, row by row; a header cell says so.
+/// - `table`: A table, row by row; a header cell says so, and a cell holds
+///   blocks and may span columns and rows.
 /// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
 /// - `include`: Another page of the source drawn in place (spec #2432): the
 ///   page by `title` and `space` as a page link names one, and whether only
@@ -319,12 +320,38 @@ impl ListItem {
     }
 }
 
-/// One cell of a [`DocBlock::Table`].
+/// One cell of a [`DocBlock::Table`] (#2436): the blocks it holds, as a page
+/// body's are (paragraphs, lists, code, panels, a nested table, a
+/// placeholder), and the columns and rows it spans, each at least 1.
+///
+/// `header` is per cell: a first row of header cells is the table's header
+/// row, and a header cell opening a body row heads that row (a header column).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct TableCell {
     pub header: bool,
-    pub text: Vec<Inline>,
+    pub blocks: Vec<DocBlock>,
+    #[serde(default = "one")]
+    pub colspan: u32,
+    #[serde(default = "one")]
+    pub rowspan: u32,
+}
+
+impl TableCell {
+    /// A cell spanning one column and one row.
+    #[must_use]
+    pub fn new(header: bool, blocks: Vec<DocBlock>) -> Self {
+        TableCell {
+            header,
+            blocks,
+            colspan: 1,
+            rowspan: 1,
+        }
+    }
+}
+
+fn one() -> u32 {
+    1
 }
 
 /// Which panel a [`DocBlock::Panel`] is.
@@ -431,7 +458,9 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
         }
         DocBlock::Table { rows } => {
             for cell in rows.iter_mut().flatten() {
-                out.extend(cell.text.iter_mut());
+                for inner in &mut cell.blocks {
+                    collect(inner, out);
+                }
             }
         }
         // What knobas filled an include with is drawn here, so its links,
@@ -446,7 +475,7 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
 }
 
 /// Every include in `blocks`, depth first, for knobas' include fill: those
-/// in lists, tables' blocks and panels, not those inside an include.
+/// in lists, table cells and panels, not those inside an include.
 pub fn includes_mut(blocks: &mut [DocBlock]) -> Vec<&mut DocBlock> {
     let mut out = Vec::new();
     for block in blocks {
@@ -465,6 +494,13 @@ fn includes<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut DocBlock>) {
                 }
             }
         }
+        DocBlock::Table { rows } => {
+            for cell in rows.iter_mut().flatten() {
+                for inner in &mut cell.blocks {
+                    includes(inner, out);
+                }
+            }
+        }
         DocBlock::Panel { blocks, .. } => {
             for inner in blocks {
                 includes(inner, out);
@@ -473,7 +509,6 @@ fn includes<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut DocBlock>) {
         DocBlock::Heading { .. }
         | DocBlock::Paragraph { .. }
         | DocBlock::Code { .. }
-        | DocBlock::Table { .. }
         | DocBlock::Placeholder { .. } => {}
     }
 }
@@ -661,6 +696,28 @@ mod tests {
     }
 
     #[test]
+    fn a_cell_crosses_with_its_blocks_and_spans_which_default_to_one() {
+        let cell = TableCell {
+            colspan: 3,
+            ..TableCell::new(
+                true,
+                vec![DocBlock::Placeholder {
+                    name: "expand".into(),
+                }],
+            )
+        };
+        let wire = serde_json::to_value(&cell).unwrap();
+        assert_eq!(wire["blocks"][0]["type"], "placeholder");
+        assert_eq!(
+            (wire["colspan"].as_u64(), wire["rowspan"].as_u64()),
+            (Some(3), Some(1))
+        );
+        let bare: TableCell =
+            serde_json::from_value(serde_json::json!({"header": false, "blocks": []})).unwrap();
+        assert_eq!(bare, TableCell::new(false, vec![]));
+    }
+
+    #[test]
     fn the_fill_in_pass_reaches_inlines_inside_lists_tables_and_panels() {
         let mention = || Inline::Mention {
             user: Some("mara".into()),
@@ -675,10 +732,16 @@ mod tests {
                 }])],
             },
             DocBlock::Table {
-                rows: vec![vec![TableCell {
-                    header: false,
-                    text: vec![mention()],
-                }]],
+                // A cell's inlines sit in its blocks, here a list in it (#2436).
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::List {
+                        ordered: true,
+                        items: vec![ListItem::new(vec![DocBlock::Paragraph {
+                            text: vec![mention()],
+                        }])],
+                    }],
+                )]],
             },
             DocBlock::Panel {
                 kind: PanelKind::Info,
@@ -726,7 +789,7 @@ mod tests {
     /// The include fill finds an include wherever the page draws one, and
     /// not inside what an include holds: that is the included page's.
     #[test]
-    fn the_include_fill_reaches_includes_in_lists_and_panels_but_not_inside_one() {
+    fn the_include_fill_reaches_includes_in_lists_cells_and_panels_but_not_inside_one() {
         let filled = DocBlock::Include {
             title: "A".into(),
             space: None,
@@ -745,6 +808,12 @@ mod tests {
                 title: None,
                 blocks: vec![DocBlock::include("C", Some("OPS".into()), false)],
             },
+            DocBlock::Table {
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::include("D", None, false)],
+                )]],
+            },
             filled,
         ];
         let titles: Vec<String> = includes_mut(&mut blocks)
@@ -754,7 +823,7 @@ mod tests {
                 _ => unreachable!(),
             })
             .collect();
-        assert_eq!(titles, ["B", "C", "A"]);
+        assert_eq!(titles, ["B", "C", "D", "A"]);
         // What an include was filled with is drawn, so it is filled in too.
         let mut drawn = vec![DocBlock::Include {
             title: "A".into(),
