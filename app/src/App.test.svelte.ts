@@ -118,6 +118,8 @@ vi.mock("./lib/ipc/sources", () => ({
   reindexFts: () => Promise.resolve(undefined),
   demoLoad: () => Promise.resolve({ source_id: "mock", upserted: 0, deleted: 0, swept: 0, cursor: "" }),
   syncNowWithProgress: () => Promise.resolve(1),
+  // Settings › Backup reads it for the share export's *State colours* tick (#2469).
+  stateColours: () => Promise.resolve([]),
 }));
 
 vi.mock("./lib/ipc/entity", () => ({
