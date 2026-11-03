@@ -872,7 +872,10 @@ async fn yours(pool: &sqlx::PgPool) -> Vec<(String, ToneChoice, ToneOrigin)> {
         .iter()
         .filter(|kind| kind.kind == "ticket")
         .flat_map(|kind| &kind.words)
-        .filter_map(|word| word.yours.map(|choice| (word.word.clone(), choice, word.origin)))
+        .filter_map(|word| {
+            word.yours
+                .map(|choice| (word.word.clone(), choice, word.origin))
+        })
         .collect()
 }
 
@@ -1214,7 +1217,11 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
 async fn a_share_export_without_state_colours_carries_no_override_table() {
     let (sharer, sharer_dir) = service("sharenotones").await;
     seed_corpus(&sharer.pool, "notones").await;
-    assert_eq!(yours(&sharer.pool).await, seeded_yours(), "the seed's overrides");
+    assert_eq!(
+        yours(&sharer.pool).await,
+        seeded_yours(),
+        "the seed's overrides"
+    );
 
     let parts = backup::ShareParts {
         state_colours: false,
