@@ -105,9 +105,10 @@ pub async fn read(
     let fallback = sources
         .iter()
         .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
-        .fold(knobas_core::payload::Declarations::empty(), |d, (id, kinds)| {
-            d.with(id, state_colours::fallback(kinds))
-        });
+        .fold(
+            knobas_core::payload::Declarations::empty(),
+            |d, (id, kinds)| d.with(id, state_colours::fallback(kinds)),
+        );
     let seen = state_colours::seen_words(pool, &open, &fallback)
         .await
         .map_err(IpcError::internal)?;

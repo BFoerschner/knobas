@@ -133,7 +133,13 @@ async fn a_status_in_the_done_category_but_outside_the_done_names_never_archives
     let job = open_job(&pool, &shipped).await;
     assert!(job.context.archived_at.is_none(), "{:?}", job.context);
     sync_lands(&pool).await;
-    assert!(open_job(&pool, &shipped).await.context.archived_at.is_none());
+    assert!(
+        open_job(&pool, &shipped)
+            .await
+            .context
+            .archived_at
+            .is_none()
+    );
 }
 
 /// Opening a job never moves `archived_at`, done or not: a live context stays

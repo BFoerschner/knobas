@@ -36,7 +36,7 @@ const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g
 
 function word(over: Partial<StateWordColour> & { word: string }): StateWordColour {
   const tone = over.tone === undefined ? (over.declared_tone ?? null) : over.tone;
-  return { declared: true, declared_tone: null, yours: null, origin: "adapter", ...over, tone };
+  return { declared: true, declared_tone: null, yours: null, origin: "adapter", ...over, category_tone: over.category_tone ?? null, tone };
 }
 
 /** A ticket kind as the read answers it, but with the seen words out of order. */
@@ -68,8 +68,8 @@ function fakePorts(start: KindStateColours[], over: Partial<StateColourPorts> = 
                 : {
                     ...w,
                     yours,
-                    tone: yours === null ? w.declared_tone : yours === "none" ? null : yours,
-                    origin: yours === null ? (w.declared ? "adapter" : "unset") : "yours",
+                    tone: yours === null ? (w.declared ? w.declared_tone : w.category_tone) : yours === "none" ? null : yours,
+                    origin: yours === null ? (w.declared ? "adapter" : w.category_tone !== null ? "category" : "unset") : "yours",
                   },
             ),
           },
@@ -214,6 +214,30 @@ test("a chip says where its tone comes from; Reset sits only on yours and clears
   expect(ports.clearToneOverrides).toHaveBeenCalledWith("ticket", "Closed");
   expect(column("Tickets", "muted")).toEqual(["Closed"]);
   expect(target.querySelector('button[aria-label="Reset Closed"]')).toBeNull();
+});
+
+test("a seen status at its category's tone sits in that column, labelled Jira category; Reset returns it there", async () => {
+  const ports = fakePorts([
+    {
+      kind: "ticket",
+      words: [
+        word({ word: "Done", declared_tone: "ok" }),
+        word({ word: "Ready for QA", declared: false, category_tone: "info", tone: "info", origin: "category" }),
+        word({ word: "Shipped", declared: false, category_tone: "ok", yours: "warn", tone: "warn", origin: "yours" }),
+      ],
+    },
+  ]);
+  await draw(ports);
+
+  expect(column("Tickets", "info")).toEqual(["Ready for QA"]);
+  expect(text(chip("Ready for QA")!.querySelector(".tf-sc-from"))).toBe("Jira category");
+  expect(column("Tickets", "warn")).toEqual(["Shipped"]);
+
+  target.querySelector<HTMLButtonElement>('button[aria-label="Reset Shipped"]')!.click();
+  await settle();
+  expect(ports.clearToneOverrides).toHaveBeenCalledWith("ticket", "Shipped");
+  expect(column("Tickets", "ok")).toEqual(["Done", "Shipped"]);
+  expect(text(chip("Shipped")!.querySelector(".tf-sc-from"))).toBe("Jira category");
 });
 
 test("Reset all clears the whole kind", async () => {

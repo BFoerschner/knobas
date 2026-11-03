@@ -115,27 +115,29 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// The category colours only: archiving reads `done_statuses`, by name.
 fn ticket_state() -> Vec<knobas_source::StatePath> {
     use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
-    vec![StatePath {
-        at: PayloadPath::of(["fields", "status", "name"]),
-        open: true,
-        text_at: None,
-        values: vec![
-            StateValue::of("Done", Tone::Ok),
-            StateValue::of("Resolved", Tone::Ok),
-            StateValue::of("In Progress", Tone::Info),
-            StateValue::of("In Review", Tone::Info),
-            StateValue::of("Closed", Tone::Muted),
-        ],
-    },
-    StatePath {
-        at: PayloadPath::of(["fields", "status", "statusCategory", "key"]),
-        open: false,
-        text_at: Some(PayloadPath::of(["fields", "status", "name"])),
-        values: vec![
-            StateValue::of("indeterminate", Tone::Info),
-            StateValue::of("done", Tone::Ok),
-        ],
-    }]
+    vec![
+        StatePath {
+            at: PayloadPath::of(["fields", "status", "name"]),
+            open: true,
+            text_at: None,
+            values: vec![
+                StateValue::of("Done", Tone::Ok),
+                StateValue::of("Resolved", Tone::Ok),
+                StateValue::of("In Progress", Tone::Info),
+                StateValue::of("In Review", Tone::Info),
+                StateValue::of("Closed", Tone::Muted),
+            ],
+        },
+        StatePath {
+            at: PayloadPath::of(["fields", "status", "statusCategory", "key"]),
+            open: false,
+            text_at: Some(PayloadPath::of(["fields", "status", "name"])),
+            values: vec![
+                StateValue::of("indeterminate", Tone::Info),
+                StateValue::of("done", Tone::Ok),
+            ],
+        },
+    ]
 }
 
 /// Where a Jira Data Center issue keeps what knobas reads (#277, ADR-0007).

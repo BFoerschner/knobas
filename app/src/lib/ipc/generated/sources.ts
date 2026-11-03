@@ -1572,7 +1572,18 @@ values: Array<StateValue>,
  * flag still loads; `false` is not written, so a declaration without an
  * open candidate serialises as it did before the flag.
  */
-open?: boolean, };
+open?: boolean, 
+/**
+ * Where the chip's text is, when the value matched at `at` is not the
+ * word a reader should see (spec #2463, #2468): Jira's status category
+ * is matched at `statusCategory.key`, and the chip says the status name.
+ * The string here, trimmed and non-blank, is the chip's text; a value's
+ * own `text` still beats it, and a miss here shows the value. A
+ * candidate with one has no state words of its own, so none of its
+ * values is offered for a tone override. Absent is `None`, and `None` is
+ * not written, so a declaration without one serialises as it did before.
+ */
+text_at?: PayloadPath, };
 
 /**
  * One value a [`StatePath`] draws, and how.
@@ -1615,11 +1626,19 @@ declared: boolean,
  */
 declared_tone: Tone | null, 
 /**
+ * The tone the word's items draw where the adapter reads on past the
+ * word (Jira's status category, #2468), for a seen word it does not
+ * declare. `None` for a declared word, and for one whose items resolve
+ * to nothing there (a to-do status).
+ */
+category_tone: Tone | null, 
+/**
  * The reader's override, if any.
  */
 yours: ToneChoice | null, 
 /**
- * What the word draws: the override, else the adapter's tone.
+ * What the word draws: the override, else the adapter's tone, else the
+ * category's.
  */
 tone: Tone | null, origin: ToneOrigin, };
 
@@ -1765,7 +1784,7 @@ export type ToneChoice = "ok" | "warn" | "err" | "info" | "muted" | "none";
 /**
  * Where a word's resulting tone comes from.
  */
-export type ToneOrigin = "yours" | "adapter" | "unset";
+export type ToneOrigin = "yours" | "adapter" | "category" | "unset";
 
 /**
  * How a run was started, in the shell's words (#961, #1146).

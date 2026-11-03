@@ -59,8 +59,10 @@ test("the dev fake draws a section and its line for builds, monitors, pull reque
   );
   expect(text(section("Pull requests")!.querySelector(".tf-sc-line"))).toContain("ok and muted pull requests are hidden from open-work lists");
   for (const s of sections) expect(text(s.querySelector(".tf-sc-line"))).not.toBe("");
-  // The fake's two seen Jira statuses, uncoloured, alphabetically.
-  expect(column("Tickets", "No colour")).toEqual(["Blocked", "To Do"]);
+  // The fake's two seen Jira statuses: Blocked at its category's info, To Do (category to do) uncoloured.
+  expect(column("Tickets", "info")).toEqual(["In Progress", "In Review", "Blocked"]);
+  expect(text(section("Tickets")!.querySelector('.tf-sc-chip[aria-label="Blocked"] .tf-sc-from'))).toBe("Jira category");
+  expect(column("Tickets", "No colour")).toEqual(["To Do"]);
 
   section("Builds")!
     .querySelector('button[aria-label="Move FAILURE"]')!

@@ -2550,6 +2550,7 @@ function word(over: Partial<StateWordColour> & { word: string }): StateWordColou
     tone: over.tone !== undefined ? over.tone : yours === null ? declared_tone : yours === "none" ? null : yours,
     origin: over.origin ?? (yours !== null ? "yours" : declared_tone !== null ? "adapter" : "unset"),
     ...over,
+    category_tone: over.category_tone ?? null,
   };
 }
 
@@ -2641,6 +2642,43 @@ test("the ? card ends with a legend per kind, from the merged state colours", as
     { kind: "Pull requests", tones: [["ok", "merged"], ["info", "open"], ["muted", "closed"]] },
     { kind: "Tickets", tones: [["ok", "Done, Resolved"], ["err", "Blocked"]] },
   ]);
+});
+
+/**
+ * Jira's status category colours every status no name maps (#2468), so the
+ * ticket section does not list the seen words left at their category's tone:
+ * it ends with one line saying so. A seen word the reader coloured is still
+ * listed under the reader's tone.
+ */
+test("the ticket legend ends with the category line instead of the words at their category's tone", async () => {
+  const withCategory = COLOURS.map((kind) =>
+    kind.kind !== "ticket"
+      ? kind
+      : {
+          ...kind,
+          words: [
+            ...kind.words,
+            word({ word: "Ready for QA", declared: false, category_tone: "info", tone: "info", origin: "category" }),
+            word({ word: "Shipped", declared: false, category_tone: "ok", tone: "ok", origin: "category" }),
+            word({ word: "Parked", declared: false, category_tone: "info", yours: "warn" }),
+          ],
+        },
+  );
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts: legendFake(withCategory) });
+  await settle();
+  await search("?");
+  await settle();
+
+  expect(legendDrawn()?.find((line) => line.kind === "Tickets")?.tones).toEqual([
+    ["ok", "Done, Resolved"],
+    ["warn", "Parked"],
+    ["err", "Blocked"],
+  ]);
+  const lines = [...target.querySelectorAll('[aria-label="Colours"] .tf-ln-lg')];
+  const tickets = lines.find((line) => line.querySelector(".tf-ln-lgk")?.textContent?.trim() === "Tickets")!;
+  expect(tickets.lastElementChild?.textContent?.trim()).toBe("other statuses: by Jira category");
+  // No other kind reads a category, so none ends with the line.
+  for (const line of lines.filter((l) => l !== tickets)) expect(line.textContent).not.toContain("by Jira category");
 });
 
 /**

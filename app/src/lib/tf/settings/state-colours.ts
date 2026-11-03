@@ -35,12 +35,12 @@ export function ordered(words: readonly StateWordColour[]): StateWordColour[] {
 
 /**
  * What a chip says about where its tone comes from. `unset` is a word the
- * mirror has seen at an open candidate that no adapter gives a tone; an origin
- * this list doesn't know yet (#2468's category) is drawn as its own word.
+ * mirror has seen at an open candidate that no adapter gives a tone, and
+ * `category` one whose tone is its tickets' Jira status category (#2468).
  */
-export function originName(origin: ToneOrigin | string): string {
-  const names: Record<string, string> = { yours: "yours", adapter: "adapter", unset: "seen", category: "Jira category" };
-  return names[origin] ?? origin;
+export function originName(origin: ToneOrigin): string {
+  const names: Record<ToneOrigin, string> = { yours: "yours", adapter: "adapter", category: "Jira category", unset: "seen" };
+  return names[origin];
 }
 
 /**

@@ -81,7 +81,7 @@ const sourcePorts: SettingsPorts = {
 function fakeStateColours(): Pick<SectionPorts, "stateColours" | "setToneOverride" | "clearToneOverrides"> {
   const kinds: KindStateColours[] = ["build", "monitor", "pr", "ticket"].map((kind) => ({
     kind,
-    words: [{ word: "settled", declared: true, declared_tone: "ok", yours: null, tone: "ok", origin: "adapter" }],
+    words: [{ word: "settled", declared: true, declared_tone: "ok", category_tone: null, yours: null, tone: "ok", origin: "adapter" }],
   }));
   return {
     stateColours: vi.fn(() => Promise.resolve(kinds)),
@@ -460,6 +460,7 @@ function kindColours(kind: string, words: [string, ToneChoice | null][]): KindSt
       word,
       declared: true,
       declared_tone: "ok",
+      category_tone: null,
       yours,
       tone: yours === null ? "ok" : yours === "none" ? null : yours,
       origin: yours === null ? "adapter" : "yours",

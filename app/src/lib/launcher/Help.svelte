@@ -87,6 +87,7 @@
             ></span
           >
         {/each}
+        {#if line.rest !== null}<span class="tf-ln-lgt">{line.rest}</span>{/if}
       </div>
     {/each}
   </div>

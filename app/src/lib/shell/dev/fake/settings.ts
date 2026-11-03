@@ -9,7 +9,7 @@
  * command step, Upper, which `repoFilePiped` runs; no pipeline until one is saved, but under
  * `?fake-diff-pipeline` *Base64 JSON*, the default for `*.json.b64`), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
  * `monitoring_settings`, `set_monitoring_settings`, `state_colours`, `set_tone_override`,
- * `clear_tone_overrides` (#2465: the adapters' declared words, two seen Jira statuses, no
+ * `clear_tone_overrides` (#2465: the adapters' declared words, two seen Jira statuses with their category tone (#2468), no
  * override until one is set), `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
@@ -64,23 +64,26 @@ const DECLARED_STATES: [string, [string, Tone | null][]][] = [
   ["pr", [["merged", "ok"], ["open", "info"], ["closed", "muted"]]],
   ["ticket", [["Done", "ok"], ["Resolved", "ok"], ["In Progress", "info"], ["In Review", "info"], ["Closed", "muted"]]],
 ];
-const SEEN_STATES: Record<string, string[]> = { ticket: ["Blocked", "To Do"] };
+/** Each seen status with its tickets' Jira category tone (#2468): Blocked is in progress, To Do is to do. */
+const SEEN_STATES: Record<string, [string, Tone | null][]> = { ticket: [["Blocked", "info"], ["To Do", null]] };
 
 /** `state_colours` over the fake's overrides, as `sources::state_colours::read` answers. */
 function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
   return DECLARED_STATES.map(([kind, declared]) => {
     const yours = (word: string) => overrides.get(`${kind}\u0000${word}`) ?? null;
-    const undeclared = [...(SEEN_STATES[kind] ?? []), ...[...overrides.keys()].filter((key) => key.startsWith(`${kind}\u0000`)).map((key) => key.slice(kind.length + 1))]
+    const category = (word: string) => SEEN_STATES[kind]?.find(([w]) => w === word)?.[1] ?? null;
+    const undeclared = [...(SEEN_STATES[kind] ?? []).map(([w]) => w), ...[...overrides.keys()].filter((key) => key.startsWith(`${kind}\u0000`)).map((key) => key.slice(kind.length + 1))]
       .filter((word, i, all) => kind in SEEN_STATES && all.indexOf(word) === i && !declared.some(([w]) => w === word))
       .sort();
     const words = [
-      ...declared.map(([word, tone]) => ({ word, declared: true, declared_tone: tone })),
-      ...undeclared.map((word) => ({ word, declared: false, declared_tone: null })),
-    ].map(({ word, declared, declared_tone }) => {
+      ...declared.map(([word, tone]) => ({ word, declared: true, declared_tone: tone, category_tone: null })),
+      ...undeclared.map((word) => ({ word, declared: false, declared_tone: null, category_tone: category(word) })),
+    ].map(({ word, declared, declared_tone, category_tone }) => {
       const mine = yours(word);
-      const tone: Tone | null = mine === null ? declared_tone : mine === "none" ? null : mine;
-      const origin = mine !== null ? "yours" : declared ? "adapter" : "unset";
-      return { word, declared, declared_tone, yours: mine, tone, origin } as const;
+      const fallback = declared ? declared_tone : category_tone;
+      const tone: Tone | null = mine === null ? fallback : mine === "none" ? null : mine;
+      const origin = mine !== null ? "yours" : declared ? "adapter" : category_tone !== null ? "category" : "unset";
+      return { word, declared, declared_tone, category_tone, yours: mine, tone, origin } as const;
     });
     return { kind, words };
   });
