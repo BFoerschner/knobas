@@ -1273,6 +1273,9 @@ mod tests {
         // and the type an absent tone reads as (spec #2463): a value its map
         // declares without a tone matches.
         "null",
+        // and the key of the path a candidate's chip text is read at instead
+        // of its value (#2468: Jira's category, drawn as the status name).
+        "text_at",
         // `NAMED`'s last-segment half (#621): the separator a slashed title
         // is split on.
         "/",
