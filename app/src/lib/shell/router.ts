@@ -4,9 +4,10 @@
  *
  * | Address                | Meaning                                          |
  * |------------------------|--------------------------------------------------|
- * | `#/assets/tree`       | the Assets view's Tree (#428)                    |
- * | `#/asset/<entity_id>`  | the Tree, opened at one asset (#428)             |
- * | `#/route/<entity_id>`  | the Tree, at the asset exposing one route (#432) |
+ * | `#/assets/tree`       | the asset tree, nothing picked (#428)            |
+ * | `#/assets/<entity_id>` | the asset tree, with one asset picked            |
+ * | `#/asset/<entity_id>`  | one asset's own page                             |
+ * | `#/route/<entity_id>`  | the page of the asset exposing one route (#432)  |
  * | `#/inbox`              | the inbox — one actionable stream (#45)          |
  * | `#/inbox/ctx/<id>`     | the inbox, pre-filtered to one context (#47)     |
  * | `#/time/<YYYY-MM-DD>`  | the day review for one day (#279)                |
@@ -31,27 +32,31 @@
  */
 
 /**
- * The Assets view's tab: the Tree, and only the Tree.
+ * Which of the estate's two views an assets address draws.
  *
- * *Monitors* was its sibling from #448 until #1459: the roster it named went
+ * `tree` is the asset tree: the estate as columns, for finding where things
+ * sit and adding them there, with the picked asset previewed beside the
+ * columns. `asset` is one asset's own page, for reading and editing it. They
+ * were one surface until the asset page was split out of the tree's pane: the
+ * pane was too narrow to read a long property in and too crowded to fill one
+ * in.
+ *
+ * *Monitors* was a sibling tab from #448 until #1459: the roster it named went
  * with the rooms UI (#1087), and Monitors lives at `#/monitors` (R-11.3), where
- * `tf/address.ts`' `legacyAddress` sends `#/assets/monitors`. One member, and
- * still a union rather than a bare string, so a tab that ever returns has to
- * be named here and fails `svelte-check` wherever the tab is read.
+ * `tf/address.ts`' `legacyAddress` sends `#/assets/monitors`.
  *
- * Never "board" — ADR-0009, which is why the tab is called *Tree* at all.
+ * Never "board" (ADR-0009).
  */
-export type AssetsTab = "tree";
+export type AssetsTab = "tree" | "asset";
 
 export type Route =
   /**
-   * The Assets view (#428): the estate, on one of its tabs.
+   * The estate (#428): the asset tree or one asset's page, by `tab`.
    *
-   * `assetId` is the asset the Tree opens at, and it is *not* a second view:
-   * `#/asset/<id>` and `#/assets/tree` draw the same surface, one of them with
-   * a selection. Story 35 — *opening an asset's address re-opens the Tree at
-   * its path* — is that sentence, and a separate detail view would have made
-   * it a second surface to keep in step with the first.
+   * On the tree, `assetId` is the asset picked in the columns, or `null`; on
+   * the page it is the asset the page draws. A route's address is a page
+   * whose asset is only known once the route is read, so its `assetId` is
+   * `null` and `routeId` names the route.
    */
   | {
       view: "assets";
@@ -60,17 +65,10 @@ export type Route =
       /**
        * The route `#/route/<id>` names (#432), when the address is a route's.
        *
-       * **Optional rather than `string | null`**, and that is the one place
-       * this union is not uniform. An assets address either names a route or
-       * has nothing to say about routes at all: `#/assets/tree` and
-       * `#/asset/<id>` are not "a route address with no route", they are
-       * addresses of a different thing. Writing it as an optional says that,
-       * and it keeps every existing construction of this variant — the top
-       * strip's button, the Tree's own `addressOf` — unchanged.
-       *
-       * The Tree resolves it to the exposing asset (`get_route`) and opens
-       * there with the route selected; `assetId` is `null` on the way in
-       * because the address does not carry one.
+       * Optional rather than `string | null`: an assets address either names a
+       * route or has nothing to say about routes at all. The page resolves it
+       * to the exposing asset (`get_route`) and draws that asset with the route
+       * picked.
        */
       routeId?: string;
     }
@@ -170,26 +168,32 @@ export function parseHash(hash: string): Route {
   // The head owns the whole address -- `#/standup/anything` is the digest, the
   // same rule `#/sources/x` and `#/time/whenever` already follow.
   if (head === "standup") return { view: "standup" };
-  // The head owns the whole address, so `#/assets/whatever` is the
-  // Tree rather than "arrives in a later milestone" -- the rule `#/sources/x`
-  // and `#/time/whenever` already follow. `#/asset` with no id is *not* the view: an address
-  // that sets out to name an asset and does not is a typo, not the estate.
-  if (head === "assets") return { view: "assets", tab: "tree", assetId: null };
+  // The head owns the whole address, so `#/assets/whatever` is the tree
+  // rather than "arrives in a later milestone" -- the rule `#/sources/x` and
+  // `#/time/whenever` already follow. A tail is a pick only when it is an
+  // entity id, which always carries its namespace's colon (`asset:<uuid>`):
+  // `#/assets/tree`, the tree's own bare address, and any other word are the
+  // tree with nothing picked.
+  if (head === "assets") {
+    return { view: "assets", tab: "tree", assetId: tail.includes(":") ? tail : null };
+  }
+  // `#/asset` with no id is *not* the estate: an address that sets out to
+  // name an asset and does not is a typo.
   if (head === "asset") {
     return tail === ""
       ? { view: "unknown", hash }
-      : { view: "assets", tab: "tree", assetId: tail };
+      : { view: "assets", tab: "asset", assetId: tail };
   }
-  // A route's address is the **Tree**, not a surface of its own (#432): a
-  // route sits on the asset that exposes it, and story 14's *a ticket about a
-  // certificate links to the route whose certificate it is* has to land
-  // somewhere a reader can see what the route belongs to. `assetId` is `null`
-  // because the address does not carry one; the view reads the route and
-  // finds it. `#/route` with no id is a typo for the same reason `#/asset` is.
+  // A route has no page of its own (#432): it sits on the asset that exposes
+  // it, and story 14's *a ticket about a certificate links to the route whose
+  // certificate it is* lands on that asset's page with the route picked.
+  // `assetId` is `null` because the address does not carry one; the page
+  // reads the route and finds it. `#/route` with no id is a typo for the same
+  // reason `#/asset` is.
   if (head === "route") {
     return tail === ""
       ? { view: "unknown", hash }
-      : { view: "assets", tab: "tree", assetId: null, routeId: tail };
+      : { view: "assets", tab: "asset", assetId: null, routeId: tail };
   }
   if (head === "sources") return { view: "sources" };
   if (head === "settings") return { view: "settings" };
@@ -232,9 +236,8 @@ export function hashFor(route: Route): string {
       // The route's address wins where there is one: it is the more specific
       // of the two, and it is what a reader copies out of the pane.
       if (route.routeId !== undefined) return `#/route/${encodeId(route.routeId)}`;
-      return route.assetId === null
-        ? `#/assets/${route.tab}`
-        : `#/asset/${encodeId(route.assetId)}`;
+      if (route.assetId === null) return "#/assets/tree";
+      return route.tab === "tree" ? `#/assets/${encodeId(route.assetId)}` : `#/asset/${encodeId(route.assetId)}`;
     case "sources":
       return "#/sources";
     case "settings":

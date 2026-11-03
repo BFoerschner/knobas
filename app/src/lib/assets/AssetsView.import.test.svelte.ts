@@ -1,6 +1,6 @@
 /**
- * The Import, from the room bar to the third group and out the other side
- * (issue #439, spec #427 stories 21–24).
+ * The Import, from the asset tree's header to the third group and out the
+ * other side (issue #439, spec #427 stories 21–24).
  *
  * A file of its own, the way #435's linking is: this one drives an
  * `<input type="file">` and a two-step dialog, and the files beside it are
@@ -39,7 +39,9 @@ vi.mock("../ipc/app", async (original) => ({
   appStatus: () => Promise.resolve({ secrets_in_memory: store.inMemory }),
 }));
 
-const { default: AssetsView } = await import("./AssetsView.svelte");
+// The tree and an asset's page behind one navigation: the Import is the
+// tree's, and the names it kept are drawn on the asset's page.
+const { default: Estate } = await import("./Estate.fixture.svelte");
 
 const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
 
@@ -228,7 +230,7 @@ function render(refusal: unknown = null, hash = "#/assets/tree") {
   };
   location.hash = hash;
   const nav = createTestNav();
-  app = mount(AssetsView, {
+  app = mount(Estate, {
     target,
     props: {
       nav,
@@ -342,33 +344,33 @@ function groups(): string[] {
 }
 
 /**
- * The monitor names an import kept are on the asset's pane (#439's fourth
- * criterion, at the surface a reader can see it on).
+ * The monitor names an import kept are on the asset's page (#439's fourth
+ * criterion, at the surface a reader can see it on): its *Monitoring* panel
+ * lists them under their own heading, as the queue they are.
  *
- * The section is drawn only when there are names: *Exposes* and *Reachable
- * via* answer a question about every asset, and this one is the estate file's
- * own note. So the assertion is both — the names on an asset that has them,
- * and no heading at all on an estate nobody imported.
+ * Nothing is attached, so the panel has no list of monitors over them (#445),
+ * and it does not say *nothing watches it* either: the names are waiting for
+ * a monitor, which is not the same as nobody having asked for one.
  */
-test("the pane lists the monitor names an import kept", async () => {
+test("the asset's page lists the monitor names an import kept", async () => {
   render(null, `#/asset/${SITE.id}`);
   await settle();
 
-  const section = target.querySelector(".named");
-  expect(section?.querySelector("h3")?.textContent?.trim()).toBe(
+  const section = target.querySelector('section[aria-label="Monitoring"]');
+  expect(section?.querySelector("h4")?.textContent?.trim()).toBe(
     "Named by the import, not in Kuma yet",
   );
   expect(
-    [...(section?.querySelectorAll("li") ?? [])].map((row) => row.textContent?.trim()),
+    [...(section?.querySelectorAll("ul.tf-as-named li") ?? [])].map((row) => row.textContent?.trim()),
   ).toEqual(["gitea", "jira (tunnel)"]);
-  // Nothing is attached, so there is no *Monitoring* section over it (#445).
-  expect(target.querySelector(".watch")).toBeNull();
+  expect(section?.querySelector("ul.tf-as-list:not(.tf-as-named)")).toBeNull();
+  expect(section?.textContent).not.toContain("Nothing watches it.");
 });
 
 test("Import opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
   render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   expect(target.querySelector('input[type="file"]')).not.toBeNull();
 
@@ -392,7 +394,7 @@ test("choosing a file previews it and draws the three groups", async () => {
   const calls = render();
   await settle();
 
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   expect(target.querySelector('input[type="file"]')).not.toBeNull();
   expect(calls.previewed).toEqual([]);
@@ -450,7 +452,7 @@ test("choosing a file previews it and draws the three groups", async () => {
 test("the preview says which value wins on each changed property", async () => {
   render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   await choose("{}");
 
@@ -476,7 +478,7 @@ test("the preview says which value wins on each changed property", async () => {
 test("Import applies the chosen file and the Tree re-reads", async () => {
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   await choose('{"assets":[]}');
 
@@ -512,7 +514,7 @@ test("Import applies the chosen file and the Tree re-reads", async () => {
 test("the chooser offers the estate file and sends it with both calls", async () => {
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
 
   const chooser = target.querySelector<HTMLSelectElement>(".tf-dialog select");
@@ -550,7 +552,7 @@ test("a file the backend refuses says so in the dialog and cannot be applied", a
     message: "this is not an estate file: expected value at line 1 column 1",
   });
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   await choose("{ this is not json");
 
@@ -606,7 +608,7 @@ test("an importer asks for the token once, and not before it is owed", async () 
   script = [{ state: "token_needed" }, { state: "ready", file: FILE, new_servers: [], skipped: [] }];
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
 
   chooseImporter();
@@ -647,7 +649,7 @@ test("land under is asked only when the importer found a server the estate lacks
   script = [{ state: "ready", file: FILE, new_servers: [], skipped: [] }];
   const quiet = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   chooseImporter();
   button("Read Hetzner Cloud")?.click();
@@ -668,7 +670,7 @@ test("land under is asked only when the importer found a server the estate lacks
   ];
   const asked = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   chooseImporter();
   button("Read Hetzner Cloud")?.click();
@@ -734,7 +736,7 @@ test("the produced file is offered for download", async () => {
   script = [{ state: "ready", file: FILE, new_servers: ["knobas-scratch"], skipped: [] }];
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   chooseImporter();
   button("Read Hetzner Cloud")?.click();
@@ -776,7 +778,7 @@ test("the Docker importer asks for no token and no landing, and names what it sk
   ];
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
 
   chooseImporter("docker");
@@ -816,7 +818,7 @@ test("the Docker importer asks for no token and no landing, and names what it sk
 test("choosing another producer drops the preview the last one drew", async () => {
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
 
   await choose('{"assets":[]}');
@@ -864,7 +866,7 @@ test("a token the far end refuses puts the field back, and another fault does no
   ];
   const calls = render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   chooseImporter();
 
@@ -911,7 +913,7 @@ test.each([
   script = [{ state: "token_needed" }];
   render();
   await settle();
-  button("Import")?.click();
+  button("Import…")?.click();
   flushSync();
   chooseImporter();
   button("Read Hetzner Cloud")?.click();

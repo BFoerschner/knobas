@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { entityAddress, legacyAddress } from "./address";
+import { page as assetPage } from "./asset/page";
 import { page as assetTreePage } from "./asset-tree/page";
 import { page as codeRowPage } from "./code-row/page";
 import { page as monitorsPage } from "./monitors/page";
@@ -91,15 +92,17 @@ test("a room, the sources view and the wizard land on pages that exist", () => {
 });
 
 // #1459: the rooms UI's *Monitors* tab beside *Tree* went with #1087;
-// Monitors lives at `#/monitors` (R-11.3), and the Tree keeps its addresses.
-test("the Assets view's old Monitors tab lands on the Monitors page, and the Tree keeps its addresses", () => {
+// Monitors lives at `#/monitors` (R-11.3). The tree keeps `#/assets`, and an
+// asset's address is its own page.
+test("the Assets view's old Monitors tab lands on the Monitors page, and the tree keeps its addresses", () => {
   const old = parseTfHash("#/assets/monitors");
   expect(old).toEqual({ view: "unknown", hash: "#/assets/monitors" });
   expect(legacyAddress("#/assets/monitors")).toEqual({ go: "#/monitors" });
   expect(pageFor(parseTfHash("#/monitors"))).toBe(monitorsPage);
   expect(pageFor(parseTfHash("#/assets"))).toBe(assetTreePage);
   expect(pageFor(parseTfHash("#/assets/tree"))).toBe(assetTreePage);
-  expect(pageFor(parseTfHash("#/asset/asset:vm-pay-01"))).toBe(assetTreePage);
+  expect(pageFor(parseTfHash("#/assets/asset:vm-pay-01"))).toBe(assetTreePage);
+  expect(pageFor(parseTfHash("#/asset/asset:vm-pay-01"))).toBe(assetPage);
   expect(legacyAddress("#/assets")).toBeNull();
 });
 

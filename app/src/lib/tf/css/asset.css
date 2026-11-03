@@ -1,0 +1,144 @@
+/* ---------- an asset's page (`tf/asset/TfAsset.svelte`) ----------
+   The shell's detail page: the canonical header, then the wide column (what is stored on it, how it is
+   reached, what it holds) and the narrow one (what is in force, what breaks with it, what watches it, what
+   it is linked to, what happened). Panels are `.tf-panel`; a panel's rows sit on `--rule-2` hairlines. */
+.tf-as-head { align-items: flex-start; }
+.tf-fhead .tf-as-mg { font-size: var(--t-2xs); line-height: 22px; width: 30px; margin-top: 4px; flex: none; }
+.tf-as-titles { flex: 1 1 360px; min-width: 0; }
+.tf-as-titleline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.tf-as-titleline h1 { overflow-wrap: anywhere; }
+/* The name in the form: the title's own type, in a field, so nothing moves when *Edit* is pressed. */
+.tf-as-head .tf-as-name {
+  font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85;
+  color: var(--ink); background: var(--paper); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 0 6px; margin: -1px 0 -1px -7px; width: min(100%, 560px);
+}
+.tf-as-head .tf-sub a { color: inherit; text-underline-offset: 2px; }
+.tf-as-head .tf-sub a:hover { color: var(--ink); }
+.tf-as-sep { color: var(--ink-2); margin: 0 3px; }
+.tf-as > .tf-banner { margin: 0 22px 12px; border: 0; border-radius: 6px; }
+
+.tf-as-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); gap: 16px;
+  align-items: start; padding: 4px 22px 40px; max-width: 1400px;
+}
+@media (max-width: 900px) { .tf-as-body { grid-template-columns: minmax(0, 1fr); padding-left: 16px; padding-right: 16px; } }
+.tf-as-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.tf-as .tf-panel { padding-bottom: 6px; }
+.tf-as .tf-panel > header { min-height: 36px; padding-bottom: 6px; }
+.tf-as-n { font-size: var(--t-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-as-sub { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 10px 12px 4px; }
+.tf-as-none { margin: 0; padding: 4px 12px 8px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-as-none .tf-linkish { margin-left: 4px; }
+
+/* A label beside its value, a hairline between rows. The label column holds a short word, the value the rest. */
+.tf-as-kv { margin: 0; }
+.tf-as-kv > div {
+  display: grid; grid-template-columns: minmax(96px, 28%) minmax(0, 1fr); gap: 2px 14px; align-items: baseline;
+  padding: 6px 12px; border-top: 1px solid var(--rule-2);
+}
+.tf-as-kv dt { font-size: var(--t-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.tf-as-kv dd { margin: 0; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.tf-as-force > div { grid-template-columns: 96px minmax(0, 1fr); }
+.tf-as-from { font-size: var(--t-xs); text-align: left; }
+/* The value is the control: a click opens the form at its field. Text, not a button's face. */
+.tf-as-val {
+  border: 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: text;
+  padding: 1px 4px; margin: -1px -4px; border-radius: 3px; white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%;
+}
+.tf-as-val:hover { background: var(--sheet-2); }
+.tf-as-val.tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); }
+.tf-as-val.tf-as-unset { color: var(--ink-2); }
+
+/* The form: the same panels, fields in place of values. */
+.tf-as-form { padding: 6px 12px 4px; align-items: start; }
+.tf-as-form label { padding-top: 5px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-as-form label.tf-as-own { font-style: italic; }
+.tf-as-form input, .tf-as-form select, .tf-as-form textarea { width: 100%; min-width: 0; }
+.tf-as-form textarea, .tf-as-addrow input, .tf-as-addrow select {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink); font: inherit;
+}
+.tf-as-form textarea { resize: vertical; line-height: 1.45; }
+.tf-as-addrow {
+  display: grid; grid-template-columns: minmax(0, 1fr) 104px minmax(0, 1.4fr) auto; gap: 8px; align-items: center; padding: 4px 12px;
+}
+.tf-as-addrow input, .tf-as-addrow select { min-width: 0; width: 100%; }
+.tf-as-formfoot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 12px 6px; font-size: var(--t-xs); }
+
+/* Routes: a name, its URL as the *open URL* action, where it lands; the picked one outlined. */
+.tf-as-routes { list-style: none; margin: 0; padding: 0; }
+.tf-as-route { padding: 7px 12px; border-top: 1px solid var(--rule-2); min-width: 0; }
+.tf-as-route.tf-sel { outline: 2px solid var(--ink); outline-offset: -2px; border-radius: 4px; }
+.tf-as-rline { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.tf-as-rname, .tf-as-url, .tf-as-to {
+  border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer; min-width: 0;
+}
+.tf-as-rname { font-weight: 600; }
+.tf-as-url { color: var(--ink-2); font-size: var(--t-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.tf-as-rname:hover, .tf-as-url:hover, .tf-as-to:hover { text-decoration: underline; text-underline-offset: 2px; }
+.tf-as-rmeta { margin: 2px 0 0; font-size: var(--t-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.tf-as-rmeta .tf-linkish { color: var(--ink); }
+/* A route's own properties (a certificate's expiry, who opened it), under the line saying where it lands. */
+.tf-as-rprops { margin: 4px 0 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 1px 12px; font-size: var(--t-xs); }
+.tf-as-rprops > div { display: contents; }
+.tf-as-rprops dt { color: var(--ink-2); }
+.tf-as-rprops dd { margin: 0; overflow-wrap: anywhere; }
+.tf-as-route .tf-trail { opacity: 0; transition: opacity .12s; }
+.tf-as-route:hover .tf-trail, .tf-as-route:focus-within .tf-trail { opacity: 1; }
+.tf-as-rhist { margin-top: 6px; }
+.tf-as-rhist .tf-as-sub { margin: 6px 0 2px; }
+.tf-as-rhist .tf-as-hist li, .tf-as-rhist .tf-as-none { padding-left: 0; padding-right: 0; }
+
+/* A list of other assets, monitors or routes: one line each, the name opening its page. */
+.tf-as-list { list-style: none; margin: 0; padding: 0; }
+.tf-as-list > li {
+  display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--rule-2);
+  min-width: 0; font-size: var(--t-sm);
+}
+.tf-as-to { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+.tf-as-list .tf-dim { white-space: nowrap; }
+.tf-as-list .tf-dot { margin-left: auto; }
+.tf-as-path { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--t-xs); }
+.tf-as-named > li { font-size: var(--t-xs); }
+/* In the narrow column a row's path goes under its name, so the name is never the part cut short. */
+.tf-as-wrap > li { flex-wrap: wrap; row-gap: 0; }
+.tf-as-wrap .tf-as-path { flex-basis: 100%; margin-left: 0; white-space: nowrap; }
+
+.tf-as-hist { list-style: none; margin: 0; padding: 0; }
+.tf-as-hist li {
+  display: flex; justify-content: space-between; gap: 12px; padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm);
+}
+.tf-as-hist li > :first-child { min-width: 0; overflow-wrap: anywhere; }
+.tf-as-hist li > .tf-dim { white-space: nowrap; font-size: var(--t-xs); }
+.tf-as-ask { margin: 0; }
+
+/* ---------- *New asset* (`assets/CreateDialog.svelte`) ---------- */
+.tf-dialog.tf-as-new { width: min(560px, calc(100vw - 32px)); }
+.tf-as-new .tf-formgrid { grid-template-columns: 120px minmax(0, 1fr); }
+.tf-as-new .tf-formgrid input, .tf-as-new .tf-formgrid select { width: 100%; min-width: 0; }
+.tf-as-new .tf-note { margin: 10px 0 0; }
+.tf-as-new .tf-as-hint { margin: 6px 0 0 132px; }
+.tf-as-newh { font-size: var(--t-sm); font-weight: 600; margin: 16px 0 8px; padding-top: 12px; border-top: 1px solid var(--rule-2); }
+.tf-as-newh .tf-dim { font-weight: 400; margin-left: 4px; }
+.tf-as-made { margin: 10px 0 0; color: var(--ok); font-size: var(--t-sm); }
+
+/* ---------- *Linked items* (`detail/LinksPanel.svelte`) ---------- */
+.tf-lnk-n { font-size: var(--t-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-lnk-none { margin: 0; padding: 4px 12px 8px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-lnk-h { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 10px 12px 4px; }
+.tf-lnk-rows { list-style: none; margin: 0; padding: 0; }
+.tf-lnk-row {
+  display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 2px 8px; align-items: center;
+  padding: 5px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm);
+}
+.tf-lnk-open {
+  border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tf-lnk-open:hover { text-decoration: underline; text-underline-offset: 2px; }
+.tf-lnk-open .tf-chip { margin-left: 6px; }
+.tf-lnk-when { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; }
+.tf-lnk-row > .tf-btn { opacity: 0; transition: opacity .12s; }
+.tf-lnk-row:hover > .tf-btn, .tf-lnk-row:focus-within > .tf-btn { opacity: 1; }
+.tf-lnk-note { grid-column: 2 / -1; margin: 0; font-size: var(--t-xs); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-lnk-why { color: var(--muted); }

@@ -1,6 +1,7 @@
 <!--
   What this item is linked to — spec §5a's core object, drawn from the viewed
-  entity's side.
+  entity's side. The asset page's *Linked items* panel, in the design
+  system's panel (`.tf-panel`) since the page left the tree's pane.
 
   **Presentational on purpose.** The panel does no IPC of its own: it is handed
   the hydrated entries `get_entity` returned and hands three intentions back
@@ -22,7 +23,6 @@
 -->
 <script lang="ts">
   import type { LinkEntry } from "../ipc/entity";
-  import Monogram from "../shell/Monogram.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { entityAddress } from "../tf/address";
@@ -71,130 +71,60 @@
   }
 </script>
 
-<div class="sec">
-  <div class="sec-h">
-    <span class="lab">Linked items</span>
-    <span class="k muted">{links.length}</span>
+<section class="tf-panel tf-lnk" aria-label="Linked items">
+  <header>
+    <h3>Linked items</h3>
+    {#if links.length > 0}<span class="tf-lnk-n">{links.length}</span>{/if}
     <span class="tf-trail">
       <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
     </span>
-  </div>
-
+  </header>
   {#if groups.length === 0}
     <!--
-      The M1 caveat ("drawing links is M2 — knobas mirrors, it does not write")
-      is gone: it described a limitation that no longer exists, and an empty
-      state that explains why you cannot act is worse than one that offers the
-      action.
+      An empty state that offers the action rather than explaining why there
+      is nothing: the button on the heading is the action.
     -->
-    <div class="empty">
-      <p>Nothing linked yet.</p>
-      <p>Link this to the ticket it implements, the build it broke, or the page that documents it.</p>
-      <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
-    </div>
+    <p class="tf-lnk-none">Nothing linked yet. Link this to the ticket it implements, the build it broke, or the page that documents it.</p>
   {:else}
     {#each groups as group (group.reading)}
-      <div class="row hd lrow">
-        <span></span>
-        <span>{group.reading}</span>
-        <span></span>
-        <span></span>
-      </div>
-      {#each group.entries as entry (entry.link.id)}
-        <div class="row lrow">
-          <Monogram text={monogramOf(entry.other.kind)} label={labelOf(entry.other.kind)} />
-          <!--
-            The title is raw source text and is rendered as text (gotcha 7).
-          -->
-          <button
-            class="t lopen"
-            title="Open {entry.other.entity_id}"
-            onclick={() => onopen(addressOf(entry))}
-          >
-            {entry.other.title || entry.other.entity_id}
-            {#if entry.other.deleted_at}
-              <span class="wd">withdrawn</span>
+      <h4 class="tf-lnk-h">{group.reading}</h4>
+      <ul class="tf-lnk-rows">
+        {#each group.entries as entry (entry.link.id)}
+          <li class="tf-lnk-row">
+            <span class="tf-dp-mono" title={labelOf(entry.other.kind)} aria-label={labelOf(entry.other.kind)}
+              >{monogramOf(entry.other.kind)}</span
+            >
+            <!-- The title is raw source text and is rendered as text (gotcha 7). -->
+            <button class="tf-lnk-open" title="Open {entry.other.entity_id}" onclick={() => onopen(addressOf(entry))}>
+              {entry.other.title || entry.other.entity_id}
+              {#if entry.other.deleted_at}
+                <span class="tf-chip tf-warn">withdrawn</span>
+              {/if}
+            </button>
+            <span class="tf-lnk-when" title="{labelOf(entry.other.kind)} · {entry.link.origin}">
+              {labelOf(entry.other.kind)}, {ago(entry.link.created_at)}
+            </span>
+            <button
+              class="tf-btn tf-sm tf-ghost"
+              title="Remove this link. Linking again is one action."
+              onclick={() => onunlink(entry)}
+            >
+              Unlink
+            </button>
+            {#if entry.link.note}
+              <p class="tf-lnk-note">{entry.link.note}</p>
             {/if}
-          </button>
-          <span class="r" title="{labelOf(entry.other.kind)} · {entry.link.origin}">
-            {labelOf(entry.other.kind)} · {ago(entry.link.created_at)}
-          </span>
-          <button
-            class="tf-btn tf-sm"
-            title="Remove this link. Linking again is one action."
-            onclick={() => onunlink(entry)}
-          >
-            Unlink
-          </button>
-        </div>
-        {#if entry.link.note}
-          <p class="lnote">{entry.link.note}</p>
-        {/if}
-        <!--
-          An accepted suggestion keeps the reason knobas proposed it with, and
-          the panel shows it: "there are not two kinds of link to reason about"
-          (#41 story 5) cuts both ways -- the row behaves like every other one,
-          and it can still say why it exists. A hand-drawn link has no reason
-          and draws no line.
-        -->
-        {#if entry.link.reason}
-          <p class="lnote lwhy">{entry.link.reason}</p>
-        {/if}
-      {/each}
+            <!--
+              An accepted suggestion keeps the reason knobas proposed it with:
+              the row behaves like every other one and can still say why it
+              exists. A hand-drawn link has no reason and draws no line.
+            -->
+            {#if entry.link.reason}
+              <p class="tf-lnk-note tf-lnk-why">{entry.link.reason}</p>
+            {/if}
+          </li>
+        {/each}
+      </ul>
     {/each}
   {/if}
-</div>
-
-<style>
-  /*
-    Four columns rather than the stylesheet's `g4`: the last one holds a
-    control, so it is sized by its content instead of by a fixed width that a
-    longer word would clip.
-  */
-  .lrow {
-    grid-template-columns: 34px 1fr auto auto;
-  }
-
-  /* The whole title cell is the navigation target, not a link-coloured word. */
-  .lopen {
-    text-align: left;
-    width: 100%;
-    color: var(--text);
-  }
-
-  .lopen:hover {
-    color: var(--link);
-  }
-
-  .wd {
-    margin-left: 6px;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--amber);
-  }
-
-  /*
-    The note is prose the user wrote about *why* the link exists, so it gets a
-    line of its own under the row rather than a column that would clip it.
-  */
-  /* knobas' words, not the user's: fainter, so the two are not one voice. */
-  .lwhy {
-    color: var(--faint);
-  }
-
-  /* The empty state's invitation sits below its two lines: placement only, the
-     margin `unported.css`' deleted `.empty .btn` gave it (#2292). */
-  .empty .tf-btn {
-    margin-top: 8px;
-  }
-
-  .lnote {
-    padding: 4px 0 6px 42px;
-    color: var(--muted);
-    font-size: 12px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-</style>
+</section>

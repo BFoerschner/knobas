@@ -78,7 +78,7 @@ function render(links: LinkEntry[]) {
       [...target.querySelectorAll<HTMLButtonElement>("button")].filter((button) =>
         button.textContent?.includes(label),
       ),
-    headings: () => [...target.querySelectorAll(".row.hd span:nth-child(2)")].map((h) => h.textContent),
+    headings: () => [...target.querySelectorAll(".tf-lnk-h")].map((h) => h.textContent),
     done: () => {
       unmount(app);
       target.remove();
@@ -195,7 +195,7 @@ test("a note is displayed, and a link without one draws no empty line", () => {
   ]);
 
   expect(screen.text()).toContain("the retry storm postmortem");
-  expect(screen.target.querySelectorAll(".lnote")).toHaveLength(1);
+  expect(screen.target.querySelectorAll(".tf-lnk-note")).toHaveLength(1);
 
   screen.done();
 });
@@ -260,14 +260,15 @@ test("an accepted suggestion still shows the reason knobas proposed it with", ()
 test("a hand-drawn link draws no reason line", () => {
   const screen = render([entry({})]);
 
-  expect(screen.target.querySelectorAll(".lwhy").length).toBe(0);
+  expect(screen.target.querySelectorAll(".tf-lnk-why").length).toBe(0);
 
   screen.done();
 });
 
 /**
  * #2238 / #2292: the panel is a page body, so its actions are the Controls'
- * small button.
+ * small button: *Link to…* on the panel's heading, and a row's *Unlink* a
+ * ghost, since a row's action fades in under the pointer.
  */
 test("every action is a small Controls button, in a row and in the empty state", () => {
   const filled = render([entry({ id: "one" })]);
@@ -278,13 +279,13 @@ test("every action is a small Controls button, in a row and in the empty state",
     ]),
   ).toEqual([
     ["Link to…", "tf-btn tf-sm"],
-    ["Unlink", "tf-btn tf-sm"],
+    ["Unlink", "tf-btn tf-sm tf-ghost"],
   ]);
   filled.done();
 
   const empty = render([]);
+  // The empty state's invitation is the heading's own button: one action, said once.
   expect(empty.buttons("Link to").map((button) => button.className.split(" ").filter((name) => name.startsWith("tf-")).join(" "))).toEqual([
-    "tf-btn tf-sm",
     "tf-btn tf-sm",
   ]);
   empty.done();

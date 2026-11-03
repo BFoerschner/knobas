@@ -14,6 +14,8 @@ test("an entity page puts its entity in front, before the job", () => {
   expect(at("#/repo/gitea%3Aacme%2Fpayouts", JOB)).toBe("gitea:acme/payouts");
   expect(at("#/page/confluence%3AENG%3ASEPA%20design", JOB)).toBe("confluence:ENG:SEPA design");
   expect(at("#/asset/asset%3Apayouts-api", JOB)).toBe("asset:payouts-api");
+  // The tree's pick is in front as well: the picked asset is the one previewed.
+  expect(at("#/assets/asset%3Apayouts-api", JOB)).toBe("asset:payouts-api");
 });
 
 test("a ticket page puts its ticket in front, before the chosen job (spec #2227)", () => {
@@ -56,6 +58,7 @@ test("a list, a space or the tree with nothing selected is nothing, never the la
     "#/docs/space/ENG",
     "#/docs/space/wiki%3AENG",
     "#/assets",
+    "#/assets/tree",
     "#/route/route%3Aget-payouts",
     "#/deps",
     "#/code",

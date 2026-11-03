@@ -27,6 +27,7 @@ import { createAlerts, type Alerts } from "./alerts.svelte";
 import { waitFor } from "../shell/test-wait";
 
 const { default: AssetsView } = await import("./AssetsView.svelte");
+const { default: Estate } = await import("./Estate.fixture.svelte");
 
 const NOW = new Date(2026, 8, 7, 9, 0, 0, 0);
 
@@ -122,7 +123,7 @@ function render(alerts: Alerts) {
 
 /** The strip's rows, as a reader reads them. */
 function rows(): string[] {
-  return [...target.querySelectorAll(".alerts li")].map((row) =>
+  return [...target.querySelectorAll(".tf-et-alerts li")].map((row) =>
     (row.textContent ?? "").replace(/\s+/g, " ").trim(),
   );
 }
@@ -147,7 +148,7 @@ test("an estate with nothing wrong in it draws no strip at all", async () => {
   await alerts.refresh();
   render(alerts);
 
-  expect(target.querySelector(".alerts")).toBeNull();
+  expect(target.querySelector(".tf-et-alerts")).toBeNull();
 });
 
 /**
@@ -164,7 +165,7 @@ test("an open alert names the monitor, the asset, its path and how long", async 
   render(alerts);
 
   expect(rows()).toEqual(["postgres (tunnel) postgres hel1 / vm-db-01 30 min ago"]);
-  expect(target.querySelector(".alerts .st")!.classList.contains("down")).toBe(true);
+  expect(target.querySelector(".tf-et-alerts .tf-dot")!.classList.contains("tf-err")).toBe(true);
 });
 
 /**
@@ -206,7 +207,7 @@ test("an alert whose monitor watches nothing is drawn, with nowhere to go", asyn
   render(alerts);
 
   expect(rows()).toEqual(["canary watching nothing 30 min ago"]);
-  expect(target.querySelector(".alerts .go"), "there is no asset to open").toBeNull();
+  expect(target.querySelector(".tf-et-alerts .tf-et-go"), "there is no asset to open").toBeNull();
 });
 
 /**
@@ -231,27 +232,27 @@ test("a warn alert is drawn amber", async () => {
   await alerts.refresh();
   render(alerts);
 
-  const dot = target.querySelector(".alerts .st")!;
-  expect(dot.classList.contains("warn")).toBe(true);
-  expect(dot.classList.contains("down")).toBe(false);
+  const dot = target.querySelector(".tf-et-alerts .tf-dot")!;
+  expect(dot.classList.contains("tf-warn")).toBe(true);
+  expect(dot.classList.contains("tf-err")).toBe(false);
 });
 
 /**
- * The row opens the **asset**, at its address in this view.
+ * The row opens the **asset**, picked in the tree.
  *
  * Spec #427 story 61: the next action is one step away. An alert has no
- * address of its own — the row navigates to the machine, which is where the
- * pane, the monitors and the history are.
+ * address of its own — the row navigates to the machine, where the preview
+ * says what it is and *Open asset* has its monitors and history.
  */
 test("clicking a row opens the asset it is about", async () => {
   const alerts = alertsHolding([alert()]);
   await alerts.refresh();
   const nav = render(alerts);
 
-  target.querySelector<HTMLButtonElement>(".alerts .go")!.click();
+  target.querySelector<HTMLButtonElement>(".tf-et-alerts .tf-et-go")!.click();
   flushSync();
 
-  expect(location.hash).toBe("#/asset/asset:postgres");
+  expect(location.hash).toBe("#/assets/asset:postgres");
   expect(nav.route).toEqual({
     view: "assets",
     tab: "tree",
@@ -270,7 +271,7 @@ test("the strip follows the store as alerts open and close", async () => {
     listen: () => Promise.resolve(() => {}),
   });
   render(alerts);
-  expect(target.querySelector(".alerts")).toBeNull();
+  expect(target.querySelector(".tf-et-alerts")).toBeNull();
 
   open = [alert()];
   await alerts.refresh();
@@ -280,14 +281,15 @@ test("the strip follows the store as alerts open and close", async () => {
   open = [];
   await alerts.refresh();
   flushSync();
-  expect(target.querySelector(".alerts"), "a healed estate loses the strip").toBeNull();
+  expect(target.querySelector(".tf-et-alerts"), "a healed estate loses the strip").toBeNull();
 });
 
 /**
- * The two lines an alert leaves behind on the asset (#446), as the pane draws
- * them: the ack a person made and the recovery the estate made.
+ * The two lines an alert leaves behind on the asset (#446), as its page's
+ * *History* draws them: the ack a person made and the recovery the estate
+ * made.
  *
- * Every other verb this pane has no arm for renders as
+ * Every other verb the history has no arm for renders as
  * `nothing: nothing → nothing`, which is what these two would do without one
  * — the failure #439's import lines already had once, on every asset in the
  * demo profile.
@@ -295,10 +297,10 @@ test("the strip follows the store as alerts open and close", async () => {
 test("the ack and the recovery are sentences in the asset's history", async () => {
   const alerts = alertsHolding([]);
   await alerts.refresh();
-  // The pane, not the strip: the history is what the *selected* asset draws.
+  // The asset's page, not the strip: the history is what one asset draws.
   location.hash = "#/asset/asset:hel1";
   const nav = createTestNav();
-  app = mount(AssetsView, {
+  app = mount(Estate, {
     target,
     props: {
       nav,

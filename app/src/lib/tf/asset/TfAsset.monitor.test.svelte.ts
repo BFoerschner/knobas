@@ -1,8 +1,10 @@
 /**
- * *Create monitor for this asset* — the pane's control and its two writes
- * (issue #453, spec #427 story 70).
+ * *Create monitor* — the asset page's control in its *Monitoring* panel, and
+ * its two writes (issue #453, spec #427 story 70). It was *Create monitor for
+ * this asset* in the tree's pane; on the asset's own page, *this asset* goes
+ * without saying.
  *
- * A file of its own for `AssetsView.write.test.svelte.ts`' reason: this needs
+ * A file of its own for the page's write tests' reason: this needs
  * ports that record two different calls and a detail whose `monitor_targets`
  * moves between tests, and mixing it into the write file would make its
  * assertions depend on which of them ran.
@@ -24,12 +26,12 @@ import type {
   AssetRow,
   MonitorTarget,
   RouteRow,
-} from "../ipc/assets";
-import type { WriteOpPayload } from "../ipc/sources";
-import { createTestNav } from "./test-nav.svelte";
-import { layers } from "../tf/layers.svelte";
-import AssetsView from "./AssetsView.svelte";
-import { waitFor } from "../shell/test-wait";
+} from "../../ipc/assets";
+import type { WriteOpPayload } from "../../ipc/sources";
+import { createTestNav } from "../../assets/test-nav.svelte";
+import { layers } from "../layers.svelte";
+import Estate from "../../assets/Estate.fixture.svelte";
+import { waitFor } from "../../shell/test-wait";
 
 const NOW = new Date(2026, 8, 7, 12, 0, 0, 0);
 
@@ -104,8 +106,9 @@ function estate(targets: MonitorTarget[], reachable: RouteRow[] = [ROUTE]) {
       else refuseQueue = refusal;
     },
     assetTypes: () => Promise.resolve([]),
-    // #505's panel: read on every selection, so a port left out falls through
-    // to the real `invoke`. Empty is honest -- no test here is about it.
+    // #505's panel: read on every asset the page draws, so a port left out
+    // falls through to the real `invoke`. Empty is honest -- no test here is
+    // about it.
     dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
     assetTree: (parentId?: string | null) =>
       Promise.resolve(
@@ -123,7 +126,7 @@ function estate(targets: MonitorTarget[], reachable: RouteRow[] = [ROUTE]) {
         reachable_via: reachable,
         history: [],
         links: [],
-        // Read back out of the store, so the pane's *not in Kuma yet* list is
+        // Read back out of the store, so the page's *not in Kuma yet* list is
         // this fixture's second read rather than a constant.
         monitors: [...monitors],
         monitoring: [],
@@ -142,8 +145,8 @@ function estate(targets: MonitorTarget[], reachable: RouteRow[] = [ROUTE]) {
     submitWrite: (payload: WriteOpPayload) => {
       if (refuseQueue !== null) return Promise.reject(refuseQueue);
       queued.push(payload);
-      // The queue's own answer is a row, and nothing in this view reads it:
-      // the pane re-reads instead. `undefined as never` would be a lie the
+      // The queue's own answer is a row, and nothing on the page reads it:
+      // the page re-reads instead. `undefined as never` would be a lie the
       // types allow; this is the honest minimum the caller ignores.
       return Promise.resolve({}) as never;
     },
@@ -157,7 +160,7 @@ let app: Record<string, unknown> | undefined;
 function render(ports: ReturnType<typeof estate>) {
   location.hash = "#/asset/asset:knobas-gitea";
   const nav = createTestNav();
-  app = mount(AssetsView, {
+  app = mount(Estate, {
     target,
     props: { nav, now: () => NOW, ports: ports as never },
   });
@@ -246,24 +249,27 @@ afterEach(() => {
  * **The criterion's negative: without the account the action is absent.**
  *
  * An Uptime Kuma configured with only its API key declares no write ops, so
- * `monitor_targets` comes back empty and the pane draws nothing — not a
- * disabled button, not an explanatory line. The other assertion is what makes
- * this a statement about the *targets* rather than about the fixture: the pane
- * is fully drawn, it just has no create in it.
+ * `monitor_targets` comes back empty and the page draws no create — not a
+ * disabled button, not an explanatory line. The other assertions are what
+ * make this a statement about the *targets* rather than about the fixture:
+ * the page is fully drawn and its *Monitoring* panel is there, saying that
+ * nothing watches the asset, with no create in it.
  */
-test("a pane with no monitor target draws no create", async () => {
+test("a page with no monitor target draws no create", async () => {
   const store = estate([]);
   render(store);
-  await waitFor(() => expect(text()).toContain("knobas-gitea"));
+  await waitFor(() => expect(text()).toContain("Nothing watches it."));
 
-  expect(names()).not.toContain("Create monitor for this asset");
+  expect(target.querySelector("h1")?.textContent?.trim()).toBe("knobas-gitea");
+  expect(target.querySelector('section[aria-label="Monitoring"]')).not.toBeNull();
+  expect(names()).not.toContain("Create monitor");
   expect(text()).not.toContain("Create monitor");
 });
 
 test("Create monitor opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
   render(estate([KUMA]));
-  await waitFor(() => expect(names()).toContain("Create monitor for this asset"));
-  click("Create monitor for this asset");
+  await waitFor(() => expect(names()).toContain("Create monitor"));
+  click("Create monitor");
   expect(text()).toContain("In Uptime Kuma");
 
   // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
@@ -300,10 +306,10 @@ test("create records the name first and then queues the write", async () => {
 
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor");
   // Prefilled from what knobas already knows: the asset's name, and the URL of
   // the route that reaches it.
   expect((field("Name") as HTMLInputElement).value).toBe("knobas-gitea");
@@ -348,10 +354,10 @@ test("a second source is picked, and its own entity is what the write targets", 
   const store = estate([KUMA, KUMA_EU]);
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor");
   type("Name", "gitea (local)");
   type("URL to check", "http://127.0.0.1:3000/api/healthz");
   choose("Create it in", "kuma-eu");
@@ -369,7 +375,7 @@ test("a second source is picked, and its own entity is what the write targets", 
 });
 
 /**
- * After the create, the pane says what is true **now**: the name is on the
+ * After the create, the page says what is true **now**: the name is on the
  * asset and no monitor answers to it yet.
  *
  * That is the state #439 already draws and a reader already has a word for, so
@@ -377,21 +383,25 @@ test("a second source is picked, and its own entity is what the write targets", 
  * moment of silence. The monitor itself is up to a poll away, which is why
  * nothing here claims it exists.
  */
-test("the recorded name lands in the pane's waiting list", async () => {
+test("the recorded name lands in the page's waiting list", async () => {
   const store = estate([KUMA]);
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor");
   type("Name", "gitea");
   click("Create");
 
   await waitFor(() =>
     expect(text()).toContain("Named by the import, not in Kuma yet"),
   );
-  expect(text()).toContain("gitea");
+  expect(
+    [...target.querySelectorAll(".tf-as-watch .tf-as-named li")].map((line) => line.textContent?.trim()),
+  ).toEqual(["gitea"]);
+  // Named and waiting is not *nothing watches it*: the panel says one or the other.
+  expect(text()).not.toContain("Nothing watches it.");
 });
 
 /**
@@ -399,7 +409,7 @@ test("the recorded name lands in the pane's waiting list", async () => {
  * it, and does not report the create as done.
  *
  * The recorded name stays, deliberately: it is what a retry needs, and the
- * pane says it is waiting. What must not happen is the dialog closing on a
+ * page says it is waiting. What must not happen is the dialog closing on a
  * write that never went — the reader would have no way to tell that from one
  * that did.
  */
@@ -411,10 +421,10 @@ test("a refused write keeps the dialog open and says why", async () => {
   });
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor");
   click("Create");
 
   await waitFor(() =>
@@ -438,10 +448,10 @@ test("a name that could not be recorded queues nothing", async () => {
   store.refuse("record", { code: "invalid", message: "an asset needs a name" });
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor");
   click("Create");
 
   await waitFor(() => expect(text()).toContain("an asset needs a name"));
@@ -461,10 +471,10 @@ test("a form with no URL cannot be submitted", async () => {
   const store = estate([KUMA], []);
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor");
   expect((field("URL to check") as HTMLInputElement).value).toBe("");
   expect(button("Create").disabled).toBe(true);
 

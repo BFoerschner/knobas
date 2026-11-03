@@ -22,6 +22,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { AssetDetail, AssetType, DependsOnThis, Environment, Dependencies } from "../../ipc/assets";
+  import { pageOf } from "../../assets/tree";
   import { readingOf } from "../../detail/relations";
   import TfDialog from "../settings/TfDialog.svelte";
   import {
@@ -319,7 +320,7 @@
         aria-describedby={sure ? `${uid}-sure` : undefined}
         onclick={() => void remove()}>{sure ? `Delete ${detail.asset.name}` : "Delete…"}</button
       >
-      <a class="tf-btn tf-ghost" href="#/asset/{encodeURIComponent(assetId)}" onclick={onclose}>Open in the asset tree</a>
+      <a class="tf-btn tf-ghost" href={pageOf({ id: assetId })} onclick={onclose}>Open its page</a>
     {/if}
     <span class="tf-dp-gap"></span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>

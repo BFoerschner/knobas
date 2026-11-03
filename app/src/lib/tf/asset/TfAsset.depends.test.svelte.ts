@@ -1,10 +1,11 @@
 /**
- * *Depends on this* — the panel in the asset pane that answers *what breaks if
- * this goes down* (issue #505, spec §12.2, `CONTEXT.md`'s **Depends on this**,
- * whose own entry warns off calling the panel a blast radius: that is the
- * question it answers, not its name).
+ * *Depends on this* — the panel on an asset's page that answers *what breaks
+ * if this goes down* (issue #505, spec §12.2, `CONTEXT.md`'s **Depends on
+ * this**, whose own entry warns off calling the panel a blast radius: that is
+ * the question it answers, not its name). It moved with the rest of the tree's
+ * pane to the page (`TfAsset.svelte`).
  *
- * A file of its own for `AssetsView.monitor.test.svelte.ts`' reason: this
+ * A file of its own for `TfAsset.monitor.test.svelte.ts`' reason: this
  * needs a port whose answer moves between tests and which records *which*
  * asset it was asked about, and mixing it into the read file would make those
  * assertions depend on which test ran first.
@@ -20,10 +21,10 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AssetDetail, AssetRow, DependsOnThis, RouteRow } from "../ipc/assets";
-import { createTestNav } from "./test-nav.svelte";
-import AssetsView from "./AssetsView.svelte";
-import { waitFor } from "../shell/test-wait";
+import type { AssetDetail, AssetRow, DependsOnThis, RouteRow } from "../../ipc/assets";
+import { createTestNav } from "../../assets/test-nav.svelte";
+import Estate from "../../assets/Estate.fixture.svelte";
+import { waitFor } from "../../shell/test-wait";
 
 const NOW = new Date(2026, 8, 8, 12, 0, 0, 0);
 
@@ -98,8 +99,8 @@ function bridge(answers: Answers) {
    * nothing else, so a test can stand in the gap between two selections.
    *
    * A flag inside the closure rather than a function swapped on the object
-   * afterwards, because the view copies its ports once at init — a port
-   * replaced on this object after mount is a port the view never reads.
+   * afterwards, because the page copies its ports once at init — a port
+   * replaced on this object after mount is a port the page never reads.
    */
   let holding: ((answer: DependsOnThis) => void) | null = null;
   let hold = false;
@@ -150,6 +151,9 @@ function bridge(answers: Answers) {
       return Promise.resolve(answer);
     },
     openExternal: () => Promise.resolve(),
+    // A route's address reads its route before it knows the asset; this estate
+    // has none to read, and the one test that follows a route only reads the address.
+    getRoute: (routeId: string) => Promise.reject({ code: "not_found", message: `no route ${routeId}` }),
   };
 }
 
@@ -160,7 +164,7 @@ function render(hash: string, answers: Answers) {
   location.hash = hash;
   const nav = createTestNav();
   const ports = bridge(answers);
-  app = mount(AssetsView, {
+  app = mount(Estate, {
     target,
     props: { nav, now: () => NOW, ports: ports as never },
   });
@@ -172,14 +176,14 @@ function text(): string {
   return (target.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-/** The number beside the heading, or `null` while the read is out. */
+/** The number beside the heading, or `null` while the read is out or when nothing breaks. */
 function count(): string | null {
-  return target.querySelector(".breaks .n")?.textContent?.trim() ?? null;
+  return target.querySelector(".tf-as-breaks .tf-as-n")?.textContent?.trim() ?? null;
 }
 
 /** Every line of the panel, whitespace collapsed, in the order it is drawn. */
 function lines(): string[] {
-  return [...target.querySelectorAll(".breaks li")].map((line) =>
+  return [...target.querySelectorAll(".tf-as-breaks li")].map((line) =>
     (line.textContent ?? "").replace(/\s+/g, " ").trim(),
   );
 }
@@ -254,15 +258,17 @@ test("the routes that would break are listed beneath and are not in the count", 
 /**
  * *Nothing* is an answer, and the panel gives it.
  *
- * The section is drawn on every asset, unlike *Monitoring*: "what breaks if I
- * turn this off" is a question about every asset, and the reader about to pull
- * a machine out is asking it precisely when the answer is nothing.
+ * The section is drawn on every asset: "what breaks if I turn this off" is a
+ * question about every asset, and the reader about to pull a machine out is
+ * asking it precisely when the answer is nothing. The sentence says it, so the
+ * heading carries no count: a count badge is drawn only above zero (the shell
+ * conventions' *Copy and display*).
  */
-test("an asset nothing depends on says so, with a count of zero", async () => {
+test("an asset nothing depends on says so, and draws no count", async () => {
   render("#/asset/asset:knobas-gitea", { [GITEA.id]: NOTHING });
 
-  await waitFor(() => expect(count()).toBe("0"));
-  expect(text()).toContain("Nothing depends on this.");
+  await waitFor(() => expect(text()).toContain("Nothing depends on this."));
+  expect(count()).toBeNull();
   expect(lines()).toEqual([]);
 });
 
@@ -270,15 +276,15 @@ test("an asset nothing depends on says so, with a count of zero", async () => {
  * The panel never shows one asset's answer under another's heading.
  *
  * The second asset's read is left pending, so the moment under test is the one
- * a slow walk really produces: the heading has moved and the answer has not.
- * What must be on screen then is *this* asset's absence of an answer, not the
+ * a slow walk really produces: the page has moved and the answer has not. What
+ * must be on screen then is *this* asset's absence of an answer, not the
  * previous one's list — a panel naming four machines under a container that
- * holds none would be the pane stating a falsehood.
+ * holds none would be the page stating a falsehood.
  *
  * The count is asserted as well as the lines: a guard that cleared the list
  * but left the number would still read "3" over an empty panel.
  */
-test("selecting another asset asks again and never draws the last one's answer", async () => {
+test("opening another asset asks again and never draws the last one's answer", async () => {
   const { nav, ports } = render("#/asset/asset:knobas-gitea", {
     [GITEA.id]: {
       assets: [{ asset: TEAMCITY, path: null, relation: "depends-on" }],
@@ -296,6 +302,7 @@ test("selecting another asset asks again and never draws the last one's answer",
   expect(lines()).toEqual([]);
   expect(count()).toBeNull();
   expect(text()).not.toContain("knobas-teamcity depends on");
+  expect(text()).toContain("Reading…");
 
   release({ assets: [{ asset: AGENT, path: null, relation: "runs-on" }], routes: [] });
   await waitFor(() => expect(count()).toBe("1"));
@@ -307,9 +314,9 @@ test("selecting another asset asks again and never draws the last one's answer",
  *
  * The two are different sentences — *nothing depends on this* and *knobas
  * could not work out what does* — and a panel that drew the first for the
- * second would tell a reader a machine was safe to turn off. The pane's own
+ * second would tell a reader a machine was safe to turn off. The page's own
  * read succeeded here, which is the case that makes this visible at all: the
- * properties and the path are on screen and only this section is short.
+ * asset is on screen and only this section is short.
  */
 test("a refused walk draws its message and not the empty state", async () => {
   render("#/asset/asset:knobas-gitea", {
@@ -319,12 +326,12 @@ test("a refused walk draws its message and not the empty state", async () => {
   await waitFor(() => expect(text()).toContain("the estate could not be walked"));
   expect(text()).not.toContain("Nothing depends on this.");
   expect(count()).toBeNull();
-  // The pane itself is fine: this failure is the panel's alone.
-  expect(text()).toContain("knobas-gitea");
+  // The page itself is fine: this failure is the panel's alone.
+  expect(target.querySelector("h1")?.textContent?.trim()).toBe("knobas-gitea");
 });
 
-/** A line is one click to the asset it names, which is what makes it useful. */
-test("a line on the panel opens the asset it names", async () => {
+/** A line is one click to the page of the asset it names, which is what makes it useful. */
+test("a line on the panel opens the page of the asset it names", async () => {
   const { nav } = render("#/asset/asset:knobas-gitea", {
     [GITEA.id]: {
       assets: [{ asset: TEAMCITY, path: null, relation: "depends-on" }],
@@ -333,34 +340,65 @@ test("a line on the panel opens the asset it names", async () => {
   });
   await waitFor(() => expect(count()).toBe("1"));
 
-  const line = [...target.querySelectorAll<HTMLButtonElement>(".breaks li button")].find(
+  const line = [...target.querySelectorAll<HTMLButtonElement>(".tf-as-breaks li button")].find(
     (candidate) => (candidate.textContent ?? "").trim() === TEAMCITY.name,
   );
   expect(line).toBeDefined();
   line?.click();
   flushSync();
 
-  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: TEAMCITY.id });
+  expect(nav.route).toEqual({ view: "assets", tab: "asset", assetId: TEAMCITY.id });
+  await waitFor(() => expect(target.querySelector("h1")?.textContent?.trim()).toBe(TEAMCITY.name));
 });
 
 /**
  * #1606: a route name too long for the column wrapped centred (a button
  * centres its text) and pushed its URL right. jsdom does no layout, so the
- * rule is pinned in the component's stylesheet.
+ * rule is pinned in the page's stylesheet: the name is left-aligned, the row
+ * wraps, and the URL takes a line of its own beneath the name, in mono with
+ * no ligatures.
  */
 test("a route's name is left-aligned and its URL wraps beneath it (#1606)", async () => {
   const fs = await import("node:fs");
-  const source = fs.readFileSync("src/lib/assets/AssetsView.svelte", "utf8");
-  const rule = (selector: string) =>
-    source.match(new RegExp(`${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
-  expect(rule(".breaks .lst li.rt .link")).toMatch(/text-align:\s*left/);
-  expect(rule(".breaks .lst li.rt")).toMatch(/display:\s*flex/);
-  expect(rule(".breaks .lst li.rt")).toMatch(/flex-wrap:\s*wrap/);
-  expect(rule(".breaks .lst li.rt .mono")).toMatch(/flex:\s*0 0 auto/);
-  expect(rule(".breaks .lst li.rt .mono")).toMatch(/font-variant-ligatures:\s*none/);
-  expect(source).toMatch(/<li class="rt">\s*<button class="link" onclick=\{\(\) => openRoute/);
+  const css = fs.readFileSync("src/lib/tf/css/asset.css", "utf8");
+  const tokens = fs.readFileSync("src/lib/tf/css/tokens.css", "utf8");
+  const page = fs.readFileSync("src/lib/tf/asset/TfAsset.svelte", "utf8");
+  const rule = (sheet: string, selector: string) =>
+    sheet.match(new RegExp(`(?:^|\\n)${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+  expect(rule(css, ".tf-as-rname, .tf-as-url, .tf-as-to")).toMatch(/text-align:\s*left/);
+  expect(rule(css, ".tf-as-list > li")).toMatch(/display:\s*flex/);
+  expect(rule(css, ".tf-as-wrap > li")).toMatch(/flex-wrap:\s*wrap/);
+  expect(rule(css, ".tf-as-wrap .tf-as-path")).toMatch(/flex-basis:\s*100%/);
+  expect(rule(tokens, ".tf .tf-mono")).toMatch(/font-variant-ligatures:\s*none/);
+  // The breaking routes' list wraps, and each URL is the mono path under its name.
+  expect(page).toMatch(/Reachable via routes that would break<\/h4>\s*<ul class="tf-as-list tf-as-wrap">/);
+  expect(page).toMatch(/onclick=\{\(\) => go\(routeAddressOf\(route\)\)\}>\{route\.name\}<\/button>\s*<span class="tf-dim tf-mono tf-as-path">\{route\.url\}<\/span>/);
 });
 
+/**
+ * A route on the panel opens its own address, which draws the page of the
+ * asset exposing it with the route picked.
+ */
+test("a route that would break opens the route's address", async () => {
+  const { nav } = render("#/asset/asset:knobas-gitea", {
+    [GITEA.id]: { assets: [{ asset: TEAMCITY, path: null, relation: "depends-on" }], routes: [TUNNEL] },
+  });
+  await waitFor(() => expect(count()).toBe("1"));
+
+  const route = [...target.querySelectorAll<HTMLButtonElement>(".tf-as-breaks li button")].find(
+    (candidate) => (candidate.textContent ?? "").trim() === TUNNEL.name,
+  );
+  expect(route).toBeDefined();
+  route?.click();
+  flushSync();
+
+  expect(nav.route).toEqual({ view: "assets", tab: "asset", assetId: null, routeId: TUNNEL.id });
+});
+
+/**
+ * #2210: a closure of thousands draws through `Windowed`, the lines near the
+ * viewport and the count of all of them.
+ */
 test("a long Depends on this list draws the lines near the viewport and counts them all (#2210)", async () => {
   const many = Array.from({ length: 2000 }, (_, at) => ({ asset: row(`asset:bulk-${at}`, `bulk-${at}`, null), path: null, relation: null }));
   render("#/asset/asset:knobas-gitea", { [GITEA.id]: { assets: many, routes: [] } });

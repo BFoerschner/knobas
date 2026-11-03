@@ -1,697 +1,70 @@
 /**
- * The Tree's writes: creating, editing, moving and deleting from the surface
- * (issue #429, spec #427 stories 3, 6, 11, 17, 18 and 34).
+ * The asset tree's writes: creating, from a column's plus, the header's *New
+ * asset* and the preview's *New asset inside* (issue #429, spec #427 stories
+ * 17, 18 and 34), and the *New asset* dialog itself.
  *
- * A file of its own rather than more tests in `AssetsView.test.svelte.ts`,
- * which is #428's and stays about the *read*: what a reader sees at an
- * address. This one needs a fixture that changes when it is written to, and
- * mixing the two would make every read assertion depend on what an earlier
- * write left behind.
+ * Editing, moving, deleting and routes left with the tree's pane: they are the
+ * asset page's, and `tf/asset/TfAsset.write.test.svelte.ts` holds them. What
+ * stays here is what the tree is for: putting a new asset at the level it
+ * belongs, with what is known about it.
  *
- * ## The fake is a store, not a stub
- *
- * `estate()` below answers all seven commands out of one array, so a create is
- * visible to the next `asset_tree`, a move rewrites the path the next
- * `get_asset` walks, and an edit appends the history line the pane draws. That
- * is the only way to witness the criteria as written — *the new asset appears
- * in its column selected*, *the columns redraw at the new path*, *the history
- * shows old and new value* — because every one of them is about what the
- * **second** read says.
- *
- * ## What the refusal assertions are, and are not
- *
- * The cycle and the non-empty-branch refusals are written here in the
- * sentences `assets::move_to` and `assets::delete` use. What that witnesses is
- * that the view shows **the backend's own message, in place**, rather than one
- * it composed itself — which is the criterion (*"a cycle is refused with the
- * message the command gives"*). That those are the sentences the real commands
- * answer with is `crates/knobas-app/tests/it/assets_ipc.rs`'s claim, over a real
- * PostgreSQL, and it is deliberately not restated here.
+ * The fake estate is `write-estate.fixture.ts`'s store, so a create is visible
+ * to the next `asset_tree` and every assertion is on what the second read
+ * says rather than on a callback.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type {
-  AssetDetail,
-  AssetEdit,
-  AssetProperty,
-  AssetRow,
-  AssetType,
-  PropertyValue,
-  RouteEdit,
-  RouteRow,
-  Visibility,
-} from "../ipc/assets";
-import type { ActivityRow } from "../ipc/entity";
-import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
-import AssetsView from "./AssetsView.svelte";
 import { waitFor } from "../shell/test-wait";
+import { estate, screen, seed } from "./write-estate.fixture";
 
-const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
+const view = screen();
+const { button, choose, click, field, press, reachable, render, text, type } = view;
 
-/**
- * A corner of the **real** type table, ids, monograms and suggestions
- * included — spec #427 rules that nothing Tidewater-shaped is invented for
- * assets, and the suggestions are the ones `knobas_core::asset` declares.
- */
-const TYPES: AssetType[] = [
-  {
-    id: "site",
-    label: "Site",
-    monogram: "SI",
-    properties: [{ key: "location", label: "Location", kind: "text" }],
-    suggests: ["hypervisor", "vm"],
-  },
-  {
-    id: "vm",
-    label: "VM",
-    monogram: "VM",
-    properties: [
-      { key: "hostname", label: "Hostname", kind: "text" },
-      { key: "ip", label: "IP", kind: "text" },
-    ],
-    suggests: ["container_engine", "service"],
-  },
-  {
-    id: "container_engine",
-    label: "Container engine",
-    monogram: "CE",
-    properties: [{ key: "version", label: "Version", kind: "text" }],
-    suggests: ["container"],
-  },
-  {
-    id: "container",
-    label: "Container",
-    monogram: "CT",
-    properties: [
-      { key: "image", label: "Image", kind: "text" },
-      { key: "ports", label: "Ports", kind: "text" },
-    ],
-    suggests: [],
-  },
-  {
-    id: "service",
-    label: "Service",
-    monogram: "SV",
-    properties: [{ key: "url", label: "URL", kind: "url" }],
-    suggests: [],
-  },
-];
-
-interface Stored {
-  id: string;
-  parent_id: string | null;
-  type_id: string;
-  name: string;
-  properties: Record<string, PropertyValue>;
-}
-
-/**
- * One route as the store holds it — the wire row minus the two names, which
- * are resolved on the way out the way the backend's join resolves them.
- */
-interface StoredRoute {
-  id: string;
-  asset_id: string;
-  target_id: string | null;
-  name: string;
-  url: string;
-  visibility: Visibility;
-  properties: Record<string, PropertyValue>;
-}
-
-/** One in-memory estate, answering the eleven commands the view calls. */
-function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
-  const rows = [...seed];
-  const routes = [...seedRoutes];
-  const lines: ActivityRow[] = [];
-  const opened: string[] = [];
-  let openRefusal: { code: string; message: string } | null = null;
-  let minted = 0;
-  let at = 0;
-
-  function record(entityId: string, verb: string, detail: unknown) {
-    at += 1;
-    lines.push({
-      id: at,
-      at: new Date(NOW.getTime() - 1000 * (100 - at)).toISOString(),
-      actor: "user",
-      verb,
-      entity_id: entityId,
-      detail,
-    } as ActivityRow);
-  }
-
-  function schema(typeId: string): AssetType | undefined {
-    return TYPES.find((type) => type.id === typeId);
-  }
-
-  function row(stored: Stored): AssetRow {
-    const type = schema(stored.type_id);
-    return {
-      id: stored.id,
-      parent_id: stored.parent_id,
-      type_id: stored.type_id,
-      type_label: type?.label ?? stored.type_id,
-      monogram: type?.monogram ?? "??",
-      name: stored.name,
-      status: "none",
-      environment: null,
-      owner: null,
-      has_children: rows.some((other) => other.parent_id === stored.id),
-      // #431's rollup, which nothing in this fixture can move: `Stored`
-      // carries no status, so every asset here is unrated and every rollup
-      // over unrated assets is `none` with nothing to count. Writing the
-      // three out rather than computing them keeps this fake about the
-      // writes it exists to witness -- `AssetsView.test.svelte.ts` is where
-      // the badge is exercised.
-      health: "none",
-      inside: "none",
-      problems_inside: 0,
-      linked_work: 0,
-    };
-  }
-
-  /** `assets::CHILDREN`'s `order by a.name asc, a.id asc`. */
-  function children(parentId: string | null): AssetRow[] {
-    return rows
-      .filter((candidate) => candidate.parent_id === parentId)
-      .sort((left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
-      .map(row);
-  }
-
-  function find(id: string): Stored {
-    const found = rows.find((candidate) => candidate.id === id);
-    if (found === undefined) throw { code: "not_found", message: `no asset ${id}` };
-    return found;
-  }
-
-  /** `assets::properties_of`: declared keys in schema order, custom after. */
-  function properties(stored: Stored): AssetProperty[] {
-    const declared = schema(stored.type_id)?.properties ?? [];
-    const claimed = declared.map((property) => property.key);
-    return [
-      ...declared.map((property) => ({
-        key: property.key,
-        label: property.label,
-        value: stored.properties[property.key] ?? null,
-        custom: false,
-      })),
-      ...Object.keys(stored.properties)
-        .filter((key) => !claimed.includes(key))
-        .sort()
-        .map((key) => ({
-          key,
-          label: key,
-          value: stored.properties[key]!,
-          custom: true,
-        })),
-    ];
-  }
-
-  function ancestors(stored: Stored): AssetRow[] {
-    const walk: AssetRow[] = [];
-    for (let parent = stored.parent_id; parent !== null;) {
-      const held = rows.find((candidate) => candidate.id === parent);
-      if (held === undefined) break;
-      walk.unshift(row(held));
-      parent = held.parent_id;
-    }
-    return walk;
-  }
-
-  function routeRow(stored: StoredRoute): RouteRow {
-    const target = stored.target_id === null ? undefined : rows.find((r) => r.id === stored.target_id);
-    return {
-      id: stored.id,
-      asset_id: stored.asset_id,
-      asset_name: find(stored.asset_id).name,
-      target_id: stored.target_id,
-      target_name: target?.name ?? null,
-      name: stored.name,
-      url: stored.url,
-      visibility: stored.visibility,
-      // `assets::custom_properties`: a route declares nothing, so every key is
-      // the reader's own and the list is by key.
-      properties: Object.keys(stored.properties)
-        .sort()
-        .map((key) => ({ key, label: key, value: stored.properties[key]!, custom: true })),
-    };
-  }
-
-  function findRoute(id: string): StoredRoute {
-    const found = routes.find((candidate) => candidate.id === id);
-    if (found === undefined) throw { code: "not_found", message: `no route ${id}` };
-    return found;
-  }
-
-  /** `assets::ROUTES_REACHABLE`: the target is on this asset's own path. */
-  function reachable(stored: Stored): RouteRow[] {
-    const above = new Set([stored.id, ...ancestors(stored).map((held) => held.id)]);
-    const under = (id: string): boolean => {
-      for (let at = rows.find((candidate) => candidate.id === id); at !== undefined; ) {
-        if (at.id === stored.id) return true;
-        at = rows.find((candidate) => candidate.id === at?.parent_id);
-      }
-      return false;
-    };
-    return routes
-      .filter((route) => route.target_id !== null && (above.has(route.target_id) || under(route.target_id)))
-      .map(routeRow);
-  }
-
-  return {
-    /** What is in the estate right now, for an assertion that is not on markup. */
-    rows,
-    /** And what it exposes — the same, for the routes. */
-    routes,
-    /** Every URL the view handed to the OS browser, in order. */
-    opened,
-    /**
-     * Make the next open fail, the way `shell/open-external` fails a scheme
-     * it will not hand to a browser.
-     *
-     * A knob rather than a second fixture: a route is *a URL or an endpoint*,
-     * so `postgres://…` is a legal route the browser cannot take, and the
-     * view's job is to say so rather than to leave a dead button.
-     */
-    refuseToOpen(refusal: { code: string; message: string }) {
-      openRefusal = refusal;
-    },
-    /**
-     * The OS browser.
-     *
-     * A port with a fake here for `assetTypes`' reason in
-     * `AssetsView.test.svelte.ts`: one left out falls through to the real
-     * `openExternal`, and the first test to press a route's URL would hand it
-     * to `@tauri-apps/plugin-opener` for real.
-     */
-    openExternal: (url: string) => {
-      opened.push(url);
-      return openRefusal === null ? Promise.resolve() : Promise.reject(openRefusal);
-    },
-    assetTypes: () => Promise.resolve(TYPES),
-    // #505's panel: read on every selection, so a port left out falls through
-    // to the real `invoke`. Empty is honest -- no test here is about it.
-    dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
-    assetTree: (parentId?: string | null) => Promise.resolve(children(parentId ?? null)),
-    getAsset: (assetId: string): Promise<AssetDetail> => {
-      try {
-        const stored = find(assetId);
-        return Promise.resolve({
-          asset: row(stored),
-          properties: properties(stored),
-          // Nothing in this fixture sets either, so nothing is in force --
-          // the same reason the rollup above is flat.
-          effective_environment: null,
-          effective_owner: null,
-          held_by: ancestors(stored),
-          holds: children(stored.id),
-          exposes: routes
-            .filter((route) => route.asset_id === assetId)
-            .sort((left, right) => left.name.localeCompare(right.name))
-            .map(routeRow),
-          reachable_via: reachable(stored),
-          // Nothing here draws a link; #435's writes are in
-          // `AssetsView.links.test.svelte.ts`.
-          links: [],
-          history: lines.filter((line) => line.entity_id === assetId).reverse(),
-          // #439's monitor names and #445's resolved monitors: this fixture
-          // is about the write surface and nothing in it has been imported, so
-          // every asset carries neither.
-          monitors: [],
-          monitoring: [],
-          monitor_targets: [],
-        });
-      } catch (cause) {
-        return Promise.reject(cause);
-      }
-    },
-    createAsset: (typeId: string, name: string, parentId?: string | null) => {
-      if (name.trim() === "") {
-        return Promise.reject({
-          code: "invalid",
-          message: "an asset needs a name",
-        });
-      }
-      minted += 1;
-      const stored: Stored = {
-        id: `asset:new-${minted}`,
-        parent_id: parentId ?? null,
-        type_id: typeId,
-        name: name.trim(),
-        properties: {},
-      };
-      rows.push(stored);
-      record(stored.id, "created", {
-        asset: { type: typeId, name: stored.name },
-      });
-      return Promise.resolve(row(stored));
-    },
-    editAsset: (assetId: string, edits: AssetEdit[]) => {
-      const stored = find(assetId);
-      for (const edit of edits) {
-        if (edit.field === "name") {
-          const from = stored.name;
-          stored.name = edit.value.trim();
-          record(assetId, "renamed", { field: "name", from, to: stored.name });
-          continue;
-        }
-        if (edit.field !== "property") continue;
-        const from = stored.properties[edit.key] ?? null;
-        if (edit.value === null) delete stored.properties[edit.key];
-        else stored.properties[edit.key] = edit.value;
-        record(assetId, "edited", {
-          field: "property",
-          key: edit.key,
-          from,
-          to: edit.value,
-        });
-      }
-      return Promise.resolve(row(stored));
-    },
-    moveAsset: (assetId: string, newParentId: string | null) => {
-      const stored = find(assetId);
-      if (newParentId !== null) {
-        // `assets::cycle_through`: the walk up from the proposed parent, and
-        // the name one step *below* the moved asset on it.
-        let below: string | null = null;
-        for (let walk: string | null = newParentId; walk !== null;) {
-          const step = rows.find((candidate) => candidate.id === walk);
-          if (step === undefined) break;
-          if (step.id === assetId) {
-            return Promise.reject({
-              code: "invalid",
-              message:
-                `moving "${stored.name}" under "${find(newParentId).name}" would make a ` +
-                `cycle: "${below ?? step.name}" is already held by "${stored.name}"`,
-            });
-          }
-          below = step.name;
-          walk = step.parent_id;
-        }
-      }
-      stored.parent_id = newParentId;
-      record(assetId, "moved", { field: "parent", to: newParentId });
-      return Promise.resolve(row(stored));
-    },
-    deleteAsset: (assetId: string) => {
-      const stored = find(assetId);
-      const held = rows.filter((candidate) => candidate.parent_id === assetId).length;
-      if (held > 0) {
-        return Promise.reject({
-          code: "conflict",
-          message: `"${stored.name}" still holds ${held} asset(s) -- move or delete them first`,
-        });
-      }
-      rows.splice(rows.indexOf(stored), 1);
-      return Promise.resolve();
-    },
-    getRoute: (routeId: string) => {
-      try {
-        const stored = findRoute(routeId);
-        return Promise.resolve({
-          route: routeRow(stored),
-          history: lines.filter((line) => line.entity_id === routeId).reverse(),
-          monitor_targets: [],
-        });
-      } catch (cause) {
-        return Promise.reject(cause);
-      }
-    },
-    createRoute: (
-      assetId: string,
-      name: string,
-      url: string,
-      targetId?: string | null,
-      visibility?: Visibility,
-      properties?: [string, PropertyValue][],
-    ) => {
-      // `assets::vet_url`'s rule, in the sentence it uses: what this witnesses
-      // is that the view shows the backend's refusal in place, and the
-      // sentence itself is `assets_ipc.rs`' claim.
-      if (!url.includes("://")) {
-        return Promise.reject({
-          code: "invalid",
-          message: `"${url}" carries no scheme -- a route is a URL or an endpoint`,
-        });
-      }
-      minted += 1;
-      const stored: StoredRoute = {
-        id: `route:new-${minted}`,
-        asset_id: assetId,
-        target_id: targetId ?? null,
-        name: name.trim(),
-        url: url.trim(),
-        visibility: visibility ?? "internal",
-        properties: Object.fromEntries(properties ?? []),
-      };
-      routes.push(stored);
-      record(stored.id, "created", { route: { name: stored.name, url: stored.url } });
-      return Promise.resolve(routeRow(stored));
-    },
-    editRoute: (routeId: string, edits: RouteEdit[]) => {
-      const stored = findRoute(routeId);
-      for (const edit of edits) {
-        // The pane writes no monitor name on a route (#976's dialog does).
-        if (edit.field === "monitors") continue;
-        // `assets::edit_route`'s two rules, both of which the pane depends on:
-        // an edit that changes nothing writes no line, and one that does
-        // writes its **old and new** value.
-        const was = {
-          name: stored.name,
-          url: stored.url,
-          target: stored.target_id,
-          visibility: stored.visibility,
-          property: edit.field === "property" ? (stored.properties[edit.key] ?? null) : null,
-        }[edit.field];
-        if (edit.field === "name") stored.name = edit.value.trim();
-        if (edit.field === "url") stored.url = edit.value.trim();
-        if (edit.field === "target") stored.target_id = edit.value;
-        if (edit.field === "visibility") stored.visibility = edit.value;
-        if (edit.field === "property") {
-          if (edit.value === null) delete stored.properties[edit.key];
-          else stored.properties[edit.key] = edit.value;
-        }
-        const now = {
-          name: stored.name,
-          url: stored.url,
-          target: stored.target_id,
-          visibility: stored.visibility,
-          property: edit.field === "property" ? (stored.properties[edit.key] ?? null) : null,
-        }[edit.field];
-        if (JSON.stringify(was) === JSON.stringify(now)) continue;
-        record(routeId, edit.field === "name" ? "renamed" : "edited", {
-          field: edit.field,
-          ...(edit.field === "property" ? { key: edit.key } : {}),
-          from: was,
-          to: now,
-        });
-      }
-      return Promise.resolve(routeRow(stored));
-    },
-    deleteRoute: (routeId: string) => {
-      const stored = findRoute(routeId);
-      routes.splice(routes.indexOf(stored), 1);
-      return Promise.resolve();
-    },
-  };
-}
-
-/** hel1 › vm-db-01 › postgres, plus a sibling VM so a column has two rows. */
-function seed(): Stored[] {
-  return [
-    {
-      id: "asset:hel1",
-      parent_id: null,
-      type_id: "site",
-      name: "hel1",
-      properties: {},
-    },
-    {
-      id: "asset:vm-db-01",
-      parent_id: "asset:hel1",
-      type_id: "vm",
-      name: "vm-db-01",
-      properties: { hostname: { kind: "text", value: "vm-db-01" } },
-    },
-    {
-      id: "asset:vm-app-02",
-      parent_id: "asset:hel1",
-      type_id: "vm",
-      name: "vm-app-02",
-      properties: {},
-    },
-    {
-      id: "asset:postgres",
-      parent_id: "asset:vm-db-01",
-      type_id: "container",
-      name: "postgres",
-      properties: { image: { kind: "text", value: "postgres:18" } },
-    },
-  ];
-}
-
-let target: HTMLDivElement;
-let app: Record<string, unknown> | undefined;
-
-function render(hash: string, ports: ReturnType<typeof estate>) {
-  location.hash = hash;
-  const nav = createTestNav();
-  app = mount(AssetsView, { target, props: { nav, now: () => NOW, ports } });
-  flushSync();
-  return { nav };
-}
-
-function text(): string {
-  return (target.textContent ?? "").replace(/\s+/g, " ").trim();
-}
-
+/** Each column's row names, left to right. */
 function columns(): string[][] {
-  return [...target.querySelectorAll("ol.col")].map((column) =>
-    [...column.querySelectorAll("button.row span.nm")].map((name) =>
-      (name.textContent ?? "").trim(),
-    ),
+  return [...view.target.querySelectorAll("ol.tf-et-col")].map((column) =>
+    [...column.querySelectorAll("button.tf-et-row span.tf-et-nm")].map((name) => (name.textContent ?? "").trim()),
   );
 }
 
-/** Each column's monogram chips, in order — the type each row draws as. */
+/** Each column's monogram chips, in order: the type each row draws as. */
 function chips(): string[][] {
-  return [...target.querySelectorAll("ol.col")].map((column) =>
-    [...column.querySelectorAll("button.row span.mg")].map((chip) =>
-      (chip.textContent ?? "").trim(),
-    ),
+  return [...view.target.querySelectorAll("ol.tf-et-col")].map((column) =>
+    [...column.querySelectorAll("button.tf-et-row span.tf-dp-mono")].map((chip) => (chip.textContent ?? "").trim()),
   );
 }
 
+/** The row each column marks as the reader's path, or `null`. */
 function marked(): (string | null)[] {
-  return [...target.querySelectorAll("ol.col")].map((column) => {
-    const on = column.querySelector('button.row[aria-current="true"] span.nm');
+  return [...view.target.querySelectorAll("ol.tf-et-col")].map((column) => {
+    const on = column.querySelector('button.tf-et-row[aria-current="true"] span.tf-et-nm');
     return on === null ? null : (on.textContent ?? "").trim();
   });
 }
 
-/**
- * Where a click lands: inside the open dialog, or in the view when there is
- * none.
- *
- * A modal traps focus and the scrim swallows everything behind it, so this is
- * what a person can actually reach. It also keeps the tests honest about
- * *which* control they mean: the pane's *Delete* and the confirmation's are
- * the same word, and a helper that took the first one in the document would
- * have confirmed nothing.
- */
-function reachable(): ParentNode {
-  return target.querySelector('[role="dialog"]') ?? target;
+/** The name the preview heads itself with: the asset the tree has picked. */
+function previewed(): string | null {
+  return view.target.querySelector(".tf-et-ph h2")?.textContent?.trim() ?? null;
 }
 
-/** The first reachable button whose visible text, name or title is `label`. */
-function button(label: string): HTMLButtonElement {
-  const found = [...reachable().querySelectorAll<HTMLButtonElement>("button")].find(
-    (candidate) =>
-      (candidate.textContent ?? "").trim() === label ||
-      candidate.getAttribute("aria-label") === label ||
-      candidate.getAttribute("title") === label,
-  );
-  if (found === undefined) {
-    throw new Error(`no button “${label}” — the buttons are: ${buttonNames().join(" | ")}`);
-  }
-  return found;
+/** The open dialog's subtitle: the level a create goes into. */
+function level(): string {
+  return ((reachable() as Element).querySelector("header")?.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
-function buttonNames(): string[] {
-  return [...reachable().querySelectorAll("button")].map(
-    (candidate) =>
-      (candidate.getAttribute("title") ??
-        candidate.getAttribute("aria-label") ??
-        (candidate.textContent ?? "").trim()) ||
-      "?",
-  );
-}
-
-/** Click, and let the effects the click set off run. */
-function click(label: string) {
-  button(label).click();
-  flushSync();
-}
-
-/** A reachable field, by its `aria-label` or by the `<label>` pointing at it. */
-function field(label: string): HTMLInputElement | HTMLSelectElement {
-  const where = reachable();
-  const named = where.querySelector<HTMLInputElement | HTMLSelectElement>(
-    `[aria-label="${label}"]`,
-  );
-  if (named !== null) return named;
-  const tag = [...where.querySelectorAll("label")].find(
-    (candidate) => (candidate.textContent ?? "").trim() === label,
-  );
-  const found =
-    tag === undefined
-      ? null
-      : where.querySelector<HTMLInputElement | HTMLSelectElement>(`#${CSS.escape(tag.htmlFor)}`);
-  if (found === null) throw new Error(`no field “${label}”`);
-  return found;
-}
-
-/**
- * Walk the move picker one level down, once that level has come back.
- *
- * Each step is a read, so the row cannot be clicked until it is there — which
- * is the picker's own claim: it walks the estate one `asset_tree` at a time
- * rather than holding a copy of it.
- */
-async function walkInto(name: string) {
-  await waitFor(() => button(`Open ${name}`));
-  click(`Open ${name}`);
-}
-
-/** Type into a field the way a person does — the view listens to `input`. */
-function type(label: string, value: string) {
-  const control = field(label);
-  control.value = value;
-  control.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-}
-
-/**
- * Pick an option the way a person does — a `<select>` answers to `change`.
- *
- * Its own helper rather than a branch inside {@link type}, because the two
- * events are the difference between a control a reader can operate and one
- * that only looks operable: `bind:value` on a select reads `change`, and a
- * test that sent `input` alone would assert on the *default* while believing
- * it had chosen.
- */
-function choose(label: string, value: string) {
-  const control = field(label);
-  control.value = value;
-  control.dispatchEvent(new Event("input", { bubbles: true }));
-  control.dispatchEvent(new Event("change", { bubbles: true }));
-  flushSync();
-}
-
-beforeEach(() => {
-  target = document.createElement("div");
-  document.body.append(target);
-  location.hash = "";
-});
-
-afterEach(() => {
-  if (app) unmount(app);
-  app = undefined;
-  target.remove();
-  location.hash = "";
-});
+beforeEach(() => view.setup());
+afterEach(() => view.teardown());
 
 /**
  * **The plus on the first column creates at the top of the estate, and the new
- * asset lands selected in its own column with its type's monogram.**
+ * asset lands picked in its own column with its type's monogram.**
  *
  * Criterion 1's first half. Nothing here tells the view what was created: the
- * dialog answers with a row, the view goes to its **address**, and everything
- * on screen is the read that follows — which is why the assertion is on the
- * column and the pane rather than on a callback.
+ * dialog answers with a row, the tree goes to its **pick**, and everything on
+ * screen is the read that follows, which is why the assertion is on the
+ * column and the preview rather than on a callback.
  *
  * At the top there is no parent, so there is no convention: the dialog says so
  * by drawing no *usual here* line at all.
@@ -709,16 +82,13 @@ test("the first column's plus creates at the top of the estate", async () => {
   click("Create");
 
   await waitFor(() => expect(columns()).toEqual([["fsn1", "hel1"]]));
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: "asset:new-1",
-  });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:new-1" });
   expect(marked()).toEqual(["fsn1"]);
-  // The type's monogram, resolved by the backend out of the table — the chip a
+  // The type's monogram, resolved by the backend out of the table: the chip a
   // column row draws.
-  expect(target.querySelector("ol.col button.row.on span.mg")?.textContent?.trim()).toBe("SI");
-  expect(text()).toContain("Created");
+  expect(view.target.querySelector("ol.tf-et-col button.tf-et-row.tf-et-on span.tf-dp-mono")?.textContent?.trim()).toBe("SI");
+  await waitFor(() => expect(previewed()).toBe("fsn1"));
+  expect(reachable()).toBe(view.target);
 });
 
 /**
@@ -727,12 +97,12 @@ test("the first column's plus creates at the top of the estate", async () => {
  *
  * Criterion 1's second half, and story 17's *usual here*. The heading names the
  * level, so a `+` over the third column is not a bare plus over an unnamed
- * list — and the dialog opens on the first suggestion rather than on whatever
+ * list, and the dialog opens on the first suggestion rather than on whatever
  * the table happens to start with.
  */
 test("a deeper column's plus creates inside that column's asset, with its conventions", async () => {
   const store = estate(seed());
-  render("#/asset/asset:vm-db-01", store);
+  render("#/assets/asset:vm-db-01", store);
   await waitFor(() => expect(columns()).toHaveLength(3));
 
   click("New asset in vm-db-01");
@@ -747,225 +117,211 @@ test("a deeper column's plus creates inside that column's asset, with its conven
   choose("Type", "service");
   click("Create");
 
-  await waitFor(() =>
-    expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres", "redis"]]),
-  );
+  await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres", "redis"]]));
   expect(marked()).toEqual(["hel1", "vm-db-01", "redis"]);
   expect(store.rows.find((row) => row.name === "redis")?.parent_id).toBe("asset:vm-db-01");
   expect(store.rows.find((row) => row.name === "redis")?.type_id).toBe("service");
-  // The monogram is asserted **here** and not on the root create: there the
-  // new asset, its only sibling and the type the dialog defaults to are all
-  // `site`, so `"SI"` is what a constant, the wrong row and the right row all
-  // say alike. Here the created row is a `service` beside a `container`, and
-  // the two chips differ.
+  // Asserted here and not on the root create: there the new asset, its only
+  // sibling and the type the dialog defaults to are all `site`. Here the
+  // created row is a `service` beside a `container`, and the two chips differ.
   expect(chips()).toEqual([["SI"], ["VM", "VM"], ["CT", "SV"]]);
 });
 
 /**
- * **A typed property and a custom property are both edited in the pane, and
- * each edit's history line carries its old and its new value.**
- *
- * Criterion 2, and story 11's whole point: *"who changed the IP"* is only
- * answerable if the old value was written down at the moment it stopped being
- * true. The typed one is edited **from empty** — a declared key nobody has
- * filled in — because that is the case the type table has to be on the wire
- * for: there is no kind in a `null`, so without the schema the editor would be
- * guessing what to send.
+ * **The header's *New asset* adds to the rightmost open column**: the level in
+ * front of the reader. Inside the picked asset when it holds things (its
+ * column is open), beside it when it is a leaf, and at the top of the estate
+ * when nothing is picked.
  */
-test("a typed and a custom property are edited in the pane and the history says so", async () => {
+test("the header's New asset creates in the rightmost open column", async () => {
   const store = estate(seed());
-  render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("Image postgres:18"));
-  expect(text()).toContain("Ports —");
-
-  // A declared key with nothing in it: the em dash is the button.
-  click("Edit Ports");
-  type("Ports", "5432");
-  click("Save");
-  await waitFor(() => expect(text()).toContain("Ports 5432"));
-  expect(text()).toContain("ports: nothing → 5432");
-
-  // Now one of the reader's own, of a kind the type never declared.
-  click("Add a property");
-  type("New property key", "backup window");
-  type("New property value", "02:00");
-  click("Add");
-  await waitFor(() => expect(text()).toContain("backup window 02:00"));
-
-  // Changing it again is where old-and-new is actually witnessed: the first
-  // write's "from" was empty, and an editor that sent the new value as both
-  // would have passed that.
-  click("Edit backup window");
-  type("backup window", "03:30");
-  click("Save");
-  await waitFor(() => expect(text()).toContain("backup window: 02:00 → 03:30"));
-
-  expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
-    image: { kind: "text", value: "postgres:18" },
-    ports: { kind: "text", value: "5432" },
-    "backup window": { kind: "text", value: "03:30" },
-  });
-});
-
-/**
- * **A move redraws the columns at the new path.**
- *
- * Criterion 3's first half. The address does not change — the asset keeps its
- * id — so what redraws the Tree is the re-read, and the assertion is on the
- * columns and the held-by line rather than on the nav.
- */
-test("moving an asset redraws the columns at its new path", async () => {
-  const store = estate(seed());
-  render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
-
-  click("Move…");
-  // The picker opens where the asset already is, so its own path is the crumb.
-  expect(text()).toContain("Move into vm-db-01");
-  click("Estate");
-  expect(text()).toContain("Move into the top of the estate");
-  await walkInto("hel1");
-  // A leaf, and the commonest move there is: vm-app-02 holds nothing yet.
-  await walkInto("vm-app-02");
-  click("Move into vm-app-02");
-
-  await waitFor(() => expect(text()).toContain("hel1 / vm-app-02 / postgres"));
-  // The line the move wrote, with the parent's **name**: the backend can only
-  // write down an id, and the pane resolves it against the path it just read.
-  expect(text()).toContain("Moved to vm-app-02");
-  // The third column reads the same either way -- `postgres` is the only
-  // thing under both VMs -- so this line witnesses that the layout survived
-  // the move and nothing more. What says the move landed is the marked row in
-  // column two, below, and the held-by line above.
-  expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]);
-  expect(marked()).toEqual(["hel1", "vm-app-02", "postgres"]);
-  expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-app-02");
-});
-
-/**
- * **A move that would make a cycle is refused in the dialog, in the command's
- * own words, and nothing moves.**
- *
- * Criterion 3's second half. The picker deliberately does **not** hide the
- * asset's own subtree: hiding it would be a second copy of
- * `assets::cycle_through` in the frontend, and the refusal is the only place
- * the loop is explained. A two-hop loop is used — the site under the container
- * it transitively holds — so the one-step case cannot be what makes this pass.
- */
-test("a cycle is refused with the message the command gives, and nothing moves", async () => {
-  const store = estate(seed());
-  render("#/asset/asset:hel1", store);
-  await waitFor(() => expect(text()).toContain("hel1"));
-
-  click("Move…");
-  await walkInto("hel1");
-  await walkInto("vm-db-01");
-  // Two hops down, not one: `postgres` is `hel1`'s *grand*child, so what
-  // refuses this is the walk up the whole held-by chain rather than the
-  // one-step case `asset_no_self_parent_chk` closes in the database. The
-  // offender the sentence names is `vm-db-01`, which is neither end of the
-  // move -- a refusal that named an end would have survived this.
-  await walkInto("postgres");
-  click("Move into postgres");
-
-  await waitFor(() =>
-    expect(text()).toContain(
-      'moving "hel1" under "postgres" would make a cycle: "vm-db-01" is already held by "hel1"',
-    ),
-  );
-  // The dialog stays open on the refusal, and the estate is untouched.
-  expect(text()).toContain("Move into postgres");
-  expect(store.rows.find((row) => row.id === "asset:hel1")?.parent_id).toBeNull();
-});
-
-/**
- * **A leaf is deleted after a confirmation, and the pane lands on its parent.**
- *
- * Criterion 4's first half. Landing on the parent rather than re-reading the id
- * that has just gone is the difference between a deletion that worked and a
- * deep-link failure drawn over one.
- */
-test("deleting a leaf asks first, then lands on what held it", async () => {
-  const store = estate(seed());
-  const { nav } = render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
-
-  click("Delete");
-  expect(text()).toContain("Delete postgres?");
+  const { nav } = render("#/assets/tree", store);
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  click("New asset");
+  expect(level()).toContain("At the top of the estate");
   click("Cancel");
-  expect(text()).not.toContain("Delete postgres?");
-  expect(store.rows).toHaveLength(4);
 
-  click("Delete");
-  click("Delete");
+  nav.go("#/assets/asset:vm-db-01");
+  await waitFor(() => expect(columns()).toHaveLength(3));
+  click("New asset");
+  expect(level()).toContain("In vm-db-01");
+  click("Cancel");
 
-  await waitFor(() =>
-    expect(nav.route).toEqual({
-      view: "assets",
-      tab: "tree",
-      assetId: "asset:vm-db-01",
-    }),
-  );
-  await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"]]));
-  expect(store.rows.map((row) => row.id)).not.toContain("asset:postgres");
+  // A leaf opens no column of its own, so the rightmost is the one it sits in.
+  nav.go("#/assets/asset:postgres");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  click("New asset");
+  expect(level()).toContain("In vm-db-01");
 });
 
 /**
- * **The delete confirm says what the backend does** (#1463, R-11.19a): links
- * stay, marked deleted, and the routes landing on the asset are counted. It is
- * the Dependencies editor's `deleteConfirm`, so the history, which the backend
- * keeps, is not mentioned.
+ * **The preview's *New asset inside* creates under the picked asset**, leaf or
+ * not: it is the one way to start a level that has no column yet.
  */
-test("the delete confirm counts the routes landing on the asset and says nothing about history", async () => {
-  const lands = (id: string, name: string): StoredRoute => ({
-    id,
-    asset_id: "asset:vm-db-01",
-    target_id: "asset:postgres",
-    name,
-    url: `https://hel1.example/${name}`,
-    visibility: "internal",
-    properties: {},
-  });
-  const store = estate(seed(), [lands("route:pg", "pg"), lands("route:pgadmin", "pgadmin")]);
-  render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
-
-  click("Delete");
-  const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
-  expect(ask).toBe("Delete postgres? 2 routes landing on it will land on nothing. Links to it stay, marked deleted.");
-  expect(ask).not.toMatch(/history/i);
-});
-
-test("with no route landing on it, the delete confirm has no routes clause", async () => {
-  render("#/asset/asset:postgres", estate(seed()));
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
-
-  click("Delete");
-  const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
-  expect(ask).toBe("Delete postgres? Links to it stay, marked deleted.");
-});
-
-/**
- * **Deleting a branch is refused by name, and the branch is still there.**
- *
- * Criterion 4's second half. The view counts nothing itself: `assets::delete`
- * refuses anything but a leaf with a `conflict` naming what it still holds, and
- * a count in the frontend would be a second copy of that rule — the copy that
- * goes stale.
- */
-test("deleting a branch is refused by name and nothing is removed", async () => {
+test("the preview's New asset inside creates under the picked asset, opening its column", async () => {
   const store = estate(seed());
-  render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01"));
+  const { nav } = render("#/assets/asset:postgres", store);
+  await waitFor(() => expect(previewed()).toBe("postgres"));
 
-  click("Delete");
-  click("Delete");
+  click("New asset inside");
+  expect(level()).toContain("In postgres");
+  type("Name", "pg-exporter");
+  click("Create");
+
+  await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"], ["pg-exporter"]]));
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:new-1" });
+  expect(store.rows.find((row) => row.name === "pg-exporter")?.parent_id).toBe("asset:postgres");
+});
+
+/**
+ * **The dialog asks for the chosen type's own properties, and what is filled
+ * in is on the asset the moment it exists.**
+ *
+ * The point of asking here: a VM is born with its hostname and IP rather than
+ * as a name with empty fields to chase one at a time. They are a second write
+ * on the row `create_asset` answered with, so the order is the witness:
+ * create, then one edit carrying exactly the filled-in fields. An empty field
+ * sends nothing, so nothing is cleared that was never set.
+ */
+test("the type's properties are asked for at create and written onto the new asset", async () => {
+  const store = estate(seed());
+  render("#/assets/asset:hel1", store);
+  await waitFor(() => expect(columns()).toHaveLength(2));
+
+  click("New asset in hel1");
+  // The site suggests a hypervisor and a VM; the table here carries only the VM.
+  expect((field("Type") as HTMLSelectElement).value).toBe("vm");
+  expect(text()).toContain("VM properties optional");
+  type("Name", "vm-db-02");
+  type("Hostname", "vm-db-02.hel1");
+  type("IP", "10.0.0.7");
+  click("Create");
+
+  await waitFor(() => expect(previewed()).toBe("vm-db-02"));
+  expect(store.rows.find((row) => row.name === "vm-db-02")?.properties).toEqual({
+    hostname: { kind: "text", value: "vm-db-02.hel1" },
+    ip: { kind: "text", value: "10.0.0.7" },
+  });
+  expect(store.sent.map(({ command, id }) => `${command} ${id}`)).toEqual(["create asset:new-1", "edit asset:new-1"]);
+  expect(store.sent[1]?.edits).toEqual([
+    { field: "property", key: "hostname", value: { kind: "text", value: "vm-db-02.hel1" } },
+    { field: "property", key: "ip", value: { kind: "text", value: "10.0.0.7" } },
+  ]);
+  // The preview draws what was filled in, so the reader sees it landed.
+  expect(text()).toContain("Hostname vm-db-02.hel1");
+});
+
+/** A name and nothing else is still one write: no empty edit follows the create. */
+test("a create with no property filled in sends no edit", async () => {
+  const store = estate(seed());
+  render("#/assets/asset:hel1", store);
+  await waitFor(() => expect(columns()).toHaveLength(2));
+
+  click("New asset in hel1");
+  type("Name", "vm-bare");
+  click("Create");
+
+  await waitFor(() => expect(previewed()).toBe("vm-bare"));
+  expect(store.sent.map(({ command }) => command)).toEqual(["create"]);
+});
+
+/**
+ * **A property is written as the kind its type declares**, not as the kind
+ * its text looks like: a service's port is a number field and lands as a
+ * number, its URL as a URL. The witness is the tag on the stored value,
+ * which the screen draws the same either way.
+ */
+test("a property is created as the kind its type declares", async () => {
+  const store = estate(seed());
+  render("#/assets/asset:vm-db-01", store);
+  await waitFor(() => expect(columns()).toHaveLength(3));
+
+  click("New asset in vm-db-01");
+  choose("Type", "service");
+  expect((field("Port") as HTMLInputElement).type).toBe("number");
+  type("Name", "grafana");
+  type("URL", "https://grafana.hel1.example/");
+  type("Port", "3000");
+  click("Create");
+
+  await waitFor(() => expect(previewed()).toBe("grafana"));
+  expect(store.rows.find((row) => row.name === "grafana")?.properties).toEqual({
+    url: { kind: "url", value: "https://grafana.hel1.example/" },
+    port: { kind: "number", value: 3000 },
+  });
+});
+
+/**
+ * ***Create and add another* keeps the dialog at the same level with the same
+ * type, empty and with the name focused again**, so a Docker engine's
+ * containers are a name and a keypress each. The columns behind read again
+ * after each, so the reader watches the list grow; `⌘Enter` is the same
+ * gesture from the keyboard, and a plain `Enter` is *Create*, which closes the
+ * dialog on the last one and picks it.
+ */
+test("Create and add another stays open for the next one, and Enter finishes", async () => {
+  const store = estate(seed());
+  const { nav } = render("#/assets/asset:vm-db-01", store);
+  await waitFor(() => expect(columns()).toHaveLength(3));
+
+  click("New asset in vm-db-01");
+  expect((field("Type") as HTMLSelectElement).value).toBe("container_engine");
+  type("Name", "docker");
+  type("Version", "29.1");
+  click("Create and add another");
+
+  await waitFor(() => expect(text()).toContain("Created docker. Name the next one."));
+  expect(level()).toContain("In vm-db-01");
+  expect((field("Name") as HTMLInputElement).value).toBe("");
+  expect((field("Version") as HTMLInputElement).value).toBe("");
+  expect((field("Type") as HTMLSelectElement).value).toBe("container_engine");
+  await waitFor(() => expect(document.activeElement).toBe(field("Name")));
+  await waitFor(() => expect(columns()[2]).toEqual(["docker", "postgres"]));
+  // The tree has not moved: the next one goes in the same place.
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:vm-db-01" });
+
+  type("Name", "podman");
+  press("Name", "Enter", { metaKey: true });
+  await waitFor(() => expect(text()).toContain("Created podman. Name the next one."));
+  await waitFor(() => expect(columns()[2]).toEqual(["docker", "podman", "postgres"]));
+
+  type("Name", "containerd");
+  press("Name", "Enter");
+  await waitFor(() => expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:new-3" }));
+  expect(reachable()).toBe(view.target);
+  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "containerd"]));
+  expect(store.rows.filter((row) => row.parent_id === "asset:vm-db-01" && row.type_id === "container_engine").map((row) => row.name)).toEqual([
+    "docker",
+    "podman",
+    "containerd",
+  ]);
+  expect(store.rows.find((row) => row.name === "docker")?.properties).toEqual({ version: { kind: "text", value: "29.1" } });
+});
+
+/**
+ * **When the properties do not save, the asset still stands, and the dialog
+ * says which half landed.** A retry of *Create* would make a second asset, so
+ * the dialog stays open on the sentence rather than closing as though all of
+ * it had worked; the new row is already in its column behind it.
+ */
+test("a property write that fails after the create says the asset stands without them", async () => {
+  const store = estate(seed());
+  store.refuseEdits({ code: "internal", message: "the database went away" });
+  render("#/assets/asset:hel1", store);
+  await waitFor(() => expect(columns()).toHaveLength(2));
+
+  click("New asset in hel1");
+  type("Name", "vm-db-02");
+  type("Hostname", "vm-db-02.hel1");
+  click("Create");
 
   await waitFor(() =>
-    expect(text()).toContain('"vm-db-01" still holds 1 asset(s) -- move or delete them first'),
+    expect(text()).toContain("Created vm-db-02, but its properties did not save: the database went away"),
   );
-  expect(store.rows).toHaveLength(4);
-  expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]);
+  expect(reachable()).not.toBe(view.target);
+  expect(text()).not.toContain("Name the next one");
+  expect(store.rows.find((row) => row.name === "vm-db-02")?.properties).toEqual({});
+  await waitFor(() => expect(columns()[1]).toEqual(["vm-app-02", "vm-db-01", "vm-db-02"]));
 });
 
 /**
@@ -973,11 +329,10 @@ test("deleting a branch is refused by name and nothing is removed", async () => 
  * plus says which of the two reasons it is.**
  *
  * The address this matters at is the bare `#/assets/tree`, where nothing is
- * selected and there is therefore **no pane** — so a message drawn inside the
- * pane, as every other failure here is, would not exist. The tooltip is the
- * other half: *"has not been read yet"* is true while the read is out and a
- * plain lie afterwards, and a disabled control that explains itself wrongly is
- * worse than one that says nothing.
+ * picked and there is no preview, so the line is under the header. The
+ * tooltip is the other half: *"has not been read yet"* is true while the read
+ * is out and a plain lie afterwards. The header's *New asset* is held the same
+ * way, saying the same thing.
  */
 test("a type table that will not load is said out loud, not left as a dead plus", async () => {
   const store = estate(seed());
@@ -990,493 +345,76 @@ test("a type table that will not load is said out loud, not left as a dead plus"
   const plus = button("New asset in Estate");
   expect(plus.disabled).toBe(true);
   expect(plus.getAttribute("title")).toBe("The type table could not be read: the bridge is down");
+  const header = button("New asset");
+  expect(header.disabled).toBe(true);
+  expect(header.getAttribute("title")).toBe("The type table could not be read: the bridge is down");
   // The columns are unaffected: only creating stopped working.
   expect(columns()).toEqual([["hel1"]]);
 });
 
 /**
- * The tree's dialogs are `TfDialog`s with a header Close, and
- * each sits on the shell's layer stack while open (#1527): the stack's close,
- * which the window's `Esc` calls when focus is outside the dialog, shuts it,
- * and nothing is left on the stack for history to wait on (#1086).
+ * The tree's dialogs are `TfDialog`s with a header Close, and each sits on the
+ * shell's layer stack while open (#1527): the stack's close, which the
+ * window's `Esc` calls when focus is outside the dialog, shuts it, and nothing
+ * is left on the stack for history to wait on (#1086). Import's is
+ * `AssetsView.import.test.svelte.ts`'s.
  */
 test.each([
   ["New asset in vm-db-01", "Create"],
-  ["Move…", "Move into hel1"],
-  ["Delete", "Delete"],
-  ["Add a route", "Expose"],
+  ["New asset", "Create"],
+  ["New asset inside", "Create"],
 ])("%s opens a dialog on the layer stack, and its close shuts it (#1527)", async (opener, inside) => {
-  const store = estate(seed());
-  render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Exposes No routes."));
+  render("#/assets/asset:vm-db-01", estate(seed()));
+  await waitFor(() => expect(previewed()).toBe("vm-db-01"));
 
   click(opener);
-  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(view.target.querySelector('[role="dialog"]')).not.toBeNull();
   expect(button(inside).closest('[role="dialog"]'), "the opener's dialog, not another").not.toBeNull();
   expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
 
   layers.open[0]!.close();
   flushSync();
-  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(view.target.querySelector('[role="dialog"]')).toBeNull();
   expect(layers.open).toEqual([]);
 });
 
 /**
- * How a footer button is drawn, in the words of the design system's Controls
- * section (#2291): the default size is the only one a footer takes, *Cancel* is
- * a ghost, the confirm is the primary (filled red when it destroys), and an
- * edit dialog's extra action sits apart on the far left as red text.
+ * **The *New asset* footer is the canonical one** (#2291, spec #2238 stories
+ * 26-28 and 32): ghost *Cancel* first, the primary last, at the default size;
+ * *Create and add another* is a plain default button between them, an
+ * alternative to the primary rather than a second one.
  */
-function drawnAs(control: Element): string {
-  const has = (name: string) => control.classList.contains(name);
-  if (!has("tf-btn") || has("tf-sm") || has("tf-lg")) return "not a default .tf-btn";
-  if (has("tf-primary")) return has("tf-danger") ? "confirm, red" : "primary";
-  if (has("tf-first")) return has("tf-danger") ? "far left, red" : "far left";
-  return has("tf-ghost") ? "ghost" : "plain";
-}
-
-/**
- * **Every dialog the pane opens has the one footer: ghost *Cancel*, then the
- * primary; an edit dialog's *Delete* on the far left** (#2291, spec #2238
- * stories 26-28 and 32).
- */
-test.each([
-  ["New asset in vm-db-01", ["Cancel: ghost", "Create: primary"]],
-  ["Move…", ["Cancel: ghost", "Move into hel1: primary"]],
-  ["Delete", ["Cancel: ghost", "Delete: confirm, red"]],
-  ["Add a route", ["Cancel: ghost", "Expose: primary"]],
-  ["Edit…", ["Delete: far left, red", "Cancel: ghost", "Save: primary"]],
-])("%s opens a dialog with the canonical footer", async (opener, footer) => {
-  const store = estate(seed(), [
-    {
-      id: "route:pg",
-      asset_id: "asset:vm-db-01",
-      target_id: "asset:postgres",
-      name: "Postgres UI",
-      url: "https://pg.hel1.example/",
-      visibility: "internal",
-      properties: {},
-    },
-  ]);
-  render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Postgres UI"));
-
-  click(opener);
-  const dialog = target.querySelector('[role="dialog"]')!;
-  const foot = [...dialog.querySelectorAll("footer button")];
-  expect(foot.map((control) => `${(control.textContent ?? "").trim()}: ${drawnAs(control)}`)).toEqual(footer);
-});
-
-/**
- * **A dialog does not outlive the selection it was opened on.**
- *
- * *Move to…* and the delete confirmation both name the selected asset and act
- * on it, so one still standing after the address moved would offer to move or
- * delete something other than the thing it names. The address can move while a
- * dialog is up without anybody clicking past the scrim — a launcher hit, a
- * notification's deep link — which is what `nav.go` stands in for here, and
- * a headless walk of this branch is where it was found.
- */
-test("an open dialog closes when the address names another asset", async () => {
-  const store = estate(seed());
-  const { nav } = render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
-
-  click("Move…");
-  expect(text()).toContain("Move into vm-db-01");
-
-  nav.go("#/asset/asset:vm-app-02");
-  flushSync();
-
-  expect(target.querySelector('[role="dialog"]')).toBeNull();
-  await waitFor(() => expect(text()).toContain("hel1 / vm-app-02"));
-  expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-db-01");
-});
-
-/**
- * **A rename is a history line with its old and its new name, and the columns
- * follow.**
- *
- * The third mutation story 11 names, beside the property edit and the move.
- * The column redraw is the part that could silently not happen: the name lives
- * in the column as well as in the pane.
- */
-test("renaming writes the old-to-new line and redraws the column", async () => {
-  const store = estate(seed());
-  render("#/asset/asset:postgres", store);
+test("New asset opens a dialog with the canonical footer", async () => {
+  render("#/assets/asset:vm-db-01", estate(seed()));
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  click("Rename");
-  type("Name", "postgres-18");
-  click("Save");
-
-  await waitFor(() => expect(text()).toContain("name: postgres → postgres-18"));
-  expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres-18"]]);
-  expect(text()).toContain("hel1 / vm-db-01 / postgres-18");
+  click("New asset in vm-db-01");
+  const dialog = view.target.querySelector('[role="dialog"]')!;
+  const foot = [...dialog.querySelectorAll("footer button")].map((control) => {
+    const has = (name: string) => control.classList.contains(name);
+    const size = !has("tf-btn") || has("tf-sm") || has("tf-lg") ? "not a default .tf-btn" : null;
+    return `${(control.textContent ?? "").trim()}: ${size ?? (has("tf-primary") ? "primary" : has("tf-ghost") ? "ghost" : "plain")}`;
+  });
+  expect(foot).toEqual(["Cancel: ghost", "Create and add another: plain", "Create: primary"]);
 });
 
 /**
- * **`Esc` in an inline editor closes the editor and nothing else.**
- *
- * The two mechanisms this merge put beside each other: #430's walk answers
- * `Escape` from anywhere in the view (a reader in the pane means the same
- * thing by it as one in a column), and #429's editors close on it. One press
- * must not do both -- cancelling the edit *and* walking the selection out of
- * the asset being edited is the rung-skipping `TfDialog` stops for a dialog.
- *
- * The witness is the **address**, which is what a walk changes and what a
- * cancelled edit leaves alone, plus the draft that was never written.
+ * **The dialog does not outlive the pick it was opened on.** It names the
+ * level it creates in; one still standing after the address moved (a launcher
+ * hit, a notification's deep link) would create somewhere the reader is no
+ * longer looking.
  */
-test("Esc in a property editor cancels the edit and does not walk the selection", async () => {
+test("an open dialog closes when the address picks another asset", async () => {
   const store = estate(seed());
-  render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("Image postgres:18"));
+  const { nav } = render("#/assets/asset:vm-db-01", store);
+  await waitFor(() => expect(columns()).toHaveLength(3));
 
-  click("Edit Ports");
-  type("Ports", "5432");
-  const editor = field("Ports");
-  editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  click("New asset in vm-db-01");
+  type("Name", "redis");
+  nav.go("#/assets/asset:vm-app-02");
   flushSync();
 
-  // The editor is gone and the property is untouched...
-  expect(text()).toContain("Ports —");
-  expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
-    image: { kind: "text", value: "postgres:18" },
-  });
-  // ...and the reader is still on the asset they were editing.
-  expect(location.hash).toBe("#/asset/asset:postgres");
-  expect(text()).toContain("hel1 / vm-db-01 / postgres");
-
-  // The add form's *first* field, not its last: the key box and the kind
-  // picker are as much a way out of the form as the value box is, and a
-  // handler hung on one field would have left the other two walking.
-  click("Add a property");
-  const key = field("New property key");
-  key.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-  flushSync();
-  expect(text()).toContain("Add a property");
-  expect(location.hash).toBe("#/asset/asset:postgres");
-});
-
-/**
- * **A custom property is stored as the kind the form was told, not as the kind
- * its text looks like.**
- *
- * The ticket's *"adds custom properties of text, number, date or url"*. The
- * pane asks for the kind rather than guessing it — `"8080"` and `8080` are
- * different properties, and a date read as a string cannot be ordered against
- * another one — so the witness is the **tag** on the stored value and not the
- * text on the screen, which is the same either way. An `addProperty` that
- * ignored the picker and parsed everything as text would survive any
- * assertion made on the rendered value.
- */
-test("a custom property is stored as the kind the picker was set to", async () => {
-  const store = estate(seed());
-  render("#/asset/asset:postgres", store);
-  await waitFor(() => expect(text()).toContain("Image postgres:18"));
-
-  click("Add a property");
-  type("New property key", "metrics port");
-  choose("New property kind", "number");
-  type("New property value", "9187");
-  click("Add");
-
-  await waitFor(() => expect(text()).toContain("metrics port 9187"));
-  expect(store.rows.find((row) => row.id === "asset:postgres")?.properties).toEqual({
-    image: { kind: "text", value: "postgres:18" },
-    "metrics port": { kind: "number", value: 9187 },
-  });
-
-  // And the form comes back on `text` rather than on the kind it was last
-  // left in: a reader adding a hostname after a port should not be handed a
-  // number box.
-  click("Add a property");
-  expect((field("New property kind") as HTMLSelectElement).value).toBe("text");
-});
-
-/**
- * **A route is exposed from the pane, lands on an asset picked by walking, and
- * is selected at its own address** (#432, criterion 3).
- *
- * Nothing here tells the view what was created: the dialog answers with a row,
- * the view goes to the **route's** address, and what is on screen is the read
- * that followed — the same path the create dialog takes for an asset.
- *
- * The target is picked by walking the estate rather than typed, so the click
- * on `postgres` is also the assertion that the picker reads a level at a time.
- */
-test("a route is exposed from the pane and lands where the picker was walked", async () => {
-  const store = estate(seed());
-  const { nav } = render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Exposes No routes."));
-
-  click("Add a route");
-  expect(text()).toContain("On vm-db-01");
-  type("Name", "Postgres UI");
-  type("URL or endpoint", "https://pg.hel1.example/");
-  choose("Visibility", "public");
-  // The picker opens where the route is exposed, so the container is one
-  // click away — and clicking it is what makes it the target. `Land on …`
-  // rather than `Open …`: in this picker choosing and walking are one click,
-  // which is the difference from the move picker's rows.
-  await waitFor(() => button("Land on postgres"));
-  click("Land on postgres");
-  click("Expose");
-
-  await waitFor(() => expect(text()).toContain("Postgres UI"));
-  const written = store.routes[0];
-  expect(written).toMatchObject({
-    asset_id: "asset:vm-db-01",
-    target_id: "asset:postgres",
-    name: "Postgres UI",
-    url: "https://pg.hel1.example/",
-    visibility: "public",
-  });
-  // The route's own address, kept: a reader who copies this link gets the
-  // route rather than the asset.
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: null,
-    routeId: written?.id,
-  });
-  const pane = text();
-  expect(pane).toContain("https://pg.hel1.example/");
-  expect(pane).toContain("→ postgres");
-  // Exposed here, and reaching the container this VM holds — both ends, in
-  // the one pane that is on both.
-  expect(pane).toContain("inside, on postgres");
-});
-
-/**
- * **A URL with no scheme is refused in the dialog, in the backend's own
- * words**, and nothing is written.
- *
- * The same rule the asset dialogs follow: knobas' refusals are shown where the
- * reader is working and are the backend's sentence, not one the frontend
- * composed — a second copy of "what is a URL" here would be the copy that goes
- * stale the day a route may be an `ssh://` endpoint.
- */
-test("a route with no scheme is refused in place and nothing is written", async () => {
-  const store = estate(seed());
-  render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Exposes No routes."));
-
-  click("Add a route");
-  type("Name", "Postgres UI");
-  type("URL or endpoint", "pg.hel1.example");
-  click("Expose");
-
-  await waitFor(() => expect(text()).toContain("carries no scheme"));
-  expect(store.routes).toHaveLength(0);
-  // The dialog is still open on what the reader typed, so the fix is one edit
-  // rather than a re-entry.
-  expect((field("Name") as HTMLInputElement).value).toBe("Postgres UI");
-});
-
-/**
- * **An exposed route is edited and deleted from the same dialog**, and each
- * lands the reader where the thing they were looking at still exists.
- *
- * The delete goes back to the asset that exposed it: the route's own address
- * would answer `not_found` and draw the deep-link failure over a deletion that
- * worked, which is the rule the asset delete already follows.
- */
-test("a route is edited and then deleted from the pane", async () => {
-  const store = estate(seed(), [
-    {
-      id: "route:pg",
-      asset_id: "asset:vm-db-01",
-      target_id: "asset:postgres",
-      name: "Postgres UI",
-      url: "https://pg.hel1.example/",
-      visibility: "internal",
-      properties: {},
-    },
-  ]);
-  const { nav } = render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Postgres UI"));
-
-  click("Edit…");
-  expect((field("URL or endpoint") as HTMLInputElement).value).toBe("https://pg.hel1.example/");
-  type("Name", "Postgres console");
-  // Clearing the target is a first-class choice: an endpoint that lands on
-  // nothing knobas knows is a route the model holds on purpose.
-  click("Clear");
-  click("Save");
-
-  await waitFor(() => expect(text()).toContain("Postgres console"));
-  expect(store.routes[0]).toMatchObject({ name: "Postgres console", target_id: null });
-  expect(text()).toContain("lands on nothing knobas knows");
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: null,
-    routeId: "route:pg",
-  });
-
-  click("Edit…");
-  click("Delete");
-  await waitFor(() => expect(text()).toContain("Exposes No routes."));
-  expect(store.routes).toHaveLength(0);
-  // Back at the asset that exposed it, not at an address that is now gone.
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: "asset:vm-db-01",
-  });
-});
-
-/**
- * **A property of the reader's own is written on a route, and cleared from
- * it** — spec #427's *"the certificate expiry as a property"* (#432).
- *
- * A route declares no keys, so this is the whole of its property surface: a
- * key, one of the four kinds, and a value. The date kind is the one this
- * example needs, and it is also the one that would silently arrive as a string
- * if the picker were ignored — which is why the assertion is on the stored
- * shape and not only on what the pane draws.
- */
-test("a certificate expiry is written on a route as a property and cleared again", async () => {
-  const store = estate(seed(), [
-    {
-      id: "route:pg",
-      asset_id: "asset:vm-db-01",
-      target_id: "asset:postgres",
-      name: "Postgres UI",
-      url: "https://pg.hel1.example/",
-      visibility: "internal",
-      properties: {},
-    },
-  ]);
-  render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Postgres UI"));
-
-  click("Edit…");
-  click("Add a property");
-  type("Property key", "cert_expires");
-  choose("Property kind", "date");
-  type("Property value", "2026-12-01");
-  click("Save");
-
-  await waitFor(() => expect(text()).toContain("cert_expires 2026-12-01"));
-  expect(store.routes[0]?.properties).toEqual({
-    cert_expires: { kind: "date", value: "2026-12-01" },
-  });
-
-  // And emptying the value clears the key: a blank text is refused by the
-  // backend with *clear the property instead*, so that is what a blank means.
-  click("Edit…");
-  type("Property value", "");
-  click("Save");
-
-  // The chip is gone from the route's row, and the route's history says where
-  // it went — which is the difference between a cleared property and one that
-  // was never there.
-  await waitFor(() => expect(text()).not.toContain("cert_expires 2026-12-01"));
-  expect(text()).toContain("cert_expires: 2026-12-01 → nothing");
-  expect(store.routes[0]?.properties).toEqual({});
-});
-
-/**
- * **A route's URL is handed to the OS browser** — spec §12.2's *open URL*
- * action, which #432 is the ticket that finally gives this view a URL for.
- *
- * Both halves, because only one of them is the happy one: a route is *a URL
- * or an endpoint*, so `postgres://10.0.0.20:5432` is a route the model holds
- * on purpose and no browser can take. The refusal is the view's own claim —
- * it is **shown rather than swallowed** — and without this the button had no
- * test at all: the port existed, its doc said a test must be able to press it
- * without a Tauri backend, and nothing pressed it.
- */
-test("a route's URL opens in the browser, and a scheme no browser takes is said out loud", async () => {
-  const store = estate(seed(), [
-    {
-      id: "route:pg",
-      asset_id: "asset:vm-db-01",
-      target_id: "asset:postgres",
-      name: "Postgres UI",
-      url: "https://pg.hel1.example/",
-      visibility: "internal",
-      properties: {},
-    },
-    {
-      id: "route:sql",
-      asset_id: "asset:vm-db-01",
-      target_id: "asset:postgres",
-      name: "Postgres wire",
-      url: "postgres://pg.hel1.example:5432/",
-      visibility: "internal",
-      properties: {},
-    },
-  ]);
-  render("#/asset/asset:vm-db-01", store);
-  await waitFor(() => expect(text()).toContain("Postgres UI"));
-
-  click("Open https://pg.hel1.example/");
-  await waitFor(() => expect(store.opened).toEqual(["https://pg.hel1.example/"]));
-  expect(text()).not.toContain("Could not open the link");
-
-  // `shell/open-external`'s own sentence for a scheme it will not hand over.
-  store.refuseToOpen({
-    code: "invalid",
-    message: "refused to open postgres://pg.hel1.example:5432/ — only http and https",
-  });
-  click("Open postgres://pg.hel1.example:5432/");
-  await waitFor(() =>
-    expect(text()).toContain("Could not open the link: refused to open"),
-  );
-  expect(store.opened).toHaveLength(2);
-  // And the route is still on the pane: a refused open changes nothing.
-  expect(store.routes).toHaveLength(2);
-});
-
-/**
- * **The route the address names shows its own history** — spec #427: routes
- * *"are created and edited from the pane, have `#/route/<id>` addresses, and
- * their own history"*.
- *
- * The asset's history is beside it and says nothing about the route, which is
- * the point of the two lists: a route's line is written on the **route's**
- * entity, so an asset whose route was renamed shows nothing and the route
- * shows the rename.
- */
-test("a route's own history is drawn when its address names it", async () => {
-  const store = estate(seed(), [
-    {
-      id: "route:pg",
-      asset_id: "asset:vm-db-01",
-      target_id: "asset:postgres",
-      name: "Postgres UI",
-      url: "https://pg.hel1.example/",
-      visibility: "internal",
-      properties: {},
-    },
-  ]);
-  render("#/route/route:pg", store);
-  await waitFor(() => expect(text()).toContain("Postgres UI — history"));
-  expect(text()).toContain("Nothing recorded.");
-
-  click("Edit…");
-  type("Name", "Postgres console");
-  click("Save");
-
-  await waitFor(() => expect(text()).toContain("Postgres console — history"));
-  // One line, with the old value and the new: the three fields the dialog also
-  // sent changed nothing, and an edit that changes nothing writes no line.
-  expect(text()).toContain("name: Postgres UI → Postgres console");
-  expect(text()).not.toContain("url:");
-  // The asset's own history is the other list on this pane, and the route's
-  // rename is not in it.
-  expect(text()).toContain("History Nothing recorded.");
-
-  // A target change carries asset **ids** on the wire, for the reason a move's
-  // line does — so the pane names them, the way it names a move's new parent.
-  // Without this the reader would get `target: asset:postgres → nothing` with
-  // the word *postgres* three lines above it on the same pane.
-  click("Edit…");
-  click("Clear");
-  click("Save");
-  await waitFor(() => expect(text()).toContain("target: postgres → nothing"));
-  expect(text()).not.toContain("asset:postgres");
+  expect(view.target.querySelector('[role="dialog"]')).toBeNull();
+  await waitFor(() => expect(previewed()).toBe("vm-app-02"));
+  expect(store.rows.map((row) => row.name)).not.toContain("redis");
 });

@@ -31,8 +31,8 @@ export interface AssetForm {
   owner: string;
   status: AssetStatus;
   properties: PropertyField[];
-  /** *Add a property* rows. */
-  added: { key: string; value: string }[];
+  /** *Add a property* rows; `kind` is text unless the row says otherwise. */
+  added: { key: string; value: string; kind?: PropertyKind }[];
   /** New *Depends on* targets, by id, in the order they were picked. */
   dependsOn: string[];
 }
@@ -53,7 +53,11 @@ export function formOf(detail: AssetDetail, types: readonly AssetType[]): AssetF
     properties: detail.properties.map((property) => ({
       key: property.key,
       label: property.label,
-      kind: property.custom ? "text" : (type?.properties.find((p) => p.key === property.key)?.kind ?? property.value?.kind ?? "text"),
+      // A custom property keeps the kind its value was written with, so a port
+      // saved as a number is edited as one; a typed one takes its type's kind.
+      kind: property.custom
+        ? (property.value?.kind ?? "text")
+        : (type?.properties.find((p) => p.key === property.key)?.kind ?? property.value?.kind ?? "text"),
       value: textOf(property.value),
       custom: property.custom,
     })),
@@ -95,9 +99,11 @@ export function editsOf(detail: AssetDetail, form: AssetForm): AssetEdit[] {
   }
   for (const row of form.added) {
     const key = row.key.trim();
-    if (key === "" && row.value.trim() === "") continue;
+    // A row set to *Number* binds a number (or null), as a typed field does.
+    const typed = row.value == null ? "" : String(row.value);
+    if (key === "" && typed.trim() === "") continue;
     if (key === "") throw new Error("A property needs a key.");
-    const value = valueOf(key, "text", row.value);
+    const value = valueOf(key, row.kind ?? "text", typed);
     if (value !== null) edits.push({ field: "property", key, value });
   }
   return edits;

@@ -1,84 +1,43 @@
 <!--
-  The Assets view, on its **Tree** tab — the estate as Miller columns with a
-  fixed right pane (issue #428, spec #427 stories 27 and 33).
+  The asset tree: the estate as Miller columns with a fixed preview beside
+  them (issue #428, spec #427 stories 27 and 33), at `#/assets` and, with an
+  asset picked, `#/assets/<id>`.
 
-  **Never "board"** (ADR-0009, `CONTEXT.md` **Tree**). The word does not appear
-  on this surface, in its classes, or in its address.
+  **The tree is for where; the asset's page is for what.** The tree finds an
+  asset, shows where it sits and what it holds, and adds assets at the level
+  they belong. Reading an asset whole and editing it is its page,
+  `#/asset/<id>` (`tf/asset/TfAsset.svelte`): *Open asset* in the preview, a
+  double click on a row, or `Enter` on a row with nothing under it. The
+  preview says enough to know it is the right one: what is in force on it,
+  what is filled in, and the routes, whose wires run to the columns.
+
+  **Never "board"** (ADR-0009, `CONTEXT.md` **Tree**).
 
   **One column per level, and each column is one read.** `assetTree(parentId)`
   answers with what one asset holds; the columns are those answers side by
-  side. A recursive read of the whole estate would be one round trip and an
-  unbounded answer, which is the thing Miller columns exist to avoid — and the
-  path to a deep asset comes back with the asset itself
-  (`AssetDetail.held_by`), so opening `#/asset/<id>` cold needs no walk.
+  side, and the path to a deep asset comes back with the asset itself
+  (`AssetDetail.held_by`), so opening `#/assets/<id>` cold needs no walk.
 
-  **The pane is fixed and the columns scroll under it** (story 33): the whole
-  point of the layout is that the path stays visible while the reader reads.
-
-  **What is in force, and what is wrong inside** (#431). The pane's *In force*
-  group is the value the asset actually has — environment, owner, health —
-  against the *Properties* group, which is what is stored on it. Where a value
-  comes from an ancestor the note says which, and it is a link: story 10's
-  point is that a reader who sees `prod` needs one click to the place `prod`
-  can be changed. The column badge counts what is **inside** a row and is
-  coloured by the worst of it, which is why a row can be red with an amber
-  badge — the row's colour is about the row, the badge is about its contents.
+  **The preview is fixed and the columns scroll under it** (story 33): the
+  path stays visible while the reader reads.
 
   **The keyboard walks the same rails a click does** (#430, stories 28-30).
   Every arrow, `Enter` and `Esc` answers with an *address* (`tree.ts`'s
   `walk`), so a walked path and a clicked one are the same path read back the
-  same way — and `Esc` that the Tree has no step for is left for the shell's
-  ladder, which takes it back to the room. The columns that no longer fit
-  beside the fixed pane collapse to spines rather than pushing the pane off
-  the screen, and the search box is the launcher's own engine narrowed to
-  `corpus::ASSET`: it hands the first match's id to the shell and the
-  columns follow, so "search reveals the path" is the same derivation
-  everything else here uses.
+  same way. The columns that no longer fit beside the preview collapse to
+  spines, and the search box is the launcher's own engine narrowed to
+  `corpus::ASSET`: it hands the first match's id to the shell and the columns
+  follow.
 
-  **The Tree is writable, and every write goes back through the address**
-  (#429). A plus on every column header creates at that level; the pane renames,
-  edits typed and custom properties, moves and deletes. What none of them do is
-  patch what is on screen: a write is followed by a **re-read**, so the columns,
-  the pane and the history are one answer from the backend rather than an
-  optimistic guess that a failed second write would leave standing.
+  **Creating is here, and goes back through the address** (#429): *New asset*
+  in the header adds to the rightmost open column, a plus on every column
+  header adds at that level, and *Import…* loads an estate file. A write is
+  followed by a **re-read**, never a patch.
 
-  **Linking is the same gesture here as on a ticket** (#435, story 36).
-  *Link to…* opens the dialog a slide-over opens, and what it drew reads back
-  through the panel a slide-over draws — with the relation worded per end, so
-  the container's pane says *runs on* and the VM's says *hosts* over the one
-  row. A column row carries the count of linked **work** beside the problem
-  badge: work is what the mirror holds, so a link to another asset or to a
-  context is not in it.
-
-  **The pane's *Monitoring* section** (#445) lists the monitors attached to
-  this asset by a `monitored-by` link, each with the state Kuma last published
-  and one click to its own page there; under it are the names the estate file
-  gave that have not found a monitor yet. Two lists because they are two facts:
-  what is attached, and what is still waiting to be. A monitor that left
-  `/metrics` — paused, or deleted — is still attached and says so, because a
-  section that dropped it would tell an asset somebody deliberately silenced a
-  check on that nothing watches it.
-
-  **What is wrong right now** (#444, story 58) is a strip above the search:
-  every open alert in the estate, one row per asset the broken monitor watches,
-  each a click to that asset. The same store the top strip counts, so the badge
-  and this list cannot be a moment apart. Health takes the monitors from this
-  ticket too, so a row is red because a monitor on it is red and not only
-  because somebody rated it. Ack, the cards and the "Not monitored" roster are
-  #446's and #449's.
-
-  **What this ticket does not draw, and why the gaps are gaps rather than
-  stubs.** The *open URL* / *copy SSH* actions are #431's neighbours in spec §2
-  and arrive with the routes that carry the URLs (#432). Wires are #433's.
-  Monitors is a section of its own at `#/monitors` (R-11.3); the tab strip that
-  once led to its rooms-era roster went with it (#1087, #1459). **Environment, owner and status are
-  editable fields on `AssetEdit` and this pane does not set them**: #431 owns
-  their *in force* half and draws it, and a control that wrote the stored value
-  beside a line reading "or inherited from vm-db-01" is a second ticket's
-  design, not this one's omission. **Dragging a row between columns** is the
-  create/move gesture this ticket's parenthetical allows and does not require;
-  the parent picker is the one that works with a keyboard, and it is what
-  landed.
+  **What is wrong right now** (#444, story 58) is a strip above the columns:
+  every open alert in the estate, one row per asset the broken monitor
+  watches, each a click to that asset. The same store the top strip counts,
+  so the badge and this list cannot be a moment apart.
 -->
 <script lang="ts">
   import { ipcErrorMessage, type SearchResponse } from "../ipc";
@@ -87,80 +46,38 @@
     assetTree as realAssetTree,
     assetTypes as realAssetTypes,
     createAsset as realCreateAsset,
-    createRoute as realCreateRoute,
-    deleteAsset as realDeleteAsset,
-    deleteRoute as realDeleteRoute,
-    dependsOnThis as realDependsOnThis,
     editAsset as realEditAsset,
-    editRoute as realEditRoute,
     getAsset as realGetAsset,
-    getRoute as realGetRoute,
-    moveAsset as realMoveAsset,
     previewEstateImport as realPreviewEstateImport,
     produceEstateFile as realProduceEstateFile,
     type AssetDetail,
     type AssetRow,
-    type AssetProperty,
-    type AttachedMonitor,
+    type AssetType,
     type Environment,
     type Inherited,
-    type AssetType,
-    type DependsOnThis,
-    type PropertyKind,
-    type RouteDetail,
-    type RouteRow,
   } from "../ipc/assets";
-  import {
-    submitWrite as realSubmitWrite,
-    unlink as realUnlink,
-    type LinkEntry,
-  } from "../ipc/entity";
   import { search as realSearch } from "../ipc/search";
-  // The relation vocabulary's own table: `depends-on` reads "depends on" and
-  // `runs-on` reads "runs on", and the panel below says the sentence rather
-  // than printing the stored key at a reader.
-  import { readingOf } from "../detail/relations";
-  import LinkDialog from "../detail/LinkDialog.svelte";
-  import LinksPanel from "../detail/LinksPanel.svelte";
   // The launcher's own debounce, imported rather than copied: two search
   // boxes in one app that wait different amounts of time feel like two apps.
   import { DEBOUNCE_MS } from "../launcher";
   import { alerts as sharedAlerts, type Alerts } from "./alerts.svelte";
   import { latestRead } from "../shell/latest-read";
-  import TfDialog from "../tf/settings/TfDialog.svelte";
   import { ago } from "../shell/time";
-  // The queued-write line, and the same one the Monitors tab draws for a pause:
-  // what a create can honestly say now is that knobas asked, and a toast is
-  // where this app says that.
-  import { push } from "../shell/toasts.svelte";
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
-  import { entityAddress } from "../tf/address";
-  import { deleteConfirm } from "../tf/deps/asset-edit";
   import { openExternal as realOpenExternal } from "../shell/open-external";
+  import { filledOf, isCode, readingOf, shownValue } from "../tf/asset/asset-page";
   import CreateDialog from "./CreateDialog.svelte";
   import ImportDialog from "./ImportDialog.svelte";
-  import MonitorDialog from "./MonitorDialog.svelte";
-  import MoveDialog from "./MoveDialog.svelte";
-  import RouteDialog from "./RouteDialog.svelte";
-  import {
-    draftOf,
-    inputTypeFor,
-    kindFor,
-    parseProperty,
-    PROPERTY_KINDS,
-    propertyEdit,
-  } from "./editing";
   import {
     addressOf,
     columnPathFor,
     emptyPath,
     estateQuery,
-    heldByPath,
     landingOf,
     matchesIn,
+    pageOf,
     problemBadge,
-    routeAddressOf,
     selectionIn,
     sourceOf,
     stripFor,
@@ -181,70 +98,18 @@
   interface AssetPorts {
     assetTree: typeof realAssetTree;
     getAsset: typeof realGetAsset;
-    /** The launcher's engine. The Tree narrows it to assets (`estateQuery`). */
+    /** The launcher's engine. The tree narrows it to assets (`estateQuery`). */
     search: typeof realSearch;
     assetTypes: typeof realAssetTypes;
     createAsset: typeof realCreateAsset;
+    /** The properties *New asset* asks for, written onto the asset it made. */
     editAsset: typeof realEditAsset;
-    moveAsset: typeof realMoveAsset;
-    deleteAsset: typeof realDeleteAsset;
-    /** The routes an asset exposes and is reached by (#432). */
-    getRoute: typeof realGetRoute;
-    createRoute: typeof realCreateRoute;
-    editRoute: typeof realEditRoute;
-    deleteRoute: typeof realDeleteRoute;
-    /**
-     * The OS browser, for the *open URL* action a route finally gives this
-     * view something to point at (spec §12.2's actions list).
-     *
-     * A port like the rest, and for the rest's reason: a test must be able to
-     * press the button without a Tauri backend behind it.
-     */
+    /** The OS browser, for a route's URL in the preview. */
     openExternal: typeof realOpenExternal;
-    /**
-     * Withdrawing a link from the pane's *Linked* panel.
-     *
-     * Only the *un*link is a port. Drawing one is `LinkDialog`'s own write —
-     * the dialog owns its picker, its failure line and its call, exactly as it
-     * does over a ticket's slide-over, and a second copy of that here would be
-     * a second dialog to keep in step with the first.
-     */
-    unlink: typeof realUnlink;
-    /**
-     * What breaks if the selected asset goes down (#505) — the pane's
-     * *Depends on this* panel.
-     *
-     * A port and a read of its own, not a field on {@link getAsset}'s answer:
-     * the walk costs a round trip per step of the closure and the pane's read
-     * runs on every selection in every column.
-     */
-    dependsOnThis: typeof realDependsOnThis;
-    /**
-     * The Import's two halves (#439): what a file would do, and doing it.
-     *
-     * Both, because the dialog is the one surface where a read and a write
-     * are one gesture -- a preview a test could not stub would make the
-     * dialog's three groups unreachable.
-     */
+    /** The Import's two halves (#439), and running an importer (#509). */
     previewEstateImport: typeof realPreviewEstateImport;
     applyEstateImport: typeof realApplyEstateImport;
-    /**
-     * Running an importer (#509) — the third half of the Import, and a port
-     * for the two above's reason: the dialog's token field, its *land under*
-     * picker and its download are each reachable only through an answer, so a
-     * produce a test could not stub would make all three unreachable.
-     */
     produceEstateFile: typeof realProduceEstateFile;
-    /**
-     * Queueing *Create monitor for this asset* (#453).
-     *
-     * The ordinary write queue, one command, exactly as the Monitors tab
-     * queues a pause -- so a Kuma that is unreachable leaves a pending row
-     * rather than an error the reader has to remember. The *other* half of
-     * that gesture, recording the monitor's name on the asset, is
-     * {@link editAsset} and is already a port.
-     */
-    submitWrite: typeof realSubmitWrite;
   }
 
   let {
@@ -285,6 +150,10 @@
   // svelte-ignore state_referenced_locally
   // Read once, at init: production omits this prop, and a bridge swapped
   // mid-life would leave what is on screen read through one set of ports and
+
+  // svelte-ignore state_referenced_locally
+  // Read once, at init: production omits this prop, and a bridge swapped
+  // mid-life would leave what is on screen read through one set of ports and
   // re-read through another.
   const io: AssetPorts = {
     assetTree: realAssetTree,
@@ -293,54 +162,17 @@
     assetTypes: realAssetTypes,
     createAsset: realCreateAsset,
     editAsset: realEditAsset,
-    moveAsset: realMoveAsset,
-    deleteAsset: realDeleteAsset,
-    getRoute: realGetRoute,
-    createRoute: realCreateRoute,
-    editRoute: realEditRoute,
-    deleteRoute: realDeleteRoute,
     openExternal: realOpenExternal,
-    unlink: realUnlink,
-    dependsOnThis: realDependsOnThis,
     previewEstateImport: realPreviewEstateImport,
     applyEstateImport: realApplyEstateImport,
     produceEstateFile: realProduceEstateFile,
-    submitWrite: realSubmitWrite,
     ...ports,
   };
 
-  /**
-   * The route the address names (#432), or `null` for every other address.
-   *
-   * `#/route/<id>` is the Tree at the asset that exposes the route, so this is
-   * read *before* the selected asset: the address does not carry an asset id
-   * and the route's own read is what supplies one.
-   */
-  const routeId = $derived(
-    nav.route.view === "assets" ? (nav.route.routeId ?? null) : null,
-  );
+  /** The asset the address picks, or `null` for the bare `#/assets/tree`. */
+  const selectedId = $derived(nav.route.view === "assets" ? nav.route.assetId : null);
 
-  /** The route `routeId` names, once it has been read. */
-  let routeDetail = $state<RouteDetail | null>(null);
-
-  /**
-   * The asset the address names, or `null` for the bare `#/assets/tree`.
-   *
-   * Two ways an address names one, and the second is the route's: story 14's
-   * *a ticket about a certificate links to the route whose certificate it is*
-   * has to open somewhere a reader can see what the route belongs to, which is
-   * the pane of the asset exposing it. The `routeDetail.route.id === routeId`
-   * guard is what keeps a stale read from selecting the previous route's asset
-   * for the frame between two route addresses.
-   */
-  const selectedId = $derived.by(() => {
-    if (nav.route.view !== "assets") return null;
-    if (nav.route.assetId !== null) return nav.route.assetId;
-    if (routeId === null || routeDetail === null) return null;
-    return routeDetail.route.id === routeId ? routeDetail.route.asset_id : null;
-  });
-
-  /** The pane's read. `null` until something is selected and read. */
+  /** The preview's read. `null` until something is picked and read. */
   let detail = $state<AssetDetail | null>(null);
   /** One list per column, aligned with `path.parents`. */
   let columns = $state<AssetRow[][]>([]);
@@ -349,152 +181,40 @@
   let loaded = $state(false);
 
   /**
-   * The built-in type table, read once.
-   *
-   * A constant on the backend, so once is enough and a second read would ask
-   * the same question twice. Empty until it lands, which is what disables the
-   * pluses: a create dialog with no type to offer is a dialog that cannot
-   * create.
+   * The built-in type table, read once. Empty until it lands, which is what
+   * disables the pluses: a create dialog with no type to offer cannot create.
    */
   let types = $state<AssetType[]>([]);
-
-  /**
-   * Why the type table is not there, when it is not.
-   *
-   * Its **own** state and not `writeFailure`: that one is drawn inside the
-   * pane and is cleared whenever the selection moves, so a failed type read on
-   * the bare `#/assets/tree` — where there is no pane at all — would have left
-   * the reader with a disabled plus whose only explanation said the read had
-   * *not happened yet*, which is a different and untrue thing.
-   */
+  /** Why the type table is not there, when it is not: said under the header, since a plus cannot say it. */
   let typesFailure = $state<string | null>(null);
 
   /**
-   * Bumped by every write, and read by the pane's effect.
-   *
-   * The pane re-reads on **the address changing or this changing**, and a
-   * write that leaves the address alone — an edit, a move — changes only this.
-   * A view that patched its own state instead would be showing an answer
-   * nobody gave it, and story 11's *every mutation is a line in the history*
-   * is precisely the part that cannot be patched: the line is written by the
-   * backend and arrives only by reading.
+   * Bumped by a create or an import, and read by the reads below: a write
+   * that leaves the address alone changes only this.
    */
   let revision = $state(0);
 
-  /**
-   * The level a plus was pressed on.
-   *
-   * A type rather than three loose fields, because the id, the name and the
-   * type conventions are one fact — *which asset the new one goes inside* —
-   * and they were travelling together from `openCreate` through three props on
-   * the dialog. `parent` is `null` at the top of the estate, where `id` is
-   * `null` too and there is no name and no convention.
-   */
+  /** The level *New asset* or a plus was pressed for. */
   let creating = $state<CreateAt | null>(null);
-  let moving = $state(false);
-  let deleting = $state(false);
-  /** The route editor: open on a new route, or on one of the pane's own. */
-  let exposing = $state(false);
-  let editingRoute = $state<RouteRow | null>(null);
-  /** Whether *Link to…* is open over the pane (story 36). */
-  let linking = $state(false);
-  /**
-   * Whether the Import is open (#439).
-   *
-   * A whole-view capability rather than a pane one, which is why it sits in
-   * the room bar: an import is about the estate, and the
-   * address that most needs it -- `#/assets/tree` with an empty tree -- has no
-   * asset selected to hang a button off.
-   */
+  /** Whether the Import is open (#439): a whole-estate capability, so on the header. */
   let importing = $state(false);
-  /**
-   * Whether *Create monitor for this asset* is open (#453, story 70).
-   *
-   * A pane capability, unlike the Import: the form is prefilled from *this*
-   * asset's routes and hostname and the name it records goes on *this* asset,
-   * so it closes with the selection like every other dialog about one asset.
-   */
-  let creatingMonitor = $state(false);
-  /** The property row being edited, by key, and the text in its field. */
-  let editingKey = $state<string | null>(null);
-  let draft = $state("");
-  let renaming = $state(false);
-  let nameDraft = $state("");
-  /** The *add a property* form, open with a key, a kind and a value. */
-  let adding = $state(false);
-  let newKey = $state("");
-  let newKind = $state<PropertyKind>("text");
-  let newValue = $state("");
-  /**
-   * What the last write refused with — shown in the pane, beside what it
-   * refused, rather than as a toast over a surface the reader is working in.
-   */
-  let writeFailure = $state<string | null>(null);
-  let writing = $state(false);
+  /** Why a route's URL would not open, said in the preview beside it. */
+  let openFailure = $state<string | null>(null);
 
   /**
-   * The layout, derived from the pane's read and from nothing else.
-   *
-   * Not from a click: a click sets the address, the address is read back, and
-   * the columns follow the answer. That is what makes an address opened cold
-   * draw the same thing as an address clicked into.
+   * The layout, derived from the preview's read and from nothing else: a
+   * click sets the address, the address is read back, and the columns follow
+   * the answer. That is what makes an address opened cold draw the same thing
+   * as an address clicked into.
    */
   const path = $derived<ColumnPath>(
     detail === null || detail.asset.id !== selectedId ? emptyPath() : columnPathFor(detail),
   );
 
-  /**
-   * What breaks if the selected asset goes down (#505), or `null` while the
-   * read is out — and {@link dependsFailure} when it came back refused.
-   *
-   * Held apart from {@link detail} because it is a second read: a pane whose
-   * panel had to wait for this one would draw its properties late for a
-   * section a reader scrolls to.
-   */
-  let dependsOn = $state<DependsOnThis | null>(null);
-  let dependsFailure = $state<string | null>(null);
-
   const detailRead = latestRead<AssetDetail>();
-  const dependsRead = latestRead<DependsOnThis>();
   const columnsRead = latestRead<AssetRow[][]>();
-  const routeRead = latestRead<RouteDetail>();
 
-  /**
-   * Read the route the address names, and nothing else.
-   *
-   * A read of its own rather than a search through the pane's `exposes`: the
-   * pane has no asset to read until this answers, which is the whole point of
-   * the address — a link into the estate from a ticket knows the route and
-   * nothing else. It re-runs on a write (`revision`) so that editing the
-   * selected route redraws it.
-   */
-  $effect(() => {
-    const id = routeId;
-    void revision;
-    if (id === null) {
-      routeDetail = null;
-      return;
-    }
-    void routeRead(() => io.getRoute(id), {
-      ok: (answer) => {
-        // `failure` is left alone: it belongs to the pane's own read, and a
-        // route landing is no evidence that the asset read succeeded.
-        routeDetail = answer;
-      },
-      fail: (cause) => {
-        routeDetail = null;
-        failure = ipcErrorMessage(cause);
-      },
-    });
-  });
-
-  /**
-   * The type table, once.
-   *
-   * No dependency is read, so this runs on mount and never again — which is
-   * the whole claim: `asset_types` answers a constant, and it answers before
-   * the database is up, so the pluses work on a cold start.
-   */
+  /** The type table, once: `asset_types` answers a constant, before the database is up. */
   $effect(() => {
     void io
       .assetTypes()
@@ -502,41 +222,21 @@
         types = answer;
       })
       .catch((cause: unknown) => {
-        // Not `failure`: the columns and the pane still draw. What stops
-        // working is creating, and the line below the room bar plus the
-        // plus's own title are where that is said.
         typesFailure = ipcErrorMessage(cause);
       });
   });
 
-  /**
-   * Which asset the editors on screen belong to.
-   *
-   * Not `$state`: it is a note to the effect below and nothing draws from it.
-   * A half-typed IP has to go when the reader clicks another asset — a field
-   * left open over a different asset would save the first one's value onto the
-   * second — and it has to **stay** across a re-read of the same asset, which
-   * is why this is a comparison rather than a reset on every run.
-   */
+  /** Which asset the open dialog and the preview's line belong to: they go when the pick moves. */
   let editorsFor: string | null = null;
 
-  /**
-   * Which asset {@link dependsOn} answers about.
-   *
-   * {@link editorsFor}'s shape and its reason: not `$state`, because nothing
-   * draws from it — it is how the effect below tells a re-read of the same
-   * asset from a move to another one.
-   */
-  let dependsFor: string | null = null;
-
-  /** The address names an asset: read it, or clear the pane when it names none. */
+  /** The address picks an asset: read it, or clear the preview when it picks none. */
   $effect(() => {
     const id = selectedId;
-    // A write bumps this; the read below is what puts its result on screen.
     void revision;
     if (id !== editorsFor) {
       editorsFor = id;
-      closeEditors();
+      creating = null;
+      openFailure = null;
     }
     if (id === null) {
       detail = null;
@@ -549,9 +249,9 @@
         failure = null;
       },
       fail: (cause) => {
-        // The selection is dropped rather than kept: an asset that is not
-        // there has no path, and a pane still showing the last one would be
-        // the view lying about what the address names.
+        // The pick is dropped rather than kept: an asset that is not there has
+        // no path, and a preview still showing the last one would be the view
+        // lying about what the address names.
         detail = null;
         failure = ipcErrorMessage(cause);
       },
@@ -559,67 +259,13 @@
   });
 
   /**
-   * The *Depends on this* panel's read (#505), beside the pane's and not
-   * inside it.
-   *
-   * An effect of its own so that the two answers arrive independently: the
-   * properties, the path and the routes are one round trip and this walk is
-   * one per step of the closure, and a pane that waited for both would draw
-   * neither until the slower had landed. Both run off `selectedId` and
-   * `revision`, so a write that changes what is held — a move, a delete, an
-   * import — re-reads the panel as well as the pane.
-   *
-   * The failure is kept and drawn in the panel rather than swallowed: this
-   * read is a walk over links a reader can get wrong (a cycle, an asset that
-   * has since gone), and a panel that silently drew "nothing depends on this"
-   * for a refusal would say a machine was safe to turn off.
-   */
-  $effect(() => {
-    const id = selectedId;
-    void revision;
-    if (id !== dependsFor) {
-      // Cleared on the way to the new asset, not left standing until the walk
-      // lands: `latestRead` drops the stale *answer*, but the last one is
-      // still on screen while the next is out, and this panel names other
-      // assets — a list of what breaks when the previous selection goes down,
-      // under this one's heading, is the pane stating a falsehood.
-      dependsFor = id;
-      dependsOn = null;
-      dependsFailure = null;
-    }
-    if (id === null) {
-      return;
-    }
-    void dependsRead(() => io.dependsOnThis(id), {
-      ok: (answer) => {
-        dependsOn = answer;
-        dependsFailure = null;
-      },
-      fail: (cause) => {
-        dependsOn = null;
-        dependsFailure = ipcErrorMessage(cause);
-      },
-    });
-  });
-
-  /**
-   * Fetch every column the layout calls for and swap them in **together**.
-   *
-   * One assignment rather than one per column: a half-drawn Miller layout is a
-   * path with a hole in it. Driven off {@link path} rather than off a click,
-   * which is what makes an address opened cold draw what an address clicked
-   * into draws.
+   * Fetch every column the layout calls for and swap them in **together**:
+   * a half-drawn Miller layout is a path with a hole in it. `revision` is
+   * read too, so an import (which creates under an unchanged address) and a
+   * create draw their new rows.
    */
   $effect(() => {
     const parents = path.parents;
-    // A write bumps `revision`, and the columns read it as well as the pane
-    // does (#439). Without it an **import** draws nothing: it creates assets
-    // under an address that has not changed, and with nothing selected
-    // `path` is the same empty path before and after, so the one effect that
-    // could notice never re-runs. The same line also relabels a column row
-    // after a rename. It costs a second read of the columns on the writes
-    // where `path` was going to change anyway -- a move, a delete -- and
-    // `latestRead` is what keeps the loser of those two from landing.
     void revision;
     void columnsRead(() => Promise.all(parents.map((parent) => io.assetTree(parent))), {
       ok: (lists) => {
@@ -745,13 +391,6 @@
   }
 
   /** The pane's two lists that run to thousands, *Holds* and *Depends on this*, windowed the same way; a line is 18 px, 2 apart. */
-  const holdsWindow = new Windowed({ count: () => detail?.holds.length ?? 0, key: (at) => detail!.holds[at]!.id, estimate: 18, gap: 2 });
-  const dependsWindow = new Windowed({
-    count: () => dependsOn?.assets.length ?? 0,
-    key: (at) => dependsOn!.assets[at]!.asset.id,
-    estimate: 18,
-    gap: 2,
-  });
 
   // -- the wires (story 31) -------------------------------------------------
 
@@ -917,12 +556,12 @@
    */
   function landing(cols: HTMLElement, wire: Wire): { box: Pick<DOMRect, "top" | "right" | "height">; band: DOMRect } | null {
     if (wire.rowId === null) {
-      const spine = cols.querySelector(`button.spine[data-spine="${wire.column}"]`);
+      const spine = cols.querySelector(`button.tf-et-spine[data-spine="${wire.column}"]`);
       return spine === null ? null : { box: spine.getBoundingClientRect(), band: spine.getBoundingClientRect() };
     }
-    const drawn = cols.querySelector(`button.row[data-asset=${CSS.escape(wire.rowId)}]`);
-    if (drawn !== null) return { box: drawn.getBoundingClientRect(), band: (drawn.closest("ol.col") ?? drawn).getBoundingClientRect() };
-    const list = cols.querySelector(`ol.col[data-col="${wire.column}"]`);
+    const drawn = cols.querySelector(`button.tf-et-row[data-asset=${CSS.escape(wire.rowId)}]`);
+    if (drawn !== null) return { box: drawn.getBoundingClientRect(), band: (drawn.closest("ol.tf-et-col") ?? drawn).getBoundingClientRect() };
+    const list = cols.querySelector(`ol.tf-et-col[data-col="${wire.column}"]`);
     const at = columns[wire.column]?.findIndex((row) => row.id === wire.rowId) ?? -1;
     if (list === null || at < 0) return null;
     const band = list.getBoundingClientRect();
@@ -1018,7 +657,7 @@
       const win = windowOf(index);
       win.reveal(at);
       void win.start;
-      row = tree?.querySelector(`.cols button.row[data-asset=${CSS.escape(chosen)}]`) ?? null;
+      row = tree?.querySelector(`.tf-et-cols button.tf-et-row[data-asset=${CSS.escape(chosen)}]`) ?? null;
       break;
     }
     // Kept, not cleared, while the row is missing. The columns are redrawn
@@ -1048,7 +687,19 @@
    *   Everywhere else in the Tree — a column row, a spine, the column strip
    *   itself — the arrows are the walk's.
    */
-  const KEEPS_ITS_OWN_KEYS = ".pane, .find";
+  /**
+   * One press of the keyboard on the tree.
+   *
+   * * `Esc` is answered from **anywhere in the view** — it is an unwind. The
+   *   press the tree has no step for is *not* consumed, and the shell's
+   *   ladder takes it back to Dependencies.
+   * * the arrows and `Enter` are answered everywhere **except** the preview,
+   *   which is full of buttons whose activation `Enter` would otherwise
+   *   swallow, and the search box, whose arrows walk its offers.
+   * * `Enter` on a row with nothing under it opens the asset's page: there is
+   *   no column to walk into, and the page is where the walk goes on.
+   */
+  const KEEPS_ITS_OWN_KEYS = ".tf-et-pane, .tf-et-find";
 
   function onkeydown(event: KeyboardEvent): void {
     if (event.key !== "Escape" && !WALK_KEYS.includes(event.key)) return;
@@ -1058,17 +709,24 @@
 
     const step = walk(event.key, path, columns);
     if (step.go === "nowhere" && event.key === "Escape") return;
+    if (step.go === "nowhere" && event.key === "Enter" && selectedId !== null) {
+      event.preventDefault();
+      event.stopPropagation();
+      nav.go(pageOf({ id: selectedId }));
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     if (step.go === "asset") {
       wantFocus = true;
       nav.go(addressOf({ id: step.id }));
     } else if (step.go === "top") {
-      // No focus to want: nothing is selected, and the flag would be spent on
-      // whatever the reader selected next.
+      // No focus to want: nothing is picked, and the flag would be spent on
+      // whatever the reader picked next.
       nav.go(hashFor({ view: "assets", tab: "tree", assetId: null }));
     }
   }
+
 
   // -- the search box (story 30) -------------------------------------------
 
@@ -1180,56 +838,7 @@
    * other than the asset it named — which is what a QA walk that changed the
    * address with the picker open turned up.
    */
-  function closeEditors() {
-    editingKey = null;
-    renaming = false;
-    adding = false;
-    creating = null;
-    moving = false;
-    deleting = false;
-    exposing = false;
-    editingRoute = null;
-    linking = false;
-    creatingMonitor = false;
-    writeFailure = null;
-  }
 
-  /**
-   * Run one write and re-read what it changed.
-   *
-   * Every mutation in this view goes through here, for two reasons that are
-   * really one: a refusal is shown **in the pane, in the backend's own
-   * words** — the cycle refusal names the asset that closes the loop, the
-   * delete refusal names what the branch still holds, and neither is a
-   * sentence this view could write for itself — and a success is followed by a
-   * read rather than by a patch, so the history line the mutation wrote is on
-   * screen the moment the write lands.
-   *
-   * Answers `null` when the write was refused, which is how a caller knows
-   * whether to close the editor it was called from — and also, without a
-   * message, when one is **already in flight**. Both leave the editor open,
-   * which is the right outcome for each: a refusal has a sentence beside it,
-   * and a second `Enter` pressed during a save is answered by the save that is
-   * already running. Every control that calls this is `disabled={writing}`, so
-   * the second case is only reachable from the keyboard.
-   */
-  async function write<T>(action: () => Promise<T>, reread = true): Promise<T | null> {
-    if (writing) return null;
-    writing = true;
-    writeFailure = null;
-    try {
-      const answer = await action();
-      if (reread) revision += 1;
-      return answer;
-    } catch (cause) {
-      writeFailure = ipcErrorMessage(cause);
-      return null;
-    } finally {
-      writing = false;
-    }
-  }
-
-  /** The level a plus creates inside: an asset, or the top of the estate. */
   interface CreateAt {
     /** What `create_asset` is given as `parentId`. */
     id: string | null;
@@ -1269,359 +878,150 @@
   }
 
   /** The type table's entry for `typeId`, or nothing for a type this build lost. */
-  function schemaOf(typeId: string): AssetType | undefined {
-    return types.find((type) => type.id === typeId);
+
+  /** *New asset* in the header: into the rightmost open column, the level in front of the reader. */
+  function openCreateHere() {
+    openCreate(Math.max(0, columns.length - 1));
   }
 
-  /** Which kind of input a property's editor is. */
-  function kindOf(property: AssetProperty): PropertyKind {
-    return kindFor(property, detail === null ? undefined : schemaOf(detail.asset.type_id));
+  /** *New asset inside* in the preview: under the picked asset, which opens a column for it. */
+  function openCreateInside(asset: AssetRow) {
+    creating = { id: asset.id, parent: asset };
   }
 
-  /**
-   * `Esc` in an inline editor: put it away, and **consume the press**.
-   *
-   * Rung 1 of the `Esc` ladder, the rung `TfDialog`'s own handler occupies for a
-   * dialog. The view answers `Escape` from anywhere inside itself -- that is
-   * #430's walk, and it is deliberate, because a reader in the pane means the
-   * same thing by the key as one standing in a column. So an editor that
-   * closed and let the press through would cancel the edit *and* walk the
-   * selection out of the asset being edited, which is two unwinds for one
-   * keypress.
-   */
-  function cancelEditor(event: KeyboardEvent, close: () => void) {
-    event.preventDefault();
-    event.stopPropagation();
-    close();
-  }
-
-  function beginEdit(property: AssetProperty) {
-    editingKey = property.key;
-    draft = draftOf(property);
-    writeFailure = null;
-  }
-
-  /** Save one property, or clear it when the field was emptied. */
-  async function saveProperty(property: AssetProperty) {
-    const current = detail;
-    if (current === null) return;
-    const parsed = parseProperty(kindOf(property), draft);
-    if ("refused" in parsed) {
-      writeFailure = parsed.refused;
-      return;
-    }
-    const done = await write(() =>
-      io.editAsset(current.asset.id, [propertyEdit(property.key, parsed.value)]),
-    );
-    if (done !== null) editingKey = null;
-  }
-
-  /** Story 6: a key of the reader's own, of one of the four kinds. */
-  async function addProperty() {
-    const current = detail;
-    if (current === null) return;
-    const parsed = parseProperty(newKind, newValue);
-    if ("refused" in parsed) {
-      writeFailure = parsed.refused;
-      return;
-    }
-    // A key with nothing in it is not a property that reads as unset — it is a
-    // key `assets::edit` would remove in the same breath it was added, writing
-    // no line and changing nothing. That is a rule about *this form's* meaning
-    // rather than about a value, so it is the **Add** button's `disabled` and
-    // not a sentence composed here: what a value may be stays the backend's.
-    if (parsed.value === null) return;
-    const value = parsed.value;
-    const done = await write(() =>
-      io.editAsset(current.asset.id, [propertyEdit(newKey, value)]),
-    );
-    if (done !== null) {
-      adding = false;
-      newKey = "";
-      newValue = "";
-      // The kind resets with the other two: a form that reopened on the last
-      // kind would offer a date box to a reader who came back for a port.
-      newKind = "text";
-    }
-  }
-
-  function beginRename() {
-    if (detail === null) return;
-    renaming = true;
-    nameDraft = detail.asset.name;
-    writeFailure = null;
-  }
-
-  async function saveName() {
-    const current = detail;
-    if (current === null) return;
-    const done = await write(() =>
-      io.editAsset(current.asset.id, [{ field: "name", value: nameDraft }]),
-    );
-    if (done !== null) renaming = false;
-  }
-
-  /**
-   * Delete, and go where the asset was.
-   *
-   * No re-read of the id that has just gone: it would answer `not_found` and
-   * draw the deep-link failure over a deletion that worked. The parent's
-   * address is the honest place to land, and the top of the estate is where a
-   * root asset leaves from.
-   */
-  async function confirmDelete() {
-    const current = detail;
-    if (current === null) return;
-    const parent = current.held_by.at(-1) ?? null;
-    const done = await write(async () => {
-      await io.deleteAsset(current.asset.id);
-      return true;
-    }, false);
-    if (done === null) return;
-    deleting = false;
-    nav.go(
-      parent === null ? hashFor({ view: "assets", tab: "tree", assetId: null }) : addressOf(parent),
-    );
-  }
-
-  /** What a history line says, in one sentence. */
-  function line(verb: string, raw: unknown): string {
-    const said = (value: unknown): string => {
-      if (value === null || value === undefined) return "nothing";
-      if (typeof value === "object" && value !== null && "value" in value) {
-        return String((value as { value: unknown }).value);
-      }
-      return String(value);
-    };
-    // `fields`, not `detail`: the component already has a `detail`, and two
-    // different things under one name in one file is a reader's trap.
-    const fields = (raw ?? {}) as Record<string, unknown>;
-    if (verb === "created") return "Created";
-    if (verb === "deleted") return "Deleted";
-    if (verb === "moved") return `Moved to ${nameOf(fields.to) ?? said(fields.to)}`;
-    // The two lines an import writes (#439). Neither is an old-to-new edit,
-    // so both fell through to the composition below and rendered as
-    // `nothing: nothing → nothing` — on every asset in an imported estate,
-    // which since #440 is every asset the demo profile has.
-    if (verb === "imported") {
-      return fields.estate === undefined ? "Imported" : `Imported from ${said(fields.estate)}`;
-    }
-    // The alert pair (#446). Two verbs and not one line with a field in it,
-    // because a reader scanning this column wants *somebody saw it* and *it
-    // healed* to be different words; the actor beside them says who — `user`
-    // against `sync:<source_id>`.
-    if (verb === "acked") return `Alert acked: ${said(fields.monitor_name)} is ${said(fields.state)}`;
-    if (verb === "recovered") return `Alert closed: ${said(fields.monitor_name)} recovered`;
-    if (verb === "edited" && fields.field === "monitors" && Array.isArray(fields.added)) {
-      // *Kept*, not *added*: a name is written down on the asset precisely
-      // because no monitor answers to it yet, and the line says which names
-      // are now waiting for one (spec #427).
-      return `monitors: kept ${fields.added.map(said).join(", ")}`;
-    }
-    const field = fields.field === "property" ? said(fields.key) : said(fields.field);
-    // A route's `target` edit carries asset **ids** on both sides, for the
-    // reason a move's line does: the name at the moment of the edit is not
-    // the name now. So it gets a move's treatment too, rather than putting
-    // `target: asset:postgres → nothing` in front of a reader who has the
-    // word *postgres* on the same pane.
-    const shown = (value: unknown): string =>
-      fields.field === "target" ? (nameOf(value) ?? said(value)) : said(value);
-    return `${field}: ${shown(fields.from)} → ${shown(fields.to)}`;
-  }
-
-  /**
-   * What an asset id is *called*, out of the rows the pane already has.
-   *
-   * A move's history line carries the new parent's **id**, which is the only
-   * thing the backend can honestly write down — the name at the moment of the
-   * move is not the name now. After the move that parent is on the held-by
-   * path, so the pane can say `Moved to knobas-jira` instead of `Moved to
-   * asset:knobas-jira`. `null` when it is not, and the id is then drawn as it
-   * is rather than guessed at.
-   */
-  function nameOf(value: unknown): string | null {
-    if (detail === null || typeof value !== "string") return null;
-    const known = [detail.asset, ...detail.held_by, ...detail.holds];
-    return known.find((row) => row.id === value)?.name ?? null;
-  }
-
-  /** A property's value as text. `null` is drawn as an em dash, not as "null". */
-  function reading(property: AssetProperty): string {
-    if (property.value === null) return "—";
-    return String(property.value.value);
-  }
-
-  /** Open a route's own address — the Tree, at the asset exposing it. */
-  function openRoute(route: RouteRow) {
-    nav.go(routeAddressOf(route));
-  }
-
-  /**
-   * Hand a route's URL to the OS browser — spec §12.2's *open URL*, which
-   * this ticket is the one that finally has a URL for.
-   *
-   * `openExternal` refuses anything that is not `http:`/`https:`, and the
-   * refusal is **shown rather than swallowed**: a route is a URL *or an
-   * endpoint*, so `postgres://10.0.0.20:5432` is a perfectly good route that
-   * no browser can open, and the reader is owed that sentence rather than a
-   * button that does nothing.
-   */
-  async function openInBrowser(url: string) {
-    try {
-      await io.openExternal(url);
-    } catch (rejection) {
-      writeFailure = `Could not open the link: ${ipcErrorMessage(rejection)}`;
-    }
-  }
-
-  /**
-   * A monitor's address inside knobas — its own detail, not its page in Kuma.
-   *
-   * `entityAddress` and not a template string, for `LinksPanel.addressOf`'s
-   * reason: it is the one rule for where a kind opens, and it encodes the key.
-   */
-  function monitorAddress(watch: AttachedMonitor): string {
-    return entityAddress("monitor", watch.entity_id);
-  }
-
-  /**
-   * The monitor names the estate file kept that have **not** found a monitor.
-   *
-   * `detail.monitors` is every name the file gave, including the ones that
-   * have since resolved -- the import never removes a name, because the file
-   * is one of the two things that puts one there. So the queue is the
-   * difference between what was named and what is attached, computed here
-   * rather than stored: the backend's two lists are both true, and which of
-   * them a name is *still* in is a rendering question.
-   */
-  const namedAndWaiting = $derived.by(() => {
-    const open = detail;
-    if (open === null) return [];
-    return open.monitors.filter(
-      (name) => !open.monitoring.some((watch) => watch.name === name),
-    );
-  });
-
-  /**
-   * Follow a `ValueSource`'s link, where it has one.
-   *
-   * A function rather than a `!` in the template: `goTo` is `null` exactly
-   * when the value is set on this asset, and the branch that must never
-   * happen is a click leading back to the asset the reader is looking at.
-   */
+  /** Follow a `ValueSource`'s link, where it has one: `null` is set here, and a link back here is no link. */
   function goToSource(hash: string | null) {
     if (hash !== null) nav.go(hash);
   }
 
   /**
-   * Withdraw one link, then re-read.
-   *
-   * The re-read is what puts the pane's list, the column's badge and the
-   * asset's history back in step: unlinking is a mutation like any other here,
-   * and `write` is the one path every mutation in this view takes.
+   * Hand a route's URL to the OS browser — spec §12.2's *open URL*. A route is
+   * a URL *or an endpoint*, so `postgres://10.0.0.20:5432` is a good route no
+   * browser can open, and the refusal is shown rather than swallowed.
    */
-  async function removeLink(entry: LinkEntry) {
-    await write(() => io.unlink(entry.link.id));
+  async function openInBrowser(url: string) {
+    openFailure = null;
+    try {
+      await io.openExternal(url);
+    } catch (rejection) {
+      openFailure = `Could not open the link: ${ipcErrorMessage(rejection)}`;
+    }
   }
-</script>
 
+  /** What is in force, and where it comes from, for the preview's two lines. */
+  type Forced = Inherited<string | Environment> | null;
+</script>
 <!--
   `Esc` and the arrows are read here, at the top of the view, and not on
   `window`: the shell's handler is on `window` (`shell/keys.ts`), so a press
-  the Tree answers is stopped before it gets there, and a press the Tree has
-  no answer for arrives there on its own. Binding both to `window` would make
-  the order they were installed in decide what `Esc` means.
--->
-<!--
-  The view is not a control and takes no focus of its own: what the reader
-  focuses is a row, a spine or the box, and this handler reads the presses
-  that bubble up from them. So the rule the ignore silences — an element with
-  a key handler needs a role — is asking for a role no assistive technology
-  would want here.
+  the tree answers is stopped before it gets there, and a press it has no
+  answer for arrives there on its own. The view is not a control and takes no
+  focus of its own: what the reader focuses is a row, a spine or the box.
 -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<section class="view" onkeydown={onkeydown}>
-  <div class="room-bar">
-    <h1>Assets</h1>
-    <!--
-      No tab strip (#1459): its *Monitors* tab named a roster that went with
-      the rooms UI (#1087), and one tab left is no strip. Monitors is a section
-      of its own at `#/monitors` (R-11.3).
-
-      In the room bar, not on a column header: an import is about the
-      whole estate, and the address that most needs it — a tree with nothing
-      in it yet — has neither a column nor a selection to hang it off.
-    -->
-    <button class="tf-btn imp" onclick={() => (importing = true)}>Import</button>
-  </div>
+<section class="tf-et" onkeydown={onkeydown}>
+  <header class="tf-fhead tf-et-head">
+    <div>
+      <h1>Asset tree</h1>
+      <p class="tf-sub">Where everything in the estate sits. Pick an asset to see what it holds; open it to read and edit it.</p>
+    </div>
+    <div class="tf-acts">
+      <button
+        class="tf-btn tf-primary"
+        disabled={types.length === 0}
+        title={typesFailure !== null ? `The type table could not be read: ${typesFailure}` : undefined}
+        onclick={openCreateHere}>New asset</button
+      >
+      <!-- On the header, not on a column: an import is about the whole estate, and the address that most needs it has no column yet. -->
+      <button class="tf-btn" onclick={() => (importing = true)}>Import…</button>
+    </div>
+  </header>
 
   {#if typesFailure}
-    <!--
-      Outside the pane on purpose: creating is a whole-view capability, and the
-      address that most needs this message (`#/assets/tree`, nothing selected)
-      has no pane to draw it in.
-    -->
-    <p class="fail tf" role="alert">Creating is unavailable: {typesFailure}</p>
+    <p class="tf-banner tf-err" role="alert">Creating is unavailable: {typesFailure}</p>
   {/if}
 
   <!--
-    **What is wrong right now** (story 58, #444), on a strip of its own above
-    the search.
+    The estate's search (story 30), as a page body's toolbar. Its offers hang
+    over the columns rather than pushing them down while a reader types.
+  -->
+  <div class="tf-fbar tf-et-bar">
+    <div class="tf-fsearch tf-et-find">
+      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"
+        ><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5" /><path
+          d="M10.5 10.5 14 14"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        /></svg
+      >
+      <input
+        type="search"
+        value={query}
+        placeholder="Find an asset"
+        aria-label="Find an asset in the estate"
+        autocomplete="off"
+        spellcheck="false"
+        oninput={(event) => typed(event.currentTarget.value)}
+        onkeydown={onboxkey}
+      />
+      {#if query.trim() !== ""}
+        <ol class="tf-et-res">
+          {#each matches as match, index (match.id)}
+            <li>
+              <button
+                class="tf-et-hit"
+                class:tf-et-on={index === active}
+                aria-current={index === active ? "true" : undefined}
+                onclick={() => reveal(match)}
+              >
+                <span class="tf-et-nm">{match.name}</span>
+                <!-- Where it lives: two containers called `postgres` are told apart by their path alone. -->
+                <span class="tf-et-pth">{match.path ?? "top level"}</span>
+              </button>
+            </li>
+          {/each}
+          {#if searchFailure}
+            <li class="tf-et-none tf-ifail">{searchFailure}</li>
+          {:else if answered && matches.length === 0}
+            <li class="tf-et-none">Nothing in the estate matches “{query.trim()}”.</li>
+          {/if}
+        </ol>
+      {/if}
+    </div>
+  </div>
 
-    Above the columns and not in the pane, because an alert is about the
-    estate rather than about whatever the reader happens to have selected —
-    story 58's words are "every open alert visible in the Assets view", and a
-    list that only appeared once you had clicked the broken thing would be a
-    list for somebody who already knew.
-
-    **Absent when there is nothing wrong**, the top strip badge's rule and for
-    its reason: a permanently empty box is a place the eye keeps checking.
-
-    The row opens the **asset**, not the alert: spec #427 story 61 is that the
-    next action is one step away, and an alert has no address of its own. A
-    monitor watching two assets draws a row each, because the reader's next
-    step is different for each of them — which of the two is the question the
-    row exists to answer, and one row naming both would answer neither. A
-    monitor watching nothing draws one row all the same, with the monitor's
-    name and nowhere to go, since an alert nobody can act on is the one most
-    worth saying out loud.
-
-    Ack, the cards and the "Not monitored" roster are #446's and #449's; this
-    is the list and the count, which is what #444 owes.
+  <!--
+    **What is wrong right now** (story 58, #444): every open alert, one row
+    per asset the broken monitor watches, each a click to that asset in the
+    tree. Absent when there is nothing wrong: a permanently empty box is a
+    place the eye keeps checking.
   -->
   {#if alerts.count > 0}
-    <section class="alerts" aria-label="Open alerts">
+    <section class="tf-et-alerts" aria-label="Open alerts">
       <ul>
         {#each alerts.open as alert (alert.id)}
           {#if alert.assets.length === 0}
             <li>
-              <span class="st {alert.state}" aria-hidden="true"></span>
-              <span class="mn">{alert.monitor_name}</span>
-              <span class="pth faint">watching nothing</span>
-              <span class="wh faint">{ago(alert.opened_at, now())}</span>
+              <span class="tf-dot tf-{alert.state === 'down' ? 'err' : 'warn'}" aria-hidden="true"></span>
+              <span class="tf-et-mn">{alert.monitor_name}</span>
+              <span class="tf-dim">watching nothing</span>
+              <span class="tf-dim tf-et-wh">{ago(alert.opened_at, now())}</span>
             </li>
           {:else}
             {#each alert.assets as watched (watched.id)}
               <li>
-                <span class="st {alert.state}" aria-hidden="true"></span>
-                <button
-                  class="go"
-                  onclick={() =>
-                    nav.go(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
-                >
-                  <span class="mn">{alert.monitor_name}</span>
-                  <span class="nm">{watched.name}</span>
-                  <span class="pth faint">{watched.path ?? "top level"}</span>
+                <span class="tf-dot tf-{alert.state === 'down' ? 'err' : 'warn'}" aria-hidden="true"></span>
+                <button class="tf-et-go" onclick={() => nav.go(addressOf({ id: watched.id }))}>
+                  <span class="tf-et-mn">{alert.monitor_name}</span>
+                  <span class="tf-et-nm">{watched.name}</span>
+                  <span class="tf-dim tf-et-pth">{watched.path ?? "top level"}</span>
                 </button>
-                <!--
-                  Acked is drawn and not hidden: #446's ack clears the *inbox*
-                  item and leaves the alert open, so a list that dropped it
-                  would say the estate was well.
-                -->
+                <!-- Acked is drawn and not hidden: an ack clears the inbox item and leaves the alert open. -->
                 {#if alert.acked_at}
-                  <span class="ak faint">acked</span>
+                  <span class="tf-chip">acked</span>
                 {/if}
-                <span class="wh faint">{ago(alert.opened_at, now())}</span>
+                <span class="tf-dim tf-et-wh">{ago(alert.opened_at, now())}</span>
               </li>
             {/each}
           {/if}
@@ -1630,163 +1030,109 @@
     </section>
   {/if}
 
-  <!--
-    The estate's search (story 30), on a strip of its own between the room bar
-    and the columns.
-
-    Not *in* the room bar: `unported.css` gives that 40px and `overflow: hidden`,
-    and the offers hang below the box — in there they were clipped to a
-    sliver. A row of its own also keeps the box clear of the path it is about
-    to open, since the offers overlay the columns and nothing else.
-  -->
-  <div class="find">
-    <input
-      class="q"
-      type="search"
-      value={query}
-      placeholder="Find an asset"
-      aria-label="Find an asset in the estate"
-      autocomplete="off"
-      spellcheck="false"
-      oninput={(event) => typed(event.currentTarget.value)}
-      onkeydown={onboxkey}
-    />
-    {#if query.trim() !== ""}
-      <ol class="res">
-        {#each matches as match, index (match.id)}
-          <li>
-            <button
-              class="hit {index === active ? 'on' : ''}"
-              aria-current={index === active ? "true" : undefined}
-              onclick={() => reveal(match)}
-            >
-              <span class="nm">{match.name}</span>
-              <!--
-                Where it lives, before the reader takes it: two containers
-                called `postgres` are told apart by their path and by
-                nothing else on this line.
-              -->
-              <span class="pth faint">{match.path ?? "top level"}</span>
-            </button>
-          </li>
-        {/each}
-        {#if searchFailure}
-          <li class="none fail">{searchFailure}</li>
-        {:else if answered && matches.length === 0}
-          <li class="none">Nothing in the estate matches “{query.trim()}”.</li>
-        {/if}
-      </ol>
-    {/if}
-  </div>
-
-  <div class="tree" bind:this={tree}>
-    <div class="cols" bind:this={stripEl}>
+  <div class="tf-et-tree" bind:this={tree}>
+    <div class="tf-et-cols" bind:this={stripEl}>
       {#if failure}
-        <p class="empty fail">{failure}</p>
+        <p class="tf-et-blank tf-ifail">{failure}</p>
       {:else if loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0}
         <!--
-          The estate with nothing in it, which is what a fresh install has
-          until the import (#439) or a hand-created asset. It says so in its
-          own words rather than drawing an empty column the reader would take
-          for a failed read — and it carries the one control that gets out of
-          this state, because a column header with no rows under it is not
-          somewhere a reader thinks to look.
+          The estate with nothing in it, which is what a fresh install has until
+          the import (#439) or a hand-made asset. It says so and carries the two
+          ways out of it.
         -->
-        <div class="none">
-          <p class="empty">Nothing in the estate yet.</p>
-          <button class="tf-btn tf-sm" disabled={types.length === 0} onclick={() => openCreate(0)}>
-            New asset
-          </button>
+        <div class="tf-empty tf-et-empty">
+          <p>Nothing in the estate yet. Add the machines you work on by hand, or import an estate file.</p>
+          <div class="tf-et-emptyacts">
+            <button class="tf-btn tf-sm tf-primary" disabled={types.length === 0} onclick={() => openCreate(0)}>New asset</button>
+            <button class="tf-btn tf-sm" onclick={() => (importing = true)}>Import…</button>
+          </div>
         </div>
       {:else}
         {#each columns as column, index (index)}
           {@const chosen = selectionIn(path, index)}
           {#if collapsed(index)}
             <!--
-              A spine (story 28, `CONTEXT.md`). A button, because clicking it
-              re-expands the column — and the only thing it says is which
-              asset of the reader's own path runs through it, turned on its
-              side.
+              A spine (story 28, `CONTEXT.md`): a button, because clicking it
+              re-expands the column, and it says which asset of the reader's
+              own path runs through it, turned on its side.
             -->
             {@const step = spineRow(index)}
             <button
-              class="col spine"
+              class="tf-et-spine"
               data-spine={index}
               onclick={() => (anchored = { at: index, of: selectedId })}
               title="Show what {step?.name ?? 'the estate'} holds"
             >
-              <span class="smg" aria-hidden="true">{step?.monogram ?? "··"}</span>
-              <span class="vn">{step?.name ?? "top level"}</span>
+              <span class="tf-et-smg" aria-hidden="true">{step?.monogram ?? "··"}</span>
+              <span class="tf-et-vn">{step?.name ?? "top level"}</span>
             </button>
           {:else}
             {@const win = windowOf(index)}
-            <div class="colw">
+            <div class="tf-et-colw">
               <!--
                 Story 34: a plus on **every** column header, so creating at that
-                level is one click and not a click plus a selection. The header
-                also names the level, which is what makes the plus unambiguous —
-                a bare `+` over the third column says nothing about what it
-                creates inside.
+                level is one click. The header names the level, which is what
+                makes the plus unambiguous.
               -->
-              <header class="col-h">
-                <span class="col-t">{headingFor(index)}</span>
+              <header class="tf-et-colh">
+                <span class="tf-et-colt">{headingFor(index)}</span>
+                <span class="tf-et-colc">{column.length}</span>
                 <button
-                  class="plus"
+                  class="tf-iconbtn tf-sm"
                   disabled={types.length === 0}
                   aria-label="New asset in {headingFor(index)}"
                   title={plusTitle(index)}
                   onclick={() => openCreate(index)}
                 >
-                  +
+                  <svg viewBox="0 0 16 16" aria-hidden="true"
+                    ><path d="M8 3.5v9M3.5 8h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg
+                  >
                 </button>
               </header>
-              <ol class="col" data-col={index} {@attach win.list}>
+              <ol class="tf-et-col" data-col={index} {@attach win.list}>
                 {#if win.before > 0}<li class="tf-wgap" aria-hidden="true" {@attach win.room("before")}></li>{/if}
                 {#each win.slice(column) as row (row.id)}
                   {@const badge = problemBadge(row)}
                   {@const work = workBadge(row)}
+                  {@const own = readingOf(row.status)}
                   <li {@attach win.row(row.id)}>
                     <button
-                      class="row {chosen === row.id ? 'on' : ''}"
+                      class="tf-et-row"
+                      class:tf-et-on={chosen === row.id}
+                      class:tf-sel={chosen === row.id && row.id === selectedId}
                       aria-current={chosen === row.id ? "true" : undefined}
                       data-asset={row.id}
-                      title={addressOf(row)}
+                      title={row.type_label}
                       onclick={() => select(row)}
+                      ondblclick={() => nav.go(pageOf(row))}
                     >
-                      <span class="mg" title={row.type_label}>{row.monogram}</span>
-                      <span class="nm">{row.name}</span>
+                      <span class="tf-dp-mono">{row.monogram}</span>
+                      <span class="tf-et-nm">{row.name}</span>
+                      {#if own.tone === "err" || own.tone === "warn"}
+                        <!-- Its own status, beside the name: the row is red because of the row. -->
+                        <span class="tf-dot tf-{own.tone}" title="Own status {own.word}"></span>
+                      {/if}
                       {#if work !== null}
                         <!--
-                          Story 32's first badge: how much work is linked to
-                          this asset. Toneless on purpose — a linked ticket is
-                          neither good nor bad, and colouring it would make the
-                          busiest asset in the estate look like the sickest.
+                          Story 32's first badge: how much work is linked to this
+                          asset. Toneless: a linked ticket is neither good nor bad.
                         -->
-                        <span
-                          class="badge work"
-                          title="{work} linked {work === 1 ? 'work item' : 'work items'}"
-                        >{work}</span>
+                        <span class="tf-et-badge tf-et-work" title="{work} linked {work === 1 ? 'work item' : 'work items'}">{work}</span>
                       {/if}
                       {#if badge}
                         <!--
-                          Story 32: what a *closed* branch is hiding. The number is
-                          the count of descendants carrying warn or down, and the
-                          colour is the worst of them — so a row that is itself
-                          down while holding one warning container is a red row
-                          with an amber badge.
+                          Story 32: what a *closed* branch is hiding, counted and
+                          coloured by the worst of it, so a down row holding one
+                          warning reads red with an amber badge.
                         -->
                         <span
-                          class="badge {badge.tone}"
+                          class="tf-et-badge tf-et-{badge.tone}"
                           title="{badge.count} {badge.count === 1 ? 'problem' : 'problems'} inside"
                         >{badge.count}</span>
                       {/if}
                       {#if row.has_children}
-                        <!--
-                          The chevron is the only thing that says there is a next
-                          column, which is why an empty trailing column is never
-                          drawn: the absence here has already said it.
-                        -->
-                        <span class="chev" aria-hidden="true">›</span>
+                        <!-- The only thing that says there is a next column, so no empty trailing column is drawn. -->
+                        <span class="tf-et-chev" aria-hidden="true">›</span>
                       {/if}
                     </button>
                   </li>
@@ -1800,657 +1146,149 @@
     </div>
 
     <!--
-      The wires (story 31, #433). One layer over the whole tree rather than a
-      line per column: a wire runs from the pane, across every column between,
-      to a row or to the spine standing in for it, so it belongs to neither
-      end. `aria-hidden`, and that is not an omission — every fact it draws is
-      already a link in the route's own row, and a screen reader following the
-      list has the whole of it in words.
-
-      Before the pane in document order and painted under it, so a wire that
-      arrives at the pane's edge stops there.
+      The wires (story 31, #433): one layer over the whole tree, from a route
+      row in the preview across every column between to the row or spine at
+      its far end. `aria-hidden`: every fact it draws is a line in the route's
+      own row. Before the preview in document order and painted under it.
     -->
-    <svg class="wires" aria-hidden="true">
+    <svg class="tf-et-wires" aria-hidden="true">
       {#each drawnWires as wire (wire.key)}
-        <!-- A halo in the columns' own background under the wire, so a line
-             crossing three columns of text stays a line. -->
-        <path class="halo" d={wire.d} />
-        <path
-          class="wire"
-          class:dashed={wire.dashed}
-          data-wire={wire.key}
-          data-to={wire.to}
-          d={wire.d}
-        />
-        <circle class="land" cx={wire.x} cy={wire.y} r="3" />
+        <!-- A halo in the columns' own background under the wire, so a line crossing text stays a line. -->
+        <path class="tf-et-halo" d={wire.d} />
+        <path class="tf-et-wire" class:tf-et-dashed={wire.dashed} data-wire={wire.key} data-to={wire.to} d={wire.d} />
+        <circle class="tf-et-land" cx={wire.x} cy={wire.y} r="3" />
       {/each}
     </svg>
 
-    <aside class="pane" bind:this={paneEl}>
-      {#if detail === null}
-        <p class="empty">
-          {loaded ? "Select an asset to see what it holds." : "Reading…"}
+    <aside class="tf-et-pane" bind:this={paneEl} aria-label="Preview">
+      {#if detail === null || detail.asset.id !== selectedId}
+        <p class="tf-et-blank">
+          {loaded ? "Pick an asset to see what it holds and how it is reached." : "Reading…"}
         </p>
       {:else}
-        <header class="pane-h">
-          <span class="mg">{detail.asset.monogram}</span>
-          {#if renaming}
-            <input
-              class="inp"
-              type="text"
-              aria-label="Name"
-              autocomplete="off"
-              value={nameDraft}
-              oninput={(event) => (nameDraft = event.currentTarget.value)}
-              onkeydown={(event) => {
-                if (event.key === "Enter") void saveName();
-                if (event.key === "Escape") cancelEditor(event, () => (renaming = false));
-              }}
-            />
-            <button class="tf-btn tf-sm tf-primary" disabled={writing} onclick={() => void saveName()}>
-              Save
-            </button>
-          {:else}
-            <h2>{detail.asset.name}</h2>
-            <span class="kind">{detail.asset.type_label}</span>
-          {/if}
+        {@const on = detail}
+        {@const asset = on.asset}
+        {@const health = readingOf(asset.health)}
+        {@const set = on.properties.filter((property) => property.value !== null)}
+        {@const filled = filledOf(on.properties)}
+        <header class="tf-et-ph">
+          <span class="tf-dp-mono">{asset.monogram}</span>
+          <div class="tf-et-pt">
+            <h2>{asset.name}</h2>
+            <p class="tf-dim">{asset.type_label}</p>
+          </div>
+          {#if health.tone !== "muted"}<span class="tf-chip tf-{health.tone}">{health.word}</span>{/if}
         </header>
-
-        <p class="crumb mono" title="Where this asset sits in the estate">
-          {heldByPath(detail).join(" / ")}
-        </p>
+        <div class="tf-et-pacts">
+          <button class="tf-btn tf-sm tf-primary" onclick={() => nav.go(pageOf(asset))}>Open asset</button>
+          <button class="tf-btn tf-sm" disabled={types.length === 0} onclick={() => openCreateInside(asset)}>New asset inside</button>
+        </div>
 
         <!--
-          What the asset *has*, as against what is stored on it. Environment
-          and owner walk up to the nearest asset that sets them (stories 8 and
-          9) and health is the worst of this asset and everything under it
-          (story 37) — three values that can each come from somewhere else, so
-          each one says where.
+          What is in force: environment and owner walk up to the nearest asset
+          that sets them (stories 8 to 10), so each says where, and the link
+          goes there in the tree.
         -->
-        <!--
-          Environment and owner draw the same three lines from the same shape,
-          so they are one snippet: two copies differing only in which field
-          they read is the pane's own version of the duplication the backend
-          avoids with one `inherited` walk.
-        -->
-        {#snippet inForce(label: string, held: Inherited<string | Environment> | null)}
-          <div class="prop force">
+        {#snippet inForce(label: string, held: Forced)}
+          <div>
             <dt>{label}</dt>
             <dd>
               {#if held}
-                {@const from = sourceOf(detail!, held)}
+                {@const from = sourceOf(on, held)}
                 <span>{held.value}</span>
                 {#if from.goTo}
-                  <button class="link src" onclick={() => goToSource(from.goTo)}>{from.note}</button>
+                  {@const there = from.goTo}
+                  <button class="tf-linkish tf-et-src" onclick={() => goToSource(there)}>{from.note}</button>
                 {:else}
-                  <span class="src faint">{from.note}</span>
+                  <span class="tf-dim tf-et-src">{from.note}</span>
                 {/if}
               {:else}
-                <span class="faint">Not set anywhere</span>
+                <span class="tf-dim">Not set anywhere</span>
               {/if}
             </dd>
           </div>
         {/snippet}
-
-        <section class="grp">
-          <h3 class="lab">In force</h3>
-          <dl class="props">
-            {@render inForce("Environment", detail.effective_environment)}
-            {@render inForce("Owner", detail.effective_owner)}
-            <div class="prop force">
-              <dt>Health</dt>
-              <dd>
-                <span class="hl {detail.asset.health}">{detail.asset.health}</span>
-                {#if detail.asset.health !== detail.asset.status}
-                  <!--
-                    Only when the two differ: repeating "own status: down"
-                    under a health of "down" is a line that never says
-                    anything.
-                  -->
-                  <span class="src faint">own status {detail.asset.status}</span>
-                {/if}
-              </dd>
+        <dl class="tf-as-kv tf-as-force tf-et-kv">
+          {@render inForce("Environment", on.effective_environment)}
+          {@render inForce("Owner", on.effective_owner)}
+          <div>
+            <dt>Holds</dt>
+            <dd>{on.holds.length === 0 ? "Nothing" : `${on.holds.length} ${on.holds.length === 1 ? "asset" : "assets"}`}</dd>
+          </div>
+          {#if on.monitoring.length > 0}
+            <div>
+              <dt>Watched by</dt>
+              <dd>{on.monitoring.map((watch) => watch.name).join(", ")}</dd>
             </div>
+          {/if}
+        </dl>
+
+        <h3 class="tf-et-ph3">
+          Properties
+          {#if filled.of > 0}<span class="tf-as-n">{filled.set} of {filled.of} set</span>{/if}
+        </h3>
+        {#if set.length === 0}
+          <p class="tf-et-none">Nothing filled in yet. <button class="tf-linkish" onclick={() => nav.go(pageOf(asset))}>Fill it in on its page</button></p>
+        {:else}
+          <dl class="tf-as-kv tf-et-kv">
+            {#each set as property (property.key)}
+              <div>
+                <dt>{property.label}</dt>
+                <dd class:tf-mono={isCode(property)} class="tf-et-v">{shownValue(property)}</dd>
+              </div>
+            {/each}
           </dl>
-        </section>
-
-        <!--
-          The three writes that are about the asset rather than about one of
-          its fields. Environment, owner and status are not among them: the
-          *In force* group above is #431's and draws where each value comes
-          from, and setting the stored half beside that is a design of its own.
-        -->
-        <div class="acts">
-          <button class="tf-btn tf-sm" onclick={beginRename}>Rename</button>
-          <button class="tf-btn tf-sm" onclick={() => (moving = true)}>Move…</button>
-          <!--
-            Story 36: the same gesture a ticket's slide-over offers, opening
-            the same dialog. It is beside the other three rather than only
-            inside the panel below because it is an action *on the asset*, and
-            a reader who has not scrolled to the links yet is the one most
-            likely to want it.
-          -->
-          <button
-            class="tf-btn tf-sm"
-            onclick={() => {
-              linking = true;
-              writeFailure = null;
-            }}
-          >
-            Link to…
-          </button>
-          <button class="tf-btn tf-sm tf-danger" onclick={() => (deleting = true)}>Delete</button>
-        </div>
-
-        {#if writeFailure}
-          <p class="fail wf" role="alert">{writeFailure}</p>
         {/if}
 
-        <section class="grp">
-          <h3 class="lab">Properties</h3>
-          <dl class="props">
-            {#each detail.properties as property (property.key)}
-              <div class="prop {property.custom ? 'own' : ''}">
-                <dt>{property.label}</dt>
-                <dd>
-                  {#if editingKey === property.key}
-                    <!--
-                      The kind decides the control, and the kind of a
-                      *declared but unfilled* property can only come from the
-                      type table — which is why it is on the wire. `value` and
-                      `oninput` rather than `bind:value`: Svelte refuses a
-                      two-way binding on an input whose `type` is dynamic.
-                    -->
-                    <input
-                      class="inp"
-                      type={inputTypeFor(kindOf(property))}
-                      aria-label={property.label}
-                      autocomplete="off"
-                      value={draft}
-                      oninput={(event) => (draft = event.currentTarget.value)}
-                      onkeydown={(event) => {
-                        if (event.key === "Enter") void saveProperty(property);
-                        if (event.key === "Escape") cancelEditor(event, () => (editingKey = null));
-                      }}
-                    />
-                    <button
-                      class="tf-btn tf-sm tf-primary"
-                      disabled={writing}
-                      onclick={() => void saveProperty(property)}
-                    >
-                      Save
-                    </button>
-                  {:else}
-                    <!--
-                      The value is the control. A declared property nobody has
-                      filled in draws an em dash and is still a button, because
-                      the empty one is exactly the property a reader has come
-                      to fill in.
-                    -->
-                    <button
-                      class="val {property.value === null ? 'faint' : ''}"
-                      title="Edit {property.label}"
-                      onclick={() => beginEdit(property)}
-                    >
-                      {reading(property)}
-                    </button>
-                  {/if}
-                </dd>
-              </div>
-            {/each}
-          </dl>
-          {#if detail.properties.length === 0}
-            <p class="empty">This type declares no properties, and none were added.</p>
-          {/if}
-
-          {#if adding}
-            <!--
-              Story 6: a key of the reader's own, of one of the four kinds, on
-              any asset. The kind is asked for rather than guessed from the
-              text, because `"8080"` and `8080` are different properties and a
-              date read as a string cannot be ordered against another one.
-            -->
-            <!--
-              `Esc` is read on the form and not on each field: the key box and
-              the kind picker are as much a way out of this form as the value
-              box is, and a press in either of them would otherwise close the
-              form *and* walk the selection (see `cancelEditor`).
-              `svelte-ignore` because the wrapper is a form, not a control: the
-              role a key handler usually asks for is one the three fields
-              inside already carry.
-            -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div
-              class="add"
-              onkeydown={(event) => {
-                if (event.key === "Escape") cancelEditor(event, () => (adding = false));
-              }}
-            >
-              <input
-                class="inp k"
-                type="text"
-                aria-label="New property key"
-                autocomplete="off"
-                placeholder="backup window"
-                bind:value={newKey}
-              />
-              <!-- The kinds are enumerated once, in `editing.ts`. -->
-              <select class="inp" aria-label="New property kind" bind:value={newKind}>
-                {#each PROPERTY_KINDS as offered (offered.kind)}
-                  <option value={offered.kind}>{offered.label}</option>
-                {/each}
-              </select>
-              <input
-                class="inp"
-                type={inputTypeFor(newKind)}
-                aria-label="New property value"
-                autocomplete="off"
-                value={newValue}
-                oninput={(event) => (newValue = event.currentTarget.value)}
-                onkeydown={(event) => {
-                  if (event.key === "Enter") void addProperty();
-                }}
-              />
-              <div class="add-f">
-                <button class="tf-btn tf-sm" onclick={() => (adding = false)}>Cancel</button>
-                <button
-                  class="tf-btn tf-sm tf-primary"
-                  disabled={writing || newKey.trim() === "" || newValue.trim() === ""}
-                  onclick={() => void addProperty()}
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-          {:else}
-            <button
-              class="tf-btn tf-sm"
-              onclick={() => {
-                adding = true;
-                writeFailure = null;
-              }}
-            >
-              Add a property
-            </button>
-          {/if}
-        </section>
-
-        <section class="grp">
-          <h3 class="lab">Held by</h3>
-          {#if detail.held_by.length === 0}
-            <p class="empty">At the top of the estate.</p>
-          {:else}
-            <ul class="lst">
-              {#each detail.held_by as held (held.id)}
-                <li>
-                  <button class="link" onclick={() => select(held)}>{held.name}</button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
-
-        <section class="grp">
-          <h3 class="lab">Holds</h3>
-          {#if detail.holds.length === 0}
-            <p class="empty">Nothing.</p>
-          {:else}
-            <ul class="lst" {@attach holdsWindow.list}>
-              {#each holdsWindow.slice(detail.holds) as held (held.id)}
-                <li {@attach holdsWindow.row(held.id)}>
-                  <button class="link" onclick={() => select(held)}>{held.name}</button>
-                  <span class="faint">{held.type_label}</span>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
-
         <!--
-          Both ends of a route, and they are two lists rather than one with a
-          direction column: *what this asset offers* and *how this asset is
-          reached* are different questions, and the mockup's pane asks them
-          under two headings ("N out · M in").
+          Both ends of a route, as two lists: what this asset offers and how it
+          is reached. `data-wire` is the end of the wire a row leaves (#433).
         -->
-        <!--
-          What every route row draws whichever list it is in: its name, whether
-          it is public, its URL as the *open URL* action, and the reader's own
-          properties. One snippet rather than two copies, the way `inForce`
-          above is one — the halves that differ are the line under it, and they
-          are what each list passes in.
-        -->
-        {#snippet routeRow(key: string, route: RouteRow, where: import("svelte").Snippet)}
-          <!--
-            `data-wire` is the end of the wire this row leaves (#433): the
-            measurement finds the row by it, and the key says which of the two
-            lists it is in — a route exposed by an asset *and* landing on it
-            has a row in both.
-          -->
-          <li
-            data-wire={key}
-            class:on={route.id === routeId}
-            aria-current={route.id === routeId ? "true" : undefined}
-          >
-            <span class="rname">
-              <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
-              {#if route.visibility === "public"}
-                <span class="vis">public</span>
-              {/if}
-            </span>
-            <button
-              class="url mono"
-              title="Open {route.url}"
-              onclick={() => void openInBrowser(route.url)}
-            >
-              {route.url}
-            </button>
-            <span class="rto">{@render where()}</span>
-            {#each route.properties as property (property.key)}
-              <span class="rprop faint">{property.label} {reading(property)}</span>
-            {/each}
+        {#snippet routeRow(key: string, route: import("../ipc/assets").RouteRow, where: import("svelte").Snippet)}
+          <li data-wire={key}>
+            <span class="tf-et-rname">{route.name}</span>
+            {#if route.visibility === "public"}<span class="tf-chip">public</span>{/if}
+            <button class="tf-et-url tf-mono" title="Open {route.url}" onclick={() => void openInBrowser(route.url)}>{route.url}</button>
+            <span class="tf-et-rto">{@render where()}</span>
           </li>
         {/snippet}
-
-        <section class="grp">
-          <h3 class="lab">Exposes</h3>
-          {#if detail.exposes.length === 0}
-            <p class="empty">No routes.</p>
-          {:else}
-            <ul class="lst routes">
-              {#each detail.exposes as route (route.id)}
-                {@render routeRow(wireKey("exposes", route.id), route, lands)}
-                {#snippet lands()}
-                  {#if route.target_id !== null}
-                    {@const to = route.target_id}
-                    <span class="faint" aria-hidden="true">→</span>
-                    <button class="link" onclick={() => goToSource(addressOf({ id: to }))}>
-                      {route.target_name}
-                    </button>
-                  {:else}
-                    <span class="faint">lands on nothing knobas knows</span>
-                  {/if}
-                  <button
-                    class="tf-btn tf-sm"
-                    onclick={() => {
-                      editingRoute = route;
-                      // The same clean slate `Add a route` opens on: a failure
-                      // from the last write, or from a link that would not
-                      // open, is drawn above *Properties* and far from here,
-                      // and one left behind the dialog reads as this edit's.
-                      writeFailure = null;
-                    }}
-                  >
-                    Edit…
-                  </button>
-                {/snippet}
-              {/each}
-            </ul>
-          {/if}
-          <button
-            class="tf-btn tf-sm"
-            onclick={() => {
-              exposing = true;
-              writeFailure = null;
-            }}
-          >
-            Add a route
-          </button>
-        </section>
-
-        <section class="grp">
-          <h3 class="lab">Reachable via</h3>
-          {#if detail.reachable_via.length === 0}
-            <p class="empty">Nothing lands here.</p>
-          {:else}
-            <ul class="lst routes">
-              {#each detail.reachable_via as route (route.id)}
-                {@render routeRow(wireKey("via", route.id), route, arrives)}
-                <!--
-                  Where it lands and who offers it — the two facts that make
-                  this list readable from the arriving end. `landing` is
-                  `tree.ts`' one answer to "here, through something above, or
-                  on something inside".
-                -->
-                {#snippet arrives()}
-                  {@const landing = landingOf(detail!, route)}
-                  {#if landing.goTo}
-                    <button class="link" onclick={() => goToSource(landing.goTo)}>
-                      {landing.note}
-                    </button>
-                  {:else}
-                    <span class="faint">{landing.note}</span>
-                  {/if}
-                  <span class="faint">· exposed by</span>
-                  <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
-                    {route.asset_name}
-                  </button>
-                {/snippet}
-              {/each}
-            </ul>
-          {/if}
-        </section>
-
-        <!--
-          **Depends on this** — what breaks if this asset goes down (spec
-          §12.2, #505), which `CONTEXT.md` gives that name and warns off
-          calling *blast radius*: that is the question, this is the panel.
-
-          Drawn on every asset, like *Exposes* and *Reachable via* and unlike
-          *Monitoring*: "what breaks if I turn this off" is a question about
-          every asset, and *nothing* is a real and useful answer to it — the
-          one a reader wants before pulling a machine out.
-
-          The routes come **beneath the list and outside the count**, which is
-          `CONTEXT.md`'s own arrangement: *"Routes whose target is the asset
-          are listed beneath as reachable via routes that would break and not
-          counted"*, which #1553 amended to *"the ones whose target is the
-          asset or anything in its answer"*, so that the number is about
-          assets. They are drawn as plain rows rather than through the
-          `routeRow` snippet above, deliberately: that row carries the
-          `data-wire` end the wire measurement reads (#433), and a route here
-          landing on the asset or inside it is already in *Reachable via* with
-          one — a second copy of the same key would measure a wire twice.
-        -->
-        <section class="grp breaks">
-          <h3 class="lab">
-            Depends on this
-            {#if dependsOn !== null}<span class="n">{dependsOn.assets.length}</span>{/if}
-          </h3>
-          {#if dependsFailure !== null}
-            <p class="empty">{dependsFailure}</p>
-          {:else if dependsOn === null}
-            <p class="empty">Reading…</p>
-          {:else if dependsOn.assets.length === 0}
-            <p class="empty">Nothing depends on this.</p>
-          {:else}
-            <ul class="lst" {@attach dependsWindow.list}>
-              {#each dependsWindow.slice(dependsOn.assets) as row (row.asset.id)}
-                <li {@attach dependsWindow.row(row.asset.id)}>
-                  <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
-                    {row.asset.name}
-                  </button>
-                  <!--
-                    Why it is on the list. A relation is rendered through the
-                    vocabulary's own table, from the *listed* asset's end — it
-                    is the one that depends on, or runs on, the asset in the
-                    pane. `null` is containment, which is a `parent_id` field
-                    and not a link (ADR-0014), so there is no relation to
-                    render and the word is *inside*.
-                  -->
-                  <span class="faint"
-                    >{row.relation === null ? "inside" : readingOf(row.relation, true)}</span
-                  >
-                  {#if row.path !== null}
-                    <span class="faint path">{row.path}</span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-          {#if dependsOn !== null && dependsOn.routes.length > 0}
-            <p class="lab via">Reachable via routes that would break</p>
-            <ul class="lst">
-              {#each dependsOn.routes as route (route.id)}
-                <li class="rt">
-                  <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
-                  <span class="faint mono">{route.url}</span>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
-
-        <!--
-          **Monitoring** — the monitors watching this asset (#445, story 33's
-          own row of the pane), and under it the names the estate file gave
-          that have not found one yet (#439).
-
-          Two sections and not one, because they are two different facts. What
-          is *attached* is a `monitored-by` link to a mirrored monitor, and it
-          carries a state and a page in Kuma; what is *named* is a string the
-          file kept on the asset, which the next import or the next sync
-          resolves. A name that has found its monitor is in the first list and
-          must not be repeated in the second — the second is the queue, not the
-          roster.
-
-          Both drawn only when they have something, unlike *Exposes* and
-          *Reachable via*: those answer "what is this reachable at", which is a
-          question about every asset, and a *Monitoring* heading reading
-          "nothing" on every hand-made asset would be a sentence about a file
-          nobody imported.
-        -->
-        {#if detail.monitoring.length > 0}
-          <section class="grp watch">
-            <h3 class="lab">Monitoring</h3>
-            <ul class="lst">
-              {#each detail.monitoring as watch (watch.entity_id)}
-                <li>
-                  <button class="link" onclick={() => nav.go(monitorAddress(watch))}>
-                    {watch.name}
-                  </button>
-                  <!--
-                    A monitor that left `/metrics` is paused or deleted (#442),
-                    and either way Kuma is publishing nothing about it: no
-                    state to show and no page to open. Saying so is the point —
-                    a blank beside a live row would read as "up".
-                  -->
-                  {#if watch.tombstoned}
-                    <span class="faint">Paused or gone from Kuma</span>
-                  {:else if watch.state !== null}
-                    <span class="hl {watch.state}">{watch.state}</span>
-                  {:else}
-                    <span class="faint">no reading</span>
-                  {/if}
-                  {#if watch.web_url !== null}
-                    <button class="link" onclick={() => void openInBrowser(watch.web_url!)}>
-                      Open in Kuma
-                    </button>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
-          </section>
+        {#if on.exposes.length > 0}
+          <h3 class="tf-et-ph3">Exposes</h3>
+          <ul class="tf-et-routes">
+            {#each on.exposes as route (route.id)}
+              {@render routeRow(wireKey("exposes", route.id), route, lands)}
+              {#snippet lands()}
+                {#if route.target_id !== null}
+                  {@const to = route.target_id}
+                  lands on <button class="tf-linkish" onclick={() => goToSource(addressOf({ id: to }))}>{route.target_name}</button>
+                {:else}
+                  lands on nothing knobas knows
+                {/if}
+              {/snippet}
+            {/each}
+          </ul>
         {/if}
-
-        {#if namedAndWaiting.length > 0}
-          <section class="grp named">
-            <h3 class="lab">Named by the import, not in Kuma yet</h3>
-            <ul class="lst">
-              {#each namedAndWaiting as name (name)}
-                <li class="mono">{name}</li>
-              {/each}
-            </ul>
-          </section>
+        {#if on.reachable_via.length > 0}
+          <h3 class="tf-et-ph3">Reachable via</h3>
+          <ul class="tf-et-routes">
+            {#each on.reachable_via as route (route.id)}
+              {@render routeRow(wireKey("via", route.id), route, arrives)}
+              {#snippet arrives()}
+                {@const landing = landingOf(on, route)}
+                {#if landing.goTo}
+                  {@const there = landing.goTo}
+                  <button class="tf-linkish" onclick={() => goToSource(there)}>{landing.note}</button>
+                {:else}
+                  {landing.note}
+                {/if}, exposed by
+                <button class="tf-linkish" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>{route.asset_name}</button>
+              {/snippet}
+            {/each}
+          </ul>
         {/if}
-
-        <!--
-          **Create monitor for this asset** (#453, story 70), drawn only where
-          a source could take it.
-
-          Its own section rather than a button under *Monitoring*, because
-          *Monitoring* is drawn only when something already watches this asset
-          — and the asset this control is for is the one nothing watches yet.
-          A control that appeared the moment an asset acquired its first
-          monitor would be missing from every asset that needed it.
-
-          `monitor_targets` empty is the ordinary answer and the criterion:
-          without an account the Uptime Kuma source declares no write ops, so
-          nothing is here to draw. No disabled button and no explanatory line —
-          a reader with no monitoring source configured is not being kept from
-          anything, and *Sources* is where a Kuma is added.
-        -->
-        {#if detail.monitor_targets.length > 0}
-          <section class="grp mkmon">
-            <button class="tf-btn tf-sm" onclick={() => (creatingMonitor = true)}>
-              Create monitor for this asset
-            </button>
-          </section>
+        {#if openFailure}
+          <p class="tf-ifail tf-et-none" role="alert">{openFailure}</p>
         {/if}
-
-        <!--
-          The selected route's **own** history (spec #427: routes *"have their
-          own history"*), drawn only when the address names one. Beside the
-          asset's rather than inside the route rows: a line per route in the
-          list would be a wall of them, and what a reader who followed
-          `#/route/<id>` came for is the story of that one route.
-        -->
-        {#if routeDetail !== null && routeDetail.route.id === routeId}
-          <section class="grp">
-            <h3 class="lab">{routeDetail.route.name} — history</h3>
-            {#if routeDetail.history.length === 0}
-              <p class="empty">Nothing recorded.</p>
-            {:else}
-              <ol class="hist">
-                {#each routeDetail.history as entry (entry.id)}
-                  <li>
-                    <span class="hw">{line(entry.verb, entry.detail)}</span>
-                    <span class="ha faint">{ago(entry.at, now())}</span>
-                  </li>
-                {/each}
-              </ol>
-            {/if}
-          </section>
-        {/if}
-
-        <!--
-          The panel a ticket's slide-over draws, mounted here with the asset's
-          own links (story 36). Not a list of this view's own: the readings, the
-          withdrawn marker, the reason line and the empty state are one set of
-          decisions, and the whole point of the story is that linking an asset
-          is the same gesture — and reads the same way — as linking a ticket.
-
-          The rows open through the room's `all` address, which is the panel's
-          own encoder: an asset row lands in the Tree, because `#/asset/<id>`
-          is what `hashFor` produces for the `asset` kind.
-        -->
-        <section class="grp">
-          <LinksPanel
-            entityId={detail.asset.id}
-            links={detail.links}
-            onopen={(hash) => nav.go(hash)}
-            onunlink={(entry) => void removeLink(entry)}
-            onlink={() => {
-              linking = true;
-              writeFailure = null;
-            }}
-          />
-        </section>
-
-        <section class="grp">
-          <h3 class="lab">History</h3>
-          {#if detail.history.length === 0}
-            <p class="empty">Nothing recorded.</p>
-          {:else}
-            <ol class="hist">
-              {#each detail.history as entry (entry.id)}
-                <li>
-                  <span class="hw">{line(entry.verb, entry.detail)}</span>
-                  <span class="ha faint">{ago(entry.at, now())}</span>
-                </li>
-              {/each}
-            </ol>
-          {/if}
-        </section>
       {/if}
     </aside>
   </div>
@@ -2461,12 +1299,15 @@
     at={creating}
     {types}
     create={io.createAsset}
+    edit={io.editAsset}
     onclose={() => (creating = null)}
-    oncreated={(row) => {
+    oncreated={(row, more) => {
+      // The address, not a local insert: the new asset is picked in its own
+      // column because the tree read it back, the path a click takes. With
+      // *add another* the dialog stays and only the columns read again.
+      revision += 1;
+      if (more) return;
       creating = null;
-      // The address, not a local insert: the new asset is selected in its own
-      // column because the Tree read it back, which is the same path a click
-      // takes and the reason a cold link lands in the same place.
       nav.go(addressOf(row));
     }}
   />
@@ -2481,361 +1322,137 @@
     onclose={() => (importing = false)}
     onimported={() => {
       importing = false;
-      // The address is unchanged — an import creates assets and never moves
-      // the reader — so the re-read is what draws the new columns, the same
-      // path every other write in this view takes.
+      // An import creates assets and never moves the reader, so the re-read
+      // is what draws the new columns.
       revision += 1;
     }}
   />
-{/if}
-
-{#if linking && detail}
-  <LinkDialog
-    fromId={detail.asset.id}
-    fromTitle={detail.asset.name}
-    onclose={() => (linking = false)}
-    oncreated={() => {
-      linking = false;
-      // The address is unchanged — the asset is the same asset — so the
-      // re-read is what puts the new link in the panel and the new count in
-      // the column's badge.
-      revision += 1;
-    }}
-  />
-{/if}
-
-{#if creatingMonitor && detail}
-  {@const on = detail}
-  <MonitorDialog
-    detail={on}
-    record={io.editAsset}
-    queue={io.submitWrite}
-    onclose={() => (creatingMonitor = false)}
-    oncreated={({ name, source }) => {
-      creatingMonitor = false;
-      // The address is unchanged — the asset is the same asset — so the
-      // re-read is what puts the recorded name into the pane's *not in Kuma
-      // yet* list, which is where this monitor lives until the poll that
-      // mirrors it. The line says what knobas **did**: the monitor itself is
-      // up to a poll away, and claiming otherwise would be the optimistic
-      // update every other write in this view refuses to make.
-      push({ text: `${name} queued for ${source} — the next poll attaches it` });
-      revision += 1;
-    }}
-  />
-{/if}
-
-{#if moving && detail}
-  <MoveDialog
-    asset={detail.asset}
-    heldBy={detail.held_by}
-    tree={io.assetTree}
-    move={io.moveAsset}
-    onclose={() => (moving = false)}
-    onmoved={() => {
-      moving = false;
-      // The address is unchanged — the asset kept its id — so the re-read is
-      // what redraws the columns at the new path.
-      revision += 1;
-    }}
-  />
-{/if}
-
-{#if (exposing || editingRoute !== null) && detail}
-  <!--
-    One dialog for both, opened on a route or on nothing. `route` decides
-    which, and `closeEditors` puts both away when the selection moves — a
-    route editor left standing over another asset would save this asset's URL
-    onto that one.
-  -->
-  <!-- Bound here: a callback prop is its own scope and the narrowing above
-       does not reach into it — `deleting`'s dialog below binds for the same
-       reason. -->
-  {@const on = detail.asset}
-  <RouteDialog
-    asset={on}
-    heldBy={detail.held_by}
-    route={editingRoute}
-    tree={io.assetTree}
-    create={io.createRoute}
-    edit={io.editRoute}
-    remove={io.deleteRoute}
-    onclose={() => {
-      exposing = false;
-      editingRoute = null;
-    }}
-    onsaved={(row) => {
-      exposing = false;
-      editingRoute = null;
-      // The address, not a local insert: the route is selected in the pane
-      // because the Tree read it back, which is the path a link from a ticket
-      // takes as well.
-      nav.go(routeAddressOf(row));
-      revision += 1;
-    }}
-    ondeleted={() => {
-      exposing = false;
-      editingRoute = null;
-      // Back to the asset that exposed it: the route's own address would
-      // answer `not_found` and draw the deep-link failure over a deletion
-      // that worked — `confirmDelete`'s rule.
-      nav.go(addressOf(on));
-      revision += 1;
-    }}
-  />
-{/if}
-
-{#if deleting && detail}
-  <!-- Bound here: a `{#snippet}` is its own scope and the narrowing above does
-       not reach into it. -->
-  {@const doomed = detail.asset}
-  {@const ask = deleteConfirm(detail)}
-  <TfDialog closeButton title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
-    {#snippet body()}
-      <!--
-        The Dependencies editor's own sentence (#1463, R-11.19a), not a copy:
-        links stay marked deleted, the routes landing on it are counted, and
-        the history, which the backend keeps, goes unmentioned.
-      -->
-      <p class="ask">{ask}</p>
-      <!--
-        Nothing here counts what the asset holds. `assets::delete` refuses a
-        branch by name, with the count in the sentence, and a second copy of
-        that rule in the frontend is the copy that goes stale — so the refusal
-        below is the backend's own.
-      -->
-      {#if writeFailure}
-        <p class="fail" role="alert">{writeFailure}</p>
-      {/if}
-    {/snippet}
-    {#snippet footer()}
-      <button class="tf-btn tf-ghost" onclick={() => (deleting = false)}>Cancel</button>
-      <button class="tf-btn tf-primary tf-danger" disabled={writing} onclick={() => void confirmDelete()}>
-        {writing ? "Deleting…" : "Delete"}
-      </button>
-    {/snippet}
-  </TfDialog>
 {/if}
 
 <style>
   /*
-    Pushed to the far end of the room bar, away from the heading: this is an
-    action on the whole estate. The room bar is the page's header, so the
-    button is `.tf-btn` at the default size (design system, Controls; #2291),
-    and only the placement is this view's.
+    The design system's page: the canonical header, the filter bar as the
+    page body's toolbar, then the tree, which fills the rest of the window
+    and scrolls inside itself, the columns sideways and each column and the
+    preview down.
   */
-  .imp {
-    margin-left: auto;
-  }
-
-  /* Three rows now: the room bar, the search strip, and the tree under both.
-     `unported.css` gives `.view` two, and the strip is this view's own. */
-  .view {
-    grid-template-rows: auto auto 1fr;
-  }
-
-  /* Columns scroll on their own axis; the pane does not move. Story 33.
-     `relative` since #433: the wire layer is measured in this element's own
-     pixels and positioned in them. */
-  .tree {
-    position: relative;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  /*
-    The wires (story 31). One transparent layer across the whole tree; the
-    curves are measured in `AssetsView`'s own `measureWires`, because where a
-    row sits is a fact about a scroll offset and a font and no stylesheet
-    knows it.
-
-    `pointer-events: none` is what keeps it a drawing: every wire lies over
-    rows and buttons a reader clicks, and a layer that took the click would
-    make the columns unusable to look at a line.
-  */
-  .wires {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    overflow: visible;
-  }
-
-  .wires path {
-    fill: none;
-    stroke-linecap: round;
-  }
-
-  .wires .halo {
-    stroke: var(--bg);
-    stroke-width: 3.2;
-    opacity: 0.92;
-  }
-
-  .wires .wire {
-    stroke: var(--amber);
-    stroke-width: 1;
-    opacity: 0.65;
-  }
-
-  /* Reached through something rather than pointed at: a spine standing in for
-     the row, or a route that arrives at an asset above this one. */
-  .wires .wire.dashed {
-    stroke-dasharray: 3 3;
-  }
-
-  .wires .land {
-    fill: var(--amber);
-    opacity: 0.8;
-  }
-
-  /*
-    The one piece of motion on this surface: a wire fades in when a selection
-    brings it, and never moves again on its own — the paths are keyed by their
-    route, so scrolling changes a `d` on an element that is already there.
-
-    Story 31's *off under reduced motion's no-animation rule*: the wires are
-    still drawn, and they arrive instead of appearing over 160ms.
-  */
-  .wires .halo,
-  .wires .wire,
-  .wires .land {
-    animation: wire-in 160ms ease-out both;
-  }
-
-  @keyframes wire-in {
-    from {
-      opacity: 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .wires .halo,
-    .wires .wire,
-    .wires .land {
-      animation: none;
-    }
-  }
-
-  .cols {
-    display: flex;
-    align-items: stretch;
-    min-width: 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  /*
-    The column and its header travel together; the rows scroll under it.
-
-    Its 220px is `tree.ts`'s `COLUMN_WIDTH` -- see the spine's rule below.
-    The width moved here from `.col` when the header arrived (#429): what the
-    strip lays out is this wrapper, so this is the number the arithmetic has
-    to be told.
-  */
-  .colw {
+  .tf-et {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    width: 220px;
-    flex: none;
     min-height: 0;
-    border-right: 1px solid var(--hair);
-  }
-
-  .col-h {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 24px;
-    flex: none;
-    padding: 0 4px 0 10px;
-    border-bottom: 1px solid var(--hair);
-  }
-
-  .col-h .col-t {
-    flex: 1;
     min-width: 0;
+  }
+
+  .tf-et > * {
+    min-width: 0;
+  }
+
+  .tf-et-head {
+    padding-bottom: 14px;
+  }
+
+  .tf-et > .tf-banner {
+    margin: 0;
+  }
+
+  .tf-et-bar {
+    position: relative;
+    z-index: 6;
+  }
+
+  .tf-et-find {
+    position: relative;
+  }
+
+  .tf-et-find svg {
+    flex: none;
+  }
+
+  .tf-et-res {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: -1px;
+    z-index: 8;
+    display: grid;
+    gap: 1px;
+    width: 380px;
+    max-height: 360px;
+    margin: 0;
+    padding: 4px;
+    overflow-y: auto;
+    list-style: none;
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--sheet);
+    box-shadow: var(--shadow);
+  }
+
+  .tf-et-hit {
+    display: grid;
+    gap: 1px;
+    width: 100%;
+    padding: 5px 8px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--ink);
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .tf-et-hit.tf-et-on,
+  .tf-et-hit:hover {
+    background: var(--sheet-2);
+  }
+
+  .tf-et-hit .tf-et-nm {
+    font-size: var(--t-sm);
+    font-weight: 600;
+  }
+
+  .tf-et-hit .tf-et-pth {
+    font-size: var(--t-xs);
+    color: var(--ink-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 600 10px/1 var(--disp);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
   }
 
-  .col-h .plus {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 2px;
-    color: var(--muted);
-    font: 400 14px/1 var(--sans);
+  .tf-et-none {
+    padding: 6px 8px;
+    color: var(--ink-2);
+    font-size: var(--t-sm);
   }
 
-  .col-h .plus:hover:not(:disabled) {
-    background: var(--raised);
-    color: var(--text);
+  /* The open-alert strip (#444): six rows, then it scrolls, so twenty broken monitors leave the columns on screen. */
+  .tf-et-alerts {
+    padding: 6px 22px;
+    background: var(--err-bg);
+    border-bottom: 1px solid var(--rule);
   }
 
-  .col-h .plus:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  /*
-    The search strip: one row, the box on the right, and its offers hanging
-    over the columns rather than pushing them down while a reader types.
-  */
-  /* The open-alert strip (#444). A band above the search, the same 14px
-     gutter every strip in this view uses. */
-  .alerts {
-    padding: 4px 14px 6px;
-    border-bottom: 1px solid var(--hair);
-  }
-
-  .alerts ul {
+  .tf-et-alerts ul {
     display: flex;
     flex-direction: column;
     gap: 2px;
     margin: 0;
     padding: 0;
     list-style: none;
-    /* Six rows, then it scrolls: an estate with twenty broken monitors must
-       not push the columns off the screen. */
     max-height: 132px;
     overflow-y: auto;
   }
 
-  .alerts li {
+  .tf-et-alerts li {
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 20px;
+    min-height: 22px;
+    font-size: var(--t-sm);
   }
 
-  /* The state as a dot, not a word: `down` and `warn` are two colours the
-     rest of this app already uses, and a word here would repeat what the
-     colour says in the space the monitor's name needs. */
-  .alerts .st {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    flex: none;
-  }
-
-  .alerts .st.down {
-    background: var(--fail);
-  }
-
-  .alerts .st.warn {
-    background: var(--amber);
-  }
-
-  .alerts .go {
+  .tf-et-go {
     display: flex;
     align-items: baseline;
     gap: 8px;
@@ -2849,577 +1466,436 @@
     cursor: pointer;
   }
 
-  .alerts .go:hover .nm {
+  .tf-et-go:hover .tf-et-nm {
     text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
-  .alerts .mn {
-    font: 500 11px/1.4 var(--mono);
-    color: var(--text);
+  .tf-et-mn {
+    font-weight: 600;
     white-space: nowrap;
   }
 
-  .alerts .nm,
-  .alerts .pth,
-  .alerts .ak,
-  .alerts .wh {
-    font: 400 11px/1.4 var(--mono);
+  .tf-et-go .tf-et-nm {
+    font-family: var(--mono);
+    font-variant-ligatures: none;
+    font-size: var(--t-xs);
+    white-space: nowrap;
+  }
+
+  .tf-et-go .tf-et-pth {
+    font-size: var(--t-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  /* Pushed to the far end, so the readings line up down the strip however
-     long the names before them are. */
-  .alerts .wh {
+  .tf-et-wh {
     margin-left: auto;
     flex: none;
+    font-size: var(--t-xs);
   }
 
-  .find {
-    position: relative;
-    display: flex;
-    justify-content: flex-end;
-    padding: 5px 14px;
-    border-bottom: 1px solid var(--hair);
-  }
-
-  .find .q {
-    width: 220px;
-    height: 24px;
-    padding: 0 8px;
-    border: 1px solid var(--hair);
-    border-radius: 2px;
-    background: var(--panel);
-    font-size: 12px;
-  }
-
-  .find .res {
-    position: absolute;
-    top: 100%;
-    right: 14px;
-    z-index: 5;
-    display: grid;
-    gap: 1px;
-    width: 320px;
-    max-height: 320px;
-    margin: 4px 0 0;
-    padding: 4px;
-    overflow-y: auto;
-    list-style: none;
-    border: 1px solid var(--hair);
-    background: var(--panel);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
-  }
-
-  .find .hit {
-    display: grid;
-    width: 100%;
-    padding: 4px 6px;
-    text-align: left;
-    font-size: 12px;
-  }
-
-  .find .hit.on,
-  .find .hit:hover {
-    background: var(--raised);
-  }
-
-  .find .hit .pth {
-    font-family: var(--mono);
-    font-size: 10.5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .find .none {
-    padding: 6px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  .col {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
+  /* Columns scroll on their own axis; the preview does not move (story 33). `relative` for the wire layer (#433). */
+  .tf-et-tree {
     flex: 1;
-    margin: 0;
-    padding: 6px 0;
-    list-style: none;
-    overflow-y: auto;
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    min-height: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--rule);
+  }
+
+  .tf-et-cols {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    background: var(--paper);
   }
 
   /*
-    A spine (story 28). Its 30px, and `.colw`'s 220px above, are `tree.ts`'s
-    `SPINE_WIDTH` and `COLUMN_WIDTH`: the arithmetic that decides *which*
-    columns collapse is pure, so it has to be told how wide the things it
-    arranges are drawn. `the strip's arithmetic measures the widths this view
-    actually draws` in `tree.test.ts` reads both numbers back out of this file
-    — changing one without the other makes the strip overflow the pane the
-    collapse exists to protect, and that test is what says so.
+    The column and its header travel together; the rows scroll under it. Its
+    220px is `tree.ts`'s `COLUMN_WIDTH`, and the spine's 30px below is
+    `SPINE_WIDTH`: `the strip's arithmetic measures the widths this view
+    actually draws` in `tree.test.ts` reads both back out of this file.
   */
+  .tf-et-colw {
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    min-height: 0;
+    border-right: 1px solid var(--rule-2);
+  }
+
+  .tf-et-colh {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    flex: none;
+    padding: 0 6px 0 12px;
+    border-bottom: 1px solid var(--rule-2);
+    background: var(--sheet);
+  }
+
+  .tf-et-colt {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--t-sm);
+    font-weight: 600;
+  }
+
+  .tf-et-colc {
+    flex: none;
+    font-size: var(--t-xs);
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tf-et-colh svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .tf-et-col {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    margin: 0;
+    padding: 4px 0;
+    list-style: none;
+    overflow-y: auto;
+  }
+
   /* A long column's room for the rows it has not drawn (#2210): never shrunk to fit the column. */
-  .col > li.tf-wgap {
+  .tf-et-col > li:global(.tf-wgap) {
     flex: none;
   }
 
-  .col.spine {
-    width: 30px;
-    flex: none;
+  /* A row is 30px tall (`ROW_PX`), its spacing inside its box, as a windowed row's must be. */
+  .tf-et-row {
+    display: flex;
     align-items: center;
-    padding: 6px 0;
-    /* Its own, since #429 moved the full column's to the `.colw` wrapper the
-       spine does not have: without it a run of spines is one grey block. */
-    border-right: 1px solid var(--hair);
-    background: var(--panel);
+    gap: 7px;
+    width: 100%;
+    height: 30px;
+    padding: 0 8px 0 10px;
+    border: 0;
+    background: none;
+    color: var(--ink);
+    font: inherit;
+    font-size: var(--t-sm);
+    text-align: left;
     cursor: pointer;
   }
 
-  .col.spine:hover {
-    background: var(--raised);
+  .tf-et-row:hover {
+    background: var(--sheet-2);
   }
 
-  .col.spine .smg {
+  /* The path: every column marks the row the reader came through. */
+  .tf-et-row.tf-et-on {
+    background: var(--sheet-2);
+    font-weight: 600;
+  }
+
+  /* The pick itself, the deepest of them: an outline, as every selection in the shell is. */
+  .tf-et-row.tf-sel {
+    box-shadow: inset 0 0 0 2px var(--ink);
+    border-radius: 4px;
+  }
+
+  .tf-et-row .tf-et-nm {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tf-et-chev {
     flex: none;
-    font: 500 9.5px/1 var(--mono);
+    color: var(--ink-2);
+    font-size: var(--t-lg);
+    line-height: 1;
+  }
+
+  .tf-et-badge {
+    flex: none;
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-size: var(--t-2xs);
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tf-et-badge.tf-et-warn {
+    background: var(--warn-bg);
+    color: var(--warn);
+  }
+
+  .tf-et-badge.tf-et-down {
+    background: var(--err-bg);
+    color: var(--err);
+  }
+
+  .tf-et-badge.tf-et-work {
+    background: var(--muted-bg);
     color: var(--muted);
   }
 
-  /* The name, turned on its side: a 30px column has no other way to carry
-     one, and the path is the thing a reader needs back. */
-  .col.spine .vn {
+  /* A spine (story 28): 30px, `SPINE_WIDTH`; the name of the reader's own path, turned on its side. */
+  .tf-et-spine {
+    width: 30px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 8px 0;
+    border: 0;
+    border-right: 1px solid var(--rule-2);
+    background: var(--sheet);
+    color: var(--ink-2);
+    cursor: pointer;
+  }
+
+  .tf-et-spine:hover {
+    background: var(--sheet-2);
+    color: var(--ink);
+  }
+
+  .tf-et-smg {
+    flex: none;
+    font: 600 9px/1 var(--mono);
+  }
+
+  .tf-et-vn {
     flex: 1;
     min-height: 0;
-    margin: 7px 0;
+    margin: 8px 0;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    font: 600 11px/1 var(--disp);
-    letter-spacing: 0.1em;
-    color: var(--faint);
+    font-size: var(--t-xs);
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .col.spine:hover .vn {
-    color: var(--muted);
+  .tf-et-empty {
+    margin: 40px auto;
   }
 
-  .none {
+  .tf-et-emptyacts {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: var(--control-gap);
   }
 
-  .row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .tf-et-blank {
+    margin: 0;
+    padding: 22px 16px;
+    color: var(--ink-2);
+    font-size: var(--t-sm);
+  }
+
+  /*
+    The wires (story 31): one transparent layer across the whole tree, the
+    curves measured in `measureWires`. `pointer-events: none` keeps it a
+    drawing over rows a reader clicks.
+  */
+  .tf-et-wires {
+    position: absolute;
+    inset: 0;
     width: 100%;
-    height: var(--row);
-    padding: 0 8px 0 10px;
-    text-align: left;
-    color: var(--text);
-    font-size: 12px;
+    height: 100%;
+    pointer-events: none;
+    overflow: visible;
   }
 
-  .row:hover {
-    background: var(--raised);
+  .tf-et-wires path {
+    fill: none;
+    stroke-linecap: round;
   }
 
-  .row.on {
-    background: var(--raised);
-    box-shadow: inset 2px 0 0 var(--text);
+  .tf-et-halo {
+    stroke: var(--paper);
+    stroke-width: 3.2;
+    opacity: 0.92;
   }
 
-  .row .nm {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .tf-et-wire {
+    stroke: var(--info);
+    stroke-width: 1.2;
+    opacity: 0.75;
   }
 
-  .row .chev {
-    color: var(--faint);
-    flex: none;
+  /* Reached through something rather than pointed at: a spine standing in for the row, or a route arriving above. */
+  .tf-et-wire.tf-et-dashed {
+    stroke-dasharray: 3 3;
   }
 
-  /* Story 32's badge. Amber and red are the app's own two alarm colours
-     (`--amber`, `--fail`), and the number is monospaced so a column of them
-     lines up at one glance rather than being read one row at a time. */
-  .row .badge {
-    flex: none;
-    min-width: 16px;
-    padding: 0 4px;
-    border: 1px solid currentColor;
-    border-radius: 8px;
-    font-family: var(--mono);
-    font-size: 10px;
-    line-height: 14px;
-    text-align: center;
+  .tf-et-land {
+    fill: var(--info);
+    opacity: 0.85;
   }
 
-  .row .badge.warn {
-    color: var(--amber);
+  /* The one motion here answers the reader: a wire fades in when a pick brings it. */
+  .tf-et-halo,
+  .tf-et-wire,
+  .tf-et-land {
+    animation: tf-et-wire-in 160ms ease-out both;
   }
 
-  .row .badge.down {
-    color: var(--fail);
+  @keyframes tf-et-wire-in {
+    from {
+      opacity: 0;
+    }
   }
 
-  /* The linked-work badge carries no alarm colour, because a linked ticket is
-     not a fault: it is the muted foreground, so it reads as a count rather
-     than as a state. It is drawn *before* the problem badge, so the two never
-     swap places on a row that has both. */
-  .row .badge.work {
-    color: var(--muted);
-    border-color: var(--hair2);
+  @media (prefers-reduced-motion: reduce) {
+    .tf-et-halo,
+    .tf-et-wire,
+    .tf-et-land {
+      animation: none;
+    }
   }
 
-  /* Positioned so that it paints over the wire layer, which is absolute and
-     would otherwise draw its last few pixels across the route rows. */
-  .pane {
+  /* Painted over the wire layer, which would otherwise draw its last pixels across the route rows. */
+  .tf-et-pane {
     position: relative;
     z-index: 1;
-    border-left: 1px solid var(--hair);
-    background: var(--panel);
-    padding: 10px 12px 18px;
+    min-width: 0;
     overflow-y: auto;
-    min-width: 0;
+    padding: 0 0 18px;
+    border-left: 1px solid var(--rule);
+    background: var(--sheet);
   }
 
-  .pane-h {
+  .tf-et-ph {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
-
-  .pane-h h2 {
-    font: 600 16px/1.2 var(--disp);
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .crumb {
-    font-size: 11px;
-    color: var(--muted);
-    margin: 0 0 14px;
-    overflow-wrap: anywhere;
-  }
-
-  .grp {
-    margin: 0 0 14px;
-  }
-
-  .grp h3 {
-    margin: 0 0 4px;
-  }
-
-  /* The count beside *Depends on this* (#505): the number of assets that
-     break, and never the routes, which sit under their own line below. */
-  .breaks .n {
-    margin-left: 6px;
-    font: 600 11px/1 var(--mono);
-    color: var(--fg);
-  }
-
-  /* The routes' own line, inside the section rather than a heading of its
-     own: they belong to this panel's answer and are outside its count. */
-  .breaks .via {
-    margin: 8px 0 4px;
-  }
-
-  /* A line here carries three things and the third is a whole path, which in
-     this pane is longer than the other two together. The shared `.lst` row is
-     one flex line, and it made a mess of both: squeezed into a 300px column
-     it broke "knobas-teamcity" across two lines — the one word a reader is
-     scanning for — and letting it wrap instead pushed each path down where it
-     read as the *next* asset's. So a grid, `.lst.routes`' treatment: name and
-     relation on the first row, the path under them on its own. */
-  .breaks .lst li {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0 8px;
-    margin-bottom: 5px;
-  }
-
-  /* A route's line is a name and its URL. A button centres its text, so a
-     name too long for the column wrapped centred and pushed the URL right
-     (#1606): the name is left-aligned, and the URL wraps beneath it when the
-     two do not fit one line. */
-  .breaks .lst li.rt {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 8px;
-  }
-
-  .breaks .lst li.rt .link {
-    text-align: left;
-  }
-
-  .breaks .lst li.rt .mono {
-    flex: 0 0 auto;
-    max-width: 100%;
-    overflow-wrap: anywhere;
-    font-variant-ligatures: none;
-  }
-
-  .breaks .lst li .path {
-    grid-column: 1 / -1;
-  }
-
-  .props {
-    display: grid;
-    gap: 2px;
-    margin: 0;
-  }
-
-  .prop {
-    display: grid;
-    grid-template-columns: 108px minmax(0, 1fr);
-    column-gap: 8px;
-    align-items: baseline;
-    font-size: 12px;
-  }
-
-  /* A custom key is marked, so the reader can tell the schema from their own
-     additions without the pane keeping a copy of the type table. */
-  .prop.own dt::after {
-    content: "*";
-    color: var(--faint);
-  }
-
-  .prop dt {
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .prop dd {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin: 0;
-    font-family: var(--mono);
-    overflow-wrap: anywhere;
-  }
-
-  /*
-     The *In force* rows stack their value and the note about where it came
-     from, rather than sharing one line: the note is a sentence, and `.prop
-     dd`'s `overflow-wrap: anywhere` -- right for an IP or an image tag --
-     breaks a sentence one character at a time in a 200px pane.
-  */
-  .prop.force dd {
-    display: flex;
-    flex-direction: column;
     align-items: flex-start;
-    gap: 1px;
+    gap: 10px;
+    padding: 14px 14px 8px;
   }
 
-  /*
-     Where a value came from, under the value and never instead of it. One
-     line, elided if the ancestor's name is long -- the treatment `.row .nm`
-     gets one section up, and the reason is the same: this is a sentence, and
-     a sentence broken across three lines in a 200px column reads as three.
-  */
-  .prop .src {
-    max-width: 100%;
-    font-family: var(--sans);
-    font-size: 11px;
-    text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .tf-et-ph .tf-dp-mono {
+    margin-top: 3px;
   }
 
-  .prop button.src {
-    text-decoration: underline;
-  }
-
-  /*
-     One vocabulary, one palette: an asset's health and a monitor's state are
-     the same four words, so the two surfaces share these rules rather than
-     asserting in prose that they agree. `.none` is health's alone -- a monitor
-     has no such state -- and Kuma's `pending` and `maintenance` fall through
-     to the inherited colour, which is what "no opinion" should look like.
-  */
-  .prop .hl.up,
-  .watch .hl.up {
-    color: var(--ok);
-  }
-
-  .prop .hl.warn,
-  .watch .hl.warn {
-    color: var(--amber);
-  }
-
-  .prop .hl.down,
-  .watch .hl.down {
-    color: var(--fail);
-  }
-
-  .prop .hl.none {
-    color: var(--faint);
-  }
-
-  /* The value reads as the value it is until it is hovered: a pane of boxes
-     would be a form, and this is a record that can be edited. */
-  .prop dd .val {
+  .tf-et-pt {
     flex: 1;
     min-width: 0;
-    padding: 0 3px;
-    text-align: left;
-    color: inherit;
-    font: inherit;
-    border-radius: 2px;
+  }
+
+  .tf-et-pt h2 {
+    font-size: var(--t-xl);
+    font-weight: 700;
+    font-variation-settings: "wdth" 88;
+    line-height: 1.2;
     overflow-wrap: anywhere;
   }
 
-  .prop dd .val:hover {
-    background: var(--raised);
+  .tf-et-pt p {
+    margin: 2px 0 0;
+    font-size: var(--t-sm);
   }
 
-  .prop dd .inp {
-    height: 22px;
-    font: inherit;
-  }
-
-  .acts {
+  .tf-et-pacts {
     display: flex;
+    gap: var(--control-gap);
     flex-wrap: wrap;
-    gap: var(--control-gap);
-    margin: 0 0 12px;
+    padding: 0 14px 12px;
   }
 
-  .wf {
-    margin: -6px 0 12px;
-    font-size: 12px;
-  }
-
-  .tf {
-    margin: 0;
-    padding: 6px 12px;
-    font-size: 12px;
-    border-bottom: 1px solid var(--hair);
-  }
-
-  .add {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 88px;
-    gap: 6px;
-    margin-top: 8px;
-  }
-
-  .add .add-f {
-    grid-column: 1 / -1;
-    display: flex;
-    justify-content: flex-end;
-    gap: var(--control-gap);
-  }
-
-  .ask {
-    margin: 0;
-    font-size: 13px;
-  }
-
-  /* One route per row: what it is called, where it answers, and where it
-     lands — three lines at the width the pane has, not a table.
-
-     `.lst.routes` and not `.routes`, because `.lst li` below carries the same
-     specificity and comes later in the file, so it was winning: the route
-     rows were laid out as one flex line each and ran off the side of the pane
-     the moment a route carried a real property. Found by pointing a browser
-     at the estate file's own routes (#433). */
-  .lst.routes li {
-    display: grid;
-    gap: 2px;
-    padding: 4px 0;
-    border-bottom: 1px solid var(--hair);
-  }
-
-  .routes li.on {
-    box-shadow: inset 2px 0 0 var(--link);
-    padding-left: 6px;
-  }
-
-  .routes .rname {
+  .tf-et-ph3 {
     display: flex;
     align-items: baseline;
-    gap: 6px;
+    gap: 8px;
+    margin: 12px 14px 4px;
+    font-size: var(--t-sm);
+    font-weight: 600;
   }
 
-  .routes .vis {
-    font: 500 9px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--amber);
+  .tf-et-kv > div {
+    grid-template-columns: minmax(0, 40%) minmax(0, 1fr);
+    padding-left: 14px;
+    padding-right: 14px;
   }
 
-  .routes .url {
-    justify-self: start;
-    max-width: 100%;
+  .tf-et-src {
+    font-size: var(--t-xs);
+    text-align: left;
+  }
+
+  .tf-et-v {
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 11px;
-    color: var(--muted);
-    text-align: left;
   }
 
-  .routes .url:hover {
-    color: var(--link);
+  .tf-et-v:global(.tf-mono) {
+    font-size: var(--t-sm);
   }
 
-  .routes .rto,
-  .routes .rprop {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px;
-    font-size: 11px;
-    /* A real route property can be a command line (until #634 the estate's
-       tunnel routes carried a whole `ssh -N -L ...`), which wraps at no space
-       there is: without this the pane scrolls
-       sideways and takes the route rows -- and the wires that leave them --
-       with it. Found by pointing a browser at the estate file's own routes. */
-    overflow-wrap: anywhere;
-  }
-
-  .lst,
-  .hist {
-    display: grid;
-    gap: 2px;
+  .tf-et-routes {
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 12px;
   }
 
-  .lst li,
-  .hist li {
+  .tf-et-routes li {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
-    gap: 8px;
+    gap: 2px 8px;
+    padding: 6px 14px;
+    border-top: 1px solid var(--rule-2);
+    font-size: var(--t-sm);
   }
 
-  .hist .hw {
-    flex: 1;
-    min-width: 0;
-    overflow-wrap: anywhere;
+  .tf-et-rname {
+    font-weight: 600;
   }
 
-  .hist .ha {
-    flex: none;
-    font-family: var(--mono);
-    font-size: 11px;
+  .tf-et-url {
+    max-width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--ink-2);
+    font-size: var(--t-xs);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .tf-et-url:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+
+  .tf-et-rto {
+    flex-basis: 100%;
+    color: var(--ink-2);
+    font-size: var(--t-xs);
+  }
+
+  .tf-et-rto :global(.tf-linkish) {
+    font-size: var(--t-xs);
+    color: var(--ink);
   }
 </style>

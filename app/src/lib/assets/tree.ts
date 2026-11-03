@@ -106,16 +106,24 @@ export function selectionIn(path: ColumnPath, column: number): string | null {
 }
 
 /**
- * Where an asset's address lives — `#/asset/<id>`, spec §2.
+ * Where an asset is picked in the tree: `#/assets/<id>`.
  *
- * A named helper because the Tree builds one of these for every row it draws,
- * including the ones nobody has selected; it **delegates to `hashFor`**, so
+ * A named helper because the tree builds one of these for every row it draws,
+ * including the ones nobody has picked; it **delegates to `hashFor`**, so
  * there is still exactly one encoder and a link from a ticket and a click in a
  * column cannot end up in different places.
  */
 export function addressOf(row: Pick<AssetRow, "id">): string {
   return hashFor({ view: "assets", tab: "tree", assetId: row.id });
 }
+
+/** Where an asset's own page lives: `#/asset/<id>`, spec §2. */
+export function pageOf(row: Pick<AssetRow, "id">): string {
+  return hashFor({ view: "assets", tab: "asset", assetId: row.id });
+}
+
+/** Which of the two an asset link opens: {@link addressOf} in the tree, {@link pageOf} on a page. */
+export type AssetLink = (row: Pick<AssetRow, "id">) => string;
 
 /**
  * Where a route's address lives — `#/route/<id>`, spec §2 (#432).
@@ -125,7 +133,7 @@ export function addressOf(row: Pick<AssetRow, "id">): string {
  * are the same string.
  */
 export function routeAddressOf(route: Pick<RouteRow, "id">): string {
-  return hashFor({ view: "assets", tab: "tree", assetId: null, routeId: route.id });
+  return hashFor({ view: "assets", tab: "asset", assetId: null, routeId: route.id });
 }
 
 /**
@@ -176,7 +184,7 @@ function throughAnAncestor(detail: AssetDetail, route: RouteRow): boolean {
   return detail.held_by.some((held) => held.id === route.target_id);
 }
 
-export function landingOf(detail: AssetDetail, route: RouteRow): Landing {
+export function landingOf(detail: AssetDetail, route: RouteRow, link: AssetLink = addressOf): Landing {
   if (route.target_id === null) {
     // Not reachable from this list — a route with no target reaches nobody —
     // so this is the total function's honest answer rather than a case the
@@ -187,7 +195,7 @@ export function landingOf(detail: AssetDetail, route: RouteRow): Landing {
   const name = route.target_name ?? route.target_id;
   return {
     note: throughAnAncestor(detail, route) ? `through ${name}` : `inside, on ${name}`,
-    goTo: addressOf({ id: route.target_id }),
+    goTo: link({ id: route.target_id }),
   };
 }
 
@@ -256,12 +264,12 @@ export interface ValueSource {
   goTo: string | null;
 }
 
-export function sourceOf(detail: AssetDetail, from: Inherited<unknown>): ValueSource {
+export function sourceOf(detail: AssetDetail, from: Inherited<unknown>, link: AssetLink = addressOf): ValueSource {
   const here = from.source_id === detail.asset.id;
   return {
     here,
     note: here ? "set here" : `inherited from ${from.source_name}`,
-    goTo: here ? null : addressOf({ id: from.source_id }),
+    goTo: here ? null : link({ id: from.source_id }),
   };
 }
 

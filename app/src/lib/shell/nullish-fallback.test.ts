@@ -31,6 +31,10 @@ const svelteVersion = (JSON.parse(readFileSync(join(APP, "node_modules/svelte/pa
 /** Hits that are right at runtime, keyed `file :: expression`. */
 const KEPT = new Map<string, string>([
   [
+    'src/lib/tf/asset/TfAsset.svelte :: field.value ?? ""',
+    "a number field's binding hands back a number, or null when emptied, under the form's `string`",
+  ],
+  [
     "src/lib/ipc/index.ts :: JSON.stringify(error) ?? String(error)",
     "`JSON.stringify` returns undefined for a function or a symbol, which its type hides",
   ],

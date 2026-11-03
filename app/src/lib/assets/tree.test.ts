@@ -18,6 +18,7 @@ import { noFilters } from "../ipc";
 import type { AssetDetail, AssetRow, RouteRow } from "../ipc/assets";
 import {
   addressOf,
+  pageOf,
   columnPathFor,
   emptyPath,
   heldByPath,
@@ -191,9 +192,11 @@ test("the held-by line ends at the asset and held_by does not", () => {
  * every entity address in this app follows, and the reason `addressOf`
  * delegates to `hashFor` instead of building the string itself.
  */
-test("a row's address is the asset's own, encoded once", () => {
-  expect(addressOf({ id: "asset:7f2c" })).toBe("#/asset/asset:7f2c");
-  expect(addressOf({ id: "asset:knobas/jira#1" })).toBe("#/asset/asset:knobas%2Fjira%231");
+test("a row's address is its pick in the tree, and its page is its own, each encoded once", () => {
+  expect(addressOf({ id: "asset:7f2c" })).toBe("#/assets/asset:7f2c");
+  expect(addressOf({ id: "asset:knobas/jira#1" })).toBe("#/assets/asset:knobas%2Fjira%231");
+  expect(pageOf({ id: "asset:7f2c" })).toBe("#/asset/asset:7f2c");
+  expect(pageOf({ id: "asset:knobas/jira#1" })).toBe("#/asset/asset:knobas%2Fjira%231");
 });
 
 /**
@@ -277,8 +280,12 @@ test("a value set here has no link and an inherited one names its ancestor", () 
   ).toEqual({
     here: false,
     note: "inherited from hel1",
-    goTo: "#/asset/asset:hel1",
+    goTo: "#/assets/asset:hel1",
   });
+  // On an asset's page the same link opens the ancestor's page.
+  expect(sourceOf(asset, { value: "prod", source_id: site.id, source_name: "hel1" }, pageOf).goTo).toBe(
+    "#/asset/asset:hel1",
+  );
 
   expect(
     sourceOf(asset, {
@@ -460,8 +467,8 @@ test("the strip's arithmetic measures the widths this view actually draws", () =
     return Number(rule[1]);
   };
 
-  expect(widthOf(".colw")).toBe(COLUMN_WIDTH);
-  expect(widthOf(".col.spine")).toBe(SPINE_WIDTH);
+  expect(widthOf(".tf-et-colw")).toBe(COLUMN_WIDTH);
+  expect(widthOf(".tf-et-spine")).toBe(SPINE_WIDTH);
 });
 
 /**
@@ -598,7 +605,7 @@ test("revealing a match is opening its address", () => {
   const [first] = matchesIn(
     answer([{ kind: "asset", hits: [{ id: "asset:ct", title: "postgres" }] }]),
   );
-  expect(addressOf({ id: first!.id })).toBe("#/asset/asset:ct");
+  expect(addressOf({ id: first!.id })).toBe("#/assets/asset:ct");
 });
 
 /**

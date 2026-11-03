@@ -314,7 +314,7 @@ The week under the day strip, Monday to Sunday with empty weekends collapsed: a 
 _Avoid_: report, timecard, week view
 
 **Passive attribution**:
-The opt-in recording of which entity was in the foreground (the open detail, else the asset in the [Tree](#tree)'s pane, else the chosen [job](#job)'s page at home, else nothing) while the window is focused, as passive [blocks](#block) derived from [observations](#observation). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. Browsing the Tree with nothing selected is a gap. Observations are kept a month.
+The opt-in recording of which entity was in the foreground (the open detail, an [asset page](#asset-page) among them, else the asset picked in the [Tree](#tree), else the chosen [job](#job)'s page at home, else nothing) while the window is focused, as passive [blocks](#block) derived from [observations](#observation). A gap stays a gap until a person assigns it; nothing recorded this way reaches a source on its own. Browsing the Tree with nothing selected is a gap. Observations are kept a month.
 _Avoid_: automatic tracking, activity tracking (the activity stream's word)
 
 **Observation**:
@@ -405,15 +405,19 @@ _Avoid_: kanban, board (unqualified)
 Retired; the app no longer draws one. A gesture that made one [tile](#tile) fill a [room](#room)'s grid.
 
 **Tree**:
-The Assets view, at `#/assets` and `#/asset/<id>`, reached from Dependencies' *Asset tree* button: the [estate](#estate) as Miller columns, one column per level. Its fixed pane offers *Create monitor for this asset* where a configured [source](#source) offers the op, and shows no control at all where none does. It has no sibling tab.
+The asset tree, at `#/assets` and, with an [asset](#asset) picked, `#/assets/<id>`, reached from Dependencies' *Asset tree* button: the [estate](#estate) as Miller columns, one column per level, for finding where an asset sits and adding assets at the level they belong. Beside the columns a fixed preview of the picked asset: what is in force on it, what is filled in and its routes, with *Open asset* to its [asset page](#asset-page). The tree edits no field. It has no sibling tab.
 _Avoid_: board, assets board, columns view
 
+**Asset page**:
+One [asset](#asset)'s own page, at `#/asset/<id>`, and at `#/route/<id>` for the asset exposing that [route](#route), with the route picked: what it is and where it sits, what is stored on it, how it is reached, what it holds, what is in force on it, what [depends on this](#depends-on-this), what watches it, what it is linked to and its history. *Edit* turns the name, environment, owner, own status and properties into one form saved as one write; where it sits changes by *Move…*. It offers *Create monitor* where a configured [source](#source) offers the op, and shows no control at all where none does.
+_Avoid_: asset detail, the pane (the tree's preview), asset editor (Dependencies' dialog)
+
 **Spine**:
-A column of the [Tree](#tree) collapsed to a 30px strip, labelled with the [asset](#asset) of the reader's own path that runs through it, re-expanded by clicking it. What collapses is decided by the width left beside the fixed pane, never by depth.
+A column of the [Tree](#tree) collapsed to a 30px strip, labelled with the [asset](#asset) of the reader's own path that runs through it, re-expanded by clicking it. What collapses is decided by the width left beside the fixed preview, never by depth.
 _Avoid_: breadcrumb (a line of names), rail, collapsed column (as a name)
 
 **Wire**:
-A line the [Tree](#tree)'s pane draws from a [route](#route)'s row to the asset at the route's far end: the target for a route the asset exposes, the exposer for one it is reachable via. It lands on that asset's row or on the [spine](#spine) hiding its column, dashed when the far end is reached through something rather than pointed at. A far end no open column lists draws nothing.
+A line the [Tree](#tree)'s preview draws from a [route](#route)'s row to the asset at the route's far end: the target for a route the asset exposes, the exposer for one it is reachable via. It lands on that asset's row or on the [spine](#spine) hiding its column, dashed when the far end is reached through something rather than pointed at. A far end no open column lists draws nothing.
 _Avoid_: edge, arrow, connector, link (knobas' relation between entities)
 
 **Monitors**:

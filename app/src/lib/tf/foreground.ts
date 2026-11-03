@@ -16,10 +16,10 @@
  *   or a place inside the page (`#/pr/<id>/files`, `#/repo/<id>/commits/<sha>`,
  *   `#/build/<pipeline>/<run>/tests`, `#/page/<id>/3`) is the same entity, so
  *   moving between the tabs of one page keeps one run of observations.
- * - **The asset in the Tree's pane** is `#/asset/<id>`: the Tree's selection
- *   lives in its address. `#/assets` and `#/route/<id>` select no asset (the
- *   route's asset is only known once the Tree has read it), so they are
- *   nothing, as the rooms UI had it.
+ * - **An asset** is its own page, `#/asset/<id>`, or its pick in the tree,
+ *   `#/assets/<id>`: the tree's pick lives in its address. The bare tree and
+ *   `#/route/<id>` name no asset (the route's asset is only known once its
+ *   page has read it), so they are nothing, as the rooms UI had it.
  * - **The open job** is the job page's resolved ticket, which the page
  *   reports to `currentJob`; its tabs keep that one ticket.
  *
@@ -42,6 +42,8 @@ function detailOf(route: TfRoute): string | null {
   // `#/build/<run>` is replaced by `#/build/<pipeline>/<run>[/<tab>]`; the run is the detail either way.
   if (head === "build") return (rest.length === 1 ? rest[0] : rest[1]) || null;
   if (ENTITY_HEADS.has(head)) return rest[0] || null;
+  // The tree's pick; its bare address is `#/assets/tree`, which names nothing.
+  if (head === "assets") return rest[0]?.includes(":") ? rest[0] : null;
   return null;
 }
 

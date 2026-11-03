@@ -1,30 +1,30 @@
 /**
- * Linking from the Tree's pane, and the count a column row carries for it
- * (issue #435, spec #427 stories 32, 33 and 36).
+ * Linking from an asset's page (issue #435, spec #427 stories 33 and 36). The
+ * count a column row carries for it is the tree's, in
+ * `assets/AssetsView.badges.test.svelte.ts`.
  *
- * A file of its own, the way #429's writes are: this one needs `../ipc/search`
+ * A file of its own, the way #429's writes are: this one needs `ipc/search`
  * mocked — *Link to…* is the launcher's own picker, and mounting it in jsdom
- * would otherwise reach for Tauri — and the two files beside it are about a
- * surface that never opens a dialog of somebody else's.
+ * would otherwise reach for Tauri.
  *
  * ## What is asserted here, and what is asserted elsewhere
  *
  * The **wording** of a relation is `relations.test.ts`'; the **dialog's** own
  * behaviour is `LinkDialog.test.svelte.ts`'; the **panel's** rows, its
  * withdrawn marker and its empty state are `LinksPanel.test.svelte.ts`'. What
- * is here is the part only this view can get wrong: that the pane is handed
+ * is here is the part only the page can get wrong: that the panel is handed
  * *its own asset's* links and its own id, so one row reads `runs on` from the
  * container and `hosts` from the VM; that the action opens the dialog over the
- * asset the reader is looking at; that unlinking re-reads rather than patching;
- * and that the column's badge draws what the backend counted.
+ * asset the reader is looking at; and that unlinking re-reads rather than
+ * patching.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { AssetDetail, AssetRow } from "../ipc/assets";
-import type { LinkEntry } from "../ipc/entity";
-import { createTestNav } from "./test-nav.svelte";
-import { layers } from "../tf/layers.svelte";
+import type { AssetDetail, AssetRow } from "../../ipc/assets";
+import type { LinkEntry } from "../../ipc/entity";
+import { createTestNav } from "../../assets/test-nav.svelte";
+import { layers } from "../layers.svelte";
 
 /**
  * The picker's engine, stubbed at the module boundary.
@@ -36,7 +36,7 @@ import { layers } from "../tf/layers.svelte";
  * launcher's home list, which is `LinkDialog.test.svelte.ts`' own reading of
  * it.
  */
-vi.mock("../ipc/search", () => ({
+vi.mock("../../ipc/search", () => ({
   search: () =>
     Promise.resolve({
       hits: [],
@@ -55,7 +55,7 @@ vi.mock("../ipc/search", () => ({
   }),
 }));
 
-const { default: AssetsView } = await import("./AssetsView.svelte");
+const { default: Estate } = await import("../../assets/Estate.fixture.svelte");
 
 const NOW = new Date(2026, 8, 6, 12, 0, 0, 0);
 
@@ -195,14 +195,13 @@ function detailOf(assetId: string): AssetDetail {
     effective_owner: null,
     held_by: heldBy,
     holds: ESTATE.filter((candidate) => candidate.parent_id === asset.id),
-    // Nothing here exposes a route; #432's surface is
-    // `AssetsView.write.test.svelte.ts`'.
+    // Nothing here exposes a route; #432's surface is the page's write tests'.
     exposes: [],
     reachable_via: [],
     history: [],
     links: linksFor(assetId),
     // Nothing here is monitored: attaching a monitor is #445's surface and has
-    // its own fixture in `AssetsView.test.svelte.ts`.
+    // its own fixture in `TfAsset.monitor.test.svelte.ts`.
     monitors: [],
     monitoring: [],
     monitor_targets: [],
@@ -217,16 +216,16 @@ function render(hash: string) {
   const unlinked: string[] = [];
   location.hash = hash;
   const nav = createTestNav();
-  app = mount(AssetsView, {
+  app = mount(Estate, {
     target,
     props: {
       nav,
       now: () => NOW,
       ports: {
         assetTypes: () => Promise.resolve([]),
-        // #505's panel: read on every selection, so a port left out falls
-        // through to the real `invoke`. Empty is honest -- no test here is
-        // about it.
+        // #505's panel: read on every asset the page draws, so a port left out
+        // falls through to the real `invoke`. Empty is honest -- no test here
+        // is about it.
         dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         assetTree: (parentId?: string | null) =>
           Promise.resolve(ESTATE.filter((candidate) => candidate.parent_id === (parentId ?? null))),
@@ -271,14 +270,14 @@ async function settle() {
 
 /** The headings the links panel drew, in order. */
 function headings(): string[] {
-  return [...target.querySelectorAll(".sec .row.hd span")]
+  return [...target.querySelectorAll(".tf-lnk .tf-lnk-h")]
     .map((cell) => cell.textContent?.trim() ?? "")
     .filter((text) => text !== "");
 }
 
 /** The other end of each link row, as the reader reads it. */
 function linkRows(): string[] {
-  return [...target.querySelectorAll(".sec .row.lrow:not(.hd) .lopen")].map(
+  return [...target.querySelectorAll(".tf-lnk .tf-lnk-row .tf-lnk-open")].map(
     (cell) => cell.textContent?.replace(/\s+/g, " ").trim() ?? "",
   );
 }
@@ -290,13 +289,13 @@ function button(label: string): HTMLButtonElement | undefined {
 }
 
 /**
- * The acceptance criterion, at the pane: one `runs-on` row, drawn from the
+ * The acceptance criterion, on the page: one `runs-on` row, drawn from the
  * container's side.
  *
  * The ticket is under `deployed from` and the VM under `runs on`, which are
  * the two relations the criterion names.
  */
-test("the container's pane reads its links from the container's side", async () => {
+test("the container's page reads its links from the container's side", async () => {
   render("#/asset/asset:postgres");
   await settle();
 
@@ -309,9 +308,9 @@ test("the container's pane reads its links from the container's side", async () 
  * handed the wrong entity id would fail while still looking right.
  *
  * `hosts` and not `runs on`: the VM is the end the link points *at*, and the
- * reading is computed against the id this pane was given.
+ * reading is computed against the id this page was given.
  */
-test("the VM's pane reads the same link as hosts", async () => {
+test("the VM's page reads the same link as hosts", async () => {
   render("#/asset/asset:vm-db-01");
   await settle();
 
@@ -319,7 +318,10 @@ test("the VM's pane reads the same link as hosts", async () => {
   expect(linkRows()).toEqual(["postgres"]);
 });
 
-/** Story 36: the action is on the asset, and it opens over the asset. */
+/**
+ * Story 36: the action is on the asset, in the page's header beside the
+ * panel's own, and it opens over the asset.
+ */
 test("Link to… opens the dialog over the open asset", async () => {
   render("#/asset/asset:postgres");
   await settle();
@@ -330,9 +332,9 @@ test("Link to… opens the dialog over the open asset", async () => {
 
   expect(target.textContent, "the dialog's own first field").toContain("What to link to");
   expect(
-    [...target.querySelectorAll("h2, .sub, .subtitle")].map((node) => node.textContent?.trim()),
+    target.querySelector('[role="dialog"] .tf-dsub')?.textContent?.trim(),
     "and it names the asset it is linking from",
-  ).toContain("postgres");
+  ).toBe("postgres");
 
   // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
   expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
@@ -344,54 +346,22 @@ test("Link to… opens the dialog over the open asset", async () => {
 
 /**
  * Unlinking is a mutation like any other here: it goes to the backend and the
- * pane **re-reads**.
+ * page **re-reads**.
  *
- * The second read is the assertion. A view that spliced the row out of its own
- * copy would look identical and would leave the column's linked-work badge
- * saying what it said before.
+ * The second read is the assertion. A page that spliced the row out of its own
+ * copy would look identical and would leave the asset's history and the
+ * tree's linked-work badge saying what they said before.
  */
 test("unlinking withdraws the link and re-reads the asset", async () => {
   const { reads, unlinked } = render("#/asset/asset:postgres");
   await settle();
   const before = reads.length;
 
-  target.querySelectorAll<HTMLButtonElement>(".sec .row.lrow .tf-btn")[0]?.click();
+  const unlink = target.querySelectorAll<HTMLButtonElement>(".tf-lnk-row .tf-btn")[0];
+  expect(unlink?.textContent?.trim()).toBe("Unlink");
+  unlink?.click();
   await settle();
 
   expect(unlinked).toEqual(["link-deploy"]);
-  expect(reads.length, "the pane read the asset again").toBeGreaterThan(before);
-});
-
-/**
- * Story 32's first badge, on the column rows: the count the backend gave, and
- * **no badge at all** where there is nothing to count.
- *
- * The site is the negative and it is in the same column as nothing else, so
- * the two assertions are about the same read: `hel1` links to no work and
- * draws no badge, while `vm-db-01` draws one and `postgres` draws two.
- */
-test("a column row carries its linked-work count and nothing when it is zero", async () => {
-  render("#/asset/asset:postgres");
-  await settle();
-
-  const badges = [...target.querySelectorAll(".cols .row")].map((rowEl) => [
-    rowEl.querySelector(".nm")?.textContent ?? "",
-    rowEl.querySelector(".badge.work")?.textContent ?? "",
-  ]);
-  expect(badges).toEqual([
-    ["hel1", ""],
-    ["vm-db-01", "1"],
-    ["postgres", "2"],
-  ]);
-});
-
-/** The badge says what it counts, so a number in a circle is readable. */
-test("the linked-work badge names what it counts", async () => {
-  render("#/asset/asset:postgres");
-  await settle();
-
-  const titles = [...target.querySelectorAll(".cols .row .badge.work")].map((node) =>
-    node.getAttribute("title"),
-  );
-  expect(titles).toEqual(["1 linked work item", "2 linked work items"]);
+  expect(reads.length, "the page read the asset again").toBeGreaterThan(before);
 });

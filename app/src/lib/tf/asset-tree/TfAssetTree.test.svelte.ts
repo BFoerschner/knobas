@@ -23,11 +23,11 @@ afterEach(() => {
 test("the page reads its address with parseHash and go sets location.hash", () => {
   mounted = mount(TfAssetTree, {
     target: document.body,
-    props: { head: "asset", rest: ["gitea:acme/web"] },
+    props: { head: "assets", rest: ["asset:web"] },
   });
   flushSync();
-  expect(seen.nav?.route).toEqual({ view: "assets", tab: "tree", assetId: "gitea:acme/web" });
+  expect(seen.nav?.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:web" });
 
-  seen.nav?.go("#/asset/other");
-  expect(location.hash).toBe("#/asset/other");
+  seen.nav?.go("#/asset/asset:other");
+  expect(location.hash).toBe("#/asset/asset:other");
 });

@@ -461,6 +461,7 @@ const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
+const TfAsset = (await import("../tf/asset/TfAsset.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
@@ -2480,6 +2481,29 @@ const CASES: Case[] = [
           ports: {
             assetTree: () => deferred([]),
             getAsset: () => Promise.reject(new Error("nothing is selected in this test")),
+            assetTypes: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * An asset's page: its own read, what depends on it and the type table,
+     * each answering after the unmount, as a reader who opens an asset and
+     * moves straight on has them.
+     */
+    name: "TfAsset",
+    source: "lib/tf/asset/TfAsset.svelte",
+    open: (target) => ({
+      app: mount(TfAsset, {
+        target,
+        props: {
+          assetId: "asset:postgres",
+          go: () => {},
+          ports: {
+            getAsset: () => Promise.reject(new Error("nothing is read in this test")),
+            dependsOnThis: () => deferred({ assets: [], routes: [] }),
             assetTypes: () => deferred([]),
           },
         },

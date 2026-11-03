@@ -42,19 +42,18 @@ test("a later milestone's address is known-unknown, not a kind", () => {
 });
 
 /**
- * A route's address is the Tree as well (#432), and it carries the route
+ * A route's address is its asset's page (#432), and it carries the route
  * rather than an asset.
  *
- * `assetId` is `null` because the address does not carry one: the view reads
- * the route and opens at the asset exposing it. The round trip is what keeps
- * the more specific address from being flattened to the asset's on the way
- * back out — a reader who copies a link to a route must get a link to the
- * route.
+ * `assetId` is `null` because the address does not carry one: the page reads
+ * the route and draws the asset exposing it. The round trip is what keeps the
+ * more specific address from being flattened to the asset's on the way back
+ * out: a reader who copies a link to a route must get a link to the route.
  */
-test("a route's address reaches the Tree, carrying the route", () => {
+test("a route's address reaches its asset's page, carrying the route", () => {
   expect(parseHash("#/route/route:9a1b")).toEqual({
     view: "assets",
-    tab: "tree",
+    tab: "asset",
     assetId: null,
     routeId: "route:9a1b",
   });
@@ -62,38 +61,32 @@ test("a route's address reaches the Tree, carrying the route", () => {
   // The route wins over an asset id where an address carries both, because it
   // is the more specific of the two.
   expect(
-    hashFor({ view: "assets", tab: "tree", assetId: "asset:7f2c", routeId: "route:9a1b" }),
+    hashFor({ view: "assets", tab: "asset", assetId: "asset:7f2c", routeId: "route:9a1b" }),
   ).toBe("#/route/route:9a1b");
 });
 
 /**
- * The Assets view has an address of its own (#428), and `#/asset/<id>` is the
- * same view with a selection rather than a second one.
+ * The estate's two views: the tree at `#/assets`, with an asset picked at
+ * `#/assets/<id>`, and one asset's own page at `#/asset/<id>`.
  *
  * The head owns the whole address, the rule `#/sources/x` and `#/time/whenever`
- * already follow: `#/assets/anything` is the Tree, because "arrives in a later
- * milestone" is the one thing it must not say now that it does not. No tail
- * has a meaning of its own since #1459: `monitors` was the sibling tab (#448),
- * whose roster went with the rooms UI (#1087), and the ticket-first shell sends
- * `#/assets/monitors` to `#/monitors` before this parser sees it.
+ * already follow: `#/assets/anything` is the tree, and only an entity id (it
+ * carries its namespace's colon) is a pick. `monitors` was the sibling tab
+ * (#448), whose roster went with the rooms UI (#1087); the ticket-first shell
+ * sends `#/assets/monitors` to `#/monitors` before this parser sees it.
  */
-test("the assets addresses reach the Tree, with and without a selection", () => {
+test("the assets addresses reach the tree or an asset's page", () => {
   expect(parseHash("#/assets/tree")).toEqual({ view: "assets", tab: "tree", assetId: null });
   expect(parseHash("#/assets")).toEqual({ view: "assets", tab: "tree", assetId: null });
   expect(parseHash("#/assets/monitors")).toEqual({ view: "assets", tab: "tree", assetId: null });
-  expect(parseHash("#/assets/whatever")).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: null,
-  });
-  expect(parseHash("#/asset/asset:7f2c")).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: "asset:7f2c",
-  });
+  expect(parseHash("#/assets/whatever")).toEqual({ view: "assets", tab: "tree", assetId: null });
+  expect(parseHash("#/assets/asset:7f2c")).toEqual({ view: "assets", tab: "tree", assetId: "asset:7f2c" });
+  expect(parseHash("#/asset/asset:7f2c")).toEqual({ view: "assets", tab: "asset", assetId: "asset:7f2c" });
   // Round trip: the id keeps its namespace colon and everything else is
   // encoded, the rule every entity address in this module follows.
   expect(hashFor(parseHash("#/asset/asset:7f2c"))).toBe("#/asset/asset:7f2c");
+  expect(hashFor(parseHash("#/assets/asset:7f2c"))).toBe("#/assets/asset:7f2c");
+  expect(hashFor(parseHash("#/assets/asset%3Avm%2F1"))).toBe("#/assets/asset:vm%2F1");
   expect(hashFor({ view: "assets", tab: "tree", assetId: null })).toBe("#/assets/tree");
 });
 

@@ -5,6 +5,7 @@
 import { expect, test } from "vitest";
 
 import { page as buildsPage } from "./builds/page";
+import { page as assetPage } from "./asset/page";
 import { page as assetTreePage } from "./asset-tree/page";
 import { page as codePage } from "./code/page";
 import { page as codeRowPage } from "./code-row/page";
@@ -32,6 +33,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(buildsPage);
   expect(PAGES).toContain(depsPage);
   expect(PAGES).toContain(assetTreePage);
+  expect(PAGES).toContain(assetPage);
   expect(PAGES).toContain(inboxPage);
   expect(PAGES).toContain(codePage);
   expect(PAGES).toContain(repoPage);
@@ -76,8 +78,9 @@ const ADDRESSES = [
   ["#/deps/job/PAY-231", "deps"],
   ["#/map", "deps"],
   ["#/assets", "asset tree"],
-  ["#/asset/asset:vm-pay-01", "asset tree"],
-  ["#/route/route:payouts", "asset tree"],
+  ["#/assets/asset:vm-pay-01", "asset tree"],
+  ["#/asset/asset:vm-pay-01", "asset"],
+  ["#/route/route:payouts", "asset"],
   ["#/inbox", "inbox"],
   ["#/sets", "sets"],
   ["#/sets/payout-stack", "sets"],
@@ -98,6 +101,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [buildsPage, "builds"],
     [depsPage, "deps"],
     [assetTreePage, "asset tree"],
+    [assetPage, "asset"],
     [inboxPage, "inbox"],
     [codePage, "code"],
     [repoPage, "repo"],
@@ -167,4 +171,10 @@ test("a ticket address and a job address of one ticket are one page, and only th
   expect(props("#/job/jira%3APAY-231")).toMatchObject({ segment: "jira:PAY-231", choose: true });
   const address = (hash: string) => jobPage.address?.(parseTfHash(hash));
   expect(address("#/job/jira%3APAY-231")).toBe(address("#/ticket/jira%3APAY-231/conversation"));
+});
+
+test("the asset page hands TfAsset the asset or the route the address names", () => {
+  const props = (hash: string) => assetPage.props({ route: parseTfHash(hash), ready: true, back: null } as Parameters<typeof assetPage.props>[0]);
+  expect(props("#/asset/asset%3Avm-pay-01")).toMatchObject({ assetId: "asset:vm-pay-01", routeId: null });
+  expect(props("#/route/route%3Apayouts")).toMatchObject({ assetId: null, routeId: "route:payouts" });
 });

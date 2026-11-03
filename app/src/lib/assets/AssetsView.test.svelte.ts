@@ -1,14 +1,17 @@
 /**
- * The Tree: what a reader sees at an asset's address, and what the view asked
- * for to draw it (issue #428, spec #427 stories 27, 33 and 35).
+ * The asset tree: what a reader sees at a tree address, and what the view
+ * asked for to draw it (issue #428, spec #427 stories 27, 33 and 35).
  *
  * The seam is **a rendered view in, user-visible text and the reads it issued
  * out** — `StandupView.test.svelte.ts` and `DayReview.test.svelte.ts`'s, and
  * the reason nothing here reaches into the component's state. The bridge is
  * injected through `ports`, so no Tauri and no database: what the backend puts
- * on a column and in the pane is `crates/knobas-app/tests/it/assets_ipc.rs`'s,
+ * on a column and in the preview is `crates/knobas-app/tests/it/assets_ipc.rs`'s,
  * and what is asserted here is that a cold address draws one column per level
- * with the path marked in each, and that the pane draws the answer.
+ * with the path marked in each, and that the preview draws the answer.
+ *
+ * What an asset's own page draws, the whole of it, is
+ * `tf/asset/TfAsset.test.svelte.ts`'s; this file is the tree's.
  *
  * **This is the automated half of criterion 4's first clause.** The other half
  * — a headless-Chrome check against `--demo` — cannot be met as the ticket
@@ -50,7 +53,7 @@ const SITE = row({
   type_id: "site",
   monogram: "SI",
   name: "hel1",
-  // The only asset in this fixture that sets either — so every value the pane
+  // The only asset in this fixture that sets either — so every value the preview
   // shows further down is one that had to be walked up to.
   environment: "prod",
   owner: "Björn",
@@ -122,9 +125,9 @@ const ESTATE = [SITE, VM, SIBLING, CONTAINER, GITEA, GITEA_DB];
 /**
  * The routes this corner of the estate exposes (#432).
  *
- * Two of them, on the *other* VM so that the container's own pane and the
- * proxy's are different panes: one landing on `gitea` and one landing on
- * nothing. The pair is what makes both halves of the pane assertable — a
+ * Two of them, on the *other* VM so that the container's own preview and the
+ * proxy's are different previews: one landing on `gitea` and one landing on
+ * nothing. The pair is what makes both halves of the preview assertable — a
  * fixture with one targeted route could not tell "exposes" from "reachable
  * via" apart on the exposing asset, and one with no untargeted route could
  * not witness the endpoint case at all.
@@ -197,7 +200,7 @@ const MONITORING: AttachedMonitor[] = [
  * The names the estate file kept on the container.
  *
  * `postgres-check` is **also** in {@link MONITORING}: it is the name that
- * found its monitor, and the pane must not say it twice -- once as something
+ * found its monitor, and the preview must not say it twice -- once as something
  * watching this asset and once as something still waiting to. `pgbouncer` is
  * the one still waiting.
  */
@@ -208,7 +211,7 @@ const NAMED_BY_THE_FILE = ["postgres-check", "pgbouncer"];
  * route whose target is on this asset's containment path, above it or below.
  *
  * A copy of the rule and not of its answer, for `inForce`'s reason -- the
- * seam under test is the *pane*, and a hard-coded list would draw the right
+ * seam under test is the *preview*, and a hard-coded list would draw the right
  * words for the wrong asset.
  */
 function reachableVia(asset: AssetRow, heldBy: AssetRow[], estate: AssetRow[]): RouteRow[] {
@@ -250,8 +253,8 @@ function row(over: Partial<AssetRow> & Pick<AssetRow, "id" | "name">): AssetRow 
  * setter at or above, innermost first.
  *
  * A copy of `assets::inherited`'s rule rather than of its answer: the seam
- * under test here is the *pane*, and a fixture that hard-coded "hel1" as the
- * source would still draw the right words if the pane read the wrong field.
+ * under test here is the *preview*, and a fixture that hard-coded "hel1" as the
+ * source would still draw the right words if the preview read the wrong field.
  */
 function inForce<T>(
   asset: AssetRow,
@@ -271,10 +274,10 @@ function property(over: Partial<AssetProperty> & Pick<AssetProperty, "key">): As
 }
 
 /**
- * The pane's read for one asset, ancestors walked over the parent field.
+ * The preview's read for one asset, ancestors walked over the parent field.
  *
  * Takes the estate it is reading, so a test can hand {@link render} an estate
- * of its own and have the *pane* answer from it too — without that, a bespoke
+ * of its own and have the *preview* answer from it too — without that, a bespoke
  * estate draws its columns and then fails every deep read against the default
  * one.
  */
@@ -298,8 +301,8 @@ function detailOf(id: string, estate: AssetRow[] = ESTATE): AssetDetail {
               label: "Image",
               value: { kind: "text", value: "postgres:18" },
             }),
-            // Declared by the type and filled in by nobody — the em dash the
-            // pane draws instead of the word "null".
+            // Declared by the type and filled in by nobody: the preview lists
+            // what is filled in, so this one counts in "1 of 2 set" only.
             property({ key: "ports", label: "Ports" }),
             property({
               key: "zzz-note",
@@ -391,7 +394,7 @@ let scrolled: ScrollIntoViewOptions[] = [];
  * `asked` is the point of the harness as much as the markup is: story 35 says
  * an address opened cold draws what a click draws, and the only way to see
  * that is which parents the view asked for having been given nothing but the
- * address and the pane's answer.
+ * address and the preview's answer.
  */
 function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
   const asked: (string | null)[] = [];
@@ -416,10 +419,6 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
         // file would render behind a "Creating is unavailable" line and a
         // dead plus. Empty is the honest fixture: no test here presses one.
         assetTypes: () => Promise.resolve([]),
-        // #505's panel: read on every selection, so a port left out falls
-        // through to the real `invoke`. Empty is honest -- no test here is
-        // about it.
-        dependsOnThis: () => Promise.resolve({ assets: [], routes: [] }),
         search: (query: SearchQuery) => {
           searched.push(query);
           return Promise.resolve(over.answer ?? matchesFor(query, estate));
@@ -446,17 +445,10 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
             return Promise.reject(cause);
           }
         },
-        getRoute: (routeId: string) => {
-          const route = ROUTES.find((candidate) => candidate.id === routeId);
-          return route === undefined
-            ? Promise.reject({ code: "not_found", message: `no route ${routeId}` })
-            : Promise.resolve({ route, history: [], monitor_targets: [] });
-        },
-        // The OS browser, for `assetTypes`' reason above: this file is about
-        // the read and presses no route's URL, but a port left out falls
-        // through to the real `openExternal` and the first test that ever did
-        // would hand the URL to `@tauri-apps/plugin-opener`. Pressing it is
-        // `AssetsView.write.test.svelte.ts`' claim.
+        // The OS browser, for `assetTypes`' reason above: a route's URL in
+        // the preview is a button, and a port left out falls through to the
+        // real `openExternal`, which would hand the URL to
+        // `@tauri-apps/plugin-opener`.
         openExternal: (url: string) => {
           opened.push(url);
           return Promise.resolve();
@@ -538,14 +530,14 @@ function pathTextOf(asset: AssetRow, estate: AssetRow[]): string | null {
 
 /**
  * Press a key on the view, and hand back the event so a test can ask whether
- * the Tree **consumed** it.
+ * the tree **consumed** it.
  *
  * Dispatched on the element under the cursor rather than on `window`: the
- * Tree's handler is on its own section precisely so an unanswered `Escape`
+ * tree's handler is on its own section precisely so an unanswered `Escape`
  * bubbles on to the shell's ladder, and a press synthesised at the top of the
  * document would never travel that path.
  */
-function press(key: string, on: Element | null = target.querySelector("section.view")): Event {
+function press(key: string, on: Element | null = target.querySelector("section.tf-et")): Event {
   const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
   on?.dispatchEvent(event);
   flushSync();
@@ -554,15 +546,15 @@ function press(key: string, on: Element | null = target.querySelector("section.v
 
 /** The spine columns, left to right, by the asset each is labelled with. */
 function spines(): string[] {
-  return [...target.querySelectorAll("button.spine .vn")].map((label) =>
+  return [...target.querySelectorAll("button.tf-et-spine .tf-et-vn")].map((label) =>
     (label.textContent ?? "").trim(),
   );
 }
 
 /** The search box, which every test that types has to find. */
 function box(): HTMLInputElement {
-  const input = target.querySelector<HTMLInputElement>("input.q");
-  if (input === null) throw new Error("the Tree has no search box");
+  const input = target.querySelector<HTMLInputElement>(".tf-et-find input");
+  if (input === null) throw new Error("the tree has no search box");
   return input;
 }
 
@@ -589,21 +581,39 @@ function text(): string {
   return (target.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** What the preview beside the columns says, as one line of text. */
+function preview(): string {
+  return (target.querySelector("aside.tf-et-pane")?.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** The asset the preview names, or `null` when it names none. */
+function previewed(): string | null {
+  const name = target.querySelector("aside.tf-et-pane h2");
+  return name === null ? null : (name.textContent ?? "").trim();
+}
+
 /** Each column's row labels, left to right. */
 function columns(): string[][] {
-  return [...target.querySelectorAll("ol.col")].map((column) =>
-    [...column.querySelectorAll("button.row span.nm")].map((name) =>
+  return [...target.querySelectorAll("ol.tf-et-col")].map((column) =>
+    [...column.querySelectorAll("button.tf-et-row span.tf-et-nm")].map((name) =>
       (name.textContent ?? "").trim(),
     ),
   );
 }
 
-/** The row marked as the selection in each column, left to right. */
+/** The row marked as the path in each column, left to right. */
 function marked(): (string | null)[] {
-  return [...target.querySelectorAll("ol.col")].map((column) => {
-    const on = column.querySelector('button.row[aria-current="true"] span.nm');
+  return [...target.querySelectorAll("ol.tf-et-col")].map((column) => {
+    const on = column.querySelector('button.tf-et-row[aria-current="true"] span.tf-et-nm');
     return on === null ? null : (on.textContent ?? "").trim();
   });
+}
+
+/** A button anywhere in the view, by its trimmed text. */
+function buttonNamed(label: string, within: ParentNode = target): HTMLButtonElement | undefined {
+  return [...within.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => (button.textContent ?? "").trim() === label,
+  );
 }
 
 beforeEach(() => {
@@ -635,21 +645,21 @@ afterEach(() => {
  * a view that asked with no parent at all would draw a first column holding
  * the whole estate. The VM and the container exist and are not in it.
  */
-test("the bare address draws the roots and nothing is selected", async () => {
+test("the bare address draws the roots and nothing is picked", async () => {
   const { asked } = render("#/assets/tree");
 
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
   expect(asked).toEqual([null]);
   expect(marked()).toEqual([null]);
-  expect(text()).toContain("Select an asset to see what it holds.");
+  expect(preview()).toBe("Pick an asset to see what it holds and how it is reached.");
 });
 
 /**
  * **No tab strip** (#1459): the *Monitors* tab beside *Tree* named a roster
- * that went with the rooms UI (#1087), and one tab left is no strip. The Tree
+ * that went with the rooms UI (#1087), and one tab left is no strip. The tree
  * is reached from Dependencies' *Asset tree* button.
  */
-test("the Tree draws no tab strip and no Monitors tab", async () => {
+test("the tree draws no tab strip and no Monitors tab", async () => {
   render("#/assets");
 
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
@@ -660,63 +670,88 @@ test("the Tree draws no tab strip and no Monitors tab", async () => {
 });
 
 /**
- * **An asset's address, opened cold, draws one column per level with the path
- * marked in each — and the pane beside it.**
+ * **A pick's address, opened cold, draws one column per level with the path
+ * marked in each, and the preview beside it.**
  *
- * Story 35, and the criterion's own sentence: *a three-level path and the
- * pane's properties*. Nothing is clicked here; the columns are derived from
- * `held_by`, which arrives with the asset, so what is asserted is that the
- * view walked nothing and cached nothing.
+ * Story 35: nothing is clicked here; the columns are derived from `held_by`,
+ * which arrives with the asset, so what is asserted is that the view walked
+ * nothing and cached nothing.
  *
  * No trailing column: the container holds nothing, and an empty column would
- * promise a level that is not there.
+ * promise a level that is not there. The preview lists what is filled in and
+ * counts the type's own fields; the unfilled *Ports* is for the asset's page.
  */
-test("an asset's address draws its whole path and its pane", async () => {
-  const { asked } = render("#/asset/asset:postgres");
+test("a pick's address draws its whole path and the preview", async () => {
+  const { asked } = render("#/assets/asset:postgres");
 
   await waitFor(() =>
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
   // Four reads, and the shape of the list is the point. The first `null` is
-  // the cold frame: the layout is `emptyPath()` until the pane's read lands,
-  // so the top column is asked for before there is a path to derive. Then the
-  // path arrives and all three levels are asked for together -- one assignment,
-  // because a half-drawn Miller layout is a path with a hole in it. Nothing
-  // above the site is asked for twice, and nothing is walked.
+  // the cold frame: the layout is `emptyPath()` until the preview's read
+  // lands, so the top column is asked for before there is a path to derive.
+  // Then the path arrives and all three levels are asked for together -- one
+  // assignment, because a half-drawn Miller layout is a path with a hole in
+  // it. Nothing above the site is asked for twice, and nothing is walked.
   expect(asked).toEqual([null, null, SITE.id, VM.id]);
   expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]);
+  // The deepest of the path is the pick, and only it carries the outline.
+  const picked = [...target.querySelectorAll("button.tf-et-row.tf-sel")];
+  expect(picked.map((row) => row.getAttribute("data-asset"))).toEqual([CONTAINER.id]);
 
-  const pane = text();
-  // The held-by line ends at the asset: it is *where this thing is*.
-  expect(pane).toContain("hel1 / vm-db-01 / postgres");
-  expect(pane).toContain("Image postgres:18");
-  // Declared and unfilled: an em dash, never the word "null".
-  expect(pane).toContain("Ports —");
-  expect(pane).toContain("zzz-note typed on this one");
-  expect(pane).toContain("Holds Nothing.");
-  // A property edit's line reads as the change it was, old value included.
-  expect(pane).toContain("os: Debian 12 → Debian 13");
-  expect(pane).toContain("Created");
-  // An imported asset's own two lines say what happened to it, and name the
-  // estate the file called itself. Every asset in the demo profile carries the
-  // first of them and nothing else (#440).
-  expect(pane).toContain("Imported from knobas test estate");
-  expect(pane).toContain("monitors: kept teamcity (tunnel)");
+  expect(previewed()).toBe("postgres");
+  const said = preview();
+  expect(said).toContain("Properties 1 of 2 set");
+  expect(said).toContain("Image postgres:18");
+  expect(said).toContain("zzz-note typed on this one");
+  expect(said).not.toContain("Ports");
+  expect(said).toContain("Holds Nothing");
+  expect(said).toContain("Watched by postgres-check, postgres-slow-query, postgres-wal");
 });
 
 /**
- * **A selection that holds something opens the column under it, and the
- * columns follow the address rather than the click.**
+ * **The preview's way on is the asset's page**: *Open asset* goes to
+ * `#/asset/<id>`, a double click on a row does the same, and so does `Enter`
+ * on a row with nothing under it, where the walk has no column to go into.
+ */
+test("Open asset, a double click and Enter on a leaf each open the asset's page", async () => {
+  const { nav } = render("#/assets/asset:postgres");
+  await waitFor(() => expect(previewed()).toBe("postgres"));
+
+  buttonNamed("Open asset", target.querySelector("aside.tf-et-pane")!)!.click();
+  flushSync();
+  expect(nav.route).toEqual({ view: "assets", tab: "asset", assetId: CONTAINER.id });
+
+  nav.go("#/assets/asset:postgres");
+  flushSync();
+  await waitFor(() => expect(previewed()).toBe("postgres"));
+  target
+    .querySelector(`button.tf-et-row[data-asset="${VM.id}"]`)!
+    .dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  flushSync();
+  expect(nav.route).toEqual({ view: "assets", tab: "asset", assetId: VM.id });
+
+  nav.go("#/assets/asset:postgres");
+  flushSync();
+  await waitFor(() => expect(previewed()).toBe("postgres"));
+  const enter = press("Enter");
+  expect(enter.defaultPrevented).toBe(true);
+  expect(nav.route).toEqual({ view: "assets", tab: "asset", assetId: CONTAINER.id });
+});
+
+/**
+ * **A pick that holds something opens the column under it, and the columns
+ * follow the address rather than the click.**
  *
  * The click sets the address; the address is read back; the columns follow the
  * answer. That is the whole reason a cold address and a click land in the same
  * place, so the assertion is on the address as well as on the markup.
  */
-test("selecting an asset that holds something opens the next column", async () => {
-  const { nav } = render("#/asset/asset:postgres");
+test("picking an asset that holds something opens the next column", async () => {
+  const { nav } = render("#/assets/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  const vm = [...target.querySelectorAll<HTMLButtonElement>("button.row")].find(
+  const vm = [...target.querySelectorAll<HTMLButtonElement>("button.tf-et-row")].find(
     (button) => button.textContent?.includes("vm-db-01"),
   );
   vm?.click();
@@ -727,94 +762,88 @@ test("selecting an asset that holds something opens the next column", async () =
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-db-01", null]);
-  expect(text()).toContain("hel1 / vm-db-01");
+  await waitFor(() => expect(previewed()).toBe("vm-db-01"));
 });
 
 /**
- * **An estate with nothing in it says so in its own words.**
+ * **An estate with nothing in it says so in its own words**, and offers the
+ * two ways out of it.
  *
- * The branch a fresh install is in until #439's import or a hand-created
- * asset, and the one a reader would otherwise take for a failed read.
+ * The branch a fresh install is in until #439's import or a hand-made asset,
+ * and the one a reader would otherwise take for a failed read.
  */
 test("an empty estate is told apart from a read that has not landed", async () => {
   render("#/assets/tree", []);
 
   await waitFor(() => expect(text()).toContain("Nothing in the estate yet."));
   expect(columns()).toEqual([]);
+  const empty = target.querySelector(".tf-et-empty")!;
+  expect(buttonNamed("New asset", empty)).toBeDefined();
+  expect(buttonNamed("Import…", empty)).toBeDefined();
 });
 
 /**
- * **An address naming an asset that is not there draws the failure, and drops
- * the selection.**
+ * **A pick naming an asset that is not there draws the failure, and drops
+ * the pick.**
  *
- * A pane still showing the last asset would be the view lying about what the
- * address names — and this is the deep-link case a notification produces.
+ * A preview still showing the last asset would be the view lying about what
+ * the address names. The page's half, a deep link to a gone asset's page, is
+ * `TfAsset.test.svelte.ts`'.
  */
-test("a deep link to an asset that is gone says so instead of showing the last one", async () => {
-  const { nav } = render("#/asset/asset:postgres");
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+test("a pick of an asset that is gone says so instead of showing the last one", async () => {
+  const { nav } = render("#/assets/asset:postgres");
+  await waitFor(() => expect(previewed()).toBe("postgres"));
 
-  nav.go("#/asset/asset:nobody");
+  nav.go("#/assets/asset:nobody");
   flushSync();
 
   await waitFor(() => expect(text()).toContain("no asset asset:nobody"));
-  expect(text()).not.toContain("hel1 / vm-db-01 / postgres");
+  expect(previewed()).toBeNull();
   expect(columns()).toEqual([]);
 });
 
 /**
- * **The pane says where an inherited value came from, and the note is a link
- * to the asset that set it** — stories 8, 9 and 10 (#431).
+ * **The preview says where an inherited value came from, and the note is a
+ * link to the asset that set it**, picked in the tree — stories 8, 9 and 10
+ * (#431).
  *
  * Nothing sets an environment or an owner between the container and the site,
- * so both values in the pane are the site's; the note names it, and one click
- * on that note opens the site's own address. A pane that drew the value
- * without its source would pass a `toContain("prod")` and leave the reader
- * with no way to find the place `prod` can be changed.
+ * so both values are the site's; the note names it, and one click opens the
+ * site in the columns. A preview that drew the value without its source would
+ * leave the reader with no way to find the place `prod` can be changed.
  */
-test("an inherited value names the ancestor it came from and links to it", async () => {
-  const { nav } = render("#/asset/asset:postgres");
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+test("an inherited value names the ancestor it came from and picks it", async () => {
+  const { nav } = render("#/assets/asset:postgres");
+  await waitFor(() => expect(previewed()).toBe("postgres"));
 
-  const pane = text();
-  expect(pane).toContain("Environment prod inherited from hel1");
-  expect(pane).toContain("Owner Björn inherited from hel1");
-  // Health is the worst of this asset and everything under it. Here they are
-  // the same, so the pane does not repeat the own status.
-  expect(pane).toContain("Health warn");
-  expect(pane).not.toContain("own status");
+  expect(preview()).toContain("Environment prod inherited from hel1");
+  expect(preview()).toContain("Owner Björn inherited from hel1");
+  // Health is the worst of this asset and everything under it, on the chip.
+  expect(target.querySelector("aside.tf-et-pane header .tf-chip")?.textContent?.trim()).toBe("warning");
 
   const note = [
-    ...target.querySelectorAll<HTMLButtonElement>("aside.pane button.src"),
+    ...target.querySelectorAll<HTMLButtonElement>("aside.tf-et-pane button.tf-et-src"),
   ].find((button) => button.textContent?.includes("inherited from hel1"));
   expect(note).toBeDefined();
   note?.click();
   flushSync();
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: SITE.id,
-  });
+  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
 });
 
 /**
  * **A value set on the asset itself reads *set here* and is not a link.**
  *
- * The negative for the test above, and the one that matters: a link that led
- * back to the asset the reader is already looking at would be a click that
- * does nothing, which is worse than no link at all. The site is where both
- * values are set, so its own pane is the case.
+ * The negative for the test above: a link that led back to the asset the
+ * reader is already looking at would be a click that does nothing, which is
+ * worse than no link at all. The site is where both values are set.
  */
 test("a value set on the asset itself says so and offers no link", async () => {
-  render("#/asset/asset:hel1");
-  await waitFor(() => expect(text()).toContain("Environment prod set here"));
+  render("#/assets/asset:hel1");
+  await waitFor(() => expect(preview()).toContain("Environment prod set here"));
 
-  expect(text()).toContain("Owner Björn set here");
-  expect(text()).not.toContain("inherited from");
-  expect(target.querySelectorAll("aside.pane button.src")).toHaveLength(0);
-  // The site is rated by nobody and still reads `warn`, because the container
-  // two levels down is — that is the rollup, in the pane.
-  expect(text()).toContain("Health warn own status none");
+  expect(preview()).toContain("Owner Björn set here");
+  expect(preview()).not.toContain("inherited from");
+  expect(target.querySelectorAll("aside.tf-et-pane button.tf-et-src")).toHaveLength(0);
 });
 
 /**
@@ -828,13 +857,10 @@ test("an asset with no environment anywhere above it says nothing is set", async
   render("#/assets/tree", [bare]);
   await waitFor(() => expect(columns()).toEqual([["lonely"]]));
 
-  const button = target.querySelector<HTMLButtonElement>("button.row");
-  button?.click();
+  target.querySelector<HTMLButtonElement>("button.tf-et-row")?.click();
   flushSync();
-  await waitFor(() =>
-    expect(text()).toContain("Environment Not set anywhere"),
-  );
-  expect(text()).toContain("Owner Not set anywhere");
+  await waitFor(() => expect(preview()).toContain("Environment Not set anywhere"));
+  expect(preview()).toContain("Owner Not set anywhere");
 });
 
 /**
@@ -848,35 +874,15 @@ test("an asset with no environment anywhere above it says nothing is set", async
  *
  * The **fourth** row is the case that decides whether the tone is read off
  * `inside` or off `health`: an asset that is itself down while holding one
- * warning. It is a red row with an *amber* badge, and an implementation
- * colouring the badge from `health` draws it red.
+ * warning. It is a red row with an *amber* badge — its own red is the dot
+ * beside its name — and an implementation colouring the badge from `health`
+ * draws it red.
  */
 test("a column row badges what is wrong inside it, in the worst tone inside", async () => {
   const estate = [
-    row({
-      id: "asset:red",
-      name: "red",
-      health: "down",
-      inside: "down",
-      problems_inside: 2,
-      linked_work: 0,
-    }),
-    row({
-      id: "asset:amber",
-      name: "amber",
-      health: "warn",
-      inside: "warn",
-      problems_inside: 1,
-      linked_work: 0,
-    }),
-    row({
-      id: "asset:clean",
-      name: "clean",
-      health: "up",
-      inside: "none",
-      problems_inside: 0,
-      linked_work: 0,
-    }),
+    row({ id: "asset:red", name: "red", health: "down", inside: "down", problems_inside: 2, linked_work: 0 }),
+    row({ id: "asset:amber", name: "amber", health: "warn", inside: "warn", problems_inside: 1, linked_work: 0 }),
+    row({ id: "asset:clean", name: "clean", health: "up", inside: "none", problems_inside: 0, linked_work: 0 }),
     row({
       id: "asset:worse",
       name: "worse",
@@ -888,18 +894,16 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
     }),
   ];
   render("#/assets/tree", estate);
-  await waitFor(() =>
-    expect(columns()).toEqual([["amber", "clean", "red", "worse"]]),
-  );
+  await waitFor(() => expect(columns()).toEqual([["amber", "clean", "red", "worse"]]));
 
-  const badges = [...target.querySelectorAll("ol.col li")].map((item) => {
-    const badge = item.querySelector("span.badge");
+  const badges = [...target.querySelectorAll("ol.tf-et-col li")].map((item) => {
+    const badge = item.querySelector("span.tf-et-badge");
     return badge === null
       ? null
       : {
-          name: (item.querySelector("span.nm")?.textContent ?? "").trim(),
+          name: (item.querySelector("span.tf-et-nm")?.textContent ?? "").trim(),
           count: (badge.textContent ?? "").trim(),
-          tone: badge.classList.contains("down") ? "down" : "warn",
+          tone: badge.classList.contains("tf-et-down") ? "down" : "warn",
           title: badge.getAttribute("title"),
         };
   });
@@ -909,6 +913,11 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
     { name: "red", count: "2", tone: "down", title: "2 problems inside" },
     { name: "worse", count: "1", tone: "warn", title: "1 problem inside" },
   ]);
+  // The row's own status, beside its name: only the one rated down by hand.
+  const own = [...target.querySelectorAll("ol.tf-et-col li")].map(
+    (item) => item.querySelector("button.tf-et-row > .tf-dot")?.classList.contains("tf-err") ?? false,
+  );
+  expect(own).toEqual([false, false, false, true]);
 });
 
 // -- the keyboard walk, the spines and the search (#430) ---------------------
@@ -917,13 +926,14 @@ test("a column row badges what is wrong inside it, in the worst tone inside", as
  * **The arrows and Enter walk the estate, and every step is an address.**
  *
  * Story 29's own sentence, through the rendered view: down the top column,
- * right into what the selection holds, and the pane following each step. The
+ * right into what the pick holds, and the preview following each step. The
  * assertion is on the address as well as on the markup, because the walk
- * moves the *selection* and the columns are derived from it — a walk with a
- * cursor of its own would draw the same thing here and disagree with the
- * address bar.
+ * moves the *pick* and the columns are derived from it.
+ *
+ * At the end, `Enter` on the container, which holds nothing, opens no column:
+ * it opens the container's page, where the walk goes on.
  */
-test("the arrows and enter walk three levels, and the pane follows", async () => {
+test("the arrows and enter walk three levels, and the preview follows", async () => {
   const { nav } = render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
@@ -940,33 +950,32 @@ test("the arrows and enter walk three levels, and the pane follows", async () =>
 
   press("Enter");
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
-  expect(text()).toContain("hel1 / vm-db-01 / postgres");
-  // The container holds nothing: `Enter` on it opens no column and moves
-  // nothing, rather than selecting out of an empty one.
+  await waitFor(() => expect(previewed()).toBe("postgres"));
+
   press("Enter");
-  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
+  expect(nav.route).toEqual({ view: "assets", tab: "asset", assetId: CONTAINER.id });
 });
 
 /**
- * **The focused row is the selected one**, which is what makes the walk
- * visible: the global `:focus-visible` ring in `unported.css` is drawn on whatever
- * has focus, and a walk that moved the selection without moving focus would
- * leave the ring on the row the reader started from.
+ * **The focused row is the picked one**, which is what makes the walk
+ * visible: the `:focus-visible` ring is drawn on whatever has focus, and a
+ * walk that moved the pick without moving focus would leave the ring on the
+ * row the reader started from.
  */
-test("the walk carries focus to the row it selected", async () => {
+test("the walk carries focus to the row it picked", async () => {
   render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
   press("ArrowDown");
   await waitFor(() => expect(marked()).toEqual(["hel1", null]));
 
-  const on = target.querySelector('button.row[aria-current="true"]');
+  const on = target.querySelector('button.tf-et-row[aria-current="true"]');
   expect(on?.textContent).toContain("hel1");
   await waitFor(() => expect(document.activeElement).toBe(on));
 });
 
-/** A step into a deeper column carries focus to the row selected there, not to the path's row in the first column (#2210). */
-test("the walk carries focus to the row it selected in a deeper column", async () => {
+/** A step into a deeper column carries focus to the row picked there, not to the path's row in the first column (#2210). */
+test("the walk carries focus to the row it picked in a deeper column", async () => {
   render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
   press("ArrowDown");
@@ -1009,21 +1018,20 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
  * **Escape unwinds one step per press, and the press it has no step for is
  * handed on.**
  *
- * The rung above the top of the estate is the bare tree; above that the Tree
- * has nothing to unwind, and the key belongs to the shell's ladder
- * (`shell/keys.ts` rung 3, *back to the room*). A view that consumed it
- * anyway would be the one surface a reader cannot leave with the keyboard —
- * so the last press is asserted **not** to be consumed.
+ * The rung above the top of the estate is the bare tree; above that the tree
+ * has nothing to unwind, and the key belongs to the shell's ladder, which
+ * takes it back to Dependencies. A view that consumed it anyway would be the
+ * one surface a reader cannot leave with the keyboard — so the last press is
+ * asserted **not** to be consumed.
  */
 test("escape unwinds the path one level at a time and then falls through", async () => {
-  const { nav } = render("#/asset/asset:postgres");
+  const { nav } = render("#/assets/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
   expect(press("Escape").defaultPrevented).toBe(true);
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
-  // Waited out between presses, and that is a statement about the view rather
-  // than about the test: the layout is derived from the pane's answer, so the
-  // rung a press lands on is the one the *drawn* path offers.
+  // Waited out between presses: the layout is derived from the preview's
+  // answer, so the rung a press lands on is the one the *drawn* path offers.
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
 
   press("Escape");
@@ -1044,54 +1052,49 @@ test("escape unwinds the path one level at a time and then falls through", async
  * spine labelled by its asset, and clicking the spine re-expands it.**
  *
  * Story 28, and the collapse is width-driven — 780px is what knobas' narrowest
- * allowed window (`minWidth: 1100`) leaves beside the fixed pane. The label is
- * the asset the reader walked *through*, not the column's parent: a spine
- * reading "top level" would tell them nothing about the path they are in.
+ * allowed window (`minWidth: 1100`) leaves beside the fixed preview. The label
+ * is the asset the reader walked *through*, not the column's parent.
  *
  * Clicking it anchors the strip there, which pushes the collapse to the other
  * end — the deepest column becomes the spine and the site is a full column
- * again. The pane does not move, which is the whole point of the collapse.
+ * again. The preview does not move, which is the whole point of the collapse.
  */
 test("a path too deep for the window collapses its oldest columns to spines", async () => {
-  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+  render("#/assets/asset:gitea-db", ESTATE, { stripWidth: 780 });
 
-  // Four levels, three of them drawn: the site is a spine and the columns the
-  // reader just walked into are the ones that keep their width.
   await waitFor(() => expect(spines()).toEqual(["hel1"]));
   expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
   expect(marked()).toEqual(["vm-app-02", "gitea", "gitea-db"]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(previewed()).toBe("gitea-db");
 
-  target.querySelector<HTMLButtonElement>("button.spine")?.click();
+  target.querySelector<HTMLButtonElement>("button.tf-et-spine")?.click();
   flushSync();
 
   // Anchored at the site, the collapse moves to the other end: the deepest
-  // column is the spine now, and it is labelled with the asset the reader has
-  // selected in it.
+  // column is the spine now, labelled with the asset picked in it.
   await waitFor(() => expect(spines()).toEqual(["gitea-db"]));
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(previewed()).toBe("gitea-db");
 });
 
 /** A window with room for every column draws no spine at all. */
 test("a path the window holds collapses nothing", async () => {
-  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 1400 });
+  render("#/assets/asset:gitea-db", ESTATE, { stripWidth: 1400 });
 
   await waitFor(() => expect(columns()).toHaveLength(4));
   expect(spines()).toEqual([]);
 });
 
 /**
- * **Typing a name in the Tree's search opens the path to the first match and
- * selects it** — criterion 3, and story 30.
+ * **Typing a name in the tree's search opens the path to the first match and
+ * picks it** — story 30.
  *
  * The reveal is an *address*: the box hands the first match's id to the
- * nav, the pane reads it, and the columns are derived from the `held_by`
+ * nav, the preview reads it, and the columns are derived from the `held_by`
  * that comes back. So the box needs to know nothing about where an asset
- * lives, and a match four levels down opens four columns without the reader
- * having walked one of them.
+ * lives, and a match four levels down opens four columns.
  */
-test("typing a name opens the path to the first match and selects it", async () => {
+test("typing a name opens the path to the first match and picks it", async () => {
   const { nav, searched } = render("#/assets/tree");
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
@@ -1100,7 +1103,7 @@ test("typing a name opens the path to the first match and selects it", async () 
   expect(searched.at(-1)?.filters.kinds).toEqual(["asset"]);
   expect(searched.at(-1)?.raw).toBe("gitea-db");
   // The list says where each match lives before the reader takes it.
-  expect(text()).toContain("hel1 / vm-app-02 / gitea");
+  expect(target.querySelector(".tf-et-res")?.textContent).toContain("hel1 / vm-app-02 / gitea");
 
   press("Enter", box());
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: GITEA_DB.id });
@@ -1108,7 +1111,7 @@ test("typing a name opens the path to the first match and selects it", async () 
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", "gitea-db"]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(previewed()).toBe("gitea-db");
 });
 
 /**
@@ -1143,7 +1146,7 @@ test("the box waits for the typing to stop, and an empty box asks nothing", asyn
  * match must not blank the path the reader is standing in.
  */
 test("a query nothing matches leaves the columns where they were", async () => {
-  const { searched } = render("#/asset/asset:postgres");
+  const { searched } = render("#/assets/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
   await type(searched, "nothing-is-called-this");
@@ -1159,7 +1162,7 @@ test("a query nothing matches leaves the columns where they were", async () => {
  * columns back without losing the asset they were reading.
  */
 test("escape in the search box clears the query before it unwinds anything", async () => {
-  const { nav, searched } = render("#/asset/asset:postgres");
+  const { nav, searched } = render("#/assets/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
   await type(searched, "gitea");
@@ -1168,7 +1171,7 @@ test("escape in the search box clears the query before it unwinds anything", asy
   press("Escape", box());
   expect(box().value).toBe("");
   expect(text()).not.toContain("gitea-db");
-  // The selection is untouched: clearing the box is not unwinding the path.
+  // The pick is untouched: clearing the box is not unwinding the path.
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: CONTAINER.id });
 });
 
@@ -1183,6 +1186,7 @@ test("the arrows move through the matches instead of the columns", async () => {
 
   await type(searched, "vm-");
   press("ArrowDown", box());
+  expect(target.querySelector(".tf-et-hit.tf-et-on")?.textContent).toContain("vm-app-02");
   press("Enter", box());
 
   // `vm-db-01` is the first match and `vm-app-02` the second: the press moved
@@ -1191,28 +1195,27 @@ test("the arrows move through the matches instead of the columns", async () => {
 });
 
 /**
- * **A re-expanded spine is a look at one path, and the next selection is
+ * **A re-expanded spine is a look at one path, and the next pick is
  * another.**
  *
- * So the anchor is kept beside the selection it was clicked in and does not
- * apply to a different one: carried, it would collapse the columns the reader
- * had just walked into, at a level they had never clicked a spine on.
+ * So the anchor is kept beside the pick it was clicked in and does not apply
+ * to a different one: carried, it would collapse the columns the reader had
+ * just walked into, at a level they had never clicked a spine on.
  *
  * The move is to `gitea`, which is one level *up* and still four columns wide
  * — it holds `gitea-db`, so a column opens under it. That is what makes the
  * assertion able to fail: a surviving anchor of 0 would draw the deepest
- * column as the spine instead of the oldest, and the two are told apart by
- * which asset the spine is labelled with.
+ * column as the spine instead of the oldest.
  */
 test("clicking a spine anchors this path and not the next one", async () => {
-  const { nav } = render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+  const { nav } = render("#/assets/asset:gitea-db", ESTATE, { stripWidth: 780 });
   await waitFor(() => expect(spines()).toEqual(["hel1"]));
 
-  target.querySelector<HTMLButtonElement>("button.spine")?.click();
+  target.querySelector<HTMLButtonElement>("button.tf-et-spine")?.click();
   flushSync();
   await waitFor(() => expect(spines()).toEqual(["gitea-db"]));
 
-  nav.go(`#/asset/${GITEA.id}`);
+  nav.go(`#/assets/${GITEA.id}`);
   flushSync();
 
   await waitFor(() => expect(marked()).toEqual(["vm-app-02", "gitea", null]));
@@ -1221,111 +1224,45 @@ test("clicking a spine anchors this path and not the next one", async () => {
 });
 
 /**
- * **Both ends of a route, in the pane of the asset each end is about** (#432).
+ * **Both ends of a route, in the preview of the asset each end is about**
+ * (#432): the rows the wires leave from.
  *
- * The exposing VM lists what it offers; the container the route lands on lists
- * how it is reached, with the exposing asset named. The untargeted route is
- * the control in the same fixture: it is under *Exposes* and reaches nobody,
- * so a pane that put every route in both lists fails here.
+ * The exposing VM lists what it offers and how it is reached; the untargeted
+ * route is under *Exposes* and reaches nobody. Every row carries the key its
+ * wire is measured by. The route's whole story, its properties and history,
+ * are on the asset's page.
  */
-test("the pane draws what an asset exposes and what reaches it", async () => {
-  render("#/asset/asset:vm-app-02");
-  await waitFor(() => expect(text()).toContain("Exposes"));
+test("the preview draws what an asset exposes and what reaches it, each row a wire's end", async () => {
+  const { opened } = render("#/assets/asset:vm-app-02");
+  await waitFor(() => expect(preview()).toContain("Exposes"));
 
-  const exposing = text();
-  expect(exposing).toContain("Gitea");
-  expect(exposing).toContain("http://127.0.0.1:3000/");
-  // A public route says so; an internal one is the unmarked default.
-  expect(exposing).toContain("public");
-  expect(exposing).toContain("Traefik dashboard");
-  expect(exposing).toContain("lands on nothing knobas knows");
-  // A route's properties are the reader's own and are drawn as they are.
-  expect(exposing).toContain("opened_by compose");
-  // The VM holds `gitea`, so the route landing on it also reaches the VM --
-  // and the pane says which end that is.
-  expect(exposing).toContain("inside, on gitea");
+  const said = preview();
+  expect(said).toContain("Gitea");
+  expect(said).toContain("public");
+  expect(said).toContain("Traefik dashboard");
+  expect(said).toContain("lands on nothing knobas knows");
+  expect(said).toContain("Reachable via");
+  expect(said).toContain("inside, on gitea, exposed by vm-app-02");
+  expect(
+    [...target.querySelectorAll("aside.tf-et-pane li[data-wire]")].map((row) => row.getAttribute("data-wire")),
+  ).toEqual(["exposes:route:dashboard", "exposes:route:gitea", "via:route:gitea"]);
 
+  // The URL is the *open URL* action, handed to the OS browser.
+  buttonNamed("http://127.0.0.1:3000/", target.querySelector("aside.tf-et-pane")!)!.click();
+  await waitFor(() => expect(opened).toEqual(["http://127.0.0.1:3000/"]));
 });
 
 /**
- * The other end of the same pair, in a pane of its own so that what is on
- * screen is one asset's: the container the route lands on says *lands here*
- * and names who offers it, and the untargeted route — which reaches nobody —
- * is not on this pane at all.
+ * An asset that exposes nothing and that nothing lands on draws neither route
+ * heading in the preview: the page says *No routes.*, the preview has room
+ * only for what is there.
  */
-test("the pane of the asset a route lands on names the end it came from", async () => {
-  render("#/asset/asset:gitea");
-  await waitFor(() => expect(text()).toContain("Reachable via"));
+test("the preview of an asset with no routes draws no route headings", async () => {
+  render("#/assets/asset:postgres");
+  await waitFor(() => expect(previewed()).toBe("postgres"));
 
-  const landing = text();
-  expect(landing).toContain("lands here");
-  expect(landing).toContain("exposed by vm-app-02");
-  expect(landing).toContain("Exposes No routes.");
-  // The endpoint lands on nothing, so it reaches nobody and is nowhere here.
-  expect(landing).not.toContain("Traefik dashboard");
-});
-
-/**
- * **A route's address opens the Tree at the asset exposing it, with the route
- * selected** — this ticket's third criterion, and story 14's point: a ticket
- * about a certificate links to the route whose certificate it is, and the link
- * has to land somewhere that says what the route belongs to.
- *
- * The address carries no asset, so the columns below are the proof that the
- * view resolved one: `#/route/gitea` draws `hel1 / vm-app-02` from nothing but
- * the route's own read.
- */
-test("a route's address opens the Tree at the asset that exposes it", async () => {
-  const { nav, asked } = render("#/route/route:gitea");
-
-  // Three columns: the estate, what the site holds, and what the *exposing*
-  // asset holds — the layout `#/asset/asset:vm-app-02` draws, from an address
-  // that named no asset at all.
-  await waitFor(() =>
-    expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]),
-  );
-  expect(marked()).toEqual(["hel1", "vm-app-02", null]);
-  expect(asked).toContain(SITE.id);
-  // The address is kept as the route's: a reader who copied this link must be
-  // able to hand it on, and the pane marks the route it names.
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: null,
-    routeId: "route:gitea",
-  });
-  // Marked in **both** lists, and that is the fixture rather than a bug: the
-  // VM exposes this route *and* is reached by it, because it lands on the
-  // container the VM holds. What the mark means is "this is the route the
-  // address names", and it names one route.
-  const selected = [...target.querySelectorAll('li[aria-current="true"]')];
-  expect(selected).toHaveLength(2);
-  for (const row of selected) expect(row.textContent).toContain("Gitea");
-  expect(target.querySelectorAll("li[aria-current]")).toHaveLength(2);
-});
-
-/**
- * Clicking a route in *reachable via* goes to the exposing asset, not to the
- * one being read — which is the same rule the address above follows, reached
- * by a click instead of a link.
- */
-test("clicking a route reached from elsewhere opens the asset exposing it", async () => {
-  const { nav } = render("#/asset/asset:gitea");
-  await waitFor(() => expect(text()).toContain("Reachable via"));
-
-  const route = [...target.querySelectorAll<HTMLButtonElement>("li button.link")].find(
-    (button) => button.textContent?.trim() === "Gitea",
-  );
-  route?.click();
-  flushSync();
-
-  expect(nav.route).toEqual({
-    view: "assets",
-    tab: "tree",
-    assetId: null,
-    routeId: "route:gitea",
-  });
-  await waitFor(() => expect(marked()).toEqual(["hel1", "vm-app-02", null]));
+  expect(preview()).not.toContain("Exposes");
+  expect(preview()).not.toContain("Reachable via");
 });
 
 // -- the wires (#433) --------------------------------------------------------
@@ -1337,13 +1274,13 @@ test("clicking a route reached from elsewhere opens the asset exposing it", asyn
  * The geometry is deliberately not read: jsdom lays nothing out, so every
  * rectangle it measures is zero and every wire's path would be the same
  * string. What a browser has to certify — that the curve reaches the row it
- * names — is the headless-Chrome pass in the PR; what this asserts is the
- * half a browser photograph cannot: *which* route is wired to *which* asset,
- * and whether the line says "through".
+ * names — is the headless-Chrome pass; what this asserts is the half a
+ * browser photograph cannot: *which* route is wired to *which* asset, and
+ * whether the line says "through".
  */
 function wires(): string[] {
-  return [...target.querySelectorAll("svg.wires path.wire")].map((wire) => {
-    const dashed = wire.classList.contains("dashed") ? " dashed" : "";
+  return [...target.querySelectorAll("svg.tf-et-wires path.tf-et-wire")].map((wire) => {
+    const dashed = wire.classList.contains("tf-et-dashed") ? " dashed" : "";
     return `${wire.getAttribute("data-wire")} → ${wire.getAttribute("data-to")}${dashed}`;
   });
 }
@@ -1351,16 +1288,16 @@ function wires(): string[] {
 /**
  * **A route whose target is drawn in a column gets a solid wire to that row,
  * and a route that lands on nothing gets none** — criterion 1, and its
- * control in the same pane.
+ * control in the same preview.
  *
- * The VM's own pane is where both ends of the pair are on screen at once: it
- * *exposes* the Gitea route, whose target sits in the column under it, and it
- * is also *reachable via* that same route, because the route lands on
- * something it holds. So one route draws two wires — from each of the two rows
- * it has in this pane — and the untargeted *Traefik dashboard* draws none.
+ * The VM's own preview is where both ends of the pair are on screen at once:
+ * it *exposes* the Gitea route, whose target sits in the column under it, and
+ * it is also *reachable via* that same route, because the route lands on
+ * something it holds. So one route draws two wires, and the untargeted
+ * *Traefik dashboard* draws none.
  */
 test("a route to an asset in an open column draws a solid wire to its row", async () => {
-  render("#/asset/asset:vm-app-02");
+  render("#/assets/asset:vm-app-02");
 
   await waitFor(() =>
     expect(wires()).toEqual([
@@ -1374,32 +1311,23 @@ test("a route to an asset in an open column draws a solid wire to its row", asyn
 
 /**
  * **A wire lands where its far end is drawn** — criterion 2, in the window
- * that draws the column, and then in the one that does not.
+ * that draws the column.
  *
- * Four levels, and the *route* is the same in both: at 780px the exposing VM's
- * column is drawn and the wire lands on its row; at 470px only the deepest
- * column fits and the same wire lands on the spine standing in for it.
- *
- * Dashed in both, and here for a reason of its own — the route reaches this
- * database *through* the container above it, which is story 31's other clause.
- * The pure test in `tree.test.ts` is where a spine landing is dashed on the
- * spine's account alone.
+ * Dashed, and for a reason of its own — the route reaches this database
+ * *through* the container above it, which is story 31's other clause.
  */
 test("a route whose exposer is drawn takes its wire to that row", async () => {
-  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 780 });
+  render("#/assets/asset:gitea-db", ESTATE, { stripWidth: 780 });
 
   await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
 });
 
 /**
  * The same route in a window that cannot hold the column: its exposer is
- * behind a spine now, and the wire lands there. One test each rather than one
- * test that unmounts and re-renders — the width is a prop, and a second
- * mounting inside one test would be the harness's `afterEach` written out by
- * hand.
+ * behind a spine now, and the wire lands there.
  */
 test("a route whose exposer is behind a spine draws a dashed wire to the spine", async () => {
-  render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 470 });
+  render("#/assets/asset:gitea-db", ESTATE, { stripWidth: 470 });
 
   await waitFor(() => expect(spines()).toEqual(["hel1", "vm-app-02", "gitea"]));
   expect(wires()).toEqual(["via:route:gitea → spine:1 dashed"]);
@@ -1410,14 +1338,13 @@ test("a route whose exposer is behind a spine draws a dashed wire to the spine",
  *
  * The wires are derived from the columns on screen rather than kept beside
  * them, so an asset no route reaches draws none the moment its columns are
- * drawn. A view that patched an SVG as it went would leave the VM's two lines
- * hanging over the new path, pointing at rows that are no longer there.
+ * drawn.
  */
 test("moving to an asset no route reaches leaves no wire behind", async () => {
-  const { nav } = render("#/asset/asset:vm-app-02");
+  const { nav } = render("#/assets/asset:vm-app-02");
   await waitFor(() => expect(wires()).toHaveLength(2));
 
-  nav.go("#/asset/asset:postgres");
+  nav.go("#/assets/asset:postgres");
   flushSync();
 
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
@@ -1425,21 +1352,20 @@ test("moving to an asset no route reaches leaves no wire behind", async () => {
 });
 
 /**
- * Lay the Tree out for one test: jsdom measures every element as zero, which
+ * Lay the tree out for one test: jsdom measures every element as zero, which
  * is the unlaid branch every other wire test runs on. `rows` is where each
  * route row sits, by its wire key, in the window's pixels; the frame and the
- * pane run `tall` pixels down, past the window's bottom edge, which is the
- * page that grows with its pane (#1460).
+ * preview run `tall` pixels down, past the window's bottom edge (#1460).
  */
 function layOut(rows: Record<string, number>, tall: number): void {
   const rect = (left: number, top: number, width: number, height: number) =>
     ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
-    if (this.matches("div.tree")) return rect(0, 0, 1000, tall);
-    if (this.matches("aside.pane")) return rect(680, 0, 320, tall);
-    if (this.matches("div.cols")) return rect(0, 0, 680, tall);
-    if (this.matches("ol.col")) return rect(0, 0, 220, window.innerHeight);
-    if (this.matches("button.row")) return rect(20, 40, 200, 24);
+    if (this.matches("div.tf-et-tree")) return rect(0, 0, 1000, tall);
+    if (this.matches("aside.tf-et-pane")) return rect(680, 0, 320, tall);
+    if (this.matches("div.tf-et-cols")) return rect(0, 0, 680, tall);
+    if (this.matches("ol.tf-et-col")) return rect(0, 0, 220, window.innerHeight);
+    if (this.matches("button.tf-et-row")) return rect(20, 40, 200, 24);
     const key = this.getAttribute("data-wire");
     if (this.matches("li[data-wire]") && key !== null && rows[key] !== undefined) return rect(690, rows[key], 300, 20);
     return rect(0, 0, 0, 0);
@@ -1449,33 +1375,30 @@ function layOut(rows: Record<string, number>, tall: number): void {
 /**
  * **A wire starts only from a route row the reader can see** (#1460).
  *
- * The pane's box reaching below the window is the page that grew with its
- * pane: every *Reachable via* row in it counted as visible, and their wires
- * ran off the bottom edge to rows nobody could see. The visible part of the
- * pane ends at the window, so the row below it draws nothing and the one
- * inside it still draws.
+ * The visible part of the preview ends at the window, so the row below it
+ * draws nothing and the one inside it still draws.
  */
 test("a route row below the window draws no wire, and one inside it does", async () => {
   const below = window.innerHeight + 400;
   layOut({ "exposes:route:gitea": 100, "via:route:gitea": below }, window.innerHeight + 1500);
-  render("#/asset/asset:vm-app-02");
+  render("#/assets/asset:vm-app-02");
 
   await waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
 });
 
 /**
- * **Scrolling the pane re-measures** (#1460): the pane is its own scroller, and
- * a row scrolled into view gains its wire at once, with nothing else changed.
+ * **Scrolling the preview re-measures** (#1460): the preview is its own
+ * scroller, and a row scrolled into view gains its wire at once.
  */
-test("a scroll on the pane brings a row scrolled into view its wire", async () => {
+test("a scroll on the preview brings a row scrolled into view its wire", async () => {
   const rows = { "exposes:route:gitea": 100, "via:route:gitea": window.innerHeight + 400 };
   layOut(rows, window.innerHeight);
-  render("#/asset/asset:vm-app-02");
+  render("#/assets/asset:vm-app-02");
   await waitFor(() => expect(wires()).toEqual(["exposes:route:gitea → asset:gitea"]));
 
   rows["via:route:gitea"] = 300;
   expect(wires(), "nothing re-measures before the scroll").toHaveLength(1);
-  target.querySelector("aside.pane")?.dispatchEvent(new Event("scroll"));
+  target.querySelector("aside.tf-et-pane")?.dispatchEvent(new Event("scroll"));
   flushSync();
 
   expect(wires()).toEqual(["exposes:route:gitea → asset:gitea", "via:route:gitea → asset:vm-app-02"]);
@@ -1486,128 +1409,21 @@ test("a scroll on the pane brings a row scrolled into view its wire", async () =
  * them** — story 31's *off under reduced motion's no-animation rule (still
  * drawn, not animated)*, as far as a stylesheet can be asked.
  *
- * The rule is a stylesheet's, so it is read off disk the way `app-css.test.ts`
- * reads the shell's and `tree.test.ts` reads the column widths: jsdom applies
- * no media query, so *whether a browser then draws the wire* is the browser
- * pass's claim and not this one. What this asserts is the regression with the
- * least visible symptom — nothing looks broken, the setting is simply
- * ignored — and it asserts it as **one rule**: `.wires .wire` and
- * `animation: none` in the same block, because two independent substring
- * checks pass on a block that turns some other element's animation off.
+ * Read off disk: jsdom applies no media query. Asserted as **one rule**: the
+ * wire's selector and `animation: none` in the same block, because two
+ * independent substring checks pass on a block that turns some other
+ * element's animation off.
  */
 test("switches the wires' fade off under reduced motion rather than hiding them", () => {
   const view = readFileSync(join(process.cwd(), "src/lib/assets/AssetsView.svelte"), "utf8");
   const block = /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n  \}/.exec(view);
 
-  expect(block, "no prefers-reduced-motion block in the Tree's stylesheet").not.toBeNull();
-  expect(block?.[0]).toMatch(/\.wires \.wire[^{}]*\{[^}]*animation:\s*none/);
-  // Switched off, not hidden: a wire nobody can see is not the same promise,
-  // and there is more than one way to make one invisible.
+  expect(block, "no prefers-reduced-motion block in the tree's stylesheet").not.toBeNull();
+  expect(block?.[0]).toMatch(/\.tf-et-wire[^{}]*\{[^}]*animation:\s*none/);
+  // Switched off, not hidden: a wire nobody can see is not the same promise.
   for (const hiding of ["display: none", "visibility: hidden", "opacity: 0"]) {
-    expect(block?.[0], `the reduced-motion block hides the wires with ${hiding}`).not.toContain(
-      hiding,
-    );
+    expect(block?.[0], `the reduced-motion block hides the wires with ${hiding}`).not.toContain(hiding);
   }
-});
-
-/**
- * **The pane's monitoring section** (issue #445, spec #427 stories 33 and 71).
- *
- * What the reader is owed for each monitor watching this asset: its name, the
- * state Kuma last published, and one click to its own page in Kuma. The
- * paused one is the row that makes the section honest — it is still attached,
- * it has no state and no page, and it says so rather than rendering as a blank
- * beside a live one. The third row separates the two halves of that: a monitor
- * the mirror still holds, with a page to open and no state word, is not the
- * same fact as one that has left it, and one row cannot witness both branches.
- */
-test("the pane lists the monitors watching the asset, with their state", async () => {
-  render(`#/asset/${CONTAINER.id}`);
-  await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
-
-  const section = target.querySelector(".watch");
-  const rows = [...section!.querySelectorAll("li")].map((row) =>
-    (row.textContent ?? "").replace(/\s+/g, " ").trim(),
-  );
-  expect(rows).toEqual([
-    "postgres-check down Open in Kuma",
-    "postgres-slow-query Paused or gone from Kuma",
-    "postgres-wal no reading Open in Kuma",
-  ]);
-});
-
-/**
- * A monitor's name opens the ticket-first Monitors page directly: the pane
- * hands the nav `entityAddress`'s address, not a rooms `#/monitor/<id>`
- * that the shell would have to rewrite on arrival (#1092).
- */
-test("a monitor's name goes to the Monitors page, not a rooms address", async () => {
-  const { nav } = render(`#/asset/${CONTAINER.id}`);
-  await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
-  const goes: string[] = [];
-  const go = nav.go.bind(nav);
-  nav.go = (hash: string) => {
-    goes.push(hash);
-    go(hash);
-  };
-
-  const name = [...target.querySelectorAll<HTMLButtonElement>(".watch button")].find(
-    (candidate) => candidate.textContent?.trim() === "postgres-check",
-  );
-  expect(name).toBeDefined();
-  name!.click();
-
-  await waitFor(() => expect(goes).toEqual(["#/monitors"]));
-});
-
-/**
- * Story 71: *a deep link from a monitor to its page in Uptime Kuma, so that
- * what knobas does not do is one click away.*
- *
- * The URL handed over is the **mirror's own** `web_url`, which is the adapter's
- * — nothing here builds one out of a base URL and an id.
- */
-test("Open in Kuma hands the monitor's own URL to the browser", async () => {
-  const { opened } = render(`#/asset/${CONTAINER.id}`);
-  await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
-
-  const open = [...target.querySelectorAll<HTMLButtonElement>(".watch button")].find(
-    (candidate) => candidate.textContent?.trim() === "Open in Kuma",
-  );
-  expect(open).toBeDefined();
-  open!.click();
-  await waitFor(() => expect(opened).toHaveLength(1));
-
-  expect(opened).toEqual(["http://127.0.0.1:3001/dashboard/4"]);
-});
-
-/**
- * The two halves of one sentence: what the file *said* and what has been
- * *found*. A name that found its monitor is in the section above and must not
- * be repeated below it — the list underneath is the queue, not the roster.
- */
-test("only the names still waiting for a monitor are listed as named by the import", async () => {
-  render(`#/asset/${CONTAINER.id}`);
-  await waitFor(() => expect(target.querySelector(".named")).not.toBeNull());
-
-  const waiting = target.querySelector(".named");
-  expect(
-    [...waiting!.querySelectorAll("li")].map((row) => (row.textContent ?? "").trim()),
-  ).toEqual(["pgbouncer"]);
-});
-
-/**
- * An asset nothing watches draws neither section. A *Monitoring* heading with
- * "nothing" under it on every hand-made asset would be a sentence about a file
- * nobody imported — the reason #439 drew the names conditionally, kept.
- */
-test("an asset with no monitors draws no monitoring section at all", async () => {
-  render(`#/asset/${VM.id}`);
-  await waitFor(() => expect(text()).toContain("vm-db-01"));
-
-  expect(target.querySelector(".watch")).toBeNull();
-  expect(target.querySelector(".named")).toBeNull();
-  expect(text()).not.toContain("Monitoring");
 });
 
 // -- a long column (#2210) -----------------------------------------------------
@@ -1619,16 +1435,16 @@ const bulkUnderSite = (n: number) =>
   );
 
 test("a long column draws the rows near the viewport, and a wire to a row it has not drawn still lands (#2210)", async () => {
-  render("#/asset/asset:gitea-db", [...ESTATE, ...bulkUnderSite(2000)], { stripWidth: 780 });
+  render("#/assets/asset:gitea-db", [...ESTATE, ...bulkUnderSite(2000)], { stripWidth: 780 });
 
   await waitFor(() => expect(wires()).toEqual(["via:route:gitea → asset:vm-app-02 dashed"]));
-  const long = [...target.querySelectorAll("ol.col")].find((column) => column.querySelector('[data-asset="asset:bulk-0"]'))!;
-  expect(long.querySelectorAll("button.row").length).toBeGreaterThan(5);
-  expect(long.querySelectorAll("button.row").length).toBeLessThan(100);
-  expect(long.querySelector('button.row[data-asset="asset:vm-app-02"]')).toBeNull();
+  const long = [...target.querySelectorAll("ol.tf-et-col")].find((column) => column.querySelector('[data-asset="asset:bulk-0"]'))!;
+  expect(long.querySelectorAll("button.tf-et-row").length).toBeGreaterThan(5);
+  expect(long.querySelectorAll("button.tf-et-row").length).toBeLessThan(100);
+  expect(long.querySelector('button.tf-et-row[data-asset="asset:vm-app-02"]')).toBeNull();
 });
 
-test("a search hit deep in a long column is drawn, selected and focused (#2210)", async () => {
+test("a search hit deep in a long column is drawn, picked and focused (#2210)", async () => {
   const { nav, searched } = render("#/assets/tree", [...ESTATE, ...bulkUnderSite(2000)]);
   await waitFor(() => expect(columns()).toEqual([["hel1"]]));
 
@@ -1638,13 +1454,4 @@ test("a search hit deep in a long column is drawn, selected and focused (#2210)"
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: "asset:bulk-1999" });
   await waitFor(() => expect(marked()).toEqual(["hel1", "bulk-1999"]));
   await waitFor(() => expect(document.activeElement?.getAttribute("data-asset")).toBe("asset:bulk-1999"));
-});
-
-test("a pane that holds thousands draws the Holds lines near the viewport (#2210)", async () => {
-  render("#/asset/asset:hel1", [...ESTATE, ...bulkUnderSite(2000)]);
-
-  await waitFor(() => expect(text()).toContain("bulk-0000"));
-  const holds = [...target.querySelectorAll("aside.pane section.grp")].find((group) => group.querySelector("h3")?.textContent?.trim() === "Holds")!;
-  expect(holds.querySelectorAll("li").length).toBeGreaterThan(5);
-  expect(holds.querySelectorAll("li").length).toBeLessThan(100);
 });
