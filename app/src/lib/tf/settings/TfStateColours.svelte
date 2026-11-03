@@ -135,6 +135,7 @@
                   aria-label={word.word}
                   draggable="true"
                   ondragstart={(event) => dragStart(event, kind.kind, word.word)}
+                  ondragend={() => (dragged = null)}
                   ><button
                     type="button"
                     class="tf-sc-word"

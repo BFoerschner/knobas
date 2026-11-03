@@ -188,6 +188,18 @@ test("a drop on a column sets that column's tone, as the keys do", async () => {
   expect(ports.setToneOverride).not.toHaveBeenCalled();
 });
 
+test("a drag that ends without a drop leaves nothing held: a later drop from elsewhere sends nothing", async () => {
+  const ports = fakePorts([tickets()]);
+  await draw(ports);
+
+  chip("Blocked")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
+  chip("Blocked")!.dispatchEvent(new Event("dragend", { bubbles: true }));
+  // Text dragged in from outside the board: no dragstart on a chip.
+  section("Tickets")!.querySelector('[role="group"][aria-label="err"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+  await settle();
+  expect(ports.setToneOverride).not.toHaveBeenCalled();
+});
+
 test("a chip says where its tone comes from; Reset sits only on yours and clears that word", async () => {
   const ports = fakePorts([tickets()]);
   await draw(ports);
