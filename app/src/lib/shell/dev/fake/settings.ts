@@ -90,6 +90,8 @@ function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   let passive = true;
   const toneOverrides = new Map<string, ToneChoice>();
+  // `?fake-tone-override` (#2469): one word is already yours, so the share export draws *State colours*.
+  if (params.has("fake-tone-override")) toneOverrides.set("ticket\u0000Blocked", "warn");
   // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
   const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
   let keptOpen = keptAsked === null ? 5 : Math.min(15, Math.max(0, Math.round(Number(keptAsked)) || 0));

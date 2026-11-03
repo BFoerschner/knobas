@@ -885,3 +885,12 @@ test("list_entities' first page reads the corpus as it is now (#2221)", () => {
   CORPUS.push({ ...CORPUS.find((entry) => entry.kind === "repo")!, entity_id: "mock:tidewater/new-repo" });
   expect(total()).toBe(was + 1);
 });
+
+test("with fake-tone-override, the fixture starts with Blocked moved to warn, so the share export's State colours tick draws (#2469)", () => {
+  const yours = (h: Calls) =>
+    (h["state_colours"]!({}) as { kind: string; words: { word: string; yours: string | null }[] }[]).flatMap((kind) =>
+      kind.words.filter((word) => word.yours !== null).map((word) => [kind.kind, word.word, word.yours]),
+    );
+  expect(yours(demoHandlers() as Calls)).toEqual([]);
+  expect(yours(demoHandlers(new URLSearchParams("fake-tone-override")) as Calls)).toEqual([["ticket", "Blocked", "warn"]]);
+});
