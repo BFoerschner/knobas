@@ -121,6 +121,8 @@ fn declarations() -> Declarations {
             merged: vec![PayloadPath::of(["merged"])],
             state: vec![StatePath {
                 at: PayloadPath::of(["state"]),
+                open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("open", Tone::Info),
                     StateValue::of("closed", Tone::Muted),

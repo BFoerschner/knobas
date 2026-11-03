@@ -3814,9 +3814,11 @@ export type StartWorkStepKind = "create_branch" | "create_pull_request" | "link_
  * The chip a row draws: the resolved [`KindPaths::state`].
  *
  * `EntityRow.state` on the wire. `text` is source text (or the adapter's
- * rename of it) and is drawn as text.
+ * rename of it) and is drawn as text. `tone` is `None` for a value its map
+ * declares without one: a chip in the neutral style, an uncoloured
+ * monogram (spec #2463).
  */
-export type StateChip = { text: string, tone: Tone, };
+export type StateChip = { text: string, tone: Tone | null, };
 
 /**
  * One proposal, as the tray draws it: the row, and **both** its ends.

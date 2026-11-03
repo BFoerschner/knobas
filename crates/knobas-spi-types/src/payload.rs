@@ -782,6 +782,26 @@ pub struct StatePath {
     /// trimming.
     #[serde(default)]
     pub values: Vec<StateValue>,
+    /// This instance invents the words at this path (spec #2463): a Jira
+    /// workflow's status names, which no adapter can list. The words the
+    /// mirror has seen here are offered for a tone override beside the
+    /// declared ones. Absent is `false`, so a descriptor written before the
+    /// flag still loads; `false` is not written, so a declaration without an
+    /// open candidate serialises as it did before the flag.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(as = "Option<bool>", optional)]
+    pub open: bool,
+    /// Where the chip's text is, when the value matched at `at` is not the
+    /// word a reader should see (spec #2463, #2468): Jira's status category
+    /// is matched at `statusCategory.key`, and the chip says the status name.
+    /// The string here, trimmed and non-blank, is the chip's text; a value's
+    /// own `text` still beats it, and a miss here shows the value. A
+    /// candidate with one has no state words of its own, so none of its
+    /// values is offered for a tone override. Absent is `None`, and `None` is
+    /// not written, so a declaration without one serialises as it did before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text_at: Option<PayloadPath>,
 }
 
 /// One value a [`StatePath`] draws, and how.
@@ -794,8 +814,14 @@ pub struct StateValue {
     /// [`resolve_flag`] makes). A string is matched after trimming.
     #[ts(type = "string | boolean")]
     pub value: serde_json::Value,
-    /// How loud the chip is.
-    pub tone: crate::tone::Tone,
+    /// How loud the chip is. `None` still **matches** (spec #2463): the walk
+    /// over candidates ends at this value and the chip draws its text with
+    /// no tone, never falling through to a later candidate. Absent is
+    /// `None`, and `None` is not written, so a toned map serialises as it
+    /// did before the tone was optional.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub tone: Option<crate::tone::Tone>,
     /// What the chip says, where the value itself is not a word a reader
     /// should see (`merged` for a merged flag's `true`). `None` shows the
     /// value.
@@ -809,7 +835,17 @@ impl StateValue {
     pub fn of(value: impl Into<serde_json::Value>, tone: crate::tone::Tone) -> Self {
         StateValue {
             value: value.into(),
-            tone,
+            tone: Some(tone),
+            text: None,
+        }
+    }
+
+    /// A value that matches and draws no tone: its chip is text in the
+    /// neutral style, and the walk over candidates stops at it.
+    pub fn toneless(value: impl Into<serde_json::Value>) -> Self {
+        StateValue {
+            value: value.into(),
+            tone: None,
             text: None,
         }
     }
@@ -825,12 +861,15 @@ impl StateValue {
 /// The chip a row draws: the resolved [`KindPaths::state`].
 ///
 /// `EntityRow.state` on the wire. `text` is source text (or the adapter's
-/// rename of it) and is drawn as text.
+/// rename of it) and is drawn as text. `tone` is `None` for a value its map
+/// declares without one: a chip in the neutral style, an uncoloured
+/// monogram (spec #2463).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct StateChip {
     pub text: String,
-    pub tone: crate::tone::Tone,
+    #[serde(default)]
+    pub tone: Option<crate::tone::Tone>,
 }
 
 /// The [`KindPaths`] field names, as the SQL macros spell them.
@@ -1328,7 +1367,10 @@ pub fn resolve_worklog(
 /// `at` leads to, trimmed and non-blank, or the boolean it leads to; anything
 /// else misses. The value must be one its own `values` names, string for
 /// string and boolean for boolean, or the candidate misses and the next is
-/// tried. The chip's text is the entry's `text`, else the value as text. [`declared_state!`](crate::declared_state) is the
+/// tried. The chip's text is the entry's `text`, else the string at the
+/// candidate's `text_at` (trimmed, non-blank), else the value as text, and
+/// its tone the entry's: an entry with none still matches and stops the walk,
+/// drawing a toneless chip. [`declared_state!`](crate::declared_state) is the
 /// same rule in SQL, held to this one by
 /// `crates/knobas-core/tests/it/payload_paths.rs`.
 #[must_use]
@@ -1343,8 +1385,13 @@ pub fn resolve_state(payload: &serde_json::Value, candidates: &[StatePath]) -> O
             _ => return None,
         };
         let entry = candidate.values.iter().find(|v| v.value == value)?;
+        let shown = || {
+            let path = candidate.text_at.as_ref()?;
+            let shown = at(payload, path)?.as_str()?.trim();
+            (!shown.is_empty()).then(|| shown.to_owned())
+        };
         Some(StateChip {
-            text: entry.text.clone().unwrap_or(text),
+            text: entry.text.clone().or_else(shown).unwrap_or(text),
             tone: entry.tone,
         })
     })
@@ -1630,7 +1677,9 @@ pub fn parent_path(chain: &[ResolvedParent]) -> Option<String> {
 /// [`path_line_read!`] wherever a row is read, so no two rows can disagree
 /// about what a state is. A kind that declares none, a value no map names, a
 /// value that is neither a string nor a boolean: all `null`, the ADR-0007
-/// miss, failing toward no chip rather than a wrong one.
+/// miss, failing toward no chip rather than a wrong one. A value its map
+/// declares without a tone is a match, not a miss: `{"text", "tone": null}`,
+/// and no later candidate is read (spec #2463).
 ///
 /// The `order by s.ord, v.vord` is the declaration order, and it is what
 /// makes the first candidate win: a merged pull request's flag comes before
@@ -1643,7 +1692,7 @@ macro_rules! declared_state {
 }
 
 /// The declared state candidates of the row `i`, as a relation of `(segs,
-/// vals, ord)`: [`declared_state!`]'s, exported for a statement that
+/// vals, ord, tsegs)` (`tsegs` the candidate's `text_at`, empty for none): [`declared_state!`]'s, exported for a statement that
 /// resolves them once a source and reads them through [`state_of!`] (#939).
 #[doc(hidden)]
 #[macro_export]
@@ -1652,7 +1701,9 @@ macro_rules! declared_state_candidates {
         concat!(
             "(select ",
             $crate::declared_segments!("t.p->'at'"),
-            " as segs, t.p->'values' as vals, t.ord from jsonb_array_elements(",
+            " as segs, t.p->'values' as vals, t.ord, ",
+            $crate::declared_segments!("t.p->'text_at'"),
+            " as tsegs from jsonb_array_elements(",
             $crate::declared_array!($decl, "state"),
             ") with ordinality as t(p, ord))"
         )
@@ -1660,7 +1711,7 @@ macro_rules! declared_state_candidates {
 }
 
 /// [`declared_state!`]'s rule over a relation of candidates the statement
-/// already holds, `(segs, vals, ord)` rows: the one spelling of the rule,
+/// already holds, `(segs, vals, ord, tsegs)` rows: the one spelling of the rule,
 /// as [`first_string_of!`] is for a string -- save the signals' reader's,
 /// [`resolved_state!`], which reads the values flattened once a statement for
 /// speed (#1148); `payload_paths.rs`'s state-chip cases hold it to this one.
@@ -1669,10 +1720,12 @@ macro_rules! declared_state_candidates {
 macro_rules! state_of {
     ($($candidates:tt)+) => {
         concat!(
-            "(select jsonb_build_object('text', coalesce(v.e->>'text', s.val #>> '{}'), 'tone', v.e->>'tone') \
+            "(select jsonb_build_object('text', coalesce(v.e->>'text', s.shown, s.val #>> '{}'), 'tone', v.e->>'tone') \
               from (select c.ord, c.vals, case jsonb_typeof(i.payload #> c.segs) \
                       when 'string' then to_jsonb(nullif(btrim(i.payload #>> c.segs), '')) \
-                      when 'boolean' then i.payload #> c.segs end as val \
+                      when 'boolean' then i.payload #> c.segs end as val, \
+                    case when cardinality(c.tsegs) > 0 and jsonb_typeof(i.payload #> c.tsegs) = 'string' \
+                      then nullif(btrim(i.payload #>> c.tsegs), '') end as shown \
                     from ",
             $($candidates)+,
             " c) s \
@@ -1680,7 +1733,7 @@ macro_rules! state_of {
                 case when jsonb_typeof(s.vals) = 'array' then s.vals else '[]'::jsonb end) \
                 with ordinality as v(e, vord) \
              where s.val is not null and v.e->'value' = s.val \
-               and jsonb_typeof(v.e->'tone') = 'string' \
+               and coalesce(jsonb_typeof(v.e->'tone'), 'null') in ('string', 'null') \
              order by s.ord, v.vord limit 1)"
         )
     };
@@ -2053,6 +2106,39 @@ mod tests {
         expected.push("markup");
         expected.sort_unstable();
         assert_eq!(keys, expected);
+    }
+
+    /// A state candidate written before spec #2463 names neither `open` nor
+    /// an optional tone: it decodes closed and toned, as it was. A toneless
+    /// value and an open candidate decode as such, and a closed, toned one
+    /// encodes exactly as it did before the two fields, so no stored
+    /// declaration changes under an adapter that uses neither.
+    #[test]
+    fn a_state_candidate_without_the_open_flag_decodes_closed() {
+        let before = serde_json::json!({
+            "at": ["status"],
+            "values": [{ "value": "FAILURE", "tone": "err" }]
+        });
+        let decoded: StatePath = serde_json::from_value(before.clone()).unwrap();
+        assert!(!decoded.open, "absent is closed");
+        assert_eq!(decoded.values[0].tone, Some(crate::tone::Tone::Err));
+        let mut written = serde_json::to_value(&decoded).unwrap();
+        written["values"][0].as_object_mut().unwrap().remove("text");
+        assert_eq!(written, before, "written as before the flag");
+
+        let open: StatePath = serde_json::from_value(serde_json::json!({
+            "at": ["fields", "status", "name"],
+            "values": [{ "value": "To Do" }],
+            "open": true
+        }))
+        .unwrap();
+        assert!(open.open);
+        assert_eq!(open.values, [StateValue::toneless("To Do")]);
+        assert_eq!(
+            serde_json::to_value(&open.values[0]).unwrap(),
+            serde_json::json!({ "value": "To Do", "text": null }),
+            "no tone is not written"
+        );
     }
 
     /// `opened` and `merged_at` were declared for the conversation's

@@ -163,6 +163,15 @@ pub struct ShareParts {
     /// only once a set exists and sends it off while there is none, as with
     /// smart lists.
     pub link_sets: bool,
+    /// `knobas.state_tone` -- the reader's state colours, a tone or *No
+    /// colour* per entity kind and state word (#2469, spec #2463 stories
+    /// 30 and 31). **On by default**: a colleague restoring the archive sees
+    /// the rows coloured as the sharer does, and unticks the part to keep
+    /// their own. It brings no address book: a row names a kind and a word,
+    /// no entity, and has no foreign key (migration `0071`). The dialog
+    /// offers its toggle only once an override exists and sends it off while
+    /// there is none, as with smart lists.
+    pub state_colours: bool,
 }
 
 impl Default for ShareParts {
@@ -177,6 +186,7 @@ impl Default for ShareParts {
             smart_lists: true,
             ticket_views: true,
             link_sets: true,
+            state_colours: true,
         }
     }
 }
@@ -271,6 +281,9 @@ impl ShareParts {
             push("link_set_member");
             push("link_set_rule");
         }
+        if self.state_colours {
+            push("state_tone");
+        }
         tables
     }
 
@@ -288,6 +301,7 @@ impl ShareParts {
             smart_lists: false,
             ticket_views: false,
             link_sets: false,
+            state_colours: false,
         }
     }
 }
@@ -306,6 +320,10 @@ mod tests {
         assert!(
             parts.smart_lists,
             "saved smart lists are on by default (#507): a saved list is a query over the link map"
+        );
+        assert!(
+            parts.state_colours,
+            "state colours are on by default (#2469): a colleague restoring sees what the sharer sees"
         );
         assert!(
             !parts.notes && !parts.time,
@@ -327,7 +345,8 @@ mod tests {
                 "ticket_view",
                 "link_set",
                 "link_set_member",
-                "link_set_rule"
+                "link_set_rule",
+                "state_tone"
             ],
         );
     }
@@ -410,6 +429,14 @@ mod tests {
                 },
                 vec!["link_set", "link_set_member", "link_set_rule"],
             ),
+            // Nor is a tone override (#2469): a kind and a word, no address.
+            (
+                ShareParts {
+                    state_colours: true,
+                    ..ShareParts::none()
+                },
+                vec!["state_tone"],
+            ),
         ] {
             assert_eq!(parts.tables(), expected, "{parts:?}");
         }
@@ -440,6 +467,7 @@ mod tests {
                 smart_lists: true,
                 ticket_views: true,
                 link_sets: true,
+                state_colours: true,
             },
         ] {
             assert!(
@@ -467,6 +495,7 @@ mod tests {
             smart_lists: true,
             ticket_views: true,
             link_sets: true,
+            state_colours: true,
         };
         for forbidden in [
             // *Hide here* is one reader's choice about one ticket (#870).
@@ -555,12 +584,17 @@ mod tests {
             older.link_sets,
             "a payload without `link_sets` must decode to the ratified answer for it, which is on"
         );
+        assert!(
+            older.state_colours,
+            "a payload without `state_colours` must decode to the ratified answer for it, which is on"
+        );
         assert_eq!(older, ShareParts::default());
 
         let all: ShareParts = serde_json::from_value(serde_json::json!({
             "links": false, "assets": false, "contexts": false,
             "notes": false, "time": false, "sources": false,
-            "smart_lists": false, "ticket_views": false, "link_sets": false
+            "smart_lists": false, "ticket_views": false, "link_sets": false,
+            "state_colours": false
         }))
         .expect("a payload naming every part");
         assert_eq!(all, ShareParts::none());

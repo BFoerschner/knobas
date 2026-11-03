@@ -30,6 +30,7 @@ export const shareDefaults: ShareParts = {
   smart_lists: true,
   ticket_views: true,
   link_sets: true,
+  state_colours: true,
 };
 
 /** The schedule, the last export, and what is on disk. */

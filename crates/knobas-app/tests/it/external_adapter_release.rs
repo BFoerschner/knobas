@@ -893,6 +893,7 @@ async fn a_share_export_carries_no_external_adapter_record() {
         smart_lists: true,
         ticket_views: true,
         link_sets: true,
+        state_colours: true,
     };
     let share = knobas_app::backup::share_export(&state, every)
         .await

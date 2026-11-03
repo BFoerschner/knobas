@@ -90,6 +90,8 @@ pub fn payload_paths() -> [KindPaths; 2] {
             finished: at("finished"),
             state: vec![StatePath {
                 at: PayloadPath::of(["state"]),
+                open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("failed", Tone::Err),
                     StateValue::of("passed", Tone::Ok),

@@ -19,6 +19,7 @@ pub mod project;
 pub mod reach;
 pub mod signals;
 pub mod start_work;
+pub mod state_colours;
 pub mod suggest;
 pub mod viewed;
 pub mod web_url;

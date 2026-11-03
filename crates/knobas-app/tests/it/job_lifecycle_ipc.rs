@@ -114,6 +114,34 @@ async fn opening_a_done_job_reads_its_archived_context_and_makes_no_second() {
     assert_eq!(again.context.archived_at, first.context.archived_at);
 }
 
+/// Jira's status category colours a ticket and never archives it (#2468): a
+/// ticket in a status outside the done-like names, filed under the `done`
+/// category, opens a live job, and a sync run landing it leaves it live.
+#[tokio::test]
+async fn a_status_in_the_done_category_but_outside_the_done_names_never_archives() {
+    let pool = scratch("job-lifecycle-category").await;
+    let shipped = ticket(&pool, "PAY-7", "Shipped").await;
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&shipped)
+        .bind(serde_json::json!({ "key": "PAY-7", "fields": { "status": {
+            "name": "Shipped", "statusCategory": { "key": "done", "name": "Done" },
+        } } }))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let job = open_job(&pool, &shipped).await;
+    assert!(job.context.archived_at.is_none(), "{:?}", job.context);
+    sync_lands(&pool).await;
+    assert!(
+        open_job(&pool, &shipped)
+            .await
+            .context
+            .archived_at
+            .is_none()
+    );
+}
+
 /// Opening a job never moves `archived_at`, done or not: a live context stays
 /// live when the mirror now says Done, and an archived one stays archived
 /// when the mirror now says something else. Only the sync run moves it.

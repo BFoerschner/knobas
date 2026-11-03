@@ -653,7 +653,7 @@ async fn a_member_row_carries_its_line_and_its_dot() {
             rows[i]
                 .state
                 .as_ref()
-                .map(|chip| (chip.text.clone(), chip.tone)),
+                .and_then(|chip| Some((chip.text.clone(), chip.tone?))),
         )
     };
     use knobas_core::tone::Tone;
@@ -777,7 +777,7 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
                 row.line.clone(),
                 row.state
                     .as_ref()
-                    .map(|chip| (chip.text.clone(), chip.tone)),
+                    .and_then(|chip| Some((chip.text.clone(), chip.tone?))),
             )
         })
         .collect();

@@ -10,12 +10,13 @@
 
   Each row is a button that inserts itself, so the card is also how the syntax
   is learned by using it. The card ends with the colour legend (#2421): what
-  a monogram's colour says, per kind, from the adapters' declared states.
+  a monogram's colour says, per kind, from the merged state colours the
+  launcher reads (#2467).
 -->
 <script lang="ts">
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindLabel, kindMonogram } from "../shell/kinds";
-  import { legendOf } from "./legend";
+  import type { LegendLine } from "./legend";
   import type { LauncherRow } from "./rows";
 
   let {
@@ -23,6 +24,7 @@
     selected,
     heading = "Prefix syntax",
     keys = [],
+    legend = [],
     optionId,
     onopen,
     onhover,
@@ -33,14 +35,13 @@
     heading?: string;
     /** The keys the box answers, listed at the bottom of the card (#2424). */
     keys?: [string, string][];
+    /** The colour legend (#2421, #2467): the merged state colours, per kind, as the launcher read them. */
+    legend?: LegendLine[];
     /** The element id of the option at a flat-list index (#1411). */
     optionId: (index: number) => string;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
-
-  /** The colour legend (#2421): the adapters' declared states, per kind. */
-  const legend = $derived(legendOf(kindRegistry.declaredStates()));
 </script>
 
 <div class="tf-ln-h"><span class="tf-ln-lab">{heading}</span></div>
@@ -86,6 +87,7 @@
             ></span
           >
         {/each}
+        {#if line.rest !== null}<span class="tf-ln-lgt">{line.rest}</span>{/if}
       </div>
     {/each}
   </div>

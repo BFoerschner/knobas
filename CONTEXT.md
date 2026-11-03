@@ -82,12 +82,20 @@ The entity you can open that an item sits directly inside: a repo for a branch, 
 _Avoid_: container, scope, holder, repository (as the name of this fact)
 
 **State chip**:
-What a row shows of where its item stands, for a kind whose adapter declares one: a pull request's `open`, `merged` or `closed`, a build's `running`, `queued` or outcome, a ticket's status. Declared as a [declared path](#declared-path) with a value map; each value is drawn with a [tone](#tone), and a value the map does not name is a [miss](#miss), so no chip. A ticket's state is its status where the adapter declares a tone for the word: on Jira, Done and Resolved are `ok`, In Progress and In Review `info`, Closed `muted`. The status is still the workflow column you move a ticket to, and a status the map does not name, such as To Do, is a miss. The launcher row draws the state as its monogram's tone, not as a chip; room rows, set dots and job sections read it like any other declared state.
+What a row shows of where its item stands, for a kind whose adapter declares one: a pull request's `open`, `merged` or `closed`, a build's `running`, `queued` or outcome, a ticket's status. Declared as a [declared path](#declared-path) with a value map; each value is drawn with a [tone](#tone) or with none, and a value the map does not name is a [miss](#miss), so no chip. A value with no tone still matches: its chip draws the word in the neutral style and no later candidate is read. The map a reader sees is the adapter's with the reader's [tone overrides](#tone-override) applied. A ticket's state is its status where the adapter declares a tone for the word: on Jira, Done and Resolved are `ok`, In Progress and In Review `info`, Closed `muted`. The status is still the workflow column you move a ticket to. A status those names leave out takes the tone of its Jira status category, read after the name: in progress is `info` and done `ok`, and the chip still says the status; a to-do status, such as To Do, is a miss. The category colours a ticket and never archives its job. The launcher row draws the state as its monogram's tone, not as a chip; room rows, set dots and job sections read it like any other declared state.
 _Avoid_: badge, status (the ticket's workflow word the state is read from, not this fact), state (alone)
 
 **Tone**:
-How loud a value is drawn, in five words the shell owns the colours of: `ok`, `warn`, `err`, `info`, `muted`. An adapter names a tone and never a colour.
+How loud a value is drawn, in five words the shell owns the colours of: `ok`, `warn`, `err`, `info`, `muted`. An adapter names a tone and never a colour, and a reader may set one per state word with a [tone override](#tone-override). The tone is the fact: what reads it (a build counted as failed for `err`, a row hidden as settled for `ok` and `muted`) follows the override, not only the colour.
 _Avoid_: colour, severity, level
+
+**Tone override**:
+A reader's choice of [tone](#tone), or of no colour, for one state word of one entity kind: `FAILURE` on builds drawn `warn`, `Blocked` on tickets drawn `err`. Per kind, never per source or adapter, so it holds for every source of the kind. It replaces the tone of a word an adapter declares, and adds a word the mirror has seen at an open candidate, one whose words the instance invents (a Jira status name). No colour still matches and stops the walk over candidates. Clearing it restores the adapter's tone, or for a seen ticket status its Jira category's.
+_Avoid_: custom colour, colour override, theme
+
+**State colours**:
+The reader's [tone overrides](#tone-override), seen per entity kind with every offered word: the words the adapters declare, then the words the mirror has seen at the kind's open candidates. Set in Settings › Appearance, read by every surface that draws a [state chip](#state-chip) and by the ⌘? legend, and never written into the stored parent declaration, so a change recomputes nothing.
+_Avoid_: colour scheme, palette
 
 **Miss**:
 A payload read finding no recognisable shape and contributing nothing: the one failure a payload read is allowed. Guessing is the forbidden alternative.
@@ -373,7 +381,7 @@ _Avoid_: incident, notification (bare), problem (the rolled-up count on a closed
 Everything knobas owns, notes included; the mirror is excluded, since it re-syncs.
 
 **Share export**:
-A curated export in the backup's own format restricted to tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, read by the ordinary restore. Parts: links, assets, contexts, [source](#source) configurations, smart lists with the [favourites](#favourite) and [keys](#key), ticket views and link sets on by default; notes and time (the timer, [blocks](#block) and [worklogs](#worklog)) off. A part whose table is empty is sent off rather than hidden. Because `pg_dump` restricts by table and never by row, the time settings cannot cross and the whole address book of entity rows does. No credential is ever in an archive, so a restored source lands as *missing secret* and at no position, since no archive carries the [mirror](#mirror). Saved queries cross exactly as written.
+A curated export in the backup's own format restricted to tables, named `knobas-share-<stamp>.knobas` so retention never deletes it, read by the ordinary restore. Parts: links, assets, contexts, [source](#source) configurations, smart lists with the [favourites](#favourite) and [keys](#key), ticket views, link sets and [state colours](#state-colours) on by default; notes and time (the timer, [blocks](#block) and [worklogs](#worklog)) off. A part whose table is empty is sent off rather than hidden. Because `pg_dump` restricts by table and never by row, the time settings cannot cross and the whole address book of entity rows does. No credential is ever in an archive, so a restored source lands as *missing secret* and at no position, since no archive carries the [mirror](#mirror). Saved queries cross exactly as written.
 
 ## Surfaces
 

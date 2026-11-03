@@ -1,8 +1,8 @@
 /** A job address read against two sources holding the same key (#1476). */
 import { expect, test } from "vitest";
 
-import type { EntityDetail } from "../../ipc/entity";
-import { footAction, loggedRow, resolveJob, resolveTicket } from "./job";
+import type { EntityDetail, EntityRow } from "../../ipc/entity";
+import { byAttention, footAction, loggedRow, resolveJob, resolveTicket } from "./job";
 
 const SOURCES = [{ id: "mock" }, { id: "gitea" }, { id: "jira" }];
 /** The mirror: PAY-231 in the mock source and in Jira, PAY-9 in Jira alone. */
@@ -118,4 +118,24 @@ test("the Logged row: the time alone with no estimate, 0m of an estimate with no
     meter: { mine: 0, others: 0, past: 0 },
   });
   expect(loggedRow(logged(), "mara")).toBeNull();
+});
+
+test("a state with no tone sorts with the settled rows, after every row that asks for you (spec #2463)", () => {
+  const at = (entity_id: string, updated_at: string, state: EntityRow["state"]): EntityRow => ({
+    entity_id,
+    kind: "pr",
+    source_id: "gitea",
+    title: entity_id,
+    updated_at,
+    synced_at: updated_at,
+    path: null,
+    state,
+  });
+  const rows = [
+    at("draft", "2026-08-22T12:00:00Z", { text: "draft", tone: null }),
+    at("merged", "2026-08-22T11:00:00Z", { text: "merged", tone: "ok" }),
+    at("open", "2026-08-20T10:00:00Z", { text: "open", tone: "info" }),
+    at("failed", "2026-08-19T10:00:00Z", { text: "FAILURE", tone: "err" }),
+  ];
+  expect(byAttention(rows).map((row) => row.entity_id)).toEqual(["failed", "open", "draft", "merged"]);
 });

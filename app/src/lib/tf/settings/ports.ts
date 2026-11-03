@@ -48,6 +48,7 @@ import { passiveAttribution, setPassiveAttribution } from "../../ipc/time";
 import type { RefusedWritesPort } from "../../shell/refused-writes";
 import {
   addSource,
+  clearToneOverrides,
   backfillSource,
   dbStats,
   reindexFts,
@@ -65,6 +66,8 @@ import {
   runEmbeddedHtml,
   setRunEmbeddedHtml,
   setSourceSecret,
+  setToneOverride,
+  stateColours,
   syncAll,
   syncNow,
   syncStatus,
@@ -74,6 +77,8 @@ import {
   type ConnectionReport,
   type DbStats,
   type InstalledAdapter,
+  type KindStateColours,
+  type ToneChoice,
   type AdapterPreview,
   type AdapterStatus,
   type UpdatePreview,
@@ -220,6 +225,12 @@ export interface SectionPorts {
   ticketViews: () => Promise<Pick<TicketViewRow, "id">[]>;
   /** Whether any link set exists, for the share export's tick (#870). */
   linkSets: () => Promise<Pick<LinkSetRow, "id">[]>;
+  /**
+   * The offered words per kind and the tone each draws: Settings › Appearance
+   * › State colours draws them (#2466), and Settings › Backup reads whether
+   * any word is *yours* for the share export's *State colours* tick (#2469).
+   */
+  stateColours: () => Promise<KindStateColours[]>;
   appStatus: () => Promise<Pick<AppStatus, "app_version">>;
   dbStats: () => Promise<DbStats>;
   reindexFts: () => Promise<void>;
@@ -232,6 +243,10 @@ export interface SectionPorts {
   openBackupFolder: () => Promise<void>;
   /** Settings › Renderers (#2262); the IPC when omitted. */
   renderers?: import("./TfRenderersSection.svelte").RendererPorts;
+  /** State colours (#2466): set a word's tone, answered with a fresh read. */
+  setToneOverride: (kind: string, word: string, tone: ToneChoice) => Promise<KindStateColours[]>;
+  /** State colours (#2466): clear one word's tone, or the kind's with `word: null`, answered with a fresh read. */
+  clearToneOverrides: (kind: string, word: string | null) => Promise<KindStateColours[]>;
 }
 
 /** The real commands, each looked up when it is called (see above). */
@@ -259,9 +274,12 @@ export const realSectionPorts: SectionPorts = {
   keys: () => keys(),
   ticketViews: () => ticketViews(),
   linkSets: () => linkSets(),
+  stateColours: () => stateColours(),
   appStatus: () => appStatus(),
   dbStats: () => dbStats(),
   reindexFts: () => reindexFts(),
+  setToneOverride: (kind, word, tone) => setToneOverride(kind, word, tone),
+  clearToneOverrides: (kind, word) => clearToneOverrides(kind, word),
   // The rooms UI's `LogsSection` (#747): Tauri's path API and the opener,
   // whose `open-path` permission is scoped to `$APPLOG`; loaded on the press.
   openLogs: async () => {

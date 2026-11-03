@@ -92,7 +92,10 @@ pub async fn stream(
         .await
         .map_err(IpcError::internal)?;
     let declared = declared_ops_of(&sources, registry);
-    let declarations = crate::sources::paths::declared_paths_of(sources, registry);
+    let overrides = knobas_core::state_colours::overrides(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    let declarations = crate::sources::paths::declared_paths_of(sources, registry, &overrides);
     let items = inbox::items(pool, identity, now, shelf, &declarations)
         .await
         .map_err(IpcError::internal)?;

@@ -632,7 +632,7 @@ drawn as (
            end
          end as grp
     from ruled r
-   where (r.state is null or r.state->>'tone' not in ('ok', 'muted'))
+   where coalesce(r.state->>'tone', '') not in ('ok', 'muted')
      and r.is_default is not true
 )"#,
     tile_page!(),

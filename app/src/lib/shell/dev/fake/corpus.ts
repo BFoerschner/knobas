@@ -429,7 +429,7 @@ function ticketState(entry: (typeof CORPUS)[number]): StateChip | null {
   const status = entry.payload["status"];
   if (entry.kind !== "ticket" || typeof status !== "string") return null;
   const found = TICKET_STATES.find((value) => value.value === status.trim());
-  return found ? { text: status, tone: found.tone } : null;
+  return found ? { text: status, tone: found.tone ?? null } : null;
 }
 
 /**

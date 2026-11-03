@@ -780,6 +780,19 @@ base: Array<PayloadPath>,
 attachments: Array<AttachmentPath>, };
 
 /**
+ * One entity kind that declares a state, and its offered words: declared
+ * words in declared order, then the others alphabetically.
+ */
+export type KindStateColours = { kind: string, words: Array<StateWordColour>, 
+/**
+ * Whether a configured adapter reads on past the kind's open candidate
+ * for a word its names leave out (Jira's status category, #2468), so
+ * that every such word, seen yet or not, takes a default there. The
+ * legend ends the kind with its category line by this.
+ */
+has_category: boolean, };
+
+/**
  * Where a **list** of strings lives: the array, and where the string sits
  * inside each element.
  *
@@ -1557,7 +1570,27 @@ at: PayloadPath,
  * The values this candidate draws a chip for, matched exactly after
  * trimming.
  */
-values: Array<StateValue>, };
+values: Array<StateValue>, 
+/**
+ * This instance invents the words at this path (spec #2463): a Jira
+ * workflow's status names, which no adapter can list. The words the
+ * mirror has seen here are offered for a tone override beside the
+ * declared ones. Absent is `false`, so a descriptor written before the
+ * flag still loads; `false` is not written, so a declaration without an
+ * open candidate serialises as it did before the flag.
+ */
+open?: boolean, 
+/**
+ * Where the chip's text is, when the value matched at `at` is not the
+ * word a reader should see (spec #2463, #2468): Jira's status category
+ * is matched at `statusCategory.key`, and the chip says the status name.
+ * The string here, trimmed and non-blank, is the chip's text; a value's
+ * own `text` still beats it, and a miss here shows the value. A
+ * candidate with one has no state words of its own, so none of its
+ * values is offered for a tone override. Absent is `None`, and `None` is
+ * not written, so a declaration without one serialises as it did before.
+ */
+text_at?: PayloadPath, };
 
 /**
  * One value a [`StatePath`] draws, and how.
@@ -1571,15 +1604,50 @@ export type StateValue = {
  */
 value: string | boolean, 
 /**
- * How loud the chip is.
+ * How loud the chip is. `None` still **matches** (spec #2463): the walk
+ * over candidates ends at this value and the chip draws its text with
+ * no tone, never falling through to a later candidate. Absent is
+ * `None`, and `None` is not written, so a toned map serialises as it
+ * did before the tone was optional.
  */
-tone: Tone, 
+tone?: Tone, 
 /**
  * What the chip says, where the value itself is not a word a reader
  * should see (`merged` for a merged flag's `true`). `None` shows the
  * value.
  */
 text: string | null, };
+
+/**
+ * One state word a kind offers, and how it is drawn.
+ */
+export type StateWordColour = { word: string, 
+/**
+ * An adapter's map names the word. `false` for a word the mirror has
+ * seen at an open candidate.
+ */
+declared: boolean, 
+/**
+ * The adapter's tone, `None` for a word it declares with none or does
+ * not declare.
+ */
+declared_tone: Tone | null, 
+/**
+ * The tone the word's items draw where the adapter reads on past the
+ * word (Jira's status category, #2468), for a seen word it does not
+ * declare. `None` for a declared word, and for one whose items resolve
+ * to nothing there (a to-do status).
+ */
+category_tone: Tone | null, 
+/**
+ * The reader's override, if any.
+ */
+yours: ToneChoice | null, 
+/**
+ * What the word draws: the override, else the adapter's tone, else the
+ * category's.
+ */
+tone: Tone | null, origin: ToneOrigin, };
 
 /**
  * How a run ended.
@@ -1713,6 +1781,17 @@ swept: number, error: string | null, cursor_after: string | null, };
  * type's and a field's doc but not a variant's (#1325).
  */
 export type SyncTrigger = "schedule" | "manual" | "first_run" | "backfill";
+
+/**
+ * What a reader picks for one state word: one of the five tones, or *No
+ * colour*. On the wire the tone's own lowercase word, or `"none"`.
+ */
+export type ToneChoice = "ok" | "warn" | "err" | "info" | "muted" | "none";
+
+/**
+ * Where a word's resulting tone comes from.
+ */
+export type ToneOrigin = "yours" | "adapter" | "category" | "unset";
 
 /**
  * How a run was started, in the shell's words (#961, #1146).

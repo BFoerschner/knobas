@@ -73,6 +73,8 @@ impl AdapterRegistry for Probe {
                     kind: "ticket".to_owned(),
                     state: vec![StatePath {
                         at: PayloadPath::of(["state"]),
+                        open: false,
+                        text_at: None,
                         values: vec![StateValue::of("open", Tone::Info)],
                     }],
                     assignee: vec![PayloadPath::of(["assignee"])],
@@ -87,6 +89,8 @@ impl AdapterRegistry for Probe {
                     merged: vec![PayloadPath::of(["merged"])],
                     state: vec![StatePath {
                         at: PayloadPath::of(["state"]),
+                        open: false,
+                        text_at: None,
                         values: vec![StateValue::of("open", Tone::Info)],
                     }],
                     head: vec![PayloadPath::of(["head", "ref"])],

@@ -1276,3 +1276,43 @@ async fn an_attachment_read_on_a_failing_jira_is_unreachable_or_unauthorized() {
     );
     jira.assert_no_violations();
 }
+
+/// A mock-backed run colours its tickets through the adapter's own state
+/// declaration (#2468): to do draws nothing, in progress is `info`, done is
+/// `ok`. The mock serves `statusCategory` inside `status`, as Data Center
+/// does, so the category reaches the payload with no extra field asked for.
+#[tokio::test]
+async fn a_mock_backed_run_colours_to_do_in_progress_and_done() {
+    use knobas_core::tone::Tone;
+    let jira = spawn_mock_jira().await;
+    let source = source(&jira.base_url(), serde_json::json!({}));
+    let mut sink = VecSink(Vec::new());
+    source.sync(None, &mut sink).await.unwrap();
+    let template = knobas_source_jira::descriptor_template();
+    let ticket = template
+        .payload_paths
+        .iter()
+        .find(|paths| paths.kind == "ticket")
+        .expect("the ticket kind declares its paths");
+    let mut drawn = std::collections::BTreeMap::new();
+    for item in &sink.0 {
+        let status = &item.payload["fields"]["status"];
+        assert!(
+            status["statusCategory"]["key"].is_string(),
+            "{} carries its status category: {status}",
+            item.entity
+        );
+        let chip = knobas_core::payload::resolve_state(&item.payload, &ticket.state);
+        drawn.insert(
+            status["name"].as_str().unwrap().to_owned(),
+            chip.and_then(|chip| chip.tone),
+        );
+    }
+    for (status, tone) in [
+        ("To Do", None),
+        ("In Progress", Some(Tone::Info)),
+        ("Done", Some(Tone::Ok)),
+    ] {
+        assert_eq!(drawn.get(status), Some(&tone), "{status} in {drawn:?}");
+    }
+}

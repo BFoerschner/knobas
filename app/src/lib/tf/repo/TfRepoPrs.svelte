@@ -15,6 +15,7 @@
   import { itemHash } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob, type OpenJobPorts } from "../job/open-jobs";
   import { visibleRepoPrs } from "./repo";
+  import { toneClass } from "../tone";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
 
@@ -75,7 +76,7 @@
         <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
           <td class="tf-mono"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td><a href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a></td>
-          <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>
+          <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
           <td class="tf-mono tf-dim">{index.jobOf({ entity_id: row.entity_id, kind: row.kind }) ?? ""}</td>
         </tr>
       {/each}

@@ -21,11 +21,12 @@ export interface ShareTick {
  * (`ShareParts`). *Saved lists, favourites and keys* is drawn only once a
  * saved list, a favourite or a key exists (they ride in that part, #2428,
  * #2429),
- * *Ticket views* (#812) only once a view exists and *Link sets* (#870) only
- * once a set exists: each part is a box about nothing before that
- * (CONTEXT.md, *Share export*).
+ * *Ticket views* (#812) only once a view exists, *Link sets* (#870) only
+ * once a set exists and *State colours* (#2469) only once a tone override
+ * exists: each part is a box about nothing before that (CONTEXT.md, *Share
+ * export*).
  */
-export function shareTicks(savedLists: boolean, savedViews = false, savedSets = false): ShareTick[] {
+export function shareTicks(savedLists: boolean, savedViews = false, savedSets = false, savedTones = false): ShareTick[] {
   const all: ShareTick[] = [
     { part: "links", label: "Links" },
     { part: "link_sets", label: "Link sets" },
@@ -34,6 +35,7 @@ export function shareTicks(savedLists: boolean, savedViews = false, savedSets = 
     { part: "assets", label: "Assets and routes" },
     { part: "sources", label: "Sources, without passwords" },
     { part: "smart_lists", label: "Saved lists, favourites and keys" },
+    { part: "state_colours", label: "State colours" },
     { part: "notes", label: "Notes" },
     { part: "time", label: "Time" },
   ];
@@ -41,7 +43,8 @@ export function shareTicks(savedLists: boolean, savedViews = false, savedSets = 
     (tick) =>
       (savedLists || tick.part !== "smart_lists") &&
       (savedViews || tick.part !== "ticket_views") &&
-      (savedSets || tick.part !== "link_sets"),
+      (savedSets || tick.part !== "link_sets") &&
+      (savedTones || tick.part !== "state_colours"),
   );
 }
 

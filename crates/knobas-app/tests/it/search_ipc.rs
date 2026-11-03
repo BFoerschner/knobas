@@ -2004,6 +2004,6 @@ async fn a_list_that_needs_attention_carries_the_reason_as_its_state() {
     };
     assert_eq!(state("healthy"), None);
     let broken = state("broken").expect("the broken list says so");
-    assert_eq!(broken.tone, knobas_core::tone::Tone::Warn);
+    assert_eq!(broken.tone, Some(knobas_core::tone::Tone::Warn));
     assert!(broken.text.starts_with("Needs attention"), "{broken:?}");
 }

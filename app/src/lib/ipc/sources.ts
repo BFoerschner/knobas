@@ -23,6 +23,7 @@ import type {
   DbStats,
   EntityRefresh,
   InstalledAdapter,
+  KindStateColours,
   NewSource,
   QueueCounts,
   QueuedWrite,
@@ -37,6 +38,7 @@ import type {
   SyncProgress,
   SyncReport,
   SyncRunRow,
+  ToneChoice,
   UpdatePreview,
   WriteOpPayload,
 } from "./generated/sources";
@@ -97,6 +99,10 @@ export type {
   Trigger,
   TriggerPath,
   TriggerValue,
+  KindStateColours,
+  StateWordColour,
+  ToneChoice,
+  ToneOrigin,
   UpdateCheck,
   UpdatePreview,
   UpdateStyle,
@@ -114,6 +120,33 @@ export function demoLoad(): Promise<SyncReport> {
 }
 
 // -- §2.2: sources, secrets, credential health --------------------------------
+
+/**
+ * *State colours* (spec #2463): per kind a configured source declares a state
+ * for, each offered word — declared words in declared order, then the words
+ * the mirror has seen at the kind's open candidates, alphabetically — with its
+ * declared tone, the reader's override and the tone it draws.
+ */
+export function stateColours(): Promise<KindStateColours[]> {
+  return invoke<KindStateColours[]>("state_colours");
+}
+
+/**
+ * Set one word's tone override, `"none"` for *No colour*, and get back what
+ * {@link stateColours} now reads. Emits `EVENTS.activityNew`.
+ */
+export function setToneOverride(kind: string, word: string, tone: ToneChoice): Promise<KindStateColours[]> {
+  return invoke<KindStateColours[]>("set_tone_override", { kind, word, tone });
+}
+
+/**
+ * Clear `kind`'s override for `word`, or every override of `kind` for `null`
+ * (*Reset all*), and get back what {@link stateColours} now reads. Emits
+ * `EVENTS.activityNew` when it cleared something.
+ */
+export function clearToneOverrides(kind: string, word: string | null): Promise<KindStateColours[]> {
+  return invoke<KindStateColours[]>("clear_tone_overrides", { kind, word });
+}
 
 /**
  * One descriptor template per compiled-in adapter kind (`id === adapter_kind`).

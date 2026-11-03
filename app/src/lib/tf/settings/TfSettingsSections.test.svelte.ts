@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { BackupStatus } from "../../ipc/backup";
 import type { InboxCategory, WriteAsk } from "../../ipc/entity";
-import type { SourceSummary } from "../../ipc/sources";
+import type { KindStateColours, SourceSummary, ToneChoice } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { keptPages } from "../kept-pages.svelte";
@@ -77,6 +77,20 @@ const sourcePorts: SettingsPorts = {
   setRunEmbeddedHtml: () => Promise.resolve(true),
 };
 
+/** Appearance's State colours (#2466): a kind per adapter family, so its board draws. */
+function fakeStateColours(): Pick<SectionPorts, "stateColours" | "setToneOverride" | "clearToneOverrides"> {
+  const kinds: KindStateColours[] = ["build", "monitor", "pr", "ticket"].map((kind) => ({
+    kind,
+    has_category: kind === "ticket",
+    words: [{ word: "settled", declared: true, declared_tone: "ok", category_tone: null, yours: null, tone: "ok", origin: "adapter" }],
+  }));
+  return {
+    stateColours: vi.fn(() => Promise.resolve(kinds)),
+    setToneOverride: vi.fn(() => Promise.resolve(kinds)),
+    clearToneOverrides: vi.fn(() => Promise.resolve(kinds)),
+  };
+}
+
 function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
     pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
@@ -115,6 +129,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     keys: vi.fn(() => Promise.resolve({ lists: [], actions: [] })),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
+    ...fakeStateColours(),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
     dbStats: vi.fn(() =>
       Promise.resolve({
@@ -200,6 +215,26 @@ function rowValue(label: string): string {
   );
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
+
+test("Appearance draws State colours below Theme, one section per kind with a state (#2466)", async () => {
+  await open("appearance");
+  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.textContent?.trim());
+  expect(heads).toEqual(["Theme", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+});
+
+test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
+  const p = sectionPorts();
+  const read = vi.spyOn(p, "stateColours");
+  view = mount(TfSettings, {
+    target,
+    context: hiddenable,
+    props: { rest: ["appearance"], job: null, ready: false, ports: sourcePorts, sectionPorts: p, layers: createLayers(), now: () => NOW, theme: createTheme() },
+  });
+  await settle();
+  expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
+  expect(target.querySelector(".tf-sc")).toBeNull();
+  expect(read).not.toHaveBeenCalled();
+});
 
 test("Appearance and the top bar's toggle are the same setting", async () => {
   const theme = createTheme();
@@ -359,6 +394,7 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
     smart_lists: false,
     ticket_views: false,
     link_sets: false,
+    state_colours: false,
     notes: true,
     time: false,
   });
@@ -415,6 +451,64 @@ test("a link set draws its tick after Links, on by default, and switching it off
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ link_sets: false }));
+});
+
+/** One kind's read, as `state_colours` answers it, with `yours` set on the words named. */
+function kindColours(kind: string, words: [string, ToneChoice | null][]): KindStateColours {
+  return {
+    kind,
+    has_category: kind === "ticket",
+    words: words.map(([word, yours]) => ({
+      word,
+      declared: true,
+      declared_tone: "ok",
+      category_tone: null,
+      yours,
+      tone: yours === null ? "ok" : yours === "none" ? null : yours,
+      origin: yours === null ? "adapter" : "yours",
+    })),
+  };
+}
+
+test("a tone override draws the State colours tick, on by default, and switching it off sends it off (#2469)", async () => {
+  const p = await open(
+    "backup",
+    sectionPorts({
+      stateColours: vi.fn(() =>
+        Promise.resolve([kindColours("build", [["SUCCESS", null]]), kindColours("ticket", [["Done", null], ["Blocked", "none"]])]),
+      ),
+    }),
+  );
+  const labels = () => [...target.querySelectorAll<HTMLLabelElement>(".tf-stg-checks label")];
+  expect(labels().map((el) => el.textContent?.trim())).toEqual([
+    "Links",
+    "Contexts",
+    "Assets and routes",
+    "Sources, without passwords",
+    "State colours",
+    "Notes",
+    "Time",
+  ]);
+  expect(labels().find((el) => el.textContent?.trim() === "State colours")!.querySelector("input")!.checked).toBe(true);
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ state_colours: true }));
+  labels()
+    .find((el) => el.textContent?.trim() === "State colours")!
+    .querySelector("input")!
+    .click();
+  flushSync();
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ state_colours: false }));
+});
+
+test("words with only the adapters' tones draw no State colours tick, and the part goes off (#2469)", async () => {
+  const p = await open("backup", sectionPorts({ stateColours: vi.fn(() => Promise.resolve([kindColours("ticket", [["Done", null]])])) }));
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).not.toContain("State colours");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ state_colours: false }));
 });
 
 /** The file names the open dialog lists, one pick each. */

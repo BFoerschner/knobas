@@ -2158,6 +2158,8 @@ mod tests {
                     let state = |at: &[&str], value: &str| {
                         vec![StatePath {
                             at: PayloadPath::of(at.iter().copied()),
+                            open: false,
+                            text_at: None,
                             values: vec![StateValue::of(value, Tone::Info)],
                         }]
                     };

@@ -59,6 +59,7 @@
   import { waitPhase } from "../waiting";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
+  import { toneClass } from "../tone";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     checkoutLine,
@@ -531,7 +532,7 @@
                       : ""}idle for more than 5 days{/if}</span
                 ></td
               >
-              <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>
+              <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
               <td class="tf-mono tf-dim">{belongs ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>

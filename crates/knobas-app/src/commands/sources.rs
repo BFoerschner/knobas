@@ -84,6 +84,71 @@ pub fn list_adapters(lifecycle: State<'_, Lifecycle>) -> Vec<knobas_source::Sour
     lifecycle.registry().descriptors()
 }
 
+// -- State colours (spec #2463) ------------------------------------------------
+
+/// *State colours*: per kind a configured source declares a state for, each
+/// offered word with its declared tone, the reader's override and the tone it
+/// draws (`crate::sources::state_colours::read`). The editor and the legend
+/// read this.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// `internal` if a read fails.
+#[tauri::command]
+pub async fn state_colours(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::sources::state_colours::KindStateColours>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::sources::state_colours::read(&pool, lifecycle.registry()).await
+}
+
+/// Set one word's tone override: `kind`'s `word` draws `tone`, or no colour
+/// for `"none"`. Every surface that draws the state reads it on its next
+/// read; the command announces the change on `activity:new`, which the open
+/// surfaces re-read on, and answers what [`state_colours`] now reads.
+///
+/// # Errors
+///
+/// `invalid` for a blank kind or word,
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// `internal` if a write fails.
+#[tauri::command]
+pub async fn set_tone_override<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    kind: String,
+    word: String,
+    tone: knobas_core::state_colours::ToneChoice,
+) -> Result<Vec<crate::sources::state_colours::KindStateColours>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let line = crate::sources::state_colours::set(&pool, &kind, &word, tone).await?;
+    crate::events::emit(&app, None, crate::events::ACTIVITY_NEW, &line);
+    crate::sources::state_colours::read(&pool, lifecycle.registry()).await
+}
+
+/// Clear tone overrides: `kind`'s override for `word`, or every override of
+/// `kind` when `word` is null (*Reset all*). Announced on `activity:new` as
+/// [`set_tone_override`] is; a clear that forgot nothing announces nothing.
+/// Answers what [`state_colours`] now reads.
+///
+/// # Errors
+///
+/// As [`set_tone_override`].
+#[tauri::command]
+pub async fn clear_tone_overrides<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    kind: String,
+    word: Option<String>,
+) -> Result<Vec<crate::sources::state_colours::KindStateColours>, IpcError> {
+    let pool = lifecycle.pool()?;
+    if let Some(line) = crate::sources::state_colours::clear(&pool, &kind, word.as_deref()).await? {
+        crate::events::emit(&app, None, crate::events::ACTIVITY_NEW, &line);
+    }
+    crate::sources::state_colours::read(&pool, lifecycle.registry()).await
+}
+
 /// The install flow's paths over the sources state's registry (#1323).
 fn installs(
     state: &crate::sources::SourcesState,
@@ -1180,7 +1245,7 @@ mod tests {
             "sources",
             MIRROR,
             "app/src/lib/ipc/sources.ts",
-            31,
+            34,
         );
     }
 }

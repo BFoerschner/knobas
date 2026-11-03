@@ -159,7 +159,11 @@ async fn a_searched_laned_board_derives_each_once() {
     assert_eq!(n, CEILING_BOARD, "mini_board_laned issued {n}");
 }
 
-const CEILING_INBOX: usize = 3;
-const CEILING_DOCS: usize = 9;
+// Each read of the declarations also reads the reader's tone overrides
+// (#2465, `knobas.state_tone`, a primary-key table of a few rows): one more
+// statement per `declared_paths` and one per searcher vocabulary. The board
+// derives both, so it gained two.
+const CEILING_INBOX: usize = 4;
+const CEILING_DOCS: usize = 10;
 const CEILING_PROJECTS: usize = 2;
-const CEILING_BOARD: usize = 6;
+const CEILING_BOARD: usize = 8;

@@ -5,7 +5,7 @@ import { boundedNumber, databaseWords, lastBackupWords, scheduleWords, shareTick
 const NOW = new Date(2026, 9, 15, 14, 30);
 
 test("the share ticks are the export's parts, in prototype-6's order, and no tick for a part that does not exist", () => {
-  expect(shareTicks(true, true, true).map((tick) => [tick.part, tick.label])).toEqual([
+  expect(shareTicks(true, true, true, true).map((tick) => [tick.part, tick.label])).toEqual([
     ["links", "Links"],
     ["link_sets", "Link sets"],
     ["ticket_views", "Ticket views"],
@@ -13,6 +13,7 @@ test("the share ticks are the export's parts, in prototype-6's order, and no tic
     ["assets", "Assets and routes"],
     ["sources", "Sources, without passwords"],
     ["smart_lists", "Saved lists, favourites and keys"],
+    ["state_colours", "State colours"],
     ["notes", "Notes"],
     ["time", "Time"],
   ]);
@@ -21,6 +22,8 @@ test("the share ticks are the export's parts, in prototype-6's order, and no tic
   expect(shareTicks(false, true, true).map((tick) => tick.label)).not.toContain("Saved lists, favourites and keys");
   expect(shareTicks(true, true, false).map((tick) => tick.label)).not.toContain("Link sets");
   expect(shareTicks(true, false, true).map((tick) => tick.label)).not.toContain("Ticket views");
+  // State colours once an override exists (#2469).
+  expect(shareTicks(true, true, true, false).map((tick) => tick.label)).not.toContain("State colours");
 });
 
 test("the last backup reads as prototype-6's line", () => {

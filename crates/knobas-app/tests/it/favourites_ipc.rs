@@ -215,6 +215,6 @@ async fn a_favourite_list_that_needs_attention_says_why() {
         .await
         .expect("the favourites");
     let state = rows[0].state.as_ref().expect("needs attention");
-    assert_eq!(state.tone, knobas_core::tone::Tone::Warn);
+    assert_eq!(state.tone, Some(knobas_core::tone::Tone::Warn));
     assert!(!state.text.is_empty());
 }

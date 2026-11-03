@@ -22,6 +22,8 @@ let setting: KeptPagesSetting;
 const state = $state<{ route: TfRoute }>({ route: parseTfHash("#/inbox") });
 /** Moves a role's revision, as a run of *Sync now* ending does. */
 const roleRevision = $state({ n: 0 });
+/** Moves as the shell's does when the state colours change (spec #2463). */
+const stale = $state({ n: 0 });
 
 /** A page per section, each one page wherever it is in that section. */
 function sectionPage(section: Section, role?: string): TfPageEntry {
@@ -73,7 +75,18 @@ beforeEach(() => {
       }),
     } as unknown as RoleSyncs,
   } as unknown as Omit<TfPageContext, "visible">;
-  host = mount(TfPage, { target, props: { ctx, pages: PAGES, kept: setting } });
+  stale.n = 0;
+  host = mount(TfPage, {
+    target,
+    props: {
+      ctx,
+      pages: PAGES,
+      kept: setting,
+      get stale() {
+        return stale.n;
+      },
+    },
+  });
   flushSync();
 });
 
@@ -169,4 +182,21 @@ test("an address with no page hides every kept page", () => {
   expect(shownPages()).toEqual([]);
   expect(held()?.sort()).toEqual(["builds", "inbox"]);
   expect(target.textContent).toContain("Nothing lives at");
+});
+
+test("when what every page drew goes stale, the hidden pages are dropped and each mounts afresh on its return; the shown one stays", () => {
+  // Settings is the page in front while the state colours change (spec #2463):
+  // a hidden page that is not a role view reads nothing on its return by itself.
+  for (const hash of ["#/docs", "#/sets", "#/builds", "#/time"]) go(hash);
+  stale.n += 1;
+  flushSync();
+  expect(held(), "only the shown page is kept").toEqual(["time"]);
+  expect(count(log.mounts, "time"), "the shown page keeps its instance").toBe(1);
+  go("#/sets");
+  expect(count(log.mounts, "sets"), "a new instance, which reads what it draws again").toBe(2);
+  go("#/time");
+  expect(count(log.mounts, "time")).toBe(1);
+  // Pages held after the change are kept as before.
+  go("#/sets");
+  expect(count(log.mounts, "sets")).toBe(2);
 });

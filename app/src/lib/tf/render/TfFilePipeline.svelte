@@ -184,6 +184,7 @@
         aria-label="Step {i + 1}, {name}"
         draggable="true"
         ondragstart={() => (dragged = i)}
+        ondragend={() => (dragged = null)}
         ondragover={(event) => event.preventDefault()}
         ondrop={(event) => drop(event, i)}
       >

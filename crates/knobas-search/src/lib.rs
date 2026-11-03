@@ -298,15 +298,33 @@ impl Searcher {
     }
 
     /// What this installation is configured with, its sources given their
-    /// declarations. One round trip, the one every query already made.
+    /// declarations, the reader's tone overrides merged in (spec #2463).
+    ///
+    /// The overrides are read here, per vocabulary, rather than kept beside
+    /// [`Self::with_payload_paths`]' copy: that copy is the adapters' own and
+    /// is what [`Self::declaring`] writes into `sync.parent_declaration`, so an
+    /// override never reaches the stored table and never recomputes the
+    /// parents. Two round trips: the source listing, and a read of a table of
+    /// a few rows.
     ///
     /// # Errors
     ///
-    /// [`SearchError::Db`] if the read fails.
+    /// [`SearchError::Db`] if a read fails.
     pub async fn vocabulary(&self) -> Result<Vocabulary, SearchError> {
+        let overrides = knobas_core::state_colours::overrides(&self.pool).await?;
+        let templates: Vec<(String, Vec<knobas_core::payload::KindPaths>)> = self
+            .payload_paths
+            .iter()
+            .map(|(adapter, paths)| {
+                (
+                    adapter.clone(),
+                    knobas_core::state_colours::merged(paths.clone(), &overrides),
+                )
+            })
+            .collect();
         Ok(Vocabulary::load(&self.pool, self.kinds.clone())
             .await?
-            .declaring(&self.payload_paths))
+            .declaring(&templates))
     }
 
     /// Read `raw` as a link-set pattern (#868, R-7.2) with this
@@ -806,7 +824,7 @@ fn flag_lists_needing_attention(groups: &mut [ResultGroup], vocab: &Vocabulary) 
             if let Err(refusal) = saved::plan(text, vocab) {
                 hit.row.state = Some(knobas_core::payload::StateChip {
                     text: refusal.description(),
-                    tone: knobas_core::tone::Tone::Warn,
+                    tone: Some(knobas_core::tone::Tone::Warn),
                 });
             }
         }

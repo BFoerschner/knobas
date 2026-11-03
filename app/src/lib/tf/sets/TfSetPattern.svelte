@@ -10,7 +10,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetMemberKind, LinkSetPatternPreview } from "../../ipc/entity";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { dotClass, patternQuery } from "./sets";
+  import { patternQuery } from "./sets";
+  import { toneClass } from "../tone";
 
   let {
     kind,
@@ -102,7 +103,7 @@
     <div class="tf-picks tf-pat-matches" role="list" aria-label="Matches now">
       {#each matched.matches.slice(0, DRAWN) as row (row.entity_id)}
         <div class="tf-pat-match" role="listitem">
-          <span class="tf-dot {dotClass(row.state)}"></span>{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>
+          <span class="tf-dot {toneClass(row.state)}"></span>{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>
         </div>
       {/each}
     </div>

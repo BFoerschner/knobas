@@ -23,8 +23,9 @@ import type {
   Segment,
 } from "../ipc";
 import type { InboxItem, StateChip } from "../ipc/entity";
+import type { KindStateColours, StateWordColour } from "../ipc/sources";
+import { EVENTS } from "../ipc";
 import { toasts } from "../shell/toasts.svelte";
-import { kindRegistry } from "../shell/kind-registry.svelte";
 import Launcher from "./Launcher.svelte";
 import { DEBOUNCE_MS } from "./session.svelte";
 import { createScope } from "./scope.svelte";
@@ -2538,59 +2539,228 @@ test("the box has no footnote, no ⌘K badge and no caret bar", async () => {
   expect(box.textContent).not.toContain("pending write");
 });
 
+/** One offered word of the *state colours* read, as `sources::state_colours::read` answers it. */
+function word(over: Partial<StateWordColour> & { word: string }): StateWordColour {
+  const declared_tone = over.declared_tone ?? null;
+  const yours = over.yours ?? null;
+  return {
+    declared: over.declared ?? true,
+    declared_tone,
+    yours,
+    tone: over.tone !== undefined ? over.tone : yours === null ? declared_tone : yours === "none" ? null : yours,
+    origin: over.origin ?? (yours !== null ? "yours" : declared_tone !== null ? "adapter" : "unset"),
+    ...over,
+    category_tone: over.category_tone ?? null,
+  };
+}
+
+/** The read the legend is drawn from: Jira's ticket words (two seen), Gitea's pull requests, Kuma's monitors. */
+const COLOURS: KindStateColours[] = [
+  {
+    kind: "monitor",
+    has_category: false,
+    words: [
+      word({ word: "up", declared_tone: "ok" }),
+      word({ word: "down", declared_tone: "err" }),
+      // The reader's: `pending` is loud for them.
+      word({ word: "pending", declared_tone: "warn", yours: "err" }),
+      word({ word: "maintenance", declared_tone: "muted" }),
+    ],
+  },
+  {
+    kind: "pr",
+    has_category: false,
+    words: [word({ word: "merged", declared_tone: "ok" }), word({ word: "open", declared_tone: "info" }), word({ word: "closed", declared_tone: "muted" })],
+  },
+  {
+    kind: "ticket",
+    has_category: true,
+    words: [
+      word({ word: "Done", declared_tone: "ok" }),
+      // Set to *No colour*: it matches and draws no tone, so no legend line names it.
+      word({ word: "In Progress", declared_tone: "info", yours: "none" }),
+      word({ word: "Resolved", declared_tone: "ok" }),
+      // Seen at Jira's open candidate; one coloured by the reader, one left alone.
+      word({ word: "Blocked", declared: false, yours: "err" }),
+      word({ word: "To Do", declared: false }),
+    ],
+  },
+];
+
+/** The legend as drawn: per kind its label and each tone's words. */
+function legendDrawn() {
+  const legend = target.querySelector('[aria-label="Colours"]');
+  if (!legend) return null;
+  return [...legend.querySelectorAll(".tf-ln-lg")].map((line) => ({
+    kind: line.querySelector(".tf-ln-lgk")?.textContent?.trim(),
+    tones: [...line.querySelectorAll<HTMLElement>(".tf-ln-mg")].map((mg) => [mg.dataset["tone"], mg.nextElementSibling?.textContent?.trim()]),
+  }));
+}
+
+const HELP_SEARCH = async () =>
+  response({
+    interpreted: { text: "", prefix: "help", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    groups: [],
+  });
+
+/** A legend's ports over a fixed read, with the `activity:new` handlers kept so a test can fire one. */
+function legendFake(first: KindStateColours[]) {
+  const fake = {
+    answer: first,
+    reads: 0,
+    heard: [] as { event: string; handler: () => void }[],
+    stateColours: async () => (fake.reads++, fake.answer),
+    listen: async (event: string, handler: () => void) => {
+      const entry = { event, handler };
+      fake.heard.push(entry);
+      return () => void fake.heard.splice(fake.heard.indexOf(entry), 1);
+    },
+    fire(event: string) {
+      for (const { event: name, handler } of [...fake.heard]) if (name === event) handler();
+    },
+  };
+  return fake;
+}
+
 /**
  * The `?` card ends with a colour legend per kind (#2421), built from the
- * states the adapters declare, so it cannot drift from what a row draws.
+ * merged map the *state colours* read answers (#2467, spec #2463), so it
+ * explains the colours a row actually draws: the reader's overrides and the
+ * seen words they coloured, and nothing for a word set to *No colour*.
  */
-test("the ? card ends with a legend per kind, from the adapters' declared states", async () => {
-  const declared = vi.spyOn(kindRegistry, "declaredStates").mockReturnValue([
-    {
-      kind: "ticket",
-      values: [
-        { value: "Done", tone: "ok", text: null },
-        { value: "In Progress", tone: "info", text: null },
-        { value: "Resolved", tone: "ok", text: null },
-        { value: "Closed", tone: "muted", text: null },
-      ],
-    },
-    {
-      kind: "pr",
-      values: [
-        { value: true, tone: "ok", text: "merged" },
-        { value: "open", tone: "info", text: null },
-        { value: "closed", tone: "muted", text: null },
-      ],
-    },
-  ]);
-  try {
-    open({
-      ports: {
-        launcherHome: async () => HOME,
-        search: async () =>
-          response({
-            interpreted: { text: "", prefix: "help", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
-            groups: [],
-          }),
-      },
-    });
-    await settle();
-    await search("?");
+test("the ? card ends with a legend per kind, from the merged state colours", async () => {
+  const legendPorts = legendFake(COLOURS);
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts });
+  await settle();
+  await search("?");
+  await settle();
 
-    const legend = target.querySelector('[aria-label="Colours"]')!;
-    expect(legend, "the legend is drawn").not.toBeNull();
-    // After the syntax rows, never among them: nothing in it is an option.
-    expect(legend.querySelectorAll('[role="option"]')).toHaveLength(0);
-    const kinds = [...legend.querySelectorAll(".tf-ln-lg")].map((line) => ({
-      kind: line.querySelector(".tf-ln-lgk")?.textContent?.trim(),
-      tones: [...line.querySelectorAll<HTMLElement>(".tf-ln-mg")].map((mg) => [mg.dataset["tone"], mg.nextElementSibling?.textContent?.trim()]),
-    }));
-    expect(kinds).toEqual([
-      { kind: "Tickets", tones: [["ok", "Done, Resolved"], ["info", "In Progress"], ["muted", "Closed"]] },
-      { kind: "Pull requests", tones: [["ok", "merged"], ["info", "open"], ["muted", "closed"]] },
-    ]);
-  } finally {
-    declared.mockRestore();
-  }
+  const legend = target.querySelector('[aria-label="Colours"]')!;
+  expect(legend, "the legend is drawn").not.toBeNull();
+  // After the syntax rows, never among them: nothing in it is an option.
+  expect(legend.querySelectorAll('[role="option"]')).toHaveLength(0);
+  expect(legendDrawn()).toEqual([
+    // `pending` under the reader's `err`, and with it no `warn` line at all.
+    { kind: "Monitors", tones: [["ok", "up"], ["err", "down, pending"], ["muted", "maintenance"]] },
+    { kind: "Pull requests", tones: [["ok", "merged"], ["info", "open"], ["muted", "closed"]] },
+    { kind: "Tickets", tones: [["ok", "Done, Resolved"], ["err", "Blocked"]] },
+  ]);
+});
+
+/**
+ * Jira's status category colours every status no name maps (#2468), so the
+ * ticket section does not list the seen words left at their category's tone:
+ * it ends with one line saying so. A seen word the reader coloured is still
+ * listed under the reader's tone.
+ */
+test("the ticket legend ends with the category line instead of the words at their category's tone", async () => {
+  const withCategory = COLOURS.map((kind) =>
+    kind.kind !== "ticket"
+      ? kind
+      : {
+          ...kind,
+          words: [
+            ...kind.words,
+            word({ word: "Ready for QA", declared: false, category_tone: "info", tone: "info", origin: "category" }),
+            word({ word: "Shipped", declared: false, category_tone: "ok", tone: "ok", origin: "category" }),
+            word({ word: "Parked", declared: false, category_tone: "info", yours: "warn" }),
+          ],
+        },
+  );
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts: legendFake(withCategory) });
+  await settle();
+  await search("?");
+  await settle();
+
+  expect(legendDrawn()?.find((line) => line.kind === "Tickets")?.tones).toEqual([
+    ["ok", "Done, Resolved"],
+    ["warn", "Parked"],
+    ["err", "Blocked"],
+  ]);
+  const lines = [...target.querySelectorAll('[aria-label="Colours"] .tf-ln-lg')];
+  const tickets = lines.find((line) => line.querySelector(".tf-ln-lgk")?.textContent?.trim() === "Tickets")!;
+  expect(tickets.lastElementChild?.textContent?.trim()).toBe("other statuses: by Jira category");
+  // No other kind reads a category, so none ends with the line.
+  for (const line of lines.filter((l) => l !== tickets)) expect(line.textContent).not.toContain("by Jira category");
+});
+
+/**
+ * The category line is the declaration's, not the corpus's (#2468): a
+ * mirror that has seen no status in a toned category yet still ends the
+ * ticket section with it, since the next status Jira adds is drawn by it;
+ * a kind whose adapter reads no category never does.
+ */
+test("the ticket legend ends with the category line before any status is seen in a toned category", async () => {
+  const unseen = COLOURS.map((kind) => (kind.kind !== "ticket" ? kind : { ...kind, words: kind.words.filter((w) => w.declared) }));
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts: legendFake(unseen) });
+  await settle();
+  await search("?");
+  await settle();
+
+  const lines = [...target.querySelectorAll('[aria-label="Colours"] .tf-ln-lg')];
+  const tickets = lines.find((line) => line.querySelector(".tf-ln-lgk")?.textContent?.trim() === "Tickets")!;
+  expect(tickets.lastElementChild?.textContent?.trim()).toBe("other statuses: by Jira category");
+  for (const line of lines.filter((l) => l !== tickets)) expect(line.textContent).not.toContain("by Jira category");
+});
+
+/**
+ * A set or a clear while the card is open announces itself on `activity:new`
+ * (#2465 Ruling 1), and the legend reads the merged map again: the reader
+ * sees the word under its new tone without closing the card. The ⌘? overlay
+ * draws the same legend from the same read.
+ */
+test("after a set while the card is open, the legend re-reads and shows the new tone", async () => {
+  const legendPorts = legendFake(COLOURS);
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts });
+  await settle();
+  press("?", { metaKey: true, shiftKey: true });
+  await settle();
+  expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
+    ["ok", "merged"],
+    ["info", "open"],
+    ["muted", "closed"],
+  ]);
+
+  // The reader moves `closed` to `err` in Settings; the command emits.
+  legendPorts.answer = COLOURS.map((kind) =>
+    kind.kind === "pr" ? { ...kind, words: kind.words.map((w) => (w.word === "closed" ? word({ word: "closed", declared_tone: "muted", yours: "err" }) : w)) } : kind,
+  );
+  legendPorts.fire(EVENTS.activityNew);
+  await settle();
+
+  expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
+    ["ok", "merged"],
+    ["info", "open"],
+    ["err", "closed"],
+  ]);
+
+  // The reader clears it again: the word goes back under the adapter's tone.
+  legendPorts.answer = COLOURS;
+  legendPorts.fire(EVENTS.activityNew);
+  await settle();
+
+  expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
+    ["ok", "merged"],
+    ["info", "open"],
+    ["muted", "closed"],
+  ]);
+});
+
+/** Closed, the launcher neither reads the colours nor listens for a change to them. */
+test("a closed launcher stops listening, and an open one reads the colours only for the legend", async () => {
+  const legendPorts = legendFake(COLOURS);
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts });
+  await settle();
+  expect(legendPorts.reads, "the board draws no legend, so nothing is read").toBe(0);
+  await search("?");
+  await settle();
+  expect(legendPorts.reads).toBe(1);
+  expect(legendPorts.heard.map(({ event }) => event)).toEqual([EVENTS.activityNew]);
+
+  press("Escape");
+  press("Escape");
+  await settle();
+  expect(legendPorts.heard, "the listener is let go with the card").toEqual([]);
 });
 
 /** A storage that outlives a launcher, as the webview's does a restart. */
