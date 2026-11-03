@@ -571,6 +571,52 @@ async fn the_read_reports_a_seen_statuss_category_tone() {
     );
 }
 
+/// A word's category tone is the most common outcome among its items, no
+/// tone counted as one (#2468): with two Jiras, a status most of whose
+/// tickets are to do stays unset, though the other Jira files one under in
+/// progress; one most of whose tickets are in progress takes `info`.
+#[tokio::test]
+async fn a_seen_statuss_category_tone_counts_its_items_that_draw_none() {
+    let pool = pool("state_colours_category_mode").await;
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('jira2', 'jira', 'jira2', 'http://y.example', 'Pat', '{}')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    for (source, key, status, category) in [
+        ("jira", "A-1", "Review", "new"),
+        ("jira", "A-2", "Review", "new"),
+        ("jira2", "B-1", "Review", "indeterminate"),
+        ("jira", "A-3", "Testing", "indeterminate"),
+        ("jira", "A-4", "Testing", "indeterminate"),
+        ("jira2", "B-2", "Testing", "new"),
+    ] {
+        mirrored(
+            &pool,
+            source,
+            "ticket",
+            key,
+            key,
+            serde_json::json!({ "key": key, "fields": { "status": {
+                "name": status, "statusCategory": { "key": category, "name": "x" },
+            } } }),
+        )
+        .await;
+    }
+    let kinds = state_colours::read(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    let ticket = &kinds.iter().find(|k| k.kind == "ticket").unwrap().words;
+    let drawn = |word: &str| {
+        let w = ticket.iter().find(|w| w.word == word).unwrap();
+        (w.category_tone, w.origin)
+    };
+    assert_eq!(drawn("Review"), (None, ToneOrigin::Unset));
+    assert_eq!(drawn("Testing"), (Some(Tone::Info), ToneOrigin::Category));
+}
+
 /// A set never touches `sync.parent_declaration`: the stored copy stays the
 /// adapters' own, byte for byte, through the searcher's next write of it.
 #[tokio::test]

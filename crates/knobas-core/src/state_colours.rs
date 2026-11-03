@@ -269,8 +269,11 @@ pub fn fallback(kinds: &[KindPaths]) -> Vec<KindPaths> {
 /// The words the mirror has seen at `paths`: per kind, the distinct trimmed
 /// non-empty strings its live items hold there, across the sources, each
 /// with the tone its items resolve to through `$2`, the [`fallback`]
-/// declarations (the most common one, a tie to the first by name; none if
-/// no item of the word resolves). The generalisation of the mini board's
+/// declarations: the most common outcome among its items, where resolving
+/// to nothing counts as one (`mode()` skips nulls, so they are spelled `''`
+/// and turned back): a word most of whose items draw no tone has none, even
+/// where another source files a few under a toned category. A tie goes to
+/// no tone, then to the tone's word. The generalisation of the mini board's
 /// `OBSERVED_STATUSES`, which knows only `ticket` and `status_name`.
 const SEEN_WORDS: &str = concat!(
     "with open_path as (
@@ -278,9 +281,9 @@ const SEEN_WORDS: &str = concat!(
               array(select jsonb_array_elements_text(p->'at')) as segs
          from jsonb_array_elements($1::jsonb) p)
      select o.kind, btrim(i.payload #>> o.segs) as word,
-            mode() within group (order by ",
+            nullif(mode() within group (order by coalesce(",
     crate::declared_state!("$2"),
-    "->>'tone') as tone
+    "->>'tone', '')), '') as tone
        from open_path o
        join sync.item i on i.source_id = o.source_id and i.kind = o.kind
       where jsonb_typeof(i.payload #> o.segs) = 'string'
