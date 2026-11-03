@@ -65,7 +65,7 @@ pub fn get(url: &str, options: Options) -> Trace {
     };
     let mut next = url.to_owned();
     for _ in 0..MAX_HOPS {
-        match one(&next, options) {
+        match one(&next, options, None) {
             Err(error) => {
                 trace.error = Some(format!("{next}: {error}"));
                 return trace;
@@ -89,7 +89,14 @@ pub fn get(url: &str, options: Options) -> Trace {
     trace
 }
 
-fn one(url: &str, options: Options) -> Result<Hop, String> {
+/// `method url` with `body` (#2443): one request, no redirect followed,
+/// for the docs writes, which send a page to the instance.
+#[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
+pub fn send(method: &Method, url: &str, body: &[u8]) -> Result<Hop, String> {
+    one(url, Options::default(), Some((method, body)))
+}
+
+fn one(url: &str, options: Options, send: Option<(&Method, &[u8])>) -> Result<Hop, String> {
     let (scheme, rest) = url
         .split_once("://")
         .ok_or_else(|| format!("{url:?} is not an absolute URL"))?;
@@ -97,7 +104,17 @@ fn one(url: &str, options: Options) -> Result<Hop, String> {
         Some(at) => rest.split_at(at),
         None => (rest, "/"),
     };
-    let request = OutgoingRequest::new(Fields::new());
+    let headers = Fields::new();
+    if let Some((_, bytes)) = send {
+        // A length, so the instance reads the body without a chunked frame.
+        headers
+            .append("content-length", bytes.len().to_string().as_bytes())
+            .map_err(|e| format!("content-length refused: {e:?}"))?;
+        headers
+            .append("content-type", b"application/json")
+            .map_err(|e| format!("content-type refused: {e:?}"))?;
+    }
+    let request = OutgoingRequest::new(headers);
     let scheme = match scheme {
         "http" => Scheme::Http,
         "https" => Scheme::Https,
@@ -115,6 +132,11 @@ fn one(url: &str, options: Options) -> Result<Hop, String> {
     if options.post_mib.is_some() {
         request
             .set_method(&Method::Post)
+            .map_err(|()| "method refused".to_owned())?;
+    }
+    if let Some((method, _)) = send {
+        request
+            .set_method(method)
             .map_err(|()| "method refused".to_owned())?;
     }
     let body = request.body().map_err(|()| "no request body".to_owned())?;
@@ -137,6 +159,14 @@ fn one(url: &str, options: Options) -> Result<Hop, String> {
             if out.blocking_write_and_flush(&chunk).is_err() {
                 break;
             }
+        }
+        drop(out);
+    }
+    if let Some((_, bytes)) = send {
+        let out = body.write().map_err(|()| "no body stream".to_owned())?;
+        for chunk in bytes.chunks(4096) {
+            out.blocking_write_and_flush(chunk)
+                .map_err(|e| format!("writing the body: {e:?}"))?;
         }
         drop(out);
     }

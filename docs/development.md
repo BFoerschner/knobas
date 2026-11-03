@@ -234,8 +234,8 @@ A change to one is announced in the PR body under **Frozen surface**, as
 | `knobas-source-teamcity` | TeamCity adapter: build configurations and builds, with trigger and re-run. |
 | `knobas-source-kuma` | Uptime Kuma adapter: monitors from `/metrics`; pause, resume and create over socket.io with an account. |
 | `knobas-source-mock` | The reference adapter. It serves the Tidewater fixture and talks to nothing. UI and engine tests use it. |
-| `knobas-wasm-host` | The WASM host (ADR-0028): loads an external adapter, a component built against `wit/adapter.wit`, runs it under wasmtime with a deadline and memory cap on every call and `wasi:http` held to its manifest's hosts, and hands it to the rest of knobas as a `dyn Source` (#1198). |
-| `knobas-adapter-sdk` | The Rust SDK of the adapter standard (#2028): the `knobas:adapter` bindings, the SPI types re-exported from `knobas-source`, and the `Adapter` trait an external adapter implements, with the WIT conversions and the `export!` macro inside. Its version is the interface version it binds (1.4.0, which adds `Adapter::refresh`, #2101), not the workspace's. |
+| `knobas-wasm-host` | The WASM host (ADR-0028): loads an external adapter, a component built against `wit/adapter.wit`, runs it under wasmtime with a deadline and memory cap on every call and `wasi:http` held to its manifest's hosts, and hands it to the rest of knobas as a `dyn Source` (#1198). `docs_contract::check` is the docs contract `knobas adapter check` would run on a component that claims the wiki role (#2444). |
+| `knobas-adapter-sdk` | The Rust SDK of the adapter standard (#2028): the `knobas:adapter` bindings, the SPI types re-exported from `knobas-source`, and the `Adapter` trait an external adapter implements, with the WIT conversions and the `export!` macro inside. Its version is the interface version it binds (1.5.0, which adds `Adapter::project`, the docs projection, #2442, and the docs writes, #2443), not the workspace's. It re-exports the shared HTML reader with its hook (`html`, `Hook`, #2444), and its default new page body is the text as escaped plain HTML (`html_from_text`). |
 | `knobas-wasm-fixture` | Test only. The fixture external adapter the WASM host is tested with: a fixed corpus with a cursor, built to a component by `just wasm-fixture` (#1198), on `knobas-adapter-sdk`. No external adapter ships with knobas. |
 | `knobas-mockd` | Deprecated and frozen (ADR-0013). An HTTP mock of Jira and TeamCity, kept as a dev-dependency for older tests until the live suites cover them. |
 | `knobas-live-cleanup` | Dev-dependency only. The one runner every live suite's `Drop` guard hands its cleanup to: a thread and runtime of its own, a bound on the whole sequence, and a report that cannot abort a test that is already unwinding (#1913). |
@@ -280,8 +280,19 @@ breaks only in a bundled build: `tauri dev` loads the Vite server over
   class or a native `<progress>`.
 - No `{@html}`. All displayed text comes from source systems, and
   `ts_headline` output is not XSS-safe.
-- No network at runtime. `default-src 'self'`, and fonts are bundled from npm.
-  Loopback and the RFC 2606 reserved names are the only exemptions.
+- No network at runtime from the app's own document. `default-src 'self'`,
+  and fonts are bundled from npm. Loopback and the RFC 2606 reserved names are
+  the only exemptions. A page's embed is the one thing that reaches the
+  network (spec #2432): the app's `frame-src` allows `http:` and `https:` so a
+  URL embed can be framed (#2441), and an HTML embed runs from the
+  `knobas-render` scheme under its own policy, `EMBED_CSP` in
+  `crates/knobas-app/src/renderers.rs`, which lets its scripts load and
+  connect over `http(s)` (#2440). Both frames are sandboxed
+  (`app/src/lib/render/embed.ts`): an HTML embed has no origin of its own, and
+  a URL embed keeps its page's origin, which is never the app's (#2460).
+  The app's own documents load in no frame (`frame-ancestors 'none'`, and
+  `app/src/lib/shell/own-frame.ts` for the dev server, #2461), so neither
+  reaches the app.
 - Every `listen()` is cleaned up, including when the component unmounts before
   the promise resolves. `lib/shell/residue.test.svelte.ts` mounts each
   component with an effect twice and fails on leftovers.

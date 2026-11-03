@@ -17,7 +17,7 @@ use knobas_app::commands::entity::{
 use knobas_app::docs::DocsScope;
 use knobas_app::sources::Registry;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
-use knobas_source::docs::{DocBlock, Inline};
+use knobas_source::docs::{DocBlock, EmbedContent, Inline, ListItem, Unfilled};
 use serde_json::{Value, json};
 
 async fn pool() -> sqlx::PgPool {
@@ -426,6 +426,175 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
     );
 }
 
+/// Spec #2432, story 23: a Confluence task list reads as a list whose items
+/// carry their checked state, nested too, with the mirror filled in inside a
+/// task's words.
+#[tokio::test]
+async fn a_task_list_reads_with_each_item_checked_or_not() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let task = |id: u32, status: &str, body: &str| {
+        format!(
+            "<ac:task><ac:task-id>{id}</ac:task-id><ac:task-status>{status}</ac:task-status><ac:task-body>{body}</ac:task-body></ac:task>"
+        )
+    };
+    let storage = format!(
+        "<ac:task-list>{}{}<ac:task-list>{}</ac:task-list></ac:task-list>",
+        task(1, "complete", "Drain the queue"),
+        task(
+            2,
+            "incomplete",
+            r#"Ask <ac:link><ri:user ri:username="mara" /></ac:link>"#
+        ),
+        task(3, "complete", "eu-1"),
+    );
+    let checklist = page(&pool, &src, "1", "Release checklist", "OPS", &[], &storage).await;
+
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &checklist)
+        .await
+        .unwrap();
+    let para = |text: Vec<Inline>| DocBlock::Paragraph { text };
+    assert_eq!(
+        doc.blocks,
+        vec![DocBlock::List {
+            ordered: false,
+            items: vec![
+                ListItem::task(true, vec![para(vec![Inline::text("Drain the queue")])]),
+                ListItem::task(
+                    false,
+                    vec![
+                        para(vec![
+                            Inline::text("Ask "),
+                            Inline::Mention {
+                                user: Some("mara".into()),
+                                name: None,
+                                me: true,
+                            },
+                        ]),
+                        DocBlock::List {
+                            ordered: false,
+                            items: vec![ListItem::task(
+                                true,
+                                vec![para(vec![Inline::text("eu-1")])]
+                            )],
+                        },
+                    ],
+                ),
+            ],
+        }]
+    );
+}
+
+/// Spec #2432, stories 24, 26 and 34: an `expand` reads as a collapsible
+/// titled as Confluence titles it, the list, table and panel inside it
+/// drawn as they are anywhere, the mirror filled in inside it, and its
+/// section refuses its edit with `macro`.
+#[tokio::test]
+async fn an_expand_reads_as_a_collapsible_and_its_section_refuses_as_a_macro() {
+    use knobas_source::docs::{PanelKind, SectionRefusal, TableCell};
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let storage = "<h2>Rollout</h2>\
+        <ac:structured-macro ac:name=\"expand\"><ac:parameter ac:name=\"title\">Rollback</ac:parameter><ac:rich-text-body>\
+        <ul><li>Ask <ac:link><ri:user ri:username=\"mara\" /></ac:link></li></ul>\
+        <table><tr><th>Region</th><td>eu-1</td></tr></table>\
+        <ac:structured-macro ac:name=\"note\"><ac:rich-text-body><p>Slow.</p></ac:rich-text-body></ac:structured-macro>\
+        </ac:rich-text-body></ac:structured-macro>\
+        <h2>Later</h2><ac:structured-macro ac:name=\"expand\"><ac:rich-text-body><p>Hidden.</p></ac:rich-text-body></ac:structured-macro>";
+    let id = page(&pool, &src, "1", "Deploy", "OPS", &[], storage).await;
+
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    let para = |text: Vec<Inline>| DocBlock::Paragraph { text };
+    let heading = |words: &str| DocBlock::Heading {
+        level: 2,
+        text: vec![Inline::text(words)],
+    };
+    assert_eq!(
+        doc.blocks,
+        vec![
+            heading("Rollout"),
+            DocBlock::Collapsible {
+                title: "Rollback".into(),
+                blocks: vec![
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![ListItem::new(vec![para(vec![
+                            Inline::text("Ask "),
+                            Inline::Mention {
+                                user: Some("mara".into()),
+                                name: None,
+                                me: true,
+                            },
+                        ])])],
+                    },
+                    DocBlock::Table {
+                        rows: vec![vec![
+                            TableCell::new(true, vec![para(vec![Inline::text("Region")])]),
+                            TableCell::new(false, vec![para(vec![Inline::text("eu-1")])]),
+                        ]],
+                    },
+                    DocBlock::Panel {
+                        kind: PanelKind::Note,
+                        title: None,
+                        blocks: vec![para(vec![Inline::text("Slow.")])],
+                    },
+                ],
+            },
+            heading("Later"),
+            DocBlock::Collapsible {
+                title: "Click here to expand...".into(),
+                blocks: vec![para(vec![Inline::text("Hidden.")])],
+            },
+        ]
+    );
+    let refusals: Vec<_> = doc.sections.iter().map(|s| (s.number, s.refusal)).collect();
+    assert_eq!(
+        refusals,
+        vec![
+            (1, Some(SectionRefusal::Macro)),
+            (2, Some(SectionRefusal::Macro))
+        ]
+    );
+}
+
+/// Spec #2432, story 33: a word only an expand holds is found, its snippet
+/// in the section the expand sits in, though the reader draws it closed.
+#[tokio::test]
+async fn a_word_only_an_expand_holds_is_found_in_its_section() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let storage = format!(
+        "<p>Intro.</p><h2>Rollback</h2>\
+         <ac:structured-macro ac:name=\"expand\"><ac:rich-text-body>\
+         <ul><li>revert the {w} flag</li></ul></ac:rich-text-body></ac:structured-macro>"
+    );
+    let id = page(&pool, &src, "1", "Deploy steps", "ENG", &[], &storage).await;
+    let content =
+        knobas_source_confluence::doc_content("page", &page_payload("ENG", &[], &storage))
+            .expect("a page projects");
+    let body = knobas_source::docs::search_text("Deploy steps", "ENG", &content);
+    indexed(&pool, &id, &[body], "tomasz", 1).await;
+
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .expect("a word is a query");
+    assert_eq!(found.total, 1);
+    let hit = &found.hits[0];
+    assert_eq!(hit.entity_id, id);
+    assert_eq!(hit.snippet.section.as_deref(), Some("Rollback"));
+    let text: String = hit
+        .snippet
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
+    assert!(text.contains(&format!("revert the {w} flag")), "{text:?}");
+}
+
 /// A ticket chip for a ticket the mirror does not hold keeps its key and
 /// nothing else; a page link to an unsynced page names no page.
 #[tokio::test]
@@ -457,6 +626,284 @@ async fn what_the_mirror_does_not_hold_stays_unresolved() {
             ]
         }]
     );
+}
+
+/// An `include` or `excerpt-include` macro naming `title` (in `space`).
+fn include_macro(name: &str, title: &str, space: Option<&str>) -> String {
+    let space = space.map_or(String::new(), |s| format!(r#" ri:space-key="{s}""#));
+    format!(
+        r#"<ac:structured-macro ac:name="{name}"><ac:parameter ac:name=""><ac:link><ri:page ri:content-title="{title}"{space} /></ac:link></ac:parameter></ac:structured-macro>"#
+    )
+}
+
+fn excerpt_macro(inner: &str) -> String {
+    format!(
+        r#"<ac:structured-macro ac:name="excerpt"><ac:rich-text-body>{inner}</ac:rich-text-body></ac:structured-macro>"#
+    )
+}
+
+fn filled(
+    title: &str,
+    space: Option<&str>,
+    excerpt: bool,
+    target: &str,
+    blocks: Vec<DocBlock>,
+) -> DocBlock {
+    DocBlock::Include {
+        title: title.into(),
+        space: space.map(str::to_owned),
+        excerpt,
+        entity_id: Some(target.to_owned()),
+        blocks,
+        unfilled: None,
+    }
+}
+
+fn unfilled(title: &str, excerpt: bool, target: Option<&str>, why: Unfilled) -> DocBlock {
+    DocBlock::Include {
+        title: title.into(),
+        space: None,
+        excerpt,
+        entity_id: target.map(str::to_owned),
+        blocks: Vec::new(),
+        unfilled: Some(why),
+    }
+}
+
+fn words(text: &str) -> DocBlock {
+    DocBlock::Paragraph {
+        text: vec![Inline::text(text)],
+    }
+}
+
+/// Spec #2432, stories 13, 14 and 17: an include draws the included page's
+/// body and an excerpt include its excerpt, both from the mirror as it is now,
+/// in another space too; a link inside them is to the included page's space.
+#[tokio::test]
+async fn an_include_and_an_excerpt_include_are_filled_from_the_mirror() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let ledger = page(&pool, &src, "1", "Ledger", "ENG", &[], "<p>L</p>").await;
+    let budget_body = |version: &str| {
+        format!(
+            "<p>Intro {version}.</p>{}<p>See <ac:link><ri:page ri:content-title=\"Ledger\" /></ac:link></p>",
+            excerpt_macro("<p>Thirty retries.</p>")
+        )
+    };
+    let budget = page(
+        &pool,
+        &src,
+        "2",
+        "Retry budget",
+        "ENG",
+        &[],
+        &budget_body("one"),
+    )
+    .await;
+    let storage = format!(
+        "<p>Ours.</p>{}{}",
+        include_macro("include", "Retry budget", Some("ENG")),
+        include_macro("excerpt-include", "Retry budget", Some("ENG")),
+    );
+    let reader = page(&pool, &src, "3", "Payout runbook", "OPS", &[], &storage).await;
+
+    let body = |version: &str| {
+        vec![
+            words(&format!("Intro {version}.")),
+            words("Thirty retries."),
+            DocBlock::Paragraph {
+                text: vec![
+                    Inline::text("See "),
+                    Inline::PageLink {
+                        text: "Ledger".into(),
+                        title: "Ledger".into(),
+                        space: Some("ENG".into()),
+                        entity_id: Some(ledger.clone()),
+                    },
+                ],
+            },
+        ]
+    };
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &reader)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks,
+        vec![
+            words("Ours."),
+            filled("Retry budget", Some("ENG"), false, &budget, body("one")),
+            filled(
+                "Retry budget",
+                Some("ENG"),
+                true,
+                &budget,
+                vec![words("Thirty retries.")]
+            ),
+        ]
+    );
+    assert!(doc.work.is_empty());
+
+    // The included page changes in the mirror; the page including it is not
+    // synced again, and draws it as it is now.
+    sqlx::query("update sync.item set payload = $2 where entity_id = $1")
+        .bind(&budget)
+        .bind(page_payload("ENG", &[], &budget_body("two")))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &reader)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks[1],
+        filled("Retry budget", Some("ENG"), false, &budget, body("two"))
+    );
+}
+
+/// Spec #2432, stories 19 to 21: an include knobas cannot fill says why, a
+/// mirrored page's still names that page, and a cycle or a chain past three
+/// stops rather than looping.
+#[tokio::test]
+async fn an_include_it_cannot_fill_says_why_and_never_loops() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let inc = |title: &str| include_macro("include", title, None);
+    let plain = page(&pool, &src, "1", "Plain", "OPS", &[], "<p>No excerpt.</p>").await;
+    let gaps = page(
+        &pool,
+        &src,
+        "2",
+        "Gaps",
+        "OPS",
+        &[],
+        &format!(
+            "{}{}{}",
+            inc("Gone"),
+            include_macro("excerpt-include", "Plain", None),
+            inc("Gaps")
+        ),
+    )
+    .await;
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &gaps)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks,
+        vec![
+            unfilled("Gone", false, None, Unfilled::NotMirrored),
+            unfilled("Plain", true, Some(&plain), Unfilled::NoExcerpt),
+            unfilled("Gaps", false, Some(&gaps), Unfilled::Cycle),
+        ]
+    );
+
+    // A includes B, B includes A: reading A, B's include of A is the cycle.
+    let a = page(
+        &pool,
+        &src,
+        "3",
+        "Alpha",
+        "OPS",
+        &[],
+        &format!("<p>a</p>{}", inc("Beta")),
+    )
+    .await;
+    let b = page(
+        &pool,
+        &src,
+        "4",
+        "Beta",
+        "OPS",
+        &[],
+        &format!("<p>b</p>{}", inc("Alpha")),
+    )
+    .await;
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &a)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks,
+        vec![
+            words("a"),
+            filled(
+                "Beta",
+                None,
+                false,
+                &b,
+                vec![
+                    words("b"),
+                    unfilled("Alpha", false, Some(&a), Unfilled::Cycle)
+                ]
+            ),
+        ]
+    );
+
+    // A chain one through five: read from one, the fourth level (four's
+    // include of five) is too deep.
+    let mut ids = Vec::new();
+    for n in 1..=5 {
+        let next = if n < 5 {
+            inc(&format!("Level {}", n + 1))
+        } else {
+            String::new()
+        };
+        ids.push(
+            page(
+                &pool,
+                &src,
+                &format!("1{n}"),
+                &format!("Level {n}"),
+                "OPS",
+                &[],
+                &format!("<p>{n}</p>{next}"),
+            )
+            .await,
+        );
+    }
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &ids[0])
+        .await
+        .unwrap();
+    let nested = |level: usize, inner: DocBlock| DocBlock::Include {
+        title: format!("Level {level}"),
+        space: None,
+        excerpt: false,
+        entity_id: Some(ids[level - 1].clone()),
+        blocks: vec![words(&level.to_string()), inner],
+        unfilled: None,
+    };
+    let five = unfilled("Level 5", false, Some(&ids[4]), Unfilled::TooDeep);
+    assert_eq!(
+        doc.blocks,
+        vec![words("1"), nested(2, nested(3, nested(4, five)))]
+    );
+}
+
+/// Spec #2432, story 22: a word only on the included page finds the included
+/// page and not the page including it.
+#[tokio::test]
+async fn a_search_finds_included_words_on_their_own_page_only() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let target_storage = format!("<p>The {w} budget.</p>");
+    let target = page(&pool, &src, "1", "Budget", "OPS", &[], &target_storage).await;
+    let reader_storage = format!("<p>Ours.</p>{}", include_macro("include", "Budget", None));
+    let reader = page(&pool, &src, "2", "Runbook", "OPS", &[], &reader_storage).await;
+    for (id, title, storage) in [
+        (&target, "Budget", &target_storage),
+        (&reader, "Runbook", &reader_storage),
+    ] {
+        let content =
+            knobas_source_confluence::doc_content("page", &page_payload("OPS", &[], storage))
+                .expect("a page projects");
+        let body = knobas_source::docs::search_text(title, "OPS", &content);
+        indexed(&pool, id, &[body], "tomasz", 1).await;
+    }
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .expect("a word is a query");
+    let hits: Vec<&str> = found.hits.iter().map(|h| h.entity_id.as_str()).collect();
+    assert_eq!(hits, [target.as_str()]);
 }
 
 /// Queue a comment write on `page`; it stays pending.
@@ -634,6 +1081,122 @@ fn scope(source: &str, key: &str) -> DocsScope {
     }
 }
 
+/// An `html` macro reads as an embed of its markup byte for byte (#2440), and
+/// the page says whether its source runs embeds: on until the reader turns
+/// *Run embedded HTML* off for that source, off for it alone, and on again
+/// for a source added again under the id of one deleted with it off.
+#[tokio::test]
+async fn an_html_macro_reads_as_an_embed_and_its_source_says_whether_it_runs() {
+    let pool = pool().await;
+    let (src, other) = (confluence(&pool).await, confluence(&pool).await);
+    let html = "<div id=\"ui\"></div>\n<script>if (a < b && c) go(\"x&amp;y\");</script>";
+    let storage = format!(
+        "<h2>API</h2><ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[{html}]]>\
+         </ac:plain-text-body></ac:structured-macro>"
+    );
+    let api = page(&pool, &src, "1", "API", "ENG", &[], &storage).await;
+    let elsewhere = page(&pool, &other, "1", "API", "ENG", &[], &storage).await;
+    let read = |id: String| {
+        let pool = pool.clone();
+        async move {
+            docs_page_inner(&pool, &Registry::for_process(), &id)
+                .await
+                .unwrap()
+        }
+    };
+
+    let doc = read(api.clone()).await;
+    assert_eq!(
+        doc.blocks[1],
+        DocBlock::Embed {
+            name: "html".into(),
+            content: EmbedContent::Html { html: html.into() },
+        }
+    );
+    assert!(doc.run_embeds, "embeds run until the reader says otherwise");
+
+    assert!(
+        !knobas_app::docs::set_run_embedded_html(&pool, &src, false)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !knobas_app::docs::run_embedded_html(&pool, &src)
+            .await
+            .unwrap()
+    );
+    let doc = read(api.clone()).await;
+    assert!(!doc.run_embeds, "turned off for its source");
+    assert_eq!(doc.blocks.len(), 2, "the embed is still there to say so");
+    assert!(
+        read(elsewhere).await.run_embeds,
+        "another source still runs its embeds"
+    );
+
+    assert!(
+        knobas_app::docs::set_run_embedded_html(&pool, &src, true)
+            .await
+            .unwrap()
+    );
+    assert!(read(api).await.run_embeds);
+
+    knobas_app::docs::set_run_embedded_html(&pool, &other, false)
+        .await
+        .unwrap();
+    knobas_app::docs::forget_run_embedded_html(&pool, &other)
+        .await
+        .unwrap();
+    assert!(
+        knobas_app::docs::run_embedded_html(&pool, &other)
+            .await
+            .unwrap(),
+        "a source deleted with embeds off does not hand that to the next one under its id"
+    );
+}
+
+/// An `iframe` macro and a widget connector read as embeds of their URL
+/// (#2441), and one naming a `javascript:` URL as the macro's placeholder.
+#[tokio::test]
+async fn an_iframe_macro_and_a_widget_connector_read_as_url_embeds() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let word = word();
+    let storage = format!(
+        "<p>Board {word}.</p>\
+         <ac:structured-macro ac:name=\"iframe\"><ac:parameter ac:name=\"src\">\
+         <ri:url ri:value=\"https://grafana.example/d/{word}?a=1&amp;b=2\" /></ac:parameter></ac:structured-macro>\
+         <ac:structured-macro ac:name=\"widget\"><ac:parameter ac:name=\"url\">\
+         <ri:url ri:value=\"https://www.youtube.com/embed/xyz\" /></ac:parameter></ac:structured-macro>\
+         <ac:structured-macro ac:name=\"iframe\"><ac:parameter ac:name=\"src\">\
+         <ri:url ri:value=\"javascript:alert(1)\" /></ac:parameter></ac:structured-macro>"
+    );
+    let id = page(&pool, &src, "1", "Board", "ENG", &[], &storage).await;
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    assert_eq!(
+        doc.blocks[1..],
+        [
+            DocBlock::Embed {
+                name: "iframe".into(),
+                content: EmbedContent::Url {
+                    url: format!("https://grafana.example/d/{word}?a=1&b=2"),
+                },
+            },
+            DocBlock::Embed {
+                name: "widget".into(),
+                content: EmbedContent::Url {
+                    url: "https://www.youtube.com/embed/xyz".into(),
+                },
+            },
+            DocBlock::Placeholder {
+                name: "iframe".into()
+            },
+        ]
+    );
+    assert!(doc.run_embeds, "one switch runs every embed kind");
+}
+
 /// Every word must appear, the snippet is the best sentence and says its
 /// section, and a hit carries its space, path, match count and editor.
 #[tokio::test]
@@ -713,6 +1276,68 @@ async fn a_search_finds_pages_with_every_word_and_says_where_the_snippet_is() {
         found.hits[0].snippet.comment_by.as_deref(),
         Some("Priya Nair")
     );
+}
+
+/// Search follows the drawing (#2435): a page's `body_text` is the shared
+/// search text over its projection, as the Confluence adapter writes it, so a
+/// word only a table cell holds is found and its snippet names its section,
+/// while a macro parameter, which the reader does not draw, is not found at
+/// all. An `html` macro is an embed (#2440): the words it shows are found, its
+/// script's are not.
+#[tokio::test]
+async fn a_word_in_a_table_cell_is_found_in_its_section() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let (w, param, shown, script) = (word(), word(), word(), word());
+    let storage = format!(
+        "<p>Intro.</p><h2>Rate limits</h2><table><tbody>\
+         <tr><th>Queue</th><th>Cap</th></tr>\
+         <tr><td><p>payouts</p></td><td>forty {w} per minute</td></tr></tbody></table>\
+         <ac:structured-macro ac:name=\"code\"><ac:parameter ac:name=\"title\">{param}</ac:parameter>\
+         <ac:plain-text-body><![CDATA[select 1;]]></ac:plain-text-body></ac:structured-macro>\
+         <ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<b>{shown}</b>\
+         <script>var {script} = 1;</script>]]>\
+         </ac:plain-text-body></ac:structured-macro>"
+    );
+    let id = page(&pool, &src, "1", "Payout limits", "ENG", &[], &storage).await;
+    let content =
+        knobas_source_confluence::doc_content("page", &page_payload("ENG", &[], &storage))
+            .expect("a page projects");
+    let body = knobas_source::docs::search_text("Payout limits", "ENG", &content);
+    indexed(&pool, &id, &[body], "tomasz", 1).await;
+
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .expect("a word is a query");
+    assert_eq!(found.total, 1);
+    let hit = &found.hits[0];
+    assert_eq!(hit.entity_id, id);
+    assert_eq!(hit.snippet.section.as_deref(), Some("Rate limits"));
+    let text: String = hit
+        .snippet
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
+    assert!(text.contains(&format!("forty {w} per minute")), "{text:?}");
+
+    let found = docs_search_inner(&pool, &Registry::for_process(), &shown, None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(found.total, 1, "an html macro's shown words are found");
+    assert_eq!(
+        found.hits[0].snippet.section.as_deref(),
+        Some("Rate limits")
+    );
+    for unseen in [param, script] {
+        let found = docs_search_inner(&pool, &Registry::for_process(), &unseen, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.total, 0, "{unseen} is not shown as text");
+    }
 }
 
 /// The picker keeps the search to its space; a typed `space:` wins over it;
@@ -1087,6 +1712,75 @@ async fn export_writes_the_page_as_markdown() {
     assert!(text.contains("## Cap"), "{text}");
     assert!(text.contains("**at most**"), "{text}");
     assert!(text.contains("](payout-design.md)"), "{text}");
+    assert!(text.contains("<!-- macro: roadmap -->"), "{text}");
+}
+
+/// A table with a merged cell, a header column and blocks in its cells reads
+/// with them through the page read (spec #2432, #2436), the mirror's fill-in
+/// reaching a mention inside a cell's list, and its Markdown export loses no
+/// word of it.
+#[tokio::test]
+async fn a_table_reads_with_spans_header_column_and_block_cells_and_exports_every_word() {
+    use knobas_source::docs::TableCell;
+
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let storage = concat!(
+        r#"<table><tbody><tr><th colspan="2">Rota</th></tr>"#,
+        r#"<tr><th rowspan="2">Mon</th><td><ul><li><ac:link><ri:user ri:username="mara" /></ac:link></li><li>Tomasz</li></ul></td></tr>"#,
+        r#"<tr><td><p>Swap first.</p><p>Then page.</p><table><tbody><tr><td>inner</td></tr></tbody></table></td></tr>"#,
+        r#"<tr><th>Tue</th><td><ac:structured-macro ac:name="roadmap" /></td></tr></tbody></table>"#,
+    );
+    let id = page(&pool, &src, "1", "On-call rota", "OPS", &[], storage).await;
+    let read = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
+    let [DocBlock::Table { rows }] = &read.blocks[..] else {
+        panic!("one table: {:#?}", read.blocks)
+    };
+    assert_eq!((rows[0][0].colspan, rows[0][0].header), (2, true));
+    assert_eq!((rows[1][0].rowspan, rows[1][0].header), (2, true));
+    assert!(rows[3][0].header, "the header column's last cell");
+    let [DocBlock::List { items, .. }] = &rows[1][1].blocks[..] else {
+        panic!("a list in the cell: {:#?}", rows[1][1])
+    };
+    let DocBlock::Paragraph { text } = &items[0].blocks[0] else {
+        panic!("{items:#?}")
+    };
+    assert!(
+        matches!(&text[0], Inline::Mention { me: true, .. }),
+        "the mention inside the cell is filled in as mine: {text:?}"
+    );
+    assert_eq!(rows[2][0].blocks.len(), 3, "two paragraphs and a table");
+    assert_eq!(
+        rows[3][1],
+        TableCell::new(
+            false,
+            vec![DocBlock::Placeholder {
+                name: "roadmap".into()
+            }]
+        ),
+        "a macro in a cell is a placeholder block, not text"
+    );
+
+    let folder =
+        std::env::temp_dir().join(format!("knobas-export-{}", uuid::Uuid::new_v4().simple()));
+    let done = docs_export_markdown_inner(&pool, &Registry::for_process(), &id, &folder)
+        .await
+        .unwrap();
+    let text = std::fs::read_to_string(folder.join(&done.file)).unwrap();
+    std::fs::remove_dir_all(&folder).ok();
+    for word in [
+        "Rota",
+        "Mon",
+        "Tomasz",
+        "Swap first.",
+        "Then page.",
+        "inner",
+        "Tue",
+    ] {
+        assert!(text.contains(word), "{word} in {text}");
+    }
     assert!(text.contains("<!-- macro: roadmap -->"), "{text}");
 }
 

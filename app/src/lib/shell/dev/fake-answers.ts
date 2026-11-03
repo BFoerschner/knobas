@@ -8,7 +8,7 @@ import type { ackAlert, applyEstateImport, assetTree, assetTypes, createAsset, c
 import type { backupNow, backupStatus, openBackupFolder, restoreBackup, setBackupSchedule, shareExport } from "../../ipc/backup";
 import type { acceptSuggestion, actionItemTicket, artifactPreview, attachmentBytes, captureContext, captureShortcut, checkoutSettings, cloneRepo, codeFacts, completeInboxItem, createActionItemTicket, createLink, createNote, deleteLinkSet, deleteNote, deleteRunPreset, diffTool, dismissSuggestion, docsCreatePage, docsEditSection, docsExportMarkdown, docsPage, docsSearch, docsTree, downloadAttachment, downloadRunFile, entityCheckout, entityCheckoutDiff, entityCommitDiff, entityFileBytes, entityFilePiped, entityRangeDiff, entityThread, entityView, exportNotesMarkdown, followMerges, getEntity, getNote, hideLinkSetMember, inboxCount, inboxItems, jobLinkSets, jobPipelines, jobReach, linkSet, linkSetHints, linkSets, listContexts, listEntities, listProjects, miniBoard, moveNotesToConfluence, notificationKinds, notify, objectPage, olderPipelineRuns, openCheckout, openDiffTool, openObject, owedTickets, parentLinks, pipelineRuns, pipelineSettings, pipelines, prViewedFiles, previewLinkSetPattern, previewLinkSetRule, promoteContext, proposalEvidence, publishStandupProtocol, pullRequestWorktrees, reachableTransitions, recordCaptureContext, refusedWrites, removePullRequestWorktree, resolveUrl, revealNote, roomSuggestions, runArtifacts, runChain, runLog, runPresets, runTests, saveLinkSet, saveNote, saveRunPreset, setCaptureShortcut, setCheckoutApplications, setCheckoutOverride, setClonesRoot, setNotesShown, setNotificationKinds, setParentLinks, setPipelinePinned, setPrFileViewed, setStandupPublishTarget, snoozeInboxItem, standupDigest, standupProtocol, standupPublishTarget, startWorkAmend, startWorkFlow, startWorkRetry, startWorkRun, startWorkSkip, submitWrite, testHistory, unlink, visitEntity } from "../../ipc/entity";
 import type { addFavourite, bindActionKey, bindListKey, createSmartList, deleteSmartList, deleteTicketView, favourites, filterSuggestions, hideSavedView, keys, launcherHome, openSavedView, removeFavourite, renameSmartList, saveTicketView, search, smartLists, ticketViews, translateTicketView } from "../../ipc/search";
-import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
+import type { addSource, amendWrite, applyHeldWrite, backfillSource, checkAdapterUpdates, credentialHealth, dbStats, deleteSource, demoLoad, discardWrite, flushWrites, installAdapter, listAdapters, listInstalledAdapters, listSources, listSyncRuns, pendingWrites, previewInstallAdapter, previewUpdateAdapter, refreshEntity, reindexFts, runEmbeddedHtml, setRunEmbeddedHtml, setSourceSecret, syncAll, syncNow, syncNowWithProgress, syncRole, syncStatus, testSource, uninstallAdapter, updateAdapter, updateSource, watchSync, writeQueueCounts } from "../../ipc/sources";
 import type { adHocBlock, createBlock, currentTimer, dayBlocks, deleteBlock, dismissBlock, logAllPreview, logWork, passiveAttribution, setPassiveAttribution, startTimer, stopTimer, timerHeartbeat, updateBlock, weekTimesheet, worklogDraft } from "../../ipc/time";
 
 type Answer<F extends (...args: never[]) => Promise<unknown>> = Awaited<ReturnType<F>>;
@@ -182,6 +182,7 @@ export interface Answers {
   room_suggestions: Answer<typeof roomSuggestions>;
   run_artifacts: Answer<typeof runArtifacts>;
   run_chain: Answer<typeof runChain>;
+  run_embedded_html: Answer<typeof runEmbeddedHtml>;
   run_log: Answer<typeof runLog>;
   run_renderer: Answer<typeof runRenderer>;
   run_presets: Answer<typeof runPresets>;
@@ -202,6 +203,7 @@ export interface Answers {
   set_notes_shown: Answer<typeof setNotesShown>;
   set_notification_kinds: Answer<typeof setNotificationKinds>;
   set_pages_kept_open: Answer<typeof setPagesKeptOpen>;
+  set_run_embedded_html: Answer<typeof setRunEmbeddedHtml>;
   set_parent_links: Answer<typeof setParentLinks>;
   set_passive_attribution: Answer<typeof setPassiveAttribution>;
   set_pipeline_pinned: Answer<typeof setPipelinePinned>;

@@ -1,3 +1,5 @@
+import "./lib/shell/own-frame-guard";
+
 import { mount } from "svelte";
 
 import App from "./App.svelte";

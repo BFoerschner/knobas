@@ -1,8 +1,8 @@
 //! The fixture external adapter (issue #1198, ADR-0028).
 //!
 //! A test adapter built to a WASM component against
-//! `knobas:adapter@1.4.0`. It serves three surveys, and a pipeline with one
-//! run ([`builds`], #1205), so that the host can be tested with the contract
+//! `knobas:adapter@1.5.0`. It serves three surveys, a pipeline with one
+//! run ([`builds`], #1205), and two docs pages ([`docs`], #2442), so that the host can be tested with the contract
 //! battery, every live read, and through the sync engine into the mirror,
 //! without a real product behind it. No external
 //! adapter ships with knobas; this is what the host is tested with.
@@ -31,6 +31,10 @@
 //!   view offers this one, with one field, the day. The fixture performs it
 //!   on a survey by answering a receipt and changing nothing, and refuses
 //!   every other write with a protocol error, as battery clause 11 asks.
+//!   The 1.5.0 build also writes pages (#2443): `update_page` is `PUT
+//!   <base_url>/pages/<key>` and `create_page` `POST <base_url>/pages`, the
+//!   op's fields as JSON, and a created page's id is the answer's body; the
+//!   markup they carry is the docs writes' ([`docs::edit_section`]).
 //! * **Built with `--features v1_0`** it is the same adapter against the
 //!   frozen 1.0.0 world (the SDK's `v1_0`), which has no `downloads`, `query` or
 //!   `sink.walked`: what the host's hold on 1.0.0 components is tested with.
@@ -38,6 +42,14 @@
 //!   frozen 1.3.0 world (the SDK's `v1_3`), the minor before `refresh`: it
 //!   exports no `refresh` and declares no `Capability::Refresh`, so its
 //!   source falls back to a run after a landed write (#2101).
+//! * **The docs source** (1.5.0, #2442, ADR-0040): two pages of the
+//!   *Harbour* space after the run, the wiki claim, and the projection that
+//!   draws every block of the docs vocabulary from them ([`docs`]). The
+//!   1.0.0 and 1.3.0 builds have neither pages nor claim, so they sync the
+//!   five items they always did; a test byte-patches this build's `docs`
+//!   export away for a wiki claim without the export.
+//!   **`"docs_breach": "<how>"`** has the pages break the docs contract
+//!   (#2444) that way, for the docs contract's tests ([`docs`] names them).
 //! * **The refresh** (1.4.0, #2101, ADR-0031): `refresh` reads one item by
 //!   id as the sync emits it, every kind, and the older run `older_runs`
 //!   answers; an id of this source it does not hold is *gone*.
@@ -88,6 +100,8 @@
 //!   without one it does not translate (`none`).
 
 mod builds;
+#[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+mod docs;
 mod fetch;
 
 use chrono::{TimeZone, Utc};
@@ -170,6 +184,12 @@ pub struct Fixture {
     deleted: Option<String>,
     /// Whether the descriptor declares `Capability::Refresh` (#2101).
     declares_refresh: bool,
+    /// How the pages break the docs contract, if they do (#2444).
+    #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
+    docs_breach: Option<String>,
+    /// The instance's address, where a page write is sent (#2443).
+    #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(dead_code))]
+    base_url: String,
 }
 
 /// The size of one message of a log flood.
@@ -217,6 +237,7 @@ fn read_fault(value: &serde_json::Value) -> Result<Fault, String> {
             "performs_undeclared",
             "deleted",
             "declares_refresh",
+            "docs_breach",
             "mirror",
             "username",
         ]
@@ -308,6 +329,8 @@ impl Fixture {
             builds::pipeline_payload(),
         ));
         items.push(self.run(builds::RUN, "42"));
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        items.extend(docs::pages(&self.id, self.docs_breach.as_deref()));
         items
     }
 
@@ -329,6 +352,65 @@ impl Fixture {
     /// alone, and `None` for anything else.
     fn is_run(&self, entity: &str) -> bool {
         self.key(entity) == Some(builds::RUN)
+    }
+
+    /// A page write sent to the instance (#2443): `UpdatePage` as `PUT
+    /// <base>/pages/<key>`, `CreatePage` as `POST <base>/pages`, the op's
+    /// fields as JSON. A `2xx` lands it; a created page's id is the
+    /// answer's body.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn send_page(&self, op: &WriteOp) -> Result<WriteReceipt, SourceError> {
+        use wasip2::http::types::Method;
+        let (method, url, sent) = match op {
+            WriteOp::UpdatePage {
+                entity,
+                base_version,
+                body,
+            } => {
+                let key = self.key(entity).ok_or_else(|| {
+                    SourceError::protocol(format!("{entity} is not a page of {}", self.id))
+                })?;
+                (
+                    Method::Put,
+                    format!("{}/pages/{key}", self.base_url),
+                    serde_json::json!({ "version": base_version + 1, "body": body }),
+                )
+            }
+            WriteOp::CreatePage {
+                parent,
+                space,
+                title,
+                body,
+            } => (
+                Method::Post,
+                format!("{}/pages", self.base_url),
+                serde_json::json!({
+                    "parent": self.key(parent),
+                    "space": space,
+                    "title": title,
+                    "body": body,
+                }),
+            ),
+            other => {
+                return Err(SourceError::protocol(format!(
+                    "{} is not a page write",
+                    other.identifier()
+                )));
+            }
+        };
+        let hop = fetch::send(&method, &url, sent.to_string().as_bytes())
+            .map_err(SourceError::Unreachable)?;
+        if !(200..300).contains(&hop.status) {
+            return Err(SourceError::protocol(format!(
+                "{url} answered {}: {}",
+                hop.status, hop.body
+            )));
+        }
+        Ok(WriteReceipt {
+            remote_id: matches!(op, WriteOp::CreatePage { .. })
+                .then(|| hop.body.trim().to_owned())
+                .filter(|id| !id.is_empty()),
+        })
     }
 
     fn no_workflow(&self) -> SourceError {
@@ -388,6 +470,10 @@ impl Adapter for Fixture {
                 .get("deleted")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned),
+            docs_breach: config
+                .get("docs_breach")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned),
             received: serde_json::json!({
                 "id": instance.id,
                 "kind": instance.kind,
@@ -396,6 +482,7 @@ impl Adapter for Fixture {
                 // The text the host sent, which is the value's own.
                 "config": instance.config.to_string(),
             }),
+            base_url: instance.base_url.trim_end_matches('/').to_owned(),
             id: instance.id,
             name: instance.display_name,
         }
@@ -409,6 +496,35 @@ impl Adapter for Fixture {
             .block();
         }
         let [pipeline, run] = builds::kinds();
+        #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+        let mut entity_kinds = vec![
+            KindInfo {
+                id: "survey".into(),
+                label: "Survey".into(),
+                plural: "Surveys".into(),
+                monogram: "SV".into(),
+                full_sync_exhaustive: true,
+                refreshes: true,
+            },
+            pipeline,
+            run,
+        ];
+        #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+        let mut payload_paths: Vec<_> = builds::payload_paths().into();
+        #[cfg_attr(any(feature = "v1_0", feature = "v1_3"), allow(unused_mut))]
+        let mut roles = vec![
+            RoleClaim {
+                role: ROLE.into(),
+                reads: Vec::new(),
+            },
+            builds::role(),
+        ];
+        #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+        {
+            entity_kinds.push(docs::kind());
+            payload_paths.push(docs::payload_paths());
+            roles.push(docs::role());
+        }
         SourceDescriptor {
             id: self.id.clone(),
             adapter_kind: KIND.into(),
@@ -428,19 +544,16 @@ impl Adapter for Fixture {
             auth_methods: vec![AuthMethod::Pat],
             accepts_account: false,
             min_sync_interval_secs: 60,
-            write_ops: vec![SOURCE_ACTION.into()],
-            entity_kinds: vec![
-                KindInfo {
-                    id: "survey".into(),
-                    label: "Survey".into(),
-                    plural: "Surveys".into(),
-                    monogram: "SV".into(),
-                    full_sync_exhaustive: true,
-                    refreshes: true,
-                },
-                pipeline,
-                run,
-            ],
+            write_ops: if cfg!(any(feature = "v1_0", feature = "v1_3")) {
+                vec![SOURCE_ACTION.into()]
+            } else {
+                vec![
+                    SOURCE_ACTION.into(),
+                    "update_page".into(),
+                    "create_page".into(),
+                ]
+            },
+            entity_kinds,
             config_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -455,19 +568,14 @@ impl Adapter for Fixture {
                     "performs_undeclared": { "type": "boolean" },
                     "deleted": { "type": "string" },
                     "declares_refresh": { "type": "boolean" },
+                    "docs_breach": { "type": "string" },
                     "mirror": { "type": "string" },
                     "username": { "type": "string" },
                 },
                 "additionalProperties": false,
             }),
-            payload_paths: builds::payload_paths().into(),
-            roles: vec![
-                RoleClaim {
-                    role: ROLE.into(),
-                    reads: Vec::new(),
-                },
-                builds::role(),
-            ],
+            payload_paths,
+            roles,
             source_actions: vec![BOOK_REPAIR.into()],
             clone_from: Vec::new(),
             url_forms: Vec::new(),
@@ -566,6 +674,8 @@ impl Adapter for Fixture {
             {
                 Ok(WriteReceipt { remote_id: None })
             }
+            #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+            WriteOp::UpdatePage { .. } | WriteOp::CreatePage { .. } => self.send_page(&op),
             _ => Err(refuse()),
         }
     }
@@ -721,6 +831,33 @@ impl Adapter for Fixture {
     /// [`builds::OLDER_RUN`]; an id of this source it does not hold, a
     /// `"deleted"` survey among them, is gone. A faulted fixture fails as
     /// its sync does.
+    /// (#2442) A page drawn ([`docs::project`]); every other kind is none.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn project(
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_adapter_sdk::spi::docs::DocContent> {
+        docs::project(kind, payload)
+    }
+
+    /// (#2443) A page's section edit in the fixture's markup
+    /// ([`docs::edit_section`]).
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn edit_section(
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Result<
+        knobas_adapter_sdk::spi::docs::SectionEdit,
+        knobas_adapter_sdk::spi::docs::EditRefused,
+    > {
+        docs::edit_section(kind, payload, number, text)
+    }
+
+    // (#2443) A new page's body: the SDK's default, its plain HTML of the
+    // text, which is the fixture's markup.
+
     #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
     fn refresh(&self, entity: &str) -> Result<knobas_adapter_sdk::RefreshAnswer, SourceError> {
         use knobas_adapter_sdk::RefreshAnswer;

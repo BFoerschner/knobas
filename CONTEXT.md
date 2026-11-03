@@ -215,6 +215,18 @@ _Avoid_: second secret, write credential, admin login
 A heading of any level on a wiki [page](#kind) and everything under it until the next heading of any level, so a section never holds a heading. The unit knobas edits a page in, one section of prose at a time. A section holding a macro or a table, or sitting inside a table, refuses its edit and offers the source's own editor. A section is edited as text, so lists and inline formatting come back as plain paragraphs, and the surface says so before the edit. The edit that goes out carries the whole page body, so everything outside the section is sent back as it arrived.
 _Avoid_: block (a unit of [time](#block)), chunk, fragment
 
+**Embed**:
+A part of a wiki [page](#kind) that is HTML as its author wrote it, or an `http(s)` URL, which the Docs reader runs in an isolated frame that cannot reach knobas, its storage or its commands. Confluence's `html` and `iframe` macros and its widget connector are embeds. A placeholder draws in its place only when the source's *Run embedded HTML* setting is off, knobas is offline, or the frame fails to load; a placeholder names a part knobas does not draw, where an embed is drawn. A [section](#section) holding one refuses its edit (ADR-0040).
+_Avoid_: macro (the source's word for many things), widget, iframe (one way an embed is drawn)
+
+**Include**:
+A part of a wiki [page](#kind) that draws another page, or only that page's excerpt, in a light frame reading "from *page title*" that opens it. The source names the target by space and title; knobas fills it from the [mirror](#mirror) when the page is read, never at sync, so it shows the target as the mirror holds it now, offline too. Its words are found in search on the target's page, not on the page that includes it. A placeholder that names the target and links to it draws instead only when knobas cannot fill it: the target is not mirrored, has no excerpt, sits more than three includes deep, or is already on the path. A [section](#section) holding one refuses its edit (ADR-0040).
+_Avoid_: transclusion, embed (an [embed](#embed) runs HTML), excerpt (what an excerpt-include takes from its target)
+
+**Collapsible**:
+A titled part of a wiki [page](#kind) whose blocks the Docs reader draws closed, opening it when the reader arrives on a search hit or an anchor inside it. Confluence's `expand` is one. Its contents are drawn in full once opened and are in the page's search text, where a placeholder draws nothing of what it stands for. A [section](#section) holding one refuses its edit (ADR-0040).
+_Avoid_: expand (Confluence's word), accordion, details
+
 **Pending write**:
 An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once: a write in flight when knobas stops may arrive twice, and knobas re-sends rather than guess and never merges or deduplicates what you wrote (ADR-0012). A write that went out and got no answer is different: if a second arrival would duplicate it, knobas holds it and asks you to check the source (a [held write](#held-write)).
 

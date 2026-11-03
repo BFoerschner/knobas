@@ -425,6 +425,8 @@ pub fn run() {
             commands::sources::list_sources,
             commands::sources::add_source,
             commands::sources::update_source,
+            commands::sources::run_embedded_html,
+            commands::sources::set_run_embedded_html,
             commands::sources::delete_source,
             commands::sources::set_source_secret,
             commands::sources::test_source,
@@ -1262,6 +1264,16 @@ mod tests {
                 .csp_header()
                 .is_some_and(|csp| csp.contains("default-src 'self'")),
             "the document lost its CSP: {:?}",
+            document.csp_header()
+        );
+        // A header, not a `<meta>`, so `frame-ancestors` holds: no frame loads
+        // the app's own document, not even a URL embed that navigates itself to
+        // the app's origin (#2461).
+        assert!(
+            document
+                .csp_header()
+                .is_some_and(|csp| csp.contains("frame-ancestors 'none'")),
+            "the document's policy lets a frame load it: {:?}",
             document.csp_header()
         );
 

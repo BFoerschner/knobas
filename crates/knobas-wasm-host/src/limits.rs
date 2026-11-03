@@ -44,6 +44,13 @@ pub const DEFAULT_DEADLINE: Duration = Duration::from_secs(600);
 /// The most a manifest may ask for: an hour.
 pub const MAX_DEADLINE: Duration = Duration::from_secs(3_600);
 
+/// The most a docs projection may take, whatever deadline the adapter asks
+/// for (#2442, spec #2432 story 48: drawing a page never hangs). A page open
+/// and a search wait on it, one call per page, and a projection reads one
+/// payload it is handed with no network, which takes milliseconds; the
+/// adapter's own deadline is sized for a first sync.
+pub const PROJECTION_DEADLINE: Duration = Duration::from_secs(5);
+
 /// What a call's store may hold when the manifest asks for nothing.
 pub const DEFAULT_MEMORY_MIB: u32 = 256;
 
@@ -298,7 +305,15 @@ pub(crate) async fn bounded<T>(
     adapter: &crate::WasmAdapter,
     call: impl Future<Output = Result<T, SourceError>>,
 ) -> Result<T, SourceError> {
-    let deadline = adapter.limits().deadline;
+    bounded_by(adapter, adapter.limits().deadline, call).await
+}
+
+/// `call` into `adapter`, stopped at `deadline`.
+pub(crate) async fn bounded_by<T>(
+    adapter: &crate::WasmAdapter,
+    deadline: Duration,
+    call: impl Future<Output = Result<T, SourceError>>,
+) -> Result<T, SourceError> {
     match tokio::time::timeout(deadline, call).await {
         Ok(answer) => answer,
         Err(_) => Err(Exceeded::Deadline(deadline).into_error(adapter.kind())),

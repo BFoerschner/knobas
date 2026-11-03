@@ -55,6 +55,7 @@ runs it, so the table and the file cannot drift.
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
+| 8095 | `docs-assets`: Swagger UI and the files the Confluence showcase's embeds load (#2456) | `--profile real-atlassian` |
 
 One host port is used here that is **not** in that table and must not be:
 `127.0.0.1:8299`, the canary (below). It is a host socket a helper script
@@ -1266,6 +1267,53 @@ and verified at 244–263 s, its three suites ~15 s once compiled;
 `confluence-live` 91–104 s, seeded and verified at 56–58 s. Each three-hour
 window holds with hours of margin. The pair's 2026-09-03 numbers, both
 products up together, are in the `justfile`'s `atlassian-live` header.
+
+#### What the seed holds: the Docs reader showcase (#2456)
+
+Besides the fixture's pages, the Confluence seed makes a set of pages that hold
+every construct the Docs reader draws (spec #2432), to open in knobas and look
+at (Björn's ruling 6, `docs/decisions/2026-11-02-spec-2432-docs-whole-pages.md`).
+They are in the **ENG** space under the home page, so `just live-demo` shows
+them in Docs under *Engineering*:
+
+| Page | What it shows |
+|---|---|
+| **Docs reader showcase** | A mention of the seed account, a page link, the `jira` macro on PAY-231, a list, code, the four panels, a table, a `toc` placeholder; labelled `knobas-docs` |
+| ↳ **Showcase: tables** | Merged cells (colspan, rowspan), a header column, cells holding a list, paragraphs, code, a panel, a nested table, an expand, an excerpt include and an HTML embed, and a fourteen-column table that scrolls sideways |
+| ↳ **Showcase: task lists and expands** | A task list with checked, unchecked and nested items; expands titled and untitled holding a list, a table and a panel. Search Docs for *quarantine ledger* or *settlement drift* to land in one |
+| ↳ **Showcase: includes** | An `include` and an `excerpt-include` of *Showcase: payout runbook* (whose `excerpt` draws on its own page); an include of *Retired payout runbook* in the **ARCHIVE** space, which no seeded knobas config syncs (*not mirrored*); an excerpt include of a page with no excerpt; a chain four deep (*Showcase: include depth 1* to *4*, the last too deep); and a cycle (*Showcase: include cycle A* and *B*). All of them sit under this page |
+| ↳ **Showcase: embeds** | An `html` macro whose script writes the number it shows; an `html` macro running a **self-hosted Swagger UI** that fetches the payouts OpenAPI file; an `iframe` of a status page; a widget connector of a YouTube video (the one embed that needs the internet); and an `iframe` of a `javascript:` address, which knobas refuses to frame |
+
+The showcase and the runbook name PAY-231, so the suggestion pass's
+`page_text_key` rule proposes linking each to that ticket, and once a proposal
+is accepted the pages are one hop from the ticket. The seeded Jira tickets
+themselves link no page.
+
+The pages are `testenv/confluence-showcase/*.xml` in storage format, in the
+order and under the parents `manifest.json` names. Each carries a `knobas-seed`
+content property with the sha256 of the storage the seed wrote, so a page whose
+file is unchanged is a skip, and an edited file reaches its page on the next
+seed as a new version. `seed-state.json` records them under
+`confluence.showcase`, apart from `confluence.pages`, which stays the fixture's
+corpus; the ENG ones count as seeded pages for `--verify` and for the adapter
+suite's whole-space bound.
+
+The embeds load from **`docs-assets`** (port 8095), a Caddy container that comes
+up with Confluence in `live_session` and is removed with it. It serves
+`testenv/docs-assets/` with `Access-Control-Allow-Origin: *`, since an embed's
+frame has an opaque origin and Swagger UI fetches its spec: `openapi.json` and
+`status.html` from git, and Swagger UI's bundle and stylesheet, which
+`./docs-assets.sh fetch` downloads once from npm (`swagger-ui-dist`, pinned
+version and integrity) into a gitignored directory. The files reach the
+container by `docker cp`, so the WSL target gets them too, and port 8095 is on
+the tunnel's list. Seeded by hand with `./seed`, the server is not up unless a
+live session started it: `KNOBAS_DOCS_ASSETS_URL` changes the address the seed
+writes into the pages.
+
+The live tests in `crates/knobas-app/tests/confluence_live.rs` read these
+pages (blocks, tables, task lists and expands, embeds, includes) and make no
+page of their own for them. The pages they still make are for write paths and
+for the search and backlink marks (#860), which predate the showcase.
 
 **The suite gated on `KNOBAS_CONFLUENCE_URL`** (issue #284) is
 `crates/knobas-source-confluence/tests/live_confluence_seeded.rs`, and it is

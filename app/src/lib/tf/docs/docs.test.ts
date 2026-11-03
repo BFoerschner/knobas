@@ -220,6 +220,15 @@ test("sections are numbered from the first heading and the outline counts matche
   expect(sectionMatches(BODY, []).size).toBe(0);
 });
 
+test("a collapsible's title and words count in its section's matches, as the find bar marks them (spec #2432)", () => {
+  const words = (t: string): DocBlock => ({ type: "paragraph", text: [{ type: "text", text: t, strong: false, emphasis: false, code: false }] });
+  const blocks: DocBlock[] = [
+    { type: "heading", level: 2, text: [{ type: "text", text: "Steps", strong: false, emphasis: false, code: false }] },
+    { type: "collapsible", title: "Retry rules", blocks: [words("Retry twice."), { type: "collapsible", title: "More", blocks: [words("then retry")] }] },
+  ];
+  expect([...sectionMatches(blocks, ["retry"])]).toEqual([[1, 3]]);
+});
+
 test("the hit's words: the header line, the snippet's place and the last line", () => {
   expect(hitsLine(5, "all spaces", 0)).toBe("5 pages in all spaces, 1 ms");
   expect(hitsLine(1, "Engineering", 3)).toBe("1 page in Engineering, 3 ms");

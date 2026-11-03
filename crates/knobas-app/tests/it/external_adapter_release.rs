@@ -460,8 +460,8 @@ async fn an_update_preview_shows_the_release_beside_what_is_installed_and_switch
             .iter()
             .map(|r| r.role.as_str())
             .collect::<Vec<_>>(),
-        ["wasm-fixture:survey-desk", "ci"],
-        "the fixture's custom role and CI"
+        ["wasm-fixture:survey-desk", "ci", "wiki"],
+        "the fixture's custom role, CI and the wiki"
     );
     assert_eq!(
         preview.installed.limits,
@@ -643,11 +643,11 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
     assert_eq!(
         add_and_sync(&pool, &connector, &registry, "quay-a").await,
-        5
+        7
     );
     assert_eq!(
         add_and_sync(&pool, &connector, &registry, "quay-b").await,
-        5
+        7
     );
     let secrets: Arc<dyn knobas_secrets::SecretStore> =
         Arc::new(knobas_secrets::MemoryStore::new());
@@ -718,7 +718,7 @@ async fn uninstall_with_two_sources_asks_once_per_source_and_does_what_each_says
     );
     assert_eq!(
         items_of(&pool, "quay-b").await,
-        5,
+        7,
         "keep left quay-b's items"
     );
     assert!(installed::list(&pool, &registry).await.unwrap().is_empty());

@@ -13,37 +13,44 @@
 //! | `h1` to `h6` | heading |
 //! | `p`, loose text | paragraph |
 //! | `ul`, `ol` (nested too) | list |
-//! | `table` with `th` / `td` | table |
+//! | `ac:task-list` (nested too) | list, each item checked or not |
+//! | `table` with `th` / `td` | table, each cell's blocks and `colspan` / `rowspan` |
 //! | `pre`, the `code` and `noformat` macros | code, with the macro's `language` |
 //! | the `info`, `note`, `warning`, `tip` and `panel` macros | panel |
 //! | the `jira` macro with a `key` | an issue chip (inline) |
+//! | the `include` and `excerpt-include` macros naming a page | include, filled by knobas at read time |
+//! | the `excerpt` macro | its contents, in its place (none when `hidden`); the page's excerpt |
 //! | `ac:link` to `ri:user` | a mention (inline) |
 //! | `ac:link` to `ri:page` | a page link (inline) |
 //! | `a href` | a link (inline) |
 //! | `strong`/`b`, `em`/`i`, `code` | text marks |
-//! | **any other macro, `ac:image`, `ac:task-list`** | placeholder, named |
+//! | **any other macro, `ac:image`** | placeholder, named |
 //!
 //! `div`, `section`, `span`, `blockquote`, `thead`, `tbody` and Confluence's
 //! layout elements are transparent: their children are read in their place.
 //!
-//! # Why a tree first
+//! # Over the shared reader
 //!
-//! [`crate::storage::to_text`] is a scanner because it only needs words. Here
-//! nesting is the meaning: a panel's body, a list inside a list item, a cell
-//! inside a row. So the body is read into a small, tolerant element tree --
-//! an unmatched close tag closes up to its opener or is ignored, an unclosed
-//! element ends with the document -- and the tree is walked. It never fails: a
-//! body that would not parse still reads as the text it holds.
+//! Storage format is XHTML with Confluence's own `ac:` and `ri:` elements.
+//! The plain HTML half is read by the shared reader
+//! (`knobas_source::docs::html`, spec #2432); this module is only its hook,
+//! [`Storage`], which maps the `ac:`/`ri:` half: macros, page and user links,
+//! emoticons, images, task lists and layouts. The same tolerant tree carries
+//! the section numbering and *Edit section*'s byte spans (#862). Nothing here
+//! fails: a body that would not parse still reads as the text it holds.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use knobas_source::docs::{
-    DocBlock, DocComment, DocContent, DocSection, DocVersion, EditRefused, Inline, PanelKind,
-    SectionEdit, SectionRefusal, TableCell,
+    DocBlock, DocComment, DocContent, DocSection, DocVersion, EditRefused, EmbedContent, Inline,
+    ListItem, PanelKind, SectionEdit, SectionRefusal,
 };
 use serde_json::Value;
 
-use crate::storage::{attr, decode_entities, split_tag, tag_name};
+use knobas_source::docs::html::{
+    self, Hook, Hooked, Node, Reading, collapse, decode_entities, parse, placeholder,
+};
 
 /// A user the record names: account name and display name, found by key.
 #[derive(Debug, Clone, Default)]
@@ -70,6 +77,7 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
     }
     let storage = payload.pointer("/body/storage/value")?.as_str()?;
     let people = people(payload);
+    let (blocks, excerpt) = read(storage, &people);
     let version = payload.pointer("/version/number").and_then(Value::as_u64);
     let labels = payload
         .pointer("/metadata/labels/results")
@@ -102,10 +110,11 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
         version,
         editor_name,
         labels,
-        blocks: to_blocks(storage, &people),
+        blocks,
         comments,
         sections: sections(storage),
         history: history(payload),
+        excerpt,
     })
 }
 
@@ -143,19 +152,20 @@ fn history(payload: &Value) -> Vec<DocVersion> {
 
 // -- sections and their edits (#862) ------------------------------------------
 
-/// Elements the reader reads through to their children (`Blocks::node`'s
-/// transparent arm): a heading inside one is still one of the page's.
-fn is_transparent(name: &str) -> bool {
+/// Confluence's layout elements, which the hook reads through to their
+/// children (`Blocks::node`'s transparent arm).
+fn is_layout(name: &str) -> bool {
     matches!(
         name,
-        "div"
-            | "section"
-            | "blockquote"
-            | "ac:layout"
-            | "ac:layout-section"
-            | "ac:layout-cell"
-            | "ac:rich-text-body"
+        "ac:layout" | "ac:layout-section" | "ac:layout-cell" | "ac:rich-text-body"
     )
+}
+
+/// Elements the reader reads through to their children: the reader's own
+/// wrappers and the hook's layouts. A heading inside one is still one of the
+/// page's.
+fn is_transparent(name: &str) -> bool {
+    html::is_block_wrapper(name) || is_layout(name)
 }
 
 fn is_heading(name: &str) -> bool {
@@ -169,6 +179,10 @@ fn headings<'a>(nodes: &'a [Node], top: bool, out: &mut Vec<(&'a Node, bool)>) {
         match node.name() {
             Some(name) if is_heading(name) => out.push((node, top)),
             Some(name) if is_transparent(name) => headings(node.children(), false, out),
+            // A drawn excerpt's headings are the page's (spec #2432).
+            Some(_) if is_macro(node) && macro_name(node) == "excerpt" && !is_hidden(node) => {
+                headings(node.children(), false, out);
+            }
             _ => {}
         }
     }
@@ -180,14 +194,21 @@ fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
     let Node::Element { name, children, .. } = node else {
         return None;
     };
+    // The editor's text has no collapsible (spec #2432): an expand is the
+    // reason, whatever it holds.
+    if is_macro(node) && macro_name(node) == "expand" {
+        return Some(SectionRefusal::Macro);
+    }
     let own = match name.as_str() {
         "table" => Some(SectionRefusal::Table),
         "pre" => Some(SectionRefusal::Code),
-        "ac:structured-macro" | "ac:macro"
-            if matches!(node.attr("ac:name"), Some("code" | "noformat")) =>
-        {
+        _ if is_macro(node) && matches!(macro_name(node).as_str(), "code" | "noformat") => {
             Some(SectionRefusal::Code)
         }
+        // The editor's text has no checkbox (spec #2432). A task's own
+        // parts are the list's, not macros; what its body holds still counts.
+        "ac:task-list" => Some(SectionRefusal::Formatting),
+        "ac:task" | "ac:task-id" | "ac:task-uuid" | "ac:task-status" | "ac:task-body" => None,
         n if n.starts_with("ac:") || n.starts_with("ri:") => Some(SectionRefusal::Macro),
         // A numbered list would come back bulleted: the editor's text has
         // only `- ` items, and `from_plain` writes them as `<ul>`.
@@ -380,7 +401,7 @@ fn plain_text(nodes: &[&Node]) -> String {
 /// export spells a panel (`knobas_source::docs::markdown`).
 fn panel_text(node: &Node, word: &str) -> String {
     let mut first = format!("**{word}**");
-    if let Some(title) = node.param("title") {
+    if let Some(title) = param(node, "title") {
         first.push(' ');
         first.push_str(&title.split_whitespace().collect::<Vec<_>>().join(" "));
     }
@@ -588,567 +609,265 @@ pub(crate) fn people(payload: &Value) -> People {
     out
 }
 
-// -- the tree ---------------------------------------------------------------
+// -- storage format over the shared reader ------------------------------------
 
-#[derive(Debug)]
-enum Node {
-    Element {
-        name: String,
-        /// The tag's inside, for attribute reads.
-        tag: String,
-        children: Vec<Node>,
-        /// Where the element's open tag starts and where it ends (past its
-        /// close tag, or where an unclosed element was cut), as byte offsets
-        /// into the storage body: what a section edit splices at (#862).
-        span: (usize, usize),
-    },
-    /// Character data, entities decoded.
-    Text(String),
-    /// A CDATA section's content, verbatim.
-    Cdata(String),
+/// A macro's `ac:parameter` by name.
+fn param(node: &Node, key: &str) -> Option<String> {
+    node.children()
+        .iter()
+        .find(|c| c.name() == Some("ac:parameter") && c.attr("ac:name") == Some(key))
+        .map(|p| p.text().trim().to_owned())
+        .filter(|v| !v.is_empty())
 }
 
-impl Node {
-    fn name(&self) -> Option<&str> {
-        match self {
-            Node::Element { name, .. } => Some(name),
-            _ => None,
-        }
+/// A macro's URL parameter by name: the `ri:url` resource storage keeps a
+/// URL in (entities decoded), or the parameter's text where it holds none.
+fn url_param(node: &Node, key: &str) -> Option<String> {
+    let found = node
+        .children()
+        .iter()
+        .find(|c| c.name() == Some("ac:parameter") && c.attr("ac:name") == Some(key))?;
+    match found.child("ri:url") {
+        Some(url) => url.attr("ri:value").map(html::decode_entities),
+        None => param(node, key),
     }
-
-    fn attr(&self, key: &str) -> Option<&str> {
-        match self {
-            Node::Element { tag, .. } => attr(tag, key),
-            _ => None,
-        }
-    }
-
-    fn children(&self) -> &[Node] {
-        match self {
-            Node::Element { children, .. } => children,
-            _ => &[],
-        }
-    }
-
-    fn child(&self, name: &str) -> Option<&Node> {
-        self.children().iter().find(|c| c.name() == Some(name))
-    }
-
-    /// All the text below this node, CDATA included.
-    fn text(&self) -> String {
-        match self {
-            Node::Text(t) | Node::Cdata(t) => t.clone(),
-            Node::Element { children, .. } => children.iter().map(Node::text).collect(),
-        }
-    }
-
-    /// A macro's `ac:parameter` by name.
-    fn param(&self, key: &str) -> Option<String> {
-        self.children()
-            .iter()
-            .find(|c| c.name() == Some("ac:parameter") && c.attr("ac:name") == Some(key))
-            .map(|p| p.text().trim().to_owned())
-            .filter(|v| !v.is_empty())
-    }
+    .filter(|v| !v.trim().is_empty())
 }
 
-/// Elements that never have children.
-fn is_void(name: &str) -> bool {
-    matches!(name, "br" | "hr" | "img" | "col")
-}
-
-/// One open element on the parse stack: name, tag, children, start offset.
-type Open = (String, String, Vec<Node>, usize);
-
-fn parse(storage: &str) -> Vec<Node> {
-    // The stack of open elements; the bottom is the document.
-    let mut stack: Vec<Open> = vec![(String::new(), String::new(), vec![], 0)];
-    let mut rest = storage;
-    let at = |rest: &str| storage.len() - rest.len();
-    let push = |stack: &mut Vec<Open>, node: Node| {
-        stack
-            .last_mut()
-            .expect("the document is never popped")
-            .2
-            .push(node);
-    };
-    let close = |stack: &mut Vec<Open>, end: usize| {
-        let (name, tag, children, start) = stack.pop().expect("only called above the document");
-        stack
-            .last_mut()
-            .expect("the document is never popped")
-            .2
-            .push(Node::Element {
-                name,
-                tag,
-                children,
-                span: (start, end),
-            });
-    };
-    while !rest.is_empty() {
-        let Some(open) = rest.find('<') else {
-            push(&mut stack, Node::Text(decode_entities(rest)));
-            rest = "";
-            break;
-        };
-        if open > 0 {
-            push(&mut stack, Node::Text(decode_entities(&rest[..open])));
-        }
-        rest = &rest[open..];
-        let start = at(rest);
-        if let Some(tail) = rest.strip_prefix("<![CDATA[") {
-            let (inside, tail) = tail.split_once("]]>").unwrap_or((tail, ""));
-            push(&mut stack, Node::Cdata(inside.to_owned()));
-            rest = tail;
-            continue;
-        }
-        if let Some(tail) = rest.strip_prefix("<!--") {
-            rest = tail.split_once("-->").map_or("", |(_, tail)| tail);
-            continue;
-        }
-        let Some((tag, tail)) = split_tag(rest) else {
-            push(&mut stack, Node::Text(decode_entities(rest)));
-            rest = "";
-            break;
-        };
-        rest = tail;
-        let name = tag_name(tag);
-        if name.is_empty() || tag.starts_with('?') || tag.starts_with('!') {
-            continue;
-        }
-        if tag.starts_with('/') {
-            // Close up to the matching opener; a close with no opener is
-            // dropped. An element closed by an ancestor's close tag ends where
-            // that tag starts.
-            if let Some(depth) = stack.iter().rposition(|(open, _, _, _)| *open == name)
-                && depth > 0
-            {
-                while stack.len() > depth + 1 {
-                    close(&mut stack, start);
-                }
-                close(&mut stack, at(rest));
-            }
-            continue;
-        }
-        if tag.ends_with('/') || is_void(&name) {
-            push(
-                &mut stack,
-                Node::Element {
-                    name,
-                    tag: tag.to_owned(),
-                    children: vec![],
-                    span: (start, at(rest)),
-                },
-            );
-            continue;
-        }
-        stack.push((name, tag.to_owned(), vec![], start));
-    }
-    let end = at(rest);
-    while stack.len() > 1 {
-        close(&mut stack, end);
-    }
-    stack
-        .pop()
-        .map(|(_, _, nodes, _)| nodes)
-        .unwrap_or_default()
-}
-
-// -- blocks -----------------------------------------------------------------
-
-/// A storage body as the reader's blocks.
+/// A storage body as the reader's blocks: the shared HTML reader
+/// (`knobas_source::docs::html`) with [`Storage`] as its hook.
 pub(crate) fn to_blocks(storage: &str, people: &People) -> Vec<DocBlock> {
-    let nodes = parse(storage);
-    let mut out = Blocks::new(people);
-    out.flow(&nodes);
-    out.finish()
+    read(storage, people).0
 }
 
-/// The block walk, with a paragraph collecting loose inline content.
-struct Blocks<'a> {
+/// A storage body's blocks and its excerpt: the body of its first `excerpt`
+/// macro, as an `excerpt-include` of the page draws it (spec #2432).
+fn read(storage: &str, people: &People) -> (Vec<DocBlock>, Option<Vec<DocBlock>>) {
+    let hook = Storage {
+        people,
+        excerpt: RefCell::new(None),
+    };
+    let blocks = html::to_blocks(storage, &hook);
+    (blocks, hook.excerpt.into_inner())
+}
+
+/// The `ac:` / `ri:` half of storage format: what plain HTML does not have.
+struct Storage<'a> {
     people: &'a People,
-    out: Vec<DocBlock>,
-    loose: Vec<Inline>,
+    /// The first `excerpt` macro's blocks, once the reader has met one.
+    excerpt: RefCell<Option<Vec<DocBlock>>>,
 }
 
-impl<'a> Blocks<'a> {
-    fn new(people: &'a People) -> Self {
-        Blocks {
-            people,
-            out: Vec::new(),
-            loose: Vec::new(),
-        }
-    }
-
-    fn finish(mut self) -> Vec<DocBlock> {
-        self.flush();
-        self.out
-    }
-
-    fn flush(&mut self) {
-        let text = tidy_inlines(std::mem::take(&mut self.loose));
-        if !text.is_empty() {
-            self.out.push(DocBlock::Paragraph { text });
-        }
-    }
-
-    fn block(&mut self, block: DocBlock) {
-        self.flush();
-        self.out.push(block);
-    }
-
-    fn sub(&self, nodes: &[Node]) -> Vec<DocBlock> {
-        let mut inner = Blocks::new(self.people);
-        inner.flow(nodes);
-        inner.finish()
-    }
-
-    fn flow(&mut self, nodes: &[Node]) {
-        for node in nodes {
-            self.node(node);
-        }
-    }
-
-    fn node(&mut self, node: &Node) {
-        let Node::Element { name, children, .. } = node else {
-            // Loose text between blocks is a paragraph's.
-            let mut inl = Inlines::new(self.people);
-            inl.node(node, Marks::default());
-            self.take(inl);
-            return;
-        };
-        match name.as_str() {
-            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
-                let level = name[1..].parse().unwrap_or(2);
-                let mut inl = Inlines::new(self.people);
-                inl.flow(children, Marks::default());
-                let (text, escaped) = inl.finish();
-                self.block(DocBlock::Heading {
-                    level,
-                    text: tidy_inlines(text),
-                });
-                for block in escaped {
-                    self.block(block);
-                }
-            }
-            "p" => {
-                self.flush();
-                let mut inl = Inlines::new(self.people);
-                inl.flow(children, Marks::default());
-                self.take(inl);
-                self.flush();
-            }
-            "ul" | "ol" => {
-                let items = children
-                    .iter()
-                    .filter(|c| c.name() == Some("li"))
-                    .map(|li| self.sub(li.children()))
-                    .collect();
-                self.block(DocBlock::List {
-                    ordered: name == "ol",
-                    items,
-                });
-            }
-            "table" => self.block(DocBlock::Table {
-                rows: self.rows(children),
-            }),
-            "pre" => self.block(DocBlock::Code {
-                code: node.text(),
-                language: None,
-            }),
-            "hr" => self.flush(),
-            "ac:structured-macro" | "ac:macro" => self.r#macro(node),
-            "ac:image" => self.block(DocBlock::Placeholder {
-                name: "image".into(),
-            }),
-            "ac:task-list" => self.block(DocBlock::Placeholder {
-                name: "task list".into(),
-            }),
-            "div" | "section" | "blockquote" | "ac:layout" | "ac:layout-section"
-            | "ac:layout-cell" | "ac:rich-text-body" => {
-                self.flush();
-                self.flow(children);
-                self.flush();
-            }
-            // Anything else is inline content of a loose paragraph.
-            _ => {
-                let mut inl = Inlines::new(self.people);
-                inl.node(node, Marks::default());
-                self.take(inl);
-            }
-        }
-    }
-
-    /// Fold an inline walk into the loose paragraph; a block it had to step
-    /// out for (an unknown macro inside a sentence) ends the paragraph there.
-    fn take(&mut self, inl: Inlines<'_>) {
-        for piece in inl.pieces {
-            match piece {
-                Piece::Inline(i) => self.loose.push(i),
-                Piece::Block(b) => self.block(b),
-            }
-        }
-    }
-
-    fn rows(&self, nodes: &[Node]) -> Vec<Vec<TableCell>> {
-        let mut rows = Vec::new();
-        for node in nodes {
-            match node.name() {
-                Some("tr") => rows.push(
-                    node.children()
-                        .iter()
-                        .filter_map(|cell| {
-                            let header = match cell.name() {
-                                Some("th") => true,
-                                Some("td") => false,
-                                _ => return None,
-                            };
-                            Some(TableCell {
-                                header,
-                                text: self.cell(cell.children()),
-                            })
-                        })
-                        .collect(),
-                ),
-                Some("thead" | "tbody" | "tfoot") => rows.extend(self.rows(node.children())),
-                _ => {}
-            }
-        }
-        rows
-    }
-
-    /// A cell's content as one run of inlines: paragraphs inside a cell are
-    /// joined by a line break.
-    fn cell(&self, nodes: &[Node]) -> Vec<Inline> {
-        let mut out = Vec::new();
-        for (i, block) in self.sub(nodes).into_iter().enumerate() {
-            if i > 0 {
-                out.push(Inline::Break);
-            }
-            match block {
-                DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => out.extend(text),
-                DocBlock::Placeholder { name } => out.push(Inline::text(format!("[{name}]"))),
-                other => out.push(Inline::text(block_words(&other))),
-            }
-        }
-        out
-    }
-
-    fn r#macro(&mut self, node: &Node) {
-        let name = node
-            .attr("ac:name")
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        match name.as_str() {
-            "code" | "noformat" => self.block(DocBlock::Code {
-                code: node
-                    .child("ac:plain-text-body")
-                    .map(Node::text)
-                    .unwrap_or_default(),
-                language: node.param("language"),
-            }),
-            "info" | "note" | "warning" | "tip" | "panel" => {
-                let kind = match name.as_str() {
-                    "info" => PanelKind::Info,
-                    "warning" => PanelKind::Warning,
-                    "tip" => PanelKind::Tip,
-                    _ => PanelKind::Note,
-                };
-                let blocks = node
-                    .child("ac:rich-text-body")
-                    .map(|body| self.sub(body.children()))
-                    .unwrap_or_default();
-                self.block(DocBlock::Panel {
-                    kind,
-                    title: node.param("title"),
-                    blocks,
-                });
-            }
-            "jira" if node.param("key").is_some() => {
-                let mut inl = Inlines::new(self.people);
-                inl.node(node, Marks::default());
-                self.take(inl);
-            }
-            _ => self.block(placeholder(&name)),
-        }
-    }
+/// A macro, in either of the two elements storage format spells one with.
+fn is_macro(node: &Node) -> bool {
+    matches!(node.name(), Some("ac:structured-macro" | "ac:macro"))
 }
 
-fn placeholder(name: &str) -> DocBlock {
-    DocBlock::Placeholder {
-        name: if name.is_empty() {
-            "unnamed".into()
-        } else {
-            name.to_owned()
-        },
-    }
+/// A macro's name, lower case: the reader reads it whatever its case.
+fn macro_name(node: &Node) -> String {
+    node.attr("ac:name")
+        .unwrap_or_default()
+        .to_ascii_lowercase()
 }
 
-/// The words of a block, for a cell that holds one.
-fn block_words(block: &DocBlock) -> String {
-    match block {
-        DocBlock::Code { code, .. } => code.clone(),
-        DocBlock::List { items, .. } => items
+/// An `excerpt` macro the page does not draw: `hidden` set, as Confluence's
+/// *Hide excerpted content* writes it.
+fn is_hidden(node: &Node) -> bool {
+    param(node, "hidden").is_some_and(|v| v.eq_ignore_ascii_case("true"))
+}
+
+/// The page an `include` or `excerpt-include` names: the `ri:page` in one of
+/// its parameters (title, and space where it says one), or the default
+/// parameter's text as a title.
+fn included_page(node: &Node) -> Option<(String, Option<String>)> {
+    let params = || {
+        node.children()
             .iter()
-            .flatten()
-            .map(block_words)
-            .collect::<Vec<_>>()
-            .join(" "),
-        DocBlock::Panel { blocks, .. } => {
-            blocks.iter().map(block_words).collect::<Vec<_>>().join(" ")
-        }
-        DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => text
-            .iter()
-            .map(|i| match i {
-                Inline::Text { text, .. }
-                | Inline::Link { text, .. }
-                | Inline::PageLink { text, .. } => text.clone(),
-                Inline::Issue { key, .. } => key.clone(),
-                _ => String::new(),
-            })
-            .collect(),
-        DocBlock::Table { .. } => String::new(),
-        DocBlock::Placeholder { name } => format!("[{name}]"),
-    }
-}
-
-// -- inlines ----------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, Default)]
-struct Marks {
-    strong: bool,
-    emphasis: bool,
-    code: bool,
-}
-
-enum Piece {
-    Inline(Inline),
-    Block(DocBlock),
-}
-
-struct Inlines<'a> {
-    people: &'a People,
-    pieces: Vec<Piece>,
-}
-
-impl<'a> Inlines<'a> {
-    fn new(people: &'a People) -> Self {
-        Inlines {
-            people,
-            pieces: Vec::new(),
+            .filter(|c| c.name() == Some("ac:parameter"))
+    };
+    for p in params() {
+        let page = p
+            .child("ri:page")
+            .or_else(|| p.child("ac:link").and_then(|l| l.child("ri:page")));
+        if let Some(page) = page {
+            let title = page
+                .attr("ri:content-title")
+                .map(decode_entities)
+                .filter(|t| !t.trim().is_empty())?;
+            let space = page
+                .attr("ri:space-key")
+                .map(decode_entities)
+                .filter(|s| !s.trim().is_empty());
+            return Some((title, space));
         }
     }
+    params()
+        .find(|p| p.attr("ac:name") == Some("") && p.children().iter().all(|c| c.name().is_none()))
+        .map(|p| collapse(&p.text()))
+        .filter(|t| !t.is_empty())
+        .map(|title| (title, None))
+}
 
-    fn finish(self) -> (Vec<Inline>, Vec<DocBlock>) {
-        let mut text = Vec::new();
-        let mut blocks = Vec::new();
-        for piece in self.pieces {
-            match piece {
-                Piece::Inline(i) => text.push(i),
-                Piece::Block(b) => blocks.push(b),
-            }
-        }
-        (text, blocks)
-    }
-
-    fn push(&mut self, inline: Inline) {
-        self.pieces.push(Piece::Inline(inline));
-    }
-
-    fn flow(&mut self, nodes: &[Node], marks: Marks) {
-        for node in nodes {
-            self.node(node, marks);
-        }
-    }
-
-    fn node(&mut self, node: &Node, marks: Marks) {
-        let (name, children) = match node {
-            Node::Text(text) | Node::Cdata(text) => {
-                self.push(Inline::Text {
-                    text: text.clone(),
-                    strong: marks.strong,
-                    emphasis: marks.emphasis,
-                    code: marks.code,
-                });
-                return;
-            }
-            Node::Element { name, children, .. } => (name.as_str(), children),
-        };
-        match name {
-            "strong" | "b" => self.flow(
-                children,
-                Marks {
-                    strong: true,
-                    ..marks
-                },
-            ),
-            "em" | "i" => self.flow(
-                children,
-                Marks {
-                    emphasis: true,
-                    ..marks
-                },
-            ),
-            "code" => self.flow(
-                children,
-                Marks {
-                    code: true,
-                    ..marks
-                },
-            ),
-            "br" => self.push(Inline::Break),
-            "a" => {
-                let text = collapse(&node.text());
-                match node.attr("href").filter(|h| !h.trim().is_empty()) {
-                    Some(href) => self.push(Inline::Link {
-                        text: if text.is_empty() {
-                            href.to_owned()
-                        } else {
-                            text
-                        },
-                        href: decode_entities(href),
-                    }),
-                    None => self.flow(children, marks),
-                }
-            }
-            "ac:link" => self.link(node, marks),
-            "ac:structured-macro" | "ac:macro" => {
-                let macro_name = node
-                    .attr("ac:name")
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                match (macro_name.as_str(), node.param("key")) {
-                    ("jira", Some(key)) => self.push(Inline::Issue {
-                        key,
-                        entity_id: None,
-                        title: None,
-                        status: None,
-                    }),
-                    _ => {
-                        // A block macro inside a sentence: the sentence stops
-                        // and the block is drawn where it stood.
-                        let mut blocks = Blocks::new(self.people);
-                        blocks.r#macro(node);
-                        for block in blocks.finish() {
-                            self.pieces.push(Piece::Block(block));
+impl Hook for Storage<'_> {
+    fn element(&self, node: &Node, reading: &Reading<'_>) -> Hooked {
+        match node.name().unwrap_or_default() {
+            _ if is_macro(node) => match macro_name(node).as_str() {
+                name @ ("include" | "excerpt-include") => {
+                    Hooked::Blocks(vec![match included_page(node) {
+                        Some((title, space)) => {
+                            DocBlock::include(title, space, name == "excerpt-include")
                         }
+                        None => placeholder(name),
+                    }])
+                }
+                // Transparent on its own page (spec #2432, story 15), and
+                // the page's excerpt.
+                "excerpt" => {
+                    let blocks = node
+                        .child("ac:rich-text-body")
+                        .map(|body| reading.blocks(body.children()))
+                        .unwrap_or_default();
+                    let mut excerpt = self.excerpt.borrow_mut();
+                    if excerpt.is_none() {
+                        *excerpt = Some(blocks.clone());
                     }
+                    Hooked::Blocks(if is_hidden(node) { Vec::new() } else { blocks })
                 }
-            }
-            "ac:image" => self.pieces.push(Piece::Block(placeholder("image"))),
-            "ac:emoticon" => {
-                if let Some(fallback) = node.attr("ac:emoji-fallback") {
-                    self.push(Inline::text(decode_entities(fallback)));
-                }
-            }
-            "ac:parameter" => {}
-            _ => self.flow(children, marks),
+                _ => r#macro(node, reading),
+            },
+            "ac:image" => Hooked::Blocks(vec![placeholder("image")]),
+            "ac:task-list" => Hooked::Blocks(vec![task_list(node, reading)]),
+            name if is_layout(name) => Hooked::Blocks(reading.blocks(node.children())),
+            "ac:link" => Hooked::Inlines(self.link(node, reading)),
+            "ac:emoticon" => Hooked::Inlines(
+                node.attr("ac:emoji-fallback")
+                    .map(|fallback| Inline::text(decode_entities(fallback)))
+                    .into_iter()
+                    .collect(),
+            ),
+            "ac:parameter" => Hooked::Inlines(vec![]),
+            // Anything else (an inline comment marker, a placeholder's
+            // instruction text, an element storage format added later) reads
+            // as what it holds.
+            _ => Hooked::Unwrap,
         }
     }
+}
 
+/// `ac:task-list`: a list whose items carry their checked state (spec
+/// #2432). A nested task list may sit in a task's body, in the task beside
+/// its body, or after the task in the outer list; each lands inside the task
+/// it belongs to.
+fn task_list(node: &Node, reading: &Reading<'_>) -> DocBlock {
+    let mut items: Vec<ListItem> = Vec::new();
+    for child in node.children() {
+        match child.name() {
+            Some("ac:task") => {
+                let done = child
+                    .child("ac:task-status")
+                    .is_some_and(|s| s.text().trim().eq_ignore_ascii_case("complete"));
+                let mut blocks = child
+                    .child("ac:task-body")
+                    .map(|body| reading.blocks(body.children()))
+                    .unwrap_or_default();
+                blocks.extend(
+                    child
+                        .children()
+                        .iter()
+                        .filter(|c| c.name() == Some("ac:task-list"))
+                        .map(|inner| task_list(inner, reading)),
+                );
+                items.push(ListItem::task(done, blocks));
+            }
+            Some("ac:task-list") => {
+                let inner = task_list(child, reading);
+                match items.last_mut() {
+                    Some(item) => item.blocks.push(inner),
+                    None => items.push(ListItem::new(vec![inner])),
+                }
+            }
+            _ => {}
+        }
+    }
+    DocBlock::List {
+        ordered: false,
+        items,
+    }
+}
+
+/// The title Confluence draws on an `expand` that names none.
+const EXPAND_TITLE: &str = "Click here to expand...";
+
+fn r#macro(node: &Node, reading: &Reading<'_>) -> Hooked {
+    let name = macro_name(node);
+    let block = match name.as_str() {
+        "code" | "noformat" => DocBlock::Code {
+            code: node
+                .child("ac:plain-text-body")
+                .map(Node::text)
+                .unwrap_or_default(),
+            language: param(node, "language"),
+        },
+        "info" | "note" | "warning" | "tip" | "panel" => DocBlock::Panel {
+            kind: match name.as_str() {
+                "info" => PanelKind::Info,
+                "warning" => PanelKind::Warning,
+                "tip" => PanelKind::Tip,
+                _ => PanelKind::Note,
+            },
+            title: param(node, "title"),
+            blocks: node
+                .child("ac:rich-text-body")
+                .map(|body| reading.blocks(body.children()))
+                .unwrap_or_default(),
+        },
+        // A collapsible (spec #2432), titled as Confluence titles it.
+        "expand" => DocBlock::Collapsible {
+            title: param(node, "title").unwrap_or_else(|| EXPAND_TITLE.to_owned()),
+            blocks: node
+                .child("ac:rich-text-body")
+                .map(|body| reading.blocks(body.children()))
+                .unwrap_or_default(),
+        },
+        // The body as written, scripts and all (#2440): the shell runs it in
+        // an isolated frame. A body of nothing is nothing to run.
+        "html" => match node.child("ac:plain-text-body").map(Node::text) {
+            Some(html) if !html.trim().is_empty() => DocBlock::Embed {
+                name,
+                content: EmbedContent::Html { html },
+            },
+            _ => placeholder("html"),
+        },
+        // A framed page (#2441): the URL as the macro names it, and only an
+        // `http(s)` one; anything else is the macro's placeholder.
+        "iframe" | "widget" => match ["src", "url"]
+            .into_iter()
+            .find_map(|key| url_param(node, key))
+            .and_then(|url| EmbedContent::url(&url))
+        {
+            Some(content) => DocBlock::Embed { name, content },
+            None => placeholder(&name),
+        },
+        "jira" => match param(node, "key") {
+            Some(key) => {
+                return Hooked::Inlines(vec![Inline::Issue {
+                    key,
+                    entity_id: None,
+                    title: None,
+                    status: None,
+                }]);
+            }
+            None => placeholder("jira"),
+        },
+        _ => placeholder(&name),
+    };
+    Hooked::Blocks(vec![block])
+}
+
+impl Storage<'_> {
     /// `ac:link`: a mention, a page link, or (anything else it can point at)
     /// its link text.
-    fn link(&mut self, node: &Node, marks: Marks) {
+    fn link(&self, node: &Node, reading: &Reading<'_>) -> Vec<Inline> {
         let body = node
             .child("ac:plain-text-link-body")
             .or_else(|| node.child("ac:link-body"))
@@ -1165,12 +884,11 @@ impl<'a> Inlines<'a> {
                 .cloned()
                 .unwrap_or_default();
             let user_name = by_name.or(person.username);
-            self.push(Inline::Mention {
+            return vec![Inline::Mention {
                 name: person.display_name.or_else(|| body.clone()),
                 user: user_name,
                 me: false,
-            });
-            return;
+            }];
         }
         if let Some(page) = node.child("ri:page") {
             let title = page
@@ -1178,111 +896,22 @@ impl<'a> Inlines<'a> {
                 .map(decode_entities)
                 .unwrap_or_default();
             if !title.is_empty() {
-                self.push(Inline::PageLink {
+                return vec![Inline::PageLink {
                     text: body.unwrap_or_else(|| title.clone()),
                     title,
                     space: page.attr("ri:space-key").map(decode_entities),
                     entity_id: None,
-                });
-                return;
+                }];
             }
         }
-        if let Some(text) = body {
-            self.push(Inline::Text {
-                text,
-                strong: marks.strong,
-                emphasis: marks.emphasis,
-                code: marks.code,
-            });
-        }
-    }
-}
-
-fn collapse(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Collapse whitespace runs across a paragraph's text runs, drop empty runs
-/// and trim the ends, so source indentation never reaches the reader.
-fn tidy_inlines(inlines: Vec<Inline>) -> Vec<Inline> {
-    let mut out: Vec<Inline> = Vec::new();
-    let mut space_before = true; // at the start, leading space is dropped
-    for inline in inlines {
-        match inline {
-            Inline::Text {
-                text,
-                strong,
-                emphasis,
-                code,
-            } => {
-                let mut squeezed = String::with_capacity(text.len());
-                for ch in text.chars() {
-                    if ch.is_whitespace() {
-                        if !space_before {
-                            squeezed.push(' ');
-                            space_before = true;
-                        }
-                    } else {
-                        squeezed.push(ch);
-                        space_before = false;
-                    }
-                }
-                if squeezed.is_empty() {
-                    continue;
-                }
-                // Merge with a neighbour carrying the same marks.
-                if let Some(Inline::Text {
-                    text: prev,
-                    strong: s,
-                    emphasis: e,
-                    code: c,
-                }) = out.last_mut()
-                    && *s == strong
-                    && *e == emphasis
-                    && *c == code
-                {
-                    prev.push_str(&squeezed);
-                    continue;
-                }
-                out.push(Inline::Text {
-                    text: squeezed,
-                    strong,
-                    emphasis,
-                    code,
-                });
-            }
-            Inline::Break => {
-                trim_end(&mut out);
-                out.push(Inline::Break);
-                space_before = true;
-            }
-            other => {
-                out.push(other);
-                space_before = false;
-            }
-        }
-    }
-    trim_end(&mut out);
-    while matches!(out.last(), Some(Inline::Break)) {
-        out.pop();
-        trim_end(&mut out);
-    }
-    out
-}
-
-fn trim_end(out: &mut Vec<Inline>) {
-    if let Some(Inline::Text { text, .. }) = out.last_mut() {
-        let trimmed = text.trim_end().len();
-        text.truncate(trimmed);
-        if text.is_empty() {
-            out.pop();
-        }
+        body.map(|text| reading.text(text)).into_iter().collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use knobas_source::docs::{ListItem, TableCell};
     use serde_json::json;
 
     fn blocks(storage: &str) -> Vec<DocBlock> {
@@ -1344,14 +973,14 @@ mod tests {
             vec![DocBlock::List {
                 ordered: true,
                 items: vec![
-                    vec![
+                    ListItem::new(vec![
                         para("Export the rows"),
                         DocBlock::List {
                             ordered: false,
-                            items: vec![vec![para("as CSV")]]
+                            items: vec![ListItem::new(vec![para("as CSV")])]
                         }
-                    ],
-                    vec![para("Group them")],
+                    ]),
+                    ListItem::new(vec![para("Group them")]),
                 ]
             }]
         );
@@ -1418,16 +1047,72 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     #[test]
     fn a_table_keeps_header_cells_and_rows() {
         let storage = "<table><colgroup><col /><col /></colgroup><tbody><tr><th><p>After</p></th><th><p>Who</p></th></tr><tr><td><p>15 min</p></td><td>second on-call</td></tr></tbody></table>";
-        let cell = |header, text: &str| TableCell {
-            header,
-            text: vec![Inline::text(text)],
-        };
+        let cell = |header, text: &str| TableCell::new(header, vec![para(text)]);
         assert_eq!(
             blocks(storage),
             vec![DocBlock::Table {
                 rows: vec![
                     vec![cell(true, "After"), cell(true, "Who")],
                     vec![cell(false, "15 min"), cell(false, "second on-call")],
+                ]
+            }]
+        );
+    }
+
+    /// Spec #2432 stories 27 to 32 (#2436): a merged cell keeps its spans, a
+    /// header cell opening each row is a header column, and a cell holds
+    /// blocks: a list, two paragraphs, a nested table, a panel, and a macro
+    /// knobas does not draw as a placeholder block, never `[name]` text.
+    #[test]
+    fn a_cell_keeps_its_spans_header_column_and_blocks() {
+        let storage = concat!(
+            r#"<table class="relative-table"><colgroup><col /><col /></colgroup><tbody>"#,
+            r#"<tr><th colspan="2"><p>Rota</p></th></tr>"#,
+            r#"<tr><th rowspan="2"><p>Mon</p></th><td><ul><li><p>Mara</p></li><li>Tomasz</li></ul></td></tr>"#,
+            r#"<tr><td><p>One.</p><p>Two.</p><table><tbody><tr><td>inner</td></tr></tbody></table></td></tr>"#,
+            r#"<tr><th>Tue</th><td><ac:structured-macro ac:name="info" ac:schema-version="1"><ac:rich-text-body><p>Swap.</p></ac:rich-text-body></ac:structured-macro><ac:structured-macro ac:name="toc" ac:schema-version="1" /></td></tr>"#,
+            "</tbody></table>",
+        );
+        let td = |blocks| TableCell::new(false, blocks);
+        assert_eq!(
+            blocks(storage),
+            vec![DocBlock::Table {
+                rows: vec![
+                    vec![TableCell {
+                        colspan: 2,
+                        ..TableCell::new(true, vec![para("Rota")])
+                    }],
+                    vec![
+                        TableCell {
+                            rowspan: 2,
+                            ..TableCell::new(true, vec![para("Mon")])
+                        },
+                        td(vec![DocBlock::List {
+                            ordered: false,
+                            items: vec![
+                                ListItem::new(vec![para("Mara")]),
+                                ListItem::new(vec![para("Tomasz")]),
+                            ],
+                        }]),
+                    ],
+                    vec![td(vec![
+                        para("One."),
+                        para("Two."),
+                        DocBlock::Table {
+                            rows: vec![vec![td(vec![para("inner")])]],
+                        },
+                    ])],
+                    vec![
+                        TableCell::new(true, vec![para("Tue")]),
+                        td(vec![
+                            DocBlock::Panel {
+                                kind: PanelKind::Info,
+                                title: None,
+                                blocks: vec![para("Swap.")],
+                            },
+                            DocBlock::Placeholder { name: "toc".into() },
+                        ]),
+                    ],
                 ]
             }]
         );
@@ -1564,21 +1249,458 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         );
     }
 
+    /// The `html` macro is an embed of its body as the author wrote it (#2440):
+    /// script, entities and a CDATA section Confluence split around `]]>`
+    /// come through byte for byte, and a sentence around it splits as for any
+    /// block macro.
     #[test]
-    fn images_and_task_lists_are_placeholders() {
+    fn an_html_macro_is_an_embed_of_its_markup_byte_for_byte() {
+        let storage = concat!(
+            r#"<p>Try it: <ac:structured-macro ac:name="html" ac:schema-version="1" ac:macro-id="m1">"#,
+            r#"<ac:plain-text-body><![CDATA[<div id="ui"></div>"#,
+            "\n<script src=\"https://api.example.com/swagger-ui.js\"></script>\n",
+            r#"<script>if (a ]]]]><![CDATA[> b && c < d) SwaggerUIBundle({url: "/spec.json?x=1&amp;y"});</script>]]>"#,
+            r#"</ac:plain-text-body></ac:structured-macro> below.</p>"#,
+        );
         assert_eq!(
-            blocks(
-                r#"<ac:image><ri:attachment ri:filename="a.png" /></ac:image><ac:task-list><ac:task><ac:task-body>x</ac:task-body></ac:task></ac:task-list>"#
-            ),
+            blocks(storage),
             vec![
-                DocBlock::Placeholder {
-                    name: "image".into()
+                para("Try it:"),
+                DocBlock::Embed {
+                    name: "html".into(),
+                    content: EmbedContent::Html {
+                        html: concat!(
+                            r#"<div id="ui"></div>"#,
+                            "\n<script src=\"https://api.example.com/swagger-ui.js\"></script>\n",
+                            r#"<script>if (a ]]> b && c < d) SwaggerUIBundle({url: "/spec.json?x=1&amp;y"});</script>"#,
+                        )
+                        .into()
+                    },
                 },
-                DocBlock::Placeholder {
-                    name: "task list".into()
-                },
+                para("below."),
             ]
         );
+    }
+
+    /// A section holding an embed is edited in Confluence: a text box would
+    /// flatten the markup it runs (spec #2432, *Section editing*).
+    #[test]
+    fn a_section_holding_an_html_macro_refuses_as_a_macro() {
+        let storage = r#"<h2>API</h2><p>Below.</p><ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[<p>hi</p>]]></ac:plain-text-body></ac:structured-macro><h2>Plain</h2><p>Text.</p>"#;
+        assert_eq!(
+            sections(storage)
+                .into_iter()
+                .map(|s| s.refusal)
+                .collect::<Vec<_>>(),
+            vec![Some(SectionRefusal::Macro), None]
+        );
+    }
+
+    /// An `html` macro with no body holds nothing to run: a placeholder, so
+    /// the page still says something is there.
+    #[test]
+    fn an_empty_html_macro_is_a_placeholder() {
+        assert_eq!(
+            blocks(
+                r#"<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[  ]]></ac:plain-text-body></ac:structured-macro>"#
+            ),
+            vec![DocBlock::Placeholder {
+                name: "html".into()
+            }]
+        );
+    }
+
+    /// The `iframe` macro and the widget connector are embeds of the URL they
+    /// name (#2441), whichever way storage spells it: a `ri:url` resource or
+    /// the bare text, under `src` or `url`.
+    #[test]
+    fn an_iframe_macro_and_a_widget_connector_are_embeds_of_their_url() {
+        let storage = concat!(
+            r#"<ac:structured-macro ac:name="iframe" ac:schema-version="1"><ac:parameter ac:name="src"><ri:url ri:value="https://grafana.example/d/abc?orgId=1&amp;kiosk" /></ac:parameter><ac:parameter ac:name="height">400</ac:parameter></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="widget" ac:schema-version="1"><ac:parameter ac:name="url"><ri:url ri:value="https://www.youtube.com/embed/dQw4w9WgXcQ" /></ac:parameter></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="iframe"><ac:parameter ac:name="url"> HTTP://docs.example/slides </ac:parameter></ac:structured-macro>"#,
+        );
+        let url = |name: &str, url: &str| DocBlock::Embed {
+            name: name.into(),
+            content: EmbedContent::Url { url: url.into() },
+        };
+        assert_eq!(
+            blocks(storage),
+            vec![
+                url("iframe", "https://grafana.example/d/abc?orgId=1&kiosk"),
+                url("widget", "https://www.youtube.com/embed/dQw4w9WgXcQ"),
+                url("iframe", "HTTP://docs.example/slides"),
+            ]
+        );
+    }
+
+    /// Only `http` and `https` are framed (spec #2432): a `javascript:`,
+    /// `file:` or custom-scheme URL, a relative one, or none at all is a
+    /// placeholder naming the macro.
+    #[test]
+    fn a_url_embed_of_another_scheme_is_a_placeholder() {
+        for src in [
+            "javascript:alert(document.domain)",
+            " JavaScript:alert(1)",
+            "file:///etc/passwd",
+            "vscode://open?file=x",
+            "data:text/html,<script>1</script>",
+            "//cdn.example/x",
+            "/wiki/x",
+            "https:",
+            "",
+        ] {
+            for name in ["iframe", "widget"] {
+                let key = if name == "iframe" { "src" } else { "url" };
+                let storage = format!(
+                    r#"<ac:structured-macro ac:name="{name}"><ac:parameter ac:name="{key}"><ri:url ri:value="{src}" /></ac:parameter></ac:structured-macro>"#
+                );
+                assert_eq!(
+                    blocks(&storage),
+                    vec![DocBlock::Placeholder { name: name.into() }],
+                    "{name} {src:?}"
+                );
+            }
+        }
+    }
+
+    /// A section holding a URL embed is edited in Confluence, as one holding
+    /// an HTML embed is.
+    #[test]
+    fn a_section_holding_an_iframe_macro_refuses_as_a_macro() {
+        let storage = r#"<h2>Board</h2><ac:structured-macro ac:name="iframe"><ac:parameter ac:name="src"><ri:url ri:value="https://x.example/" /></ac:parameter></ac:structured-macro><h2>Plain</h2><p>Text.</p>"#;
+        assert_eq!(
+            sections(storage)
+                .into_iter()
+                .map(|s| s.refusal)
+                .collect::<Vec<_>>(),
+            vec![Some(SectionRefusal::Macro), None]
+        );
+    }
+
+    #[test]
+    fn an_image_is_a_placeholder() {
+        assert_eq!(
+            blocks(r#"<ac:image><ri:attachment ri:filename="a.png" /></ac:image>"#),
+            vec![DocBlock::Placeholder {
+                name: "image".into()
+            }]
+        );
+    }
+
+    fn task(id: u32, status: &str, body: &str) -> String {
+        format!(
+            "<ac:task><ac:task-id>{id}</ac:task-id><ac:task-uuid>u-{id}</ac:task-uuid>\
+             <ac:task-status>{status}</ac:task-status><ac:task-body>{body}</ac:task-body></ac:task>"
+        )
+    }
+
+    /// Spec #2432, story 23: a task list is a list whose items carry their
+    /// checked state.
+    #[test]
+    fn a_task_list_is_a_list_of_checked_and_unchecked_items() {
+        let storage = format!(
+            "<ac:task-list>{}{}</ac:task-list>",
+            task(
+                1,
+                "complete",
+                "<span class=\"placeholder-inline-tasks\">Drain the <strong>queue</strong></span>"
+            ),
+            task(2, "incomplete", "Restart the worker"),
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![DocBlock::List {
+                ordered: false,
+                items: vec![
+                    ListItem::task(
+                        true,
+                        vec![DocBlock::Paragraph {
+                            text: vec![
+                                Inline::text("Drain the "),
+                                Inline::Text {
+                                    text: "queue".into(),
+                                    strong: true,
+                                    emphasis: false,
+                                    code: false,
+                                },
+                            ],
+                        }]
+                    ),
+                    ListItem::task(false, vec![para("Restart the worker")]),
+                ]
+            }]
+        );
+    }
+
+    /// A nested task list lands inside the task it follows, whether the
+    /// storage puts it in the task's body, in the task, or after the task in
+    /// the outer list.
+    #[test]
+    fn a_nested_task_list_is_a_list_inside_its_task() {
+        let inner = |id| {
+            format!(
+                "<ac:task-list>{}</ac:task-list>",
+                task(id, "complete", "eu-1")
+            )
+        };
+        let nested = ListItem::task(
+            false,
+            vec![
+                para("Restart"),
+                DocBlock::List {
+                    ordered: false,
+                    items: vec![ListItem::task(true, vec![para("eu-1")])],
+                },
+            ],
+        );
+        let in_body = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "incomplete", &format!("Restart{}", inner(2)))
+        );
+        let in_task = format!(
+            "<ac:task-list><ac:task><ac:task-id>1</ac:task-id><ac:task-status>incomplete</ac:task-status>\
+             <ac:task-body>Restart</ac:task-body>{}</ac:task></ac:task-list>",
+            inner(2)
+        );
+        let after = format!(
+            "<ac:task-list>{}{}</ac:task-list>",
+            task(1, "incomplete", "Restart"),
+            inner(2)
+        );
+        for storage in [in_body, in_task, after] {
+            assert_eq!(
+                blocks(&storage),
+                vec![DocBlock::List {
+                    ordered: false,
+                    items: vec![nested.clone()]
+                }],
+                "{storage}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_task_list_inside_a_sentence_and_a_panel_still_reads() {
+        let list = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "complete", "Done")
+        );
+        let done = DocBlock::List {
+            ordered: false,
+            items: vec![ListItem::task(true, vec![para("Done")])],
+        };
+        assert_eq!(
+            blocks(&format!("<p>Before{list}after</p>")),
+            vec![para("Before"), done.clone(), para("after")]
+        );
+        assert_eq!(
+            blocks(&format!(
+                "<ac:structured-macro ac:name=\"info\"><ac:rich-text-body>{list}</ac:rich-text-body></ac:structured-macro>"
+            )),
+            vec![DocBlock::Panel {
+                kind: PanelKind::Info,
+                title: None,
+                blocks: vec![done]
+            }]
+        );
+    }
+
+    fn expand(title: Option<&str>, body: &str) -> String {
+        let title = title
+            .map(|t| format!("<ac:parameter ac:name=\"title\">{t}</ac:parameter>"))
+            .unwrap_or_default();
+        format!(
+            "<ac:structured-macro ac:name=\"expand\" ac:schema-version=\"1\">{title}<ac:rich-text-body>{body}</ac:rich-text-body></ac:structured-macro>"
+        )
+    }
+
+    /// Spec #2432, stories 24 and 26: an `expand` is a collapsible holding
+    /// its blocks, and what it holds reads as it would outside it.
+    #[test]
+    fn an_expand_is_a_collapsible_of_its_lists_tables_and_panels() {
+        let body = "<p>Lead.</p><ul><li>One</li><li>Two</li></ul>\
+            <table><tr><th>Day</th><td>Tue</td></tr></table>\
+            <ac:structured-macro ac:name=\"warning\"><ac:rich-text-body><p>Hot.</p></ac:rich-text-body></ac:structured-macro>";
+        assert_eq!(
+            blocks(&expand(Some("Rollout &amp; rollback"), body)),
+            vec![DocBlock::Collapsible {
+                title: "Rollout & rollback".to_owned(),
+                blocks: vec![
+                    para("Lead."),
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![
+                            ListItem::new(vec![para("One")]),
+                            ListItem::new(vec![para("Two")]),
+                        ],
+                    },
+                    DocBlock::Table {
+                        rows: vec![vec![
+                            TableCell::new(true, vec![para("Day")]),
+                            TableCell::new(false, vec![para("Tue")]),
+                        ]],
+                    },
+                    DocBlock::Panel {
+                        kind: PanelKind::Warning,
+                        title: None,
+                        blocks: vec![para("Hot.")],
+                    },
+                ],
+            }]
+        );
+    }
+
+    /// Confluence titles an expand that names none "Click here to
+    /// expand...", and so does the reader; a blank title is none.
+    #[test]
+    fn an_untitled_expand_takes_confluences_default_title() {
+        for storage in [expand(None, "<p>In.</p>"), expand(Some("  "), "<p>In.</p>")] {
+            assert_eq!(
+                blocks(&storage),
+                vec![DocBlock::Collapsible {
+                    title: "Click here to expand...".to_owned(),
+                    blocks: vec![para("In.")],
+                }]
+            );
+        }
+    }
+
+    /// Story 32: an expand in a table cell is itself, never `[expand]`.
+    #[test]
+    fn an_expand_in_a_cell_is_a_collapsible_in_its_blocks() {
+        let storage = format!(
+            "<table><tr><td>{}</td></tr></table>",
+            expand(Some("More"), "<p>In.</p>")
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![DocBlock::Table {
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::Collapsible {
+                        title: "More".to_owned(),
+                        blocks: vec![para("In.")],
+                    }]
+                )]],
+            }]
+        );
+    }
+
+    fn include(name: &str, page: &str) -> String {
+        format!(
+            r#"<ac:structured-macro ac:name="{name}" ac:schema-version="1"><ac:parameter ac:name="nopanel">true</ac:parameter><ac:parameter ac:name=""><ac:link>{page}</ac:link></ac:parameter></ac:structured-macro>"#
+        )
+    }
+
+    /// Spec #2432, stories 13 and 14: `include` and `excerpt-include` name
+    /// their page as a page link does, by title and the space where they say
+    /// one; nothing is filled, that is knobas' at read time.
+    #[test]
+    fn an_include_and_an_excerpt_include_name_their_page() {
+        let storage = format!(
+            "<p>Before {}</p>{}{}",
+            include(
+                "include",
+                r#"<ri:page ri:space-key="OPS" ri:content-title="Retry &amp; budget" />"#
+            ),
+            include(
+                "excerpt-include",
+                r#"<ri:page ri:content-title="Ledger" />"#
+            ),
+            r#"<ac:structured-macro ac:name="include"><ac:parameter ac:name="">Plain title</ac:parameter></ac:structured-macro>"#,
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![
+                para("Before"),
+                DocBlock::include("Retry & budget", Some("OPS".into()), false),
+                DocBlock::include("Ledger", None, true),
+                DocBlock::include("Plain title", None, false),
+            ]
+        );
+    }
+
+    /// An include that names no page is a placeholder, never a hole.
+    #[test]
+    fn an_include_naming_no_page_is_a_placeholder() {
+        let storage = format!(
+            "{}{}",
+            include("include", r#"<ri:attachment ri:filename="a.png" />"#),
+            r#"<ac:structured-macro ac:name="excerpt-include"></ac:structured-macro>"#,
+        );
+        assert_eq!(
+            blocks(&storage),
+            vec![placeholder("include"), placeholder("excerpt-include")]
+        );
+    }
+
+    /// Spec #2432, story 15: `excerpt` draws as its contents on its own page,
+    /// and those contents are the page's excerpt. A hidden excerpt is not
+    /// drawn on the page, as in Confluence, and is still its excerpt.
+    #[test]
+    fn an_excerpt_draws_as_its_contents_and_is_the_pages_excerpt() {
+        let excerpt = |hidden: &str| {
+            format!(
+                r#"<p>Lead.</p><ac:structured-macro ac:name="excerpt">{hidden}<ac:rich-text-body><h2>Inside</h2><p>The <strong>short</strong> story.</p></ac:rich-text-body></ac:structured-macro><ac:structured-macro ac:name="excerpt"><ac:rich-text-body><p>Second.</p></ac:rich-text-body></ac:structured-macro>"#
+            )
+        };
+        let inside = vec![
+            DocBlock::Heading {
+                level: 2,
+                text: vec![Inline::text("Inside")],
+            },
+            DocBlock::Paragraph {
+                text: vec![
+                    Inline::text("The "),
+                    Inline::Text {
+                        text: "short".into(),
+                        strong: true,
+                        emphasis: false,
+                        code: false,
+                    },
+                    Inline::text(" story."),
+                ],
+            },
+        ];
+        let shown = doc_content("page", &page(&excerpt(""))).unwrap();
+        let mut drawn = vec![para("Lead.")];
+        drawn.extend(inside.clone());
+        drawn.push(para("Second."));
+        assert_eq!(shown.blocks, drawn);
+        assert_eq!(shown.excerpt, Some(inside.clone()), "the first excerpt");
+        // The heading inside is one of the page's, numbered as the reader
+        // numbers it.
+        assert_eq!(shown.sections.len(), 1);
+
+        let hidden = doc_content(
+            "page",
+            &page(&excerpt(
+                r#"<ac:parameter ac:name="hidden">true</ac:parameter>"#,
+            )),
+        )
+        .unwrap();
+        assert_eq!(hidden.blocks, vec![para("Lead."), para("Second.")]);
+        assert_eq!(hidden.excerpt, Some(inside));
+        assert!(hidden.sections.is_empty());
+
+        let none = doc_content("page", &page("<p>No excerpt.</p>")).unwrap();
+        assert_eq!(none.excerpt, None);
+    }
+
+    /// Spec #2432, story 34: a section holding an include refuses as a macro.
+    #[test]
+    fn a_section_holding_an_include_refuses_as_a_macro() {
+        let storage = format!(
+            "<h2>Pulled in</h2><p>a</p>{}<h2>Plain</h2><p>b</p>",
+            include(
+                "excerpt-include",
+                r#"<ri:page ri:content-title="Ledger" />"#
+            )
+        );
+        let got: Vec<Option<SectionRefusal>> =
+            sections(&storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(got, vec![Some(SectionRefusal::Macro), None]);
     }
 
     #[test]
@@ -1602,6 +1724,32 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 }
             ]
         );
+    }
+
+    /// Storage anyone can author nests as deep as it likes, and so does the
+    /// plain HTML in an HTML macro: the projection, its sections and its
+    /// search text read a 100,000-deep page without overflowing the stack
+    /// (#2449), the hook reading each panel's body back through the reader.
+    #[test]
+    fn a_page_nested_past_the_readers_depth_still_projects() {
+        let deep = 100_000;
+        let panels = format!(
+            "{}deep words{}",
+            r#"<ac:structured-macro ac:name="info"><ac:rich-text-body><p>"#.repeat(deep / 3),
+            "</p></ac:rich-text-body></ac:structured-macro>".repeat(deep / 3)
+        );
+        let html = format!(
+            "{}html words{}",
+            "<ul><li><blockquote>".repeat(deep / 3),
+            "</blockquote></li></ul>".repeat(deep / 3)
+        );
+        let storage = format!(
+            r#"<h2>Deep</h2>{panels}<ac:structured-macro ac:name="html"><ac:plain-text-body><![CDATA[{html}]]></ac:plain-text-body></ac:structured-macro>"#
+        );
+        let content = doc_content(crate::KIND_PAGE, &page(&storage)).expect("a page projects");
+        let text = knobas_source::docs::search_text("T", "S", &content);
+        assert!(text.contains("deep words"), "{text}");
+        assert!(text.contains("html words"), "{text}");
     }
 
     #[test]
@@ -1704,7 +1852,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     fn sections_are_numbered_by_heading_and_say_whether_knobas_edits_them() {
         let storage = "<p>Lead.</p>\
             <h2>Text</h2><p>One <br/>two.</p><ul><li>a</li><li>b</li></ul>\
-            <h2>Table</h2><table><tr><td>x</td></tr></table>\
+            <h2>Table</h2><table><tr><td><ul><li>x</li></ul><ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[y]]></ac:plain-text-body></ac:structured-macro></td></tr></table>\
             <h2>Code</h2><ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>\
             <h2>Panel</h2><ac:structured-macro ac:name=\"info\"><ac:rich-text-body><p>i</p></ac:rich-text-body></ac:structured-macro>\
             <h2>Bold</h2><p>a <strong>b</strong></p>\
@@ -1730,6 +1878,90 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (8, Some(String::new()), None),
                 (9, None, Some(SectionRefusal::Formatting)),
                 (10, Some("- a b".to_owned()), None),
+            ]
+        );
+    }
+
+    /// A macro's name is read as the reader reads it, whatever its case: a
+    /// `Code` macro draws as code, so its section refuses as code.
+    #[test]
+    fn a_macro_named_in_any_case_refuses_as_the_reader_draws_it() {
+        let code = "<h2>Code</h2><ac:structured-macro ac:name=\"Code\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>";
+        assert!(matches!(blocks(code)[1], DocBlock::Code { .. }));
+        assert_eq!(sections(code)[0].refusal, Some(SectionRefusal::Code));
+        let noformat = "<h2>Plain</h2><ac:macro ac:name=\"NoFormat\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:macro>";
+        assert_eq!(sections(noformat)[0].refusal, Some(SectionRefusal::Code));
+    }
+
+    /// A heading inside any wrapper the reader reads through (`article`,
+    /// `aside`, `details`…) is drawn, so it is numbered as one of the page's.
+    #[test]
+    fn a_heading_inside_any_wrapper_the_reader_reads_through_is_numbered() {
+        for wrapper in [
+            "article", "aside", "header", "footer", "main", "nav", "figure", "details",
+        ] {
+            let storage =
+                format!("<h2>Top</h2><p>a</p><{wrapper}><h2>Inside</h2><p>b</p></{wrapper}>");
+            let drawn = blocks(&storage)
+                .iter()
+                .filter(|b| matches!(b, DocBlock::Heading { .. }))
+                .count();
+            assert_eq!(sections(&storage).len(), drawn, "{wrapper}");
+        }
+    }
+
+    /// Spec #2432: the editor's text has no checkbox, so a section holding a
+    /// task list refuses with `formatting` rather than losing them.
+    #[test]
+    fn a_section_holding_a_task_list_refuses_as_formatting() {
+        let list = format!(
+            "<ac:task-list>{}</ac:task-list>",
+            task(1, "incomplete", "Restart")
+        );
+        let storage = format!(
+            "<h2>Tasks</h2><p>Lead.</p>{list}\
+             <h2>In a panel</h2><ac:structured-macro ac:name=\"note\"><ac:rich-text-body>{list}</ac:rich-text-body></ac:structured-macro>\
+             <h2>Plain</h2><ul><li>a</li></ul>"
+        );
+        let got: Vec<Option<SectionRefusal>> =
+            sections(&storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(SectionRefusal::Formatting),
+                Some(SectionRefusal::Formatting),
+                None
+            ]
+        );
+    }
+
+    /// Spec #2432, story 34: a section holding an expand refuses with
+    /// `macro`, whatever the expand holds: the editor's text has no
+    /// collapsible, so a table or code inside it is not the reason.
+    #[test]
+    fn a_section_holding_an_expand_refuses_as_a_macro() {
+        let storage = format!(
+            "<h2>Prose</h2><p>Lead.</p>{}\
+             <h2>Table</h2>{}\
+             <h2>Code</h2>{}\
+             <h2>Beside a table</h2>{}<table><tr><td>x</td></tr></table>",
+            expand(Some("More"), "<p>a</p><ul><li>b</li></ul>"),
+            expand(None, "<table><tr><td>x</td></tr></table>"),
+            expand(
+                None,
+                "<ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[y]]></ac:plain-text-body></ac:structured-macro>"
+            ),
+            expand(None, "<p>a</p>"),
+        );
+        let got: Vec<Option<SectionRefusal>> =
+            sections(&storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(SectionRefusal::Macro),
+                Some(SectionRefusal::Macro),
+                Some(SectionRefusal::Macro),
+                Some(SectionRefusal::Table),
             ]
         );
     }

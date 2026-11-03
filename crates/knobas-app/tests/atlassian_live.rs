@@ -4452,8 +4452,9 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
 /// mirror. Both titles are read back from the server rather than from the
 /// mirror, and typed the way the query box writes a name with a space --
 /// quoted (the deputy's ruling of 2026-10-12 on #597). The direct parent's
-/// scope is asserted as an exact set, the home page's as containment: other
-/// tests in this suite publish under the home page's subtree.
+/// scope is asserted as an exact set, the home page's as containment, each
+/// page asked for by its title: other tests in this suite publish under the
+/// home page's subtree, and the seeded showcase (#2456) lives there too.
 ///
 /// The query goes through `live_under::search` (#644), the helper the other
 /// three adapters' `under:` witnesses share: the searcher built the app's way,
@@ -4496,30 +4497,31 @@ async fn under_its_grandparent_finds_the_seeded_grandchild() {
 
     let entity = |id: &str| format!("confluence:{id}");
 
+    // Containment, one page at a time: the home page's subtree is the whole
+    // space, which holds the Docs reader showcase too (#2456) and so no longer
+    // fits on one page of hits. Each page is asked for by its title beside the
+    // `under:` token, so the hit is read off a page that holds it.
     let by_grandparent =
         live_under::search(&state.pool, CONFLUENCE, &live_under::under(&grandparent)).await;
-    let pages = &by_grandparent.kinds["page"];
     assert_eq!(
         by_grandparent.kinds.keys().collect::<Vec<_>>(),
         ["page"],
         "{}: Confluence mirrors pages only",
         live_under::under(&grandparent)
     );
-    assert_eq!(
-        pages.ids.len(),
-        pages.total,
-        "{} fits on one page, so containment below is read off every match",
-        live_under::under(&grandparent)
-    );
+    let total = by_grandparent.kinds["page"].total;
     for (what, id) in [
         ("the grandchild", &wiki.page),
         ("the parent", &wiki.parent_page_id),
         ("the grandparent itself", &wiki.home_page_id),
     ] {
+        let title = title_of(wiki.content(id, "version").await);
+        let query = format!("{} {title}", live_under::under(&grandparent));
+        let found = live_under::search(&state.pool, CONFLUENCE, &query).await;
+        let pages = &found.kinds["page"];
         assert!(
             pages.ids.contains(&entity(id)),
-            "{} did not find {what} {}: {:?}",
-            live_under::under(&grandparent),
+            "{query} did not find {what} {}: {:?}",
             entity(id),
             pages.ids
         );
@@ -4538,7 +4540,7 @@ async fn under_its_grandparent_finds_the_seeded_grandchild() {
     println!(
         "SEEDED {} -> {} hit(s), the grandchild {} among them; {} -> {:?}",
         live_under::under(&grandparent),
-        pages.total,
+        total,
         entity(&wiki.page),
         live_under::under(&parent),
         by_parent.ids()

@@ -870,17 +870,33 @@ export type DocBacklink = { entity_id: string, title: string, space_key: string 
  * - `heading`: A section heading. `level` is 1 to 6 as the source wrote it;
  *   the reader draws every level as a section head.
  * - `list`: A list. A nested list's items are drawn as a list inside their
- *   item.
+ *   item. An item may carry a checked state: a task list is a list whose
+ *   items say whether they are done ([`ListItem`]).
  * - `code`: A code block, verbatim, with the language the source named.
- * - `table`: A table, row by row; a header cell says so.
+ * - `table`: A table, row by row; a header cell says so, and a cell holds
+ *   blocks and may span columns and rows.
  * - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+ * - `collapsible`: A titled part the reader draws closed, with the blocks
+ *   inside it, opened when the reader arrives on a search hit inside it
+ *   (spec #2432). Confluence's `expand` is one; its words are the page's.
+ * - `include`: Another page of the source drawn in place (spec #2432): the
+ *   page by `title` and `space` as a page link names one, and whether only
+ *   its `excerpt` is wanted. The adapter leaves the rest empty; knobas fills
+ *   it when the reader is read, from the mirror as it is now: `entity_id`
+ *   the mirrored page, `blocks` what it includes, or `unfilled` why it
+ *   could not ([`Unfilled`]).
  * - `placeholder`: Something the source has that the reader does not draw: the
  *   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
  *   so a page with a part knobas cannot draw says so (story 134).
+ * - `embed`: Something the page runs rather than says (spec #2432, #2440):
+ *   `name` is the source's word for it (Confluence's `html` macro), and
+ *   `content` what runs. The shell draws it in an isolated frame, never in
+ *   its own document.
  *
- * Source text, never markup.
+ * Source text, never markup, but for an embed's `html`, which is markup to
+ * run and never to draw.
  */
-export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<Array<DocBlock>>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "placeholder", name: string, };
+export type DocBlock = { "type": "heading", level: number, text: Array<DocInline>, } | { "type": "paragraph", text: Array<DocInline>, } | { "type": "list", ordered: boolean, items: Array<DocListItem>, } | { "type": "code", code: string, language: string | null, } | { "type": "table", rows: Array<Array<TableCell>>, } | { "type": "panel", kind: PanelKind, title: string | null, blocks: Array<DocBlock>, } | { "type": "collapsible", title: string, blocks: Array<DocBlock>, } | { "type": "include", title: string, space: string | null, excerpt: boolean, entity_id: string | null, blocks: Array<DocBlock>, unfilled: Unfilled | null, } | { "type": "placeholder", name: string, } | { "type": "embed", name: string, content: DocEmbedContent, };
 
 /**
  * One comment on a page.
@@ -906,6 +922,19 @@ author_name: string | null,
  * When it was written, RFC 3339, as the source wrote it.
  */
 at: string | null, blocks: Array<DocBlock>, };
+
+/**
+ * What a [`DocBlock::Embed`] runs.
+ *
+ * - `html`: A document as its author wrote it, byte for byte, scripts
+ *   included: the shell serves it from its own origin under a policy of its
+ *   own, in a sandboxed frame (#2440). Source markup, never drawn in the
+ *   app's document.
+ * - `url`: A page the author framed (#2441): an absolute `http` or `https`
+ *   URL, the shell's frame `src`, in the same sandbox. Built only through
+ *   [`EmbedContent::url`], which refuses any other scheme.
+ */
+export type DocEmbedContent = { "kind": "html", html: string, } | { "kind": "url", url: string, };
 
 /**
  * What *Export as Markdown* wrote.
@@ -969,6 +998,16 @@ matches: number, editor: string | null, editor_name: string | null, updated_at: 
  * - `break`: A hard line break inside a block.
  */
 export type DocInline = { "type": "text", text: string, strong: boolean, emphasis: boolean, code: boolean, } | { "type": "link", text: string, href: string, } | { "type": "page_link", text: string, title: string, space: string | null, entity_id: string | null, } | { "type": "issue", key: string, entity_id: string | null, title: string | null, status: string | null, } | { "type": "mention", user: string | null, name: string | null, me: boolean, } | { "type": "break" };
+
+/**
+ * One item of a [`DocBlock::List`]: its blocks, and for a task its checked
+ * state (spec #2432, *The vocabulary is the seam*).
+ *
+ * `checked` is `None` for an ordinary item, `Some(true)` for a task that is
+ * done and `Some(false)` for one that is not. The shell draws the state and
+ * never changes it.
+ */
+export type DocListItem = { checked: boolean | null, blocks: Array<DocBlock>, };
 
 /**
  * One page in a space's tree.
@@ -1050,7 +1089,13 @@ work: Array<DocWork>,
  * `create_page`, each where its adapter declares it and (for the two
  * page writes) writes the source's markup (#862).
  */
-writes: Array<DocWrite>, };
+writes: Array<DocWrite>, 
+/**
+ * Whether this page's source runs its embeds: *Run embedded HTML*, on
+ * until the reader turns it off for the source ([`run_embedded_html`],
+ * #2440). Off, the shell draws each embed as a placeholder.
+ */
+run_embeds: boolean, };
 
 /**
  * One section of a page body: a top-level heading and what follows it up to
@@ -3814,9 +3859,14 @@ total: number,
 more: Array<SuggestionMore>, };
 
 /**
- * One cell of a [`DocBlock::Table`].
+ * One cell of a [`DocBlock::Table`] (#2436): the blocks it holds, as a page
+ * body's are (paragraphs, lists, code, panels, a nested table, a
+ * placeholder), and the columns and rows it spans, each at least 1.
+ *
+ * `header` is per cell: a first row of header cells is the table's header
+ * row, and a header cell opening a body row heads that row (a header column).
  */
-export type TableCell = { header: boolean, text: Array<DocInline>, };
+export type TableCell = { header: boolean, blocks: Array<DocBlock>, colspan: number, rowspan: number, };
 
 /**
  * How one test came out in one run: its history, newest first (#855).
@@ -3987,6 +4037,18 @@ untracked: Array<string>,
  * listed.
  */
 untracked_truncated: boolean, };
+
+/**
+ * Why knobas could not fill a [`DocBlock::Include`] when the reader was read.
+ *
+ * - `not_mirrored`: The mirror holds no page of that title in that space of
+ *   the same source (another space, no access, deleted).
+ * - `no_excerpt`: The page is mirrored, but marks no excerpt.
+ * - `too_deep`: The include sits more than [`INCLUDE_DEPTH`] includes deep.
+ * - `cycle`: The page is already on the way here: a page including itself,
+ *   or one including a page that includes it.
+ */
+export type Unfilled = "not_mirrored" | "no_excerpt" | "too_deep" | "cycle";
 
 /**
  * What a pasted URL resolved to: the entity, and the kind that says where it

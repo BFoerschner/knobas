@@ -330,11 +330,33 @@ impl Registry {
     }
 
     /// The Docs projection of an adapter kind (#859), `None` for a kind that
-    /// draws no pages or is not compiled in. A plain function over the
-    /// mirrored payload, so the reader needs no built source and no secret.
+    /// draws no pages or the registry does not hold. A compiled-in row's is a
+    /// plain function over the mirrored payload, so the reader needs no
+    /// built source and no secret. A loaded external adapter that exports
+    /// the docs projection (1.5.0, #2442) draws through its component,
+    /// which needs neither either: each call instantiates it afresh, so the
+    /// adapter loaded now draws every mirrored page, with no re-sync.
     #[must_use]
-    pub fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
-        ADAPTERS.iter().find(|a| a.kind == kind).and_then(|a| a.doc)
+    pub fn doc_projection(&self, kind: &str) -> Option<knobas_sync::scheduler::Projection> {
+        if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
+            return row.doc.map(knobas_sync::scheduler::Projection::from);
+        }
+        let adapter = self.docs_component(kind)?;
+        Some(knobas_sync::scheduler::Projection::new(
+            move |kind, payload| adapter.project(kind, payload),
+        ))
+    }
+
+    /// The loaded external adapter of `kind` that exports 1.5.0's `docs`
+    /// interface. The interface holds the projection and the writes
+    /// together, so [`WasmAdapter::projects`] answers for
+    /// all three.
+    fn docs_component(&self, kind: &str) -> Option<WasmAdapter> {
+        self.read()
+            .loaded
+            .iter()
+            .find(|a| a.kind() == kind && a.projects())
+            .cloned()
     }
 
     /// How the tree of `entity_kind`'s view names its sections by path, for
@@ -355,13 +377,19 @@ impl Registry {
 
     /// The Docs writes of an adapter kind (#862): a section edit and a new
     /// page's body in its own markup. `None` for a kind knobas writes no
-    /// pages for.
+    /// pages for. A loaded external adapter that exports docs (1.5.0)
+    /// makes them through its component (#2443), as its projection draws.
     #[must_use]
-    pub fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
-        ADAPTERS
-            .iter()
-            .find(|a| a.kind == kind)
-            .and_then(|a| a.doc_writes)
+    pub fn doc_writes(&self, kind: &str) -> Option<knobas_sync::scheduler::Writes> {
+        if let Some(row) = ADAPTERS.iter().find(|a| a.kind == kind) {
+            return row.doc_writes.map(knobas_sync::scheduler::Writes::from);
+        }
+        let adapter = self.docs_component(kind)?;
+        let body = adapter.clone();
+        Some(knobas_sync::scheduler::Writes::new(
+            move |kind, payload, number, text| adapter.edit_section(kind, payload, number, text),
+            move |text| body.body_from_text(text),
+        ))
     }
 }
 
@@ -374,11 +402,11 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
         Some(self)
     }
 
-    fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
+    fn doc_projection(&self, kind: &str) -> Option<knobas_sync::scheduler::Projection> {
         Registry::doc_projection(self, kind)
     }
 
-    fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
+    fn doc_writes(&self, kind: &str) -> Option<knobas_sync::scheduler::Writes> {
         Registry::doc_writes(self, kind)
     }
 

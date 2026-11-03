@@ -69,7 +69,7 @@ unset KNOBAS_LIVE_SSH KNOBAS_LIVE_ONE_JVM DOCKER_HOST
 # A scratch testenv/ whose seeds do nothing, so `live_session` can run whole.
 fake=$scratch/tree/testenv
 mkdir -p "$fake"
-for s in seed-gitea.sh seed-teamcity.sh seed-atlassian.sh seed-atlassian-content.sh seed; do
+for s in seed-gitea.sh seed-teamcity.sh seed-atlassian.sh seed-atlassian-content.sh seed docs-assets.sh; do
   printf '#!/usr/bin/env bash\nexit 0\n' >"$fake/$s"
   chmod +x "$fake/$s"
 done

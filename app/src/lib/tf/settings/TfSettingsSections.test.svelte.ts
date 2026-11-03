@@ -73,6 +73,8 @@ const sourcePorts: SettingsPorts = {
   ticketViews: () => Promise.resolve([]),
   hideSavedView: () => Promise.resolve(),
   appStatus: () => Promise.resolve({ secrets_in_memory: false }),
+  runEmbeddedHtml: () => Promise.resolve(true),
+  setRunEmbeddedHtml: () => Promise.resolve(true),
 };
 
 function sectionPorts(over: Partial<SectionPorts> = {}) {

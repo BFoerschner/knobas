@@ -6,7 +6,6 @@ use knobas_core::entity::EntityRef;
 use knobas_source::SyncItem;
 
 use crate::model::RawContent;
-use crate::storage::Account;
 
 /// Map one page, in the namespace of the instance that fetched it.
 ///
@@ -14,28 +13,16 @@ use crate::storage::Account;
 /// Confluences are `confluence` and `confluence-eu`, and their items must not
 /// collide.
 ///
-/// `me` is the account the run authenticated as, and it is here for one
-/// reason: a Confluence mention is markup carrying a user **key**, so
-/// [`crate::storage::to_text`] needs an identity to resolve one against before
-/// `body_text` can carry the `@name` the inbox's mention rule reads. `None` is
-/// a run that could not say who it is, and renders every key-shaped link as
-/// nothing -- the miss direction, spelled out on [`Account`].
-pub(crate) fn to_sync_item(
-    source_id: &str,
-    base_url: &str,
-    raw: &RawContent,
-    me: Option<Account<'_>>,
-) -> SyncItem {
+/// `raw` is the record as the sync completed it, its mentions' users looked
+/// up ([`crate::users`]): `body_text` is the shared search text over this
+/// adapter's own projection of the payload stored beside it (#2435), so a
+/// mention reads as the `@name` the inbox's mention rule reads exactly where
+/// the reader can name it.
+pub(crate) fn to_sync_item(source_id: &str, base_url: &str, raw: &RawContent) -> SyncItem {
     let content = &raw.content;
     let title = content.title.clone().unwrap_or_default();
-    let (body, links) = crate::storage::to_indexed_text(raw.storage(), me);
-    let comments = content
-        .children
-        .as_ref()
-        .and_then(|c| c.comment.as_ref())
-        .map(|c| c.results.as_slice())
-        .unwrap_or_default();
-    let body_text = indexed_body_text(raw, &title, body, comments, &links, me);
+    let payload = with_position(&raw.raw);
+    let body_text = search_text(&title, &payload);
     SyncItem {
         // **The content id, never the title.** A page renamed in Confluence
         // keeps its id, so every link, note and worklog knobas drew to it
@@ -73,7 +60,7 @@ pub(crate) fn to_sync_item(
         // expand that deeply -- falls back to the page's stamp, which is the
         // miss direction and the behaviour before the expansion was asked for.
         updated_at: newest_change(raw),
-        payload: with_position(&raw.raw),
+        payload,
         // P5: the page Confluence itself names in `_links.webui`, on the base
         // URL the user typed -- which is the one reachable from the user's
         // machine, unlike `_links.base`, which is whatever the instance
@@ -165,78 +152,25 @@ fn created_by(raw: &RawContent) -> Option<String> {
         .and_then(|u| u.username.clone())
 }
 
-/// `body_text` with the Docs search's marks (#860, #861;
-/// `knobas_source::docs::indexed`): the title and the body, each heading's
-/// line marked; then each comment under a line naming its author; then one
-/// line per page the body links to, in the page's own space where the link
-/// names none. What FTS indexes is the words it indexed before, plus each
-/// linked page's title.
-fn indexed_body_text(
-    raw: &RawContent,
-    title: &str,
-    body: String,
-    comments: &[RawContent],
-    links: &[(Option<String>, String)],
-    me: Option<Account<'_>>,
-) -> String {
-    use knobas_source::docs::indexed;
-    let mut parts = vec![title.to_owned(), body];
-    for c in comments {
-        let text = crate::storage::to_text(c.storage(), me);
-        if text.trim().is_empty() {
-            continue;
-        }
-        let author = c
-            .raw
-            .pointer("/history/createdBy/displayName")
-            .or_else(|| c.raw.pointer("/version/by/displayName"))
-            .and_then(serde_json::Value::as_str);
-        parts.push(format!("{}\n{text}", indexed::comment_line(author)));
-    }
-    let own = raw
-        .raw
+/// `body_text` (#2435; `knobas_source::docs::search_text`): what the reader
+/// draws of the page and its comments, with the Docs search's marks, a link
+/// with no space in the page's own. A record the projection cannot read (no
+/// storage body) is its title, so it is still found by it.
+fn search_text(title: &str, payload: &serde_json::Value) -> String {
+    let space = payload
         .pointer("/space/key")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
-    let mut seen = std::collections::BTreeSet::new();
-    let lines: Vec<String> = links
-        .iter()
-        .map(|(space, title)| indexed::link_line(space.as_deref().unwrap_or(own), title))
-        .filter(|line| seen.insert(line.clone()))
-        .collect();
-    parts.push(lines.join("\n"));
-    join(parts)
-}
-
-/// Join the non-empty parts into the blob FTS indexes -- the same rule
-/// `knobas-source-mock` and the Jira adapter use, so a Confluence page and a
-/// Jira ticket are indexed alike.
-fn join(parts: impl IntoIterator<Item = String>) -> String {
-    parts
-        .into_iter()
-        .filter(|p| !p.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    match crate::blocks::doc_content(crate::KIND_PAGE, payload) {
+        Some(content) => knobas_source::docs::search_text(title, space, &content),
+        None => title.trim().to_owned(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
-
-    /// The account the seeded Confluence's admin is -- the one every mapping
-    /// below is made as, so a `ri:user` link in a fixture body renders the way
-    /// the mirror will really hold it.
-    fn me() -> Account<'static> {
-        Account {
-            username: "knobas",
-            user_key: Some("ff8080818f2a1b4c018f2a1c9d0e0001"),
-        }
-    }
-
-    fn to_sync_item(source_id: &str, base_url: &str, raw: &RawContent) -> SyncItem {
-        super::to_sync_item(source_id, base_url, raw, Some(me()))
-    }
 
     /// The seeded page as the real server answers it, with the expansions
     /// [`crate::api::EXPAND`] asks for. Every path asserted below is one
@@ -602,6 +536,70 @@ mod tests {
         assert_eq!(
             item.web_url.as_deref(),
             Some("https://wiki.eu.example/confluence/display/ENG/SEPA+payout+retry+design")
+        );
+    }
+
+    /// Search follows the drawing (#2435): `body_text` is the shared
+    /// function over the page's own projection, so a word only a table cell
+    /// holds is found in its section, and what the reader does not draw as
+    /// text -- a macro's parameters, an embed's script -- is not. An embed's
+    /// shown words are (#2440).
+    #[test]
+    fn body_text_is_the_drawn_blocks_and_nothing_the_reader_does_not_draw() {
+        use knobas_source::docs::indexed::{Part, read};
+        let mut raw = a_page();
+        raw.raw["body"]["storage"]["value"] = json!(
+            "<h2>Limits</h2><table><tbody><tr><th>Queue</th><th>Cap</th></tr>\
+             <tr><td><p>payouts</p></td><td>forty per minute</td></tr></tbody></table>\
+             <ac:structured-macro ac:name=\"code\"><ac:parameter ac:name=\"title\">Flagged</ac:parameter>\
+             <ac:plain-text-body><![CDATA[select 1;]]></ac:plain-text-body></ac:structured-macro>\
+             <ac:structured-macro ac:name=\"html\"><ac:plain-text-body><![CDATA[<b>Swagger</b>\
+             <script>var secret = 1;</script>]]></ac:plain-text-body></ac:structured-macro>"
+        );
+        let raw: RawContent = serde_json::from_value(raw.raw).unwrap();
+        let item = to_sync_item("confluence", "http://x.example", &raw);
+        let read = read(&item.body_text);
+        let limits = read
+            .runs
+            .iter()
+            .find(|r| r.part == Part::Section("Limits".into()))
+            .expect("the Limits section");
+        // An `html` macro is an embed (#2440): the words it shows are the
+        // page's, its script's are not.
+        assert_eq!(
+            limits.text,
+            "Queue\nCap\npayouts\nforty per minute\nselect 1;\nSwagger"
+        );
+        for absent in ["Flagged", "secret", "script", "html", "<"] {
+            assert!(
+                !item.body_text.contains(absent),
+                "{absent:?} in {:?}",
+                item.body_text
+            );
+        }
+    }
+
+    /// The shared function is the one writer: whatever the projection draws
+    /// is what `body_text` holds, here for the seeded page with its mentions
+    /// resolved through the users the sync looked up.
+    #[test]
+    fn body_text_is_the_shared_function_over_the_projection() {
+        let mut raw = a_page();
+        raw.raw["body"]["storage"]["value"] =
+            json!("<p>Ask <ac:link><ri:user ri:userkey=\"k-ops\" /></ac:link>first.</p>");
+        raw.raw["mentioned_users"] =
+            json!([{"userKey": "k-ops", "username": "ops.lead", "displayName": "Ops Lead"}]);
+        let raw: RawContent = serde_json::from_value(raw.raw).unwrap();
+        let item = to_sync_item("confluence", "http://x.example", &raw);
+        let content = crate::blocks::doc_content(crate::KIND_PAGE, &item.payload).unwrap();
+        assert_eq!(
+            item.body_text,
+            knobas_source::docs::search_text(&item.title, "ENG", &content)
+        );
+        assert!(
+            item.body_text.contains("@ops.lead first."),
+            "{}",
+            item.body_text
         );
     }
 }

@@ -249,6 +249,21 @@
       ]
     },
     {
+      "id": "asset:knobas-docs-assets",
+      "type": "container",
+      "name": "knobas-docs-assets",
+      "parent": "asset:wsl-docker",
+      "description": "Caddy serving the static files the seeded Confluence's Docs reader showcase embeds (#2456): Swagger UI's bundle, the payouts OpenAPI file and a status page, filled from testenv/docs-assets/ by `docker cp`. Up and removed with Confluence.",
+      "properties": {
+        "docker_context": "wsl",
+        "container_name": "knobas-docs-assets",
+        "image": "caddy",
+        "compose_service": "docs-assets",
+        "compose_profile": "real-atlassian",
+        "published_port": "127.0.0.1:8095"
+      }
+    },
+    {
       "id": "asset:knobas-confluence-db",
       "type": "container",
       "name": "knobas-confluence-db",

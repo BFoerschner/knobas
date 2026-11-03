@@ -5,7 +5,7 @@
 import { createRawSnippet, flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
 
-import type { DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
+import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, TableCell, Unfilled, WriteAsk } from "../../ipc/entity";
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
@@ -37,6 +37,14 @@ function text(t: string) {
   return { type: "text" as const, text: t, strong: false, emphasis: false, code: false };
 }
 
+function para(t: string): DocBlock {
+  return { type: "paragraph", text: [text(t)] };
+}
+
+function cell(header: boolean, blocks: DocBlock[], colspan = 1, rowspan = 1): TableCell {
+  return { header, blocks, colspan, rowspan };
+}
+
 const PAGE: DocPage = {
   entity_id: "confluence:2",
   source_id: "confluence",
@@ -66,7 +74,7 @@ const PAGE: DocPage = {
       ],
     },
     { type: "code", code: "select 1;", language: "sql" },
-    { type: "table", rows: [[{ header: true, text: [text("After")] }], [{ header: false, text: [text("15 min")] }]] },
+    { type: "table", rows: [[cell(true, [para("After")])], [cell(false, [para("15 min")])]] },
     { type: "placeholder", name: "roadmap" },
   ],
   comments: [{ id: "65700", author: "priya", author_name: "Priya Nair", at: "2026-08-19T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Rewriting it.")] }] }],
@@ -77,6 +85,7 @@ const PAGE: DocPage = {
   backlinks: [],
   work: [],
   writes: [],
+  run_embeds: true,
 };
 
 const QUEUED: QueuedWrite = {
@@ -333,6 +342,203 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   expect(doc.querySelector("h2#s-1 a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
 });
 
+test("a task list draws each item's state, nested too, beside an ordinary list, and nothing in it ticks a task (spec #2432, story 23)", async () => {
+  const para = (t: string) => ({ type: "paragraph" as const, text: [text(t)] });
+  const blocks: DocPage["blocks"] = [
+    {
+      type: "list",
+      ordered: false,
+      items: [
+        { checked: true, blocks: [para("Drain the queue")] },
+        {
+          checked: false,
+          blocks: [para("Restart the worker"), { type: "list", ordered: false, items: [{ checked: true, blocks: [para("eu-1")] }] }],
+        },
+      ],
+    },
+    { type: "list", ordered: false, items: [{ checked: null, blocks: [para("Notes")] }] },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const doc = target.querySelector(".tf-doc")!;
+  const items = [...doc.querySelectorAll("li")];
+  const state = (li: Element) => li.querySelector(":scope > .tf-box")?.getAttribute("aria-label") ?? null;
+  expect(items.map((li) => [li.querySelector("p")?.textContent, state(li)])).toEqual([
+    ["Drain the queue", "Done"],
+    ["Restart the worker", "Not done"],
+    ["eu-1", "Done"],
+    ["Notes", null],
+  ]);
+  expect(items.map((li) => li.querySelector(":scope > .tf-box")?.classList.contains("tf-on") ?? null)).toEqual([true, false, true, null]);
+  expect(doc.querySelectorAll("li input, li button, li [tabindex]"), "a task's box is drawn, never a control").toHaveLength(0);
+});
+
+const collapsible = (title: string, blocks: DocPage["blocks"]): DocPage["blocks"][number] => ({ type: "collapsible", title, blocks });
+const collapsibles = () => [...target.querySelectorAll<HTMLDetailsElement>(".tf-doc details.tf-collapse")];
+
+test("a collapsible draws closed under its title, and the lists, tables and panels inside it draw as anywhere (spec #2432)", async () => {
+  const blocks: DocPage["blocks"] = [
+    collapsible("Rollback steps", [
+      { type: "list", ordered: false, items: [{ checked: null, blocks: [para("Revert the flag")] }] },
+      { type: "table", rows: [[{ header: false, blocks: [para("eu-1")], colspan: 1, rowspan: 1 }]] },
+      { type: "panel", kind: "warning", title: null, blocks: [para("Slow.")] },
+    ]),
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const [only, ...rest] = collapsibles();
+  expect(rest).toHaveLength(0);
+  expect(only!.open).toBe(false);
+  expect(only!.querySelector(":scope > summary")?.textContent).toBe("Rollback steps");
+  expect(only!.querySelector("li p")?.textContent).toBe("Revert the flag");
+  expect(only!.querySelector("table td")?.textContent).toBe("eu-1");
+  expect(only!.querySelector(".tf-callout.tf-warn")?.textContent).toContain("Slow.");
+});
+
+test("arriving on a search hit inside a collapsible opens it and leaves the others closed (spec #2432)", async () => {
+  const blocks: DocPage["blocks"] = [
+    para("Intro."),
+    collapsible("Steps", [collapsible("Inner", [para("Post to the ledger.")])]),
+    collapsible("Other", [para("Nothing here.")]),
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
+  search("ledger");
+  await settle();
+  location.hash = "";
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  expect(location.hash).toBe("#/page/confluence%3A2");
+  shown!.rest = ["confluence:2"];
+  await settle();
+  expect(target.querySelector(".tf-rd-page mark.tf-cur")?.textContent).toBe("ledger");
+  expect(collapsibles().map((d) => [d.querySelector(":scope > summary")?.textContent, d.open])).toEqual([
+    ["Steps", true],
+    ["Inner", true],
+    ["Other", false],
+  ]);
+  location.hash = "";
+});
+
+test("a hit picked from another page opens the page with the collapsible around the match open (spec #2432, story 25)", async () => {
+  const blocks: DocPage["blocks"] = [para("Intro."), collapsible("Steps", [para("Post to the ledger.")]), collapsible("Other", [para("Nothing here.")])];
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:2" ? { ...PAGE, blocks } : { ...PAGE, entity_id: id, title: "Ops home", blocks: [para("Home.")] }));
+  // The router hands TfDocs the address's rest, as `page.ts` does.
+  const props = $state({ ready: true, rest: ["confluence:1"], job: null, ports: ports({ docsPage, docsSearch: vi.fn(async () => HITS) }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(collapsibles().map((d) => d.open)).toEqual([]);
+  props.rest = ["search", "ledger"];
+  await settle();
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  expect(location.hash).toBe("#/page/confluence%3A2");
+  props.rest = ["confluence:2"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  expect(target.querySelector(".tf-rd-page mark.tf-cur")?.textContent).toBe("ledger");
+  expect(collapsibles().map((d) => [d.querySelector(":scope > summary")?.textContent, d.open])).toEqual([
+    ["Steps", true],
+    ["Other", false],
+  ]);
+  location.hash = "";
+});
+
+test("a match in a collapsible's title does not open it; stepping to a match inside it does (spec #2432)", async () => {
+  const blocks: DocPage["blocks"] = [para("The ledger."), collapsible("Ledger rules", [para("Close the ledger daily.")])];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })), docsSearch: vi.fn(async () => HITS) }));
+  search("ledger");
+  await settle();
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  shown!.rest = ["confluence:2"];
+  await settle();
+  const bar = () => target.querySelector(".tf-findbar")!;
+  expect(bar().textContent).toContain("1 of 3");
+  const next = () => bar().querySelector<HTMLButtonElement>("button[aria-label='Next']")!.click();
+  next();
+  await settle();
+  expect(bar().textContent).toContain("2 of 3");
+  expect(collapsibles()[0]!.open, "the title is drawn while closed").toBe(false);
+  next();
+  await settle();
+  expect(collapsibles()[0]!.open).toBe(true);
+  location.hash = "";
+});
+
+test("a collapsible opened on one page is closed on the next page that holds one in the same place (spec #2432)", async () => {
+  const docsPage = vi.fn(async (id: string) => ({ ...PAGE, entity_id: id, blocks: [collapsible(`Steps on ${id}`, [para("In.")])] }));
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  collapsibles()[0]!.open = true;
+  props.rest = ["confluence:1"];
+  await settle();
+  expect(collapsibles()[0]!.querySelector(":scope > summary")?.textContent).toBe("Steps on confluence:1");
+  expect(collapsibles()[0]!.open).toBe(false);
+});
+
+test("an include draws the page it includes in a frame reading from <title>, which opens that page (spec #2432, stories 13 and 16)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "paragraph", text: [text("Ours.")] },
+    {
+      type: "include",
+      title: "Retry budget",
+      space: "ENG",
+      excerpt: true,
+      entity_id: "confluence:9",
+      blocks: [
+        { type: "heading", level: 2, text: [text("Budget")] },
+        { type: "paragraph", text: [text("Thirty retries.")] },
+      ],
+      unfilled: null,
+    },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks, sections: [] })) }));
+  const frame = target.querySelector(".tf-doc .tf-incl")!;
+  expect(frame.querySelector(".tf-incl-from")?.textContent?.replace(/\s+/g, " ").trim()).toBe("from Retry budget");
+  const link = frame.querySelector<HTMLAnchorElement>(".tf-incl-from a")!;
+  expect([link.getAttribute("href"), link.querySelector("em")?.textContent]).toEqual(["#/page/confluence%3A9", "Retry budget"]);
+  expect([...frame.querySelectorAll("h2, p")].map((e) => [e.tagName, e.textContent])).toEqual([
+    ["H2", "Budget"],
+    ["P", "Thirty retries."],
+  ]);
+  expect(target.querySelector(".tf-doc .tf-macro"), "a filled include is no placeholder").toBeNull();
+});
+
+test("an include knobas could not fill is a placeholder that says why and names the page, linking it or the source (spec #2432, stories 19 to 21)", async () => {
+  const miss = (title: string, why: Unfilled, entity_id: string | null): DocPage["blocks"][number] => ({
+    type: "include",
+    title,
+    space: null,
+    excerpt: why === "no_excerpt",
+    entity_id,
+    blocks: [],
+    unfilled: why,
+  });
+  const blocks: DocPage["blocks"] = [
+    miss("Gone", "not_mirrored", null),
+    miss("Plain", "no_excerpt", "confluence:3"),
+    miss("Level 5", "too_deep", "confluence:15"),
+    miss("Alpha", "cycle", "confluence:4"),
+  ];
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks, sections: [] })) }));
+  const boxes = [...target.querySelectorAll(".tf-doc .tf-macro")];
+  expect(boxes.map((b) => b.querySelector("span")?.textContent)).toEqual([
+    "This part includes Gone, which knobas does not mirror.",
+    "This part includes the excerpt of Plain, which has none.",
+    "This part includes Level 5 more than three includes deep, so knobas stops here.",
+    "This part includes Alpha, which includes this page again, so knobas stops here.",
+  ]);
+  expect(boxes.map((b) => b.querySelector("a.tf-pgl")?.getAttribute("href") ?? null)).toEqual([
+    null,
+    "#/page/confluence%3A3",
+    "#/page/confluence%3A15",
+    "#/page/confluence%3A4",
+  ]);
+  expect(boxes.map((b) => b.querySelector("b")?.textContent)).toEqual(["Gone", "Plain", "Level 5", "Alpha"]);
+  // A page the mirror does not hold is linked in the source.
+  expect(boxes.map((b) => b.querySelector("button")?.textContent ?? null)).toEqual(["Open this part in Confluence", null, null, null]);
+  boxes[0]!.querySelector("button")!.click();
+  await settle();
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+  expect(target.querySelector(".tf-doc .tf-incl")).toBeNull();
+});
+
 test("Copy copies the code, and the placeholder and Open in Confluence open the page", async () => {
   const io = await draw(["confluence:2"]);
   const copy = [...target.querySelectorAll("button")].find((b) => b.textContent === "Copy")!;
@@ -343,6 +549,95 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   [...target.querySelectorAll("button")].find((b) => b.textContent === "Open in Confluence")!.click();
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
+});
+
+test("a table draws its spans, a header row and a header column, and blocks in its cells (spec #2432, #2436)", async () => {
+  const blocks: DocPage["blocks"] = [
+    {
+      type: "table",
+      rows: [
+        [cell(true, [para("Day")]), cell(true, [para("Rota")], 2)],
+        [
+          cell(true, [para("Mon")], 1, 2),
+          cell(false, [{ type: "list", ordered: false, items: [{ checked: null, blocks: [para("Mara")] }, { checked: null, blocks: [para("Tomasz")] }] }]),
+          cell(false, [para("One.")]),
+        ],
+        [
+          cell(false, [
+            para("Swap first."),
+            para("Then page."),
+            { type: "code", code: "page --swap", language: null },
+            { type: "panel", kind: "info", title: null, blocks: [para("Ask first.")] },
+            { type: "table", rows: [[cell(false, [para("inner")])]] },
+          ]),
+          cell(false, [para("Two.")]),
+        ],
+        [cell(true, [para("Tue")]), cell(false, [para("Priya")], 2)],
+      ],
+    },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const table = target.querySelector(".tf-doc table")!;
+  const head = [...table.querySelectorAll(":scope > thead > tr > th")];
+  expect(head.map((th) => [th.textContent, th.getAttribute("scope"), th.getAttribute("colspan")])).toEqual([
+    ["Day", "col", null],
+    ["Rota", "col", "2"],
+  ]);
+  const rows = [...table.querySelectorAll(":scope > tbody > tr")];
+  // A header cell opening every row, the one spanning two rows included, is a header column.
+  expect(rows.map((tr) => [...tr.children].map((c) => [c.tagName, c.getAttribute("scope"), c.getAttribute("colspan"), c.getAttribute("rowspan")]))).toEqual([
+    [
+      ["TH", "row", null, "2"],
+      ["TD", null, null, null],
+      ["TD", null, null, null],
+    ],
+    [
+      ["TD", null, null, null],
+      ["TD", null, null, null],
+    ],
+    [
+      ["TH", "row", null, null],
+      ["TD", null, "2", null],
+    ],
+  ]);
+  const list = rows[0]!.children[1]!;
+  expect([...list.querySelectorAll("ul > li")].map((li) => li.textContent)).toEqual(["Mara", "Tomasz"]);
+  const blocky = rows[1]!.children[0]!;
+  expect([...blocky.querySelectorAll(":scope > p")].map((p) => p.textContent)).toEqual(["Swap first.", "Then page."]);
+  expect(blocky.querySelector("pre code")?.textContent).toBe("page --swap");
+  expect(blocky.querySelector(".tf-callout.tf-info")?.textContent).toContain("Ask first.");
+  expect(blocky.querySelector("table td")?.textContent).toBe("inner");
+});
+
+test("a table scrolls sideways inside itself, and a header cell that opens only some rows is no header column (#2436)", async () => {
+  const blocks: DocPage["blocks"] = [
+    {
+      type: "table",
+      rows: [
+        [cell(true, [para("Key")]), cell(false, [para("a")])],
+        [cell(false, [para("b")]), cell(false, [para("c")])],
+      ],
+    },
+  ];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const table = target.querySelector(".tf-doc table")!;
+  expect(table.parentElement?.classList.contains("tf-doc-tbl")).toBe(true);
+  expect(table.querySelector("thead")).toBeNull();
+  expect([...table.querySelectorAll("th")].map((th) => [th.textContent, th.getAttribute("scope")])).toEqual([["Key", null]]);
+});
+
+test("a placeholder inside a table cell draws as its block with Open this part in, never as [name] text (#2436)", async () => {
+  const blocks: DocPage["blocks"] = [
+    { type: "table", rows: [[cell(false, [para("Before"), { type: "placeholder", name: "expand" }])]] },
+  ];
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, blocks })) }));
+  const td = target.querySelector(".tf-doc td")!;
+  expect(td.textContent).not.toContain("[expand]");
+  const macro = td.querySelector(".tf-macro")!;
+  expect(macro.textContent).toContain("This part is a Confluence expand macro, which knobas does not draw.");
+  [...macro.querySelectorAll("button")].find((b) => b.textContent === "Open this part in Confluence")!.click();
+  await settle();
   expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
 });
 

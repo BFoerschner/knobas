@@ -1,5 +1,5 @@
 //! Refresh's read crosses the boundary (#2101, ADR-0031): a component built
-//! against `knobas:adapter@1.4.0` answers the read of one item by id as the
+//! against `knobas:adapter@1.4.0` or later answers the read of one item by id as the
 //! item its sync emits, and *gone* for one deleted at the source. One built
 //! against 1.3.0, the minor before it, still installs and syncs, and
 //! answers *not offered*, which is what sends its source to a run after a
@@ -75,7 +75,11 @@ async fn a_refresh_crosses_as_the_item_the_sync_emits_for_that_id() {
     let source = build(&load_fixture(), serde_json::json!({}));
     assert!(source.descriptor().refreshes());
     let items = synced(source.as_ref()).await;
-    assert_eq!(items.len(), 5, "the surveys, the pipeline and the run");
+    assert_eq!(
+        items.len(),
+        7,
+        "the surveys, the pipeline, the run and the pages"
+    );
     for item in &items {
         let id = item.entity.to_string();
         match source.refresh(&id).await {

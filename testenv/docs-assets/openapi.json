@@ -1,0 +1,50 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Tidewater payouts API",
+    "version": "1.4.0",
+    "description": "The payouts service behind the SEPA batch. Served by the testenv's docs-assets server for the Docs reader showcase (#2456)."
+  },
+  "servers": [{ "url": "https://payouts.tidewater.test/v1" }],
+  "paths": {
+    "/payouts": {
+      "get": {
+        "summary": "List payouts",
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "settled", "failed", "quarantined"] } }
+        ],
+        "responses": {
+          "200": { "description": "Payouts, newest first", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Payout" } } } } }
+        }
+      },
+      "post": {
+        "summary": "Create a payout",
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewPayout" } } } },
+        "responses": { "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Payout" } } } } }
+      }
+    },
+    "/payouts/{id}/retry": {
+      "post": {
+        "summary": "Retry a failed payout",
+        "description": "Exponential backoff, base 30 s, factor 2, at most 5 attempts (PAY-231).",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "202": { "description": "Retry scheduled" }, "409": { "description": "Attempts used up; the payout is quarantined" } }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "NewPayout": {
+        "type": "object",
+        "required": ["iban", "amount_cents"],
+        "properties": { "iban": { "type": "string" }, "amount_cents": { "type": "integer" }, "reference": { "type": "string" } }
+      },
+      "Payout": {
+        "allOf": [
+          { "$ref": "#/components/schemas/NewPayout" },
+          { "type": "object", "properties": { "id": { "type": "string" }, "status": { "type": "string" }, "attempts": { "type": "integer" } } }
+        ]
+      }
+    }
+  }
+}

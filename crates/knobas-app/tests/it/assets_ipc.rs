@@ -3162,7 +3162,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
         .expect("the estate imports");
     let outcome = written.value;
 
-    assert_eq!(outcome.assets_created, 19, "the file's assets");
+    assert_eq!(outcome.assets_created, 20, "the file's assets");
     assert_eq!(outcome.routes_created, 6, "the file's routes");
     assert_eq!(outcome.properties_set, 0, "there was nothing to change");
     assert_eq!(outcome.properties_kept, 0);
@@ -3181,7 +3181,7 @@ async fn the_first_import_creates_the_real_estate_with_the_files_own_ids() {
     );
     assert_eq!(
         written.activity[0].detail["outcome"]["assets_created"],
-        serde_json::json!(19)
+        serde_json::json!(20)
     );
 
     let top = assets::tree(&pool, None).await.expect("the top level");
@@ -3414,8 +3414,8 @@ async fn a_second_import_of_the_same_file_is_all_known_and_changes_nothing() {
         .expect("the second preview");
     assert_eq!(
         preview.known.len(),
-        25,
-        "nineteen assets and six routes are all already in the tree"
+        26,
+        "twenty assets and six routes are all already in the tree"
     );
     assert!(preview.new.is_empty(), "{:?}", preview.new);
     assert!(preview.changes.is_empty(), "{:?}", preview.changes);
@@ -6297,9 +6297,9 @@ async fn breaks_with(pool: &PgPool, id: &str) -> Vec<(String, Option<String>)> {
 ///
 /// `CONTEXT.md`, **Depends on this**: *"its descendants, since they run inside
 /// it"*. The subject is the WSL VM, which holds the deepest branch the real
-/// file has -- Docker engine, eleven containers, and a database inside three of
+/// file has -- Docker engine, twelve containers, and a database inside three of
 /// them -- so "nearest first" is a claim with three levels under it rather than
-/// one, and "by name within a step" is a claim over eleven siblings. (Until #634
+/// one, and "by name within a step" is a claim over twelve siblings. (Until #634
 /// the subject was the Hetzner TeamCity machine, decommissioned since; until
 /// 2026-11-01, OrbStack's VM on the notebook.)
 ///
@@ -6316,6 +6316,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             ("asset:knobas-confluence".to_owned(), None),
             ("asset:knobas-confluence-db".to_owned(), None),
             ("asset:knobas-docker-proxy".to_owned(), None),
+            ("asset:knobas-docs-assets".to_owned(), None),
             ("asset:knobas-forgejo".to_owned(), None),
             ("asset:knobas-gitea".to_owned(), None),
             ("asset:knobas-https-front".to_owned(), None),
@@ -6380,7 +6381,7 @@ async fn what_breaks_below_an_asset_is_everything_it_holds_nearest_first() {
             .await
             .expect("the names in the database's order");
     assert_eq!(names, by_name);
-    assert_eq!(answer.assets.len(), 15);
+    assert_eq!(answer.assets.len(), 16);
 }
 
 /// A route landing on what **holds** the asset is not one that breaks with it.
@@ -6558,7 +6559,7 @@ async fn a_runs_on_link_counts_with_its_own_word_beside_what_is_held() {
 /// no link to have been drawn and is the plainer answer to *why is this here*.
 ///
 /// The whole list is asserted, not just that line: a tie-break that dropped
-/// the other fourteen would also satisfy an assertion about this one.
+/// the other fifteen would also satisfy an assertion about this one.
 #[tokio::test]
 async fn an_asset_held_and_linked_in_the_same_step_reads_as_inside() {
     let pool = imported("depends-on-tie-break").await;
@@ -6571,6 +6572,7 @@ async fn an_asset_held_and_linked_in_the_same_step_reads_as_inside() {
             ("asset:knobas-confluence".to_owned(), None),
             ("asset:knobas-confluence-db".to_owned(), None),
             ("asset:knobas-docker-proxy".to_owned(), None),
+            ("asset:knobas-docs-assets".to_owned(), None),
             ("asset:knobas-forgejo".to_owned(), None),
             ("asset:knobas-gitea".to_owned(), None),
             ("asset:knobas-https-front".to_owned(), None),

@@ -179,6 +179,32 @@ services:
       - https-front-data:/data
     restart: unless-stopped
 
+  # Static files for the Docs reader showcase (#2456): Swagger UI's bundle,
+  # the payouts OpenAPI file and a status page, which the seeded Confluence's
+  # `html` and `iframe` macros load. Every answer carries
+  # `Access-Control-Allow-Origin: *`, because an embed's frame has an opaque
+  # origin and Swagger UI fetches its spec. Started and filled with the
+  # Confluence session (live-lib.sh, `docker cp` of testenv/docs-assets/, so
+  # it works on the WSL target too); removed with it.
+  docs-assets:
+    image: ${CADDY_IMAGE:?run testenv/pin-images.sh to generate testenv/images.env}
+    profiles: ["real-atlassian"]
+    container_name: knobas-docs-assets
+    environment:
+      CADDYFILE: |
+        {
+        	admin off
+        }
+        :8095 {
+        	header Access-Control-Allow-Origin *
+        	root * /srv
+        	file_server
+        }
+    command: ["sh", "-c", "mkdir -p /srv && printf '%s' \"$$CADDYFILE\" > /etc/caddy/Caddyfile && exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile"]
+    ports:
+      - "127.0.0.1:8095:8095"
+    restart: unless-stopped
+
   # The Docker daemon Uptime Kuma's seeded Docker host talks to (#978), so a
   # Docker monitor created in this Kuma has a host to name.
   #

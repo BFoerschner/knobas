@@ -12,15 +12,12 @@ fn para(words: &str) -> DocBlock {
 }
 
 fn cell(words: &str) -> TableCell {
-    TableCell {
-        header: false,
-        text: text(words),
-    }
+    TableCell::new(false, vec![para(words)])
 }
 
 /// The body alone, as a page titled `T` writes it.
 fn body(blocks: &[DocBlock]) -> String {
-    page("T", blocks)
+    page("T", None, blocks)
         .strip_prefix("# T\n\n")
         .expect("a body")
         .to_owned()
@@ -112,24 +109,57 @@ fn a_list_is_bulleted_or_numbered_and_nests_under_its_item() {
         DocBlock::List {
             ordered: false,
             items: vec![
-                vec![para("one")],
-                vec![
+                ListItem::new(vec![para("one")]),
+                ListItem::new(vec![
                     para("two"),
                     DocBlock::List {
                         ordered: true,
-                        items: vec![vec![para("a")], vec![para("b")]],
+                        items: vec![
+                            ListItem::new(vec![para("a")]),
+                            ListItem::new(vec![para("b")]),
+                        ],
                     },
-                ],
+                ]),
             ],
         },
         DocBlock::List {
             ordered: true,
-            items: vec![vec![para("first")], vec![para("second")]],
+            items: vec![
+                ListItem::new(vec![para("first")]),
+                ListItem::new(vec![para("second")]),
+            ],
         },
     ]);
     assert_eq!(
         md,
         "- one\n- two\n\n  1. a\n  2. b\n\n1. first\n2. second\n"
+    );
+}
+
+/// Spec #2432, story 40: a task item keeps its state as GitHub's task
+/// syntax; an ordinary item beside it stays a plain item.
+#[test]
+fn a_task_item_is_written_with_its_box_ticked_or_not() {
+    let md = body(&[DocBlock::List {
+        ordered: false,
+        items: vec![
+            ListItem::task(true, vec![para("Drain the queue")]),
+            ListItem::task(
+                false,
+                vec![
+                    para("Restart the worker"),
+                    DocBlock::List {
+                        ordered: false,
+                        items: vec![ListItem::task(false, vec![para("eu-1")])],
+                    },
+                ],
+            ),
+            ListItem::new(vec![para("Notes")]),
+        ],
+    }]);
+    assert_eq!(
+        md,
+        "- [x] Drain the queue\n- [ ] Restart the worker\n\n  - [ ] eu-1\n- Notes\n"
     );
 }
 
@@ -171,7 +201,90 @@ fn a_table_is_a_pipe_table_headed_by_its_first_row() {
         "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n",
         "a header wider than every row sets the width"
     );
-    assert_eq!(page("T", &[DocBlock::Table { rows: vec![] }]), "# T\n");
+    assert_eq!(
+        page("T", None, &[DocBlock::Table { rows: vec![] }]),
+        "# T\n"
+    );
+}
+
+/// A pipe in a nested table's cell is escaped once, by the inner table, and
+/// stays one escaped pipe in the outer cell: escaping it again would read as
+/// an escaped backslash and a column break (#2436). A backslash in text still
+/// comes out escaped before an escaped pipe.
+#[test]
+fn a_pipe_inside_a_nested_tables_cell_breaks_no_column() {
+    let md = body(&[DocBlock::Table {
+        rows: vec![
+            vec![cell("Outer"), cell("Back")],
+            vec![
+                TableCell::new(
+                    false,
+                    vec![DocBlock::Table {
+                        rows: vec![vec![cell("a|b")]],
+                    }],
+                ),
+                cell("c\\|d"),
+            ],
+        ],
+    }]);
+    assert_eq!(
+        md,
+        concat!(
+            "| Outer | Back |\n",
+            "| --- | --- |\n",
+            "| \\| a\\|b \\|<br>\\| --- \\| | c\\\\\\|d |\n",
+        )
+    );
+}
+
+/// A pipe table has no spans and no blocks (#2436): a spanned cell keeps its
+/// place and leaves the places it covers empty, so the columns still line up,
+/// and a cell's blocks are its lines joined by `<br>`. No word is lost.
+#[test]
+fn a_spanned_cell_leaves_its_places_empty_and_block_cells_keep_their_words() {
+    let md = body(&[DocBlock::Table {
+        rows: vec![
+            vec![
+                TableCell {
+                    colspan: 2,
+                    ..cell("Owner")
+                },
+                TableCell {
+                    rowspan: 2,
+                    ..cell("Notes")
+                },
+            ],
+            vec![
+                cell("Team"),
+                TableCell::new(
+                    false,
+                    vec![
+                        DocBlock::List {
+                            ordered: false,
+                            items: vec![
+                                ListItem::new(vec![para("Mara")]),
+                                ListItem::new(vec![para("Tomasz")]),
+                            ],
+                        },
+                        para("On call"),
+                        DocBlock::Table {
+                            rows: vec![vec![cell("in"), cell("ner")]],
+                        },
+                    ],
+                ),
+            ],
+            vec![cell("Ops"), cell("x"), cell("y")],
+        ],
+    }]);
+    assert_eq!(
+        md,
+        concat!(
+            "| Owner |  | Notes |\n",
+            "| --- | --- | --- |\n",
+            "| Team | - Mara<br>- Tomasz<br><br>On call<br><br>\\| in \\| ner \\|<br>\\| --- \\| --- \\| |  |\n",
+            "| Ops | x | y |\n",
+        )
+    );
 }
 
 #[test]
@@ -216,6 +329,60 @@ fn a_placeholder_is_an_html_comment_naming_it() {
     assert_eq!(md, "<!-- macro: jira- -chart -->\n\n<!-- macro: toc -->\n");
 }
 
+fn html_embed() -> DocBlock {
+    DocBlock::Embed {
+        name: "html".to_owned(),
+        content: crate::docs::EmbedContent::Html {
+            html: "<script>alert(1)</script>".to_owned(),
+        },
+    }
+}
+
+/// An HTML embed is never pasted into the file: a viewer that renders the
+/// Markdown would run its scripts (#2440). It has no URL of its own, so it
+/// is a link to the page it is on, named for the embed (spec #2432, story
+/// 40), wherever on the page it sits.
+#[test]
+fn an_html_embed_is_a_link_to_its_page_named_for_it_and_not_its_markup() {
+    let md = page(
+        "T",
+        Some("https://wiki.example/pages/5"),
+        &[
+            html_embed(),
+            DocBlock::Collapsible {
+                title: "Try it".to_owned(),
+                blocks: vec![html_embed()],
+            },
+        ],
+    );
+    assert_eq!(
+        md,
+        "# T\n\n[html](https://wiki.example/pages/5)\n\n<details>\n<summary>Try it</summary>\n\n[html](https://wiki.example/pages/5)\n\n</details>\n"
+    );
+}
+
+/// A page with no web URL has nothing to link an HTML embed to: a comment
+/// names it.
+#[test]
+fn an_html_embed_on_a_page_with_no_url_is_a_comment_naming_it() {
+    assert_eq!(body(&[html_embed()]), "<!-- embed: html -->\n");
+}
+
+/// A URL embed is a link to the page it frames (spec #2432, story 40).
+#[test]
+fn a_url_embed_is_a_link_to_its_url() {
+    let md = body(&[DocBlock::Embed {
+        name: "iframe".to_owned(),
+        content: crate::docs::EmbedContent::Url {
+            url: "https://grafana.example/d/1?a=b".to_owned(),
+        },
+    }]);
+    assert_eq!(
+        md,
+        "[https://grafana.example/d/1?a=b](https://grafana.example/d/1?a=b)\n"
+    );
+}
+
 #[test]
 fn markdown_goes_through_as_it_is_refs_included() {
     assert_eq!(
@@ -249,5 +416,53 @@ fn a_file_name_stays_in_its_folder_and_writable() {
     assert!(
         !long.contains("-.md"),
         "no dash before the extension: {long}"
+    );
+}
+
+/// A collapsible is GitHub's `<details>`: its title the summary, as HTML
+/// text, and its blocks Markdown under it (spec #2432).
+#[test]
+fn a_collapsible_is_a_details_block_titled_by_its_summary() {
+    let md = body(&[DocBlock::Collapsible {
+        title: "Steps <1> & 2".to_owned(),
+        blocks: vec![
+            para("Lead *here*."),
+            DocBlock::List {
+                ordered: false,
+                items: vec![ListItem::new(vec![para("one")])],
+            },
+        ],
+    }]);
+    assert_eq!(
+        md,
+        "<details>\n<summary>Steps &lt;1&gt; &amp; 2</summary>\n\nLead \\*here\\*.\n\n- one\n\n</details>\n"
+    );
+}
+
+/// Spec #2432, story 40: a filled include is its contents, after a comment
+/// naming the page they are from; an unfilled one is a comment naming it.
+#[test]
+fn an_include_is_its_contents_and_an_unfilled_one_a_comment_naming_it() {
+    let md = body(&[
+        DocBlock::Include {
+            title: "Retry -- budget".to_owned(),
+            space: None,
+            excerpt: false,
+            entity_id: Some("c:1".to_owned()),
+            blocks: vec![para("Thirty."), para("Then stop.")],
+            unfilled: None,
+        },
+        DocBlock::Include {
+            title: "Gone".to_owned(),
+            space: None,
+            excerpt: true,
+            entity_id: None,
+            blocks: vec![],
+            unfilled: Some(super::super::Unfilled::NotMirrored),
+        },
+    ]);
+    assert_eq!(
+        md,
+        "<!-- from: Retry - - budget -->\n\nThirty.\n\nThen stop.\n\n<!-- include: Gone -->\n"
     );
 }

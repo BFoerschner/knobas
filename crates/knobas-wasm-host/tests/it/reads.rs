@@ -119,7 +119,11 @@ async fn a_survey_s_view_offers_its_declared_source_action_and_the_fixture_perfo
     let source = build(&load_fixture(), serde_json::json!({}));
     let declared = source.descriptor();
     assert_eq!(declared.source_actions, ["book_repair"]);
-    assert_eq!(declared.write_ops, [SOURCE_ACTION]);
+    // Beside its pages' writes (#2443), which are no source action.
+    assert_eq!(
+        declared.write_ops,
+        [SOURCE_ACTION, "update_page", "create_page"]
+    );
 
     let view = source
         .view("surveys:survey-1", None)

@@ -2,12 +2,13 @@
 //! wasmtime, is one more [`Source`].
 //!
 //! An external adapter is one WASM component built against the WIT world in
-//! `wit/adapter.wit`, `knobas:adapter@1.4.0`. [`WasmAdapter::load`] compiles
+//! `wit/adapter.wit`, `knobas:adapter@1.5.0`. [`WasmAdapter::load`] compiles
 //! it, refuses one built against a version this knobas cannot host, and
-//! reads its descriptor. A 1.0.0 to 1.3.0 component is hosted too: what
+//! reads its descriptor. A 1.0.0 to 1.4.0 component is hosted too: what
 //! the later minors added is an import it does not use (`download-sink` in
 //! 1.1.0, `sink.walked` in 1.3.0) and exports (`downloads` in 1.1.0, `query`
-//! in 1.2.0, `refresh` in 1.4.0) the host looks up as optional. [`WasmAdapter::build`] turns a
+//! in 1.2.0, `refresh` in 1.4.0, `docs` in 1.5.0) the host looks up as
+//! optional. [`WasmAdapter::build`] turns a
 //! configured instance into a `Box<dyn Source>`, which forwards each trait
 //! call across the interface. The sync engine, the write queue, IPC and the
 //! shell see that and nothing else.
@@ -22,6 +23,13 @@
 //! ([`net`], #1203). Every call has a deadline and a memory cap
 //! ([`limits`], #1204): one that passes either is stopped, and fails naming
 //! the limit.
+//!
+//! **The docs projection** (1.5.0, #2442, ADR-0040) is the one call made
+//! with no way out: [`WasmAdapter::project`] runs under the same memory cap,
+//! a deadline held to [`limits::PROJECTION_DEADLINE`], and a policy that
+//! allows no host, so every request the
+//! component sends is refused, whatever its manifest declares. A page's
+//! search text is built here from it at sync ([`WasmSource`]).
 //!
 //! **One store per call.** Every call instantiates the component afresh,
 //! constructs its `adapter` from the instance, calls one function and drops
@@ -42,6 +50,7 @@ use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 pub mod allow;
 mod convert;
+pub mod docs_contract;
 pub mod limits;
 pub mod manifest;
 mod net;
@@ -74,7 +83,7 @@ pub const PACKAGE: &str = "knobas:adapter";
 /// newer than this one is hosted; every other is refused at load.
 pub const INTERFACE_VERSION: Version = Version {
     major: 1,
-    minor: 4,
+    minor: 5,
     patch: 0,
 };
 
@@ -90,6 +99,10 @@ const QUERY_EXPORT: &str = "knobas:adapter/query";
 
 /// The optional interface a 1.4.0 component exports `refresh` in (#2101).
 const REFRESH_EXPORT: &str = "knobas:adapter/refresh";
+
+/// The optional interface a 1.5.0 component exports the docs projection
+/// in (#2442).
+const DOCS_EXPORT: &str = "knobas:adapter/docs";
 
 /// The function `name` of the optional interface `interface` (without its
 /// version), or `None` when the component does not export the interface:
@@ -189,6 +202,12 @@ struct Inner {
     translate_query: Option<ComponentExportIndex>,
     /// `refresh.refresh`, when the component exports it (1.4.0, #2101).
     refresh: Option<ComponentExportIndex>,
+    /// `docs.project`, when the component exports it (1.5.0, #2442).
+    project: Option<ComponentExportIndex>,
+    /// `docs.edit-section` and `docs.body-from-text`, which a component
+    /// that exports `docs` exports with `project` (1.5.0, #2443).
+    edit_section: Option<ComponentExportIndex>,
+    body_from_text: Option<ComponentExportIndex>,
 }
 
 impl std::fmt::Debug for WasmAdapter {
@@ -256,6 +275,9 @@ impl WasmAdapter {
         let download = optional_export(&component, DOWNLOADS_EXPORT, "download")?;
         let translate_query = optional_export(&component, QUERY_EXPORT, "translate-query")?;
         let refresh = optional_export(&component, REFRESH_EXPORT, "refresh")?;
+        let project = optional_export(&component, DOCS_EXPORT, "project")?;
+        let edit_section = optional_export(&component, DOCS_EXPORT, "edit-section")?;
+        let body_from_text = optional_export(&component, DOCS_EXPORT, "body-from-text")?;
         let mut adapter = Self {
             inner: Arc::new(Inner {
                 engine,
@@ -265,6 +287,9 @@ impl WasmAdapter {
                 template: placeholder_descriptor(),
                 translate_query,
                 refresh,
+                project,
+                edit_section,
+                body_from_text,
             }),
             hosts: Arc::from([]),
             limits: limits::Limits::default(),
@@ -285,6 +310,10 @@ impl WasmAdapter {
         }
         if adapter.inner.refresh.is_some() {
             block_on(source::check_refresh(&adapter)).map_err(LoadError::Link)?;
+        }
+        if adapter.inner.project.is_some() {
+            block_on(source::check_project(&adapter)).map_err(LoadError::Link)?;
+            block_on(source::check_doc_writes(&adapter)).map_err(LoadError::Link)?;
         }
         Ok(adapter)
     }
@@ -337,6 +366,75 @@ impl WasmAdapter {
     #[must_use]
     pub fn refreshes(&self) -> bool {
         self.inner.refresh.is_some()
+    }
+
+    /// Whether the component exports the docs projection (1.5.0, #2442).
+    /// One that does not draws no page, and install refuses its wiki claim
+    /// ([`manifest::check`]).
+    #[must_use]
+    pub fn projects(&self) -> bool {
+        self.inner.project.is_some()
+    }
+
+    /// The docs projection (1.5.0, #2442, ADR-0040): the record of entity
+    /// kind `kind` whose mirrored payload is `payload`, drawn as a docs page
+    /// by the component, as a built-in adapter's `DocProjection` draws it.
+    ///
+    /// `None` for a component that exports no projection, a kind it draws
+    /// no page for, and a call that fails: a trap, the deadline, the memory
+    /// cap, or an answer that does not decode. The failure is logged and
+    /// the page draws as the source's failure. The call is granted no HTTP
+    /// capability. What knobas fills at read time is cleared from the
+    /// answer, and a URL embed of a scheme the shell does not frame is a
+    /// placeholder ([`source::project`]).
+    ///
+    /// Blocks while the component runs, on a thread of its own, as
+    /// [`Self::build`] does, so it may be called from inside a runtime.
+    #[must_use]
+    pub fn project(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::docs::DocContent> {
+        self.projects()
+            .then(|| block_on(source::project(self, kind, payload)))
+            .flatten()
+    }
+
+    /// The docs section edit (1.5.0, #2443), a built-in adapter's
+    /// `DocWrites::edit_section` made by the component: section `number` of
+    /// the record whose mirrored payload is `payload`, its body replaced
+    /// with `text` in the source's markup, or why the section is refused.
+    /// The answer is queued as an `UpdatePage`, which [`Source::write`]
+    /// performs.
+    ///
+    /// `None` for a component that exports no docs, and for a call that
+    /// fails, as [`Self::project`] does: a trap, the deadline, the memory
+    /// cap. The failure is logged. Called as the projection is, with no
+    /// HTTP capability and a deadline of at most
+    /// [`limits::PROJECTION_DEADLINE`], blocking on a thread of its own.
+    #[must_use]
+    pub fn edit_section(
+        &self,
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Option<Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused>> {
+        self.projects()
+            .then(|| block_on(source::edit_section(self, kind, payload, number, text)))
+            .flatten()
+    }
+
+    /// A new page's body from the editor's plain text in the source's
+    /// markup (1.5.0, #2443), a built-in adapter's
+    /// `DocWrites::body_from_text` made by the component, queued as a
+    /// `CreatePage`. `None` as [`Self::edit_section`] is.
+    #[must_use]
+    pub fn body_from_text(&self, text: &str) -> Option<String> {
+        self.projects()
+            .then(|| block_on(source::body_from_text(self, text)))
+            .flatten()
     }
 
     /// The interface version the component is built against.
@@ -578,16 +676,50 @@ fn new_store(
 /// Where `just wasm-fixture` writes the fixture component, or
 /// `KNOBAS_WASM_FIXTURE` when that names another file. For tests: the
 /// fixture is a test adapter and nothing ships it, hence `test-util`.
+///
+/// Panics when the component at the default path is older than a source it
+/// was built from (#2442): a test on a stale fixture can pass without
+/// seeing what the fixture now does, as a mutant once survived that way.
 #[cfg(feature = "test-util")]
 #[must_use]
 pub fn fixture_component() -> std::path::PathBuf {
     std::env::var_os("KNOBAS_WASM_FIXTURE").map_or_else(
         || {
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/wasm32-wasip2/release/knobas_wasm_fixture.wasm")
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../target/wasm32-wasip2/release/knobas_wasm_fixture.wasm");
+            assert_fixture_fresh(&path);
+            path
         },
         std::path::PathBuf::from,
     )
+}
+
+/// Panics naming a source newer than the component at `path`, read from
+/// the dep-info file cargo writes beside it (every source the build read,
+/// the WIT included). A component or dep-info that is missing is left to
+/// the load, which names the recipe.
+#[cfg(feature = "test-util")]
+fn assert_fixture_fresh(path: &Path) {
+    let modified = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let Some(built) = modified(path) else {
+        return;
+    };
+    let Ok(dep_info) = std::fs::read_to_string(path.with_extension("d")) else {
+        return;
+    };
+    let Some((_, sources)) = dep_info.lines().next().and_then(|l| l.split_once(": ")) else {
+        return;
+    };
+    for source in sources.split_whitespace().map(Path::new) {
+        if modified(source).is_some_and(|changed| changed > built) {
+            panic!(
+                "the fixture component at {} is older than {}, which it is built from; \
+                 `just wasm-fixture` rebuilds it",
+                path.display(),
+                source.display()
+            );
+        }
+    }
 }
 
 /// The fixture built against the frozen 1.0.0 world, which `just
@@ -597,6 +729,32 @@ pub fn fixture_component() -> std::path::PathBuf {
 pub fn fixture_component_v1_0() -> std::path::PathBuf {
     let current = fixture_component();
     current.with_file_name("knobas_wasm_fixture_v1_0.wasm")
+}
+
+/// The fixture's bytes with every occurrence of `from` replaced by `to`,
+/// which is as long, so every offset in the component stays where it was:
+/// a component that differs from the fixture in one name or one string
+/// (#2442). An export's name is spelt in several sections, and renaming it
+/// everywhere keeps the component whole. Panics when `from` does not occur.
+#[cfg(feature = "test-util")]
+#[must_use]
+pub fn patched_fixture(from: &str, to: &str) -> Vec<u8> {
+    assert_eq!(from.len(), to.len(), "a patch keeps the length");
+    let mut bytes =
+        std::fs::read(fixture_component()).expect("`just wasm-fixture` builds the fixture");
+    let mut found = 0;
+    let mut at = 0;
+    while let Some(offset) = bytes[at..]
+        .windows(from.len())
+        .position(|w| w == from.as_bytes())
+    {
+        let start = at + offset;
+        bytes[start..start + to.len()].copy_from_slice(to.as_bytes());
+        found += 1;
+        at = start + to.len();
+    }
+    assert!(found > 0, "{from:?} must occur in the component");
+    bytes
 }
 
 /// The fixture built against the frozen 1.3.0 world, the minor before

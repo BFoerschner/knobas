@@ -48,7 +48,7 @@
 #
 #   - every `docker` call in this file, the seeds and the suites goes to that
 #     machine's engine (`DOCKER_HOST=ssh://<host>`, exported here);
-#   - one ssh master forwards the product ports (3000-3002 3443 3445 8080 8090 8111) from
+#   - one ssh master forwards the product ports (3000-3002 3443 3445 8080 8090 8095 8111) from
 #     this machine's 127.0.0.1 to that machine's 127.0.0.1, so every URL the
 #     seeds, `./seed --env` and the suites use is the one they use locally;
 #   - no run stops a product when it ends (`live_to_put_back`), and the
@@ -131,8 +131,9 @@ esac
 # The one-JVM refusal: on for this machine's 8 GB VM, off for a remote target
 # that keeps all three up. Either may be overridden.
 LIVE_ONE_JVM=${KNOBAS_LIVE_ONE_JVM:-$([ -n "$LIVE_REMOTE" ] && echo 0 || echo 1)}
-# 3443 and 3445 are the https front's Gitea and Forgejo (#2377).
-LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 3443 3445 8080 8090 8111}
+# 3443 and 3445 are the https front's Gitea and Forgejo (#2377); 8095 the
+# docs-assets server that comes up with Confluence (#2456).
+LIVE_TUNNEL_PORTS=${KNOBAS_LIVE_TUNNEL_PORTS:-3000 3001 3002 3443 3445 8080 8090 8095 8111}
 
 # _live_tunnel_sock -- the ssh master's control socket. Short on purpose:
 # macOS caps a socket path at 104 bytes and $TMPDIR is already half of that.
@@ -996,6 +997,7 @@ _live_atlassian_remove() {
   # not found" (seen on this branch's first runs, #633). Named volumes,
   # because `rm -v` removes only anonymous ones.
   _live_compose --profile real-atlassian rm --stop --force "$1" "$1-db"
+  [ "$1" != confluence ] || _live_compose --profile real-atlassian rm --stop --force docs-assets
   local v
   for v in "knobas-testenv_$1-data" "knobas-testenv_$1-db-data"; do
     if docker volume inspect "$v" >/dev/null 2>&1; then docker volume rm "$v" >/dev/null; fi
@@ -1030,9 +1032,21 @@ _live_atlassian_api() {
   done
 }
 
+# _live_docs_assets -- the static server the Confluence showcase's embeds
+# load (#2456): Swagger UI fetched once (testenv/docs-assets.sh), the
+# container up, and testenv/docs-assets/ copied in. `docker cp` rather than a
+# bind mount, so a remote engine gets the files too. Run on every seed: a
+# copy is cheap, and a container that was recreated is filled again.
+_live_docs_assets() {
+  "$LIVE_TESTENV/docs-assets.sh" fetch || return 1
+  _live_compose --profile real-atlassian up -d --wait docs-assets || return 1
+  docker cp "$("$LIVE_TESTENV/docs-assets.sh" dir)/." knobas-docs-assets:/srv/ >/dev/null || return 1
+}
+
 # _live_atlassian_seed <product> -- up, wizard, content, verified.
 _live_atlassian_seed() {
   _live_compose --profile real-atlassian up -d --wait "$1-db" "$1" || return 1
+  [ "$1" != confluence ] || _live_docs_assets || return 1
   (cd "$LIVE_TESTENV" && ./seed-atlassian.sh "$1") || return 1
   _live_atlassian_api "$1" || return 1
   # Twice, deliberately: the second run reaches the find-then-skip branches

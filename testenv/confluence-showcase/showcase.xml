@@ -1,0 +1,10 @@
+<p>Every construct the Docs reader draws, on pages you can open in knobas. Owner <ac:link><ri:user ri:userkey="{{MENTIONED}}" /></ac:link>; the work is tracked in PAY-231 <ac:structured-macro ac:name="jira" ac:schema-version="1"><ac:parameter ac:name="key">PAY-231</ac:parameter></ac:structured-macro>, and the design it follows is <ac:link><ri:page ri:content-title="SEPA payout retry design" /></ac:link>.</p>
+<ul><li><p><ac:link><ri:page ri:content-title="Showcase: tables" /></ac:link>: merged cells, a header column, rich cells and a wide table.</p></li><li><p><ac:link><ri:page ri:content-title="Showcase: task lists and expands" /></ac:link>: tasks and collapsible sections.</p></li><li><p><ac:link><ri:page ri:content-title="Showcase: includes" /></ac:link>: includes, excerpts, and every reason one cannot be filled.</p></li><li><p><ac:link><ri:page ri:content-title="Showcase: embeds" /></ac:link>: HTML, Swagger UI, an iframe and a video.</p></li></ul>
+<h2>Backoff</h2>
+<ac:structured-macro ac:name="code" ac:schema-version="1"><ac:parameter ac:name="language">sql</ac:parameter><ac:plain-text-body><![CDATA[select 1 < 2;]]></ac:plain-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="info" ac:schema-version="1"><ac:rich-text-body><p>In review.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="warning" ac:schema-version="1"><ac:rich-text-body><p>No SLA yet.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="note" ac:schema-version="1"><ac:rich-text-body><p>A note.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="tip" ac:schema-version="1"><ac:rich-text-body><p>A tip.</p></ac:rich-text-body></ac:structured-macro>
+<table><tbody><tr><th>Code</th><th>Retried?</th></tr><tr><td>HTTP 503</td><td>yes</td></tr></tbody></table>
+<ac:structured-macro ac:name="toc" ac:schema-version="1" />

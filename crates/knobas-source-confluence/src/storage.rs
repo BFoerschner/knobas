@@ -1,343 +1,31 @@
-//! Confluence **storage format** in, plain text out.
+//! Confluence **storage format**: the scanning helpers the projection
+//! ([`crate::blocks`]) and the mention lookup ([`crate::users`]) read it
+//! with, and plain text into storage format for the writes.
 //!
-//! The storage format is XHTML with Confluence's own `ac:` and `ri:` elements
-//! mixed in. `payload` keeps it verbatim (§3a), because a later, smarter
-//! rendering must be able to re-project it without re-syncing -- that is the
-//! next ticket. What `body_text` needs is the opposite: the words, and only
-//! the words, because FTS indexes it and because roadmap §4 gotcha 7 says
-//! markup must never reach the webview by being mistaken for text.
+//! What `body_text` holds is not read here. Since #2435 it is the shared
+//! search text over the page's projection (`knobas_source::docs::search_text`,
+//! [`crate::map`]): search follows the drawing, so a macro's parameters and
+//! the CDATA of a macro the reader does not draw as text are not searched.
 //!
 //! # Why a hand-rolled scanner and not an HTML parser
 //!
 //! Storage format is not HTML: it is XML-shaped, it carries namespaced
 //! elements no HTML parser models, and its CDATA sections hold the bodies of
-//! code macros. A parser would either reject it or normalise it into a DOM
-//! this crate would then have to walk back out. The job here is small and
-//! total -- text between tags, entities decoded, block boundaries kept -- and
-//! a scanner that never fails is worth more than a parser that sometimes
-//! does, because the failure mode of a body that would not parse is a page
-//! that is not searchable.
+//! code macros. A scanner that never fails is worth more than a parser that
+//! sometimes does, because the failure mode of a body that would not parse is
+//! a page that is neither drawn nor searchable.
 //!
 //! # Order matters, and it is the security-relevant half
 //!
-//! Tags are stripped **before** entities are decoded. `&lt;script&gt;` in the
-//! storage format is the *text* `<script>`, and it must come out as that text;
-//! decoding first would manufacture a tag out of prose and then strip it,
-//! silently deleting what the author wrote.
+//! Tags are split off **before** entities are decoded. `&lt;script&gt;` in
+//! the storage format is the *text* `<script>`, and it must come out as that
+//! text; decoding first would manufacture a tag out of prose and then strip
+//! it, silently deleting what the author wrote.
 
-/// Who a storage body's user links are resolved against.
-///
-/// Confluence writes a mention as `<ac:link><ri:user ri:userkey="…"/></ac:link>`
-/// -- a **key**, not a name -- so a body_text built by stripping tags carries
-/// no trace of who was mentioned. This is the one identity the adapter can
-/// resolve a key to, and it is the only one the inbox asks about: the account
-/// the source is configured with, read from `/rest/api/user/current` at the
-/// start of every run ([`crate::model::CurrentUser`]).
-///
-/// ADR-0007's shape, in one sentence: **one named read, and a miss where the
-/// shape is absent.** A link naming somebody else's key resolves to nothing
-/// rather than to a guess -- which is the direction that costs a mention
-/// knobas never claims, instead of claiming somebody else's as mine.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Account<'a> {
-    /// The username contract §4.1 spells `author` with, and the string the
-    /// inbox's mention rule and `@me` match against.
-    pub username: &'a str,
-    /// `userKey` -- the stable id a Confluence editor writes into a mention.
-    /// `None` on an instance that did not report one, which makes every
-    /// key-shaped link a miss.
-    pub user_key: Option<&'a str>,
-}
-
-/// The storage format stripped to text.
-///
-/// Block-level elements become line breaks so `<h2>A</h2><p>B</p>` reads as
-/// two lines rather than as `AB`; inline elements vanish so `a<em>b</em>c`
-/// reads as `abc`. Runs of whitespace collapse, blank lines go, and the
-/// result is trimmed -- what is left is what a person would have typed.
-///
-/// **One element does not vanish: `ri:user`.** A mention is markup, and
-/// stripping it would delete the only thing that says the body names somebody
-/// -- so it is rendered back to the `@name` a person typed to make it, which
-/// is the spelling `knobas_core::inbox`'s mention rule reads and the spelling
-/// that module already documents Confluence as using. `ri:username` renders
-/// whoever it names; `ri:userkey` renders only [`Account`]'s own key, because
-/// that is the one key this adapter can resolve. See [`Account`] for the
-/// direction the misses fall in.
-#[must_use]
-pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
-    scan(storage, me, None)
-}
-
-/// [`to_text`] with the Docs search's marks (#860, #861;
-/// `knobas_source::docs::indexed`): each heading's line opens with
-/// [`SECTION`](knobas_source::docs::indexed::SECTION), and every `ri:page`
-/// the body links to is returned as `(space key, title)`, the space `None`
-/// where the link names none (the page's own).
-#[must_use]
-pub(crate) fn to_indexed_text(
-    storage: &str,
-    me: Option<Account<'_>>,
-) -> (String, Vec<(Option<String>, String)>) {
-    let mut links = Vec::new();
-    let text = scan(storage, me, Some(&mut links));
-    (text, links)
-}
-
-fn scan(
-    storage: &str,
-    me: Option<Account<'_>>,
-    mut links: Option<&mut Vec<(Option<String>, String)>>,
-) -> String {
-    let mut out = String::with_capacity(storage.len());
-    let mut rest = storage;
-    while let Some(open) = rest.find('<') {
-        out.push_str(&rest[..open]);
-        rest = &rest[open..];
-        if let Some(tail) = rest.strip_prefix("<![CDATA[") {
-            // The body of a code macro. Its content is text, verbatim: it is
-            // inside CDATA precisely because it may contain `<`.
-            let (inside, tail) = tail.split_once("]]>").unwrap_or((tail, ""));
-            out.push_str(inside);
-            rest = tail;
-            continue;
-        }
-        if let Some(tail) = rest.strip_prefix("<!--") {
-            rest = tail.split_once("-->").map_or("", |(_, tail)| tail);
-            continue;
-        }
-        let Some((tag, tail)) = split_tag(rest) else {
-            // A `<` that opens nothing: the rest of the document is text.
-            out.push_str(rest);
-            rest = "";
-            break;
-        };
-        let name = tag_name(tag);
-        if name == "ri:user" {
-            if let Some(mentioned) = mentioned_name(tag, me) {
-                // A trailing space, always: the mention rule requires the
-                // username not be followed by another name character, and a
-                // `<ac:plain-text-link-body>` right behind the link would
-                // otherwise run its text straight onto the name and hide the
-                // mention. `tidy` collapses the space away where nothing
-                // follows.
-                out.push('@');
-                out.push_str(mentioned);
-                out.push(' ');
-            }
-        } else if is_block(&name) {
-            out.push('\n');
-            if links.is_some()
-                && !tag.starts_with('/')
-                && matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
-            {
-                out.push(knobas_source::docs::indexed::SECTION);
-            }
-        } else if name == "ri:page"
-            && let Some(links) = links.as_deref_mut()
-            && let Some(title) = attr(tag, "ri:content-title").filter(|t| !t.trim().is_empty())
-        {
-            let space = attr(tag, "ri:space-key")
-                .filter(|k| !k.trim().is_empty())
-                .map(|k| decode_entities(k).trim().to_owned());
-            let title = decode_entities(title).trim().to_owned();
-            // A link with no body of its own reads as the page's title, as
-            // Confluence draws it, so the sentence keeps its words.
-            if tail.trim_start().starts_with("</ac:link>") {
-                out.push_str(&title.replace('&', "&amp;"));
-            }
-            links.push((space, title));
-        }
-        rest = tail;
-    }
-    out.push_str(rest);
-    tidy(&decode_entities(&out))
-}
-
-/// Split `<…>` off the front of `rest`, respecting quoted attribute values.
-///
-/// `<img alt="a > b"/>` is one tag, and a scan to the first `>` would cut it
-/// in half and spill `b"/>` into the text. Returns the tag's inside and what
-/// follows it, or `None` for a `<` that never closes.
-pub(crate) fn split_tag(rest: &str) -> Option<(&str, &str)> {
-    let mut quote: Option<char> = None;
-    for (i, ch) in rest.char_indices().skip(1) {
-        match quote {
-            Some(open) if ch == open => quote = None,
-            Some(_) => {}
-            None if ch == '"' || ch == '\'' => quote = Some(ch),
-            None if ch == '>' => return Some((&rest[1..i], &rest[i + ch.len_utf8()..])),
-            None => {}
-        }
-    }
-    None
-}
-
-/// Which name a `ri:user` element renders as, if any.
-///
-/// Two attributes, in the order Confluence prefers them: `ri:username` names
-/// the account outright and is rendered whoever it is, and `ri:userkey` is
-/// rendered only when it is [`Account`]'s own -- an unresolvable key is a
-/// miss, never a guess.
-fn mentioned_name<'a>(tag: &'a str, me: Option<Account<'a>>) -> Option<&'a str> {
-    if let Some(name) = attr(tag, "ri:username").filter(|name| !name.is_empty()) {
-        return Some(name);
-    }
-    let me = me?;
-    let key = attr(tag, "ri:userkey").filter(|key| !key.is_empty())?;
-    (Some(key) == me.user_key).then_some(me.username)
-}
-
-/// One attribute's value out of a tag body, or `None` for an attribute that is
-/// absent or unquoted.
-///
-/// The name must be **preceded by whitespace and followed by `=`**, because
-/// `ri:username` contains `ri:user` and a substring search for one would find
-/// the other. Whitespace and not "or the start of the tag": the first token in
-/// a tag body is the element name, never an attribute, so requiring the space
-/// costs nothing and needs no second case. Deliberately total: a malformed tag
-/// yields no attribute rather than an error, which is this module's whole
-/// discipline (a body that would not parse is a page that is not searchable).
-pub(crate) fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
-    let mut rest = tag;
-    loop {
-        let at = rest.find(name)?;
-        let before_ok = at > 0
-            && rest[..at]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_ascii_whitespace());
-        let after = &rest[at + name.len()..];
-        let value = after.trim_start();
-        if before_ok && value.starts_with('=') {
-            let value = value[1..].trim_start();
-            let quote = value.chars().next().filter(|c| *c == '"' || *c == '\'')?;
-            let value = &value[quote.len_utf8()..];
-            return value.find(quote).map(|end| &value[..end]);
-        }
-        rest = after;
-    }
-}
-
-/// The element name inside a tag body, lowercased and without its `/`.
-pub(crate) fn tag_name(tag: &str) -> String {
-    tag.trim_start_matches('/')
-        .split(|c: char| c.is_ascii_whitespace() || c == '/' || c == '>')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-}
-
-/// Whether this element ends a line of text.
-///
-/// The XHTML block elements a Confluence body actually uses, plus the `ac:`
-/// elements that behave like blocks: a macro, a layout cell, a task. Anything
-/// unrecognised is treated as **inline**, which is the direction that only
-/// ever costs a missing line break -- treating an unknown inline element as a
-/// block would chop a sentence in half in the search index.
-fn is_block(name: &str) -> bool {
-    matches!(
-        name,
-        "p" | "div"
-            | "br"
-            | "hr"
-            | "h1"
-            | "h2"
-            | "h3"
-            | "h4"
-            | "h5"
-            | "h6"
-            | "li"
-            | "ul"
-            | "ol"
-            | "dl"
-            | "dt"
-            | "dd"
-            | "table"
-            | "thead"
-            | "tbody"
-            | "tr"
-            | "th"
-            | "td"
-            | "blockquote"
-            | "pre"
-            | "section"
-            | "ac:layout"
-            | "ac:layout-section"
-            | "ac:layout-cell"
-            | "ac:structured-macro"
-            | "ac:rich-text-body"
-            | "ac:plain-text-body"
-            | "ac:task"
-            | "ac:task-list"
-    )
-}
-
-/// The XML entities a storage-format body carries, plus numeric references.
-///
-/// `&nbsp;` becomes an ordinary space rather than U+00A0: what this feeds is a
-/// full-text index and a launcher excerpt, and a non-breaking space there is a
-/// character no search will ever be typed with.
-pub(crate) fn decode_entities(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut rest = raw;
-    while let Some(at) = rest.find('&') {
-        out.push_str(&rest[..at]);
-        rest = &rest[at..];
-        let Some((entity, tail)) = rest[1..]
-            .find(';')
-            .filter(|end| *end <= 12)
-            .map(|end| (&rest[1..=end], &rest[end + 2..]))
-        else {
-            out.push('&');
-            rest = &rest[1..];
-            continue;
-        };
-        match entity {
-            "amp" => out.push('&'),
-            "lt" => out.push('<'),
-            "gt" => out.push('>'),
-            "quot" => out.push('"'),
-            "apos" | "#39" => out.push('\''),
-            "nbsp" | "#160" => out.push(' '),
-            _ => match numeric(entity) {
-                Some(ch) => out.push(ch),
-                // An entity knobas does not know is left exactly as it was
-                // written: inventing a character for it would put a guess in
-                // the search index, and `&hellip;` read as text is worse only
-                // cosmetically.
-                None => {
-                    out.push('&');
-                    out.push_str(entity);
-                    out.push(';');
-                }
-            },
-        }
-        rest = tail;
-    }
-    out.push_str(rest);
-    out
-}
-
-/// `&#8212;` / `&#x2014;` -- the numeric references a Confluence editor writes
-/// for a dash, a quote or an ellipsis.
-fn numeric(entity: &str) -> Option<char> {
-    let digits = entity.strip_prefix('#')?;
-    let code = match digits.strip_prefix(['x', 'X']) {
-        Some(hex) => u32::from_str_radix(hex, 16).ok()?,
-        None => digits.parse::<u32>().ok()?,
-    };
-    char::from_u32(code)
-}
-
-/// Collapse whitespace, drop blank lines, trim.
-fn tidy(raw: &str) -> String {
-    raw.lines()
-        .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
+// The tag and entity reads are the shared HTML reader's (spec #2432), so a
+// tag splits and an entity decodes the same way in the projection and the
+// mention lookup.
+pub(crate) use knobas_source::docs::html::{attr, split_tag, tag_name};
 
 /// Plain text in, **storage format** out -- the other direction, and the only
 /// one a write takes (issue #286).
@@ -347,13 +35,12 @@ fn tidy(raw: &str) -> String {
 /// is not: a body posted as `representation: "storage"` is XHTML, so a `<` in
 /// somebody's prose would either be dropped by the wiki's own sanitizer or
 /// stored as the start of an element they did not write. Translating here is
-/// this adapter's job, and it is the same reasoning as [`to_text`]'s in
-/// reverse.
+/// this adapter's job.
 ///
 /// The rules, and they are deliberately few:
 ///
 /// * `&`, `<` and `>` are escaped, `&` **first** -- the mirror image of
-///   [`to_text`]'s "strip before decoding". Escaping `<` first would then
+///   the projection's "split tags before decoding". Escaping `<` first would then
 ///   escape the `&` of the `&lt;` it just wrote and produce `&amp;lt;`.
 /// * A blank line starts a new `<p>`; a single newline inside a paragraph
 ///   becomes `<br/>`. That is what the Confluence editor does with the same
@@ -500,22 +187,39 @@ fn escape(raw: &str) -> String {
 mod tests {
     use super::*;
 
-    /// A body with no `ri:user` in it renders identically whoever is asking,
-    /// so every test that is not about a mention reads it with no account --
-    /// and shadowing the name here keeps that claim in one place rather than
-    /// in thirty call sites.
-    fn to_text(storage: &str) -> String {
-        super::to_text(storage, None)
+    /// The `body_text` a page with this body and no title gets
+    /// (`knobas_source::docs::search_text` over the projection, #2435), the
+    /// sync having looked up the credential's own key -- what
+    /// [`crate::users::Directory`] always knows -- when `me` is set. A body
+    /// with no `ri:user` in it reads the same either way.
+    fn body_text(storage: &str, me: bool) -> String {
+        let mut people = crate::blocks::People::new();
+        if me {
+            people.insert(
+                "ff8080818f2a1b4c018f2a1c9d0e0001".to_owned(),
+                crate::blocks::Person {
+                    username: Some("knobas".to_owned()),
+                    display_name: Some("knobas".to_owned()),
+                },
+            );
+        }
+        let content = knobas_source::docs::DocContent {
+            version: None,
+            editor_name: None,
+            labels: Vec::new(),
+            blocks: crate::blocks::to_blocks(storage, &people),
+            comments: Vec::new(),
+            sections: Vec::new(),
+            history: Vec::new(),
+            excerpt: None,
+        };
+        knobas_source::docs::search_text("", "", &content)
     }
 
-    /// The account the seeded Confluence's admin is, as
-    /// `/rest/api/user/current` reports it.
-    fn me() -> Account<'static> {
-        Account {
-            username: "knobas",
-            user_key: Some("ff8080818f2a1b4c018f2a1c9d0e0001"),
-        }
+    fn to_text(storage: &str) -> String {
+        body_text(storage, false)
     }
+
     // -- plain text out to the wiki (issue #286) ---------------------------
 
     /// The whole point of the direction: what a reader types is **character
@@ -585,7 +289,7 @@ mod tests {
     fn a_heading_and_a_paragraph_become_two_lines() {
         assert_eq!(
             to_text("<h2>Backoff policy</h2><p>base 30 s</p>"),
-            "Backoff policy\nbase 30 s"
+            "\u{1e}Backoff policy\nbase 30 s"
         );
     }
 
@@ -604,9 +308,9 @@ mod tests {
         let text = to_text(SEEDED);
         assert_eq!(
             text,
-            "Backoff policy\nbase 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient \
+            "\u{1e}Backoff policy\nbase 30 s, factor 2, max 5 attempts, jitter ±10 %. Transient \
              codes: HTTP 503, TEMP_UNAVAILABLE. After the final attempt the payout is moved to \
-             the manual review queue (see PAY-231).\nManual review queue\nSLA: to be defined."
+             the manual review queue (see PAY-231).\n\u{1e}Manual review queue\nSLA: to be defined."
         );
         assert!(!text.contains('<'), "no markup survives: {text}");
     }
@@ -706,18 +410,18 @@ mod tests {
     #[test]
     fn a_user_link_renders_as_the_at_name_the_mention_rule_reads() {
         assert_eq!(
-            super::to_text(
+            body_text(
                 "<p><ac:link><ri:user ri:username=\"knobas\" /></ac:link> can you add the \
                  SLA?</p>",
-                Some(me())
+                true
             ),
             "@knobas can you add the SLA?"
         );
         assert_eq!(
-            super::to_text(
+            body_text(
                 "<p><ac:link><ri:user ri:userkey=\"ff8080818f2a1b4c018f2a1c9d0e0001\" \
                  /></ac:link> can you add the SLA?</p>",
-                Some(me())
+                true
             ),
             "@knobas can you add the SLA?"
         );
@@ -733,17 +437,17 @@ mod tests {
     #[test]
     fn a_link_that_is_not_mine_never_renders_as_me() {
         assert_eq!(
-            super::to_text(
+            body_text(
                 "<p><ac:link><ri:user ri:username=\"mara.lindqvist\" /></ac:link> ping</p>",
-                Some(me())
+                true
             ),
             "@mara.lindqvist ping"
         );
         assert_eq!(
-            super::to_text(
+            body_text(
                 "<p><ac:link><ri:user ri:userkey=\"2c9080f0-somebody-else\" /></ac:link> \
                  ping</p>",
-                Some(me())
+                true
             ),
             "ping",
             "an unresolvable key is a miss, not a guess"
@@ -751,10 +455,10 @@ mod tests {
         // And with no account at all -- a source whose `username` was never
         // filled in -- a key resolves to nothing while a name still renders.
         assert_eq!(
-            super::to_text(
+            body_text(
                 "<p><ac:link><ri:user ri:userkey=\"ff8080818f2a1b4c018f2a1c9d0e0001\" \
                  /></ac:link> ping</p>",
-                None
+                false
             ),
             "ping"
         );
@@ -778,7 +482,7 @@ mod tests {
             "<ri:user data-ri:userkey=\"ff8080818f2a1b4c018f2a1c9d0e0001\"/>",
         ] {
             assert_eq!(
-                super::to_text(&format!("<p>before{tag}after</p>"), Some(me())),
+                body_text(&format!("<p>before{tag}after</p>"), true),
                 "beforeafter",
                 "{tag} must render as nothing"
             );
@@ -787,7 +491,7 @@ mod tests {
         // rendered from it -- the module's own rule, unchanged by mentions,
         // and the reason a truncated body is searchable rather than empty.
         assert_eq!(
-            super::to_text("<p>before<ri:user ri:username=\"knobas\"", Some(me())),
+            body_text("<p>before<ri:user ri:username=\"knobas\"", true),
             "before<ri:user ri:username=\"knobas\""
         );
     }
@@ -798,12 +502,13 @@ mod tests {
     /// and match nobody.
     #[test]
     fn a_rendered_mention_is_delimited_from_whatever_follows_it() {
-        let text = super::to_text(
+        let text = body_text(
             "<p><ac:link><ri:user ri:username=\"knobas\" /><ac:plain-text-link-body>\
              <![CDATA[knobas]]></ac:plain-text-link-body></ac:link>?</p>",
-            Some(me()),
+            true,
         );
-        assert_eq!(text, "@knobas knobas?");
+        // The link's body is the name the reader draws, not more words.
+        assert_eq!(text, "@knobas ?");
     }
 
     #[test]

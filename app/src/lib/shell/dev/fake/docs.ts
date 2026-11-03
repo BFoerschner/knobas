@@ -61,9 +61,11 @@ import type {
   DocsTree,
   DocSpace,
   SectionRefusal,
+  TableCell,
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS, fakeRoleScope } from "./corpus";
+import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
 
 /** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
@@ -142,25 +144,109 @@ const META: Record<string, [string, string]> = {
   "Ledger reconciliation runbook": ["TW", "2026-08-19 09:00"],
 };
 
+/**
+ * An `html` macro's body (#2440): an endpoint list its script builds, so a
+ * frame that runs no script shows only the heading, and a line that says
+ * whether the script could reach the app's document (it cannot: the frame's
+ * origin is opaque).
+ */
+const EXPLORER = `<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 12px 16px; color: #1f2933; }
+  h3 { margin: 0 0 8px; } .ep { display: flex; gap: 10px; padding: 6px 0; border-top: 1px solid #e4e7eb; }
+  .m { font: 600 12px ui-monospace, monospace; width: 52px; color: #fff; border-radius: 3px; text-align: center; }
+  .GET { background: #2f80ed; } .POST { background: #27ae60; } .wall { color: #6b7785; margin-top: 10px; }
+</style>
+<h3>ledger-api 2.4</h3>
+<div id="eps"></div>
+<p class="wall" id="wall"></p>
+<script>
+  [["GET", "/balances/{account}"], ["POST", "/bookings"], ["GET", "/bookings/{id}"], ["POST", "/refunds"]].forEach(function (e) {
+    var row = document.createElement("div"); row.className = "ep";
+    row.innerHTML = '<span class="m ' + e[0] + '">' + e[0] + "</span><code>" + e[1] + "</code>";
+    document.getElementById("eps").appendChild(row);
+  });
+  var reached; try { reached = !!parent.document.title; } catch (e) { reached = false; }
+  document.getElementById("wall").textContent = reached ? "This frame reached the app." : "Runs in a sandbox: knobas is out of reach.";
+</script>`;
+
 /** A prototype body block. */
 type Proto =
   | { h: string }
   | { p: string }
   | { ul: string[] }
   | { ol: string[] }
+  /** A task list (spec #2432): each task done or not, with the tasks nested under it. */
+  | { tasks: Task[] }
   | { code: string; lang?: string }
   | { table: string[][] }
+  /** A table drawn as written: spans, a header column, blocks in cells (#2436). */
+  | { grid: () => TableCell[][] }
   | { info: string }
   | { warn: string }
   | { note: string }
-  | { macro: string };
+  /** A collapsible (spec #2432), Confluence's `expand`: its title and its blocks. */
+  | { fold: string; blocks: Proto[] }
+  /** An include (spec #2432): another page's body, or its excerpt, filled as the real read fills it. */
+  | { include: string; excerpt?: boolean }
+  | { macro: string }
+  | { html: string }
+  | { frame: string; name?: string };
+
+type Task = [done: boolean, text: string, under?: Task[]];
 
 interface Body {
   labels: string[];
   version: number;
   blocks: Proto[];
+  /** What the page marks as its excerpt, for an excerpt include of it. */
+  excerpt?: Proto[];
   comments: [string, string, string][];
 }
+
+/** A table cell for [`rota`]: its blocks, and the columns and rows it spans. */
+function gridCell(header: boolean, blocks: DocBlock[], colspan = 1, rowspan = 1): TableCell {
+  return { header, blocks, colspan, rowspan };
+}
+
+/**
+ * The rota (#2436): a header row with a merged cell, a header column whose
+ * first cell spans two rows, a list, two paragraphs and code in cells, a
+ * placeholder in a cell, and more columns than the reader is wide. A
+ * function, as `para` reads the corpus declared below.
+ */
+const rota = (): TableCell[][] => [
+  [
+    gridCell(true, [para("Week")]),
+    gridCell(true, [para("Primary")]),
+    gridCell(true, [para("Backup")]),
+    gridCell(true, [para("Handover")], 2),
+    gridCell(true, [para("Escalation contacts outside business hours")]),
+    gridCell(true, [para("Notes")]),
+  ],
+  [
+    gridCell(true, [para("Week 44")], 1, 2),
+    gridCell(false, [para("Mara Lindqvist")]),
+    gridCell(false, [para("Jonas Berg")]),
+    gridCell(false, [para("Tuesday 10:00")]),
+    gridCell(false, [{ type: "list", ordered: false, items: [{ checked: null, blocks: [para("read the open incidents")] }, { checked: null, blocks: [para("check the review queue")] }] }]),
+    gridCell(false, [para("Priya Nair, then Tomasz Wójcik")], 1, 2),
+    gridCell(false, [para("Restore drill on Thursday."), para("Expect the replica to lag while it runs.")]),
+  ],
+  [
+    gridCell(false, [para("Tomasz Wójcik")]),
+    gridCell(false, [para("Mara Lindqvist")]),
+    gridCell(false, [para("Tuesday 10:00")]),
+    gridCell(false, [{ type: "code", code: "kuma ack --all", language: "sh" }]),
+    gridCell(false, [{ type: "placeholder", name: "expand" }]),
+  ],
+  [
+    gridCell(true, [para("Week 45")]),
+    gridCell(false, [para("Jonas Berg")], 2),
+    gridCell(false, [para("Swapped, see the channel.")], 2),
+    gridCell(false, [para("Priya Nair")]),
+    gridCell(false, [{ type: "panel", kind: "info", title: null, blocks: [para("Finance close week.")] }]),
+  ],
+];
 
 /** prototype-6's `BODIES`, the pages it writes out. */
 const BODIES: Record<string, Body> = {
@@ -199,9 +285,24 @@ const BODIES: Record<string, Body> = {
       { p: "Every code the PSP returns on a batch or a single payout, and what payout-service does with it. Keep this table in step with `psp::errors` in payout-service." },
       { h: "Codes" },
       { table: [["Code", "Meaning", "What we do"], ["TEMP_UNAVAILABLE", "The PSP is overloaded or in maintenance", "retry with backoff"], ["RATE_LIMITED", "Too many requests from our key", "stop, send to manual review"], ["INVALID_IBAN", "Checksum or length is wrong", "fail, tell the customer"], ["DUPLICATE", "The idempotency key was seen before", "treat as sent"], ["TIMEOUT", "No answer within 60 s", "retry with backoff"]] },
+      {
+        fold: "Codes the PSP retired in 2025",
+        blocks: [
+          { p: "Batches from before the 2025 API still carry these. payout-service reads them as their successors." },
+          { ul: ["`BUSY` reads as TEMP_UNAVAILABLE.", "`THROTTLED` reads as RATE_LIMITED."] },
+        ],
+      },
       { h: "Transient or permanent" },
       { p: "Only TEMP_UNAVAILABLE and TIMEOUT are transient. Everything else is permanent and is never retried automatically. See {{page:SEPA payout retry design}} for the backoff." },
       { note: "The PSP sandbox returns TEMP_UNAVAILABLE on purpose for IBANs ending in 0503. Use those in integration tests." },
+      { h: "Adding a code" },
+      {
+        tasks: [
+          [true, "Add it to `psp::errors` in payout-service."],
+          [false, "Add its row to the table above.", [[true, "Meaning, from the PSP's changelog"], [false, "What we do, agreed with finance"]]],
+          [false, "Tell #payments-ops which batches it can fail."],
+        ],
+      },
     ],
     comments: [["ML", "2026-08-20 09:00", "Added the sandbox IBAN trick, it makes the retry test deterministic."]],
   },
@@ -215,6 +316,12 @@ const BODIES: Record<string, Body> = {
       { h: "Data flow" },
       { p: "A payout starts as a booking in ledger-api, is picked up by payout-service at 13:00, and comes back as a settlement event the next morning." },
       { macro: "draw.io diagram" },
+      { h: "API reference" },
+      { p: "The ledger API's endpoints, from the embedded explorer the platform team hosts." },
+      { html: EXPLORER },
+      { h: "Status board" },
+      { p: "The payout dashboard, framed from the status host." },
+      { frame: "https://example.com/" },
     ],
     comments: [],
   },
@@ -225,6 +332,7 @@ const BODIES: Record<string, Body> = {
       { warn: "Parts of this page describe the old ledger topology. Tomasz is updating it in [[OPS-77]]." },
       { h: "Rota" },
       { p: "On-call rotates weekly on Tuesdays at 10:00. The current person is in the #oncall channel topic." },
+      { grid: rota },
       { h: "When an alert fires" },
       { ol: ["Acknowledge it in Uptime Kuma within 15 minutes.", "Check the runbook linked from the monitor.", "If prod payouts are affected, tell finance in #payments-ops."] },
       { h: "Ledger" },
@@ -232,6 +340,7 @@ const BODIES: Record<string, Body> = {
       { h: "Escalation" },
       { table: [["After", "Who"], ["15 min unacknowledged", "second on-call"], ["30 min prod outage", "Tomasz Wójcik"], ["Money at risk", "Priya Nair"]] },
     ],
+    excerpt: [{ p: "On-call rotates weekly on Tuesdays at 10:00. The current person is in the #oncall channel topic." }],
     comments: [["TW", "2026-08-19 09:00", "Rewriting the Ledger section this week."]],
   },
   "Ledger reconciliation runbook": {
@@ -243,6 +352,9 @@ const BODIES: Record<string, Body> = {
       { h: "Steps" },
       { ol: ["Export the flagged rows.", "Group them by PSP code and amount.", "For partial refunds, check whether the fee was booked twice; that was [[PAY-228]]."] },
       { code: "select payout_id, ledger_amount, psp_amount\nfrom recon.flagged\nwhere created_at > now() - interval '1 day'\norder by abs(ledger_amount - psp_amount) desc;", lang: "sql" },
+      { h: "Who to ask" },
+      { include: "On-call handbook", excerpt: true },
+      { include: "Reconciliation in the old ledger" },
     ],
     comments: [],
   },
@@ -257,13 +369,16 @@ interface FakePage {
 }
 
 /**
- * The pages other modules name by id: the one read last, and PAY-231's two
- * pages, which `job-reach.ts` lists in what the job reaches (#863).
+ * The pages other modules name by id: the one read last, PAY-231's two
+ * pages, which `job-reach.ts` lists in what the job reaches (#863), and the
+ * one holding an embed (#2440).
  */
 const NAMED: Record<string, string> = {
   "SEPA payout retry design": "confluence:sepa",
   "Manual review queue": "confluence:manual-review",
   "PSP error codes": "confluence:psp-codes",
+  // Its embed is the one the shots and `scripts/embed-witness.mjs` open (#2440).
+  "Payments architecture overview": "confluence:architecture",
 };
 
 const PAGES: FakePage[] = [];
@@ -354,22 +469,52 @@ function para(s: string): DocBlock {
   return { type: "paragraph", text: inl(s) };
 }
 
+function tasks(list: Task[]): DocBlock {
+  return {
+    type: "list",
+    ordered: false,
+    items: list.map(([done, text, under]) => ({ checked: done, blocks: under ? [para(text), tasks(under)] : [para(text)] })),
+  };
+}
+
 function block(b: Proto): DocBlock {
   if ("h" in b) return { type: "heading", level: 2, text: inl(b.h) };
   if ("p" in b) return para(b.p);
-  if ("ul" in b) return { type: "list", ordered: false, items: b.ul.map((l) => [para(l)]) };
-  if ("ol" in b) return { type: "list", ordered: true, items: b.ol.map((l) => [para(l)]) };
+  if ("ul" in b) return { type: "list", ordered: false, items: b.ul.map((l) => ({ checked: null, blocks: [para(l)] })) };
+  if ("ol" in b) return { type: "list", ordered: true, items: b.ol.map((l) => ({ checked: null, blocks: [para(l)] })) };
+  if ("tasks" in b) return tasks(b.tasks);
   if ("code" in b) return { type: "code", code: b.code, language: b.lang ?? null };
   if ("table" in b) {
     return {
       type: "table",
-      rows: b.table.map((row, r) => row.map((cell) => ({ header: r === 0, text: inl(cell) }))),
+      rows: b.table.map((row, r) => row.map((cell) => ({ header: r === 0, blocks: [para(cell)], colspan: 1, rowspan: 1 }))),
     };
   }
+  if ("grid" in b) return { type: "table", rows: b.grid() };
   if ("info" in b) return { type: "panel", kind: "info", title: null, blocks: [para(b.info)] };
   if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
   if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
+  if ("fold" in b) return { type: "collapsible", title: b.fold, blocks: b.blocks.map(block) };
+  if ("html" in b) return { type: "embed", name: "html", content: { kind: "html", html: b.html } };
+  if ("frame" in b) return { type: "embed", name: b.name ?? "iframe", content: { kind: "url", url: b.frame } };
+  if ("include" in b) return include(b.include, b.excerpt ?? false);
   return { type: "placeholder", name: b.macro };
+}
+
+/** An include as the real read fills it: the page's blocks or its excerpt, or why not. */
+function include(title: string, excerpt: boolean): DocBlock {
+  const page = PAGES.find((p) => p.title === title);
+  const body = BODIES[title];
+  const drawn = excerpt ? body?.excerpt : body?.blocks;
+  return {
+    type: "include",
+    title,
+    space: null,
+    excerpt,
+    entity_id: page?.id ?? null,
+    blocks: drawn?.map(block) ?? [],
+    unfilled: page === undefined ? "not_mirrored" : drawn === undefined ? "no_excerpt" : null,
+  };
 }
 
 /** prototype-6's generic body for a page it does not write out. */
@@ -436,12 +581,14 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
     for (const b of list) {
       if (b.type === "table") note("table");
       else if (b.type === "code") note("code");
-      else if (b.type === "placeholder" || (b.type === "panel" && inPanel)) note("macro");
+      else if (b.type === "placeholder" || b.type === "collapsible" || b.type === "embed" || b.type === "include" || (b.type === "panel" && inPanel)) note("macro");
       else if (b.type === "panel") visit(b.blocks, true);
       else if (b.type === "paragraph") inlines(b.text);
       else if (b.type === "list") {
+        // The editor's text has no checkbox: a task list is formatting (spec #2432).
+        if (b.items.some((item) => item.checked !== null)) note("formatting");
         for (const item of b.items) {
-          for (const inner of item) {
+          for (const inner of item.blocks) {
             if (inner.type === "paragraph") inlines(inner.text);
             else note("formatting");
           }
@@ -457,7 +604,7 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
 function sectionText(blocks: DocBlock[]): string {
   return blocks
     .map((b) => {
-      if (b.type === "list") return b.items.map((item) => `- ${item.map(blockWords).join(" ")}`).join("\n");
+      if (b.type === "list") return b.items.map((item) => `- ${item.blocks.map(blockWords).join(" ")}`).join("\n");
       if (b.type !== "panel") return blockWords(b);
       const head = `**${b.kind.charAt(0).toUpperCase()}${b.kind.slice(1)}**${b.title ? ` ${b.title}` : ""}`;
       const body = sectionText(b.blocks);
@@ -490,9 +637,9 @@ function work(blocks: DocBlock[]): DocPage["work"] {
   };
   const visit = (b: DocBlock) => {
     if (b.type === "heading" || b.type === "paragraph") walk(b.text);
-    else if (b.type === "list") b.items.flat().forEach(visit);
-    else if (b.type === "panel") b.blocks.forEach(visit);
-    else if (b.type === "table") b.rows.flat().forEach((c) => walk(c.text));
+    else if (b.type === "list") b.items.flatMap((item) => item.blocks).forEach(visit);
+    else if (b.type === "panel" || b.type === "collapsible") b.blocks.forEach(visit);
+    else if (b.type === "table") b.rows.flat().forEach((c) => c.blocks.forEach(visit));
   };
   blocks.forEach(visit);
   return out;
@@ -566,6 +713,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
     backlinks: backlinks(found.title),
     work: work(body.blocks.map(block)),
     writes: ["comment", "update_page", "create_page"],
+    run_embeds: !EMBEDS_OFF.has("confluence"),
   };
 }
 
@@ -694,13 +842,49 @@ function queued(op: string, entity: string, payload: WriteOpPayload): QueuedWrit
   };
 }
 
+/**
+ * `?fake-embed-host=<origin>` (#2440, `scripts/embed-witness.mjs`): every
+ * embed's HTML is the witness's probe instead. It loads `<origin>/lib.js`,
+ * fetches `<origin>/spec.json`, a host other than the app's, and tries to
+ * reach the app: its window, its document, its storage, Tauri's globals and
+ * the `ipc:` scheme. It writes what happened into `#knobas-witness` as JSON,
+ * for the witness to read from the frame.
+ */
+function witnessed(doc: DocPage, host: string | null): DocPage {
+  if (host === null) return doc;
+  // The bridge's call is spelt from two halves: house-rules' scan for a command
+  // called outside lib/ipc/ reads the word in any string, and this is a probe.
+  const call = ["inv", "oke"].join("");
+  const probe = `<p id="knobas-witness">running</p>
+<script src="${host}/lib.js"></script>
+<script>
+var call = "${call}";
+(async function () {
+  var out = { script: typeof window.witnessLib === "string" ? window.witnessLib : null };
+  try { out.spec = (await (await fetch("${host}/spec.json")).json()).openapi; } catch (e) { out.spec = "refused: " + e; }
+  var tryIt = function (name, f) { try { var v = f(); out[name] = v === undefined || v === null ? "unreachable" : "REACHED"; } catch (e) { out[name] = "refused"; } };
+  tryIt("parentTauri", function () { return parent.__TAURI_INTERNALS__; });
+  tryIt("topTauri", function () { return top.__TAURI_INTERNALS__; });
+  tryIt("ownTauri", function () { return window.__TAURI_INTERNALS__; });
+  tryIt("parentDocument", function () { return parent.document.title; });
+  tryIt("storage", function () { return localStorage.length; });
+  try { parent.__TAURI_INTERNALS__[call]("docs_page", { entityId: "confluence:sepa" }); out.ipcCall = "CALLED"; } catch (e) { out.ipcCall = "refused"; }
+  try { await fetch("ipc://localhost/docs_page"); out.ipcScheme = "REACHED"; } catch (e) { out.ipcScheme = "refused"; }
+  document.getElementById("knobas-witness").textContent = JSON.stringify(out);
+})();
+</script>`;
+  const swap = (blocks: DocBlock[]): DocBlock[] =>
+    blocks.map((b) => (b.type === "embed" && b.content.kind === "html" ? { ...b, content: { kind: "html", html: probe } } : b));
+  return { ...doc, blocks: swap(doc.blocks) };
+}
+
 /** This feature's commands. */
 export function handlers(params: URLSearchParams): Handlers {
   // The bulk space's pages, none unless the page was opened with the switch.
   const bulk = bulkPages(Number(params.get("fake-docs-pages") ?? 0) || 0);
   return {
     docs_tree: () => tree(bulk),
-    docs_page: (args) => page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0),
+    docs_page: (args) => witnessed(page(args, bulk, Number(params.get("fake-docs-long") ?? 0) || 0), params.get("fake-embed-host")),
     docs_search: (args) => search(args, bulk),
     docs_export_markdown: (args) => {
       const found = [...PAGES, ...bulk].find((p) => p.id === String(args["entityId"] ?? ""));

@@ -24,7 +24,11 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod html;
 pub mod markdown;
+mod search_text;
+
+pub use search_text::search_text;
 
 /// The entity kind the Docs frame draws: knobas' own word for a page since
 /// migration `0001`. A docs source emits its pages as this kind.
@@ -54,6 +58,12 @@ pub struct DocContent {
     pub blocks: Vec<DocBlock>,
     /// The page's comments, oldest first.
     pub comments: Vec<DocComment>,
+    /// What the source marks as the page's excerpt, the part another page's
+    /// excerpt include draws (spec #2432, *Include resolution in knobas*), or
+    /// `None` where the page marks none. Its blocks are also in
+    /// [`DocContent::blocks`] where the source draws them on the page itself.
+    #[serde(default)]
+    pub excerpt: Option<Vec<DocBlock>>,
     /// The page's sections in the order of its top-level headings, numbered
     /// from 1 as the reader numbers them, each with whether knobas edits it
     /// (#862, R-10.13).
@@ -179,15 +189,31 @@ pub struct DocComment {
 /// - `heading`: A section heading. `level` is 1 to 6 as the source wrote it;
 ///   the reader draws every level as a section head.
 /// - `list`: A list. A nested list's items are drawn as a list inside their
-///   item.
+///   item. An item may carry a checked state: a task list is a list whose
+///   items say whether they are done ([`ListItem`]).
 /// - `code`: A code block, verbatim, with the language the source named.
-/// - `table`: A table, row by row; a header cell says so.
+/// - `table`: A table, row by row; a header cell says so, and a cell holds
+///   blocks and may span columns and rows.
 /// - `panel`: An info, note, warning or tip panel, with the blocks inside it.
+/// - `collapsible`: A titled part the reader draws closed, with the blocks
+///   inside it, opened when the reader arrives on a search hit inside it
+///   (spec #2432). Confluence's `expand` is one; its words are the page's.
+/// - `include`: Another page of the source drawn in place (spec #2432): the
+///   page by `title` and `space` as a page link names one, and whether only
+///   its `excerpt` is wanted. The adapter leaves the rest empty; knobas fills
+///   it when the reader is read, from the mirror as it is now: `entity_id`
+///   the mirrored page, `blocks` what it includes, or `unfilled` why it
+///   could not ([`Unfilled`]).
 /// - `placeholder`: Something the source has that the reader does not draw: the
 ///   source's own name for it (a Confluence macro's `ac:name`). Never dropped,
 ///   so a page with a part knobas cannot draw says so (story 134).
+/// - `embed`: Something the page runs rather than says (spec #2432, #2440):
+///   `name` is the source's word for it (Confluence's `html` macro), and
+///   `content` what runs. The shell draws it in an isolated frame, never in
+///   its own document.
 ///
-/// Source text, never markup.
+/// Source text, never markup, but for an embed's `html`, which is markup to
+/// run and never to draw.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export_to = "entity.ts")]
@@ -201,7 +227,7 @@ pub enum DocBlock {
     },
     List {
         ordered: bool,
-        items: Vec<Vec<DocBlock>>,
+        items: Vec<ListItem>,
     },
     Code {
         code: String,
@@ -215,17 +241,167 @@ pub enum DocBlock {
         title: Option<String>,
         blocks: Vec<DocBlock>,
     },
+    Collapsible {
+        title: String,
+        blocks: Vec<DocBlock>,
+    },
+    Include {
+        title: String,
+        space: Option<String>,
+        excerpt: bool,
+        #[serde(default)]
+        entity_id: Option<String>,
+        #[serde(default)]
+        blocks: Vec<DocBlock>,
+        #[serde(default)]
+        unfilled: Option<Unfilled>,
+    },
     Placeholder {
         name: String,
     },
+    Embed {
+        name: String,
+        content: EmbedContent,
+    },
 }
 
-/// One cell of a [`DocBlock::Table`].
+/// What a [`DocBlock::Embed`] runs.
+///
+/// - `html`: A document as its author wrote it, byte for byte, scripts
+///   included: the shell serves it from its own origin under a policy of its
+///   own, in a sandboxed frame (#2440). Source markup, never drawn in the
+///   app's document.
+/// - `url`: A page the author framed (#2441): an absolute `http` or `https`
+///   URL, the shell's frame `src`, in the same sandbox. Built only through
+///   [`EmbedContent::url`], which refuses any other scheme.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "DocEmbedContent")]
+pub enum EmbedContent {
+    Html { html: String },
+    Url { url: String },
+}
+
+impl EmbedContent {
+    /// A URL embed of `raw`, trimmed, when it is an absolute `http(s)` URL
+    /// with a host; `None` for anything else (`javascript:`, `file:`, a
+    /// custom scheme, a relative or scheme-relative URL), which the adapter
+    /// draws as a placeholder (spec #2432: only `http` and `https` are framed).
+    pub fn url(raw: &str) -> Option<Self> {
+        let url = raw.trim();
+        let (scheme, rest) = url.split_once("://")?;
+        let host = rest.split(['/', '?', '#']).next().unwrap_or_default();
+        let framed = scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https");
+        let clean = !url.chars().any(|c| c.is_whitespace() || c.is_control());
+        (framed && clean && !host.is_empty()).then(|| Self::Url {
+            url: url.to_owned(),
+        })
+    }
+}
+
+/// Why knobas could not fill a [`DocBlock::Include`] when the reader was read.
+///
+/// - `not_mirrored`: The mirror holds no page of that title in that space of
+///   the same source (another space, no access, deleted).
+/// - `no_excerpt`: The page is mirrored, but marks no excerpt.
+/// - `too_deep`: The include sits more than [`INCLUDE_DEPTH`] includes deep.
+/// - `cycle`: The page is already on the way here: a page including itself,
+///   or one including a page that includes it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
+pub enum Unfilled {
+    NotMirrored,
+    NoExcerpt,
+    TooDeep,
+    Cycle,
+}
+
+/// How many includes deep knobas fills: an include on the page read is one
+/// deep, an include inside what it includes two, and so on.
+pub const INCLUDE_DEPTH: usize = 3;
+
+impl DocBlock {
+    /// An include as the adapter emits it: the page named, nothing filled.
+    #[must_use]
+    pub fn include(title: impl Into<String>, space: Option<String>, excerpt: bool) -> Self {
+        DocBlock::Include {
+            title: title.into(),
+            space,
+            excerpt,
+            entity_id: None,
+            blocks: Vec::new(),
+            unfilled: None,
+        }
+    }
+}
+
+/// One item of a [`DocBlock::List`]: its blocks, and for a task its checked
+/// state (spec #2432, *The vocabulary is the seam*).
+///
+/// `checked` is `None` for an ordinary item, `Some(true)` for a task that is
+/// done and `Some(false)` for one that is not. The shell draws the state and
+/// never changes it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "DocListItem")]
+pub struct ListItem {
+    #[serde(default)]
+    pub checked: Option<bool>,
+    pub blocks: Vec<DocBlock>,
+}
+
+impl ListItem {
+    /// An ordinary item: no checked state.
+    #[must_use]
+    pub fn new(blocks: Vec<DocBlock>) -> Self {
+        Self {
+            checked: None,
+            blocks,
+        }
+    }
+
+    /// A task item, done or not.
+    #[must_use]
+    pub fn task(checked: bool, blocks: Vec<DocBlock>) -> Self {
+        Self {
+            checked: Some(checked),
+            blocks,
+        }
+    }
+}
+
+/// One cell of a [`DocBlock::Table`] (#2436): the blocks it holds, as a page
+/// body's are (paragraphs, lists, code, panels, a nested table, a
+/// placeholder), and the columns and rows it spans, each at least 1.
+///
+/// `header` is per cell: a first row of header cells is the table's header
+/// row, and a header cell opening a body row heads that row (a header column).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct TableCell {
     pub header: bool,
-    pub text: Vec<Inline>,
+    pub blocks: Vec<DocBlock>,
+    #[serde(default = "one")]
+    pub colspan: u32,
+    #[serde(default = "one")]
+    pub rowspan: u32,
+}
+
+impl TableCell {
+    /// A cell spanning one column and one row.
+    #[must_use]
+    pub fn new(header: bool, blocks: Vec<DocBlock>) -> Self {
+        TableCell {
+            header,
+            blocks,
+            colspan: 1,
+            rowspan: 1,
+        }
+    }
+}
+
+fn one() -> u32 {
+    1
 }
 
 /// Which panel a [`DocBlock::Panel`] is.
@@ -321,26 +497,64 @@ pub fn inlines_mut(blocks: &mut [DocBlock]) -> Vec<&mut Inline> {
 fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
     match block {
         DocBlock::Heading { text, .. } | DocBlock::Paragraph { text } => {
-            out.extend(text.iter_mut())
+            out.extend(text.iter_mut());
         }
-        DocBlock::List { items, .. } => {
-            for item in items {
-                for inner in item {
-                    collect(inner, out);
-                }
-            }
-        }
-        DocBlock::Table { rows } => {
-            for cell in rows.iter_mut().flatten() {
-                out.extend(cell.text.iter_mut());
-            }
-        }
-        DocBlock::Panel { blocks, .. } => {
+        // What knobas filled an include with is drawn here, so its links,
+        // chips and mentions are filled like the page's own.
+        DocBlock::Include { blocks, .. } => {
             for inner in blocks {
                 collect(inner, out);
             }
         }
-        DocBlock::Code { .. } | DocBlock::Placeholder { .. } => {}
+        _ => {
+            for inner in nested_mut(block) {
+                collect(inner, out);
+            }
+        }
+    }
+}
+
+/// The blocks the page itself nests in `block`: a list item's, a table
+/// cell's, a panel's and a collapsible's. Not an include's, which knobas
+/// fills. The match names every block, so a new one is a decision here.
+fn nested_mut(block: &mut DocBlock) -> Vec<&mut DocBlock> {
+    match block {
+        DocBlock::List { items, .. } => items.iter_mut().flat_map(|i| &mut i.blocks).collect(),
+        DocBlock::Table { rows } => rows
+            .iter_mut()
+            .flatten()
+            .flat_map(|c| &mut c.blocks)
+            .collect(),
+        DocBlock::Panel { blocks, .. } | DocBlock::Collapsible { blocks, .. } => {
+            blocks.iter_mut().collect()
+        }
+        DocBlock::Heading { .. }
+        | DocBlock::Paragraph { .. }
+        | DocBlock::Include { .. }
+        | DocBlock::Code { .. }
+        | DocBlock::Placeholder { .. }
+        | DocBlock::Embed { .. } => Vec::new(),
+    }
+}
+
+/// Every include in `blocks`, depth first, for knobas' include fill: those
+/// in lists, table cells, panels and collapsibles, not those inside an
+/// include.
+pub fn includes_mut(blocks: &mut [DocBlock]) -> Vec<&mut DocBlock> {
+    let mut out = Vec::new();
+    for block in blocks {
+        includes(block, &mut out);
+    }
+    out
+}
+
+fn includes<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut DocBlock>) {
+    if matches!(block, DocBlock::Include { .. }) {
+        out.push(block);
+        return;
+    }
+    for inner in nested_mut(block) {
+        includes(inner, out);
     }
 }
 
@@ -369,6 +583,9 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
 /// * [`LINK`], the linked page's space key, [`LINK`], its title, [`LINK`]:
 ///   one line per page the body links to, last, so a backlink is a substring
 ///   ([`link_line`]).
+///
+/// A docs page's lines are written by one function, [`search_text`](super::search_text),
+/// from the page's projection (#2435), so no source writes them by hand.
 pub mod indexed {
     /// Opens a section's heading line.
     pub const SECTION: char = '\u{1E}';
@@ -498,6 +715,53 @@ mod tests {
         assert_eq!(back, block);
     }
 
+    /// Spec #2432: a list item crosses as `{checked, blocks}`; an ordinary
+    /// item's `checked` is null.
+    #[test]
+    fn a_list_item_crosses_with_its_checked_state() {
+        let block = DocBlock::List {
+            ordered: false,
+            items: vec![
+                ListItem::task(true, vec![]),
+                ListItem::task(false, vec![]),
+                ListItem::new(vec![]),
+            ],
+        };
+        let wire = serde_json::to_value(&block).unwrap();
+        assert_eq!(
+            wire["items"],
+            serde_json::json!([
+                {"checked": true, "blocks": []},
+                {"checked": false, "blocks": []},
+                {"checked": null, "blocks": []},
+            ])
+        );
+        let back: DocBlock = serde_json::from_value(wire).unwrap();
+        assert_eq!(back, block);
+    }
+
+    #[test]
+    fn a_cell_crosses_with_its_blocks_and_spans_which_default_to_one() {
+        let cell = TableCell {
+            colspan: 3,
+            ..TableCell::new(
+                true,
+                vec![DocBlock::Placeholder {
+                    name: "expand".into(),
+                }],
+            )
+        };
+        let wire = serde_json::to_value(&cell).unwrap();
+        assert_eq!(wire["blocks"][0]["type"], "placeholder");
+        assert_eq!(
+            (wire["colspan"].as_u64(), wire["rowspan"].as_u64()),
+            (Some(3), Some(1))
+        );
+        let bare: TableCell =
+            serde_json::from_value(serde_json::json!({"header": false, "blocks": []})).unwrap();
+        assert_eq!(bare, TableCell::new(false, vec![]));
+    }
+
     #[test]
     fn the_fill_in_pass_reaches_inlines_inside_lists_tables_and_panels() {
         let mention = || Inline::Mention {
@@ -508,15 +772,21 @@ mod tests {
         let mut blocks = vec![
             DocBlock::List {
                 ordered: false,
-                items: vec![vec![DocBlock::Paragraph {
+                items: vec![ListItem::new(vec![DocBlock::Paragraph {
                     text: vec![mention()],
-                }]],
+                }])],
             },
             DocBlock::Table {
-                rows: vec![vec![TableCell {
-                    header: false,
-                    text: vec![mention()],
-                }]],
+                // A cell's inlines sit in its blocks, here a list in it (#2436).
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::List {
+                        ordered: true,
+                        items: vec![ListItem::new(vec![DocBlock::Paragraph {
+                            text: vec![mention()],
+                        }])],
+                    }],
+                )]],
             },
             DocBlock::Panel {
                 kind: PanelKind::Info,
@@ -528,6 +798,129 @@ mod tests {
             },
         ];
         assert_eq!(inlines_mut(&mut blocks).len(), 3);
+    }
+
+    /// A URL embed (#2441) crosses as `{kind: "url", url}`, and is made only
+    /// of an absolute `http(s)` URL with a host.
+    #[test]
+    fn a_url_embed_crosses_naming_its_url_and_takes_only_http_and_https() {
+        let block = DocBlock::Embed {
+            name: "iframe".into(),
+            content: EmbedContent::url(" https://grafana.example/d/1 ").unwrap(),
+        };
+        assert_eq!(
+            serde_json::to_value(&block).unwrap(),
+            serde_json::json!({
+                "type": "embed", "name": "iframe",
+                "content": { "kind": "url", "url": "https://grafana.example/d/1" },
+            })
+        );
+        for good in ["http://a.example", "HTTPS://a.example:8443/x?y#z"] {
+            assert!(EmbedContent::url(good).is_some(), "{good}");
+        }
+        for bad in [
+            "javascript:alert(1)",
+            "javascript://%0aalert(1)",
+            "file:///etc/passwd",
+            "ftp://a.example/",
+            "knobas://x",
+            "//a.example/",
+            "/wiki",
+            "https://",
+            "https:///path",
+            "https://a.example/\nx",
+            "",
+        ] {
+            assert_eq!(EmbedContent::url(bad), None, "{bad:?}");
+        }
+    }
+
+    /// Spec #2432: an include crosses naming its page, with nothing filled
+    /// until knobas fills it; a reason crosses in snake case.
+    #[test]
+    fn an_include_crosses_naming_its_page_and_why_it_is_unfilled() {
+        let wire = serde_json::to_value(DocBlock::include("Retry budget", None, true)).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "type": "include", "title": "Retry budget", "space": null, "excerpt": true,
+                "entity_id": null, "blocks": [], "unfilled": null,
+            })
+        );
+        let missed: DocBlock = serde_json::from_value(serde_json::json!({
+            "type": "include", "title": "Gone", "space": "OPS", "excerpt": false,
+            "unfilled": "not_mirrored",
+        }))
+        .unwrap();
+        let DocBlock::Include {
+            unfilled, blocks, ..
+        } = missed
+        else {
+            panic!("an include")
+        };
+        assert_eq!(unfilled, Some(Unfilled::NotMirrored));
+        assert!(blocks.is_empty());
+        assert_eq!(
+            serde_json::to_value(Unfilled::TooDeep).unwrap(),
+            serde_json::json!("too_deep")
+        );
+    }
+
+    /// The include fill finds an include wherever the page draws one, and
+    /// not inside what an include holds: that is the included page's.
+    #[test]
+    fn the_include_fill_reaches_includes_in_lists_cells_panels_and_collapsibles_but_not_inside_one()
+    {
+        let filled = DocBlock::Include {
+            title: "A".into(),
+            space: None,
+            excerpt: false,
+            entity_id: Some("c:1".into()),
+            blocks: vec![DocBlock::include("Inner", None, false)],
+            unfilled: None,
+        };
+        let mut blocks = vec![
+            DocBlock::List {
+                ordered: false,
+                items: vec![ListItem::new(vec![DocBlock::include("B", None, true)])],
+            },
+            DocBlock::Panel {
+                kind: PanelKind::Info,
+                title: None,
+                blocks: vec![DocBlock::include("C", Some("OPS".into()), false)],
+            },
+            DocBlock::Table {
+                rows: vec![vec![TableCell::new(
+                    false,
+                    vec![DocBlock::include("D", None, false)],
+                )]],
+            },
+            DocBlock::Collapsible {
+                title: "More".into(),
+                blocks: vec![DocBlock::include("E", None, false)],
+            },
+            filled,
+        ];
+        let titles: Vec<String> = includes_mut(&mut blocks)
+            .into_iter()
+            .map(|b| match b {
+                DocBlock::Include { title, .. } => title.clone(),
+                _ => unreachable!(),
+            })
+            .collect();
+        assert_eq!(titles, ["B", "C", "D", "E", "A"]);
+        // What an include was filled with is drawn, so it is filled in too.
+        let mut drawn = vec![DocBlock::Include {
+            title: "A".into(),
+            space: None,
+            excerpt: false,
+            entity_id: None,
+            blocks: vec![DocBlock::Paragraph {
+                text: vec![Inline::text("x")],
+            }],
+            unfilled: None,
+        }];
+        assert_eq!(inlines_mut(&mut drawn).len(), 1);
     }
 
     #[test]

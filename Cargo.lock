@@ -3180,7 +3180,7 @@ dependencies = [
 
 [[package]]
 name = "knobas-adapter-sdk"
-version = "1.4.0"
+version = "1.5.0"
 dependencies = [
  "chrono",
  "knobas-source",
@@ -3549,6 +3549,7 @@ dependencies = [
  "knobas-core",
  "knobas-http",
  "knobas-source",
+ "knobas-spi-types",
  "knobas-sync",
  "knobas-wasm-host",
  "reqwest",

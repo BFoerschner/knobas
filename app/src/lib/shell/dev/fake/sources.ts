@@ -9,6 +9,9 @@ import { keepSeed, onFakeReset } from "../fake-seed";
 import { fills } from "../../../tf/roles.svelte";
 import { CORPUS, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
 
+/** The sources *Run embedded HTML* is off for (#2440): `fake/docs.ts` reads it for a page's `run_embeds`. */
+export const EMBEDS_OFF = new Set<string>();
+
 // -- the sources cockpit's fixture -------------------------------------------
 
 /** What the fixture's adapters declare — §3a's display metadata. */
@@ -626,6 +629,14 @@ export function handlers(): Handlers {
     sync_role: (args) => syncRole(args),
     reindex_fts: () => null,
     delete_source: () => null,
+    // Stored for the session (#2440), so a page opened after turning it off draws its embeds as placeholders.
+    run_embedded_html: (args) => !EMBEDS_OFF.has(String(args["id"] ?? "")),
+    set_run_embedded_html: (args) => {
+      const id = String(args["id"] ?? "");
+      if (args["on"] === false) EMBEDS_OFF.add(id);
+      else EMBEDS_OFF.delete(id);
+      return !EMBEDS_OFF.has(id);
+    },
     // Answered, never stored: the row the page draws next is the fixture's
     // with the patch laid over it, which is what `update_source` answers.
     update_source: (args) => {
@@ -701,4 +712,4 @@ export function handlers(): Handlers {
   };
 }
 
-keepSeed(FIXTURE_SOURCES, FIXTURE_ADAPTERS, INSTALLED);
+keepSeed(FIXTURE_SOURCES, FIXTURE_ADAPTERS, INSTALLED, EMBEDS_OFF);

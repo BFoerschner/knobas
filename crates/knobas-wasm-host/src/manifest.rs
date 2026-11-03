@@ -21,7 +21,8 @@
 //! knobas adapter built against that interface version, its descriptor is
 //! well formed and names the manifest's kind and version, and every role it
 //! claims is covered by its kinds, declared paths and reads
-//! ([`knobas_source::role::check`]).
+//! ([`knobas_source::role::check`]), and a docs-source claim comes from a
+//! component that exports the docs projection ([`check_docs`], #2442).
 //!
 //! `hosts` is the adapter's allowlist (#1203, [`crate::allow`]): each entry
 //! is a fixed host or a whole-entry template `{key}`, and a template's key
@@ -123,6 +124,11 @@ pub enum Refusal {
     Limits(String),
     #[error("the adapter's role claims are refused: {0}")]
     Role(#[from] ClaimError),
+    #[error(
+        "the adapter claims the {role} role, and its component exports no docs projection \
+         ({PACKAGE}/docs, 1.5.0), so knobas could draw none of its pages"
+    )]
+    NoDocsProjection { role: &'static str },
 }
 
 /// A manifest and its artifact that passed every static check.
@@ -254,6 +260,7 @@ pub fn check(manifest: Manifest, artifact: Vec<u8>) -> Result<Checked, Refusal> 
         });
     }
     check_descriptor(&manifest, &adapter.template())?;
+    check_docs(&adapter.template(), adapter.projects())?;
     let adapter = adapter
         .with_hosts(manifest.host_patterns()?)
         .with_limits(manifest.limits()?);
@@ -303,5 +310,22 @@ pub fn check_descriptor(manifest: &Manifest, descriptor: &SourceDescriptor) -> R
         }
     }
     knobas_source::role::check(descriptor)?;
+    Ok(())
+}
+
+/// The docs half of the static checks (ADR-0040, #2442): a descriptor that
+/// claims the wiki role is accepted only from a component that exports the
+/// docs projection (`projects`), since its pages are drawn and indexed from
+/// nothing else.
+///
+/// # Errors
+///
+/// [`Refusal::NoDocsProjection`].
+pub fn check_docs(descriptor: &SourceDescriptor, projects: bool) -> Result<(), Refusal> {
+    let role = knobas_source::role::WIKI;
+    let claims = descriptor.roles.iter().any(|claim| claim.role == role);
+    if claims && !projects {
+        return Err(Refusal::NoDocsProjection { role });
+    }
     Ok(())
 }

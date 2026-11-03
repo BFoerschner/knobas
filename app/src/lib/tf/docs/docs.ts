@@ -22,7 +22,10 @@ import type {
   PanelKind,
   Reached,
   SectionRefusal,
+  Unfilled,
 } from "../../ipc/entity";
+import { getContext, setContext } from "svelte";
+
 import { originLabel } from "../job/job";
 import { isDone } from "../tickets/tickets";
 
@@ -201,18 +204,100 @@ export function blockWords(block: DocBlock): string {
     case "paragraph":
       return inlineWords(block.text);
     case "list":
-      return block.items.flat().map(blockWords).join(" ");
+      return block.items
+        .flatMap((item) => item.blocks)
+        .map(blockWords)
+        .join(" ");
     case "code":
       return block.code;
     case "table":
       return block.rows
         .flat()
-        .map((c) => inlineWords(c.text))
+        .flatMap((c) => c.blocks.map(blockWords))
         .join(" ");
     case "panel":
       return block.blocks.map(blockWords).join(" ");
+    case "collapsible":
+      return [block.title, ...block.blocks.map(blockWords)].join(" ");
+    // An include's words are the included page's, as in search (spec #2432).
+    case "include":
     case "placeholder":
+    // What an embed shows is in its frame, not in the reader's words.
+    case "embed":
       return "";
+  }
+}
+
+/**
+ * Open every collapsible (`details.tf-collapse`) that hides `match`, so the
+ * find bar's current match is on screen (spec #2432). A match in a
+ * collapsible's own title is drawn while it is closed and opens nothing.
+ */
+export function revealMatch(match: Element): void {
+  for (let fold = match.parentElement?.closest("details.tf-collapse"); fold; fold = fold.parentElement?.closest("details.tf-collapse")) {
+    const title = fold.querySelector(":scope > summary");
+    if (!title?.contains(match)) (fold as HTMLDetailsElement).open = true;
+  }
+}
+
+/**
+ * How long an embed's frame has to say it loaded (#2440): its reporter
+ * speaks before the author's HTML runs, so a frame silent this long never
+ * loaded, and offers *Open in browser*.
+ */
+export const EMBED_REPORT_MS = 10_000;
+
+/**
+ * A URL embed's height (#2441), up to the window's: the framed page is
+ * another origin's and reports nothing, so its frame cannot follow it and
+ * scrolls inside itself. Its `load` event, not a report, says it loaded.
+ */
+export const EMBED_URL_HEIGHT = 480;
+
+/**
+ * The border of an embed's frame in CSS pixels, each side (`.tf-embed iframe`
+ * in `tf/css/docs.css`; `tf-css.test.ts` holds the two together). The frame
+ * is border-box, so its `height` holds this border twice: an HTML frame is
+ * its document's reported height plus both, or a document that fits scrolls
+ * by their width (#2459).
+ */
+export const EMBED_FRAME_BORDER = 1;
+
+/** An HTML embed's frame height: its document's height and border, up to the window's. */
+export function embedFrameHeight(documentHeight: number, viewport: number): number {
+  return Math.min(documentHeight + 2 * EMBED_FRAME_BORDER, viewport);
+}
+
+const EMBEDS = Symbol("docs-embeds");
+
+/**
+ * Say, for every embed `TfDocs` draws below, whether the page's source runs
+ * them (*Run embedded HTML*, `DocPage.run_embeds`): a context, so the blocks
+ * of a body and of each comment hear it without a prop through every level.
+ */
+export function provideEmbeds(runs: () => boolean): void {
+  setContext(EMBEDS, runs);
+}
+
+/** Whether embeds run here: what `TfDocs` said, and on where nothing said. */
+export function embedsRun(): () => boolean {
+  return getContext<(() => boolean) | undefined>(EMBEDS) ?? (() => true);
+}
+
+/**
+ * Why an include is a placeholder (spec #2432), as the words before and after
+ * the page's title.
+ */
+export function includeMiss(why: Unfilled): { before: string; after: string } {
+  switch (why) {
+    case "not_mirrored":
+      return { before: "This part includes ", after: ", which knobas does not mirror." };
+    case "no_excerpt":
+      return { before: "This part includes the excerpt of ", after: ", which has none." };
+    case "too_deep":
+      return { before: "This part includes ", after: " more than three includes deep, so knobas stops here." };
+    case "cycle":
+      return { before: "This part includes ", after: ", which includes this page again, so knobas stops here." };
   }
 }
 
@@ -342,6 +427,24 @@ export function panelLabel(block: Extract<DocBlock, { type: "panel" }>): string 
 export function headed(rows: { header: boolean }[][]): boolean {
   const first = rows[0];
   return first !== undefined && first.length > 0 && first.every((c) => c.header);
+}
+
+/**
+ * Whether a table's body rows (`rows` from `from` on) open with a header cell
+ * each, so that column heads its rows (#2436): a header column, recognized
+ * from the cells' own `header` as a header row is. A row the first column's
+ * cell above spans into opens with that cell.
+ */
+export function headerColumn(rows: { header: boolean; rowspan: number }[][], from: number): boolean {
+  const body = rows.slice(from);
+  let spannedTo = 0;
+  for (const [r, row] of body.entries()) {
+    if (r < spannedTo) continue;
+    const first = row[0];
+    if (!first?.header) return false;
+    spannedTo = r + Math.max(1, first.rowspan);
+  }
+  return body.length > 0;
 }
 
 // -- the search (#860) and the find bar --------------------------------------

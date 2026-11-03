@@ -52,6 +52,53 @@
 //!   that answers it declares [`spi::Capability::Refresh`], and one built
 //!   against an earlier 1.x answers *not offered*, so its source runs after
 //!   every landed write instead.
+//! * **The docs projection** (1.5.0, ADR-0040) is [`Adapter::project`]: a
+//!   mirrored record drawn as a docs page, in `knobas-source`'s docs
+//!   vocabulary ([`spi::docs::DocContent`]). It takes no instance, as a
+//!   built-in adapter's `DocProjection` takes none, and the host calls it
+//!   with no HTTP capability. An adapter that claims the `wiki` role
+//!   answers it for its `page` kind; the host builds each page's search
+//!   text from it. **The docs writes** beside it are
+//!   [`Adapter::edit_section`] and [`Adapter::body_from_text`] (#2443): the
+//!   markup a section edit or a new page queues, which [`Adapter::write`]
+//!   then performs as `update_page` or `create_page`.
+//! * **The shared HTML reader** (ADR-0040, #2444) is [`html`], the one
+//!   knobas reads Confluence with: [`html::to_blocks`] reads markup into the
+//!   docs blocks and never fails, and hands every element it does not know
+//!   (a wiki's own macros and links) to the adapter's [`Hook`], which
+//!   answers [`Hooked::Blocks`] or [`Hooked::Inlines`] (made with
+//!   [`Reading`], which reads the element's children back through the
+//!   reader), [`Hooked::Unwrap`] (read its children in its place) or
+//!   [`Hooked::Decline`] (a placeholder named after it). An adapter maps
+//!   only what is its own:
+//!
+//!   ```
+//!   use knobas_adapter_sdk::{Hook, Hooked, Reading, html};
+//!   use knobas_adapter_sdk::spi::docs::{DocBlock, Inline};
+//!
+//!   struct Wiki;
+//!   impl Hook for Wiki {
+//!       fn element(&self, element: &html::Node, reading: &Reading<'_>) -> Hooked {
+//!           match element.name() {
+//!               Some("wiki:user") => Hooked::Inlines(vec![reading.text("@someone")]),
+//!               Some("wiki:box") => Hooked::Blocks(reading.blocks(element.children())),
+//!               _ => Hooked::Decline,
+//!           }
+//!       }
+//!   }
+//!
+//!   let blocks = html::to_blocks("<p>Ask <wiki:user/></p><wiki:poll/>", &Wiki);
+//!   assert_eq!(blocks[1], DocBlock::Placeholder { name: "wiki:poll".into() });
+//!   ```
+//!
+//! * **The docs contract** holds the projection and the writes together
+//!   (`knobas_wasm_host::docs_contract`, held on a component that claims the
+//!   wiki role or exports `docs`): every `page`
+//!   the sync emits is drawn, no other kind is, sections are numbered from
+//!   1, a section the projection refuses the edit refuses for the same
+//!   reason, an editable one is edited against the version drawn, a section
+//!   that is not there is [`EditRefused::Missing`](knobas_source::docs::EditRefused::Missing),
+//!   and a new page's body is not empty. Each check is named when it fails.
 
 // The bindings name this crate by its own name, so that the paths they
 // write resolve in the adapter crate the export macro expands in, and here.
@@ -61,6 +108,8 @@ mod convert;
 mod glue;
 
 pub use knobas_source as spi;
+pub use knobas_source::docs::html;
+pub use knobas_source::docs::html::{Hook, Hooked, Reading};
 pub use knobas_source::{
     ConnectionInfo, Cursor, RefreshAnswer, SourceDescriptor, SourceError, SyncItem, WriteOp,
     WriteReceipt,
@@ -303,6 +352,53 @@ pub trait Adapter: Sized + 'static {
         Ok(None)
     }
 
+    /// The docs projection (1.5.0, ADR-0040): the record of entity kind
+    /// `kind` whose payload, as this adapter emitted it, is `payload`, drawn
+    /// as a docs page, or `None`, the default, for a kind it draws no page
+    /// for. A plain function of the payload: the host calls it when a page
+    /// is opened and when it indexes a `page` at sync, with no instance and
+    /// no HTTP capability (every request is refused), and stops it after
+    /// at most 5 s. A projection that panics or is stopped is no content,
+    /// and the page draws as the source's failure.
+    /// Built against 1.4.0 or earlier, which has no `docs`, it is never
+    /// called.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn project(kind: &str, payload: &serde_json::Value) -> Option<knobas_source::docs::DocContent> {
+        let _ = (kind, payload);
+        None
+    }
+
+    /// The docs section edit (1.5.0, #2443), a built-in adapter's
+    /// `DocWrites::edit_section`: section `number` (1 for the first
+    /// top-level heading, as [`Self::project`]'s `sections` number them) of
+    /// the record whose payload is `payload`, its body replaced with `text`
+    /// in this adapter's markup and the rest kept byte for byte, with the
+    /// version the payload holds. The host queues the answer as a
+    /// `WriteOp::UpdatePage`, which [`Self::write`] performs. Called as
+    /// [`Self::project`] is: no instance, no HTTP, at most 5 s. The default
+    /// edits nothing: [`EditRefused::Missing`](knobas_source::docs::EditRefused::Missing).
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn edit_section(
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Result<knobas_source::docs::SectionEdit, knobas_source::docs::EditRefused> {
+        let _ = (kind, payload, number, text);
+        Err(knobas_source::docs::EditRefused::Missing)
+    }
+
+    /// A new page's body in this adapter's markup from the editor's plain
+    /// text (1.5.0, #2443), a built-in adapter's `DocWrites::body_from_text`:
+    /// `## ` starts a section, `- ` a list item, a blank line a paragraph.
+    /// Queued as a `WriteOp::CreatePage`. Called as [`Self::project`] is.
+    /// The default is [`html_from_text`], plain HTML with the text escaped:
+    /// a wiki whose markup is HTML keeps it, any other overrides it.
+    #[cfg(not(any(feature = "v1_0", feature = "v1_3")))]
+    fn body_from_text(text: &str) -> String {
+        html_from_text(text)
+    }
+
     /// Read one item by id (ADR-0031): `entity` is an entity ref in string
     /// form, in this instance's namespace. [`RefreshAnswer::Item`] is the
     /// item as `sync` hands it to the sink for that id, [`RefreshAnswer::Gone`]
@@ -340,8 +436,86 @@ pub trait Adapter: Sized + 'static {
     }
 }
 
+/// The editor's plain text as plain HTML, every character of it text: a
+/// `## ` line an `h2`, consecutive `- ` lines one `ul`, other consecutive
+/// lines one `p` (joined by a space), a blank line between blocks.
+/// [`Adapter::body_from_text`]'s default, and a section edit's body for a
+/// wiki whose markup is HTML.
+#[must_use]
+pub fn html_from_text(text: &str) -> String {
+    fn escape(text: &str) -> String {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    }
+    let mut out = String::new();
+    let mut paragraph: Vec<&str> = Vec::new();
+    let mut items: Vec<&str> = Vec::new();
+    let flush = |out: &mut String, paragraph: &mut Vec<&str>, items: &mut Vec<&str>| {
+        if !paragraph.is_empty() {
+            out.push_str(&format!("<p>{}</p>", escape(&paragraph.join(" "))));
+            paragraph.clear();
+        }
+        if !items.is_empty() {
+            out.push_str("<ul>");
+            for item in items.drain(..) {
+                out.push_str(&format!("<li>{}</li>", escape(item)));
+            }
+            out.push_str("</ul>");
+        }
+    };
+    for line in text.lines().map(str::trim) {
+        if let Some(heading) = line.strip_prefix("## ") {
+            flush(&mut out, &mut paragraph, &mut items);
+            out.push_str(&format!("<h2>{}</h2>", escape(heading)));
+        } else if let Some(item) = line.strip_prefix("- ") {
+            if !paragraph.is_empty() {
+                flush(&mut out, &mut paragraph, &mut items);
+            }
+            items.push(item);
+        } else if line.is_empty() {
+            flush(&mut out, &mut paragraph, &mut items);
+        } else {
+            if !items.is_empty() {
+                flush(&mut out, &mut paragraph, &mut items);
+            }
+            paragraph.push(line);
+        }
+    }
+    flush(&mut out, &mut paragraph, &mut items);
+    out
+}
+
 #[cfg(test)]
 mod tests {
+    use knobas_source::docs::{DocBlock, Inline};
+
+    /// The default new page body is HTML the shared reader reads back as
+    /// the editor wrote it: what looks like markup in the text is text.
+    #[test]
+    fn a_new_page_s_default_body_is_the_text_as_plain_html_with_nothing_unescaped() {
+        let body = super::html_from_text(
+            "## Tides & <b>times</b>\nSpring tides\nrun <script>fast</script>.\n\n- one\n- two",
+        );
+        assert_eq!(
+            body,
+            "<h2>Tides &amp; &lt;b&gt;times&lt;/b&gt;</h2>\
+             <p>Spring tides run &lt;script&gt;fast&lt;/script&gt;.</p>\
+             <ul><li>one</li><li>two</li></ul>"
+        );
+        let blocks = super::html::to_blocks(&body, &super::html::Plain);
+        assert_eq!(
+            blocks[1],
+            DocBlock::Paragraph {
+                text: vec![Inline::text("Spring tides run <script>fast</script>.")]
+            }
+        );
+        assert!(
+            matches!(&blocks[2], DocBlock::List { items, .. } if items.len() == 2),
+            "{blocks:?}"
+        );
+    }
+
     /// The interface version the bindings are generated from: the
     /// `package` line of the WIT this crate binds.
     fn wit_version(wit: &str) -> &str {

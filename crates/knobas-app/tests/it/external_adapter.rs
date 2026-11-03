@@ -55,8 +55,8 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
         .await
         .unwrap();
     assert_eq!(
-        run.upserted, 5,
-        "the fixture serves three surveys, a pipeline and a run"
+        run.upserted, 7,
+        "the fixture serves three surveys, a pipeline, a run and two pages"
     );
 
     let (kind, title): (String, String) =
