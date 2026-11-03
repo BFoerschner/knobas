@@ -846,14 +846,6 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     }
 }
 
-/// The `id`, `label` and `query` of every saved list a database holds, in the
-/// rail's own order.
-///
-/// Read as three strings rather than through `saved::all`, because what the
-/// assertions below are about is the **text** an archive moved: a comparison
-/// that went through a type would be comparing what this side made of the
-/// bytes, which is the one thing a "nothing rewrites a stored query" claim
-/// cannot afford.
 /// The tone overrides [`seed_corpus`] sets on `ticket`, the kind its Jira
 /// source declares a state for.
 const SEEDED_TONES: [(&str, ToneChoice); 2] =
@@ -887,6 +879,14 @@ fn seeded_yours() -> Vec<(String, ToneChoice, ToneOrigin)> {
         .collect()
 }
 
+/// The `id`, `label` and `query` of every saved list a database holds, in the
+/// rail's own order.
+///
+/// Read as three strings rather than through `saved::all`, because what the
+/// assertions below are about is the **text** an archive moved: a comparison
+/// that went through a type would be comparing what this side made of the
+/// bytes, which is the one thing a "nothing rewrites a stored query" claim
+/// cannot afford.
 async fn saved_lists(pool: &sqlx::PgPool) -> Vec<(String, String, String)> {
     sqlx::query_as("select id, label, query from knobas.smart_list order by created_at, id")
         .fetch_all(pool)
