@@ -496,14 +496,15 @@ async fn the_read_offers_declared_then_seen_words_and_never_finished() {
             blocked.tone,
             blocked.origin
         ),
-        (false, None, None, ToneOrigin::Unset),
-        "a status with no category on record falls back to nothing"
+        (false, None, None, ToneOrigin::Category),
+        "a status with no category on record gets nothing from the category, \
+         which is still where its default comes from"
     );
 }
 
 /// A seen status no name maps reports the tone Jira's status category gives
-/// its tickets (#2468), with origin *category*; a to-do status has none and
-/// stays unset, and the reader's override still wins. The category keys
+/// its tickets (#2468), with origin *category*; a to-do status has none, and
+/// its origin is still the category, and the reader's override still wins. The category keys
 /// themselves are no words: the chip never says them.
 #[tokio::test]
 async fn the_read_reports_a_seen_statuss_category_tone() {
@@ -559,7 +560,11 @@ async fn the_read_reports_a_seen_statuss_category_tone() {
         drawn("Shipped"),
         (Some(Tone::Ok), Some(Tone::Ok), ToneOrigin::Category)
     );
-    assert_eq!(drawn("Backlog"), (None, None, ToneOrigin::Unset));
+    assert_eq!(
+        drawn("Backlog"),
+        (None, None, ToneOrigin::Category),
+        "a to-do status draws no colour, and that is its category's"
+    );
     assert_eq!(
         drawn("Parked"),
         (Some(Tone::Info), Some(Tone::Err), ToneOrigin::Yours)
@@ -593,7 +598,7 @@ async fn a_kind_reads_its_category_before_any_status_is_seen() {
 
 /// A word's category tone is the most common outcome among its items, no
 /// tone counted as one (#2468): with two Jiras, a status most of whose
-/// tickets are to do stays unset, though the other Jira files one under in
+/// tickets are to do draws no colour, though the other Jira files one under in
 /// progress; one most of whose tickets are in progress takes `info`.
 #[tokio::test]
 async fn a_seen_statuss_category_tone_counts_its_items_that_draw_none() {
@@ -633,7 +638,7 @@ async fn a_seen_statuss_category_tone_counts_its_items_that_draw_none() {
         let w = ticket.iter().find(|w| w.word == word).unwrap();
         (w.category_tone, w.origin)
     };
-    assert_eq!(drawn("Review"), (None, ToneOrigin::Unset));
+    assert_eq!(drawn("Review"), (None, ToneOrigin::Category));
     assert_eq!(drawn("Testing"), (Some(Tone::Info), ToneOrigin::Category));
 }
 

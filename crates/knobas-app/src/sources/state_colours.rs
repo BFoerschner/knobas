@@ -32,9 +32,12 @@ pub enum ToneOrigin {
     /// The adapter's declared map.
     Adapter,
     /// Where the adapter reads on for a word its map leaves out: Jira's
-    /// status category (#2468), for a seen status no name maps.
+    /// status category (#2468), for every seen status no name maps,
+    /// whatever the category gives it (a to-do status: no colour).
     Category,
-    /// Nothing: a seen word no adapter declares and nobody coloured.
+    /// Nothing: a seen word no adapter declares and nobody coloured, of a
+    /// kind no adapter reads on past the open candidate for. No shipped
+    /// adapter has such a kind today.
     Unset,
 }
 
@@ -102,14 +105,16 @@ pub async fn read(
         .filter(|d| sources.iter().any(|s| s.adapter_kind == d.adapter_kind))
         .map(|d| (d.adapter_kind, d.payload_paths))
         .collect();
-    let open: Vec<state_colours::OpenPath> = sources
-        .iter()
-        .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
+    // Each configured source with its adapter's declarations.
+    let declaring = || {
+        sources
+            .iter()
+            .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
+    };
+    let open: Vec<state_colours::OpenPath> = declaring()
         .flat_map(|(id, kinds)| state_colours::open_paths(id, kinds).collect::<Vec<_>>())
         .collect();
-    let fallback = sources
-        .iter()
-        .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
+    let fallback = declaring()
         .fold(
             knobas_core::payload::Declarations::empty(),
             |d, (id, kinds)| d.with(id, state_colours::fallback(kinds)),
@@ -199,6 +204,9 @@ fn offered(
                         (Some(choice), _) => (choice.tone(), ToneOrigin::Yours),
                         (None, _) if declared => (declared_tone, ToneOrigin::Adapter),
                         (None, Some(tone)) => (Some(tone), ToneOrigin::Category),
+                        // A to-do status draws no colour, and that is its
+                        // category's answer as much as `info` is.
+                        (None, None) if has_category => (None, ToneOrigin::Category),
                         (None, None) => (None, ToneOrigin::Unset),
                     };
                     StateWordColour {
@@ -282,4 +290,77 @@ pub async fn clear(
         )
         .await?,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use knobas_core::payload::{KindPaths, PayloadPath, StatePath, StateValue};
+    use knobas_core::state_colours::SeenWord;
+
+    use super::*;
+
+    /// A ticket's open status name, and, with `category`, the candidate a
+    /// status no name maps is read on at (Jira's status category).
+    fn ticket(category: bool) -> KindPaths {
+        let mut state = vec![StatePath {
+            at: PayloadPath::of(["status", "name"]),
+            open: true,
+            text_at: None,
+            values: vec![StateValue::of("Done", Tone::Ok)],
+        }];
+        if category {
+            state.push(StatePath {
+                at: PayloadPath::of(["status", "category"]),
+                open: false,
+                text_at: Some(PayloadPath::of(["status", "name"])),
+                values: vec![StateValue::of("indeterminate", Tone::Info)],
+            });
+        }
+        KindPaths {
+            kind: "ticket".to_owned(),
+            state,
+            ..KindPaths::default()
+        }
+    }
+
+    fn seen(word: &str, fallback: Option<Tone>) -> SeenWord {
+        SeenWord {
+            kind: "ticket".to_owned(),
+            word: word.to_owned(),
+            fallback,
+        }
+    }
+
+    fn origins(category: bool, seen: &[SeenWord]) -> Vec<(String, Option<Tone>, ToneOrigin)> {
+        let templates = BTreeMap::from([("jira".to_owned(), vec![ticket(category)])]);
+        offered(&templates, seen, &[])[0]
+            .words
+            .iter()
+            .map(|w| (w.word.clone(), w.tone, w.origin))
+            .collect()
+    }
+
+    /// Where an adapter reads on to a category, every seen word's default is
+    /// the category's, a to-do status's no colour too (spec #2463: a chip
+    /// shows *Jira category* for a ticket's default). Only a kind with
+    /// nowhere to read on leaves a seen word unset.
+    #[test]
+    fn a_seen_word_takes_the_category_origin_wherever_its_kind_reads_one() {
+        let words = [seen("Backlog", None), seen("Testing", Some(Tone::Info))];
+        assert_eq!(
+            origins(true, &words),
+            [
+                ("Done".to_owned(), Some(Tone::Ok), ToneOrigin::Adapter),
+                ("Backlog".to_owned(), None, ToneOrigin::Category),
+                ("Testing".to_owned(), Some(Tone::Info), ToneOrigin::Category),
+            ]
+        );
+        assert_eq!(
+            origins(false, &[seen("Backlog", None)]),
+            [
+                ("Done".to_owned(), Some(Tone::Ok), ToneOrigin::Adapter),
+                ("Backlog".to_owned(), None, ToneOrigin::Unset),
+            ]
+        );
+    }
 }
