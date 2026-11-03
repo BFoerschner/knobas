@@ -2673,6 +2673,17 @@ test("after a set while the card is open, the legend re-reads and shows the new 
     ["info", "open"],
     ["err", "closed"],
   ]);
+
+  // The reader clears it again: the word goes back under the adapter's tone.
+  legendPorts.answer = COLOURS;
+  legendPorts.fire(EVENTS.activityNew);
+  await settle();
+
+  expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
+    ["ok", "merged"],
+    ["info", "open"],
+    ["muted", "closed"],
+  ]);
 });
 
 /** Closed, the launcher neither reads the colours nor listens for a change to them. */

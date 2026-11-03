@@ -74,8 +74,8 @@
     renameSmartList as defaultRenameSmartList,
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
+    EVENTS,
   } from "../ipc";
-  import { EVENTS } from "../ipc";
   import type { CredentialHealth, KindStateColours } from "../ipc/sources";
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
