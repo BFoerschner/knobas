@@ -45,9 +45,9 @@ function tickets(): KindStateColours {
     kind: "ticket",
     has_category: true,
     words: [
-      word({ word: "To Do", declared: false, origin: "unset" }),
+      word({ word: "To Do", declared: false, origin: "category" }),
       word({ word: "Done", declared_tone: "ok" }),
-      word({ word: "Blocked", declared: false, origin: "unset" }),
+      word({ word: "Blocked", declared: false, origin: "category" }),
       word({ word: "In Progress", declared_tone: "info" }),
       word({ word: "Closed", declared_tone: "muted", yours: "err", tone: "err", origin: "yours" }),
     ],
@@ -70,7 +70,7 @@ function fakePorts(start: KindStateColours[], over: Partial<StateColourPorts> = 
                     ...w,
                     yours,
                     tone: yours === null ? (w.declared ? w.declared_tone : w.category_tone) : yours === "none" ? null : yours,
-                    origin: yours === null ? (w.declared ? "adapter" : w.category_tone !== null ? "category" : "unset") : "yours",
+                    origin: yours === null ? (w.declared ? "adapter" : k.has_category ? "category" : "unset") : "yours",
                   },
             ),
           },
@@ -209,8 +209,12 @@ test("a chip says where its tone comes from; Reset sits only on yours and clears
 
   expect(text(chip("Done")!.querySelector(".tf-sc-from"))).toBe("adapter");
   expect(text(chip("Closed")!.querySelector(".tf-sc-from"))).toBe("yours");
-  expect(text(chip("Blocked")!.querySelector(".tf-sc-from"))).toBe("seen");
+  // A to-do status draws no colour, and that is its category's (spec #2463).
+  expect(text(chip("To Do")!.querySelector(".tf-sc-from"))).toBe("Jira category");
   expect(target.querySelectorAll('button[aria-label^="Reset "]').length).toBe(1);
+  // The word and Reset are the chip's own buttons, the control the design system names for them.
+  expect(grip("Closed")!.classList.contains("tf-chipbtn")).toBe(true);
+  expect(target.querySelector('button[aria-label="Reset Closed"]')!.classList.contains("tf-chipbtn")).toBe(true);
 
   target.querySelector<HTMLButtonElement>('button[aria-label="Reset Closed"]')!.click();
   await settle();

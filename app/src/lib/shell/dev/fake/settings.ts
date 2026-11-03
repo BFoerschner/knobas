@@ -82,7 +82,8 @@ function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
       const mine = yours(word);
       const fallback = declared ? declared_tone : category_tone;
       const tone: Tone | null = mine === null ? fallback : mine === "none" ? null : mine;
-      const origin = mine !== null ? "yours" : declared ? "adapter" : category_tone !== null ? "category" : "unset";
+      // Jira's ticket reads on to its status category, so every seen status's default is the category's, none too.
+      const origin = mine !== null ? "yours" : declared ? "adapter" : kind === "ticket" ? "category" : "unset";
       return { word, declared, declared_tone, category_tone, yours: mine, tone, origin } as const;
     });
     // Jira's ticket reads on to its status category; no other kind does.

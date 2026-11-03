@@ -34,9 +34,10 @@ export function ordered(words: readonly StateWordColour[]): StateWordColour[] {
 }
 
 /**
- * What a chip says about where its tone comes from. `unset` is a word the
- * mirror has seen at an open candidate that no adapter gives a tone, and
- * `category` one whose tone is its tickets' Jira status category (#2468).
+ * What a chip says about where its tone comes from. `category` is a seen
+ * word whose default is its tickets' Jira status category (#2468), no colour
+ * for a to-do status included, and `unset` a seen word of a kind no adapter
+ * reads on past the word for.
  */
 export function originName(origin: ToneOrigin): string {
   const names: Record<ToneOrigin, string> = { yours: "yours", adapter: "adapter", category: "Jira category", unset: "seen" };
