@@ -14,3 +14,17 @@
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .tf-mon .tf-mon-failed > td { padding-top: 0; border-top: 0; }
+
+/* The hidden fold (#2447's monitors, drawn apart): its summary, then the rows dimmed while it is open. */
+.tf-mon .tf-mon-foldrow > td { padding: 0; }
+.tf-mon-fold > summary {
+  list-style: none; cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2);
+  padding: 10px 12px; display: flex; gap: 8px; align-items: baseline;
+}
+.tf-mon-fold > summary::-webkit-details-marker { display: none; }
+.tf-mon-fold > summary::before { content: "▸"; font-size: var(--t-xs); width: 10px; }
+.tf-mon-fold[open] > summary::before { content: "▾"; }
+.tf-mon-fold > summary .tf-dim { font-weight: 400; }
+.tf-mon .tf-mon-hid > td { color: var(--ink-2); }
+.tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
+.tf-mon-hidn { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }

@@ -1,7 +1,7 @@
 /**
  * Monitors (#864, R-11.3, R-11.4), mounted over stand-in reads: the header and
  * tabs, the roster's order and columns, the scopes, *Ack*, *Pause* and
- * *Resume*, *Hide* and the *Hidden* chip, *Assets nothing watches*, and
+ * *Resume*, *Hide* and the hidden fold, *Assets nothing watches*, and
  * *Create monitor*'s two writes.
  */
 import { flushSync, mount, unmount } from "svelte";
@@ -13,7 +13,7 @@ import { EVENTS } from "../../ipc";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import type { Hear } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
-import { forgetFilters } from "../filter/filter-state.svelte";
+import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
@@ -281,54 +281,87 @@ test("Pause and Resume queue the source's op for that monitor", async () => {
   ]);
 });
 
-/** The filter bar's *Hidden* chip. */
-const hiddenChip = () => target.querySelector<HTMLButtonElement>('[role="group"][aria-label="Hidden"] button')!;
-const names = () => rows().map((tr) => text(tr.querySelector("td")).replace(/ HTTP$| TCP$/, ""));
+/** The fold of hidden monitors at the roster's end, its summary row apart from the monitors. */
+const fold = () => target.querySelector<HTMLDetailsElement>("details.tf-mon-fold");
+const monitorRows = () => rows().filter((tr) => !tr.classList.contains("tf-mon-foldrow"));
+const names = () => monitorRows().map((tr) => text(tr.querySelector("td")).replace(/ HTTP$| TCP$/, ""));
+const count = () => text(target.querySelector(".tf-fcount")) + text(target.querySelector(".tf-mon-hidn"));
+const row = (name: string) => monitorRows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
 
-test("Hide takes a monitor off the roster by its id, and the Hidden chip shows it with Unhide", async () => {
+test("Hide moves a monitor into the closed fold at the roster's end; opened, it is dimmed with Unhide and no Ack", async () => {
   let roster = ROSTER;
   const stand = ports({
     monitorRoster: async () => roster,
     setMonitorHidden: async (id, hidden) => {
       hides.push([id, hidden]);
-      roster = roster.map((row) => (row.entity_id === id ? { ...row, hidden } : row));
+      roster = roster.map((each) => (each.entity_id === id ? { ...each, hidden } : each));
       return hidden;
     },
   });
   await draw([], "PAY-231", stand);
-  expect(text(hiddenChip())).toBe("Hidden");
-  const down = rows().find((tr) => text(tr.querySelector("td")).startsWith("flows-stage"))!;
-  button(down, "Hide")!.click();
+  expect(fold()).toBeNull();
+  expect(button(row("flows-stage"), "Ack")).toBeDefined();
+  button(row("flows-stage"), "Hide")!.click();
   await settle();
   expect(hides).toEqual([["kuma:2", true]]);
   expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health"]);
-  expect(text(hiddenChip())).toBe("Hidden 1");
+  expect(fold()!.open).toBe(false);
+  expect(text(fold()!.querySelector("summary"))).toBe("1 hidden monitor Their alerts don’t reach the inbox or notify you.");
+  expect(rows().at(-1)!.classList.contains("tf-mon-foldrow")).toBe(true);
+  expect(count()).toBe("3 monitors, 1 hidden");
   expect(toasts.items.map((t) => t.text)).toContain(
-    "Hid flows-stage. Its alerts no longer reach the inbox or notify; the Hidden chip shows it.",
+    "Hid flows-stage. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.",
   );
 
-  hiddenChip().click();
+  fold()!.open = true;
+  fold()!.dispatchEvent(new Event("toggle"));
   await settle();
-  expect(hiddenChip().getAttribute("aria-pressed")).toBe("true");
-  expect(names()).toEqual(["flows-stage"]);
-  button(rows()[0]!, "Unhide")!.click();
+  expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health", "flows-stage"]);
+  const hidden = row("flows-stage");
+  expect(hidden.classList.contains("tf-mon-hid")).toBe(true);
+  expect(hidden.querySelector(".tf-chip")!.classList.contains("tf-err")).toBe(false);
+  expect(button(hidden, "Ack")).toBeUndefined();
+  expect(button(hidden, "Hide")).toBeUndefined();
+  button(hidden, "Unhide")!.click();
   await settle();
   expect(hides).toEqual([
     ["kuma:2", true],
     ["kuma:2", false],
   ]);
-  expect(rows()).toEqual([]);
-  expect(text(target.querySelector(".tf-empty"))).toBe("No monitor is hidden.");
+  expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner", "payouts /health"]);
+  expect(fold()).toBeNull();
+  expect(count()).toBe("4 monitors");
 });
 
-test("a monitor the read says is hidden is drawn only under the Hidden chip", async () => {
-  await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((row) => (row.entity_id === "kuma:1" ? { ...row, hidden: true } : row)) }));
+test("the fold stays as the reader left it, and opens by itself on a search only hidden monitors answer", async () => {
+  await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((each) => (each.entity_id === "kuma:1" ? { ...each, hidden: true } : each)) }));
   expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner"]);
-  hiddenChip().click();
+  expect(fold()!.open).toBe(false);
+
+  sessionFilter("monitors").text = "payouts";
   await settle();
+  expect(fold()!.open).toBe(true);
   expect(names()).toEqual(["payouts /health"]);
-  expect(button(rows()[0]!, "Unhide")).toBeDefined();
-  expect(button(rows()[0]!, "Hide")).toBeUndefined();
+  expect(target.querySelector(".tf-empty")).toBeNull();
+  expect(count()).toBe("0 of 3 monitors, 1 hidden");
+
+  fold()!.open = false;
+  fold()!.dispatchEvent(new Event("toggle"));
+  await settle();
+  expect(names()).toEqual([]);
+  sessionFilter("monitors").text = "";
+  await settle();
+  expect(fold()!.open).toBe(false);
+  expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner"]);
+});
+
+test("every filter applies to the hidden monitors: a fold with no match is not drawn", async () => {
+  await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((each) => (each.entity_id === "kuma:1" ? { ...each, hidden: true } : each)) }));
+  sessionFilter("monitors").chips["st"] = ["Down"];
+  await settle();
+  expect(names()).toEqual(["flows-stage"]);
+  expect(fold()).toBeNull();
+  expect(count()).toBe("1 of 3 monitors");
 });
 
 test("a hide the backend refuses keeps the row and says why", async () => {

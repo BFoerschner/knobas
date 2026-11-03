@@ -444,7 +444,7 @@ export function ackAlert(monitorId: string): Promise<OpenAlert> {
  * whether it is hidden now.
  *
  * Knobas-local, not a write-back: Uptime Kuma goes on checking it. A hidden
- * monitor is drawn only under the tab's *Hidden* chip, and its alerts reach
+ * monitor is drawn in the fold of hidden monitors at the roster's end, and its alerts reach
  * no inbox, so it raises no desktop notification. Rejects with `not_found`
  * when the id is no monitor in the mirror.
  */

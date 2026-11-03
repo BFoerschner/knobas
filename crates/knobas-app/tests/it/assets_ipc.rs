@@ -5148,7 +5148,7 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
 }
 
 /// **A hidden monitor stays on the roster, flagged** -- the tab decides what
-/// to draw under its *Hidden* chip -- and *Unhide* clears the flag.
+/// to draw in its fold of hidden monitors -- and *Unhide* clears the flag.
 #[tokio::test]
 async fn a_hidden_monitor_is_on_the_roster_flagged_hidden() {
     let pool = pool("monitors-roster-hidden").await;
