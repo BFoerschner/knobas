@@ -166,4 +166,15 @@ ticket_views: boolean,
  * only once a set exists and sends it off while there is none, as with
  * smart lists.
  */
-link_sets: boolean, };
+link_sets: boolean, 
+/**
+ * `knobas.state_tone` -- the reader's state colours, a tone or *No
+ * colour* per entity kind and state word (#2469, spec #2463 stories
+ * 30 and 31). **On by default**: a colleague restoring the archive sees
+ * the rows coloured as the sharer does, and unticks the part to keep
+ * their own. It brings no address book: a row names a kind and a word,
+ * no entity, and has no foreign key (migration `0071`). The dialog
+ * offers its toggle only once an override exists and sends it off while
+ * there is none, as with smart lists.
+ */
+state_colours: boolean, };

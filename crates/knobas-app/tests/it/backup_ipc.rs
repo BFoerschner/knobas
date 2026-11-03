@@ -20,6 +20,8 @@ use knobas_app::sources::Registry;
 use std::sync::Arc;
 
 use knobas_app::backup::{self, BackupSchedule, BackupState};
+use knobas_app::sources::state_colours::ToneOrigin;
+use knobas_core::state_colours::ToneChoice;
 use tauri::ipc::CallbackFn;
 use tauri::test::MockRuntime;
 
@@ -823,6 +825,14 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
         .await
         .expect("hide the set's member on the ticket");
 
+    // state colours (#2469): a declared Jira status moved, and a status no
+    // adapter declares given *No colour*, through the command the editor calls.
+    for (word, choice) in SEEDED_TONES {
+        knobas_app::sources::state_colours::set(pool, "ticket", word, choice)
+            .await
+            .expect("seed a tone override");
+    }
+
     Seeded {
         ticket,
         pr,
@@ -844,6 +854,36 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
 /// that went through a type would be comparing what this side made of the
 /// bytes, which is the one thing a "nothing rewrites a stored query" claim
 /// cannot afford.
+/// The tone overrides [`seed_corpus`] sets on `ticket`, the kind its Jira
+/// source declares a state for.
+const SEEDED_TONES: [(&str, ToneChoice); 2] =
+    [("Done", ToneChoice::Warn), ("Blocked", ToneChoice::None)];
+
+/// Every `ticket` word the read command says is *yours*, with the choice.
+///
+/// Through `state_colours::read`, the command the editor and the legend read,
+/// so a row that arrived is also a row the far machine applies: the restored
+/// Jira source config is what puts `ticket` in the answer.
+async fn yours(pool: &sqlx::PgPool) -> Vec<(String, ToneChoice, ToneOrigin)> {
+    let kinds = knobas_app::sources::state_colours::read(pool, &Registry::for_process())
+        .await
+        .expect("read the state colours");
+    kinds
+        .iter()
+        .filter(|kind| kind.kind == "ticket")
+        .flat_map(|kind| &kind.words)
+        .filter_map(|word| word.yours.map(|choice| (word.word.clone(), choice, word.origin)))
+        .collect()
+}
+
+/// [`SEEDED_TONES`] as [`yours`] reads them.
+fn seeded_yours() -> Vec<(String, ToneChoice, ToneOrigin)> {
+    SEEDED_TONES
+        .iter()
+        .map(|(word, choice)| ((*word).to_owned(), *choice, ToneOrigin::Yours))
+        .collect()
+}
+
 async fn saved_lists(pool: &sqlx::PgPool) -> Vec<(String, String, String)> {
     sqlx::query_as("select id, label, query from knobas.smart_list order by created_at, id")
         .fetch_all(pool)
@@ -971,6 +1011,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("link_set", 1),
         ("link_set_member", 2),
         ("link_set_rule", 2),
+        ("state_tone", 2),
     ] {
         assert_eq!(
             rows(there, table).await,
@@ -1155,6 +1196,71 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
             .collect::<Vec<_>>(),
         vec![("epic", "jira:PAY-200"), ("manual", estate.ticket.as_str())]
     );
+
+    // **The state colours arrived as the colleague's own** (#2469): the read
+    // command the editor draws from says *yours* for both words, the declared
+    // one and the one no adapter names.
+    assert_eq!(
+        yours(there).await,
+        seeded_yours(),
+        "the state colours did not cross"
+    );
+}
+
+/// **Unticking *State colours* keeps the receiver's own** (#2469, spec #2463
+/// story 31): the archive names no override table, and a restore of it
+/// brings no override.
+#[tokio::test]
+async fn a_share_export_without_state_colours_carries_no_override_table() {
+    let (sharer, sharer_dir) = service("sharenotones").await;
+    seed_corpus(&sharer.pool, "notones").await;
+    assert_eq!(yours(&sharer.pool).await, seeded_yours(), "the seed's overrides");
+
+    let parts = backup::ShareParts {
+        state_colours: false,
+        ..backup::ShareParts::default()
+    };
+    let record = backup::share_export(&sharer, parts)
+        .await
+        .expect("a share export without state colours");
+    let held = data_tables(&sharer_dir.path().join(&record.file)).await;
+    assert!(
+        !held.contains(&"state_tone".to_owned()),
+        "the archive carries knobas.state_tone with the part off: {held:?}"
+    );
+    assert!(
+        held.contains(&"source_config".to_owned()),
+        "the rest of the defaults still travel: {held:?}"
+    );
+
+    let (colleague, colleague_dir) = service("sharenotonestarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("the restore");
+    assert_eq!(rows(&colleague.pool, "state_tone").await, 0);
+    assert_eq!(
+        yours(&colleague.pool).await,
+        Vec::new(),
+        "the restored source reads with the adapters' tones only"
+    );
+}
+
+/// **A full backup carries the state colours** (#2469, spec #2463 story 29)
+/// with no part to tick: `knobas.state_tone` is in the `knobas` schema, and
+/// the backup is the schema.
+#[tokio::test]
+async fn a_backup_restores_the_state_colours() {
+    let (old, old_dir) = service("tonesbackup").await;
+    seed_corpus(&old.pool, "tonesbackup").await;
+    let archive = backup::export_now(&old).await.expect("the backup");
+
+    let (fresh, fresh_dir) = service("tonesbackuptarget").await;
+    hand_over(&old_dir, &fresh_dir, &archive.file);
+    backup::restore(&fresh, &archive.file)
+        .await
+        .expect("the restore");
+    assert_eq!(yours(&fresh.pool).await, seeded_yours());
 }
 
 /// **Each toggle alone brings exactly its tables and nothing else**, read off
@@ -1248,6 +1354,15 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
                 ..none
             },
             vec!["link_set", "link_set_member", "link_set_rule"],
+        ),
+        // Nor is a tone override (#2469): a kind and a word.
+        (
+            "state colours",
+            backup::ShareParts {
+                state_colours: true,
+                ..none
+            },
+            vec!["state_tone"],
         ),
     ] {
         let record = backup::share_export(&sharer, parts)
