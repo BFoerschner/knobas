@@ -119,6 +119,7 @@ Three sizes is the complete set. A rule outside `chrome.css` doesn't set a butto
 
 - **Icon-only buttons** (`.tf-iconbtn`) are square at their row's height: `--control-h` by default, `--control-h-sm` with `.tf-sm` in a page body's row. The top bar's icon buttons are at the header height.
 - **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height from its token, with horizontal padding only. The filter bar is a page body's toolbar, so its search (`.tf-fsearch`) and its selects (`.tf-fsel select`) are `--control-h-sm`, as the segmented control and the pill toggles beside them are.
+- **Chip buttons** (`.tf-chipbtn`): a button that is part of a chip's text, drawn as that text. The State colours chip's word, which is its grip, and its *Reset* are the two (spec #2463). No border, background or padding, and the chip's own font; `chrome.css` draws it, and a view adds no size to it. Text-only styling (an underline, a weight) is the view's.
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
 
 ### Gap
@@ -175,6 +176,7 @@ There is no third way to draw danger.
 | Pill toggles | `.tf-fbar .tf-fchips button` |
 | Row with small actions | `.tf-ext-row .tf-trail .tf-btn.tf-sm` |
 | Icon-only button | `.tf-ext-row .tf-trail .tf-iconbtn` |
+| A chip's own buttons | `.tf-chip .tf-chipbtn` |
 | Dialog footer with an extra action | `.tf-dialog footer .tf-btn.tf-first` |
 | A viewer's title-line action | `.tf-dialog .tf-dhead .tf-acts .tf-btn` |
 | Dialog footer's ghost *Cancel* | `.tf-dialog footer .tf-btn.tf-ghost` |
@@ -188,7 +190,7 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 
 `app/src/lib/tf/controls/style-gate.test.ts` reads every stylesheet and component under `app/src/` (a component's `<style>` blocks count) and fails when:
 
-- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control, or a disabled control's `opacity` or `cursor` (the disabled look is one rule): a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
+- **(a)** a rule outside `chrome.css` sets `height`, `min-height`, `padding`, `font-size` (or the `font` shorthand) or `border-radius` on a control, or a disabled control's `opacity` or `cursor` (the disabled look is one rule): a selector whose subject names `.tf-btn`, `.tf-sm`, `.tf-lg`, `.tf-iconbtn`, `.tf-chipbtn` or `.tf-refresh`, or is a `button` inside `.tf-seg` or `.tf-fchips`;
 - **(b)** the unported button classes `btn`, `tb-btn` or `x` appear in a stylesheet or in a component's `class`;
 - **(c)** a row of buttons has a `gap` other than `var(--control-gap)`: an actions container (`.tf-acts`, any local `…acts` row with or without the hyphen, the bare `.acts`, `.tf-trail`, a dialog's `footer`; a `…facts` name is not one), or a row of controls under another name (the filter bar `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, any `…-btns` row, a dialog's title-line cluster `.tf-dctl`);
 - **(f)** a field in a row of buttons (`.tf-fsearch`, or a `select` or `input` inside a row of buttons or a `.tf-fsel`) sets a literal `height` or `min-height`, or vertical padding: it takes `height: var(--control-h…)`;

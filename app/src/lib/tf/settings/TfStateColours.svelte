@@ -127,7 +127,7 @@
               ondrop={(event) => drop(event, kind.kind, column)}
             >
               <div class="tf-sc-colh">
-                {#if column === "none"}No colour{:else}<span class="tf-dot tf-{column}" aria-hidden="true"></span>{column}{/if}
+                {#if column !== "none"}<span class="tf-dot tf-{column}" aria-hidden="true"></span>{/if}{columnName(column)}
               </div>
               {#each words.filter((w) => columnOf(w) === column) as word (word.word)}
                 <span
@@ -139,13 +139,13 @@
                   ondragend={() => (dragged = null)}
                   ><button
                     type="button"
-                    class="tf-sc-word"
+                    class="tf-chipbtn tf-sc-word"
                     aria-label="Move {word.word}"
                     title="Drag, or press ← or →"
                     onkeydown={(event) => gripKeys(event, kind.kind, word)}>{word.word}</button
                   ><span class="tf-sc-from">{originName(word.origin)}</span>{#if word.yours !== null}<button
                       type="button"
-                      class="tf-sc-reset"
+                      class="tf-chipbtn tf-sc-reset"
                       aria-label="Reset {word.word}"
                       title="Back to the default"
                       onclick={() => void write(() => ports.clearToneOverrides(kind.kind, word.word), `Could not reset ${word.word}`)}

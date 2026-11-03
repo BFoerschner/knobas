@@ -126,14 +126,7 @@
   content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--ink-2); box-sizing: border-box;
 }
 .tf-sc-chip { max-width: 100%; cursor: grab; gap: 4px; }
-.tf-sc-word {
-  border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: grab;
-  overflow: hidden; text-overflow: ellipsis; min-width: 0;
-}
-.tf-sc-word:focus-visible, .tf-sc-reset:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; border-radius: 2px; }
+.tf-sc-word { cursor: grab; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .tf-sc-from { font-weight: 400; opacity: .75; }
-.tf-sc-reset {
-  border: 0; background: none; padding: 0; color: inherit; font: inherit; font-weight: 400; cursor: pointer;
-  text-decoration: underline; text-underline-offset: 2px;
-}
+.tf-sc-reset { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
 .tf-sc-line code { font-size: .95em; }

@@ -54,8 +54,9 @@ type Entry = { list: string; line: number; rule: string; file: string; key: stri
 /**
  * Classes that name a control (rule a). `tf-refresh` is the shared Refresh button
  * (`TfDetailRefresh`), always a `.tf-btn`; views resized it under its own name.
+ * `tf-chipbtn` is a chip's own button, drawn as the chip's text (spec #2463).
  */
-const CONTROL = /\.(?:tf-btn|tf-sm|tf-lg|tf-iconbtn|tf-refresh)(?![\w-])/;
+const CONTROL = /\.(?:tf-btn|tf-sm|tf-lg|tf-iconbtn|tf-chipbtn|tf-refresh)(?![\w-])/;
 /** The segmented control and the pill toggles: their `button`s are controls. */
 const BUTTON_GROUP = /\.(?:tf-seg|tf-fchips)(?![\w-])/;
 const SIZING = /^(?:height|min-height|padding(?:-[a-z-]+)?|font-size|font|border(?:-[a-z]+)*-radius)$/;
@@ -392,6 +393,7 @@ test("(a) a control sized outside the controls stylesheet fails, and the same ru
     ".tf-rvq .tf-fchips button { padding: 1px 9px; }",
     ".tf-y, .tf-x .tf-btn { border-radius: 2px; }",
     ".tf-rd-acts .tf-refresh { padding: 3px 8px; }",
+    ".tf-sc-chip .tf-chipbtn { padding: 0 2px; }",
   ]) {
     const failures = planted({ "lib/tf/css/view.css": css });
     expect(failures, css).toHaveLength(1);

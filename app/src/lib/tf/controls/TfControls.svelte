@@ -81,6 +81,15 @@
           </button>
         </div>
       </div>
+      <div class="tf-ext-row">
+        <span class="tf-stg-sn">
+          <b>A chip with its own buttons</b>
+          <span class="tf-dim">Drawn as the chip's text: the word, which moves it, and Reset.</span>
+        </span>
+        <span class="tf-chip tf-info"
+          ><button type="button" class="tf-chipbtn">In Progress</button>yours<button type="button" class="tf-chipbtn">Reset</button></span
+        >
+      </div>
     </section>
 
     <section class="tf-dialog" aria-labelledby="tf-ctl-dialog">
