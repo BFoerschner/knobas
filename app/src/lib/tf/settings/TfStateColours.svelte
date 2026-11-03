@@ -28,6 +28,7 @@
   import type { KindStateColours, ToneChoice } from "../../ipc/sources";
   import { kindLabel } from "../../shell/kinds";
   import { push } from "../../shell/toasts.svelte";
+  import { toneClass } from "../tone";
   import { COLUMNS, columnName, columnOf, drives, ordered, originName, stepped } from "./state-colours";
 
   let { ports }: { ports: StateColourPorts } = $props();
@@ -130,7 +131,7 @@
               </div>
               {#each words.filter((w) => columnOf(w) === column) as word (word.word)}
                 <span
-                  class="tf-chip tf-sc-chip {word.tone ? `tf-${word.tone}` : ''}"
+                  class="tf-chip tf-sc-chip {toneClass(word)}"
                   role="group"
                   aria-label={word.word}
                   draggable="true"

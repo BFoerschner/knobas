@@ -14,7 +14,6 @@ import type {
   LinkSetRow,
   LinkSetRuleKind,
   LinkSetRuleRow,
-  StateChip,
 } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 
@@ -143,11 +142,6 @@ export function patternQuery(kind: LinkSetMemberKind, project: string, text: str
 export function hintTickets(hint: Pick<LinkSetHint, "epic" | "tickets">): string {
   const more = hint.tickets.length - 1;
   return `${keyOf(hint.tickets[0] ?? "")} and ${more} more ${more === 1 ? "ticket" : "tickets"} under ${keyOf(hint.epic)}`;
-}
-
-/** A dot's tone class from a member row's state (#1008); no state, or no tone, draws the muted dot. */
-export function dotClass(state: StateChip | null): string {
-  return state?.tone ? `tf-${state.tone}` : "";
 }
 
 /** How many of a list the editor shows before *and N more* (R-7.7). */

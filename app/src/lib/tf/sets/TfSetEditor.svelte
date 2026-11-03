@@ -33,7 +33,8 @@
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
-  import { dotClass, itemsOf, KIND_LABEL, MEMBER_KINDS, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
+  import { itemsOf, KIND_LABEL, MEMBER_KINDS, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
+  import { toneClass } from "../tone";
   import TfSetPattern from "./TfSetPattern.svelte";
   import TfSetPicker from "./TfSetPicker.svelte";
 
@@ -307,7 +308,7 @@
             {/each}
             {#each members as member (member.entity_id)}
               <div class="tf-member">
-                <span class="tf-dot {dotClass(member.state)}"></span>
+                <span class="tf-dot {toneClass(member.state)}"></span>
                 <span class:tf-mono={kind === "repo" || kind === "asset"}>{member.title ?? keyOf(member.entity_id)}</span>
                 {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{member.line}</span>{/if}
                 <button

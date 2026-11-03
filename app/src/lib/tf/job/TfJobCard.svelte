@@ -44,6 +44,7 @@
   import { parentOf } from "../sets/apply";
   import { epicLine, initials } from "../tickets/tickets";
   import { blockers, keyOf, loggedRow } from "./job";
+  import { toneClass } from "../tone";
 
   let {
     detail,
@@ -271,7 +272,7 @@
           ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
               class="tf-st"
               class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
-              ><span class="tf-dot {row.state.tone ? `tf-${row.state.tone}` : ''}" aria-hidden="true"></span>{row.state.text}</span
+              ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{row.state.text}</span
             >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
         >
       {/each}
