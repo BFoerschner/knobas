@@ -298,7 +298,9 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
 /// Jira's status category (#2468): `indeterminate` is `info`, `done` is `ok`,
 /// and `new` draws no colour. The chip still says the status name. An exact
 /// name beats the category (`Closed` stays `muted` though Jira files it under
-/// done), and the reader's override beats both.
+/// done), and the reader's override beats both: on a status outside the map,
+/// and on one of the five names (`Done`, `warn` over its name's and its
+/// category's `ok`).
 #[tokio::test]
 async fn a_tickets_status_outside_the_map_takes_its_categorys_tone() {
     let _guard = SERIAL.lock().await;
@@ -312,6 +314,7 @@ async fn a_tickets_status_outside_the_map_takes_its_categorys_tone() {
         ("Backlog", "new"),
         ("Closed", "done"),
         (overridden.as_str(), "indeterminate"),
+        ("Done", "done"),
     ];
     let mut ids = Vec::new();
     for (n, (status, category)) in cases.iter().enumerate() {
@@ -339,6 +342,16 @@ async fn a_tickets_status_outside_the_map_takes_its_categorys_tone() {
     )
     .await
     .unwrap();
+    // `Done` is a word every ticket of this module's mirror shares: the
+    // override lives only as long as this test holds SERIAL.
+    knobas_core::state_colours::set(
+        &pool,
+        "ticket",
+        "Done",
+        knobas_core::state_colours::ToneChoice::Warn,
+    )
+    .await
+    .unwrap();
     let response = searcher(&pool)
         .await
         .search(SearchQuery {
@@ -349,9 +362,11 @@ async fn a_tickets_status_outside_the_map_takes_its_categorys_tone() {
         })
         .await
         .unwrap();
-    knobas_core::state_colours::clear(&pool, "ticket", Some(&overridden))
-        .await
-        .unwrap();
+    for word in [overridden.as_str(), "Done"] {
+        knobas_core::state_colours::clear(&pool, "ticket", Some(word))
+            .await
+            .unwrap();
+    }
     let hits: Vec<_> = response
         .groups
         .iter()
@@ -379,6 +394,7 @@ async fn a_tickets_status_outside_the_map_takes_its_categorys_tone() {
             None,
             on("Closed", Tone::Muted),
             on(&overridden, Tone::Err),
+            on("Done", Tone::Warn),
         ]
     );
 }
