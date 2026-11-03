@@ -230,6 +230,9 @@ fn invoke_managing(
             knobas_app::commands::sources::watch_sync,
             knobas_app::commands::sources::sync_role,
             knobas_app::commands::sources::refresh_entity,
+            knobas_app::commands::sources::state_colours,
+            knobas_app::commands::sources::set_tone_override,
+            knobas_app::commands::sources::clear_tone_overrides,
             shapes::without_progress,
             shapes::with_progress
         ])
@@ -1804,4 +1807,83 @@ async fn refresh_entity_answers_each_outcome_and_the_detail_says_it_can() {
             .expect("the refreshed item's detail");
     assert!(detail.refreshes, "the mock's adapter reads one item");
     scheduler.shutdown().await;
+}
+
+/// A tone override's set and clear announce themselves on `activity:new`,
+/// the event the open surfaces already re-read on (#2465): a set redraws
+/// what is open with no resync. Driven through the commands on a mock app
+/// over a database of its own, since an override colours the whole kind.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tone_override_is_announced_on_the_activity_event() {
+    let pool = knobas_db::test_util::scratch_database("tone_override_event")
+        .await
+        .pool(4)
+        .await
+        .expect("a pool onto this test's own database");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('tc', 'teamcity', 'TeamCity', 'http://x', 'Pat')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let invoke_watching = |cmd: &str, body: serde_json::Value| {
+        let seen: std::sync::Arc<std::sync::Mutex<Vec<serde_json::Value>>> = Default::default();
+        let recorder = std::sync::Arc::clone(&seen);
+        let pool = pool.clone();
+        let answer = invoke_managing(cmd, body, move |app| {
+            app.manage(ready_over(pool));
+            app.listen("activity:new", move |event| {
+                if let Ok(value) = serde_json::from_str::<serde_json::Value>(event.payload()) {
+                    recorder.lock().unwrap().push(value);
+                }
+            });
+        })
+        .unwrap_or_else(|error| panic!("{error}"))
+        .deserialize::<serde_json::Value>()
+        .expect("the state colours came back");
+        let lines = seen.lock().unwrap().clone();
+        (answer, lines)
+    };
+    let failure = |answer: &serde_json::Value| {
+        answer
+            .as_array()
+            .and_then(|kinds| kinds.iter().find(|k| k["kind"] == "build"))
+            .and_then(|k| k["words"].as_array())
+            .and_then(|words| words.iter().find(|w| w["word"] == "FAILURE"))
+            .cloned()
+            .unwrap_or_else(|| panic!("no build FAILURE in {answer}"))
+    };
+
+    let (answer, lines) = invoke_watching(
+        "set_tone_override",
+        serde_json::json!({ "kind": "build", "word": "FAILURE", "tone": "warn" }),
+    );
+    assert_eq!(failure(&answer)["tone"], "warn", "{answer}");
+    assert_eq!(failure(&answer)["origin"], "yours", "{answer}");
+    assert_eq!(lines.len(), 1, "one line per set: {lines:?}");
+    assert_eq!(lines[0]["verb"], "state_tone_set");
+    assert_eq!(
+        lines[0]["detail"],
+        serde_json::json!({ "kind": "build", "word": "FAILURE", "tone": "warn" })
+    );
+
+    let (answer, lines) = invoke_watching(
+        "clear_tone_overrides",
+        serde_json::json!({ "kind": "build", "word": null }),
+    );
+    assert_eq!(failure(&answer)["tone"], "err", "{answer}");
+    assert_eq!(lines.len(), 1, "one line per clear: {lines:?}");
+    assert_eq!(lines[0]["verb"], "state_tone_cleared");
+
+    let (_, lines) = invoke_watching(
+        "clear_tone_overrides",
+        serde_json::json!({ "kind": "build", "word": "FAILURE" }),
+    );
+    assert!(lines.is_empty(), "a clear that forgot nothing announces nothing: {lines:?}");
+
+    let (answer, lines) = invoke_watching("state_colours", serde_json::json!({}));
+    assert_eq!(failure(&answer)["origin"], "adapter", "{answer}");
+    assert!(lines.is_empty(), "a read announces nothing");
 }

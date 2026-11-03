@@ -60,6 +60,10 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     knobas_core::entity_list::EntityRow::export_all(cfg)?;
     knobas_core::tone::Tone::export_all(cfg)?;
     knobas_core::payload::StateChip::export_all(cfg)?;
+    knobas_core::state_colours::ToneChoice::export_all(cfg)?;
+    crate::sources::state_colours::ToneOrigin::export_all(cfg)?;
+    crate::sources::state_colours::StateWordColour::export_all(cfg)?;
+    crate::sources::state_colours::KindStateColours::export_all(cfg)?;
     knobas_core::entity_list::EntityOrder::export_all(cfg)?;
     knobas_core::entity_list::EntityFilter::export_all(cfg)?;
     knobas_core::entity_list::EntityPage::export_all(cfg)?;

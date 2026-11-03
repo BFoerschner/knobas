@@ -89,6 +89,7 @@ mod sources_crud;
 mod sources_registry;
 mod standup_ipc;
 mod start_work;
+mod state_colours_ipc;
 mod status_move;
 mod suggestion_pass;
 mod suggestions_ipc;

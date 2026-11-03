@@ -1155,6 +1155,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 values: vec![
                     StateValue::of("open", Tone::Info),
                     StateValue::of("merged", Tone::Ok),
+                    // Gitea's word and tone (#2465): the dataset holds no
+                    // closed pull request, but a `pr` is one kind whichever
+                    // adapter mirrors it, so the reference declares it too.
+                    StateValue::of("closed", Tone::Muted),
                 ],
             }],
             head: vec![PayloadPath::of(["from"])],

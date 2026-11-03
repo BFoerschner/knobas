@@ -39,9 +39,14 @@ use crate::IpcError;
 /// and every path-driven read misses on its items -- which is the honest
 /// answer: knobas cannot know where a source it cannot build keeps anything.
 ///
+/// **The reader's tone overrides are merged in** (spec #2463,
+/// `knobas_core::state_colours::merge`): every read that binds these
+/// declarations draws the reader's state colours, with no SQL of its own
+/// knowing about them. One more primary-key read of a table of a few rows.
+///
 /// # Errors
 ///
-/// `internal` if the source listing fails.
+/// `internal` if the source listing or the overrides read fails.
 pub async fn declared_paths(
     pool: &PgPool,
     registry: &dyn AdapterRegistry,
@@ -49,22 +54,22 @@ pub async fn declared_paths(
     let sources = knobas_sync::config::list(pool)
         .await
         .map_err(IpcError::internal)?;
-    Ok(declared_paths_of(sources, registry))
+    let overrides = knobas_core::state_colours::overrides(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(declared_paths_of(sources, registry, &overrides))
 }
 
-/// [`declared_paths`] over a source list the caller already read, for a
-/// command that needs the list for something else too and so lists it once
-/// (#1659).
+/// [`declared_paths`] over a source list and the overrides the caller
+/// already read, for a command that needs the list for something else too and
+/// so lists it once (#1659).
 #[must_use]
 pub fn declared_paths_of(
     sources: Vec<knobas_sync::config::SourceConfigRow>,
     registry: &dyn AdapterRegistry,
+    overrides: &[knobas_core::state_colours::ToneOverride],
 ) -> Declarations {
-    let by_kind: std::collections::HashMap<String, Vec<knobas_source::KindPaths>> = registry
-        .descriptors()
-        .into_iter()
-        .map(|d| (d.adapter_kind, d.payload_paths))
-        .collect();
+    let by_kind = templates(registry, overrides);
     sources
         .into_iter()
         .fold(
@@ -74,6 +79,24 @@ pub fn declared_paths_of(
                 None => declarations,
             },
         )
+}
+
+/// Each adapter kind's template declarations, `overrides` merged in.
+#[must_use]
+pub fn templates(
+    registry: &dyn AdapterRegistry,
+    overrides: &[knobas_core::state_colours::ToneOverride],
+) -> std::collections::HashMap<String, Vec<knobas_source::KindPaths>> {
+    registry
+        .descriptors()
+        .into_iter()
+        .map(|d| {
+            (
+                d.adapter_kind,
+                knobas_core::state_colours::merged(d.payload_paths, overrides),
+            )
+        })
+        .collect()
 }
 
 #[cfg(test)]

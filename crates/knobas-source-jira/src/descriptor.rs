@@ -101,11 +101,15 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// and any word a workflow adds that is not named here, is no state at all,
 /// which draws the row uncoloured. By name, as `done_statuses` is, and not by
 /// status category: knobas does not sync the category.
+///
+/// The candidate is **open** (spec #2463): a workflow invents its status
+/// names, so the words the mirror has seen here are offered for a tone
+/// override beside these five, and an override for one of them is added here.
 fn ticket_state() -> Vec<knobas_source::StatePath> {
     use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
     vec![StatePath {
         at: PayloadPath::of(["fields", "status", "name"]),
-        open: false,
+        open: true,
         values: vec![
             StateValue::of("Done", Tone::Ok),
             StateValue::of("Resolved", Tone::Ok),

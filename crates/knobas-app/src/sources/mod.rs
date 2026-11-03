@@ -15,6 +15,7 @@ pub mod progress;
 pub mod refresh;
 pub mod registry;
 pub mod remote;
+pub mod state_colours;
 pub mod write_queue;
 
 // `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
