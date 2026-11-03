@@ -114,11 +114,10 @@ pub async fn read(
     let open: Vec<state_colours::OpenPath> = declaring()
         .flat_map(|(id, kinds)| state_colours::open_paths(id, kinds).collect::<Vec<_>>())
         .collect();
-    let fallback = declaring()
-        .fold(
-            knobas_core::payload::Declarations::empty(),
-            |d, (id, kinds)| d.with(id, state_colours::fallback(kinds)),
-        );
+    let fallback = declaring().fold(
+        knobas_core::payload::Declarations::empty(),
+        |d, (id, kinds)| d.with(id, state_colours::fallback(kinds)),
+    );
     let seen = state_colours::seen_words(pool, &open, &fallback)
         .await
         .map_err(IpcError::internal)?;
