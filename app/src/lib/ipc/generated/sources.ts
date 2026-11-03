@@ -780,6 +780,12 @@ base: Array<PayloadPath>,
 attachments: Array<AttachmentPath>, };
 
 /**
+ * One entity kind that declares a state, and its offered words: declared
+ * words in declared order, then the others alphabetically.
+ */
+export type KindStateColours = { kind: string, words: Array<StateWordColour>, };
+
+/**
  * Where a **list** of strings lives: the array, and where the string sits
  * inside each element.
  *
@@ -1595,6 +1601,29 @@ tone?: Tone,
 text: string | null, };
 
 /**
+ * One state word a kind offers, and how it is drawn.
+ */
+export type StateWordColour = { word: string, 
+/**
+ * An adapter's map names the word. `false` for a word the mirror has
+ * seen at an open candidate.
+ */
+declared: boolean, 
+/**
+ * The adapter's tone, `None` for a word it declares with none or does
+ * not declare.
+ */
+declared_tone: Tone | null, 
+/**
+ * The reader's override, if any.
+ */
+yours: ToneChoice | null, 
+/**
+ * What the word draws: the override, else the adapter's tone.
+ */
+tone: Tone | null, origin: ToneOrigin, };
+
+/**
  * How a run ended.
  *
  * Stored in `knobas.sync_run.outcome`, whose `sync_run_outcome_chk`
@@ -1726,6 +1755,17 @@ swept: number, error: string | null, cursor_after: string | null, };
  * type's and a field's doc but not a variant's (#1325).
  */
 export type SyncTrigger = "schedule" | "manual" | "first_run" | "backfill";
+
+/**
+ * What a reader picks for one state word: one of the five tones, or *No
+ * colour*. On the wire the tone's own lowercase word, or `"none"`.
+ */
+export type ToneChoice = "ok" | "warn" | "err" | "info" | "muted" | "none";
+
+/**
+ * Where a word's resulting tone comes from.
+ */
+export type ToneOrigin = "yours" | "adapter" | "unset";
 
 /**
  * How a run was started, in the shell's words (#961, #1146).

@@ -1881,7 +1881,10 @@ async fn a_tone_override_is_announced_on_the_activity_event() {
         "clear_tone_overrides",
         serde_json::json!({ "kind": "build", "word": "FAILURE" }),
     );
-    assert!(lines.is_empty(), "a clear that forgot nothing announces nothing: {lines:?}");
+    assert!(
+        lines.is_empty(),
+        "a clear that forgot nothing announces nothing: {lines:?}"
+    );
 
     let (answer, lines) = invoke_watching("state_colours", serde_json::json!({}));
     assert_eq!(failure(&answer)["origin"], "adapter", "{answer}");

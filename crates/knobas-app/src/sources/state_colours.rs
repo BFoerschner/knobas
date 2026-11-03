@@ -98,14 +98,18 @@ pub async fn read(
     Ok(offered(&templates, &seen, &overrides))
 }
 
+/// A kind's declared words in declared order, each with its adapter's tone.
+type Declared = Vec<(String, Option<Tone>)>;
+
 /// [`read`]'s answer from what it read.
 fn offered(
     templates: &BTreeMap<String, Vec<knobas_source::KindPaths>>,
     seen: &[(String, String)],
     overrides: &[ToneOverride],
 ) -> Vec<KindStateColours> {
-    // kind -> (declared words in order with their tone, has an open candidate)
-    let mut kinds: BTreeMap<String, (Vec<(String, Option<Tone>)>, bool)> = BTreeMap::new();
+    // Per kind: its declared words in order with their tone, and whether it
+    // has an open candidate.
+    let mut kinds: BTreeMap<String, (Declared, bool)> = BTreeMap::new();
     for paths in templates.values().flatten() {
         if paths.state.is_empty() {
             continue;

@@ -8,7 +8,9 @@
  * one is made), `diff_pipelines`, `set_diff_pipelines` (#2270, on until set), `command_steps`, `set_command_steps`, `named_pipelines`, `set_named_pipelines` (#2265: one
  * command step, Upper, which `repoFilePiped` runs; no pipeline until one is saved, but under
  * `?fake-diff-pipeline` *Base64 JSON*, the default for `*.json.b64`), `pages_kept_open`, `set_pages_kept_open` (#2247), `passive_attribution`, `set_passive_attribution`,
- * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
+ * `monitoring_settings`, `set_monitoring_settings`, `state_colours`, `set_tone_override`,
+ * `clear_tone_overrides` (#2465: the adapters' declared words, two seen Jira statuses, no
+ * override until one is set), `backup_status`,
  * `backup_now`, `set_backup_schedule` and `open_backup_folder` (which opens
  * nothing: a browser has no file manager to show the folder in).
  * Notifications are `inbox.ts`'s and Standup's publish target is
@@ -33,6 +35,8 @@
 import type { BackupRecord, BackupSchedule, BackupStatus } from "../../../ipc/backup";
 import type { MonitoringSettings } from "../../../ipc/assets";
 import type { CommandStep, CommandStepDraft, NamedPipeline, NamedPipelineDraft, RenderContent, RendererDefault, UserRenderer, UserRendererDraft } from "../../../ipc/app";
+import type { KindStateColours, ToneChoice } from "../../../ipc/sources";
+import type { Tone } from "../../../ipc/generated/entity";
 import type { Handlers } from "../fake-tauri";
 
 const DIRECTORY = "~/Library/Application Support/knobas/backups";
@@ -54,8 +58,38 @@ function record(at: Date, bytes: number): BackupRecord {
 }
 
 /** This feature's commands. */
+/** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
+const DECLARED_STATES: [string, [string, Tone | null][]][] = [
+  ["build", [["running", "info"], ["queued", "info"], ["SUCCESS", "ok"], ["FAILURE", "err"], ["UNKNOWN", "muted"]]],
+  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "warn"], ["maintenance", "muted"]]],
+  ["pr", [["merged", "ok"], ["open", "info"], ["closed", "muted"]]],
+  ["ticket", [["Done", "ok"], ["Resolved", "ok"], ["In Progress", "info"], ["In Review", "info"], ["Closed", "muted"]]],
+];
+const SEEN_STATES: Record<string, string[]> = { ticket: ["Blocked", "To Do"] };
+
+/** `state_colours` over the fake's overrides, as `sources::state_colours::read` answers. */
+function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
+  return DECLARED_STATES.map(([kind, declared]) => {
+    const yours = (word: string) => overrides.get(`${kind}\u0000${word}`) ?? null;
+    const undeclared = [...(SEEN_STATES[kind] ?? []), ...[...overrides.keys()].filter((key) => key.startsWith(`${kind}\u0000`)).map((key) => key.slice(kind.length + 1))]
+      .filter((word, i, all) => kind in SEEN_STATES && all.indexOf(word) === i && !declared.some(([w]) => w === word))
+      .sort();
+    const words = [
+      ...declared.map(([word, tone]) => ({ word, declared: true, declared_tone: tone })),
+      ...undeclared.map((word) => ({ word, declared: false, declared_tone: null })),
+    ].map(({ word, declared, declared_tone }) => {
+      const mine = yours(word);
+      const tone: Tone | null = mine === null ? declared_tone : mine === "none" ? null : mine;
+      const origin = mine !== null ? "yours" : declared ? "adapter" : "unset";
+      return { word, declared, declared_tone, yours: mine, tone, origin } as const;
+    });
+    return { kind, words };
+  });
+}
+
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   let passive = true;
+  const toneOverrides = new Map<string, ToneChoice>();
   // `?fake-pages-kept-open=<n>` starts *Pages kept open* at n (the keep-alive budget, #2250).
   const keptAsked = new URLSearchParams(globalThis.location?.search).get("fake-pages-kept-open");
   let keptOpen = keptAsked === null ? 5 : Math.min(15, Math.max(0, Math.round(Number(keptAsked)) || 0));
@@ -160,6 +194,19 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     set_passive_attribution: (args) => {
       passive = args["enabled"] === true;
       return passive;
+    },
+    state_colours: () => stateColours(toneOverrides),
+    set_tone_override: (args) => {
+      toneOverrides.set(`${String(args["kind"])}\u0000${String(args["word"]).trim()}`, args["tone"] as ToneChoice);
+      return stateColours(toneOverrides);
+    },
+    clear_tone_overrides: (args) => {
+      const kind = String(args["kind"]);
+      const word = args["word"];
+      for (const key of [...toneOverrides.keys()]) {
+        if (key === `${kind}\u0000${String(word)}` || (word === null && key.startsWith(`${kind}\u0000`))) toneOverrides.delete(key);
+      }
+      return stateColours(toneOverrides);
     },
     monitoring_settings: () => monitoring,
     set_monitoring_settings: (args) => {

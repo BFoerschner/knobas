@@ -143,9 +143,7 @@ pub async fn clear_tone_overrides<R: tauri::Runtime>(
     word: Option<String>,
 ) -> Result<Vec<crate::sources::state_colours::KindStateColours>, IpcError> {
     let pool = lifecycle.pool()?;
-    if let Some(line) =
-        crate::sources::state_colours::clear(&pool, &kind, word.as_deref()).await?
-    {
+    if let Some(line) = crate::sources::state_colours::clear(&pool, &kind, word.as_deref()).await? {
         crate::events::emit(&app, None, crate::events::ACTIVITY_NEW, &line);
     }
     crate::sources::state_colours::read(&pool, lifecycle.registry()).await
@@ -1247,7 +1245,7 @@ mod tests {
             "sources",
             MIRROR,
             "app/src/lib/ipc/sources.ts",
-            31,
+            34,
         );
     }
 }

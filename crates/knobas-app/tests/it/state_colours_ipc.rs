@@ -29,7 +29,12 @@ async fn pool(label: &str) -> PgPool {
         .pool(4)
         .await
         .expect("a pool onto this test's own database");
-    for (id, kind) in [("tc", "teamcity"), ("git", "gitea"), ("mock", "mock"), ("jira", "jira")] {
+    for (id, kind) in [
+        ("tc", "teamcity"),
+        ("git", "gitea"),
+        ("mock", "mock"),
+        ("jira", "jira"),
+    ] {
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
              values ($1, $2, $1, 'http://x.example', 'Pat', '{}')",
@@ -118,9 +123,16 @@ async fn room_chip(pool: &PgPool, source: &str, kind: &str, id: &str) -> Option<
     let declarations = knobas_app::sources::paths::declared_paths(pool, &registry)
         .await
         .unwrap();
-    let page = list_entities_inner(pool, &registry, &filter(&[source], &[kind]), 100, 0, &declarations)
-        .await
-        .unwrap();
+    let page = list_entities_inner(
+        pool,
+        &registry,
+        &filter(&[source], &[kind]),
+        100,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap();
     page.rows
         .into_iter()
         .find(|row| row.entity_id == id)
@@ -240,7 +252,12 @@ async fn a_failure_set_to_warn_is_warn_everywhere_and_no_longer_failed() {
     );
     assert_eq!(
         before,
-        (Some(Tone::Err), Some(Tone::Err), Some(Tone::Err), vec![red.clone()]),
+        (
+            Some(Tone::Err),
+            Some(Tone::Err),
+            Some(Tone::Err),
+            vec![red.clone()]
+        ),
         "the adapter's tone, before any override"
     );
 
@@ -254,7 +271,12 @@ async fn a_failure_set_to_warn_is_warn_everywhere_and_no_longer_failed() {
     );
     assert_eq!(
         after,
-        (Some(Tone::Warn), Some(Tone::Warn), Some(Tone::Warn), Vec::<String>::new()),
+        (
+            Some(Tone::Warn),
+            Some(Tone::Warn),
+            Some(Tone::Warn),
+            Vec::<String>::new()
+        ),
         "the override, on every surface, and the build is no longer failed"
     );
 }
@@ -361,7 +383,10 @@ async fn clearing_a_word_then_the_kind_restores_the_adapters_tones() {
     let cleared = state_colours::clear(&pool, "build", Some("FAILURE"))
         .await
         .unwrap();
-    assert!(cleared.is_some(), "a clear that forgot a word writes its line");
+    assert!(
+        cleared.is_some(),
+        "a clear that forgot a word writes its line"
+    );
     assert_eq!(tones(&pool).await, (Some(Tone::Err), Some(Tone::Muted)));
 
     state_colours::clear(&pool, "build", None).await.unwrap();
@@ -393,7 +418,12 @@ fn words(kinds: &[KindStateColours], kind: &str) -> Vec<String> {
 #[tokio::test]
 async fn the_read_offers_declared_then_seen_words_and_never_finished() {
     let pool = pool("state_colours_read").await;
-    for (key, status) in [("PAY-1", "To Do"), ("PAY-2", "Blocked"), ("PAY-3", "Done"), ("PAY-4", " Blocked ")] {
+    for (key, status) in [
+        ("PAY-1", "To Do"),
+        ("PAY-2", "Blocked"),
+        ("PAY-3", "Done"),
+        ("PAY-4", " Blocked "),
+    ] {
         mirrored(
             &pool,
             "jira",
@@ -407,7 +437,9 @@ async fn the_read_offers_declared_then_seen_words_and_never_finished() {
     build(&pool, "Ledger_Build", 1, "finished", "SUCCESS").await;
     set(&pool, "build", "FAILURE", ToneChoice::Warn).await;
 
-    let kinds = state_colours::read(&pool, &Registry::for_process()).await.unwrap();
+    let kinds = state_colours::read(&pool, &Registry::for_process())
+        .await
+        .unwrap();
 
     assert_eq!(
         kinds.iter().map(|k| k.kind.as_str()).collect::<Vec<_>>(),
@@ -416,19 +448,39 @@ async fn the_read_offers_declared_then_seen_words_and_never_finished() {
     );
     assert_eq!(
         words(&kinds, "ticket"),
-        ["Done", "Resolved", "In Progress", "In Review", "Closed", "Blocked", "To Do"]
+        [
+            "Done",
+            "Resolved",
+            "In Progress",
+            "In Review",
+            "Closed",
+            "Blocked",
+            "To Do"
+        ]
     );
     assert_eq!(
         words(&kinds, "build"),
-        ["running", "failed", "success", "queued", "SUCCESS", "FAILURE", "UNKNOWN"],
+        [
+            "running", "failed", "success", "queued", "SUCCESS", "FAILURE", "UNKNOWN"
+        ],
         "declared words only, the mock's then TeamCity's: no build candidate is open, so \
          TeamCity's `finished` is never offered"
     );
     let build = &kinds.iter().find(|k| k.kind == "build").unwrap().words;
     let failure = build.iter().find(|w| w.word == "FAILURE").unwrap();
     assert_eq!(
-        (failure.declared_tone, failure.yours, failure.tone, failure.origin),
-        (Some(Tone::Err), Some(ToneChoice::Warn), Some(Tone::Warn), ToneOrigin::Yours)
+        (
+            failure.declared_tone,
+            failure.yours,
+            failure.tone,
+            failure.origin
+        ),
+        (
+            Some(Tone::Err),
+            Some(ToneChoice::Warn),
+            Some(Tone::Warn),
+            ToneOrigin::Yours
+        )
     );
     let success = build.iter().find(|w| w.word == "SUCCESS").unwrap();
     assert_eq!(
