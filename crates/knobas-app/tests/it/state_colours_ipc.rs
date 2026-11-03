@@ -490,8 +490,84 @@ async fn the_read_offers_declared_then_seen_words_and_never_finished() {
     let ticket = &kinds.iter().find(|k| k.kind == "ticket").unwrap().words;
     let blocked = ticket.iter().find(|w| w.word == "Blocked").unwrap();
     assert_eq!(
-        (blocked.declared, blocked.tone, blocked.origin),
-        (false, None, ToneOrigin::Unset)
+        (
+            blocked.declared,
+            blocked.category_tone,
+            blocked.tone,
+            blocked.origin
+        ),
+        (false, None, None, ToneOrigin::Unset),
+        "a status with no category on record falls back to nothing"
+    );
+}
+
+/// A seen status no name maps reports the tone Jira's status category gives
+/// its tickets (#2468), with origin *category*; a to-do status has none and
+/// stays unset, and the reader's override still wins. The category keys
+/// themselves are no words: the chip never says them.
+#[tokio::test]
+async fn the_read_reports_a_seen_statuss_category_tone() {
+    let pool = pool("state_colours_category").await;
+    for (key, status, category) in [
+        ("PAY-1", "Ready for QA", "indeterminate"),
+        ("PAY-2", "Shipped", "done"),
+        ("PAY-3", "Backlog", "new"),
+        ("PAY-4", "Parked", "indeterminate"),
+        ("PAY-5", "Closed", "done"),
+    ] {
+        mirrored(
+            &pool,
+            "jira",
+            "ticket",
+            key,
+            key,
+            serde_json::json!({ "key": key, "fields": { "status": {
+                "name": status, "statusCategory": { "key": category, "name": "x" },
+            } } }),
+        )
+        .await;
+    }
+    set(&pool, "ticket", "Parked", ToneChoice::Err).await;
+
+    let kinds = state_colours::read(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    assert_eq!(
+        words(&kinds, "ticket"),
+        [
+            "Done",
+            "Resolved",
+            "In Progress",
+            "In Review",
+            "Closed",
+            "Backlog",
+            "Parked",
+            "Ready for QA",
+            "Shipped",
+        ]
+    );
+    let ticket = &kinds.iter().find(|k| k.kind == "ticket").unwrap().words;
+    let drawn = |word: &str| {
+        let w = ticket.iter().find(|w| w.word == word).unwrap();
+        (w.category_tone, w.tone, w.origin)
+    };
+    assert_eq!(
+        drawn("Ready for QA"),
+        (Some(Tone::Info), Some(Tone::Info), ToneOrigin::Category)
+    );
+    assert_eq!(
+        drawn("Shipped"),
+        (Some(Tone::Ok), Some(Tone::Ok), ToneOrigin::Category)
+    );
+    assert_eq!(drawn("Backlog"), (None, None, ToneOrigin::Unset));
+    assert_eq!(
+        drawn("Parked"),
+        (Some(Tone::Info), Some(Tone::Err), ToneOrigin::Yours)
+    );
+    assert_eq!(
+        drawn("Closed"),
+        (None, Some(Tone::Muted), ToneOrigin::Adapter),
+        "an exact name is the adapter's, whatever its category"
     );
 }
 

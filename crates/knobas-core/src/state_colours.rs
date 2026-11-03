@@ -179,7 +179,9 @@ pub fn word_of(value: &StateValue) -> Option<String> {
 /// Apply `overrides` to one adapter's declared kinds, per word.
 ///
 /// * An override for a word a candidate declares replaces that value's tone,
-///   in every candidate that declares it.
+///   in every candidate that declares it. A candidate drawn as another
+///   path's string (`StatePath::text_at`, Jira's status category) declares
+///   no words: its values are keys the chip never says, and keep their tone.
 /// * An override for a word no candidate of the kind declares is added to the
 ///   kind's first **open** candidate (`StatePath::open`), as a value matching
 ///   that string. A kind with no open candidate ignores it.
@@ -192,7 +194,7 @@ pub fn merge(kinds: &mut [KindPaths], overrides: &[ToneOverride]) {
         for o in overrides.iter().filter(|o| o.kind == paths.kind) {
             let tone = o.choice.tone();
             let mut declared = false;
-            for candidate in &mut paths.state {
+            for candidate in paths.state.iter_mut().filter(|c| c.text_at.is_none()) {
                 for value in &mut candidate.values {
                     if word_of(value).as_deref() == Some(o.word.as_str()) {
                         value.tone = tone;
@@ -244,16 +246,41 @@ pub fn open_paths<'a>(
     })
 }
 
+/// What a word seen at an open candidate falls back to (#2468): per kind
+/// with an open candidate, the candidates after the first open one, which is
+/// where a ticket whose status no name maps is read on (Jira's status
+/// category). A kind with no open candidate, or none after it, has none.
+#[must_use]
+pub fn fallback(kinds: &[KindPaths]) -> Vec<KindPaths> {
+    kinds
+        .iter()
+        .filter_map(|paths| {
+            let open = paths.state.iter().position(|c| c.open)?;
+            let rest = &paths.state[open + 1..];
+            (!rest.is_empty()).then(|| KindPaths {
+                kind: paths.kind.clone(),
+                state: rest.to_vec(),
+                ..KindPaths::default()
+            })
+        })
+        .collect()
+}
+
 /// The words the mirror has seen at `paths`: per kind, the distinct trimmed
-/// non-empty strings its live items hold there, across the sources. The
-/// generalisation of the mini board's `OBSERVED_STATUSES`, which knows only
-/// `ticket` and `status_name`.
+/// non-empty strings its live items hold there, across the sources, each
+/// with the tone its items resolve to through `$2`, the [`fallback`]
+/// declarations (the most common one, a tie to the first by name; none if
+/// no item of the word resolves). The generalisation of the mini board's
+/// `OBSERVED_STATUSES`, which knows only `ticket` and `status_name`.
 const SEEN_WORDS: &str = concat!(
     "with open_path as (
        select p->>'source_id' as source_id, p->>'kind' as kind,
               array(select jsonb_array_elements_text(p->'at')) as segs
          from jsonb_array_elements($1::jsonb) p)
-     select distinct o.kind, btrim(i.payload #>> o.segs) as word
+     select o.kind, btrim(i.payload #>> o.segs) as word,
+            mode() within group (order by ",
+    crate::declared_state!("$2"),
+    "->>'tone') as tone
        from open_path o
        join sync.item i on i.source_id = o.source_id and i.kind = o.kind
       where jsonb_typeof(i.payload #> o.segs) = 'string'
@@ -261,10 +288,22 @@ const SEEN_WORDS: &str = concat!(
         and ",
     crate::live_by_exclusion!("i"),
     "
+      group by 1, 2
       order by 1, 2"
 );
 
-/// [`SEEN_WORDS`] over `paths`: `(kind, word)`, by kind then word.
+/// One word the mirror has seen at an open candidate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SeenWord {
+    pub kind: String,
+    pub word: String,
+    /// The tone its items draw through the [`fallback`] declarations: Jira's
+    /// status category for a status no name maps.
+    pub fallback: Option<Tone>,
+}
+
+/// [`SEEN_WORDS`] over `paths`, by kind then word. `fallback` holds each
+/// source's [`fallback`] declarations.
 ///
 /// # Errors
 ///
@@ -272,14 +311,24 @@ const SEEN_WORDS: &str = concat!(
 pub async fn seen_words(
     pool: &PgPool,
     paths: &[OpenPath],
-) -> Result<Vec<(String, String)>, CoreError> {
+    fallback: &crate::payload::Declarations,
+) -> Result<Vec<SeenWord>, CoreError> {
     if paths.is_empty() {
         return Ok(Vec::new());
     }
-    Ok(sqlx::query_as(SEEN_WORDS)
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(SEEN_WORDS)
         .bind(sqlx::types::Json(paths))
+        .bind(fallback.as_param())
         .fetch_all(pool)
-        .await?)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(kind, word, tone)| SeenWord {
+            kind,
+            word,
+            fallback: tone.and_then(|t| serde_json::from_value(serde_json::Value::String(t)).ok()),
+        })
+        .collect())
 }
 
 #[cfg(test)]
@@ -344,6 +393,55 @@ mod tests {
                 PayloadPath::of(["status"])
             )]
         );
+    }
+
+    /// A ticket as Jira declares it (#2468): its open status name, then its
+    /// category, drawn as the name.
+    fn ticket() -> KindPaths {
+        KindPaths {
+            kind: "ticket".to_owned(),
+            state: vec![
+                StatePath {
+                    at: PayloadPath::of(["status", "name"]),
+                    open: true,
+                    text_at: None,
+                    values: vec![StateValue::of("Done", Tone::Ok)],
+                },
+                StatePath {
+                    at: PayloadPath::of(["status", "category"]),
+                    open: false,
+                    text_at: Some(PayloadPath::of(["status", "name"])),
+                    values: vec![StateValue::of("done", Tone::Ok)],
+                },
+            ],
+            ..KindPaths::default()
+        }
+    }
+
+    /// A candidate whose chip says another path's string has no words of its
+    /// own: an override for `done` is a status named `done`, added to the
+    /// open candidate, and never retones the category's `done`.
+    #[test]
+    fn an_override_never_retones_a_candidate_drawn_as_another_path() {
+        let kinds = merged(vec![ticket()], &[over("ticket", "done", ToneChoice::Err)]);
+        assert_eq!(kinds[0].state[1], ticket().state[1]);
+        assert_eq!(
+            kinds[0].state[0].values,
+            [
+                StateValue::of("Done", Tone::Ok),
+                StateValue::of("done", Tone::Err)
+            ]
+        );
+    }
+
+    /// What a seen word falls back to is what the candidates after the open
+    /// one draw: the category, never the name it was seen at.
+    #[test]
+    fn the_fallback_is_the_candidates_after_the_open_one() {
+        let fallback = fallback(&[ticket(), build()]);
+        assert_eq!(fallback.len(), 1, "a kind with no open candidate has none");
+        assert_eq!(fallback[0].kind, "ticket");
+        assert_eq!(fallback[0].state, ticket().state[1..]);
     }
 
     /// The stored spelling round-trips, *No colour* as SQL null.

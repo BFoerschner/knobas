@@ -4,7 +4,8 @@
 //! `knobas_core::state_colours`'. This is where the registry is, so this is
 //! where the words a kind offers are listed: the declared words of every
 //! candidate of every configured adapter, then the words the mirror has seen
-//! at the kind's open candidates.
+//! at the kind's open candidates, each with the tone its items fall back to
+//! (Jira's status category, #2468).
 
 use std::collections::BTreeMap;
 
@@ -30,6 +31,9 @@ pub enum ToneOrigin {
     Yours,
     /// The adapter's declared map.
     Adapter,
+    /// Where the adapter reads on for a word its map leaves out: Jira's
+    /// status category (#2468), for a seen status no name maps.
+    Category,
     /// Nothing: a seen word no adapter declares and nobody coloured.
     Unset,
 }
@@ -45,9 +49,15 @@ pub struct StateWordColour {
     /// The adapter's tone, `None` for a word it declares with none or does
     /// not declare.
     pub declared_tone: Option<Tone>,
+    /// The tone the word's items draw where the adapter reads on past the
+    /// word (Jira's status category, #2468), for a seen word it does not
+    /// declare. `None` for a declared word, and for one whose items resolve
+    /// to nothing there (a to-do status).
+    pub category_tone: Option<Tone>,
     /// The reader's override, if any.
     pub yours: Option<ToneChoice>,
-    /// What the word draws: the override, else the adapter's tone.
+    /// What the word draws: the override, else the adapter's tone, else the
+    /// category's.
     pub tone: Option<Tone>,
     pub origin: ToneOrigin,
 }
@@ -92,7 +102,13 @@ pub async fn read(
         .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
         .flat_map(|(id, kinds)| state_colours::open_paths(id, kinds).collect::<Vec<_>>())
         .collect();
-    let seen = state_colours::seen_words(pool, &open)
+    let fallback = sources
+        .iter()
+        .filter_map(|s| Some((s.id.as_str(), templates.get(&s.adapter_kind)?)))
+        .fold(knobas_core::payload::Declarations::empty(), |d, (id, kinds)| {
+            d.with(id, state_colours::fallback(kinds))
+        });
+    let seen = state_colours::seen_words(pool, &open, &fallback)
         .await
         .map_err(IpcError::internal)?;
     Ok(offered(&templates, &seen, &overrides))
@@ -104,7 +120,7 @@ type Declared = Vec<(String, Option<Tone>)>;
 /// [`read`]'s answer from what it read.
 fn offered(
     templates: &BTreeMap<String, Vec<knobas_source::KindPaths>>,
-    seen: &[(String, String)],
+    seen: &[state_colours::SeenWord],
     overrides: &[ToneOverride],
 ) -> Vec<KindStateColours> {
     // Per kind: its declared words in order with their tone, and whether it
@@ -117,6 +133,11 @@ fn offered(
         let (declared, open) = kinds.entry(paths.kind.clone()).or_default();
         for candidate in &paths.state {
             *open |= candidate.open;
+            // A candidate drawn as another path's string (Jira's category)
+            // has keys, not words: the chip never says them.
+            if candidate.text_at.is_some() {
+                continue;
+            }
             for value in &candidate.values {
                 if let Some(word) = state_colours::word_of(value)
                     && !declared.iter().any(|(w, _)| *w == word)
@@ -139,8 +160,8 @@ fn offered(
             if open {
                 let more = seen
                     .iter()
-                    .filter(|(k, _)| *k == kind)
-                    .map(|(_, w)| w.clone())
+                    .filter(|w| w.kind == kind)
+                    .map(|w| w.word.clone())
                     .chain(
                         overrides
                             .iter()
@@ -160,15 +181,24 @@ fn offered(
                 .chain(others.into_iter().map(|word| (word, false, None)))
                 .map(|(word, declared, declared_tone)| {
                     let mine = yours(&word);
-                    let (tone, origin) = match mine {
-                        Some(choice) => (choice.tone(), ToneOrigin::Yours),
-                        None if declared => (declared_tone, ToneOrigin::Adapter),
-                        None => (None, ToneOrigin::Unset),
+                    let category_tone = if declared {
+                        None
+                    } else {
+                        seen.iter()
+                            .find(|w| w.kind == kind && w.word == word)
+                            .and_then(|w| w.fallback)
+                    };
+                    let (tone, origin) = match (mine, category_tone) {
+                        (Some(choice), _) => (choice.tone(), ToneOrigin::Yours),
+                        (None, _) if declared => (declared_tone, ToneOrigin::Adapter),
+                        (None, Some(tone)) => (Some(tone), ToneOrigin::Category),
+                        (None, None) => (None, ToneOrigin::Unset),
                     };
                     StateWordColour {
                         word,
                         declared,
                         declared_tone,
+                        category_tone,
                         yours: mine,
                         tone,
                         origin,
