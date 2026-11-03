@@ -75,7 +75,8 @@
     resolveUrl as defaultResolveUrl,
     search as defaultSearch,
   } from "../ipc";
-  import type { CredentialHealth } from "../ipc/sources";
+  import { EVENTS } from "../ipc";
+  import type { CredentialHealth, KindStateColours } from "../ipc/sources";
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
@@ -84,6 +85,7 @@
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
+  import { type LegendPorts, legendOf, realLegendPorts } from "./legend";
   import Preview, { PREVIEW_DEBOUNCE_MS } from "./Preview.svelte";
   import QueryBox from "./QueryBox.svelte";
   import Pinned from "./Pinned.svelte";
@@ -133,6 +135,7 @@
     ontimer,
     ports,
     sheetPorts,
+    legendPorts,
     openExternal = realOpenExternal,
     scope = launcherScope,
     keys = launcherKeys,
@@ -206,6 +209,8 @@
     ports?: Partial<SessionPorts>;
     /** The sheet's writes and reads (#2426), injectable as `ports` is. */
     sheetPorts?: Partial<SheetPorts>;
+    /** The colour legend's read and the event that re-reads it (#2467), injectable as `ports` is. */
+    legendPorts?: Partial<LegendPorts>;
     /**
      * *Titles* or *Everything* (#2430): the app's one choice, kept across
      * closing and a restart. Injectable so a test can keep it in a storage of
@@ -416,6 +421,50 @@
   const overlayRows = $derived<LauncherRow[]>(
     overlayShown.map(({ entry, word }) => ({ kind: "syntax", id: `filter:${entry.token}`, entry: { ...entry, summary: word } })),
   );
+
+  // svelte-ignore state_referenced_locally
+  // Read once, as the session's ports are.
+  const legendIo: LegendPorts = { ...realLegendPorts, ...legendPorts };
+  /**
+   * The colour legend under the `?` card and the ⌘? overlay (#2467): the
+   * merged map the *state colours* read answers, read while either is on
+   * screen. A set or a clear announces itself on `activity:new` (#2465
+   * Ruling 1), so while the legend is drawn every activity line re-reads it.
+   * Not filtered by verb: the event is coalesced, so the line it carries may
+   * be another one than the set's. A failed read keeps what was drawn.
+   */
+  const legendShown = $derived(open && (overlay !== null || session.mode === "help"));
+  let colours = $state<KindStateColours[]>([]);
+  const legend = $derived(legendOf(colours));
+  $effect(() => {
+    if (!legendShown) return;
+    let live = true;
+    let asked = 0;
+    let off: (() => void) | null = null;
+    const read = () => {
+      const mine = ++asked;
+      legendIo
+        .stateColours()
+        .then((answer) => {
+          if (live && mine === asked) colours = answer;
+        })
+        .catch(() => {});
+    };
+    legendIo
+      .listen(EVENTS.activityNew, read)
+      .then((stop) => {
+        if (live) off = stop;
+        else stop();
+      })
+      .catch(() => {
+        // No event channel: the legend is the one read at opening.
+      });
+    read();
+    return () => {
+      live = false;
+      off?.();
+    };
+  });
 
   /**
    * The list's name while ⌘S asks for it (#2424), or `null`. The box holds
@@ -1711,6 +1760,7 @@
             selected={overlay.selected}
             heading="Filters"
             keys={boxKeys}
+            {legend}
             {optionId}
             onopen={pickFilter}
             onhover={(index) => overlay && (overlay.selected = index)}
@@ -1764,6 +1814,7 @@
           <Help
             rows={session.rows}
             selected={session.selected}
+            {legend}
             {optionId}
             onopen={activate}
             onhover={(index) => (session.selected = index)}
