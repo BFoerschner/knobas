@@ -65,6 +65,7 @@ import {
   runEmbeddedHtml,
   setRunEmbeddedHtml,
   setSourceSecret,
+  stateColours,
   syncAll,
   syncNow,
   syncStatus,
@@ -74,6 +75,7 @@ import {
   type ConnectionReport,
   type DbStats,
   type InstalledAdapter,
+  type KindStateColours,
   type AdapterPreview,
   type AdapterStatus,
   type UpdatePreview,
@@ -220,6 +222,8 @@ export interface SectionPorts {
   ticketViews: () => Promise<Pick<TicketViewRow, "id">[]>;
   /** Whether any link set exists, for the share export's tick (#870). */
   linkSets: () => Promise<Pick<LinkSetRow, "id">[]>;
+  /** Whether any tone override exists (a word that is *yours*), for the share export's tick (#2469). */
+  stateColours: () => Promise<KindStateColours[]>;
   appStatus: () => Promise<Pick<AppStatus, "app_version">>;
   dbStats: () => Promise<DbStats>;
   reindexFts: () => Promise<void>;
@@ -259,6 +263,7 @@ export const realSectionPorts: SectionPorts = {
   keys: () => keys(),
   ticketViews: () => ticketViews(),
   linkSets: () => linkSets(),
+  stateColours: () => stateColours(),
   appStatus: () => appStatus(),
   dbStats: () => dbStats(),
   reindexFts: () => reindexFts(),

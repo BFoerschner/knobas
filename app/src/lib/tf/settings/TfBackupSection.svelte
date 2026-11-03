@@ -51,6 +51,7 @@
       | "keys"
       | "ticketViews"
       | "linkSets"
+      | "stateColours"
       | "openBackupFolder"
     >;
     layers: Layers;
@@ -66,8 +67,16 @@
   let savedViews = $state(false);
   /** Whether a link set exists (#870): its tick, on `savedLists`' terms. */
   let savedSets = $state(false);
-  /** The share ticks: the ratified defaults, smart lists, ticket views and link sets only when one exists. */
-  let parts = $state<ShareParts>({ ...shareDefaults, smart_lists: false, ticket_views: false, link_sets: false });
+  /** Whether a tone override exists (#2469): its tick, on `savedLists`' terms. */
+  let savedTones = $state(false);
+  /** The share ticks: the ratified defaults; smart lists, ticket views, link sets and state colours only when one exists. */
+  let parts = $state<ShareParts>({
+    ...shareDefaults,
+    smart_lists: false,
+    ticket_views: false,
+    link_sets: false,
+    state_colours: false,
+  });
   let busy = $state(false);
   /** Which archives the open dialog lists, or `null` when none is open. */
   let choosing = $state<"backup" | "share" | null>(null);
@@ -136,6 +145,13 @@
         parts = { ...parts, link_sets: savedSets };
       })
       .catch(() => (savedSets = false));
+    void ports
+      .stateColours()
+      .then((kinds) => {
+        savedTones = kinds.some((kind) => kind.words.some((word) => word.yours !== null));
+        parts = { ...parts, state_colours: savedTones };
+      })
+      .catch(() => (savedTones = false));
   });
 
   async function saveSchedule(next: BackupSchedule) {
@@ -169,6 +185,7 @@
         smart_lists: savedLists && parts.smart_lists,
         ticket_views: savedViews && parts.ticket_views,
         link_sets: savedSets && parts.link_sets,
+        state_colours: savedTones && parts.state_colours,
       });
       push({ text: `Saved ${made.file} to ${status?.directory ?? "the backup folder"}`, ms: 15_000 });
       await load();
@@ -194,7 +211,7 @@
     }
   }
 
-  const ticks = $derived(shareTicks(savedLists, savedViews, savedSets));
+  const ticks = $derived(shareTicks(savedLists, savedViews, savedSets, savedTones));
   const nothingTicked = $derived(!ticks.some((tick) => parts[tick.part]));
   const listed = $derived(status?.archives.filter((archive) => archive.share === (choosing === "share")) ?? []);
 
