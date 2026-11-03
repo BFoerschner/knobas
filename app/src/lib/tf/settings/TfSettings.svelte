@@ -228,7 +228,7 @@
       {:else if place.section === "backup"}
         <TfBackupSection ports={sectionPorts} {layers} now={clock} onrestored={() => void load()} />
       {:else if place.section === "appearance"}
-        <TfAppearanceSection {theme} />
+        <TfAppearanceSection {theme} {ready} ports={sectionPorts} />
       {:else if place.section === "performance"}
         <TfPerformanceSection ports={sectionPorts} />
       {:else if place.section === "renderers"}

@@ -77,6 +77,19 @@ const sourcePorts: SettingsPorts = {
   setRunEmbeddedHtml: () => Promise.resolve(true),
 };
 
+/** Appearance's State colours (#2466): a kind per adapter family, so its board draws. */
+function fakeStateColours(): Pick<SectionPorts, "stateColours" | "setToneOverride" | "clearToneOverrides"> {
+  const kinds: KindStateColours[] = ["build", "monitor", "pr", "ticket"].map((kind) => ({
+    kind,
+    words: [{ word: "settled", declared: true, declared_tone: "ok", yours: null, tone: "ok", origin: "adapter" }],
+  }));
+  return {
+    stateColours: vi.fn(() => Promise.resolve(kinds)),
+    setToneOverride: vi.fn(() => Promise.resolve(kinds)),
+    clearToneOverrides: vi.fn(() => Promise.resolve(kinds)),
+  };
+}
+
 function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
     pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
@@ -115,7 +128,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     keys: vi.fn(() => Promise.resolve({ lists: [], actions: [] })),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
-    stateColours: vi.fn(() => Promise.resolve([])),
+    ...fakeStateColours(),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
     dbStats: vi.fn(() =>
       Promise.resolve({
@@ -201,6 +214,26 @@ function rowValue(label: string): string {
   );
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
+
+test("Appearance draws State colours below Theme, one section per kind with a state (#2466)", async () => {
+  await open("appearance");
+  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.textContent?.trim());
+  expect(heads).toEqual(["Theme", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+});
+
+test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
+  const p = sectionPorts();
+  const read = vi.spyOn(p, "stateColours");
+  view = mount(TfSettings, {
+    target,
+    context: hiddenable,
+    props: { rest: ["appearance"], job: null, ready: false, ports: sourcePorts, sectionPorts: p, layers: createLayers(), now: () => NOW, theme: createTheme() },
+  });
+  await settle();
+  expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
+  expect(target.querySelector(".tf-sc")).toBeNull();
+  expect(read).not.toHaveBeenCalled();
+});
 
 test("Appearance and the top bar's toggle are the same setting", async () => {
   const theme = createTheme();
