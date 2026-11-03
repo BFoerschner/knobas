@@ -124,10 +124,12 @@ fn gitea_pr_state() -> Vec<knobas_core::payload::StatePath> {
     vec![
         StatePath {
             at: PayloadPath::of(["merged"]),
+            open: false,
             values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
         },
         StatePath {
             at: PayloadPath::of(["state"]),
+            open: false,
             values: vec![
                 StateValue::of("open", Tone::Info),
                 StateValue::of("closed", Tone::Muted),
@@ -146,6 +148,7 @@ fn teamcity_build() -> knobas_core::payload::KindPaths {
         state: vec![
             StatePath {
                 at: PayloadPath::of(["state"]),
+                open: false,
                 values: vec![
                     StateValue::of("running", Tone::Info),
                     StateValue::of("queued", Tone::Info),
@@ -153,6 +156,7 @@ fn teamcity_build() -> knobas_core::payload::KindPaths {
             },
             StatePath {
                 at: PayloadPath::of(["status"]),
+                open: false,
                 values: vec![
                     StateValue::of("SUCCESS", Tone::Ok),
                     StateValue::of("FAILURE", Tone::Err),
@@ -184,6 +188,7 @@ fn forge_kinds() -> Vec<knobas_core::payload::KindPaths> {
             }],
             state: vec![StatePath {
                 at: PayloadPath::of(["phase"]),
+                open: false,
                 values: vec![
                     StateValue::of("active", Tone::Info).shown_as("open"),
                     StateValue::of("done", Tone::Muted),
@@ -195,6 +200,7 @@ fn forge_kinds() -> Vec<knobas_core::payload::KindPaths> {
             kind: "build".to_owned(),
             state: vec![StatePath {
                 at: PayloadPath::of(["result"]),
+                open: false,
                 values: vec![
                     StateValue::of("running", Tone::Info),
                     StateValue::of("broken", Tone::Err),

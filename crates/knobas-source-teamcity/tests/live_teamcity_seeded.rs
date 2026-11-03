@@ -1793,14 +1793,14 @@ async fn a_synced_build_carries_its_state_chip() {
         failed,
         Some(StateChip {
             text: "FAILURE".to_owned(),
-            tone: Tone::Err
+            tone: Some(Tone::Err)
         })
     );
     assert_eq!(
         passed,
         Some(StateChip {
             text: "SUCCESS".to_owned(),
-            tone: Tone::Ok
+            tone: Some(Tone::Ok)
         })
     );
     for build in of_kind(&items, "build") {

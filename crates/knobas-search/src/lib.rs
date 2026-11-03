@@ -806,7 +806,7 @@ fn flag_lists_needing_attention(groups: &mut [ResultGroup], vocab: &Vocabulary) 
             if let Err(refusal) = saved::plan(text, vocab) {
                 hit.row.state = Some(knobas_core::payload::StateChip {
                     text: refusal.description(),
-                    tone: knobas_core::tone::Tone::Warn,
+                    tone: Some(knobas_core::tone::Tone::Warn),
                 });
             }
         }

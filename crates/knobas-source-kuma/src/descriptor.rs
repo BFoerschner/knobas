@@ -222,6 +222,7 @@ fn monitor_state() -> Vec<knobas_source::StatePath> {
     use knobas_source::{PayloadPath, StatePath, StateValue};
     vec![StatePath {
         at: PayloadPath::of(["state"]),
+        open: false,
         values: vec![
             StateValue::of("up", Tone::Ok),
             StateValue::of("down", Tone::Err),
@@ -337,7 +338,7 @@ mod tests {
         let chip = |state: &str| {
             let payload = serde_json::json!({ "state": state });
             knobas_core::payload::resolve_state(&payload, &paths.state)
-                .map(|chip| (chip.text, chip.tone))
+                .and_then(|chip| Some((chip.text, chip.tone?)))
         };
         use knobas_core::tone::Tone;
         assert_eq!(chip("up"), Some(("up".to_owned(), Tone::Ok)));

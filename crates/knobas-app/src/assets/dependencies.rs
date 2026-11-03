@@ -376,7 +376,7 @@ pub async fn read(
             // An open pull request is one whose declared state reads in
             // flight; a merged or closed one is not drawn.
             match state {
-                Some(chip) if chip.tone == Tone::Info => {
+                Some(chip) if chip.tone == Some(Tone::Info) => {
                     ("pr".to_owned(), Some(Tone::Info), Some(chip.text))
                 }
                 _ => continue,
@@ -405,7 +405,7 @@ pub async fn read(
             id: pipeline.entity_id,
             kind: PIPELINE.to_owned(),
             name: pipeline.name,
-            health: newest.as_ref().map(|chip| chip.tone),
+            health: newest.as_ref().and_then(|chip| chip.tone),
             state: newest.map(|chip| chip.text),
             monitors: 0,
             environment: None,

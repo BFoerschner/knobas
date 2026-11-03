@@ -142,7 +142,7 @@ fn expected() -> [Option<StateChip>; 4] {
     let chip = |text: &str, tone: Tone| {
         Some(StateChip {
             text: text.to_owned(),
-            tone,
+            tone: Some(tone),
         })
     };
     [
@@ -260,7 +260,7 @@ async fn a_tickets_hit_carries_its_declared_status_tone() {
             .unwrap_or_else(|| panic!("{id} is among the hits"))
             .state
             .as_ref()
-            .map(|chip| (chip.text.clone(), chip.tone))
+            .and_then(|chip| chip.tone.map(|tone| (chip.text.clone(), tone)))
     };
     assert_eq!(
         ids.iter().map(tone).collect::<Vec<_>>(),

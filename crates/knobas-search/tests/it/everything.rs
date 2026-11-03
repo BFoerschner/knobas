@@ -215,7 +215,7 @@ async fn a_word_only_in_a_run_log_answers_the_pipeline_coloured_by_its_last_run(
         hit.row.state,
         Some(StateChip {
             text: "FAILURE".to_owned(),
-            tone: Tone::Err
+            tone: Some(Tone::Err)
         })
     );
     assert_eq!(

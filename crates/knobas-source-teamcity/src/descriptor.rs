@@ -246,10 +246,12 @@ fn build_state() -> Vec<knobas_source::StatePath> {
     vec![
         StatePath {
             at: PayloadPath::of(["state"]),
+            open: false,
             values: vec![value("running", Tone::Info), value("queued", Tone::Info)],
         },
         StatePath {
             at: PayloadPath::of(["status"]),
+            open: false,
             values: vec![
                 value("SUCCESS", Tone::Ok),
                 value("FAILURE", Tone::Err),
@@ -353,7 +355,7 @@ mod tests {
         let drawn = |text: &str, tone: Tone| {
             Some(StateChip {
                 text: text.to_owned(),
-                tone,
+                tone: Some(tone),
             })
         };
         assert_eq!(

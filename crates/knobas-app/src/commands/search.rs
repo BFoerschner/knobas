@@ -699,7 +699,7 @@ mod tests {
         // #666: a value, for `path`'s reason below.
         let state = Some(knobas_core::payload::StateChip {
             text: "FAILURE".to_owned(),
-            tone: knobas_core::tone::Tone::Err,
+            tone: Some(knobas_core::tone::Tone::Err),
         });
         // #2452: a value, for `path`'s reason; it is skipped when absent.
         let cell = Some("Payments".to_owned());

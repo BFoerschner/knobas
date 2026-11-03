@@ -1480,7 +1480,7 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
     let chip = |text: &str, tone: Tone| {
         Some(StateChip {
             text: text.to_owned(),
-            tone,
+            tone: Some(tone),
         })
     };
     // All four room statements -- two orders, with and without the
@@ -1660,6 +1660,93 @@ async fn the_code_tile_draws_open_pull_requests_first_and_no_settled_one() {
     assert_eq!(count("pr", Some(Tone::Info)), 2);
     assert_eq!(count("branch", None), 30);
     assert_eq!(tally.len(), 2, "nothing else is counted: {tally:?}");
+}
+
+/// A pull-request word its map declares without a tone (spec #2463) is
+/// none of the tones: the attention order, which hides the settled `ok` and
+/// `muted` rows, keeps it, draws its text with no tone, ranks it after every
+/// toned row, and counts it under no tone.
+#[tokio::test]
+async fn the_code_tile_keeps_a_pull_request_whose_word_has_no_tone() {
+    use knobas_core::payload::{Declarations, PayloadPath, StateChip, StateValue};
+    use knobas_core::tone::Tone;
+    let pool = seeded().await;
+    let gitea = configured(&pool, "gitea").await;
+    let repo =
+        serde_json::json!({ "full_name": "tidewater/payout-service", "name": "payout-service" });
+    let pr = |state: &str| serde_json::json!({ "state": state, "merged": false, "base": { "repo": repo } });
+    for (key, state, minutes) in [
+        ("tidewater/payout-service#1", "draft", 1),
+        ("tidewater/payout-service#2", "open", 600),
+        ("tidewater/payout-service#3", "closed", 2),
+    ] {
+        mirrored(&pool, &gitea, "pr", key, pr(state)).await;
+        dated(&pool, &format!("{gitea}:{key}"), minutes).await;
+    }
+    let builtin = builtin_declarations(&pool).await;
+    let kinds = builtin
+        .of_source(&gitea)
+        .cloned()
+        .map(|mut paths| {
+            for candidate in &mut paths.state {
+                if paths.kind == "pr" && candidate.at == PayloadPath::of(["state"]) {
+                    candidate.values.push(StateValue::toneless("draft"));
+                }
+            }
+            paths
+        })
+        .collect();
+    let declarations = Declarations::empty().with(gitea.clone(), kinds);
+
+    let page = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &EntityFilter {
+            sources: vec![gitea.clone()],
+            kinds: vec!["pr".to_owned()],
+            order: EntityOrder::Attention,
+            ..all()
+        },
+        10,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap();
+
+    let drawn: Vec<(&str, Option<StateChip>)> = page
+        .rows
+        .iter()
+        .map(|r| (r.entity_id.as_str(), r.state.clone()))
+        .collect();
+    assert_eq!(
+        drawn,
+        [
+            (
+                format!("{gitea}:tidewater/payout-service#2").as_str(),
+                Some(StateChip {
+                    text: "open".to_owned(),
+                    tone: Some(Tone::Info)
+                })
+            ),
+            (
+                format!("{gitea}:tidewater/payout-service#1").as_str(),
+                Some(StateChip {
+                    text: "draft".to_owned(),
+                    tone: None
+                })
+            ),
+        ],
+        "the open one, then the toneless draft; the closed one is settled"
+    );
+    let tally = page.tally.expect("the attention order counts what it drew");
+    let count = |tone: Option<Tone>| {
+        tally
+            .iter()
+            .find(|t| t.kind == "pr" && t.tone == tone)
+            .map_or(0, |t| t.count)
+    };
+    assert_eq!((count(Some(Tone::Info)), count(None)), (1, 1), "{tally:?}");
 }
 
 /// A Gitea source whose configured username is `username`, or none: the
@@ -4363,7 +4450,7 @@ async fn a_commits_detail_carries_the_builds_that_ran_on_it_failing_first() {
         let builds: Vec<(String, Option<Tone>)> = detail
             .builds
             .iter()
-            .map(|r| (r.entity_id.clone(), r.state.as_ref().map(|s| s.tone)))
+            .map(|r| (r.entity_id.clone(), r.state.as_ref().and_then(|s| s.tone)))
             .collect();
         assert_eq!(
             builds,

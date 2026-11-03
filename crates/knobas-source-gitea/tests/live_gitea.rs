@@ -1872,7 +1872,7 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         let drawn = |text: &str, tone: Tone| {
             Some(StateChip {
                 text: text.to_owned(),
-                tone,
+                tone: Some(tone),
             })
         };
         assert_eq!(

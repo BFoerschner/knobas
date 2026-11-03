@@ -490,7 +490,7 @@ fn asset_chip(health: crate::assets::AssetStatus) -> Option<knobas_core::payload
     };
     Some(knobas_core::payload::StateChip {
         text: health.as_str().to_owned(),
-        tone,
+        tone: Some(tone),
     })
 }
 

@@ -495,7 +495,9 @@ macro_rules! asked_of {
 /// read once a statement: `(source_id, kind, segs, ord, m)`, one row per
 /// candidate, `m` its map as a jsonb object from each value's text (the value
 /// as jsonb, `"open"` or `true`) to `{text, tone}`, the first entry kept where
-/// a map names a value twice and only the values that have a tone. Which
+/// a map names a value twice. A value without a tone is kept, its `tone`
+/// null: it matches and stops the walk (spec #2463); a tone that is neither
+/// a string nor absent is no value. Which
 /// [`resolved_state!`] reads per row as the CTE `state_paths`. Through
 /// [`crate::declared_state!`] each row walked the whole declaration, about
 /// 19 µs a build on the probe (#939); through [`crate::state_of!`] over the
@@ -526,7 +528,8 @@ macro_rules! state_paths {
                   from jsonb_array_elements(
                          case when jsonb_typeof(c.vals) = 'array' then c.vals else '[]'::jsonb end)
                        with ordinality as v(e, vord)
-                 where jsonb_typeof(v.e->'tone') = 'string' and v.e->'value' is not null) m
+                 where coalesce(jsonb_typeof(v.e->'tone'), 'null') in ('string', 'null')
+                   and v.e->'value' is not null) m
              where m.m is not null"
         )
     };

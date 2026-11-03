@@ -136,7 +136,7 @@ pub async fn list(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<EntityRow>, S
         let state = crate::saved::plan(&row.query, vocab).err().map(|refusal| {
             knobas_core::payload::StateChip {
                 text: refusal.description(),
-                tone: knobas_core::tone::Tone::Warn,
+                tone: Some(knobas_core::tone::Tone::Warn),
             }
         });
         (

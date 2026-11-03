@@ -429,7 +429,7 @@ async fn hash_b_answers_a_configuration_as_a_pipeline_coloured_by_its_newest_run
         group.hits[0].row.state,
         Some(StateChip {
             text: "FAILURE".to_owned(),
-            tone: Tone::Err
+            tone: Some(Tone::Err)
         })
     );
 }
@@ -584,7 +584,7 @@ async fn runs_commits_and_jira_boards_are_not_among_the_boards_newest_rows() {
         .find(|row| row.entity_id == kept[0])
         .unwrap();
     assert_eq!(config.path.as_deref(), Some("Root › Payouts"));
-    assert_eq!(config.state.as_ref().map(|s| s.tone), Some(Tone::Err));
+    assert_eq!(config.state.as_ref().and_then(|s| s.tone), Some(Tone::Err));
 }
 
 /// `kind:` offers what the answer can hold (#2422): a view, a set and a
