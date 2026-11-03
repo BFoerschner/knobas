@@ -96,15 +96,23 @@ pub fn descriptor_template() -> SourceDescriptor {
 }
 
 /// A ticket's state (#2421, spec #2419): its status, in the tone the launcher
-/// colours its monogram with and the `?` card's legend explains. Done and
-/// resolved are green, in progress and in review blue, closed grey; to do,
-/// and any word a workflow adds that is not named here, is no state at all,
-/// which draws the row uncoloured. By name, as `done_statuses` is, and not by
-/// status category: knobas does not sync the category.
+/// colours its monogram with and the `?` card's legend explains. Two
+/// candidates, read in order:
 ///
-/// The candidate is **open** (spec #2463): a workflow invents its status
-/// names, so the words the mirror has seen here are offered for a tone
-/// override beside these five, and an override for one of them is added here.
+/// 1. The status **name**: done and resolved are green, in progress and in
+///    review blue, closed grey. The candidate is **open** (spec #2463): a
+///    workflow invents its status names, so the words the mirror has seen
+///    here are offered for a tone override beside these five, and an
+///    override for one of them is added here, ahead of the category.
+/// 2. The status **category** (#2468), for every name the first leaves out:
+///    Jira's `indeterminate` is blue and `done` green, and `new` is not
+///    mapped, so a to-do status draws no colour. The chip says the status
+///    name (`text_at`), never the category key. `BASE_FIELDS` already asks
+///    for `status`, and Data Center nests `statusCategory` inside it, so the
+///    sync is unchanged.
+///
+/// So the reader's override beats the exact name, which beats the category.
+/// The category colours only: archiving reads `done_statuses`, by name.
 fn ticket_state() -> Vec<knobas_source::StatePath> {
     use knobas_source::{PayloadPath, StatePath, StateValue, Tone};
     vec![StatePath {
@@ -117,6 +125,15 @@ fn ticket_state() -> Vec<knobas_source::StatePath> {
             StateValue::of("In Progress", Tone::Info),
             StateValue::of("In Review", Tone::Info),
             StateValue::of("Closed", Tone::Muted),
+        ],
+    },
+    StatePath {
+        at: PayloadPath::of(["fields", "status", "statusCategory", "key"]),
+        open: false,
+        text_at: Some(PayloadPath::of(["fields", "status", "name"])),
+        values: vec![
+            StateValue::of("indeterminate", Tone::Info),
+            StateValue::of("done", Tone::Ok),
         ],
     }]
 }
@@ -645,7 +662,7 @@ mod tests {
 
     /// A ticket's state is its status, in a tone (#2421): done green, in
     /// progress or in review blue, closed grey, and to do -- or any word the
-    /// declaration does not name -- no state at all.
+    /// declaration does not name, on a record with no category -- no state.
     #[test]
     fn a_ticket_declares_its_status_as_a_state_with_a_tone() {
         use knobas_core::tone::Tone;
@@ -673,6 +690,41 @@ mod tests {
         assert_eq!(chip("Closed"), Some(("Closed".to_owned(), Tone::Muted)));
         assert_eq!(chip("To Do"), None);
         assert_eq!(chip("Open"), None);
+    }
+
+    /// A status the names leave out takes its category's tone, drawn as the
+    /// status name (#2468); `new` and an unknown key draw nothing, and an
+    /// exact name beats its category.
+    #[test]
+    fn a_status_outside_the_names_is_drawn_by_its_category() {
+        use knobas_core::tone::Tone;
+        let template = descriptor_template();
+        let ticket = template
+            .payload_paths
+            .iter()
+            .find(|paths| paths.kind == crate::KIND_TICKET)
+            .expect("the ticket kind declares its paths");
+        let chip = |status: &str, category: &str| {
+            let payload = serde_json::json!({ "fields": { "status": {
+                "name": status, "statusCategory": { "key": category },
+            } } });
+            knobas_core::payload::resolve_state(&payload, &ticket.state)
+                .map(|chip| (chip.text, chip.tone))
+        };
+        assert_eq!(
+            chip("Blocked", "indeterminate"),
+            Some(("Blocked".to_owned(), Some(Tone::Info)))
+        );
+        assert_eq!(
+            chip("Shipped", "done"),
+            Some(("Shipped".to_owned(), Some(Tone::Ok)))
+        );
+        assert_eq!(chip("To Do", "new"), None);
+        assert_eq!(chip("Odd", "undefined"), None);
+        assert_eq!(
+            chip("Closed", "done"),
+            Some(("Closed".to_owned(), Some(Tone::Muted)))
+        );
     }
 
     /// **No example field id in the help text** (#297).

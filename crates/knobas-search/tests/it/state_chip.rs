@@ -293,3 +293,92 @@ async fn the_boards_newest_rows_carry_their_state_chip() {
     let (ids, want) = without_the_run(&ids);
     assert_eq!(states(&board.recent, &ids), want);
 }
+
+/// A status outside the five names Jira's descriptor maps takes its tone from
+/// Jira's status category (#2468): `indeterminate` is `info`, `done` is `ok`,
+/// and `new` draws no colour. The chip still says the status name. An exact
+/// name beats the category (`Closed` stays `muted` though Jira files it under
+/// done), and the reader's override beats both.
+#[tokio::test]
+async fn a_tickets_status_outside_the_map_takes_its_categorys_tone() {
+    let _guard = SERIAL.lock().await;
+    let pool = pool().await;
+    let t = token();
+    let at = Utc::now() - chrono::Duration::days(400);
+    let overridden = format!("Parked {t}");
+    let cases = [
+        ("Ready for QA", "indeterminate"),
+        ("Shipped", "done"),
+        ("Backlog", "new"),
+        ("Closed", "done"),
+        (overridden.as_str(), "indeterminate"),
+    ];
+    let mut ids = Vec::new();
+    for (n, (status, category)) in cases.iter().enumerate() {
+        ids.push(
+            item(
+                &pool,
+                "jira",
+                "ticket",
+                &format!("{t}-{n}"),
+                &format!("ticket {t}"),
+                serde_json::json!({ "fields": { "status": {
+                    "name": status,
+                    "statusCategory": { "key": category, "name": "whatever" },
+                } } }),
+                at,
+            )
+            .await,
+        );
+    }
+    knobas_core::state_colours::set(
+        &pool,
+        "ticket",
+        &overridden,
+        knobas_core::state_colours::ToneChoice::Err,
+    )
+    .await
+    .unwrap();
+    let response = searcher(&pool)
+        .await
+        .search(SearchQuery {
+            titles: false,
+            raw: t.clone(),
+            limit: 30,
+            filters: SearchFilters::default(),
+        })
+        .await
+        .unwrap();
+    knobas_core::state_colours::clear(&pool, "ticket", Some(&overridden))
+        .await
+        .unwrap();
+    let hits: Vec<_> = response
+        .groups
+        .iter()
+        .flat_map(|g| &g.hits)
+        .map(|h| &h.row)
+        .collect();
+    let chip = |id: &String| {
+        hits.iter()
+            .find(|row| &row.entity_id == id)
+            .unwrap_or_else(|| panic!("{id} is among the hits"))
+            .state
+            .clone()
+    };
+    let on = |text: &str, tone: Tone| {
+        Some(StateChip {
+            text: text.to_owned(),
+            tone: Some(tone),
+        })
+    };
+    assert_eq!(
+        ids.iter().map(chip).collect::<Vec<_>>(),
+        [
+            on("Ready for QA", Tone::Info),
+            on("Shipped", Tone::Ok),
+            None,
+            on("Closed", Tone::Muted),
+            on(&overridden, Tone::Err),
+        ]
+    );
+}
