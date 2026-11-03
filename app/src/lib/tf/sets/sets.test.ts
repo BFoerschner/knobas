@@ -4,7 +4,7 @@ import { expect, test } from "vitest";
 import { reasonLabel } from "../builds/builds";
 import { originLabel } from "../job/job";
 import type { LinkSetMemberKind } from "../../ipc/entity";
-import { contentLines, hintTickets, patternQuery, ruleLabel } from "./sets";
+import { contentLines, dotClass, hintTickets, patternQuery, ruleLabel } from "./sets";
 
 test("a rule reads as prototype-6 writes it, the epic's title only when it is not its key", () => {
   expect(ruleLabel({ kind: "epic", value: "jira:PAY-200", title: "Payout reliability" })).toBe(
@@ -67,4 +67,10 @@ test("the hint names the first ticket, how many more, and the epic, as prototype
   expect(hintTickets({ ...hint, tickets: ["jira:PAY-240", "jira:PAY-241"] })).toBe(
     "PAY-240 and 1 more ticket under PAY-200",
   );
+});
+
+test("a member's dot takes its state's tone, and a state with no tone draws the muted dot (spec #2463)", () => {
+  expect(dotClass({ text: "down", tone: "err" })).toBe("tf-err");
+  expect(dotClass({ text: "draft", tone: null })).toBe("");
+  expect(dotClass(null)).toBe("");
 });

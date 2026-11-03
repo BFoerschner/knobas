@@ -161,11 +161,11 @@ const RANK: Record<Tone, number> = { err: 0, warn: 1, info: 2, ok: SETTLED, mute
 
 /**
  * A section's rows, sorted by what asks for you, then newest first (R-4.6).
- * A row with no state sorts with the settled ones; a row the source never
- * dated sorts last among its rank.
+ * A row with no state, or a state with no tone, sorts with the settled ones;
+ * a row the source never dated sorts last among its rank.
  */
 export function byAttention(rows: readonly EntityRow[]): EntityRow[] {
-  const rank = (row: EntityRow) => (row.state ? RANK[row.state.tone] : SETTLED);
+  const rank = (row: EntityRow) => (row.state?.tone ? RANK[row.state.tone] : SETTLED);
   return [...rows].sort(
     (a, b) => rank(a) - rank(b) || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
   );

@@ -531,7 +531,7 @@
                       : ""}idle for more than 5 days{/if}</span
                 ></td
               >
-              <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>
+              <td>{#if row.state}<span class="tf-chip {row.state.tone ? `tf-${row.state.tone}` : ''}">{row.state.text}</span>{/if}</td>
               <td class="tf-mono tf-dim">{belongs ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>

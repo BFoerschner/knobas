@@ -145,9 +145,9 @@ export function hintTickets(hint: Pick<LinkSetHint, "epic" | "tickets">): string
   return `${keyOf(hint.tickets[0] ?? "")} and ${more} more ${more === 1 ? "ticket" : "tickets"} under ${keyOf(hint.epic)}`;
 }
 
-/** A dot's tone class from a member row's state (#1008); none draws the muted dot. */
+/** A dot's tone class from a member row's state (#1008); no state, or no tone, draws the muted dot. */
 export function dotClass(state: StateChip | null): string {
-  return state ? `tf-${state.tone}` : "";
+  return state?.tone ? `tf-${state.tone}` : "";
 }
 
 /** How many of a list the editor shows before *and N more* (R-7.7). */

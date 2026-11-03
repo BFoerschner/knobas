@@ -215,6 +215,16 @@ test("Pull requests are grouped in the attention read's order, then merged or cl
   expect(attention?.kinds).toEqual(["pr"]);
 });
 
+test("a pull request whose state word has no tone draws its word in the neutral chip (spec #2463)", async () => {
+  const draft = row(`gitea:${PAYOUT}#150`, "pr", "Draft payout batching", { path: PAYOUT, state: { text: "draft", tone: null } });
+  const listEntities: CodePorts["listEntities"] = async (filter) =>
+    filter.kinds.includes("repo") ? page(REPOS) : filter.kinds.includes("branch") ? page([]) : page([draft]);
+  await draw(["prs"], null, ports({ listEntities }));
+
+  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "draft");
+  expect(chip?.getAttribute("class")?.trim()).toBe("tf-chip");
+});
+
 test("Waiting on me keeps the review asked of you; This job with nothing held offers Search all of Code", async () => {
   await draw(["prs"]);
   const chip = [...target.querySelectorAll("button")].find((button) => text(button) === "Waiting on me")!;

@@ -1557,7 +1557,16 @@ at: PayloadPath,
  * The values this candidate draws a chip for, matched exactly after
  * trimming.
  */
-values: Array<StateValue>, };
+values: Array<StateValue>, 
+/**
+ * This instance invents the words at this path (spec #2463): a Jira
+ * workflow's status names, which no adapter can list. The words the
+ * mirror has seen here are offered for a tone override beside the
+ * declared ones. Absent is `false`, so a descriptor written before the
+ * flag still loads; `false` is not written, so a declaration without an
+ * open candidate serialises as it did before the flag.
+ */
+open?: boolean, };
 
 /**
  * One value a [`StatePath`] draws, and how.
@@ -1571,9 +1580,13 @@ export type StateValue = {
  */
 value: string | boolean, 
 /**
- * How loud the chip is.
+ * How loud the chip is. `None` still **matches** (spec #2463): the walk
+ * over candidates ends at this value and the chip draws its text with
+ * no tone, never falling through to a later candidate. Absent is
+ * `None`, and `None` is not written, so a toned map serialises as it
+ * did before the tone was optional.
  */
-tone: Tone, 
+tone?: Tone, 
 /**
  * What the chip says, where the value itself is not a word a reader
  * should see (`merged` for a merged flag's `true`). `None` shows the

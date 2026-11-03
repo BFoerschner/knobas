@@ -75,7 +75,7 @@
         <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
           <td class="tf-mono"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td><a href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a></td>
-          <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>
+          <td>{#if row.state}<span class="tf-chip {row.state.tone ? `tf-${row.state.tone}` : ''}">{row.state.text}</span>{/if}</td>
           <td class="tf-mono tf-dim">{index.jobOf({ entity_id: row.entity_id, kind: row.kind }) ?? ""}</td>
         </tr>
       {/each}

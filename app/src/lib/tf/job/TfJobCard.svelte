@@ -271,7 +271,7 @@
           ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
               class="tf-st"
               class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
-              ><span class="tf-dot tf-{row.state.tone}" aria-hidden="true"></span>{row.state.text}</span
+              ><span class="tf-dot {row.state.tone ? `tf-${row.state.tone}` : ''}" aria-hidden="true"></span>{row.state.text}</span
             >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
         >
       {/each}
