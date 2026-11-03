@@ -15,30 +15,22 @@
   more than the colour: the line under each section says what (`drives`).
 -->
 <script lang="ts" module>
-  import { clearToneOverrides, setToneOverride, stateColours, type KindStateColours, type ToneChoice } from "../../ipc/sources";
+  import type { SectionPorts } from "./ports";
 
-  export interface StateColourPorts {
-    stateColours: () => Promise<KindStateColours[]>;
-    setToneOverride: (kind: string, word: string, tone: ToneChoice) => Promise<KindStateColours[]>;
-    clearToneOverrides: (kind: string, word: string | null) => Promise<KindStateColours[]>;
-  }
-
-  export const realStateColourPorts: StateColourPorts = {
-    stateColours: () => stateColours(),
-    setToneOverride: (kind, word, tone) => setToneOverride(kind, word, tone),
-    clearToneOverrides: (kind, word) => clearToneOverrides(kind, word),
-  };
+  /** The board's read, set and clear: the settings ports' own (`ports.ts`). */
+  export type StateColourPorts = Pick<SectionPorts, "stateColours" | "setToneOverride" | "clearToneOverrides">;
 </script>
 
 <script lang="ts">
   import { tick } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import type { KindStateColours, ToneChoice } from "../../ipc/sources";
   import { kindLabel } from "../../shell/kinds";
   import { push } from "../../shell/toasts.svelte";
   import { COLUMNS, columnName, columnOf, drives, ordered, originName, stepped } from "./state-colours";
 
-  let { ports = realStateColourPorts }: { ports?: StateColourPorts } = $props();
+  let { ports }: { ports: StateColourPorts } = $props();
 
   /** The last answer the backend gave; `null` until the read answers. */
   let stored = $state<KindStateColours[] | null>(null);

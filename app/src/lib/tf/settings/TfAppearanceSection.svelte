@@ -8,7 +8,7 @@
   import type { Theme, ThemeChoice } from "../theme.svelte";
   import TfStateColours, { type StateColourPorts } from "./TfStateColours.svelte";
 
-  let { theme, ready = true, ports }: { theme: Theme; ready?: boolean; ports?: StateColourPorts } = $props();
+  let { theme, ready = true, ports }: { theme: Theme; ready?: boolean; ports: StateColourPorts } = $props();
 
   const CHOICES: readonly (readonly [ThemeChoice, string])[] = [
     ["system", "Like the system"],
@@ -29,5 +29,5 @@
   </div>
 </div>
 {#if ready}
-  <TfStateColours {...ports ? { ports } : {}} />
+  <TfStateColours {ports} />
 {/if}

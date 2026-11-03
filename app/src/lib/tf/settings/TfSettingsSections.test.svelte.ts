@@ -78,7 +78,7 @@ const sourcePorts: SettingsPorts = {
 };
 
 /** Appearance's State colours (#2466): a kind per adapter family, so its board draws. */
-function fakeStateColours(): NonNullable<SectionPorts["stateColours"]> {
+function fakeStateColours(): Pick<SectionPorts, "stateColours" | "setToneOverride" | "clearToneOverrides"> {
   const kinds: KindStateColours[] = ["build", "monitor", "pr", "ticket"].map((kind) => ({
     kind,
     words: [{ word: "settled", declared: true, declared_tone: "ok", yours: null, tone: "ok", origin: "adapter" }],
@@ -94,7 +94,6 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
     pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
     setPagesKeptOpen: vi.fn((count: number) => Promise.resolve(Math.min(15, count))),
-    stateColours: fakeStateColours(),
     passiveAttribution: vi.fn(() => Promise.resolve(true)),
     setPassiveAttribution: vi.fn((on: boolean) => Promise.resolve(on)),
     notify: vi.fn(() => Promise.resolve()),
@@ -129,6 +128,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     keys: vi.fn(() => Promise.resolve({ lists: [], actions: [] })),
     ticketViews: vi.fn(() => Promise.resolve([])),
     linkSets: vi.fn(() => Promise.resolve([])),
+    ...fakeStateColours(),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
     dbStats: vi.fn(() =>
       Promise.resolve({
@@ -223,7 +223,7 @@ test("Appearance draws State colours below Theme, one section per kind with a st
 
 test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
   const p = sectionPorts();
-  const read = vi.spyOn(p.stateColours, "stateColours");
+  const read = vi.spyOn(p, "stateColours");
   view = mount(TfSettings, {
     target,
     context: hiddenable,

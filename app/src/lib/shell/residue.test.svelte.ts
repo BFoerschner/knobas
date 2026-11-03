@@ -545,7 +545,6 @@ function sectionPorts() {
   return {
     pagesKeptOpen: () => deferred(5),
     setPagesKeptOpen: (count: number) => deferred(count),
-    stateColours: { stateColours: () => deferred([]), setToneOverride: () => deferred([]), clearToneOverrides: () => deferred([]) },
     passiveAttribution: () => deferred(true),
     setPassiveAttribution: (on: boolean) => deferred(on),
     notify: () => deferred(undefined),
@@ -574,6 +573,9 @@ function sectionPorts() {
     keys: () => deferred({ lists: [], actions: [] }),
     ticketViews: () => deferred([]),
     linkSets: () => deferred([]),
+    stateColours: () => deferred([]),
+    setToneOverride: () => deferred([]),
+    clearToneOverrides: () => deferred([]),
     appStatus: () => deferred({ app_version: "1.6.0" }),
     dbStats: () =>
       deferred({ db_bytes: 1, entity_count: 0, item_count: 0, per_source: [], oldest_synced_at: null, newest_synced_at: null }),
