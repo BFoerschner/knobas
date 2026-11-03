@@ -52,6 +52,16 @@ export function hold<T>(held: readonly Held<T>[], next: { key: string; value: T 
   return [...kept, shown];
 }
 
+/**
+ * The held pages once what every hidden one drew is out of date (the state
+ * colours changed, spec #2463): the shown page alone. A hidden page reads
+ * again on its return only if it is a role view, so the rest are dropped and
+ * mount afresh, reading what they draw.
+ */
+export function forgetHidden<T>(held: readonly Held<T>[]): Held<T>[] {
+  return held.filter((page) => page.visible);
+}
+
 /** *Pages kept open*, the one the window's page host reads. */
 export interface KeptPagesSetting {
   readonly value: number;

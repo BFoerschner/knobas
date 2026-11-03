@@ -1815,6 +1815,31 @@ test("the stored Pages kept open reaches the page host once the database answers
   expect(target.querySelectorAll(".tf-kept"), "none kept besides the page in front").toHaveLength(1);
 });
 
+test("a set or a clear of a state colour drops the hidden pages, so each reads its states again on its return; other activity keeps them (spec #2463)", async () => {
+  const handlers = new Map<string, (event: { payload: unknown }) => void>();
+  start({ listen: (event, handler) => (handlers.set(event, handler), Promise.resolve(() => {})) });
+  await settle();
+  await at("#/time");
+  await at("#/inbox");
+  await at("#/settings");
+  const kept = target.querySelectorAll(".tf-kept").length;
+  expect(kept, "Time and Inbox are kept behind Settings").toBeGreaterThanOrEqual(3);
+  const line = (verb: string) => ({ payload: { id: 1, at: "2026-11-03T10:00:00Z", actor: "user", verb, entity_id: null, detail: {} } });
+
+  handlers.get("activity:new")!(line("link_created"));
+  await settle();
+  expect(target.querySelectorAll(".tf-kept"), "another line is no colour change").toHaveLength(kept);
+
+  handlers.get("activity:new")!(line("state_tone_set"));
+  await settle();
+  expect(target.querySelectorAll(".tf-kept"), "Settings alone, in front").toHaveLength(1);
+
+  await at("#/inbox");
+  handlers.get("activity:new")!(line("state_tone_cleared"));
+  await settle();
+  expect(target.querySelectorAll(".tf-kept")).toHaveLength(1);
+});
+
 test("the saved command renderers are in the registry once the database answers (#2262)", async () => {
   start({
     userRenderers: () =>

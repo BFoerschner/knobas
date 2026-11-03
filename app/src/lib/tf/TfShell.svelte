@@ -73,6 +73,7 @@
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
   import { escStep, escTarget, openerName } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
+  import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
   import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
@@ -325,6 +326,8 @@
   // ---- the status bar's reads, once the database can answer ----
   let sources = $state<Pick<SourceSummary, "id" | "display_name">[] | null>(null);
   let sync = $state<SourceSyncStatus[]>([]);
+  /** Moves on each set or clear of a state colour (spec #2463): the page host drops its hidden pages then. */
+  let recoloured = $state(0);
   let now = $state(new Date());
   /** Bumped by an event that asks for the source list again. */
   let sourcesAsked = $state(0);
@@ -410,8 +413,14 @@
         if (was?.running === true && !row.running) askSources();
       }),
     );
-    // Every queue transition writes an activity line.
-    hold(ports.listen(EVENTS.activityNew, () => void queue.refresh()));
+    // Every queue transition writes an activity line. So does a set or a clear
+    // of a state colour, after which every hidden page drew stale states.
+    hold(
+      ports.listen(EVENTS.activityNew, ({ payload }) => {
+        void queue.refresh();
+        if (recolours(payload)) recoloured += 1;
+      }),
+    );
     const stopBadges = badges.start();
     const tick = setInterval(() => (now = new Date()), 30_000);
 
@@ -580,6 +589,7 @@
   <main class="tf-main" tabindex="-1">
     <TfPage
       {kept}
+      stale={recoloured}
       ctx={{
         route,
         ready: lifecycle.ready,

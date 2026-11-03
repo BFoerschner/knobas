@@ -31,7 +31,8 @@
     pretending to be another.
 -->
 <script lang="ts">
-  import { keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
+  import { untrack } from "svelte";
+  import { forgetHidden, keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
   import type { TfPageContext, TfPageEntry } from "./page-entry";
   import { PAGES } from "./pages";
   import { SECTION_NAME, type TfRoute } from "./route";
@@ -42,6 +43,7 @@
     ctx,
     pages = PAGES,
     kept = keptPages,
+    stale = 0,
   }: {
     /** Everything the shell hands a page; see `page-entry.ts`. `visible` is this host's. */
     ctx: Omit<TfPageContext, "visible">;
@@ -49,6 +51,12 @@
     pages?: readonly TfPageEntry[];
     /** *Pages kept open* (#2247); the window's when omitted. */
     kept?: Pick<KeptPagesSetting, "value">;
+    /**
+     * Moves when what every page drew is out of date: the state colours
+     * changed (spec #2463). The hidden pages are dropped then, and mount
+     * afresh on their return.
+     */
+    stale?: number;
   } = $props();
 
   const route = $derived(ctx.route);
@@ -62,9 +70,14 @@
    * the setting drops the surplus at once.
    */
   let held: Held<{ entry: TfPageEntry; route: TfRoute }>[] = [];
+  let staleSeen = untrack(() => stale);
   const drawn = $derived.by(() => {
     const entry = page;
     const at = route;
+    if (stale !== staleSeen) {
+      staleSeen = stale;
+      held = forgetHidden(held);
+    }
     const next =
       entry === undefined ? null : { key: `${pages.indexOf(entry)}:${entry.address?.(at) ?? ""}`, value: { entry, route: at } };
     held = hold(held, next, kept.value);

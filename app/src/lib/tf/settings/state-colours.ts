@@ -45,6 +45,16 @@ export function originName(origin: ToneOrigin): string {
 }
 
 /**
+ * Whether an `activity:new` line is a set or a clear of a state colour
+ * (`sources::state_colours::SET_VERB` and `CLEARED_VERB`): every surface that
+ * draws a state draws something else now (spec #2463).
+ */
+export function recolours(line: unknown): boolean {
+  const verb = (line as { verb?: unknown } | null)?.verb;
+  return verb === "state_tone_set" || verb === "state_tone_cleared";
+}
+
+/**
  * The line under a kind's section: what its tone drives besides the colour.
  * Each names the readers that branch on a tone (`crates/knobas-core/src/inbox.rs`
  * and `signals.rs` for `err` builds, `entity_list.rs`'s attention order for the
