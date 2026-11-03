@@ -8,10 +8,13 @@
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
     *Ack* on a down monitor, *Pause* or *Resume* where the source offers
-    it, and *Hide* (*Unhide* under the *Hidden* chip). A hidden monitor is off
-    the roster until that chip is on, and its alerts reach no inbox, so it
-    raises no desktop notification; knobas-local, Uptime Kuma goes on checking
-    it. While a pause or resume is on its way its echo (*queued*, then *sent*,
+    it, and *Hide*. A hidden monitor leaves the roster for the fold at its
+    end (*N hidden monitors*, closed until the reader opens it, or open by
+    itself when it holds every match), where it is drawn dimmed with a
+    neutral chip and *Unhide* in place of *Hide*. Every filter applies to the
+    fold as to the roster. Its alerts reach no inbox, so it raises no desktop
+    notification and offers no *Ack*; knobas-local, Uptime Kuma goes on
+    checking it. While a pause or resume is on its way its echo (*queued*, then *sent*,
     `tf/queued.svelte.ts`, #2105) stands in the button's place until the
     roster reads the new state.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
@@ -114,7 +117,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
-  import { sessionFilter } from "../filter/filter-state.svelte";
+  import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { listenSynced } from "../builds/pipeline-ports";
@@ -122,6 +125,7 @@
   import {
     stateChip,
     gaps,
+    hiddenFoldOpen,
     isRoute,
     isRouteId,
     kindWord,
@@ -366,11 +370,8 @@
   // -- the filter bar --------------------------------------------------------
 
   const filter = sessionFilter("monitors");
-  /** The one value of the *Hidden* chip group. */
-  const HIDDEN_CHIP = "Hidden";
-  const hiddenCount = $derived((roster ?? []).filter((row) => row.hidden).length);
-  const hiddenLabel = $derived(hiddenCount > 0 ? `Hidden ${hiddenCount}` : HIDDEN_CHIP);
-  const showHidden = $derived((filter.chips["hid"] ?? []).includes(HIDDEN_CHIP));
+  /** The hidden fold as the reader last left it; `null` until touched, so it may open by itself on a search only it answers. */
+  const hiddenFold = sessionFold("monitors:hidden");
   // Prototype-6 opens Monitors on *All*.
   if (filter.scope === null) filter.scope = "all";
   $effect(() => {
@@ -389,18 +390,15 @@
       { id: "mine", label: "My jobs", query: "" },
       { id: "all", label: "All", query: "" },
     ],
-    chips: [
-      { key: "st", label: "State", options: STATE_CHIPS.map((value) => ({ value, label: value })) },
-      { key: "hid", label: "Hidden", options: [{ value: HIDDEN_CHIP, label: hiddenLabel }] },
-    ],
+    chips: [{ key: "st", label: "State", options: STATE_CHIPS.map((value) => ({ value, label: value })) }],
     dropdowns: [{ key: "type", label: "Type", options: types.map((value) => ({ value, label: value })) }],
   });
   const scope = $derived<"job" | "mine" | "all">(
     filter.scope === "job" && job !== null ? "job" : filter.scope === "mine" ? "mine" : "all",
   );
-  const rows = $derived(
+  const kept = $derived(
     roster === null
-      ? []
+      ? { shown: [], hidden: [] }
       : visibleMonitors(
           sorted(roster),
           {
@@ -409,11 +407,20 @@
             states: filter.chips["st"] ?? [],
             type: filter.dropdowns["type"] ?? "",
             text: filter.text,
-            hidden: showHidden,
           },
           index,
         ),
   );
+  const rows = $derived(kept.shown);
+  const foldOpen = $derived(hiddenFoldOpen(hiddenFold.open, kept));
+  /** The roster's own size, for the count: a hidden monitor is counted apart. */
+  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
+
+  /** Only the reader's toggle is remembered, not the one the open attribute raises as the fold is drawn. */
+  function toggleFold(event: Event) {
+    const open = (event.currentTarget as HTMLDetailsElement).open;
+    if (open !== foldOpen) hiddenFold.open = open;
+  }
 
   /** The header's line: how many checks, from which source, synced when. */
   const header = $derived.by(() => {
@@ -435,17 +442,28 @@
     for (const id of ids) if (!refreshers.has(id)) refreshers.set(id, createDetailRefresh(untrack(() => ports.refresh)));
   }
 
-  /** The roster's table rows in order: each monitor, and under it the reason its refresh failed. */
-  const entries = $derived(
-    rows.flatMap((row) => {
+  type Entry = { row: MonitorRow; failed: string | null } | { row: null; failed: null };
+  const FOLD_KEY = "\u0000hidden-fold";
+  const withFailures = (list: readonly MonitorRow[]): Entry[] =>
+    list.flatMap((row) => {
       const failed = refreshers.get(row.entity_id)?.failed ?? null;
       return failed === null ? [{ row, failed }] : [{ row, failed: null }, { row, failed }];
-    }),
-  );
+    });
+  /**
+   * The roster's table rows in order: each monitor, and under it the reason its
+   * refresh failed; then, when the filter keeps any hidden monitor, the fold's
+   * summary and, while it is open, those monitors the same way.
+   */
+  const entries = $derived<Entry[]>([
+    ...withFailures(rows),
+    ...(kept.hidden.length > 0 ? [{ row: null, failed: null }] : []),
+    ...(kept.hidden.length > 0 && foldOpen ? withFailures(kept.hidden) : []),
+  ]);
   /** Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. */
   const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42 });
 
-  function entryKey(entry: { row: MonitorRow; failed: string | null }): string {
+  function entryKey(entry: Entry): string {
+    if (entry.row === null) return FOLD_KEY;
     return entry.failed === null ? entry.row.entity_id : `${entry.row.entity_id}\u0000failed`;
   }
 
@@ -491,7 +509,7 @@
       if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
       push({
         text: hidden
-          ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; the Hidden chip shows it.`
+          ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.`
           : `${row.name} is back on the roster, and its alerts reach the inbox again.`,
       });
       revision += 1;
@@ -595,7 +613,9 @@
   >
 </nav>
 {#if tab === "all"}
-  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={roster?.length ?? null} />
+  <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal}>
+    {#snippet after()}{#if kept.hidden.length > 0}<span class="tf-mon-hidn">, {kept.hidden.length} hidden</span>{/if}{/snippet}
+  </FilterBar>
 {/if}
 <div class="tf-cbody">
   {#if failed !== null}
@@ -631,7 +651,7 @@
       <div class="tf-empty">Every container, service, route, database and VM has a monitor.</div>
     {/if}
   {:else if roster !== null}
-    {#if rows.length > 0}
+    {#if entries.length > 0}
       <table class="tf-tbl tf-mon">
         <thead>
           <tr><th>Monitor</th><th>State</th><th>Last 24 h</th><th>Response</th><th>30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
@@ -640,18 +660,32 @@
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
           {#each win.slice(entries) as entry (entryKey(entry))}
             {@const row = entry.row}
-            {#if entry.failed !== null}
+            {#if row === null}
+              <tr class="tf-mon-foldrow" {@attach win.row(FOLD_KEY)}>
+                <td colspan="7">
+                  <!-- The summary alone, as Builds' folds: the hidden rows follow it while it is open. -->
+                  <details class="tf-mon-fold" open={foldOpen} ontoggle={toggleFold}>
+                    <summary
+                      ><span>{counted(kept.hidden.length, "hidden monitor", "hidden monitors")}</span>
+                      <span class="tf-dim">Their alerts don’t reach the inbox or notify you.</span></summary
+                    >
+                  </details>
+                </td>
+              </tr>
+            {:else if entry.failed !== null}
               <tr class="tf-mon-failed" {@attach win.row(entryKey(entry))}>
                 <td colspan="7"><div class="tf-banner tf-err tf-refresh-failed" role="alert">{entry.failed}</div></td>
               </tr>
             {:else}
               {@const chip = stateChip(row, now)}
-              {@const down = chip.tone === "err" && !row.tombstoned}
+              <!-- A hidden monitor draws its state in no tone and offers no Ack: its alerts reach no inbox. -->
+              {@const tone = row.hidden ? null : chip.tone}
+              {@const down = tone === "err" && !row.tombstoned}
               {@const toggled = echoOn(row.entity_id, TOGGLE)}
               {@const refresher = refreshers.get(row.entity_id)}
-              <tr {@attach win.row(entryKey(entry))}>
+              <tr class:tf-mon-hid={row.hidden} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><span class="tf-chip" class:tf-ok={chip.tone === "ok"} class:tf-warn={chip.tone === "warn"} class:tf-err={chip.tone === "err"} class:tf-info={chip.tone === "info"}>{chip.label}</span></td>
+                <td><span class="tf-chip" class:tf-ok={tone === "ok"} class:tf-warn={tone === "warn"} class:tf-err={tone === "err"} class:tf-info={tone === "info"}>{chip.label}</span></td>
                 <td>
                   <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
                     {#each segments(row, now.getTime()) as segment, at (at)}<i class="tf-seg-{segment}"></i>{/each}
@@ -699,7 +733,7 @@
       <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
     {:else}
       <div class="tf-empty">
-        {showHidden && hiddenCount === 0 ? "No monitor is hidden." : "No monitor matches."}
+        No monitor matches.
         {#if scope === "job"}
           <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
         {/if}

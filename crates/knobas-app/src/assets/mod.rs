@@ -904,9 +904,9 @@ pub struct MonitorRow {
     /// silenced.
     pub tombstoned: bool,
     /// Whether the reader hid it (`knobas.monitor_hidden`, [`set_monitor_hidden`]):
-    /// the tab draws it only under its *Hidden* chip, and its alerts reach no
-    /// inbox and so raise no desktop notification. Knobas-local; Uptime Kuma
-    /// goes on checking it.
+    /// the tab draws it in the fold of hidden monitors at the roster's end, and
+    /// its alerts reach no inbox and so raise no desktop notification.
+    /// Knobas-local; Uptime Kuma goes on checking it.
     pub hidden: bool,
     /// The assets this monitor is attached to by a `monitored-by` link, by
     /// name -- with the path that tells two containers called `postgres`

@@ -10,6 +10,7 @@ import { jobIndex } from "../job/open-jobs";
 import {
   stateChip,
   gaps,
+  hiddenFoldOpen,
   kindWord,
   prefill,
   routePrefill,
@@ -18,6 +19,7 @@ import {
   sorted,
   uptimeText,
   visibleMonitors,
+  type KeptMonitors,
 } from "./monitors";
 
 const NOW = Date.parse("2026-10-16T14:00:00Z");
@@ -159,8 +161,9 @@ describe("the filter", () => {
     { id: "jira:PAY-231", reached: [{ entity_id: "kuma:1" }] },
     { id: "jira:PAY-200", reached: [{ entity_id: "asset:db" }] },
   ]);
-  const base = { scope: "all" as const, job: null, states: [] as string[], type: "", text: "", hidden: false };
-  const names = (kept: MonitorRow[]) => kept.map((r) => r.name);
+  const base = { scope: "all" as const, job: null, states: [] as string[], type: "", text: "" };
+  const names = (kept: KeptMonitors) => kept.shown.map((r) => r.name);
+  const hiddenNames = (kept: KeptMonitors) => kept.hidden.map((r) => r.name);
 
   test("This job keeps what the job reaches, by the monitor or the asset it watches", () => {
     expect(names(visibleMonitors(rows, { ...base, scope: "job", job: "PAY-231" }, index))).toEqual(["flows-stage"]);
@@ -176,10 +179,23 @@ describe("the filter", () => {
     expect(names(visibleMonitors(rows, { ...base, type: "TCP" }, index))).toEqual(["pg"]);
   });
 
-  test("a hidden monitor is kept only under the Hidden chip, and the other filters still apply to it", () => {
+  test("a hidden monitor is kept apart from the roster, and the other filters still apply to it", () => {
     expect(names(visibleMonitors(rows, base, index))).toEqual(["flows-stage", "pg", "vm ping"]);
-    expect(names(visibleMonitors(rows, { ...base, hidden: true }, index))).toEqual(["noisy"]);
-    expect(names(visibleMonitors(rows, { ...base, hidden: true, states: ["Up"] }, index))).toEqual([]);
+    expect(hiddenNames(visibleMonitors(rows, base, index))).toEqual(["noisy"]);
+    expect(hiddenNames(visibleMonitors(rows, { ...base, states: ["Down"] }, index))).toEqual(["noisy"]);
+    expect(hiddenNames(visibleMonitors(rows, { ...base, states: ["Up"] }, index))).toEqual([]);
+    expect(hiddenNames(visibleMonitors(rows, { ...base, scope: "mine" }, index))).toEqual([]);
+  });
+
+  test("the hidden fold opens by itself only when it holds every match, and otherwise stays as the reader left it", () => {
+    const some = visibleMonitors(rows, base, index);
+    const onlyHidden = visibleMonitors(rows, { ...base, text: "noisy" }, index);
+    const none = visibleMonitors(rows, { ...base, text: "nothing" }, index);
+    expect(hiddenFoldOpen(null, some)).toBe(false);
+    expect(hiddenFoldOpen(null, onlyHidden)).toBe(true);
+    expect(hiddenFoldOpen(null, none)).toBe(false);
+    expect(hiddenFoldOpen(true, some)).toBe(true);
+    expect(hiddenFoldOpen(false, onlyHidden)).toBe(false);
   });
 
   test("the words match the monitor, the asset and the type", () => {

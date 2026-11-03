@@ -125,17 +125,24 @@ export interface MonitorFilter {
   /** The type chosen, in {@link kindWord}'s words; `""` is *Any*. */
   type: string;
   text: string;
-  /** The *Hidden* chip: on keeps only the monitors the reader hid, off only the others. */
-  hidden: boolean;
+}
+
+/**
+ * What the filter keeps, split in two: the roster proper, and the monitors the
+ * reader hid, which the page draws in a fold at its end. Every filter applies
+ * to both, so a hidden monitor is found by the same words as any other.
+ */
+export interface KeptMonitors {
+  shown: MonitorRow[];
+  hidden: MonitorRow[];
 }
 
 /** The ids a row is reached by: the monitor's own, and every asset it watches. */
 const idsOf = (row: MonitorRow) => [row.entity_id, ...row.assets.map((asset) => asset.id)];
 
-/** The rows the filter keeps, in the order given. */
-export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilter, index: JobIndex): MonitorRow[] {
-  return rows.filter((row) => {
-    if (row.hidden !== filter.hidden) return false;
+/** The rows the filter keeps, in the order given, the hidden ones apart. */
+export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilter, index: JobIndex): KeptMonitors {
+  const kept = rows.filter((row) => {
     if (filter.scope === "job") {
       const job = filter.job;
       if (job === null || !idsOf(row).some((id) => index.holds(job, { entity_id: id }))) return false;
@@ -148,6 +155,16 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
     const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
     return matchesAll(haystack, filter.text);
   });
+  return { shown: kept.filter((row) => !row.hidden), hidden: kept.filter((row) => row.hidden) };
+}
+
+/**
+ * Whether the fold of hidden monitors is open: as the reader last left it,
+ * and before they have touched it, open only when it holds every match, so a
+ * search that finds only hidden monitors shows them rather than nothing.
+ */
+export function hiddenFoldOpen(remembered: boolean | null, kept: KeptMonitors): boolean {
+  return remembered ?? (kept.shown.length === 0 && kept.hidden.length > 0);
 }
 
 /**
