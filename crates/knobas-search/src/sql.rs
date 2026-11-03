@@ -1270,6 +1270,9 @@ mod tests {
         "text",
         "tone",
         "{}",
+        // and the type an absent tone reads as (spec #2463): a value its map
+        // declares without a tone matches.
+        "null",
         // `NAMED`'s last-segment half (#621): the separator a slashed title
         // is split on.
         "/",
