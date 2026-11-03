@@ -322,6 +322,28 @@ mod tests {
         assert_eq!(kinds, vec![build()]);
     }
 
+    /// Only an open candidate is where seen words are looked for: a kind
+    /// with an open and a closed candidate offers the words seen at the open
+    /// one alone, so TeamCity's pass-through `finished`, on a closed one, is
+    /// never offered.
+    #[test]
+    fn only_open_candidates_are_looked_at() {
+        let mut kind = build();
+        kind.state[1].open = true;
+        let open: Vec<(String, String, PayloadPath)> =
+            open_paths("tc", std::slice::from_ref(&kind))
+                .map(|p| (p.source_id, p.kind, p.at))
+                .collect();
+        assert_eq!(
+            open,
+            [(
+                "tc".to_owned(),
+                "build".to_owned(),
+                PayloadPath::of(["status"])
+            )]
+        );
+    }
+
     /// The stored spelling round-trips, *No colour* as SQL null.
     #[test]
     fn every_choice_is_stored_and_read_back_as_itself() {
