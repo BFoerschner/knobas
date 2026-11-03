@@ -1207,8 +1207,59 @@ async fn each_issue_carries_its_status_and_no_history() {
             seeded_issue.key
         );
     }
+    // Jira's status category (#2468), which the ticket's state reads after
+    // the name: Data Center nests it inside `status`, which the sync already
+    // asks for, so every record carries it, and a status no name maps draws
+    // its category's tone under the status name.
+    let template = knobas_source_jira::descriptor_template();
+    let ticket = template
+        .payload_paths
+        .iter()
+        .find(|paths| paths.kind == "ticket")
+        .expect("the ticket kind declares its paths");
+    let mut categories = BTreeMap::new();
+    for it in &items {
+        let status = &it.payload["fields"]["status"];
+        let name = status["name"].as_str().unwrap_or_default().to_owned();
+        let key = status["statusCategory"]["key"]
+            .as_str()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{}: the state reads the category at fields.status.statusCategory.key: {status}",
+                    it.entity.key
+                )
+            })
+            .to_owned();
+        let by_name = match name.as_str() {
+            "Done" | "Resolved" => Some(Some(knobas_core::tone::Tone::Ok)),
+            "In Progress" | "In Review" => Some(Some(knobas_core::tone::Tone::Info)),
+            "Closed" => Some(Some(knobas_core::tone::Tone::Muted)),
+            _ => None,
+        };
+        let by_category = match key.as_str() {
+            "indeterminate" => Some(knobas_core::tone::Tone::Info),
+            "done" => Some(knobas_core::tone::Tone::Ok),
+            _ => None,
+        };
+        let want = by_name.unwrap_or(by_category);
+        let chip = knobas_core::payload::resolve_state(&it.payload, &ticket.state);
+        assert_eq!(
+            chip.as_ref().and_then(|chip| chip.tone),
+            want,
+            "{}: {name} in category {key}",
+            it.entity.key
+        );
+        if let Some(chip) = chip {
+            assert_eq!(
+                chip.text, name,
+                "{}: the chip says the status",
+                it.entity.key
+            );
+        }
+        categories.insert(name, key);
+    }
     println!(
-        "SEEDED statuses: {} issue(s), none with a changelog",
+        "SEEDED statuses: {} issue(s), none with a changelog; categories {categories:?}",
         seeded.seed.issues.len()
     );
 }
