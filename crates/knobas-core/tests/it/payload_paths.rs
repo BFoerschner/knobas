@@ -884,11 +884,13 @@ fn state_declarations() -> Declarations {
                     StatePath {
                         at: PayloadPath::of(["merged"]),
                         open: false,
+                        text_at: None,
                         values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
                     },
                     StatePath {
                         at: PayloadPath::of(["state"]),
                         open: false,
+                        text_at: None,
                         values: vec![
                             StateValue::of("open", Tone::Info),
                             StateValue::of("closed", Tone::Muted),
@@ -906,6 +908,7 @@ fn state_declarations() -> Declarations {
                     StatePath {
                         at: PayloadPath::of(["state"]),
                         open: false,
+                        text_at: None,
                         values: vec![
                             StateValue::of("running", Tone::Info),
                             StateValue::of("queued", Tone::Info),
@@ -914,6 +917,7 @@ fn state_declarations() -> Declarations {
                     StatePath {
                         at: PayloadPath::of(["status"]),
                         open: false,
+                        text_at: None,
                         values: vec![
                             StateValue::of("SUCCESS", Tone::Ok),
                             StateValue::of("FAILURE", Tone::Err),
@@ -932,6 +936,7 @@ fn state_declarations() -> Declarations {
                 state: vec![StatePath {
                     at: PayloadPath::of(["status"]),
                     open: false,
+                    text_at: None,
                     values: vec![StateValue::of("FAILURE", Tone::Muted).shown_as("broken")],
                 }],
                 ..KindPaths::default()
@@ -947,6 +952,7 @@ fn state_declarations() -> Declarations {
                 state: vec![StatePath {
                     at: PayloadPath::of(["status"]),
                     open: false,
+                    text_at: None,
                     values: vec![
                         StateValue::of("FAILURE", Tone::Err).shown_as("failed"),
                         StateValue::of("FAILURE", Tone::Ok).shown_as("fine"),
@@ -967,6 +973,7 @@ fn state_declarations() -> Declarations {
                     StatePath {
                         at: PayloadPath::of(["state"]),
                         open: false,
+                        text_at: None,
                         values: vec![
                             StateValue::toneless("running"),
                             StateValue::toneless("blocked").shown_as("held"),
@@ -977,10 +984,40 @@ fn state_declarations() -> Declarations {
                     StatePath {
                         at: PayloadPath::of(["status"]),
                         open: true,
+                        text_at: None,
                         values: vec![
                             StateValue::of("SUCCESS", Tone::Ok),
                             StateValue::toneless("FAILURE"),
                             StateValue::of("FAILURE", Tone::Err),
+                        ],
+                    },
+                ],
+                ..KindPaths::default()
+            }],
+        )
+        // A candidate whose chip says another path's string (#2468): Jira's
+        // status category is matched at its key and drawn as the status
+        // name. A build, because the signals' spelling reads builds and pull
+        // requests only.
+        .with(
+            "jira",
+            vec![KindPaths {
+                kind: "build".to_owned(),
+                state: vec![
+                    StatePath {
+                        at: PayloadPath::of(["status", "name"]),
+                        open: true,
+                        text_at: None,
+                        values: vec![StateValue::of("Closed", Tone::Muted)],
+                    },
+                    StatePath {
+                        at: PayloadPath::of(["status", "category"]),
+                        open: false,
+                        text_at: Some(PayloadPath::of(["status", "name"])),
+                        values: vec![
+                            StateValue::of("indeterminate", Tone::Info),
+                            StateValue::of("done", Tone::Ok),
+                            StateValue::toneless("undefined").shown_as("odd"),
                         ],
                     },
                 ],
@@ -1168,6 +1205,58 @@ async fn a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust() {
             serde_json::json!({ "state": "finished", "status": "FAILURE" }),
             toneless("FAILURE"),
         ),
+        // The name candidate first, then the category, drawn as the name.
+        (
+            "jira",
+            "build",
+            "20",
+            serde_json::json!({ "status": { "name": "Closed", "category": "done" } }),
+            chip("Closed", Tone::Muted),
+        ),
+        (
+            "jira",
+            "build",
+            "21",
+            serde_json::json!({ "status": { "name": " Ready for QA ", "category": "done" } }),
+            chip("Ready for QA", Tone::Ok),
+        ),
+        (
+            "jira",
+            "build",
+            "22",
+            serde_json::json!({ "status": { "name": "Blocked", "category": " indeterminate " } }),
+            chip("Blocked", Tone::Info),
+        ),
+        // No name, a blank one, or one that is not a string: the value shows.
+        (
+            "jira",
+            "build",
+            "23",
+            serde_json::json!({ "status": { "category": "done" } }),
+            chip("done", Tone::Ok),
+        ),
+        (
+            "jira",
+            "build",
+            "24",
+            serde_json::json!({ "status": { "name": "  ", "category": "indeterminate" } }),
+            chip("indeterminate", Tone::Info),
+        ),
+        (
+            "jira",
+            "build",
+            "25",
+            serde_json::json!({ "status": { "name": { "x": 1 }, "category": "done" } }),
+            chip("done", Tone::Ok),
+        ),
+        // A value's own text beats the path's.
+        (
+            "jira",
+            "build",
+            "26",
+            serde_json::json!({ "status": { "name": "Weird", "category": "undefined" } }),
+            toneless("odd"),
+        ),
     ];
     for (source, kind, key, payload, expected) in cases {
         let (sql, rust) = chips(&pool, &declarations, source, kind, key, payload).await;
@@ -1217,6 +1306,14 @@ async fn a_state_chip_misses_in_both_and_never_guesses() {
             "commit",
             "r/p@abc",
             serde_json::json!({ "merged": true, "state": "open" }),
+            &declarations,
+        ),
+        // A category its map leaves out (Jira's `new`) misses, name and all.
+        (
+            "jira",
+            "build",
+            "27",
+            serde_json::json!({ "status": { "name": "To Do", "category": "new" } }),
             &declarations,
         ),
     ];

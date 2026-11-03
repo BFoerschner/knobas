@@ -1152,6 +1152,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             state: vec![StatePath {
                 at: PayloadPath::of(["state"]),
                 open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("open", Tone::Info),
                     StateValue::of("merged", Tone::Ok),
@@ -1205,6 +1206,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             state: vec![StatePath {
                 at: PayloadPath::of(["status"]),
                 open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("running", Tone::Info),
                     StateValue::of("failed", Tone::Err),
@@ -1233,6 +1235,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             state: vec![StatePath {
                 at: PayloadPath::of(["state"]),
                 open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("up", Tone::Ok),
                     StateValue::of("down", Tone::Err),

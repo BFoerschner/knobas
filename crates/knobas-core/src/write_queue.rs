@@ -1692,11 +1692,13 @@ mod tests {
             StatePath {
                 at: PayloadPath::of(["merged"]),
                 open: false,
+                text_at: None,
                 values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
             },
             StatePath {
                 at: PayloadPath::of(["state"]),
                 open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("open", Tone::Info),
                     StateValue::of("closed", Tone::Muted),

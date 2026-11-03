@@ -110,6 +110,7 @@ fn ticket_state() -> Vec<knobas_source::StatePath> {
     vec![StatePath {
         at: PayloadPath::of(["fields", "status", "name"]),
         open: true,
+        text_at: None,
         values: vec![
             StateValue::of("Done", Tone::Ok),
             StateValue::of("Resolved", Tone::Ok),

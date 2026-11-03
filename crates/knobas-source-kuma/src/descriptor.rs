@@ -223,6 +223,7 @@ fn monitor_state() -> Vec<knobas_source::StatePath> {
     vec![StatePath {
         at: PayloadPath::of(["state"]),
         open: false,
+        text_at: None,
         values: vec![
             StateValue::of("up", Tone::Ok),
             StateValue::of("down", Tone::Err),

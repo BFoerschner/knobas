@@ -294,11 +294,13 @@ mod tests {
                 StatePath {
                     at: PayloadPath::of(["state"]),
                     open: false,
+                    text_at: None,
                     values: vec![StateValue::of("running", Tone::Info)],
                 },
                 StatePath {
                     at: PayloadPath::of(["status"]),
                     open: false,
+                    text_at: None,
                     values: vec![StateValue::of("FAILURE", Tone::Err)],
                 },
             ],

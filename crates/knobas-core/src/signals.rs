@@ -492,8 +492,8 @@ macro_rules! asked_of {
 }
 
 /// Every declared source's `state` candidates for builds and pull requests,
-/// read once a statement: `(source_id, kind, segs, ord, m)`, one row per
-/// candidate, `m` its map as a jsonb object from each value's text (the value
+/// read once a statement: `(source_id, kind, segs, ord, tsegs, m)`, one row
+/// per candidate (`tsegs` its `text_at`, #2468), `m` its map as a jsonb object from each value's text (the value
 /// as jsonb, `"open"` or `true`) to `{text, tone}`, the first entry kept where
 /// a map names a value twice. A value without a tone is kept, its `tone`
 /// null: it matches and stops the walk (spec #2463); a tone that is neither
@@ -510,7 +510,7 @@ macro_rules! asked_of {
 macro_rules! state_paths {
     ($decl:literal) => {
         concat!(
-            "select i.source_id, i.kind, c.segs, c.ord, m.m
+            "select i.source_id, i.kind, c.segs, c.ord, c.tsegs, m.m
                from (select d.source_id, k.kind
                        from jsonb_object_keys(case when jsonb_typeof(",
             $decl,
@@ -547,8 +547,10 @@ macro_rules! state_paths {
 macro_rules! resolved_state {
     () => {
         concat!(
-            "(select jsonb_build_object('text', coalesce(s.e->>'text', s.v #>> '{}'), 'tone', s.e->>'tone')
-               from (select p.ord, x.v, p.m -> (x.v::text) as e
+            "(select jsonb_build_object('text', coalesce(s.e->>'text', s.shown, s.v #>> '{}'), 'tone', s.e->>'tone')
+               from (select p.ord, x.v, p.m -> (x.v::text) as e,
+                            case when cardinality(p.tsegs) > 0 and jsonb_typeof(i.payload #> p.tsegs) = 'string'
+                              then nullif(btrim(i.payload #>> p.tsegs), '') end as shown
                        from state_paths p cross join lateral (select ",
             $crate::state_value_at!(),
             " as v) x

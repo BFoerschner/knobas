@@ -791,6 +791,17 @@ pub struct StatePath {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(as = "Option<bool>", optional)]
     pub open: bool,
+    /// Where the chip's text is, when the value matched at `at` is not the
+    /// word a reader should see (spec #2463, #2468): Jira's status category
+    /// is matched at `statusCategory.key`, and the chip says the status name.
+    /// The string here, trimmed and non-blank, is the chip's text; a value's
+    /// own `text` still beats it, and a miss here shows the value. A
+    /// candidate with one has no state words of its own, so none of its
+    /// values is offered for a tone override. Absent is `None`, and `None` is
+    /// not written, so a declaration without one serialises as it did before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub text_at: Option<PayloadPath>,
 }
 
 /// One value a [`StatePath`] draws, and how.
@@ -1356,7 +1367,8 @@ pub fn resolve_worklog(
 /// `at` leads to, trimmed and non-blank, or the boolean it leads to; anything
 /// else misses. The value must be one its own `values` names, string for
 /// string and boolean for boolean, or the candidate misses and the next is
-/// tried. The chip's text is the entry's `text`, else the value as text, and
+/// tried. The chip's text is the entry's `text`, else the string at the
+/// candidate's `text_at` (trimmed, non-blank), else the value as text, and
 /// its tone the entry's: an entry with none still matches and stops the walk,
 /// drawing a toneless chip. [`declared_state!`](crate::declared_state) is the
 /// same rule in SQL, held to this one by
@@ -1373,8 +1385,13 @@ pub fn resolve_state(payload: &serde_json::Value, candidates: &[StatePath]) -> O
             _ => return None,
         };
         let entry = candidate.values.iter().find(|v| v.value == value)?;
+        let shown = || {
+            let path = candidate.text_at.as_ref()?;
+            let shown = at(payload, path)?.as_str()?.trim();
+            (!shown.is_empty()).then(|| shown.to_owned())
+        };
         Some(StateChip {
-            text: entry.text.clone().unwrap_or(text),
+            text: entry.text.clone().or_else(shown).unwrap_or(text),
             tone: entry.tone,
         })
     })
@@ -1675,7 +1692,7 @@ macro_rules! declared_state {
 }
 
 /// The declared state candidates of the row `i`, as a relation of `(segs,
-/// vals, ord)`: [`declared_state!`]'s, exported for a statement that
+/// vals, ord, tsegs)` (`tsegs` the candidate's `text_at`, empty for none): [`declared_state!`]'s, exported for a statement that
 /// resolves them once a source and reads them through [`state_of!`] (#939).
 #[doc(hidden)]
 #[macro_export]
@@ -1684,7 +1701,9 @@ macro_rules! declared_state_candidates {
         concat!(
             "(select ",
             $crate::declared_segments!("t.p->'at'"),
-            " as segs, t.p->'values' as vals, t.ord from jsonb_array_elements(",
+            " as segs, t.p->'values' as vals, t.ord, ",
+            $crate::declared_segments!("t.p->'text_at'"),
+            " as tsegs from jsonb_array_elements(",
             $crate::declared_array!($decl, "state"),
             ") with ordinality as t(p, ord))"
         )
@@ -1692,7 +1711,7 @@ macro_rules! declared_state_candidates {
 }
 
 /// [`declared_state!`]'s rule over a relation of candidates the statement
-/// already holds, `(segs, vals, ord)` rows: the one spelling of the rule,
+/// already holds, `(segs, vals, ord, tsegs)` rows: the one spelling of the rule,
 /// as [`first_string_of!`] is for a string -- save the signals' reader's,
 /// [`resolved_state!`], which reads the values flattened once a statement for
 /// speed (#1148); `payload_paths.rs`'s state-chip cases hold it to this one.
@@ -1701,10 +1720,12 @@ macro_rules! declared_state_candidates {
 macro_rules! state_of {
     ($($candidates:tt)+) => {
         concat!(
-            "(select jsonb_build_object('text', coalesce(v.e->>'text', s.val #>> '{}'), 'tone', v.e->>'tone') \
+            "(select jsonb_build_object('text', coalesce(v.e->>'text', s.shown, s.val #>> '{}'), 'tone', v.e->>'tone') \
               from (select c.ord, c.vals, case jsonb_typeof(i.payload #> c.segs) \
                       when 'string' then to_jsonb(nullif(btrim(i.payload #>> c.segs), '')) \
-                      when 'boolean' then i.payload #> c.segs end as val \
+                      when 'boolean' then i.payload #> c.segs end as val, \
+                    case when cardinality(c.tsegs) > 0 and jsonb_typeof(i.payload #> c.tsegs) = 'string' \
+                      then nullif(btrim(i.payload #>> c.tsegs), '') end as shown \
                     from ",
             $($candidates)+,
             " c) s \

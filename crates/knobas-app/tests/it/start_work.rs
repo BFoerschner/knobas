@@ -1643,6 +1643,7 @@ async fn a_source_that_spells_head_and_base_its_own_way_is_read_where_it_declare
             state: vec![StatePath {
                 at: PayloadPath::of(["state"]),
                 open: false,
+                text_at: None,
                 values: vec![
                     StateValue::of("open", Tone::Info),
                     StateValue::of("merged", Tone::Ok),
@@ -1889,6 +1890,7 @@ fn declared(merged: bool) -> knobas_core::payload::Declarations {
     let mut state = vec![StatePath {
         at: PayloadPath::of(["state"]),
         open: false,
+        text_at: None,
         values: vec![
             StateValue::of("open", Tone::Info),
             StateValue::of("closed", Tone::Muted),
@@ -1900,6 +1902,7 @@ fn declared(merged: bool) -> knobas_core::payload::Declarations {
             StatePath {
                 at: PayloadPath::of(["merged"]),
                 open: false,
+                text_at: None,
                 values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
             },
         );

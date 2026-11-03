@@ -74,6 +74,7 @@ impl AdapterRegistry for Probe {
                     state: vec![StatePath {
                         at: PayloadPath::of(["state"]),
                         open: false,
+                        text_at: None,
                         values: vec![StateValue::of("open", Tone::Info)],
                     }],
                     assignee: vec![PayloadPath::of(["assignee"])],
@@ -89,6 +90,7 @@ impl AdapterRegistry for Probe {
                     state: vec![StatePath {
                         at: PayloadPath::of(["state"]),
                         open: false,
+                        text_at: None,
                         values: vec![StateValue::of("open", Tone::Info)],
                     }],
                     head: vec![PayloadPath::of(["head", "ref"])],
