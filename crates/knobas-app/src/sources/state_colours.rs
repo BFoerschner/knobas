@@ -69,6 +69,11 @@ pub struct StateWordColour {
 pub struct KindStateColours {
     pub kind: String,
     pub words: Vec<StateWordColour>,
+    /// Whether a configured adapter reads on past the kind's open candidate
+    /// for a word its names leave out (Jira's status category, #2468), so
+    /// that every such word, seen yet or not, takes a default there. The
+    /// legend ends the kind with its category line by this.
+    pub has_category: bool,
 }
 
 /// Every kind a configured source declares a state for, by kind id.
@@ -124,14 +129,15 @@ fn offered(
     seen: &[state_colours::SeenWord],
     overrides: &[ToneOverride],
 ) -> Vec<KindStateColours> {
-    // Per kind: its declared words in order with their tone, and whether it
-    // has an open candidate.
-    let mut kinds: BTreeMap<String, (Declared, bool)> = BTreeMap::new();
+    // Per kind: its declared words in order with their tone, whether it has
+    // an open candidate, and whether an adapter reads on past that one.
+    let mut kinds: BTreeMap<String, (Declared, bool, bool)> = BTreeMap::new();
     for paths in templates.values().flatten() {
         if paths.state.is_empty() {
             continue;
         }
-        let (declared, open) = kinds.entry(paths.kind.clone()).or_default();
+        let (declared, open, category) = kinds.entry(paths.kind.clone()).or_default();
+        *category |= !state_colours::fallback(std::slice::from_ref(paths)).is_empty();
         for candidate in &paths.state {
             *open |= candidate.open;
             // A candidate drawn as another path's string (Jira's category)
@@ -150,7 +156,7 @@ fn offered(
     }
     kinds
         .into_iter()
-        .map(|(kind, (declared, open))| {
+        .map(|(kind, (declared, open, has_category))| {
             let yours = |word: &str| {
                 overrides
                     .iter()
@@ -206,7 +212,11 @@ fn offered(
                     }
                 })
                 .collect();
-            KindStateColours { kind, words }
+            KindStateColours {
+                kind,
+                words,
+                has_category,
+            }
         })
         .collect()
 }

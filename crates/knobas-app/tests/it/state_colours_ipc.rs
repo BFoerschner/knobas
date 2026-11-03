@@ -569,6 +569,26 @@ async fn the_read_reports_a_seen_statuss_category_tone() {
         (None, Some(Tone::Muted), ToneOrigin::Adapter),
         "an exact name is the adapter's, whatever its category"
     );
+    let has_category = |kind: &str| kinds.iter().find(|k| k.kind == kind).unwrap().has_category;
+    assert!(has_category("ticket"), "Jira reads on to the category");
+    assert!(
+        !has_category("build"),
+        "no adapter reads on past a build's state"
+    );
+}
+
+/// The category is Jira's ticket declaration, not the corpus (#2468): the
+/// kind says it reads one on a mirror that has seen no status yet, so the
+/// legend's category line never waits for a seen word.
+#[tokio::test]
+async fn a_kind_reads_its_category_before_any_status_is_seen() {
+    let pool = pool("state_colours_category_unseen").await;
+    let kinds = state_colours::read(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    let ticket = kinds.iter().find(|k| k.kind == "ticket").unwrap();
+    assert!(ticket.has_category);
+    assert!(ticket.words.iter().all(|w| w.category_tone.is_none()));
 }
 
 /// A word's category tone is the most common outcome among its items, no

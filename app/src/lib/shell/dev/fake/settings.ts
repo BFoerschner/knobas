@@ -85,7 +85,8 @@ function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
       const origin = mine !== null ? "yours" : declared ? "adapter" : category_tone !== null ? "category" : "unset";
       return { word, declared, declared_tone, category_tone, yours: mine, tone, origin } as const;
     });
-    return { kind, words };
+    // Jira's ticket reads on to its status category; no other kind does.
+    return { kind, words, has_category: kind === "ticket" };
   });
 }
 

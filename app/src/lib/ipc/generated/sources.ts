@@ -783,7 +783,14 @@ attachments: Array<AttachmentPath>, };
  * One entity kind that declares a state, and its offered words: declared
  * words in declared order, then the others alphabetically.
  */
-export type KindStateColours = { kind: string, words: Array<StateWordColour>, };
+export type KindStateColours = { kind: string, words: Array<StateWordColour>, 
+/**
+ * Whether a configured adapter reads on past the kind's open candidate
+ * for a word its names leave out (Jira's status category, #2468), so
+ * that every such word, seen yet or not, takes a default there. The
+ * legend ends the kind with its category line by this.
+ */
+has_category: boolean, };
 
 /**
  * Where a **list** of strings lives: the array, and where the string sits

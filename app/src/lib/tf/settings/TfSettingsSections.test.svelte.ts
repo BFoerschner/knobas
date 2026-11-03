@@ -81,6 +81,7 @@ const sourcePorts: SettingsPorts = {
 function fakeStateColours(): Pick<SectionPorts, "stateColours" | "setToneOverride" | "clearToneOverrides"> {
   const kinds: KindStateColours[] = ["build", "monitor", "pr", "ticket"].map((kind) => ({
     kind,
+    has_category: kind === "ticket",
     words: [{ word: "settled", declared: true, declared_tone: "ok", category_tone: null, yours: null, tone: "ok", origin: "adapter" }],
   }));
   return {
@@ -456,6 +457,7 @@ test("a link set draws its tick after Links, on by default, and switching it off
 function kindColours(kind: string, words: [string, ToneChoice | null][]): KindStateColours {
   return {
     kind,
+    has_category: kind === "ticket",
     words: words.map(([word, yours]) => ({
       word,
       declared: true,

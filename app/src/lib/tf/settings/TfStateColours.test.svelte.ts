@@ -43,6 +43,7 @@ function word(over: Partial<StateWordColour> & { word: string }): StateWordColou
 function tickets(): KindStateColours {
   return {
     kind: "ticket",
+    has_category: true,
     words: [
       word({ word: "To Do", declared: false, origin: "unset" }),
       word({ word: "Done", declared_tone: "ok" }),
@@ -117,6 +118,7 @@ test("each word sits in its tone's column; declared words first, then seen words
 test("the order puts declared words before seen ones whatever order the read gives", async () => {
   const mixed: KindStateColours = {
     kind: "ticket",
+    has_category: true,
     words: [
       word({ word: "Zebra", declared: false, origin: "unset" }),
       word({ word: "Waiting", declared_tone: "warn" }),
@@ -150,6 +152,7 @@ test("→ from muted sets No colour; → at No colour and ← at ok do nothing",
   const ports = fakePorts([
     {
       kind: "pr",
+      has_category: false,
       words: [word({ word: "closed", declared_tone: "muted" }), word({ word: "merged", declared_tone: "ok" })],
     },
   ]);
@@ -220,6 +223,7 @@ test("a seen status at its category's tone sits in that column, labelled Jira ca
   const ports = fakePorts([
     {
       kind: "ticket",
+      has_category: true,
       words: [
         word({ word: "Done", declared_tone: "ok" }),
         word({ word: "Ready for QA", declared: false, category_tone: "info", tone: "info", origin: "category" }),

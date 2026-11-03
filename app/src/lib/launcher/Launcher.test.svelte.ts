@@ -2558,6 +2558,7 @@ function word(over: Partial<StateWordColour> & { word: string }): StateWordColou
 const COLOURS: KindStateColours[] = [
   {
     kind: "monitor",
+    has_category: false,
     words: [
       word({ word: "up", declared_tone: "ok" }),
       word({ word: "down", declared_tone: "err" }),
@@ -2568,10 +2569,12 @@ const COLOURS: KindStateColours[] = [
   },
   {
     kind: "pr",
+    has_category: false,
     words: [word({ word: "merged", declared_tone: "ok" }), word({ word: "open", declared_tone: "info" }), word({ word: "closed", declared_tone: "muted" })],
   },
   {
     kind: "ticket",
+    has_category: true,
     words: [
       word({ word: "Done", declared_tone: "ok" }),
       // Set to *No colour*: it matches and draws no tone, so no legend line names it.
@@ -2678,6 +2681,25 @@ test("the ticket legend ends with the category line instead of the words at thei
   const tickets = lines.find((line) => line.querySelector(".tf-ln-lgk")?.textContent?.trim() === "Tickets")!;
   expect(tickets.lastElementChild?.textContent?.trim()).toBe("other statuses: by Jira category");
   // No other kind reads a category, so none ends with the line.
+  for (const line of lines.filter((l) => l !== tickets)) expect(line.textContent).not.toContain("by Jira category");
+});
+
+/**
+ * The category line is the declaration's, not the corpus's (#2468): a
+ * mirror that has seen no status in a toned category yet still ends the
+ * ticket section with it, since the next status Jira adds is drawn by it;
+ * a kind whose adapter reads no category never does.
+ */
+test("the ticket legend ends with the category line before any status is seen in a toned category", async () => {
+  const unseen = COLOURS.map((kind) => (kind.kind !== "ticket" ? kind : { ...kind, words: kind.words.filter((w) => w.declared) }));
+  open({ ports: { launcherHome: async () => HOME, search: HELP_SEARCH }, legendPorts: legendFake(unseen) });
+  await settle();
+  await search("?");
+  await settle();
+
+  const lines = [...target.querySelectorAll('[aria-label="Colours"] .tf-ln-lg')];
+  const tickets = lines.find((line) => line.querySelector(".tf-ln-lgk")?.textContent?.trim() === "Tickets")!;
+  expect(tickets.lastElementChild?.textContent?.trim()).toBe("other statuses: by Jira category");
   for (const line of lines.filter((l) => l !== tickets)) expect(line.textContent).not.toContain("by Jira category");
 });
 

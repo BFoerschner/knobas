@@ -11,8 +11,9 @@
  *
  * A seen word left at its Jira status category's tone (#2468) is on no line
  * either: the category colours every status no name maps, including ones
- * not seen yet, so a kind that reads one ends with `CATEGORY_LINE` instead
- * of listing them. A word the reader coloured is listed under its tone.
+ * not seen yet, so a kind that reads one (`has_category`, a fact of the
+ * declaration, not of the corpus) ends with `CATEGORY_LINE` instead of
+ * listing them. A word the reader coloured is listed under its tone.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
@@ -34,13 +35,13 @@ const ORDER: Tone[] = ["ok", "info", "warn", "err", "muted"];
 
 export function legendOf(colours: KindStateColours[]): LegendLine[] {
   return colours
-    .map(({ kind, words }) => ({
+    .map(({ kind, words, has_category }) => ({
       kind,
       tones: ORDER.map((tone) => ({
         tone,
         words: [...new Set(words.filter((word) => word.tone === tone && word.origin !== "category").map((word) => word.word))],
       })).filter((line) => line.words.length > 0),
-      rest: words.some((word) => word.category_tone !== null) ? CATEGORY_LINE : null,
+      rest: has_category ? CATEGORY_LINE : null,
     }))
     .filter((line) => line.tones.length > 0 || line.rest !== null);
 }
