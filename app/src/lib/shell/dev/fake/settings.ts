@@ -57,7 +57,6 @@ function record(at: Date, bytes: number): BackupRecord {
   return { taken_at: at.toISOString(), file: `${DIRECTORY}/${archiveName(at)}`, bytes };
 }
 
-/** This feature's commands. */
 /** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
 const DECLARED_STATES: [string, [string, Tone | null][]][] = [
   ["build", [["running", "info"], ["queued", "info"], ["SUCCESS", "ok"], ["FAILURE", "err"], ["UNKNOWN", "muted"]]],
@@ -87,6 +86,7 @@ function stateColours(overrides: Map<string, ToneChoice>): KindStateColours[] {
   });
 }
 
+/** This feature's commands. */
 export function handlers(params: URLSearchParams = new URLSearchParams()): Handlers {
   let passive = true;
   const toneOverrides = new Map<string, ToneChoice>();
