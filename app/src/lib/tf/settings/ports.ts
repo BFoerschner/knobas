@@ -232,6 +232,8 @@ export interface SectionPorts {
   openBackupFolder: () => Promise<void>;
   /** Settings › Renderers (#2262); the IPC when omitted. */
   renderers?: import("./TfRenderersSection.svelte").RendererPorts;
+  /** Settings › Appearance › State colours (#2466): its read, set and clear; the IPC when omitted. */
+  stateColours?: import("./TfStateColours.svelte").StateColourPorts;
 }
 
 /** The real commands, each looked up when it is called (see above). */

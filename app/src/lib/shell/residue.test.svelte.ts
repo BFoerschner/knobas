@@ -545,6 +545,7 @@ function sectionPorts() {
   return {
     pagesKeptOpen: () => deferred(5),
     setPagesKeptOpen: (count: number) => deferred(count),
+    stateColours: { stateColours: () => deferred([]), setToneOverride: () => deferred([]), clearToneOverrides: () => deferred([]) },
     passiveAttribution: () => deferred(true),
     setPassiveAttribution: (on: boolean) => deferred(on),
     notify: () => deferred(undefined),
@@ -2232,6 +2233,8 @@ const CASES: Case[] = [
   sectionCase("TfLogsSection", "logs"),
   sectionCase("TfPerformanceSection", "performance"),
   sectionCase("TfRenderersSection", "renderers"),
+  // Appearance's State colours (#2466): its read lands late.
+  sectionCase("TfStateColours", "appearance"),
   {
     /**
      * The write queue panel (#1425): a layer on the stack, and a title read

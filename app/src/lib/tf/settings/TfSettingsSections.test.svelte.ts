@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { BackupStatus } from "../../ipc/backup";
 import type { InboxCategory, WriteAsk } from "../../ipc/entity";
-import type { SourceSummary } from "../../ipc/sources";
+import type { KindStateColours, SourceSummary } from "../../ipc/sources";
 import { createHealth } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { keptPages } from "../kept-pages.svelte";
@@ -77,10 +77,24 @@ const sourcePorts: SettingsPorts = {
   setRunEmbeddedHtml: () => Promise.resolve(true),
 };
 
+/** Appearance's State colours (#2466): a kind per adapter family, so its board draws. */
+function fakeStateColours(): NonNullable<SectionPorts["stateColours"]> {
+  const kinds: KindStateColours[] = ["build", "monitor", "pr", "ticket"].map((kind) => ({
+    kind,
+    words: [{ word: "settled", declared: true, declared_tone: "ok", yours: null, tone: "ok", origin: "adapter" }],
+  }));
+  return {
+    stateColours: vi.fn(() => Promise.resolve(kinds)),
+    setToneOverride: vi.fn(() => Promise.resolve(kinds)),
+    clearToneOverrides: vi.fn(() => Promise.resolve(kinds)),
+  };
+}
+
 function sectionPorts(over: Partial<SectionPorts> = {}) {
   return {
     pagesKeptOpen: vi.fn(() => Promise.resolve(5)),
     setPagesKeptOpen: vi.fn((count: number) => Promise.resolve(Math.min(15, count))),
+    stateColours: fakeStateColours(),
     passiveAttribution: vi.fn(() => Promise.resolve(true)),
     setPassiveAttribution: vi.fn((on: boolean) => Promise.resolve(on)),
     notify: vi.fn(() => Promise.resolve()),
@@ -200,6 +214,26 @@ function rowValue(label: string): string {
   );
   return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
 }
+
+test("Appearance draws State colours below Theme, one section per kind with a state (#2466)", async () => {
+  await open("appearance");
+  const heads = [...body().querySelectorAll(".tf-stg-l, h2, h3")].map((el) => el.textContent?.trim());
+  expect(heads).toEqual(["Theme", "State colours", "Builds", "Monitors", "Pull requests", "Tickets"]);
+});
+
+test("Appearance's State colours waits for the database; Theme does not (#2466)", async () => {
+  const p = sectionPorts();
+  const read = vi.spyOn(p.stateColours, "stateColours");
+  view = mount(TfSettings, {
+    target,
+    context: hiddenable,
+    props: { rest: ["appearance"], job: null, ready: false, ports: sourcePorts, sectionPorts: p, layers: createLayers(), now: () => NOW, theme: createTheme() },
+  });
+  await settle();
+  expect(target.querySelector('[aria-label="Theme"]')).not.toBeNull();
+  expect(target.querySelector(".tf-sc")).toBeNull();
+  expect(read).not.toHaveBeenCalled();
+});
 
 test("Appearance and the top bar's toggle are the same setting", async () => {
   const theme = createTheme();
