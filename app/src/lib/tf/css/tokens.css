@@ -1,6 +1,6 @@
 /* ---------- tokens: light, then dark by the OS unless forced light, then forced dark ---------- */
 :root {
-  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --field: #FFFFFF; --ink: #17212B; --ink-2: #4B5663;
+  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --field: #FFFFFF; --ink: #17212B; --ink-2: #4B5663; --fill: var(--ink);
   --rule: #CBD2D9; --rule-2: #DDE2E7;
   --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
   --focus: #2F55D4; --mark: #F6E08F;
@@ -27,7 +27,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7;
+    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #BCC5CF;
     --rule: #323C47; --rule-2: #28313A;
     --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
     --focus: #8AA6FF; --mark: #5C4E17;
@@ -41,7 +41,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7;
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #BCC5CF;
   --rule: #323C47; --rule-2: #28313A;
   --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
   --focus: #8AA6FF; --mark: #5C4E17;

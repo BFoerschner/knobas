@@ -55,6 +55,7 @@
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
+  import { fitLabel } from "../time/day-view";
   import { pipelineHash, runTone, stateWord } from "./builds";
   import {
     chipTone,
@@ -369,6 +370,24 @@
   const segments = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
+  /** A step's name at what its segment holds: whole, or ended with an ellipsis, never cut mid-letter. */
+  let barPx = $state(0);
+  let pen: CanvasRenderingContext2D | null = null;
+  function measureBar(bar: HTMLElement) {
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => (barPx = bar.clientWidth));
+    seen.observe(bar);
+    return () => seen.disconnect();
+  }
+  function stepLabel(name: string, widthPct: number): string | null {
+    if (barPx === 0) return name;
+    pen ??= document.createElement("canvas").getContext("2d");
+    const measuring = pen;
+    if (measuring === null) return name;
+    measuring.font = `400 11px ${getComputedStyle(document.body).getPropertyValue("--sans")}`;
+    return fitLabel(name, (widthPct / 100) * barPx - 18, (text) => measuring.measureText(text).width);
+  }
+
   function chipWord(r: RunRow): string {
     return r.finished === null ? resultWord(r) : stateWord(r.state?.text ?? "");
   }
@@ -476,13 +495,13 @@
           type="button"
           class="tf-btn"
           {...refusedAttrs(cannotRun)}
-          onclick={runAgain}>Run again<span class="tf-wide">{" "}with changes</span>…</button
+          onclick={runAgain}><span>Run again<span class="tf-wide">{" "}with changes</span>…</span></button
         >
       {:else}
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
       {/if}
       {#if run.web_url !== null}
-        <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></button>
+        <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}><span>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></span></button>
       {/if}
       <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} />
     </div>
@@ -490,7 +509,7 @@
   {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
 
   {#if segments.length > 0}
-    <div class="tf-stepsbar">
+    <div class="tf-stepsbar" {@attach measureBar}>
       <svg role="group" aria-label="Steps" width="100%" height="30">
         {#each segments as segment (segment.index)}
           <a
@@ -502,7 +521,7 @@
             <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
               <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
               {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
-              <text x="10" y="19">{segment.name}</text>
+              {#if stepLabel(segment.name, segment.width) !== null}<text x="10" y="19">{stepLabel(segment.name, segment.width)}</text>{/if}
             </svg>
           </a>
         {/each}

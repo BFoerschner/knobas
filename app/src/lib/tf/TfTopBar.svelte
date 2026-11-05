@@ -55,11 +55,17 @@
   });
   /** What the clock runs on, as the chip names it: a ticket key, a label, an asset id. */
   const clockOn = $derived(timer.current === null ? null : targetReading(timer.current.target));
+
+  /** Below 1040 px the nav scrolls: the page you are on stays in view when you get there. */
+  function keepCurrentInView(nav: HTMLElement) {
+    void current;
+    nav.querySelector('[aria-current="page"]')?.scrollIntoView?.({ inline: "nearest", block: "nearest" });
+  }
 </script>
 
 <header class="tf-top">
   <span class="tf-brand">knobas</span>
-  <nav class="tf-nav" aria-label="Main">
+  <nav class="tf-nav" aria-label="Main" {@attach keepCurrentInView}>
     {#each NAV as section (section)}
       {@const count = badge(section)}
       <a href={sectionHash(section)} aria-current={section === current ? "page" : undefined}>

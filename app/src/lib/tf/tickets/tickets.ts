@@ -174,8 +174,11 @@ export function ticketFacts(
 export function previewAction(
   card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
   timerOnIt: boolean,
+  chosen = false,
 ): { label: string; note: string; chooses: boolean } {
   const lower = card.status?.toLowerCase() ?? "";
+  // Already the job: nothing to start from here, and its page has the timer.
+  if (chosen) return { label: "Open ticket", note: timerOnIt ? "Your timer is running on this ticket." : "This is the ticket you are on.", chooses: false };
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",

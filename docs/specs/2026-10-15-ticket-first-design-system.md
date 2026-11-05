@@ -12,7 +12,7 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
+- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and appears behind matched search text and what mentions you. A chip that names the job is neutral.
 - **The yellow card is a light surface in both themes.** Its dots and chips take the light tone values, so a failing build reads on it in dark too: dark's `--warn` is the card's own yellow and its `--err` is pink on it. Every yellow card (the ticket page's, the Tickets board's card and the list's row) re-declares the five tones and their tints at their light values (`job.css`), so the blocked chip and every dot follow without a rule of their own (spec #2396, #2400).
 - **The width axis does the shouting, not colour or size.** Big figures (the job key, counts, durations) use Archivo at width 62 and weight 800. Page titles use width 85. Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
@@ -37,7 +37,8 @@ Tokens are the prototype's, unchanged, except `--field`, which it did not have. 
 | `--card-ink` | `#2A230B` | `#1D1806` | Text on the card |
 | `--card-ink-2` | `#5A4D1E` | `#3F3511` | Secondary text on the card |
 | `--focus` | `#2F55D4` | `#8AA6FF` | Focus ring |
-| `--mark` | `#F6E08F` | `#5C4E17` | Matched search text |
+| `--mark` | `#F6E08F` | `#5C4E17` | Matched search text, and what mentions you |
+| `--fill` | `--ink` | `#BCC5CF` | Whatever is filled to say it is on: a primary, a pressed toggle, a rail's selected row. In dark it steps down from `--ink`, so it never outshouts the yellow card |
 | `--ok` / `--ok-bg` | `#1F7444` / `#DDEFE4` | `#6FCF97` / `#1B3427` | Passed, merged, up |
 | `--warn` / `--warn-bg` | `#8A5600` / `#F6EBD3` | `#E5B04D` / `#3A2E14` | Needs attention, stale |
 | `--err` / `--err-bg` | `#B0262A` / `#F7DEDD` | `#FF8A80` / `#3F1F1F` | Failed, down, broken |
@@ -131,7 +132,7 @@ Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog fo
 
 ### Header
 
-The title block on the left and `.tf-acts` on the right, on the title line, top-aligned to it. Every page uses this layout; none puts its actions on a line of their own. The actions come in this order:
+The title block on the left and `.tf-acts` on the right, on the title line, top-aligned to it. Every page uses this layout; none puts its actions on a line of their own, except the Docs reader, whose 40 px title takes the reading column. The actions come in this order:
 
 1. the primary;
 2. the other actions;
@@ -209,7 +210,7 @@ A control this section doesn't name is added by amending this section, the `#/co
 
 ## Layout
 
-The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (side rails and preview panes close) and 900 px (columns stack). The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
+The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (preview panes close and side rails narrow) and 900 px (columns stack). A page whose own width decides something, such as a table shedding columns or a header shortening a label, uses a container query instead. The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
 
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
 
@@ -219,7 +220,7 @@ From 1240 px down the Tickets preview is closed, so one click on a card or row o
 
 A section's own page has no breadcrumb bar, unless a ticket card's row opened it narrowed to that ticket, when the bar says *Back to PAY-231* and `Esc` goes there: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
 
-A filter bar directly under a page's header is a full-width band. One inside a page's body, under its tabs, is a card on the body's edges. A key in mono carries no underline until pointed at; a link made of words always does.
+A filter bar is a full-width band under the page's tabs, on every page. A key in mono carries no underline until pointed at; a link made of words always does.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
 

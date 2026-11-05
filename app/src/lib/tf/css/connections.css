@@ -10,8 +10,8 @@
 .tf-who b { color: var(--ink); font-weight: 600; }
 .tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
 .tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--mark); }
-/* Yellow is the ticket you are on. A mention is a highlight, which is `--mark`. */
-.tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); font-family: var(--mono); font-variant-ligatures: none; }
+/* Yellow is the ticket you are on, on its page, its card and its row, and nothing else: a chip that names the job is neutral. A mention is a highlight, which is `--mark`. */
+.tf-chip.tf-chip-job { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); font-family: var(--mono); font-variant-ligatures: none; }
 .tf-chip.tf-chip-mention { background: var(--mark); color: var(--ink); }
 .tf-at { font-weight: 600; color: var(--info); }
 .tf-fold {

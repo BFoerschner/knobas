@@ -681,7 +681,7 @@
                       <tr class:tf-row={run !== null} onclick={() => run !== null && (location.hash = run)}>
                         <td
                           ><span class="tf-dot tf-{row.tone ?? 'muted'}"></span>
-                          {#if run !== null}<a href={run}>{row.title}</a>{:else}{row.title}{/if}</td
+                          {#if run !== null}<a href={run}>{row.title}</a>{:else}{row.title}{/if}{#if rail.some((check) => check.row === row && check.required)}{" "}<span class="tf-prreq">Required</span>{/if}</td
                         >
                         <td>{[row.chip, row.meta].filter((bit) => bit !== null && bit !== "").join(", ")}</td>
                       </tr>
@@ -835,7 +835,8 @@
                 </div>
               {/if}
             </div>
-            {#if rail.length > 0}
+            <!-- Overview's own list has these in full: the rail keeps them in reach on the other tabs. -->
+            {#if rail.length > 0 && tab !== "overview"}
               <div class="tf-panel tf-prrail-checks">
                 <header><h3>Checks</h3></header>
                 <div class="tf-prlist">

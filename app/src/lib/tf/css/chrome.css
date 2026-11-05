@@ -67,6 +67,11 @@
 .tf-iconbtn svg { width: 16px; height: 16px; }
 
 /* ---------- status bar ---------- */
+/* A rail's selected row is on the fill: the tones on it are the ones that read there. */
+.tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"] {
+  --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
+}
+
 /* Inside a box that clips, a ring outside the element loses its sides: it draws inside. */
 :is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-ql, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc) :focus-visible { outline-offset: -2px; }
 
@@ -127,8 +132,8 @@
 /* Row one is the title and the actions (Controls, *Header*). The rest of the title block runs the full width under
    them, so a long subline is never squeezed into what the buttons leave. */
 .tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(min-content, 1fr) auto; gap: 0 12px; align-items: start; }
-.tf-fhead > div:first-child:not(.tf-board-title):has(> h1) { display: contents; }
-.tf-fhead > div:first-child:not(.tf-board-title):has(> h1) > :not(h1) { grid-column: 1 / -1; }
+.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) { display: contents; }
+.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) > :not(h1) { grid-column: 1 / -1; }
 .tf-fhead > .tf-acts { grid-column: 2; grid-row: 1; justify-content: flex-end; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
@@ -164,9 +169,9 @@
   background: var(--sheet); font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none;
 }
 .tf-btn:hover { border-color: var(--ink-2); }
-.tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
-/* After `.tf-btn:hover` at equal weight, so the primary needs a hover of its own. */
-.tf-btn.tf-primary:hover { --tf-hover: color-mix(in srgb, var(--ink) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
+.tf-btn.tf-primary { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
+/* After `.tf-btn:hover` at equal weight, so the primary needs a hover of its own. A disabled one does not answer. */
+.tf-btn.tf-primary:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 /* Not `--sheet-2`: a row's hover is that fill too, and a ghost button in the row would show no change. */
 .tf-btn.tf-ghost:hover { background: var(--rule-2); border-color: var(--rule); }
@@ -178,7 +183,7 @@
 /* Danger, one pair: red text starts a destructive action, filled red confirms it. */
 .tf-btn.tf-danger { color: var(--err); }
 .tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }
-.tf-btn.tf-primary.tf-danger:hover { --tf-hover: color-mix(in srgb, var(--err) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
+.tf-btn.tf-primary.tf-danger:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--err) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 
 /* A strip's or a row's trailing group of actions: at the end, centred on the strip, the control gap apart. */
 .tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
@@ -202,14 +207,14 @@
   border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-seg button:not([aria-pressed="true"]):hover { background: var(--sheet-2); color: var(--ink); }
-.tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
+.tf-seg button[aria-pressed="true"] { background: var(--fill); color: var(--sheet); }
 .tf-fchips { display: inline-flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-fchips button {
   height: var(--control-h-sm); padding: 0 10px; font-size: var(--t-sm); border-radius: 12px;
   border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-fchips button:hover { border-color: var(--ink-2); }
-.tf-fchips button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-fchips button[aria-pressed="true"] { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
 
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {

@@ -369,7 +369,12 @@ function railView(conflict = false): SourceView {
 const lines = (selector: string) => [...target.querySelectorAll(selector)].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
 
 test("the side rail: a failing required check is the first check, and readiness says not ready (#2278)", async () => {
+  // Overview's own list has the checks in full, so the rail keeps them for the other tabs.
   await draw([PR], ports({ pr: railView() }));
+  expect(target.querySelector(".tf-prrail-checks")).toBeNull();
+  if (view) unmount(view);
+  view = null;
+  await draw([PR, "conversation"], ports({ pr: railView() }));
   expect(lines(".tf-prrail-checks .tf-prit")).toEqual(["ci/test Required failure", "lint failure", "ci/build Required success"]);
   // The mirror holds ci/test's run: the check opens it.
   expect(target.querySelector(".tf-prrail-checks .tf-prit a")!.getAttribute("href")).toBe(`#/build/${encodeURIComponent(RUN)}`);
@@ -1264,7 +1269,7 @@ test("a pull request whose refresh failed keeps its page and says why", async ()
   await draw([PR], ports({ refresh: probe.ports }));
   target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh")!.click();
   await settle();
-  expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway. Refresh to try again.");
   expect(text("h1")).toContain("SEPA retry with exponential backoff");
   expect(target.querySelector(".tf-cbody")?.textContent).not.toBe("");
 });

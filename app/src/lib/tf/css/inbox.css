@@ -22,6 +22,7 @@
   .tf-ibody { padding-left: 16px; padding-right: 16px; }
   .tf-ib { grid-template-columns: minmax(0, 1fr); }
   .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
-  .tf-ib .tf-acts { justify-content: flex-start; }
+  .tf-ib .tf-acts { justify-content: flex-start; order: 3; }
+  .tf-isnooze { order: 4; padding-left: 0; }
 }
 

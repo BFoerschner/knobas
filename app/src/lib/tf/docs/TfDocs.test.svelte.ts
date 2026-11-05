@@ -2432,7 +2432,7 @@ test("a refresh that failed keeps the page and says why under the meta line (#21
   await draw(["confluence:2"], io);
   refreshButton()!.click();
   await settle();
-  expect(docBanners()).toEqual(["Couldn't refresh: 502 Bad Gateway"]);
+  expect(docBanners()).toEqual(["Couldn't refresh: 502 Bad Gateway. Refresh to try again."]);
   expect(target.querySelector(".tf-refresh-failed")?.previousElementSibling?.classList.contains("tf-rd-meta")).toBe(true);
   expect(io.docsPage).toHaveBeenCalledTimes(1);
   expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");

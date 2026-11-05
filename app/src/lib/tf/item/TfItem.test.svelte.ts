@@ -398,7 +398,7 @@ test("a failed refresh says why in one line and keeps the detail as it was", asy
 
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: connection refused");
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: connection refused. Refresh to try again.");
   expect(count.detail).toBe(1);
   expect(target.querySelector("h1")?.textContent).toBe("Quay crane 4 inspection");
   expect(target.querySelector(".tf-item-text")?.textContent).toBe(BODY);

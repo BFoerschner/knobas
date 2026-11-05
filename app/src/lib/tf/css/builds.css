@@ -20,10 +20,9 @@
 .tf-legend i.tf-run-run { background: var(--info); }
 .tf-facts2 { display: flex; gap: 22px; font-size: var(--t-sm); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .tf-facts2 b { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
-/* The runs' toolbar is the table's own head: on the table's edges, and no inset of its own. */
-.tf-runbar { padding: 8px 22px 0; }
 .tf-runbar .tf-fsearch { flex-basis: 240px; }
 .tf-runbar .tf-fsel select { max-width: 120px; }
+.tf-runs { margin-top: 2px; }
 /* A day's heading belongs to the rows under it: the larger space is above. */
 .tf .tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 18px 0 6px; }
 .tf .tf-runs .tf-dayh:first-child { margin-top: 14px; }
@@ -34,7 +33,7 @@
 .tf-durbar rect { fill: var(--ink-2); opacity: .35; }
 .tf-progress { width: 70px; height: 4px; vertical-align: middle; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
 .tf-progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
-.tf-chip.tf-jobchip-sm { background: var(--card); color: var(--card-ink); }
+.tf-chip.tf-jobchip-sm { background: var(--sheet-2); color: var(--ink); border: 1px solid var(--rule); }
 .tf-older { padding: 12px 0; display: flex; gap: 8px; align-items: center; }
 .tf-older[hidden] { display: none; }
 .tf-runs.tf-bsettings { padding-top: 16px; }
@@ -115,7 +114,7 @@
 .tf-pi:hover { background: var(--sheet-2); }
 /* An inset ink pill, as every rail's selected row; the run strip's tones are re-declared for the ink. */
 .tf-pi[aria-current="true"] {
-  background: var(--ink); color: var(--sheet);
+  background: var(--fill); color: var(--sheet);
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted); --rule: var(--on-ink-muted);
 }
 .tf-pi-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -145,7 +144,12 @@
 .tf-pi-why { grid-column: 1 / span 2; font-size: var(--t-xs); color: var(--ink-2); margin-top: 2px; }
 .tf-pi[aria-current="true"] .tf-pi-why { color: inherit; }
 .tf-scope-note { font-size: var(--t-sm); color: var(--ink-2); padding: 8px 8px 0; margin: 0; }
-.tf-bmain { overflow: auto; overflow-y: scroll; min-width: 0; }
+/* Its own width decides when a long header label gives up its end, not the window's. */
+.tf-bmain { overflow: auto; overflow-y: scroll; min-width: 0; container: bmain / inline-size; }
+@container bmain (max-width: 1130px) {
+  .tf-wide { display: none; }
+  .tf-shorten > span::after { content: "…"; }
+}
 .tf-runs { padding: 0 22px 18px; container-type: inline-size; }
 .tf-runs .tf-run-no { width: 150px; }
 .tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }

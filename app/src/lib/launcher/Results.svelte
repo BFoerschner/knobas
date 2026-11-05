@@ -157,7 +157,7 @@
 
 {#if response.groups.length === 0 && !rows.some((row) => row.kind === "inbox")}
   <p class="tf-ln-none">
-    Nothing in the mirror matches
+    Nothing matches
     <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
 {/if}

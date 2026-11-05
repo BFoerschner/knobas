@@ -909,6 +909,7 @@
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}
+      chosen={chosenJob.id === current.card.entity_id}
     />
   {:else}
     <aside class="tf-preview" aria-label="Selected ticket"><p>Select a ticket to see what is around it.</p></aside>

@@ -1046,7 +1046,7 @@
         >
       {/if}
       <div class="tf-rd-crumb">
-        <a href="#/docs">Docs</a>
+        {#if place.kind === "page" || place.kind === "space"}<a href="#/docs">Docs</a>{:else}Docs{/if}
         {#if p.space}
           › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
         {/if}
@@ -1056,7 +1056,8 @@
         › <strong><TfMarked text={p.title} {stems} /></strong>
       </div>
       <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
-      {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
+      <!-- `#/docs` reopens the page last read: with no page behind this one, there is nowhere back to go. -->
+      {#if back !== null && !(back.name === "Docs" && tree?.last_read === p.entity_id)}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
     </nav>
       <div class="tf-rd-sheet">
         <article class="tf-rd-page" bind:this={article}>

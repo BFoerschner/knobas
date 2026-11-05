@@ -321,7 +321,7 @@ test("the header names the pipeline and number with the result, then branch, who
   expect(target.querySelector(".tf-crumbs")?.textContent).toBe("Builds › Payout_IntegrationTests › #1187");
   const h1 = target.querySelector("h1")!;
   expect(h1.textContent).toContain("Payout_IntegrationTests #1187");
-  expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("Failure");
+  expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("failure");
   const sub = target.querySelector(".tf-bhead .tf-sub")!.textContent!;
   expect(sub).toMatch(/^feature\/PAY-231-sepa-retry, started by VCS change a41f2c, .+, took 4 m 12 s$/);
   expect(button("Re-run")).toBeDefined();
@@ -746,7 +746,7 @@ test("a sync of the run's source finishing reads the run again: a running run dr
   await settle();
   expect(drawn.reads).toBe(2);
   expect(views, "the view again, and its failed test now that it finished").toEqual(["", "", "tests"]);
-  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("Success");
+  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("success");
   expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5 m");
   expect(button("Stop")).toBeUndefined();
   expect(button("Re-run")).toBeDefined();
@@ -1237,7 +1237,7 @@ test("a run whose refresh failed keeps its page and says why under the header", 
   await settle();
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway. Refresh to try again.");
   expect(target.querySelector("h1")?.textContent).toContain("#1187");
   expect(target.querySelector(".tf-bhead + .tf-refresh-failed, .tf-bhead ~ .tf-refresh-failed")).not.toBeNull();
 });

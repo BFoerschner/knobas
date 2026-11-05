@@ -675,7 +675,7 @@ test("a repository whose refresh failed keeps its page and says why", async () =
   );
   refreshButton()!.click();
   await settle();
-  expect(text(target.querySelector(".tf-refresh-failed"))).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(text(target.querySelector(".tf-refresh-failed"))).toBe("Couldn't refresh: 502 Bad Gateway. Refresh to try again.");
   expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
   expect(target.querySelectorAll(".tf-cbody tbody tr").length).toBe(2);
 });

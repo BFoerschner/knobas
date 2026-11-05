@@ -32,5 +32,5 @@
   </div>
 {/if}
 {#if failed !== null}
-  <div class="tf-banner tf-err tf-refresh-failed" role="alert">{failed}</div>
+  <div class="tf-banner tf-err tf-refresh-failed" role="alert">{failed.replace("the source", detail.source.display_name)}. Refresh to try again.</div>
 {/if}

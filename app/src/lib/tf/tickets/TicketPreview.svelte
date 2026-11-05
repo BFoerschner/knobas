@@ -24,6 +24,7 @@
     description,
     around,
     timerOnIt,
+    chosen = false,
   }: {
     /** The ticket; its status is its own, whatever column it stands in (#1423). */
     card: TicketFacts;
@@ -33,9 +34,11 @@
     around: AroundLine[] | null;
     /** Whether the timer runs on this ticket. */
     timerOnIt: boolean;
+    /** The ticket is the chosen job. */
+    chosen?: boolean;
   } = $props();
 
-  const action = $derived(previewAction(card, timerOnIt));
+  const action = $derived(previewAction(card, timerOnIt, chosen));
   const epic = $derived(epicLine(card));
   // The preview has no attachment list to resolve a wiki's `!name!` against, so it says the file's name instead of the mark.
   const markdown = $derived(description === null ? null : proseMarkdown(withoutAttachmentMarks(description.text, description.markup), description.markup));

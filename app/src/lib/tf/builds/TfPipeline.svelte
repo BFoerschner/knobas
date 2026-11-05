@@ -562,7 +562,7 @@
       <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
     {/if}
     {#if pipeline.web_url !== null}
-      <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={openInSource}>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></button>
+      <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={openInSource}><span>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></span></button>
     {/if}
     <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} />
   </div>

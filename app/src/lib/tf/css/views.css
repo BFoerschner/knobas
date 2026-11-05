@@ -3,7 +3,7 @@
 .tf-vfind input {
   width: 100%; height: var(--control-h-sm); border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 0 8px; color: var(--ink);
 }
-.tf-vfind + .tf-vlist { padding-top: 4px; }
+.tf-vfind + .tf-vlist { padding-top: 4px; padding-right: 2px; scrollbar-gutter: stable; }
 .tf-vw-row { position: relative; }
 /* The row's `…` draws over its count on hover, so the name keeps the room and every count ends on one edge. */
 .tf-vw-row:is(:hover, :focus-within):has(.tf-vw-more) .tf-count { visibility: hidden; }

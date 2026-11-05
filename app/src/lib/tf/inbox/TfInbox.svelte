@@ -223,7 +223,10 @@
       pickedValue = "";
       snoozing = snoozing === entry.item.key ? null : entry.item.key;
     }
-    else if (action === "done") void inbox.complete(entry.item.key);
+    else if (action === "done") {
+      push({ text: `Done: ${sentence(entry.item)}` });
+      void inbox.complete(entry.item.key);
+    }
   }
 </script>
 

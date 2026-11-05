@@ -3,7 +3,7 @@
 .tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; }
 .tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
 .tf-stg-nav a:hover { background: var(--sheet-2); }
-.tf-stg-nav a[aria-current="page"] { background: var(--ink); color: var(--sheet); }
+.tf-stg-nav a[aria-current="page"] { background: var(--fill); color: var(--sheet); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 /* A page whose board needs the room, or its state chips read "SUCC…". */

@@ -31,9 +31,9 @@ export function isRunning(pipeline: PipelineRow): boolean {
  * A run's block in the strip: finished, its declared tone; in flight,
  * running once it started and queued before.
  */
-/** A source's state as a label: TeamCity says *FAILURE*, and the shell's labels are sentence case. */
+/** A source's state as a chip's word: TeamCity says *FAILURE*, and every other chip says *failure*, *open*, *merged*. */
 export function stateWord(text: string): string {
-  return text !== text.toUpperCase() || text.toLowerCase() === text ? text : text[0]! + text.slice(1).toLowerCase();
+  return text === text.toUpperCase() ? text.toLowerCase() : text;
 }
 
 export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | "q" {

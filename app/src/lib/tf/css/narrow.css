@@ -38,9 +38,6 @@
   .tf-nav .tf-count { padding: 0 5px; }
   .tf-nav a[href="#/review"] .tf-count { display: none; }
   .tf-tm-row { grid-template-columns: 120px minmax(0, 1fr) 100px 280px; }
-  /* A long button label gives up its end, so the actions keep one row. */
-  .tf-wide { display: none; }
-  .tf-shorten::after { content: "…"; margin-left: -6px; }
 }
 @media (max-width: 1240px) {
   .tf-grid { grid-template-columns: minmax(0, 1fr); }

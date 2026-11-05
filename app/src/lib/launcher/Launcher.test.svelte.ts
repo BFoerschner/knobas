@@ -863,7 +863,7 @@ test("an author search says which sources could not be asked", async () => {
   // read, and it used the word `CONTEXT.md`'s **Mirror** entry forbids until
   // #518.
   expect(target.querySelector(".tf-ln-none")?.textContent).toContain(
-    "Nothing in the mirror matches",
+    "Nothing matches",
   );
 });
 
@@ -1476,7 +1476,7 @@ test("hash i lists the inbox lines newest first and enter opens one", async () =
   const times = rows.map((row) => row.querySelector(".tf-ln-k")?.textContent ?? "");
   expect(times[0]).toMatch(/^\d\d:\d\d$/u);
   expect(times[2]).toMatch(/^yesterday \d\d:\d\d$/u);
-  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+  expect(target.textContent).not.toContain("Nothing matches");
 
   await search("#i review");
   const narrowed = [...target.querySelectorAll(".tf-ln-res")];
@@ -1948,7 +1948,7 @@ test("a launcher_home that is rejected shows the reason and a retry, not an empt
   expect(target.textContent).toContain("Reconcile mandates");
 });
 
-test("a search that never answers says Searching, never 'Nothing in the mirror matches'", async () => {
+test("a search that never answers says Searching, never 'Nothing matches'", async () => {
   open({
     ports: { launcherHome: async () => HOME, search: () => new Promise<never>(() => {}) },
   });
@@ -1956,10 +1956,10 @@ test("a search that never answers says Searching, never 'Nothing in the mirror m
   typeInBox("sepa");
   await debounced();
   expect(target.textContent).toContain("Searching");
-  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+  expect(target.textContent).not.toContain("Nothing matches");
 });
 
-test("a rejected search shows the reason, never 'Nothing in the mirror matches'", async () => {
+test("a rejected search shows the reason, never 'Nothing matches'", async () => {
   open({
     ports: {
       launcherHome: async () => HOME,
@@ -1972,7 +1972,7 @@ test("a rejected search shows the reason, never 'Nothing in the mirror matches'"
   typeInBox("sepa");
   await debounced();
   expect(target.textContent).toContain("index is rebuilding");
-  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+  expect(target.textContent).not.toContain("Nothing matches");
 });
 
 // ── The selected row stays on screen (#1411) ─────────────────────────────────────

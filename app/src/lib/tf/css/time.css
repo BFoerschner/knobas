@@ -36,7 +36,8 @@
 .tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: 2; }
 /* On the yellow block the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
 .tf-tm-b.tf-tm-run:focus-visible rect, .tf-tm-b.tf-tm-run.tf-on rect { stroke: var(--card-ink); }
-.tf-tm-now { fill: var(--err); }
+/* Ink: red means something failed, and the time of day never has. */
+.tf-tm-now { fill: var(--ink); }
 .tf-tm-legend {
   display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: var(--t-xs); color: var(--ink-2);
   margin-bottom: 18px;
@@ -101,7 +102,8 @@
 .tf-tm-week .tf-tm-we { background: var(--sheet-2); }
 .tf-tm-t { min-width: 240px; }
 .tf-tm-t small { display: block; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-tm-t a { color: inherit; text-decoration: underline; }
+.tf-tm-t a { color: inherit; }
+.tf-tm-t a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .tf-tm-c { min-width: 92px; font-variant-numeric: tabular-nums; }
 .tf-tm-c a { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: inherit; }
 .tf-tm-c small { font-size: var(--t-2xs); color: var(--ink-2); }
@@ -137,7 +139,7 @@
   padding: 2px 8px; font-size: var(--t-sm); line-height: 1.35; cursor: pointer;
 }
 .tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
-.tf-su-val[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.tf-su-val[aria-pressed="true"] { background: var(--fill); border-color: var(--fill); color: var(--sheet); }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
 .tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
 .tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }
