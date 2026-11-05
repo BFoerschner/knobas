@@ -66,31 +66,23 @@ macro_rules! parent_names {
 }
 pub(crate) use parent_names;
 
-/// What the typed `under:` values came to: the ones a parent answers to, and
-/// among those the ones with nothing the launcher admits beneath them.
+/// What the typed `under:` values came to.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct KnownUnder {
-    /// Each `(token, value)` a parent answers to, in the order typed.
-    pub known: Vec<(String, String)>,
-    /// The tokens among `known` beneath which the launcher admits no row: a
-    /// name only left-out kinds sit under (#2488), in the order typed.
+    /// Whether values were typed and the launcher admits a row beneath none of
+    /// them. Such a query answers with nothing before the statement is asked
+    /// (#2495). False with no `under:` typed, which scopes nothing.
+    pub admits_nothing: bool,
+    /// The tokens a parent answers to beneath which the launcher admits no
+    /// row: a name only left-out kinds sit under (#2488), in the order typed.
     pub left_out: Vec<String>,
 }
 
-impl KnownUnder {
-    /// Whether the launcher admits nothing beneath any of the typed values:
-    /// every known one is left out, and an unknown one has nothing beneath
-    /// it by definition. Such a query answers with nothing before the
-    /// statement is asked (#2495).
-    pub fn admits_nothing(&self) -> bool {
-        self.left_out.len() == self.known.len()
-    }
-}
-
 /// Report every `under:` value no parent answers to as an unknown token, in
-/// the spelling the reader typed it, and hand back the values one does answer
-/// to, with the ones the launcher admits nothing beneath (its `hidden` kinds
-/// left out) named for [`left_out_tokens`].
+/// the spelling the reader typed it, and hand back what the launcher admits
+/// beneath the values with its `hidden` kinds left out: whether it admits
+/// anything, and the known names it admits nothing beneath, for
+/// [`left_out_tokens`].
 ///
 /// One bounded read for both questions ([`crate::sql::parent_positions`]),
 /// so an `under:` keystroke pays, per value, an index probe of the mirror and
@@ -119,17 +111,17 @@ pub(crate) async fn report_unknown(
         .map(|(_, value)| value.clone())
         .collect();
     let positions = crate::sql::parent_positions(pool, &values, hidden).await?;
-    let mut known_under = KnownUnder::default();
+    let mut known_under = KnownUnder {
+        admits_nothing: positions.admitting.is_empty(),
+        left_out: Vec::new(),
+    };
     let typed: Vec<(String, String)> = parsed.under.clone();
-    for ((token, value), position) in typed.into_iter().zip(1_i64..) {
+    for ((token, _), position) in typed.into_iter().zip(1_i64..) {
         if !positions.known.contains(&position) {
             parsed.unknown(&token);
-            continue;
+        } else if !positions.admitting.contains(&position) {
+            known_under.left_out.push(token);
         }
-        if !positions.admitting.contains(&position) {
-            known_under.left_out.push(token.clone());
-        }
-        known_under.known.push((token, value));
     }
     Ok(known_under)
 }
@@ -145,8 +137,8 @@ pub(crate) async fn report_unknown(
 /// not asked, as [`report_unknown`] does not ask them, because a word
 /// matching nothing beneath the name is not what the launcher left out. And
 /// it was asked of the launcher's own `under:` predicate, arm for arm
-/// ([`crate::sql::parent_positions`]), so what `under:` admits and what this
-/// says cannot drift.
+/// ([`crate::sql::parent_positions`], whose doc names the tests that hold the
+/// two together).
 pub(crate) fn left_out_tokens(
     parsed: &Parsed,
     known_under: &KnownUnder,

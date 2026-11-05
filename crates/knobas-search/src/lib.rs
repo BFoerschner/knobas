@@ -401,7 +401,7 @@ impl Searcher {
         // them answers with nothing, and the statement is not asked: to say
         // nothing, it reads the whole mirror twice, for the live items and
         // for the run logs (#2495).
-        let rows: Vec<RawHit> = if filters.filters_by_under() && known_under.admits_nothing() {
+        let rows: Vec<RawHit> = if known_under.admits_nothing {
             Vec::new()
         } else {
             let corpora = corpus::searched(self.corpora(), filters.titles);
