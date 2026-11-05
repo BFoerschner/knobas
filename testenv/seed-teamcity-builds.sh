@@ -178,6 +178,14 @@ expect() {  # expect <what> <status>...
   die "$_what: HTTP $REST_STATUS: $(printf '%s' "$REST_BODY" | head -c 400)"
 }
 
+# A 200 that is not a JSON object says nothing about what was asked. Where the
+# answer decides a delete it must not read as "not there": jq fails on it, so a
+# `jq -e` under `if !` or an empty `$(jq ...)` would take it for one (#2480).
+expect_object() {  # expect_object <what>
+  printf '%s' "$REST_BODY" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || die "$1: HTTP $REST_STATUS, but the body is not a JSON object: $(printf '%s' "$REST_BODY" | head -c 400)"
+}
+
 # --------------------------------------------------------------------------
 # The derivation table (tc_state.rs), in shell.
 project_of() { printf '%s' "${1%%_*}"; }               # Payout_Build -> Payout
@@ -481,8 +489,11 @@ ensure_build_type() {  # ensure_build_type <id>
 ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
   rest GET "/app/rest/builds/id:$1?fields=testOccurrences(failed),revisions(revision(vcs-root-instance(properties(property(name,value)))))"
   expect "read build id $1" 200
+  expect_object "read build id $1"
   _why=''
-  case "$(printf '%s' "$REST_BODY" | jq -r '[.revisions.revision[]?."vcs-root-instance".properties.property[]? | select(.name=="url") | .value][0] // ""')" in
+  _url=$(printf '%s' "$REST_BODY" | jq -r '[.revisions.revision[]?."vcs-root-instance".properties.property[]? | select(.name=="url") | .value][0] // ""')
+  [ -n "$_url" ] || die "build id $1 names no VCS root URL, so nothing says an older seed ran it; deleting nothing: $(printf '%s' "$REST_BODY" | head -c 400)"
+  case "$_url" in
     "$GITEA_INTERNAL_URL"/*) ;;
     *) _why="it ran from another VCS root URL" ;;
   esac
@@ -493,8 +504,13 @@ ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
     # #856, #2480: the failed build publishes the folder and the binary files.
     # Only what is missing counts: the delete is one-way, and a build that also
     # holds a file a later seed added is no reason for this seed to run it again.
+    # No artifact at all is no older seed's build (each published the report since
+    # #665) but a failed read or the server's clean-up: a person decides that one.
     rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
     expect "list the artifacts of build id $1" 200
+    expect_object "list the artifacts of build id $1"
+    [ "$(printf '%s' "$REST_BODY" | jq '[.file[]?] | length')" -gt 0 ] \
+      || die "build id $1 lists no artifacts, which no seed's failed build does; deleting nothing. If they are really gone, delete the build by hand and seed again: $(printf '%s' "$REST_BODY" | head -c 400)"
     for _f in $(seeded_root_files); do
       if ! printf '%s' "$REST_BODY" | jq -e --arg f "$_f" '[.file[]?.name] | index($f)' >/dev/null; then
         _why="it publishes no $_f"
@@ -761,20 +777,38 @@ ensure_change_witness() {
   if [ -n "$_rec" ]; then
     _sha=$(printf '%s' "$_rec" | jq -r .sha)
     _b=$(printf '%s' "$_rec" | jq -r .before_id); _a=$(printf '%s' "$_rec" | jq -r .after_id)
+    # The pair goes only on an answer that says it is not good: a 404, another
+    # agent, another head. A read that failed says nothing, and stops the seed
+    # rather than delete both builds (#2480).
     gitea GET "/repos/$GITEA_ORG/$CHANGE_REPO/branches/$_branch"
+    case "$GITEA_STATUS" in
+      200|404) ;;
+      *) die "read $CHANGE_BRANCH of $CHANGE_REPO: HTTP $GITEA_STATUS: $GITEA_BODY" ;;
+    esac
     _head=$(printf '%s' "$GITEA_BODY" | jq -r '.commit.id // empty' 2>/dev/null || true)
+    [ "$GITEA_STATUS" = "404" ] || [ -n "$_head" ] \
+      || die "read $CHANGE_BRANCH of $CHANGE_REPO: HTTP 200 with no commit: $GITEA_BODY"
     rest GET "/app/rest/builds/id:$_b?fields=state"
+    expect "read build id $_b of the change witness" 200 404
     _bs=$REST_STATUS
     # Both builds ran on the fixture's one agent (#1560): a pair that ran on
     # an agent another worktree's compose registered is made again.
     _ag=1
     for _x in "$_b" "$_a"; do
       rest GET "/app/rest/builds/id:$_x?fields=agent(name)"
-      [ "$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty' 2>/dev/null)" = "knobas-agent" ] || _ag=0
+      expect "read the agent of build id $_x" 200 404
+      if [ "$REST_STATUS" = "404" ]; then _ag=0; continue; fi
+      expect_object "read the agent of build id $_x"
+      [ "$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty')" = "knobas-agent" ] || _ag=0
     done
-    rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
-    if [ "$_ag" = 1 ] && [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$REST_STATUS" = "200" ] \
-       && [ "$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')" = "$_sha" ]; then
+    _listed=''
+    if [ "$_ag" = 1 ]; then
+      rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
+      expect "read the changes of build id $_a" 200
+      expect_object "read the changes of build id $_a"
+      _listed=$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')
+    fi
+    if [ "$_ag" = 1 ] && [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$_listed" = "$_sha" ]; then
       say "the change witness is there: build id $_a on $CHANGE_BRANCH lists $_sha (after build id $_b)"
       CHANGES_JSON=$_rec
       return 0

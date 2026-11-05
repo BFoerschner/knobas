@@ -999,7 +999,14 @@ decodes them and publishes them beside the report and again in `reports/`, so
 finished 1187 that lacks a file is deleted and run again as above, so a server
 gains them on the next `./seed --teamcity` and its 1187 takes a new, higher id
 (once: a later seed finds the files and leaves it). The agent has no checkout of
-`testenv`, which is why the bytes travel in the step's script.
+`testenv`, which is why the bytes travel in the step's script. A read that failed
+or lists nothing stops the seed and deletes nothing
+(`testenv/seed-teamcity-builds-test.sh`, no server).
+
+A mirror that synced the old build keeps it (the shared server's id 1) as a live
+row beside the new one: a TeamCity build is a windowed kind, so no sync or backfill
+tombstones it (ADR-0003). *Refresh* on that run answers gone and tombstones the
+row; `just live-sources-remove` takes the whole source off.
 
 **A build that lists a change (#683).** TeamCity lists a change only for a
 commit it has never seen on any branch, and never for a configuration's first
