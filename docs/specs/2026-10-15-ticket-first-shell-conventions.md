@@ -179,7 +179,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   (#1451)
 - A run's live reads (`run_log`, `run_tests`, `test_history`, `run_artifacts`, `artifact_preview`, `artifact_bytes`)
   route by the run's namespace with no mirror check, as `entity_view` does, and answer frame shapes
-  (`knobas_source::run`). A download from a source is one command (`download_run_file`) into a new
+  (`knobas_source::run`; `artifact_bytes` answers `AttachmentBytes`). A download from a source is one command (`download_run_file`) into a new
   file in the downloads folder, named by the adapter's suggestion cut to its last segment, never
   the source's URL opened in a browser (D8). (#854, #855, #856)
 - A run's steps are `run_log`'s steps; the run page reads the log once and hands that read to the

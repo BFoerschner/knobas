@@ -2290,7 +2290,7 @@ pub trait Source: Send + Sync {
     /// One artifact file of run `entity`, read whole up to `cap` bytes with the
     /// stored credential (#2417): the file viewer's image or PDF. A file
     /// longer than `cap` is [`FileBytes::TooLarge`](view::FileBytes::TooLarge),
-    /// its size what the adapter read before it stopped, so at least `cap`;
+    /// its size what the adapter read before it stopped, so more than `cap`;
     /// never a cut file. `Ok(None)` as for [`run_log`](Source::run_log), and
     /// for an adapter that reads no artifact's bytes.
     async fn artifact_bytes(

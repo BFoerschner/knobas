@@ -358,8 +358,10 @@ pub const ATTACHMENT_CAP: u64 = 5 * 1024 * 1024;
 pub enum FileBytes {
     /// The whole file, at most the cap asked for.
     Read(Vec<u8>),
-    /// The file is longer than the cap asked for; this is its size in bytes,
-    /// and none of it was kept.
+    /// The file is longer than the cap asked for, and none of it was kept.
+    /// This is its size in bytes, or, from a read that stops past the cap
+    /// ([`Source::artifact_bytes`](crate::Source::artifact_bytes)), how much it
+    /// read: only a lower bound.
     TooLarge { size: u64 },
 }
 
