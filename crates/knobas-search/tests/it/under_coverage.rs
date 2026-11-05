@@ -350,9 +350,10 @@ async fn a_source_whose_child_rows_are_all_withdrawn_names_no_parent() {
 #[tokio::test]
 async fn a_live_child_row_answers_wherever_it_sits_among_withdrawn_ones() {
     use FilterAnswer::{Answered, NoValues};
-    // Past what a bounded look reads (`coverage::UNDER_COVERAGE_SQL`'s 256), at two
-    // child rows a commit.
-    const RUN: usize = 135;
+    // Well past what a bounded look reads (`coverage::UNDER_COVERAGE_SQL`'s 256), at
+    // two child rows a commit. A backward scan does not read in strict order, so a
+    // run only just past 256 can leave the live row within its reach.
+    const RUN: i64 = 500;
     // (case, withdrawn rows written before, a live one between?, withdrawn rows after)
     let cases = [
         ("live, then a run withdrawn", 0, true, RUN, Answered),
@@ -370,15 +371,11 @@ async fn a_live_child_row_answers_wherever_it_sits_among_withdrawn_ones() {
         let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
         item(&pool, &gitea, "repo", &full, repo.clone()).await;
         let commit = serde_json::json!({ "repository": repo });
-        for n in 0..before {
-            item(&pool, &gitea, "commit", &format!("gone-{n}"), commit.clone()).await;
-        }
+        commits(&pool, &gitea, "gone-a", before, &commit).await;
         if live {
-            item(&pool, &gitea, "commit", "live", commit.clone()).await;
+            commits(&pool, &gitea, "live", 1, &commit).await;
         }
-        for n in before..before + after {
-            item(&pool, &gitea, "commit", &format!("gone-{n}"), commit.clone()).await;
-        }
+        commits(&pool, &gitea, "gone-b", after, &commit).await;
         sqlx::query("update knobas.entity set deleted_at = now() where id like $1")
             .bind(format!("{gitea}:gone-%"))
             .execute(&pool)
@@ -388,6 +385,40 @@ async fn a_live_child_row_answers_wherever_it_sits_among_withdrawn_ones() {
         let answers = under_answers(&searcher, &format!("under:{full} source:{gitea}")).await;
         assert_eq!(answers, vec![(gitea, expected)], "{case}");
     }
+}
+
+/// `count` commits in one write, and so together in the child index.
+async fn commits(
+    pool: &sqlx::PgPool,
+    source: &str,
+    tag: &str,
+    count: i64,
+    payload: &serde_json::Value,
+) {
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select $1 || ':' || $2 || '-' || g, 'commit', 't'
+           from generate_series(1, $3::bigint) g",
+    )
+    .bind(source)
+    .bind(tag)
+    .bind(count)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                item_updated_at)
+         select $1 || ':' || $2 || '-' || g, $1, 'commit', 't', 't', $4, now()
+           from generate_series(1, $3::bigint) g",
+    )
+    .bind(source)
+    .bind(tag)
+    .bind(count)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 /// A child row counts only under the adapter the source is configured with, at
