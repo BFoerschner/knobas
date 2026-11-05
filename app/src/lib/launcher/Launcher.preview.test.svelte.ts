@@ -194,7 +194,9 @@ test("the pane waits for the selection to settle, then draws its excerpts with t
   // The first row is a hit by its title alone.
   await paused();
   expect(pane()?.textContent).toContain("Retry everything");
-  expect(pane()?.textContent).toContain("Only the title holds the words.");
+  // #2481: the same row may be a hit by a stem or a key, so no word about where.
+  expect(pane()?.textContent).toContain("No passage to quote.");
+  expect(pane()?.textContent).not.toContain("title holds");
 
   press("ArrowDown");
   // Still the row before, until the pause is over.

@@ -7,14 +7,17 @@
 //! number of its first line. This module cuts it into the places a reader
 //! finds again -- a page's sections and comments as the Docs search's marks
 //! spell them (`knobas_source::docs::indexed`), a log's lines -- and keeps
-//! each sentence or line that holds a typed word, the words flagged.
+//! each sentence or line that holds a typed word, the words flagged. A
+//! section's heading and a comment's author are indexed too and sit only in
+//! their marks, so a mark that holds a word is quoted as well (#2481).
 //!
 //! Words are matched as the Docs search marks them (`knobas_app::docs`'s
 //! `stem`, prototype-6): lowercased, a word over four letters without one
 //! `ing`, `es`, `ed` or `s` at its end, at the start of a word, the mark
 //! running to the word's end. It is a reader's marking, not the index's
 //! stemming: a row Postgres matched through a stem this rule misses has no
-//! excerpt, and the preview says only the title holds the words.
+//! excerpt. So has a row matched by its title, its key or a page link's line,
+//! and the preview says only that there is no passage to quote (#2481).
 
 use knobas_source::docs::indexed::{self, Part};
 
@@ -49,11 +52,14 @@ pub fn excerpts(
         return Vec::new();
     }
     let mut out = Vec::new();
-    let keep = |place: Option<String>, sentence: &str, out: &mut Vec<Excerpt>| {
+    // The marking is passed unmade, so a full list marks no more of the text.
+    let keep = |place: Option<String>,
+                segments: &dyn Fn() -> Option<Vec<Segment>>,
+                out: &mut Vec<Excerpt>| {
         if out.len() >= MAX {
             return;
         }
-        let Some(segments) = marked(sentence, &stems) else {
+        let Some(segments) = segments() else {
             return;
         };
         if out
@@ -67,11 +73,27 @@ pub fn excerpts(
     if let Some(first) = first_line {
         for (offset, line) in text.lines().enumerate() {
             let number = first.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
-            keep(Some(format!("line {number}")), line.trim(), &mut out);
+            keep(
+                Some(format!("line {number}")),
+                &|| marked(line.trim(), &stems),
+                &mut out,
+            );
         }
         return out;
     }
     for run in indexed::read(text).runs {
+        match &run.part {
+            Part::Lead => {}
+            Part::Section(heading) => {
+                keep(
+                    Some("Heading".to_owned()),
+                    &|| marked(heading, &stems),
+                    &mut out,
+                );
+            }
+            // The line reads as its own place, so it names none.
+            Part::Comment(by) => keep(None, &|| author_line(by, &stems), &mut out),
+        }
         let place = match &run.part {
             Part::Lead => None,
             Part::Section(heading) => Some(heading.clone()),
@@ -88,10 +110,25 @@ pub fn excerpts(
             _ => run.text,
         };
         for sentence in sentences(&body) {
-            keep(place.clone(), &sentence, &mut out);
+            keep(place.clone(), &|| marked(&sentence, &stems), &mut out);
         }
     }
     out
+}
+
+/// `Comment by <name>` with the words marked in the name alone; `None` when
+/// the name holds none. The rest is this module's wording, which no row is
+/// indexed by.
+fn author_line(name: &str, stems: &[Vec<char>]) -> Option<Vec<Segment>> {
+    let mut segments = marked(name, stems)?;
+    segments.insert(
+        0,
+        Segment {
+            text: "Comment by ".to_owned(),
+            hit: false,
+        },
+    );
+    Some(segments)
 }
 
 /// A needle as a reader matches it: lowercased, and a word longer than four
@@ -239,6 +276,74 @@ mod tests {
         assert_eq!(
             flat(&out),
             vec![(None, "The [payouts] [retried].".to_owned())]
+        );
+    }
+
+    /// #2481: `fts` indexes a comment's author line, so a row found by that
+    /// name alone has to quote it, or the preview has nothing to say.
+    #[test]
+    fn a_comment_whose_author_holds_the_word_is_quoted_with_the_name_marked() {
+        let out = excerpts(
+            "T",
+            "T\nThe payouts retried.\n\u{1f}Priya Nair\nLooks wrong.",
+            None,
+            &needles(&["priya"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![(None, "Comment by [Priya] Nair".to_owned())]
+        );
+    }
+
+    /// The name is what is marked: `Comment by` is this module's wording and
+    /// no row is indexed by it.
+    #[test]
+    fn the_words_comment_by_are_never_a_match() {
+        let text = "T\n\u{1f}Priya\nLooks wrong.";
+        assert!(excerpts("T", text, None, &needles(&["comment"])).is_empty());
+        assert!(excerpts("T", text, None, &needles(&["by"])).is_empty());
+    }
+
+    #[test]
+    fn one_author_of_many_comments_is_quoted_once_and_the_comment_text_keeps_its_place() {
+        let out = excerpts(
+            "T",
+            "T\n\u{1f}Priya\nCap the retry.\n\u{1f}Priya\nStill failing.",
+            None,
+            &needles(&["priya", "retry"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![
+                (None, "Comment by [Priya]".to_owned()),
+                (Some("Comment by Priya"), "Cap the [retry].".to_owned()),
+            ]
+        );
+    }
+
+    /// A comment no name was recorded for has no author line to quote.
+    #[test]
+    fn a_comment_by_nobody_quotes_only_its_text() {
+        let out = excerpts("T", "T\n\u{1f}\nCap the retry.", None, &needles(&["retry"]));
+        assert_eq!(
+            flat(&out),
+            vec![(Some("Comment"), "Cap the [retry].".to_owned())]
+        );
+    }
+
+    /// The same cause as the author line: a heading is indexed and sits only
+    /// in its mark.
+    #[test]
+    fn a_section_whose_heading_holds_the_word_is_quoted_with_the_word_marked() {
+        let out = excerpts(
+            "T",
+            "T\n\u{1e}Backoff policy\nWait, then go again.",
+            None,
+            &needles(&["backoff"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![(Some("Heading"), "[Backoff] policy".to_owned())]
         );
     }
 
