@@ -172,7 +172,6 @@ function ports(
       calls.unlinks.push(id);
       return Promise.resolve();
     },
-    roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
     search: () => Promise.reject(new Error("not in this test")),
     launcherHome: () => Promise.reject(new Error("not in this test")),
     jobReach: () => Promise.resolve([]),

@@ -12,13 +12,11 @@ import { createAlerts } from "../assets/alerts.svelte";
 import { createInbox } from "../inbox/inbox.svelte";
 import { createNotifications } from "../inbox/notify.svelte";
 import { createBadges } from "../tf/badges.svelte";
-import { createDepViewState } from "../tf/deps/views.svelte";
 import { breadcrumbJob, currentJob } from "../tf/job/current.svelte";
 import { createLayers } from "../tf/layers.svelte";
 import { createApps } from "../tf/openin/apps.svelte";
 import { createClones } from "../tf/openin/clones.svelte";
 import { askAgain, forgetEchoes, echoWrite, echoesOn, takeAgain } from "../tf/queued.svelte";
-import { createDecisions } from "../tf/review/decisions.svelte";
 import { createTheme } from "../tf/theme.svelte";
 import { createFollower, writeFollower } from "./follow-write";
 import { resetStores } from "./test-resets";
@@ -50,11 +48,9 @@ test("resetStores reaches the reset of every singleton", async () => {
     vi.spyOn((await import("../inbox/notify.svelte")).notifications, "reset"),
     vi.spyOn((await import("./timer.svelte")).timer, "reset"),
     vi.spyOn((await import("../tf/badges.svelte")).badges, "reset"),
-    vi.spyOn((await import("../tf/deps/views.svelte")).depViewState, "reset"),
     vi.spyOn((await import("../tf/layers.svelte")).layers, "reset"),
     vi.spyOn((await import("../tf/openin/apps.svelte")).apps, "reset"),
     vi.spyOn((await import("../tf/openin/clones.svelte")).clones, "reset"),
-    vi.spyOn((await import("../tf/review/decisions.svelte")).decisions, "reset"),
     vi.spyOn((await import("../tf/theme.svelte")).theme, "reset"),
   ];
   const follower = writeFollower();
@@ -224,43 +220,20 @@ test("timer.reset drops the running timer and what the reader has in front, and 
   expect(timerOff).toHaveBeenCalledTimes(1);
 });
 
-test("badges.reset forgets the three counts and unsubscribes", async () => {
+test("badges.reset forgets the counts and unsubscribes", async () => {
   const off = vi.fn();
   const badges = createBadges({
     failingBuilds: async () => 2,
     monitorsDown: async () => 3,
-    proposals: async () => 4,
     listen: async () => off,
   });
   badges.start();
   await badges.refresh();
   await flush();
-  expect([badges.builds, badges.monitors, badges.proposals]).toEqual([2, 3, 4]);
+  expect([badges.builds, badges.monitors]).toEqual([2, 3]);
   badges.reset();
-  expect([badges.builds, badges.monitors, badges.proposals]).toEqual([null, null, null]);
+  expect([badges.builds, badges.monitors]).toEqual([null, null]);
   expect(off).toHaveBeenCalledTimes(2);
-});
-
-test("depViewState.reset forgets the views, the draft and the opening last drawn", () => {
-  const settings = { layers: {}, environments: [] } as never;
-  const views = {
-    views: [
-      { id: "top", settings },
-      { id: "ticket", settings },
-    ],
-    opens_from_top: "top",
-    opens_from_ticket: "ticket",
-  } as never;
-  const state = createDepViewState();
-  state.take(views);
-  state.opening("T-1");
-  expect(state.current?.id).toBe("ticket");
-  state.reset();
-  expect([state.saved, state.current, state.draft]).toEqual([null, null, null]);
-  state.take(views);
-  expect(state.current?.id).toBe("top");
-  state.opening("T-1");
-  expect(state.current?.id, "the opening survived the reset").toBe("ticket");
 });
 
 test("the job id and the breadcrumb reset through their own doors", async () => {
@@ -323,20 +296,6 @@ test("forgetEchoes stops the write follow an echo started", async () => {
   await flush();
   forgetEchoes();
   expect(unlisten).toHaveBeenCalledTimes(1);
-});
-
-test("decisions.reset cancels a held write and forgets the verdicts", async () => {
-  vi.useFakeTimers();
-  const acceptSuggestion = vi.fn(async () => {});
-  const decisions = createDecisions({ acceptSuggestion, dismissSuggestion: vi.fn(), createLink: vi.fn() }, 100);
-  const entry = { link: { id: "l", relation: "r", from_id: "a", to_id: "b" } } as never;
-  decisions.decide(entry, "yes", "r", () => {});
-  expect(decisions.verdicts).toEqual({ l: "yes" });
-  decisions.reset();
-  expect(decisions.verdicts).toEqual({});
-  expect(decisions.entries).toEqual([]);
-  await vi.advanceTimersByTimeAsync(500);
-  expect(acceptSuggestion, "a write held before the reset still went out").not.toHaveBeenCalled();
 });
 
 test("theme.reset goes back to following the system", () => {

@@ -193,11 +193,11 @@ test("pressing Monitors on a ticket only read opens Monitors on This job for tha
   expect(squash(thisJob()!)).toContain("PAY-231");
 });
 
-test("Assets opens the ticket's own Dependencies opening", async () => {
+test("Assets opens the asset tree at the first asset the ticket reaches", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
   const card = await pageOf("PAY-231");
   await allSections(card, ["Sub-tasks", "Code", "Builds", "Docs", "Monitors", "Assets"]);
-  expect(sectionRow(card, "Assets").getAttribute("href")).toBe("#/deps/job/PAY-231");
+  expect(sectionRow(card, "Assets").getAttribute("href")).toMatch(/^#\/asset\/asset/);
 });
 
 test("pressing Sub-tasks lands on Tickets with under:PAY-231 in the search line, and the board holds its sub-tasks", async () => {

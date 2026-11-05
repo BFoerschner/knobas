@@ -167,7 +167,7 @@ A knobas-owned, typed, bidirectional connection between two entities, one record
 _Avoid_: relation (a link's type), reference
 
 **Suggestion**:
-A machine-proposed link with a stated reason. Accepting makes a link; dismissing persists.
+A machine-proposed link with a stated reason. Accepting makes a link; dismissing persists. The backend still makes them; the app has drawn none since 2026-11-05 (`docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md`).
 _Avoid_: recommendation
 
 **Backlink**:
@@ -394,7 +394,7 @@ Per query, which sources could answer a filter and which have nothing it can mat
 _Avoid_: capability (a static claim on the descriptor; this is a measured one about a corpus), support
 
 **Room**:
-Retired; the app no longer draws one. The hub view a switcher entry opened. The [job](#job) is the working view of one ticket, a [ticket view](#ticket-view) lists tickets, a [link set](#link-set) gathers what belongs together, and Dependencies draws the links. Do not use the word for any of these.
+Retired; the app no longer draws one. The hub view a switcher entry opened. The [job](#job) is the working view of one ticket, a [ticket view](#ticket-view) lists tickets, and a [link set](#link-set) gathers what belongs together. Do not use the word for any of these.
 _Avoid_: dashboard
 
 **Tile**:
@@ -413,7 +413,7 @@ _Avoid_: kanban, board (unqualified)
 Retired; the app no longer draws one. A gesture that made one [tile](#tile) fill a [room](#room)'s grid.
 
 **Tree**:
-The Assets view, at `#/assets` and `#/asset/<id>`, reached from Dependencies' *Asset tree* button: the [estate](#estate) as Miller columns, one column per level. Its fixed pane offers *Create monitor for this asset* where a configured [source](#source) offers the op, and shows no control at all where none does. It has no sibling tab.
+The Assets view, at `#/assets` and `#/asset/<id>`, with no top bar entry: a row, an alert or a search opens it at an asset, and that page's breadcrumb leads to `#/assets`. It draws the [estate](#estate) as Miller columns, one column per level. Its fixed pane offers *Create monitor for this asset* where a configured [source](#source) offers the op, and shows no control at all where none does. It has no sibling tab.
 _Avoid_: board, assets board, columns view
 
 **Spine**:

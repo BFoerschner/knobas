@@ -31,7 +31,6 @@ function ports(over: Partial<BadgePorts> = {}): BadgePorts & { fire: (event: str
   return {
     failingBuilds: () => Promise.resolve(2),
     monitorsDown: () => Promise.resolve(1),
-    proposals: () => Promise.resolve(4),
     listen: (event, handler) => {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
       return Promise.resolve(() => {});
@@ -43,11 +42,11 @@ function ports(over: Partial<BadgePorts> = {}): BadgePorts & { fire: (event: str
   };
 }
 
-test("nothing is counted until the shell asks, then all three are", async () => {
+test("nothing is counted until the shell asks, then both are", async () => {
   const badges = createBadges(ports());
-  expect([badges.builds, badges.monitors, badges.proposals]).toEqual([null, null, null]);
+  expect([badges.builds, badges.monitors]).toEqual([null, null]);
   await badges.refresh();
-  expect([badges.builds, badges.monitors, badges.proposals]).toEqual([2, 1, 4]);
+  expect([badges.builds, badges.monitors]).toEqual([2, 1]);
 });
 
 test("a failed read keeps the last answer instead of clearing the badge", async () => {

@@ -26,6 +26,7 @@
  * cleared property, which is a different edit from the one the reader made.
  */
 import type {
+  AssetDetail,
   AssetProperty,
   AssetType,
   PropertyEdit,
@@ -178,4 +179,11 @@ export function parseProperty(kind: PropertyKind, raw: string): Parsed {
  */
 export function propertyEdit(key: string, value: PropertyValue | null): PropertyEdit {
   return { field: "property", key, value };
+}
+
+/** The delete confirm's words, in prototype-6's (#1463). */
+export function deleteConfirm(detail: AssetDetail): string {
+  const lands = detail.reachable_via.filter((route) => route.target_id === detail.asset.id).length;
+  const routes = lands > 0 ? ` ${lands} route${lands > 1 ? "s" : ""} landing on it will land on nothing.` : "";
+  return `Delete ${detail.asset.name}?${routes} Links to it stay, marked deleted.`;
 }

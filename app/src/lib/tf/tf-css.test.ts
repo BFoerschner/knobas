@@ -308,10 +308,7 @@ test("every rule that takes the mono font variable turns ligatures off after its
   expect(bare).toEqual([]);
 });
 
-test("a Find match in a broken Dependencies tile is --ink on --mark; elsewhere it inherits (#1462)", () => {
-  const rule = block(code, ".tf-dp-t.tf-dp-err mark");
-  expect(rule).toMatch(/color:\s*var\(--ink\)/);
-  expect(rule).not.toMatch(/background/);
+test("a Find match is on --mark and inherits its colour (#1462)", () => {
   const base = block(code, ".tf mark");
   expect(base).toMatch(/background:\s*var\(--mark\)/);
   expect(base).toMatch(/color:\s*inherit/);
@@ -389,7 +386,7 @@ test("every sticky side column is bounded by the window and scrolls on its own, 
   const columns = sticky.filter(([selector]) => !STICKY_BARS.includes(selector));
   // The columns this test was written against: it keeps finding them.
   expect(columns.map(([selector]) => selector)).toEqual(
-    expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline", ".tf-dp-rail", ".tf-dp-panel"]),
+    expect.arrayContaining([".tf-ftreebox", ".tf-flist", ".tf-rd-outline"]),
   );
   // A column whose head stays put scrolls in an inner box instead (#2257: the file tree's rows under its head).
   const INNER: Record<string, string> = { ".tf-ftreebox": ".tf-ftree" };

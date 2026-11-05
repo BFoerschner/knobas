@@ -16,7 +16,7 @@ test("no summary on the ? card names a milestone", () => {
 test("env: stays on the card, greyed out, and says where to go instead", () => {
   const env = SYNTAX.find((entry) => entry.token === "env:");
   expect(env?.expect).toBe("reported");
-  expect(env?.summary).toBe("not a filter yet; use asset: or Dependencies (also health:)");
+  expect(env?.summary).toBe("not a filter yet; use asset: (also health:)");
 });
 
 /** The table's row for `token`. */

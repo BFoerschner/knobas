@@ -20,11 +20,9 @@ import type {
   EntityRow,
   JobLinkSets,
   Reached,
-  SuggestionEntry,
   Thread,
 } from "../../ipc/entity";
 import { ipcErrorMessage } from "../../ipc";
-import { PROPOSAL_LIMIT, proposalsFor } from "./connections";
 import {
   assetTone,
   isMine,
@@ -50,7 +48,6 @@ export type JobReaderPorts = Pick<
   | "listEntities"
   | "visitEntity"
   | "entityThread"
-  | "roomSuggestions"
   | "jobReach"
   | "jobLinkSets"
   | "getAsset"
@@ -112,7 +109,6 @@ export interface JobReader {
   readonly threadFailure: string | null;
   /** When the person last opened this job before now: `null` for never. */
   readonly lastVisit: string | null;
-  readonly proposals: SuggestionEntry[] | null;
   /** Opens the job `segment` names: every slot starts fresh, and an answer for the last job is dropped. */
   open(segment: string): void;
   /**
@@ -151,7 +147,6 @@ function fresh() {
     thread: null as Thread | null,
     threadFailure: null as string | null,
     lastVisit: null as string | null,
-    proposals: null as SuggestionEntry[] | null,
     reached: new Map<string, Reached>(),
     inherited: null as JobLinkSets | null,
     builds: null as EntityRow[] | null,
@@ -191,9 +186,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       void readSubtasks(id, mine);
       void readInherited(id, mine);
       // The reach starts from the ticket's context, so the context first.
-      const context = await ports.promoteContext(id);
+      await ports.promoteContext(id);
       if (mine !== token) return;
-      void readProposals(context.id, id, mine);
       void readReach(id, mine);
       void readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
@@ -300,16 +294,6 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     state.lastVisit = visit.status === "fulfilled" ? visit.value : null;
     if (read.status === "fulfilled") state.thread = read.value;
     else state.threadFailure = ipcErrorMessage(read.reason);
-  }
-
-  async function readProposals(context: string, id: string, mine: number) {
-    try {
-      const page = await ports.roomSuggestions([], context, PROPOSAL_LIMIT);
-      if (mine === token) state.proposals = proposalsFor(page.rows, id);
-    } catch {
-      // A tray that cannot be read proposes nothing; the button says connected only.
-      if (mine === token) state.proposals = [];
-    }
   }
 
   /** The ticket again, over what was drawn; a failed read keeps it. */
@@ -448,9 +432,6 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     },
     get lastVisit() {
       return state.lastVisit;
-    },
-    get proposals() {
-      return state.proposals;
     },
     open(segment) {
       const mine = ++token;

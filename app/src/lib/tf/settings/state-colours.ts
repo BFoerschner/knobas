@@ -58,7 +58,7 @@ export function recolours(line: unknown): boolean {
  * The line under a kind's section: what its tone drives besides the colour.
  * Each names the readers that branch on a tone (`crates/knobas-core/src/inbox.rs`
  * and `signals.rs` for `err` builds, `entity_list.rs`'s attention order for the
- * Code tile, `assets/dependencies.rs` for `info` pull requests, `job.ts`'s
+ * Code tile, `job.ts`'s
  * rollups for a job's builds and monitors). Backticks mark a tone's name.
  */
 export function drives(kind: string): string | null {
@@ -66,7 +66,7 @@ export function drives(kind: string): string | null {
     case "build":
       return "`err` is what the inbox and signals count as a failed build. A job counts `err` builds as failing, `info` as running and `ok` as passing.";
     case "pr":
-      return "`ok` and `muted` pull requests are hidden from open-work lists (a room's Code tile), and Dependencies draws only `info` ones as open.";
+      return "`ok` and `muted` pull requests are hidden from open-work lists (a room's Code tile).";
     case "monitor":
       return "A job counts `err` monitors as down, `warn` as warning and `ok` as fine.";
     case "ticket":

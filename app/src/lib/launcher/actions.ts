@@ -22,16 +22,14 @@ export interface LauncherAction {
 }
 
 /** What each section holds, in one line: the row's second line. */
-const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
+const SECTION_DETAIL: Record<Exclude<Section, "job" | "assets">, string> = {
   tickets: "Every ticket from every configured source",
   inbox: "What asks for you: mentions, reviews, failed builds",
   code: "Repositories, branches and pull requests",
   builds: "Pipelines and their runs",
   docs: "The wiki's spaces and pages",
-  deps: "Hosts, services and what each one exposes",
   monitors: "Uptime checks and their current state",
   sets: "Groups of repos, pipelines and pages shown on tickets by rule",
-  review: "Links knobas found between items, for you to accept or reject",
   time: "Your day, your worklogs and your standup",
   settings: "Sources, checkouts, time, notifications and the rest",
 };

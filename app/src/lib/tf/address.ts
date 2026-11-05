@@ -5,7 +5,7 @@
  * Pure. {@link entityAddress} is the one rule every producer outside a page
  * uses: the launcher's rows, a desktop notification's click and the capture
  * window's *Open in knobas*. It is `job.ts`' `itemHash` plus the two kinds
- * that function has no page for: a route opens Dependencies' asset tree at
+ * that function has no page for: a route opens the asset tree at
  * the asset exposing it (`#/route/<id>`, as before #881), and a note opens
  * its own page (`#/note/<id>`, #1504), which sends the reader to Settings ›
  * Notes and capture while notes hide (D10).

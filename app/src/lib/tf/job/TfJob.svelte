@@ -17,8 +17,7 @@
   *Start work* stepper while it runs and a blocked ticket's red banner
   (#818, R-4.8); the description through the Markdown component in a resting
   panel; and the whole conversation with its compose box. No tabs: an old
-  `/map` or `/conversation` address draws the same page. Dependencies keeps
-  its *This job* opening.
+  `/map` or `/conversation` address draws the same page.
 
   Opening it reads the ticket, then **promotes its context** (`promote_context`,
   idempotent, so a ticket with a context keeps it and one without gets one)
@@ -173,7 +172,6 @@
   const thread = $derived(reader.thread);
   const threadFailure = $derived(reader.threadFailure);
   const lastVisit = $derived(reader.lastVisit);
-  const proposals = $derived(reader.proposals);
   const reached = $derived(reader.reached);
   const inherited = $derived(reader.inherited);
   const sources = $derived(reader.sources);
@@ -614,7 +612,6 @@
       {groups}
       hidden={hiddenOf(inherited)}
       alsoIn={(entityId) => alsoIn(inherited, entityId)}
-      {proposals}
       {layers}
       onclose={() => (drawer = false)}
       onunlink={(entry) => void unlinkEntry(entry)}

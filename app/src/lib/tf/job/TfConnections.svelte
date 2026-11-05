@@ -7,8 +7,7 @@
   the ticket, each with *Unlink* on hover or focus and "also in" the sets that
   hold it too; **From Payout stack, via epic PAY-200**, one per link set that
   applies and one for the parent (#867), a set's rows with *Hide here* and the
-  group with *Edit set*; **Hidden on KEY** with *Show again*; and the
-  proposals box with *Judge them one by one*.
+  group with *Edit set*; and **Hidden on KEY** with *Show again*.
 
   It registers with the shell's layer stack while open, so `Esc` closes it
   (rung 2), as does a click on the scrim; focus goes to its filter and returns
@@ -17,7 +16,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
 
-  import type { LinkEntry, SuggestionEntry } from "../../ipc/entity";
+  import type { LinkEntry } from "../../ipc/entity";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
   import { filterLinks, filterRows, sectionOf, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
@@ -26,7 +25,6 @@
   let {
     jobKey,
     links,
-    proposals,
     groups = [],
     hidden = [],
     alsoIn = () => [],
@@ -42,8 +40,6 @@
     jobKey: string;
     /** The links drawn on the ticket. */
     links: LinkEntry[];
-    /** This ticket's proposals, `null` while the read is out. */
-    proposals: SuggestionEntry[] | null;
     /** The link sets that apply, then the parent (#867): a group each. */
     groups?: JobGroup[];
     /** A set's rows hidden on this ticket (R-7.5). */
@@ -143,12 +139,6 @@
           <button type="button" class="tf-x tf-shown" onclick={() => onshow(row.id)} aria-label="Show again: {row.title}">Show again</button>
         </div>
       {/each}
-    {/if}
-    {#if proposals !== null && proposals.length > 0}
-      <div class="tf-proposed">
-        <strong>{proposals.length} proposed for {jobKey}</strong>
-        <a class="tf-btn tf-sm" href="#/review/{encodeURIComponent(proposals[0]!.link.id)}" onclick={onclose}>Judge them one by one</a>
-      </div>
     {/if}
     <p class="tf-dnote">Links and link sets stay in knobas and are never written to a source.</p>
   </div>

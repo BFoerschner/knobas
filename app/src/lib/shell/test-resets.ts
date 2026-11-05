@@ -59,7 +59,6 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/kept-pages.svelte.ts#keptPages": async () => (await import("../tf/kept-pages.svelte")).keptPages.reset(),
   "tf/role-sync.svelte.ts#roleSyncs": async () => (await import("../tf/role-sync.svelte")).roleSyncs.forget(),
   "tf/role-sync.svelte.ts#sourceSyncs": async () => (await import("../tf/role-sync.svelte")).sourceSyncs.forget(),
-  "tf/deps/views.svelte.ts#depViewState": async () => (await import("../tf/deps/views.svelte")).depViewState.reset(),
   // Two stores in one file, each cleared through its own public door.
   "tf/job/current.svelte.ts#entityId": async () => void (await import("../tf/job/current.svelte")).currentJob.set(null),
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
@@ -77,7 +76,6 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/queued.svelte.ts#echoes": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#asked": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
   "tf/queued.svelte.ts#follows": async () => (await import("../tf/queued.svelte")).forgetEchoes(),
-  "tf/review/decisions.svelte.ts#decisions": async () => (await import("../tf/review/decisions.svelte")).decisions.reset(),
   // The default renderer per file pattern (#2263), as the backend answered it.
   "render/defaults.svelte.ts#rendererDefaults": async () => (await import("../render/defaults.svelte")).rendererDefaults.reset(),
   "render/pipelines.svelte.ts#namedPipelines": async () => (await import("../render/pipelines.svelte")).namedPipelines.reset(),

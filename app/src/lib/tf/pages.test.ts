@@ -9,7 +9,6 @@ import { page as assetTreePage } from "./asset-tree/page";
 import { page as codePage } from "./code/page";
 import { page as codeRowPage } from "./code-row/page";
 import { page as controlsPage } from "./controls/page";
-import { page as depsPage } from "./deps/page";
 import { page as diffPage } from "./diff/page";
 import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
@@ -17,7 +16,6 @@ import { PAGES, pageFor } from "./pages";
 import { parseTfHash } from "./route";
 import { page as prPage } from "./pr/page";
 import { page as repoPage } from "./repo/page";
-import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
 import { page as setsPage } from "./sets/page";
 import { page as ticketsPage } from "./tickets/page";
@@ -28,9 +26,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(jobPage);
   expect(PAGES).toContain(timePage);
   expect(PAGES).toContain(settingsPage);
-  expect(PAGES).toContain(reviewPage);
   expect(PAGES).toContain(buildsPage);
-  expect(PAGES).toContain(depsPage);
   expect(PAGES).toContain(assetTreePage);
   expect(PAGES).toContain(inboxPage);
   expect(PAGES).toContain(codePage);
@@ -56,8 +52,8 @@ const ADDRESSES = [
   ["#/time/2026-10-15", "time"],
   ["#/settings", "settings"],
   ["#/settings/source/teamcity", "settings"],
-  ["#/review", "review"],
-  ["#/review/link-1", "review"],
+  ["#/review", "shell"],
+  ["#/review/link-1", "shell"],
   ["#/builds", "builds"],
   ["#/builds/teamcity%3AbuildType%3APayout_Build", "builds"],
   ["#/build/x/y", "builds"],
@@ -72,9 +68,9 @@ const ADDRESSES = [
   ["#/commit/mock%3A9f2c1ab", "code row"],
   ["#/diff/gitea%3Atidewater%2Fpayout-service/main/feature%2Fsepa", "diff"],
   ["#/diff/gitea%3Atidewater%2Fpayout-service/main", "shell"],
-  ["#/deps", "deps"],
-  ["#/deps/job/PAY-231", "deps"],
-  ["#/map", "deps"],
+  ["#/deps", "shell"],
+  ["#/deps/job/PAY-231", "shell"],
+  ["#/map", "shell"],
   ["#/assets", "asset tree"],
   ["#/asset/asset:vm-pay-01", "asset tree"],
   ["#/route/route:payouts", "asset tree"],
@@ -94,9 +90,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [jobPage, "job"],
     [timePage, "time"],
     [settingsPage, "settings"],
-    [reviewPage, "review"],
     [buildsPage, "builds"],
-    [depsPage, "deps"],
     [assetTreePage, "asset tree"],
     [inboxPage, "inbox"],
     [codePage, "code"],
@@ -131,23 +125,6 @@ test("a ticket's `/mention` address asks the page for the mention, and no other 
   expect(props("#/ticket/jira%3APAY-231")).toMatchObject({ toMention: false });
   expect(props("#/ticket/jira%3APAY-231/conversation")).toMatchObject({ toMention: false });
   expect(props("#/job/PAY-231/mention")).toMatchObject({ toMention: false });
-});
-
-test("the deps page opens from the ticket its address names, with the open job's id when it is that ticket", () => {
-  type Ctx = Parameters<typeof depsPage.props>[0];
-  const props = (hash: string, defaultJob: Ctx["defaultJob"]) =>
-    depsPage.props({ route: parseTfHash(hash), ready: true, job: "PAY-231", defaultJob } as Ctx);
-  const nav = { key: "PAY-231", entityId: "jira:PAY-231" };
-  expect(props("#/deps/job/PAY-231", nav)).toMatchObject({ ticket: "PAY-231", ticketId: "jira:PAY-231", job: "PAY-231" });
-  expect(props("#/deps/job/PAY-228", nav)).toMatchObject({ ticket: "PAY-228", ticketId: null });
-  expect(props("#/deps", nav)).toMatchObject({ ticket: null, ticketId: null, job: "PAY-231" });
-  expect(props("#/map", null)).toMatchObject({ ticket: null });
-});
-
-test("the review page hands TfReview the addressed proposal, or none", () => {
-  const props = (hash: string) => reviewPage.props({ route: parseTfHash(hash) } as Parameters<typeof reviewPage.props>[0]);
-  expect(props("#/review/link%3Afake-2")).toMatchObject({ sid: "link:fake-2" });
-  expect(props("#/review")).toMatchObject({ sid: null });
 });
 
 test("the builds page hands TfBuilds the address's head and the pipeline's entity id", () => {

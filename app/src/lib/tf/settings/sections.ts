@@ -114,6 +114,5 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["J K ↑ ↓", "Tickets", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],
   ["L", "Job", "Connections"],
-  ["Y N S", "Proposed links", "Link, not related, decide later"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];

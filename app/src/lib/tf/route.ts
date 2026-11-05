@@ -7,11 +7,10 @@
  * highlight can be tested as a string.
  *
  * Prototype-6 has more first segments than nav entries: a pull request lives
- * under Code, a run under Builds, a page under Docs, an asset under
- * Dependencies. {@link SECTION_OF} is that mapping, copied from the
- * prototype's `renderNav`, so the nav lights the place a deep address belongs
- * to. `#/map` and `#/assets` are the retired global map and asset page (D13);
- * they still belong to Dependencies, which took their places.
+ * under Code, a run under Builds, a page under Docs. {@link SECTION_OF} is that
+ * mapping, copied from the prototype's `renderNav`, so the nav lights the place
+ * a deep address belongs to. The asset tree is a section with no nav entry since
+ * Dependencies went (`docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md`).
  */
 import { repoHash } from "./repo/repo";
 
@@ -23,10 +22,9 @@ export type Section =
   | "code"
   | "builds"
   | "docs"
-  | "deps"
   | "monitors"
+  | "assets"
   | "sets"
-  | "review"
   | "time"
   | "settings";
 
@@ -38,10 +36,9 @@ export const SECTION_NAME: Record<Section, string> = {
   code: "Code",
   builds: "Builds",
   docs: "Docs",
-  deps: "Dependencies",
   monitors: "Monitors",
+  assets: "Asset tree",
   sets: "Link sets",
-  review: "Proposed links",
   time: "Time",
   settings: "Settings",
 };
@@ -60,7 +57,6 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
   assets: "Asset tree",
   asset: "Asset",
   route: "Route",
-  map: "Map",
   branch: "Branch",
   commit: "Commit",
   diff: "Diff",
@@ -69,17 +65,16 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
 /**
  * The main navigation, left to right (R-1.1). Settings is the cog, not a tab.
  * Job has no entry (spec #2396): the job is a ticket's page, under Tickets.
+ * The asset tree has none either: a row, an alert or a search opens it at an asset.
  */
-export const NAV: readonly Exclude<Section, "job">[] = [
+export const NAV: readonly Exclude<Section, "job" | "assets">[] = [
   "tickets",
   "inbox",
   "code",
   "builds",
   "docs",
-  "deps",
   "monitors",
   "sets",
-  "review",
   "time",
 ];
 
@@ -101,16 +96,13 @@ const SECTION_OF: Record<string, Section> = {
   build: "builds",
   docs: "docs",
   page: "docs",
-  deps: "deps",
-  assets: "deps",
-  asset: "deps",
-  map: "deps",
-  // A route's address (#432) opens the asset tree at the asset exposing it,
-  // which is Dependencies' *Asset tree* (#871).
-  route: "deps",
   monitors: "monitors",
+  // The asset tree (#871). A route's address (#432) opens it at the asset
+  // exposing the route.
+  assets: "assets",
+  asset: "assets",
+  route: "assets",
   sets: "sets",
-  review: "review",
   time: "time",
   settings: "settings",
 };
@@ -175,6 +167,8 @@ export function parseTfHash(hash: string): TfRoute {
   // #1087: Monitors lives at `#/monitors` now (R-11.3), so this is an old
   // address, which `address.ts`' `legacyAddress` sends there (#1459).
   if (head === "assets" && segments[1] === "monitors") return { view: "unknown", hash };
+  // The tree with nothing selected, under any old tab name (`#/assets/tree`): `shell/router.ts` reads them as one.
+  if (head === "assets") return { view: "full", section: "assets", head, rest: [] };
   const section = SECTION_OF[head];
   if (section === undefined) return { view: "unknown", hash };
   if (section === "tickets") return { view: "tickets", rest: segments.slice(1) };
@@ -247,7 +241,7 @@ export function isTopPage(route: TfRoute): boolean {
  * - a pull request or a repository, any tab of it → Code;
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → Dependencies;
+ * - a doc page → Docs; an asset or a route → the asset tree's top page;
  * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the

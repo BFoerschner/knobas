@@ -165,7 +165,7 @@ vi.mock("../ipc/entity", () => ({
   listEntities: () => deferred(PAGE),
   // What a ticket reaches (#817): the Tickets preview's default ports name it (#1030).
   jobReach: () => deferred([]),
-  // A job's pipelines (#850): Dependencies' default ports name it (#874).
+  // A job's pipelines (#850).
   jobPipelines: () => deferred([]),
   // The standup digest (#288). The `ports` prop is what the case below drives
   // the view through; this is here because the module-level import resolves
@@ -197,9 +197,6 @@ vi.mock("../ipc/entity", () => ({
   saveNote: () => deferred(NOTE),
   deleteNote: () => deferred(true),
   unlink: () => deferred(undefined),
-  // The proposals read, deferred like everything else, so a view can be
-  // unmounted with it still in flight.
-  roomSuggestions: () => deferred({ rows: [], total: 0 }),
   // The start-work stepper's reads, deferred like everything else, so it can be
   // unmounted with both still in flight.
   startWorkFlow: () => deferred([]),
@@ -407,7 +404,6 @@ const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfJobCard = (await import("../tf/job/TfJobCard.svelte")).default;
 const TfConversation = (await import("../tf/job/TfConversation.svelte")).default;
-const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
@@ -427,9 +423,6 @@ const TfDiffPage = (await import("../tf/diff/TfDiffPage.svelte")).default;
 const TfNote = (await import("../tf/note/TfNote.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
-const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
-const { createDepViewState } = await import("../tf/deps/views.svelte");
-const TfDepsViewMenu = (await import("../tf/deps/TfDepsViewMenu.svelte")).default;
 const TfSets = (await import("../tf/sets/TfSets.svelte")).default;
 const TfSetEditor = (await import("../tf/sets/TfSetEditor.svelte")).default;
 const TfSetPicker = (await import("../tf/sets/TfSetPicker.svelte")).default;
@@ -464,7 +457,6 @@ const AssetsView = (await import("../assets/AssetsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
-const TfImport = (await import("../tf/deps/TfImport.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
 const { createInbox } = await import("../inbox/inbox.svelte");
 
@@ -761,30 +753,6 @@ const CASES: Case[] = [
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
   {
-    /** Dependencies' view menu (#873): its outside-click listener lives while it is open. */
-    name: "TfDepsViewMenu",
-    source: "lib/tf/deps/TfDepsViewMenu.svelte",
-    open: (target) => {
-      const views = createDepViewState();
-      views.take({ views: [{ id: "v", name: "Everything", settings: { layers: {}, environments: [], problems: false, tiles: "auto", fold_at: 24 } }], opens_from_ticket: "v", opens_from_top: "v" });
-      return {
-        app: mount(TfDepsViewMenu, {
-          target,
-          props: {
-            views,
-            layerIds: ["work", "code"],
-            ports: {
-              saveDepView: () => deferred(null as never),
-              deleteDepView: () => deferred(null as never),
-              setDepViewDefaults: () => deferred(null as never),
-            },
-          },
-        }),
-      };
-    },
-    exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
-  },
-  {
     /** The view editor (#814): its preview read waits a moment after each change, on a timer. */
     name: "ViewEditor",
     source: "lib/tf/tickets/ViewEditor.svelte",
@@ -827,7 +795,6 @@ const CASES: Case[] = [
           badges: createBadges({
             failingBuilds: () => deferred(0),
             monitorsDown: () => deferred(0),
-            proposals: () => deferred(0),
             listen: (event, handler) => mockedListen(event, handler),
           }),
         },
@@ -1140,7 +1107,6 @@ const CASES: Case[] = [
             entityThread: () => deferred({ comments: [], me: [] }),
             createLink: () => new Promise(() => {}),
             unlink: () => new Promise(() => {}),
-            roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
             search: () => new Promise(() => {}),
             launcherHome: () => new Promise(() => {}),
             jobReach: () => deferred([]),
@@ -1542,35 +1508,10 @@ const CASES: Case[] = [
         props: {
           jobKey: "PAY-231",
           links: [],
-          proposals: [],
           layers: createLayers(),
           onclose: () => {},
           onunlink: () => {},
           onlinkto: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * Proposed links (#835): `Y`, `N`, `S` and the filter bar's `/` on the
-     * window, and the tray read behind a ready database, answering late.
-     */
-    name: "TfReview",
-    source: "lib/tf/review/TfReview.svelte",
-    open: (target) => ({
-      app: mount(TfReview, {
-        target,
-        props: {
-          ready: true,
-          job: "PAY-231",
-          sid: null,
-          layers: createLayers(),
-          ports: {
-            roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
-            proposalEvidence: () => deferred({ link_id: "", reason: null, excerpts: [], support: [], against: [] }),
-          },
-          ongo: () => {},
         },
       }),
     }),
@@ -1727,8 +1668,7 @@ const CASES: Case[] = [
     }),
   ),
   // The pull request page (#841): its one view, the repository and its
-  // checkout, the proposals and each check's run, behind a ready database,
-  // answering late.
+  // checkout and each check's run, behind a ready database, answering late.
   {
     name: "TfPr",
     source: "lib/tf/pr/TfPr.svelte",
@@ -1769,7 +1709,6 @@ const CASES: Case[] = [
                 groups: null,
               } as never),
             entityCheckout: () => deferred({ path: null, tree: null } as never),
-            roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
             resolveUrl: () => deferred(null),
             listSources: () => deferred([]),
             submitWrite: () => deferred({} as never),
@@ -2118,24 +2057,6 @@ const CASES: Case[] = [
           preview: () => deferred({ count: 0, matches: [], projects: [{ source_id: "wiki", key: "OPS", name: "OPS", path: [] }], refusal: null }),
           onadd: () => {},
           onclose: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /** Dependencies (#871, #873): its read and its views behind a ready database, answering late. */
-    name: "TfDeps",
-    source: "lib/tf/deps/TfDeps.svelte",
-    open: (target) => ({
-      app: mount(TfDeps, {
-        target,
-        props: {
-          ready: true,
-          views: createDepViewState(),
-          ports: {
-            dependencies: () => deferred({ layers: [], kinds: [], items: [], relations: [] }),
-            depViews: () => deferred({ views: [], opens_from_ticket: "", opens_from_top: "" }),
-          },
         },
       }),
     }),
@@ -2556,30 +2477,6 @@ const CASES: Case[] = [
           apply: () => Promise.reject(new Error("no write in this test")),
           produce: () => Promise.reject(new Error("no importer in this test")),
           tree: () => deferred([]),
-          onclose: () => {},
-          onimported: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * Dependencies' *Import…* (#1066): `ImportDialog`'s port, with the same one
-     * effect on the same `latestRead`, idle until `landing_needed`. The case
-     * above says why the idle dialog is the one this harness can hold.
-     */
-    name: "TfImport",
-    source: "lib/tf/deps/TfImport.svelte",
-    open: (target) => ({
-      app: mount(TfImport, {
-        target,
-        props: {
-          ports: {
-            previewEstateImport: () => Promise.reject(new Error("no preview in this test")),
-            applyEstateImport: () => Promise.reject(new Error("no write in this test")),
-            produceEstateFile: () => Promise.reject(new Error("no importer in this test")),
-            assetTree: () => deferred([]),
-          },
           onclose: () => {},
           onimported: () => {},
         },

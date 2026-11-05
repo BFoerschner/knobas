@@ -134,7 +134,6 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
     entityThread: () => Promise.resolve({ comments: [], me: [] }),
     createLink: reject,
     unlink: reject,
-    roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
     search: reject,
     launcherHome: reject,
     jobReach: () => Promise.resolve([]),

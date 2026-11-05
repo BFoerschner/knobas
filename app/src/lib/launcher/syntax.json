@@ -181,7 +181,7 @@
   {
     "token": "env:",
     "insert": "env:",
-    "summary": "not a filter yet; use asset: or Dependencies (also health:)",
+    "summary": "not a filter yet; use asset: (also health:)",
     "probe": "env:prod",
     "prefix": null,
     "expect": "reported"

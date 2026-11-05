@@ -912,9 +912,8 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
 
 /**
  * **The delete confirm says what the backend does** (#1463, R-11.19a): links
- * stay, marked deleted, and the routes landing on the asset are counted. It is
- * the Dependencies editor's `deleteConfirm`, so the history, which the backend
- * keeps, is not mentioned.
+ * stay, marked deleted, and the routes landing on the asset are counted. The
+ * history, which the backend keeps, is not mentioned.
  */
 test("the delete confirm counts the routes landing on the asset and says nothing about history", async () => {
   const lands = (id: string, name: string): StoredRoute => ({
