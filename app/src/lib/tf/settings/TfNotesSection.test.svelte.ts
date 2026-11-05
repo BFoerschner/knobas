@@ -55,7 +55,7 @@ function stub(initial: Partial<CaptureShortcut> = {}) {
     listAdapters: () => Promise.resolve([{ adapter_kind: "confluence", write_ops: ["create_page"] }] as never),
     search: () =>
       Promise.resolve({
-        interpreted: { text: "", prefix: null, filters: {}, unknown_tokens: [] },
+        interpreted: { text: "", prefix: null, filters: {}, unknown_tokens: [], left_out_tokens: [] },
         groups: [
           {
             kind: "page",

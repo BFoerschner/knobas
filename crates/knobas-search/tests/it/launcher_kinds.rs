@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use knobas_core::payload::StateChip;
 use knobas_core::tone::Tone;
-use knobas_search::{SearchFilters, SearchQuery, SearchResponse, Searcher};
+use knobas_search::{FilterAnswer, SearchFilters, SearchQuery, SearchResponse, Searcher};
 use tokio::sync::Mutex;
 
 static SERIAL: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -685,4 +685,175 @@ async fn a_saved_lists_count_is_the_answer_its_text_applies() {
     assert_eq!(pipelines.count, 1, "{pipelines:?}");
     let word = searcher.save_list(&format!("Word {t}"), &t).await.unwrap();
     assert_eq!(word.count, 1, "{word:?}");
+}
+
+/// A commit of a repository the mirror does not hold, the shape Gitea stores:
+/// the name it declares is known, and nothing else sits beneath it.
+async fn lone_commit(pool: &sqlx::PgPool, t: &str, name: &str) {
+    let full = format!("o{t}/{name}");
+    item(
+        pool,
+        "gitea",
+        "commit",
+        &format!("{full}@{t}"),
+        &format!("Bump {t}"),
+        serde_json::json!({ "sha": t, "repository": { "full_name": full, "name": name } }),
+        Utc::now(),
+    )
+    .await;
+}
+
+/// #2488: the name is known, so it is no unknown token, and the coverage cannot
+/// say why the answer is empty: the source holding the commit has no row if it
+/// holds only commits and `Answered` if it holds more, never `NoValues`. The
+/// left-out token is what says why.
+#[tokio::test]
+async fn under_a_name_only_left_out_kinds_declare_says_so() {
+    let pool = pool().await;
+    let t = token();
+    let name = format!("unmirrored-{t}");
+    lone_commit(&pool, &t, &name).await;
+
+    let token = format!("under:{name}");
+    for raw in [
+        token.clone(),
+        format!("{token} {t}"),
+        format!("{token} nothing{t}"),
+    ] {
+        let answer = search(&pool, &raw, false).await;
+        assert_eq!(answer.total, 0, "{raw}");
+        assert_eq!(
+            answer.interpreted.left_out_tokens,
+            [token.as_str()],
+            "{raw}"
+        );
+        assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
+        let holder_says_no_values = answer
+            .coverage
+            .iter()
+            .flat_map(|c| &c.sources)
+            .any(|s| s.source_id == "gitea" && s.answer == FilterAnswer::NoValues);
+        assert!(!holder_says_no_values, "{raw}: {:?}", answer.coverage);
+    }
+}
+
+/// #2488: a name that answers with anything else, or a word that matched
+/// nothing beneath it, owes nothing to what the launcher leaves out.
+#[tokio::test]
+async fn under_says_nothing_of_left_out_kinds_where_something_else_sits_beneath() {
+    let pool = pool().await;
+    let t = token();
+    let (config, _) = pipeline(&pool, &t, Utc::now()).await;
+    let config = config.strip_prefix("teamcity:").unwrap();
+
+    // The configuration itself answers, and its runs are left out.
+    let answered = search(&pool, &format!("under:{config}"), false).await;
+    assert_eq!(answered.total, 1);
+    assert!(answered.interpreted.left_out_tokens.is_empty());
+
+    // Empty for the word, and the configuration still sits under that name.
+    let word = search(&pool, &format!("under:{config} nothing{t}"), false).await;
+    assert_eq!(word.total, 0);
+    assert!(word.interpreted.left_out_tokens.is_empty());
+
+    // A name nothing declares is an unknown token, and that alone.
+    let typo = search(&pool, &format!("under:typo{t}"), false).await;
+    assert_eq!(typo.total, 0);
+    assert_eq!(typo.interpreted.unknown_tokens, [format!("under:typo{t}")]);
+    assert!(typo.interpreted.left_out_tokens.is_empty());
+}
+
+/// #2488: `kind:` stays in the grammar and names a kind the launcher leaves
+/// out, so the query is empty whatever else it holds.
+#[tokio::test]
+async fn a_kind_the_launcher_leaves_out_says_so_in_the_spelling_typed() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let (config, _) = pipeline(&pool, &t, Utc::now()).await;
+    let config = config.strip_prefix("teamcity:").unwrap();
+    item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{t}-1"),
+        &format!("Fix {t}"),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+
+    for (raw, want) in [
+        (format!("kind:build under:{config}"), vec!["kind:build"]),
+        (format!("kind:build {t}"), vec!["kind:build"]),
+        ("kind:build".to_owned(), vec!["kind:build"]),
+        ("type:commit".to_owned(), vec!["type:commit"]),
+        // One chip per kind, however often it is named.
+        ("kind:build kind:build".to_owned(), vec!["kind:build"]),
+        (format!("kind:ticket nothing{t}"), vec![]),
+        // Empty, and the kind beside it is left out all the same.
+        (
+            format!("kind:build kind:ticket nothing{t}"),
+            vec!["kind:build"],
+        ),
+    ] {
+        let answer = search(&pool, &raw, false).await;
+        assert_eq!(answer.total, 0, "{raw}");
+        assert_eq!(answer.interpreted.left_out_tokens, want, "{raw}");
+        assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
+        assert!(answer.coverage.is_empty(), "{raw}: {:?}", answer.coverage);
+    }
+
+    // An answer that holds something has nothing to explain.
+    let found = search(&pool, &format!("kind:build kind:ticket {t}"), false).await;
+    assert_eq!(found.total, 1);
+    assert!(found.interpreted.left_out_tokens.is_empty());
+}
+
+/// #2488: a known name with something kept beneath it, whichever way the name
+/// is known, is an ordinary empty when the word misses: a chip here would
+/// blame the filter for what the word did.
+#[tokio::test]
+async fn a_word_that_misses_beneath_a_kept_row_or_an_asset_draws_no_token() {
+    let pool = pool().await;
+    let t = token();
+
+    let repo = format!("kept-{t}");
+    let full = format!("o{t}/{repo}");
+    item(
+        &pool,
+        "gitea",
+        "pr",
+        &format!("{full}#1"),
+        &format!("Change {t}"),
+        serde_json::json!({ "base": { "repo": { "full_name": full, "name": repo } } }),
+        Utc::now(),
+    )
+    .await;
+
+    let asset = format!("host-{t}");
+    let id = format!("asset:{t}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(&asset)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.asset (id, type_id, name, path_text) values ($1,'vm',$2,'')")
+        .bind(&id)
+        .bind(&asset)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for name in [&repo, &asset] {
+        let found = search(&pool, &format!("under:{name}"), false).await;
+        assert!(found.total > 0, "{name} answers");
+
+        let raw = format!("under:{name} nothing{t}");
+        let answer = search(&pool, &raw, false).await;
+        assert_eq!(answer.total, 0, "{raw}");
+        assert!(answer.interpreted.left_out_tokens.is_empty(), "{raw}");
+        assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
+    }
 }

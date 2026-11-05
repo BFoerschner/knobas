@@ -311,7 +311,14 @@ text: string, prefix: Prefix | null, filters: SearchFilters,
  * `key:value` pairs the parser did not recognise, so the UI can say so
  * instead of silently ignoring them.
  */
-unknown_tokens: Array<string>, };
+unknown_tokens: Array<string>, 
+/**
+ * Typed `under:`, `kind:` and `type:` tokens that explain an empty answer: the
+ * launcher leaves out the kind named, or everything beneath the name
+ * (#2488, [`crate::frames`]). Not unknown, because the grammar and the
+ * mirror both know them. Empty unless the launcher's answer is.
+ */
+left_out_tokens: Array<string>, };
 
 /**
  * The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and

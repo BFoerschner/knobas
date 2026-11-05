@@ -67,7 +67,7 @@ function response(raw: string): SearchResponse {
       ? [{ ...LIST, rank: 1, snippet: [], excerpts: [] } as unknown as SearchHit]
       : [];
   return {
-    interpreted: { text: word, prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    interpreted: { text: word, prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
     groups: hits.length ? [{ kind: "list", label: "List", plural: "Lists", monogram: "LI", total: 1, hits }] : [],
     total: hits.length,
     took_ms: 1,

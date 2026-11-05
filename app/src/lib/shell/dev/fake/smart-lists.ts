@@ -85,6 +85,7 @@ export function fakeListSearch(raw: string): SearchResponse | null {
       prefix: null,
       filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups:
       hits.length === 0

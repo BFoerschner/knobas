@@ -56,6 +56,7 @@ function response(raw: string): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds: inbox ? ["inbox"] : [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: one ? [{ kind: one.kind, label: one.kind, plural: `${one.kind}s`, monogram: "XX", total: 1, hits }] : [],
     total: hits.length,

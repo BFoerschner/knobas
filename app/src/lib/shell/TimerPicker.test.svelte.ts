@@ -72,7 +72,7 @@ function estateOf(hits: SearchHit[]): SearchResponse {
           },
         ];
   return {
-    interpreted: { text: "", prefix: null, filters: noFilters(), unknown_tokens: [] },
+    interpreted: { text: "", prefix: null, filters: noFilters(), unknown_tokens: [], left_out_tokens: [] },
     groups,
     total: hits.length,
     took_ms: 1,

@@ -491,7 +491,7 @@ test("an anchor past the last column is clamped to the deepest window", () => {
 /** A search answer carrying one group of `kind`. */
 function answer(groups: { kind: string; hits: { id: string; title: string; path?: string }[] }[]) {
   return {
-    interpreted: { text: "", prefix: null, filters: noFilters(), unknown_tokens: [] },
+    interpreted: { text: "", prefix: null, filters: noFilters(), unknown_tokens: [], left_out_tokens: [] },
     total: groups.reduce((count, group) => count + group.hits.length, 0),
     took_ms: 1,
     coverage: [],

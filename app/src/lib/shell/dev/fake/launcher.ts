@@ -36,6 +36,7 @@ function ticketsByKey(raw: string): SearchResponse | null {
       prefix: null,
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [{ kind: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", total: hits.length, hits }],
     total: hits.length,
@@ -58,6 +59,7 @@ function actionPalette(raw: string): SearchResponse | null {
       prefix: "action",
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [],
     total: 0,
@@ -91,6 +93,8 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
   if (palette !== null) return palette;
   const help = helpCard((query.raw ?? "").trim());
   if (help !== null) return help;
+  const leftOut = leftOutAnswer((query.raw ?? "").trim());
+  if (leftOut !== null) return leftOut;
   const byKey = ticketsByKey((query.raw ?? "").trim());
   if (byKey !== null) return byKey;
   const words = wordSearch(query.raw ?? "", query.titles !== false);
@@ -124,6 +128,7 @@ function estateSearch(args: Record<string, unknown>): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds: ["asset"], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups:
       hits.length === 0
@@ -156,6 +161,7 @@ function helpCard(raw: string): SearchResponse | null {
       prefix: "help",
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [],
     total: 0,
@@ -340,10 +346,35 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
       prefix: null,
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups,
     total: groups.reduce((sum, group) => sum + group.total, 0),
     took_ms: 3,
+    coverage: [],
+  };
+}
+
+/**
+ * What the engine answers for a query the launcher leaves empty (#2488), so
+ * the token saying why can be looked at under `?fake-ipc`. `kind:<a left-out
+ * kind>` and one made-up name only commits sit beneath; the rule itself is
+ * witnessed over a real PostgreSQL in `knobas-search`'s `launcher_kinds`.
+ */
+function leftOutAnswer(raw: string): SearchResponse | null {
+  const named = /^kind:(build|commit|jira_view)$/.test(raw) || raw === "under:retired-service";
+  if (!named) return null;
+  return {
+    interpreted: {
+      text: "",
+      prefix: null,
+      filters: { sources: [], kinds: raw.startsWith("kind:") ? [raw.slice(5)] : [], updated_within_days: null, mine: false, authors: [] },
+      unknown_tokens: [],
+      left_out_tokens: [raw],
+    },
+    groups: [],
+    total: 0,
+    took_ms: 2,
     coverage: [],
   };
 }

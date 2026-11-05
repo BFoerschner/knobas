@@ -366,7 +366,7 @@ impl Searcher {
         // Whether an `under:` value names any parent is the mirror's to say,
         // and it is said before the echo is built so the greyed-out token
         // rides back with everything else the parse reported.
-        under::report_unknown(&self.pool, &mut parsed).await?;
+        let known_under = under::report_unknown(&self.pool, &mut parsed).await?;
         // Pipelines under the shell's word, and no runs or commits (#2422).
         let frames = frames::LauncherFrames::of(&vocab.declarations);
         let filters = EffectiveFilters {
@@ -376,7 +376,7 @@ impl Searcher {
             hidden_kinds: frames.left_out,
             ..query::merge(&parsed, &query.filters)
         };
-        let interpreted = ParsedQuery {
+        let mut interpreted = ParsedQuery {
             filters: filters.echo(),
             ..parsed.query.clone()
         };
@@ -405,6 +405,11 @@ impl Searcher {
             query.limit,
         );
         let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        if rows.is_empty() {
+            interpreted.left_out_tokens =
+                under::left_out_tokens(&self.pool, &corpora, &parsed, &known_under, &filters)
+                    .await?;
+        }
         let mut groups = if filters.excerpts {
             group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
         } else {

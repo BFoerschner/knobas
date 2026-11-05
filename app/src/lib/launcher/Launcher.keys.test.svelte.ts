@@ -34,7 +34,7 @@ function response(raw: string): SearchResponse {
   const one = HITS[raw.trim()];
   const hits = one ? [{ source_id: "jira", updated_at: null, synced_at: "2026-08-25T11:56:00Z", path: null, state: null, rank: 1, snippet: [], ...one } as SearchHit] : [];
   return {
-    interpreted: { text: raw.trim(), prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    interpreted: { text: raw.trim(), prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
     groups: one ? [{ kind: one.kind, label: one.kind, plural: `${one.kind}s`, monogram: "XX", total: 1, hits }] : [],
     total: hits.length,
     took_ms: 1,

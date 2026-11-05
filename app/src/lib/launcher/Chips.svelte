@@ -77,6 +77,16 @@
     return "this filtered nothing";
   }
 
+  /**
+   * Why a token the grammar and the mirror both know still answered nothing
+   * (#2488). `left_out_tokens` holds `kind:`, `type:` and `under:` tokens alone.
+   */
+  function leftOutReason(token: string): string {
+    return token.toLowerCase().startsWith("under:")
+      ? "the launcher leaves out everything beneath it"
+      : "the launcher leaves this kind out";
+  }
+
   /** A configured source's health, for the dot on its chip. */
   function health(id: string): CredentialHealth | undefined {
     return sources.find((source) => source.source_id === id);
@@ -131,13 +141,16 @@
   });
 </script>
 
-{#if chips.length > 0 || interpreted.unknown_tokens.length > 0}
+{#if chips.length > 0 || interpreted.unknown_tokens.length > 0 || interpreted.left_out_tokens.length > 0}
   <div class="tf-ln-fbar">
     {#each chips as chip (chip.key)}
       <span class="tf-ln-fchip tf-ln-set" class:tf-ln-fail={chip.fail} title={chip.title}>{chip.text}</span>
     {/each}
     {#each interpreted.unknown_tokens as token (token)}
       <span class="tf-ln-fchip tf-ln-off" title={reason(token)}>{token} — {reason(token)}</span>
+    {/each}
+    {#each interpreted.left_out_tokens as token (token)}
+      <span class="tf-ln-fchip tf-ln-off" title={leftOutReason(token)}>{token} — {leftOutReason(token)}</span>
     {/each}
   </div>
 {/if}

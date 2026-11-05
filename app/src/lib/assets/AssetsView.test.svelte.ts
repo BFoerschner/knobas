@@ -504,7 +504,7 @@ function matchesFor(query: SearchQuery, estate: AssetRow[]): SearchResponse {
       excerpts: [],
     }));
   return {
-    interpreted: { text: query.raw, prefix: null, filters: noFilters(), unknown_tokens: [] },
+    interpreted: { text: query.raw, prefix: null, filters: noFilters(), unknown_tokens: [], left_out_tokens: [] },
     groups:
       hits.length === 0
         ? []

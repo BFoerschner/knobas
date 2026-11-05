@@ -68,6 +68,7 @@ function response(over: Partial<SearchResponse> = {}): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [
       {
@@ -488,6 +489,7 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
             prefix: null,
             filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
             unknown_tokens: ["env:prod", "source:cf"],
+            left_out_tokens: [],
           },
           groups: [],
         }),
@@ -502,6 +504,36 @@ test("an unknown token is greyed out with a reason rather than silently ignored"
   expect(greyed).toEqual([
     "env:prod — the estate arrives with assets",
     "source:cf — no source matches source:cf",
+  ]);
+});
+
+test("a token the launcher left out says so, in its own words and not an unknown token's", async () => {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () =>
+        response({
+          interpreted: {
+            text: "",
+            prefix: null,
+            filters: { sources: [], kinds: ["build"], updated_within_days: null, mine: false, authors: [] },
+            unknown_tokens: [],
+            left_out_tokens: ["kind:build", "type:commit", "under:Old-Repo"],
+          },
+          groups: [],
+        }),
+    },
+  });
+  await settle();
+  target.querySelector("input")!.value = "kind:build type:commit under:Old-Repo";
+  target.querySelector("input")!.dispatchEvent(new Event("input", { bubbles: true }));
+  await debounced();
+
+  const greyed = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")].map((el) => el.textContent?.trim());
+  expect(greyed).toEqual([
+    "kind:build — the launcher leaves this kind out",
+    "type:commit — the launcher leaves this kind out",
+    "under:Old-Repo — the launcher leaves out everything beneath it",
   ]);
 });
 
@@ -520,6 +552,7 @@ test("a combined # filter is sent as typed and draws one chip per letter", async
             prefix: null,
             filters: { sources: [], kinds: ["repo", "list"], updated_within_days: null, mine: false, authors: [] },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
         });
       },
@@ -549,6 +582,7 @@ test("a key typed as a word finds its ticket and draws no filter chip", async ()
             prefix: null,
             filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
         });
       },
@@ -615,6 +649,7 @@ test("a source chip is marked when that source is refusing the credential", asyn
               authors: [],
             },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
         }),
     },
@@ -675,6 +710,7 @@ test("a chip for a source with no health reading is not marked failing", async (
               authors: [],
             },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
         }),
     },
@@ -717,6 +753,7 @@ test("a named person is a chip, and nothing about them is greyed out", async () 
               authors: ["jonas"],
             },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
         }),
     },
@@ -742,6 +779,7 @@ test("`?` lists the syntax, and clicking a row inserts it", async () => {
             prefix: "help",
             filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
           groups: [],
         }),
@@ -791,6 +829,7 @@ test("an author search says which sources could not be asked", async () => {
               authors: ["jonas"],
             },
             unknown_tokens: [],
+            left_out_tokens: [],
           },
           groups: [],
           total: 0,
@@ -1275,6 +1314,7 @@ function listsAnswer(): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds: ["list"], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [
       {
@@ -1403,6 +1443,7 @@ function inboxAnswer(text: string): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds: ["inbox"], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [],
     total: 0,
@@ -2335,6 +2376,7 @@ function pagesAnswer(kinds: string[]): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [
       {
@@ -2599,7 +2641,7 @@ function legendDrawn() {
 
 const HELP_SEARCH = async () =>
   response({
-    interpreted: { text: "", prefix: "help", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    interpreted: { text: "", prefix: "help", filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
     groups: [],
   });
 

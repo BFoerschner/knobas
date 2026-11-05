@@ -60,6 +60,7 @@ function response(raw: string): SearchResponse {
       prefix: null,
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [
       { kind: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", total: 1, hits: [TITLED] },
