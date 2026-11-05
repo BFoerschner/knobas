@@ -120,8 +120,8 @@ export class SheetMode {
   #flows = 0;
 
   /** What is a favourite now (#2428): the board's block, so the sheet offers *Unfavourite* on it. */
-  #favourites = $derived(favouriteKeys(this.#host.session.home?.favourites ?? []));
-  #context = $derived({
+  #favourites = $derived.by(() => favouriteKeys(this.#host.session.home?.favourites ?? []));
+  #context = $derived.by(() => ({
     job: this.#host.job ?? null,
     canTime: this.#host.ontimer !== undefined,
     apps: this.#applications,
@@ -130,7 +130,7 @@ export class SheetMode {
     merge: this.#mergeOf(this.current?.subject),
     branches: this.#host.io.branches,
     now: this.#host.now ?? new Date(),
-  });
+  }));
 
   /** The actions as the box narrows them; none while a flow is open. */
   readonly shown = $derived(this.current && !this.current.flow ? narrowActions(sheetActions(this.current.subject, this.#context), this.current.filter) : []);
