@@ -1051,14 +1051,16 @@ pub struct ParentPositions {
 ///
 /// Both questions are `exists`, so the server stops at the first row that
 /// answers one, where the `in (select ...)` this replaced listed every row a
-/// name has first -- 32 ms for a name 5,000 commits carry -- and where the
+/// name has first -- 26 ms for a name 5,000 commits carry -- and where the
 /// launcher's statement, asked whether it admits a row, read the whole
-/// mirror to say nothing (#2495). The values are compared in SQL on both
-/// sides, as `PARENTS_SQL` is, so a value Rust and the server lower-case
-/// differently (`İ`) is still known; each reaches `lower($n::text)`, which
-/// folds to a constant and keeps the read on `item_parent_name_idx`
-/// (`lower(ip.name)`). The statement is built here because `AssertSqlSafe`
-/// is confined to this module; every value is a bind.
+/// mirror to say nothing (#2495). A name with nothing admitted beneath it has
+/// no such row, so it is bounded by the rows that name has, not by the mirror:
+/// 6 ms for those 5,000. The values are compared in SQL on both sides, as
+/// `PARENTS_SQL` is, so a value Rust and the server lower-case differently
+/// (`İ`) is still known; each reaches its `exists` as `o.v`, a parameter, which
+/// keeps the read on an index over `lower(ip.name)`. The statement is built
+/// here because `AssertSqlSafe` is confined to this module; every value is a
+/// bind.
 ///
 /// **Admitting is the launcher's `under:` predicate, arm for arm**, so what
 /// `under:` admits and what `crate::under::left_out_tokens` says is left out

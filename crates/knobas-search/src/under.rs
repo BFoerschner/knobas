@@ -93,8 +93,10 @@ impl KnownUnder {
 /// left out) named for [`left_out_tokens`].
 ///
 /// One bounded read for both questions ([`crate::sql::parent_positions`]),
-/// so an `under:` keystroke pays an index probe per value and no more: a
-/// name still being typed answers to nothing and the probe stops at that.
+/// so an `under:` keystroke pays, per value, an index probe of the mirror and
+/// a scan of the estate, where the statement read the whole mirror. A name
+/// still being typed answers to nothing: 2 ms at `testing::seed_estate`'s
+/// upper bound.
 ///
 /// The value stays in the filter: `under:a under:typo` still scopes to `a`,
 /// and `under:typo` alone answers with nothing -- which is true -- while the
