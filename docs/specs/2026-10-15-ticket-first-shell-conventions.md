@@ -177,7 +177,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   draws its linked tickets from its confirmed links in place of *Create ticket*. Standup's action
   item keeps its own command, `create_action_item_ticket`, which links the ticket to the note.
   (#1451)
-- A run's live reads (`run_log`, `run_tests`, `test_history`, `run_artifacts`, `artifact_preview`)
+- A run's live reads (`run_log`, `run_tests`, `test_history`, `run_artifacts`, `artifact_preview`, `artifact_bytes`)
   route by the run's namespace with no mirror check, as `entity_view` does, and answer frame shapes
   (`knobas_source::run`). A download from a source is one command (`download_run_file`) into a new
   file in the downloads folder, named by the adapter's suggestion cut to its last segment, never
