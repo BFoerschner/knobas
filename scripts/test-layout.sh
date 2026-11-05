@@ -112,8 +112,8 @@ guard() {
     [ "$n" -gt 0 ] || die "no crates under $root/crates -- is -C pointing at the repository root?"
 
     local unlisted stale status=0
-    unlisted=$(LC_ALL=C comm -23 <(nonblank "$found") <(nonblank "$listed"))
-    stale=$(LC_ALL=C comm -13 <(nonblank "$found") <(nonblank "$listed"))
+    unlisted=$(env LC_ALL=C comm -23 <(nonblank "$found") <(nonblank "$listed"))
+    stale=$(env LC_ALL=C comm -13 <(nonblank "$found") <(nonblank "$listed"))
     if [ -n "$unlisted" ]; then
         echo "$prog: top-level test files that are neither tests/it/main.rs nor on test-layout-exceptions.txt:" >&2
         printf '%s\n' "$unlisted" | sed -E 's|^([^/]*)/(.*)$|  crates/\1/tests/\2.rs|' >&2
