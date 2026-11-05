@@ -1501,8 +1501,8 @@ _require-live-env SOURCE +NAMES:
 # The Gitea adapter against the REAL pinned container in `testenv/`.
 #
 # FORGEJO (#1195, spec #1192 story 18): `just gitea-live forgejo` is the one
-# switch. It runs this same recipe -- the adapter suite, the three start-work
-# tests and the clone test -- against the pinned Forgejo container (profile
+# switch. It runs this same recipe -- the adapter suite, the start-work tests
+# and the clone test -- against the pinned Forgejo container (profile
 # `forgejo`, port 3002, its own volume and seed state, `seed-forgejo.sh`)
 # instead of Gitea. Forgejo is stopped again at the end if the run started it;
 # Gitea is left alone. It takes the Gitea lock. `gitea-live-capped` and
@@ -1593,6 +1593,12 @@ _require-live-env SOURCE +NAMES:
 # holds it before the run that follows the write starts. Its issue and
 # branches are its own, taken back by its guards.
 #
+# AND UNDER (#2485): `under_each_seeded_repository_finds_its_branches_and_pulls_and_its_commits_name_it`
+# syncs the seeded repositories into a database of its own and asks
+# `Searcher::search` for what sits under each. This recipe is what a change to
+# what the search answers owes (`docs/agents/working-model.md`, *Live runs*), so
+# it runs here as well as in `start-work-live`. Read-only at Gitea.
+#
 # AND CLONE (#823): `crates/knobas-app/tests/clone_live.rs` clones a seeded
 # repository over http (admitted by the test-only door; the app clones over
 # https and ssh only, ADR-0023), refuses a folder that is not a clone and a bad
@@ -1615,6 +1621,8 @@ gitea-live forge="gitea":
       -- --ignored --nocapture --test-threads=1 --exact a_gitea_issue_is_on_the_tickets_board_beside_a_jira_ticket
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1 --exact each_landed_write_is_in_the_mirror_as_gitea_holds_it_before_the_follow_up_run
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
+      -- --ignored --nocapture --test-threads=1 --exact under_each_seeded_repository_finds_its_branches_and_pulls_and_its_commits_name_it
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test clone_live \
       -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test read_cache_live \

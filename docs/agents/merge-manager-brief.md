@@ -19,7 +19,7 @@ Yours is the ticket's only review. Start as soon as the PR opens, even as a draf
 3. Verify claims. Check that the mutation proof is present when the implementer brief says it is owed; add a mutant only for a claim you find untested. Ask whether the fixture can witness the claim and which direction is unwitnessed. A finding about a ticket you haven't read is a hypothesis: read it first.
 4. Don't open screenshot PNGs; they are for Björn. Review the code.
 5. Fix on the branch yourself (`git status --short`, named paths) per *Fix it in place first*; what fails its fit test you file and report with the finding quoted. Cap: 3 rounds, then stop and report.
-6. Re-run a live suite only if your fixes or the rebase touched what it exercises (`docs/agents/working-model.md`, *Live runs*).
+6. Re-run a live suite only if your fixes or the rebase touched what it exercises (`docs/agents/working-model.md`, *Live runs*). A diff that changes what the search answers owes the runs the implementer brief's *Live suites* names, whichever of you touched it: a PR body without them is a finding.
 
 ## The gate
 
