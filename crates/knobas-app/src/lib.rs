@@ -629,7 +629,6 @@ pub fn run() {
             commands::entity::test_history,
             commands::entity::run_artifacts,
             commands::entity::artifact_preview,
-            commands::entity::artifact_bytes,
             commands::entity::download_run_file,
             // #867's job link sets read, appended at the foot: the list is
             // append-only (§10.8).
@@ -710,6 +709,8 @@ pub fn run() {
             commands::search::keys,
             commands::search::bind_list_key,
             commands::search::bind_action_key,
+            // #2417's artifact bytes, appended at the foot (§10.8).
+            commands::entity::artifact_bytes,
         ])
         .build(context)
         .expect("build the tauri application")
