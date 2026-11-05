@@ -31,7 +31,7 @@ beforeEach(() => {
       current: null,
       job: null,
       inbox: { count: 0 },
-      badges: { builds: null, monitors: null, proposals: null },
+      badges: { builds: null, monitors: null },
       timer: { current: null, elapsed: null },
       onsearch: () => {},
       ontimer: undefined,

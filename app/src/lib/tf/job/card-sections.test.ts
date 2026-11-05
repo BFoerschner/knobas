@@ -5,7 +5,8 @@
 import { expect, test } from "vitest";
 
 import type { EntityRow } from "../../ipc/entity";
-import { codeRollup, worstSignal } from "./job";
+import { cardSections, type CardReads } from "./card-sections";
+import { codeRollup, worstSignal, type AssetLine } from "./job";
 
 function row(entity_id: string, kind: string, state: EntityRow["state"] = null): EntityRow {
   return { entity_id, kind, source_id: "gitea", title: entity_id, updated_at: null, synced_at: "2026-08-22T00:00:00Z", path: null, state };
@@ -51,4 +52,25 @@ test("the row draws the worst signal, whatever order the rollup lists them in", 
 
 test("a settled signal is no state worth a row's words", () => {
   expect(worstSignal({ lead: "", signals: [{ tone: "ok", text: "3 fine" }] })).toBeNull();
+});
+
+const NOTHING: CardReads = {
+  entityId: "jira:PAY-231",
+  subtasks: null,
+  code: [],
+  unpushed: new Set(),
+  builds: [],
+  pages: [],
+  monitors: [],
+  assets: [],
+};
+const asset = (id: string): AssetLine => ({ id, name: id, type: "service", environment: null, on: null, tone: null });
+
+test("the Assets row opens the asset tree at the ticket's first asset, its id encoded", () => {
+  const { rows } = cardSections({ ...NOTHING, assets: [asset("asset:a/1"), asset("asset:b")] });
+  expect(rows.map((row) => [row.name, row.count, row.href, row.opens])).toEqual([["Assets", 2, "#/asset/asset%3Aa%2F1", null]]);
+});
+
+test("a ticket that reaches no asset draws no Assets row, and has no first asset to open", () => {
+  expect(cardSections({ ...NOTHING, assets: [] }).rows).toEqual([]);
 });

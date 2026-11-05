@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { EntityDetail, LinkEntry, SuggestionEntry, Thread } from "../../ipc/entity";
+import type { EntityDetail, LinkEntry, Thread } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
@@ -133,15 +133,6 @@ function thread(): Thread {
   };
 }
 
-const PROPOSAL: SuggestionEntry = {
-  link: { ...PR.link, id: "link:p1", from_id: "teamcity:Payout_Build", origin: "suggested", confirmed_at: null },
-  from: { entity_id: "teamcity:Payout_Build", kind: "build", title: "Payout build", deleted_at: null },
-  to: { entity_id: ID, kind: "ticket", title: "Retry failed SEPA payouts", deleted_at: null },
-};
-const ELSEWHERE: SuggestionEntry = {
-  ...PROPOSAL,
-  link: { ...PROPOSAL.link, id: "link:p2", to_id: "jira:PAY-228" },
-};
 
 function ports(over: Partial<JobPorts> = {}): JobPorts {
   let links = [PR, PAGE];
@@ -169,7 +160,6 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
       links = links.filter((entry) => entry.link.id !== id);
       return Promise.resolve();
     },
-    roomSuggestions: () => Promise.resolve({ rows: [PROPOSAL, ELSEWHERE], total: 2, more: [] }),
     search: () => Promise.reject(new Error("not in this test")),
     launcherHome: () => Promise.resolve({ recent: [], favourites: [], stale_sources: [] } as never),
     jobReach: () => Promise.resolve([]),
@@ -412,8 +402,7 @@ test("the drawer lists the ticket's links and its own proposals; the page draws 
     "Idempotent retry window Code Unlink",
     "SEPA payout retry design Pages Unlink",
   ]);
-  expect(squash(drawer.querySelector(".tf-proposed"))).toBe("1 proposed for PAY-231 Judge them one by one");
-  expect(drawer.querySelector(".tf-proposed a")?.getAttribute("href")).toBe("#/review/link%3Ap1");
+  expect(squash(drawer), "proposals are not drawn (2026-11-05)").not.toContain("proposed");
   expect(squash(drawer)).toContain("Links and link sets stay in knobas and are never written to a source.");
   expect(document.activeElement).toBe(drawer.querySelector("input[aria-label='Filter connections']"));
 
@@ -567,17 +556,15 @@ test("Link to… opens a dialog over the drawer that says the link stays in knob
   expect(target.querySelector("[aria-label='Connections']")).not.toBeNull();
 });
 
-test("a ticket with nothing linked says so, and no proposals draw no box", async () => {
+test("a ticket with nothing linked says so", async () => {
   open({
     ports: ports({
       getEntity: () => Promise.resolve(ticket([])),
-      roomSuggestions: () => Promise.resolve({ rows: [ELSEWHERE], total: 1, more: [] }),
     }),
   });
   await settle();
   drawerOpen();
   expect(squash(target.querySelector(".tf-dbody"))).toContain("Nothing linked on the ticket itself.");
-  expect(target.querySelector(".tf-proposed")).toBeNull();
 });
 
 // ---- link sets on the job (#867, R-4.4, R-6.2, R-7.5) ----

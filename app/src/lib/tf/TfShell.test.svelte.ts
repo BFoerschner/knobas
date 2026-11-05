@@ -194,7 +194,6 @@ const JOB_PORTS: JobPorts = {
   entityThread: () => Promise.resolve({ comments: [], me: [] }),
   createLink: () => Promise.reject(new Error("not in this suite")),
   unlink: () => Promise.reject(new Error("not in this suite")),
-  roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
   search: () => Promise.reject(new Error("not in this suite")),
   launcherHome: () => Promise.reject(new Error("not in this suite")),
   jobReach: () => Promise.resolve([]),
@@ -252,7 +251,6 @@ function start(
       badges: createBadges({
         failingBuilds: () => Promise.resolve(2),
         monitorsDown: () => Promise.resolve(over.monitorsDown ?? 0),
-        proposals: () => Promise.resolve(5),
         listen: () => Promise.resolve(() => {}),
       }),
       layers: over.layers ?? createLayers(),
@@ -370,9 +368,9 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
     ["#/commit/gh:c-9", "#/code"],
     ["#/page/confluence:2", "#/docs"],
     ["#/docs/space/ENG", "#/docs"],
-    ["#/asset/assets:svc-1", "#/deps"],
-    ["#/route/assets:route-1", "#/deps"],
-    ["#/assets", "#/deps"],
+    ["#/asset/assets:svc-1", "#/monitors"],
+    ["#/route/assets:route-1", "#/monitors"],
+    ["#/assets", "#/monitors"],
     ["#/code/repos", "#/code"],
     ["#/monitors/unmonitored", "#/monitors"],
     ["#/settings/appearance", "#/settings"],
@@ -524,9 +522,9 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   let crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
   const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
-  expect(parent.textContent).toBe("Dependencies");
-  expect(parent.getAttribute("href")).toBe("#/deps");
-  expect(escHint()).toBe("Back to Dependencies Esc");
+  expect(parent.textContent).toBe("Monitors");
+  expect(parent.getAttribute("href")).toBe("#/monitors");
+  expect(escHint()).toBe("Back to Monitors Esc");
 
   await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;
@@ -636,7 +634,7 @@ test("a forced theme leaves <html> with the shell", async () => {
   expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
 });
 
-test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zero", async () => {
+test("badges: inbox and failing builds in err tone; nothing drawn at zero", async () => {
   start();
   await settle();
   const counts = Object.fromEntries(
@@ -651,10 +649,8 @@ test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zer
     Code: null,
     Builds: "2 err",
     Docs: null,
-    Dependencies: null,
     Monitors: null,
     "Link sets": null,
-    "Proposed links": "5",
     Time: null,
   });
 });
@@ -665,7 +661,7 @@ test("the nav reads Tickets first and the rest in order, with no Job entry (spec
   start();
   await at("#/job");
   const names = seen<HTMLAnchorElement>(".tf-nav a").map((a) => a.firstChild?.textContent?.trim());
-  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Dependencies", "Monitors", "Link sets", "Proposed links", "Time"]);
+  expect(names).toEqual(["Tickets", "Inbox", "Code", "Builds", "Docs", "Monitors", "Link sets", "Time"]);
   expect(target.querySelector(".tf-top [aria-label='Settings']"), "Settings is the cog, not a nav entry").not.toBeNull();
 });
 
@@ -1785,7 +1781,7 @@ test("⌘R on an item's page runs its Refresh, as a click does", async () => {
 
 test("a page kept hidden takes no keys: / focuses nothing in it", async () => {
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
-  for (const view of ["#/tickets", "#/docs", "#/builds", "#/deps"]) {
+  for (const view of ["#/tickets", "#/docs", "#/builds", "#/sets"]) {
     await at(view);
   }
   for (const view of ["#/time", "#/settings"]) {

@@ -9,7 +9,7 @@
  * `#/entity/<id>`, which the new shell answered with *Nothing lives at …*.
  *
  * **An alert opens the asset tree at the affected asset** (spec #427 story
- * 61), `#/asset/<id>` in Dependencies. Its `entity_id` is the asset the
+ * 61), `#/asset/<id>`. Its `entity_id` is the asset the
  * monitor watches, and that address is more precise than the row's
  * *Open monitor* (`#/monitors`); both are ticket-first pages.
  *

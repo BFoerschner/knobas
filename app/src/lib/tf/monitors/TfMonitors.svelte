@@ -600,7 +600,10 @@
     <h1>Monitors</h1>
     <div class="tf-sub">{header}</div>
   </div>
-  {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
+  <div class="tf-acts">
+    <a class="tf-btn tf-ghost" href="#/assets" title="The asset tree in columns">Asset tree</a>
+    {#if sync}{@render sync()}{/if}
+  </div>
 </header>
 <nav class="tf-tabs" aria-label="Monitors">
   <a href="#/monitors" aria-current={tab === "all" ? "page" : undefined}

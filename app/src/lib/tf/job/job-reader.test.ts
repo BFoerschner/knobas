@@ -90,10 +90,6 @@ function fakes(
       await wait(id);
       return { comments: [], me: [id] };
     },
-    roomSuggestions: async (_sources, context) => {
-      asked.push(`roomSuggestions ${context}`);
-      return { rows: [], total: 0, more: [] };
-    },
     jobReach: async (id) => {
       asked.push(`jobReach ${id}`);
       await wait(id);
@@ -133,7 +129,6 @@ function slots(reader: ReturnType<typeof createJobReader>) {
     builds: reader.builds?.map((one) => one.title),
     pages: reader.pages?.map((one) => one.title),
     monitors: reader.monitors?.map((one) => one.title),
-    proposals: reader.proposals,
     failure: reader.failure,
   };
 }
@@ -148,7 +143,6 @@ const B = {
   builds: ["ci of jira:B"],
   pages: ["wiki of jira:B"],
   monitors: ["monitoring of jira:B"],
-  proposals: [],
   failure: null,
 };
 

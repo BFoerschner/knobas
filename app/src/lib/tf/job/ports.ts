@@ -20,7 +20,6 @@ import {
   previewLinkSetRule,
   saveLinkSet,
   promoteContext,
-  roomSuggestions,
   submitWrite,
   unlink,
   visitEntity,
@@ -32,7 +31,6 @@ import {
   type JobLinkSets,
   type LinkRow,
   type MiniBoard,
-  type SuggestionPage,
   type Thread,
   type Reached,
 } from "../../ipc/entity";
@@ -60,7 +58,6 @@ export interface JobPorts {
   entityThread: (entityId: string) => Promise<Thread>;
   createLink: (fromId: string, toId: string, relation?: string, note?: string) => Promise<LinkRow>;
   unlink: (linkId: string) => Promise<void>;
-  roomSuggestions: (sources: string[], ctx: string | null, limit: number) => Promise<SuggestionPage>;
   /** What *Link to…* searches with: the launcher's own reads. */
   search: SessionPorts["search"];
   launcherHome: SessionPorts["launcherHome"];
@@ -123,7 +120,6 @@ export const bridgePorts: JobPorts = {
   entityThread: (entityId) => entityThread(entityId),
   createLink: (fromId, toId, relation, note) => createLink(fromId, toId, relation, note),
   unlink: (linkId) => unlink(linkId),
-  roomSuggestions: (sources, ctx, limit) => roomSuggestions(sources, ctx, limit),
   search: (query) => search(query),
   launcherHome: () => launcherHome(),
   jobReach: (entityId) => jobReach(entityId),

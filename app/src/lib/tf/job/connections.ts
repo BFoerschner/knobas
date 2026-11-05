@@ -1,12 +1,12 @@
 /**
  * The Connections drawer, pure (#820, R-4.3, R-6.2): what *Linked on KEY*
- * lists, what the button counts, and which proposals are this ticket's.
+ * lists and what the button counts.
  *
  * A job's connections are the links drawn on its ticket, then one group per
  * link set that applies and one for the parent (#867, R-6.2), read by
  * `job_link_sets`; a set's rows hidden on this ticket go under *Hidden on KEY*.
  */
-import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow, SuggestionEntry } from "../../ipc/entity";
+import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 import { kindRegistry } from "../../shell/kind-registry.svelte";
 import { entityAddress } from "../address";
@@ -47,14 +47,6 @@ export function linkedOn(detail: Pick<EntityDetail, "links">): LinkEntry[] {
 export function filterLinks(links: readonly LinkEntry[], text: string): LinkEntry[] {
   return links.filter((entry) => matchesAll(`${entry.other.title} ${sectionOf(entry.other.kind)}`, text));
 }
-
-/** The proposals with this ticket at one end: what *N proposed* counts and *Judge them* opens. */
-export function proposalsFor(rows: readonly SuggestionEntry[], entityId: string): SuggestionEntry[] {
-  return rows.filter((row) => row.link.from_id === entityId || row.link.to_id === entityId);
-}
-
-/** How many proposals a ticket's room is asked for: enough that one ticket's are all there. */
-export const PROPOSAL_LIMIT = 200;
 
 /**
  * Why a set applies, in prototype-6's words (its `viaLabel`): "via epic

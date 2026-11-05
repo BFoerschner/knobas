@@ -48,14 +48,13 @@ const PAGES = [
   sectionPage("inbox"),
   sectionPage("builds", "ci"),
   sectionPage("docs"),
-  sectionPage("deps"),
+  sectionPage("settings"),
   sectionPage("monitors"),
   sectionPage("sets"),
-  sectionPage("review"),
   sectionPage("time"),
 ];
 
-const SIX = ["#/inbox", "#/builds", "#/docs", "#/deps", "#/monitors", "#/sets"];
+const SIX = ["#/inbox", "#/builds", "#/docs", "#/settings", "#/monitors", "#/sets"];
 
 beforeEach(() => {
   log = { mounts: [], reads: [] };
@@ -120,7 +119,7 @@ test("visiting six pages and going back to the second shows it without remountin
 });
 
 test("the first page visited is dropped past the cap and remounts when revisited", () => {
-  for (const hash of [...SIX, "#/review"]) go(hash);
+  for (const hash of [...SIX, "#/time"]) go(hash);
   expect(held()).not.toContain("inbox");
   go("#/inbox");
   expect(count(log.mounts, "inbox")).toBe(2);
@@ -142,7 +141,7 @@ test("lowering Pages kept open drops the hidden pages down to it at once", () =>
   expect(held()).toHaveLength(6);
   setting.set(2);
   flushSync();
-  expect(held()?.sort()).toEqual(["deps", "monitors", "sets"]);
+  expect(held()?.sort()).toEqual(["monitors", "sets", "settings"]);
   expect(shownPages()).toEqual(["sets"]);
 });
 

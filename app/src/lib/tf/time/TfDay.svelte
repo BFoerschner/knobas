@@ -421,9 +421,9 @@
    * *Delete block* (#1429): the block leaves the day at once and the delete is
    * held for the toast's life, then sent; *Undo* cancels a write that never
    * happened, so the block keeps its id, its context and its worklog mark (the
-   * #835 pattern). The timer outlives the view, as the Proposed links view's
-   * do, so leaving the day does not lose the delete; closing the window inside
-   * those seconds does, and the block is simply there next time.
+   * #835 pattern). The timer outlives the view, so leaving the day does not lose
+   * the delete; closing the window inside those seconds does, and the block is
+   * simply there next time.
    */
   function remove() {
     const current = dialog;

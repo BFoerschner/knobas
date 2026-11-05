@@ -27,7 +27,7 @@
  * With no opener, the structural parent is `parentOf`'s: a run's is
  * Builds, a pull request's or a repository's Code, a commit's its
  * repository's page, a doc page's Docs, an asset's or a route's
- * Dependencies, a ticket page's Tickets, and anything else inside a section that section's top page.
+ * Monitors, a ticket page's Tickets, and anything else inside a section that section's top page.
  * An item's page and a note's page have no parent, so rung 8 leaves them
  * where they are. `Esc` never reads "the job you were last in" (#2228); a
  * key that sometimes does nothing is what makes the others safe to press.

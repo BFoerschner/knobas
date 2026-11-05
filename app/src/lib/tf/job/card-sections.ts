@@ -6,9 +6,9 @@
  * has answered and no row is left, the card says *Nothing connected yet.*
  *
  * Pressing a section row opens that section's view on *This job* narrowed to
- * the ticket, chosen or not (`scoped.svelte.ts`); Assets opens the ticket's
- * own Dependencies opening, which already is; Sub-tasks writes `under:<key>`
- * in the Tickets view's search line.
+ * the ticket, chosen or not (`scoped.svelte.ts`); Assets opens the asset tree
+ * at the ticket's first asset; Sub-tasks writes `under:<key>` in the Tickets
+ * view's search line.
  */
 import type { EntityRow } from "../../ipc/entity";
 import { sessionFilter } from "../filter/filter-state.svelte";
@@ -69,7 +69,6 @@ export function rollupWords(rollup: Rollup): string {
 }
 
 export function cardSections(read: CardReads): CardTable {
-  const key = keyOf(read.entityId);
   const rows: CardSection[] = [];
   if (read.subtasks !== null && read.subtasks.total > 0) {
     const { total, open } = read.subtasks;
@@ -89,7 +88,7 @@ export function cardSections(read: CardReads): CardTable {
   if (read.builds !== null) section("Builds", read.builds.length, buildsRollup(read.builds), sectionHash("builds"), "builds");
   if (read.pages !== null) section("Docs", read.pages.length, pagesRollup(read.pages), sectionHash("docs"), "docs");
   if (read.monitors !== null) section("Monitors", read.monitors.length, monitorsRollup(read.monitors), sectionHash("monitors"), "monitors");
-  if (read.assets !== null) section("Assets", read.assets.length, assetsRollup(read.assets), `#/deps/job/${encodeURIComponent(key)}`, null);
+  if (read.assets?.[0] !== undefined) section("Assets", read.assets.length, assetsRollup(read.assets), `#/asset/${encodeURIComponent(read.assets[0].id)}`, null);
   const settled = [read.subtasks, read.code, read.builds, read.pages, read.monitors, read.assets].every((slot) => slot !== null);
   return { rows, settled };
 }

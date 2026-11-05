@@ -26,7 +26,7 @@
     /** The section the address lights, or `null`. */
     current: Section | null;
     inbox: Pick<Inbox, "count">;
-    badges: Pick<Badges, "builds" | "monitors" | "proposals">;
+    badges: Pick<Badges, "builds" | "monitors">;
     timer: Pick<Timer, "current" | "elapsed">;
     onsearch: () => void;
     /** Stop the timer into the worklog draft, or start one: the shell's verb. */
@@ -43,9 +43,7 @@
           ? badges.builds
           : section === "monitors"
             ? badges.monitors
-            : section === "review"
-              ? badges.proposals
-              : null;
+            : null;
     if (n === null || n <= 0) return null;
     return { n, err: section === "builds" || section === "monitors" };
   }

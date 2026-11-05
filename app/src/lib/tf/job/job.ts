@@ -227,7 +227,7 @@ export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly
  * commit keep addresses of their own, which send the reader on to the
  * repository page that draws them (#1440). A kind with no view
  * of its own opens the section that lists it: a Jira view or a saved view its
- * ticket view, a pipeline Builds at itself, a link set its page, a route Dependencies' asset tree, a note its
+ * ticket view, a pipeline Builds at itself, a link set its page, a route the asset tree, a note its
  * own page (`#/note/<id>`, #1504, which sends the reader to Settings › Notes
  * while notes hide, D10) or, titled by the standup protocol rule, Time ›
  * Standup at its date, anything else its item page, `#/item/<id>`, which draws the source's block

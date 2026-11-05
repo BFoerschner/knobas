@@ -23,8 +23,7 @@
   - **Files changed**: `TfPrFiles` (#842), which reads the deferred *Files*
     section when the tab opens.
   - **Commits**: the pull request's commits; one the mirror holds opens its
-    diff on the repository page, and one with a proposed link says *proposed
-    link, judge it*, which opens the proposal.
+    diff on the repository page.
 
   Everything is the source's view of the pull request (`entity_view`), read
   once per pull request (its *Files* once more, when that tab opens); the
@@ -39,7 +38,6 @@
     EntityFilter,
     EntityPage,
     SourceView,
-    SuggestionPage,
     UrlMatch,
   } from "../../ipc/entity";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
@@ -52,7 +50,6 @@
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
-    roomSuggestions: (sources: string[], ctx: string | null, limit: number) => Promise<SuggestionPage>;
     /** A check's link, to the run the mirror holds; never a pasted text. */
     resolveUrl: (url: string) => Promise<UrlMatch | null>;
     listSources: () => Promise<SourceFacts[]>;
@@ -78,7 +75,6 @@
     listEntities,
     prViewedFiles,
     resolveUrl,
-    roomSuggestions,
     setPrFileViewed,
     submitWrite,
     type EntityRow,
@@ -137,7 +133,6 @@
       entityView: (entityId, section) => entityView(entityId, section),
       listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
       entityCheckout: (entityId) => entityCheckout(entityId),
-      roomSuggestions: (sources, ctx, limit) => roomSuggestions(sources, ctx, limit),
       resolveUrl: (url) => resolveUrl(url),
       listSources: () => listSources(),
       submitWrite: (payload) => submitWrite(payload),
@@ -162,8 +157,6 @@
 
   /** How many repositories one read asks for: a source with more is read on with `offset` (#1825). */
   const LIMIT = 1000;
-  /** The proposals one read answers: `room_suggestions` takes no offset and answers at most 500 (`ROW_CEILING`, #1643), as many as Review reads. */
-  const PROPOSALS = 500;
 
   const route = $derived(readPrRoute(rest));
   const prId = $derived(route.prId);
@@ -181,8 +174,6 @@
   let me = $state<string | null>(null);
   /** Each check's run, by its link, once the mirror answered. */
   let runs = $state<Record<string, UrlMatch>>({});
-  /** The proposal waiting on each commit, by the commit's entity id. */
-  let proposals = $state<Record<string, string>>({});
   /** The header's *Refresh* or *Sync now* (#2107). */
   const refresh = createDetailRefresh(untrack(() => ports.refresh));
 
@@ -199,7 +190,6 @@
     mine = false;
     me = null;
     runs = {};
-    proposals = {};
     untrack(() => refresh.reset());
     ports.getEntity(id).then(
       (found) => {
@@ -220,17 +210,6 @@
       },
     );
     readView(id, () => live);
-    ports.roomSuggestions([], null, PROPOSALS).then(
-      (page) => {
-        if (!live) return;
-        const found: Record<string, string> = {};
-        for (const entry of page.rows) {
-          for (const end of [entry.from, entry.to]) if (end.kind === "commit") found[end.entity_id] ??= entry.link.id;
-        }
-        proposals = found;
-      },
-      () => {},
-    );
     return () => {
       live = false;
     };
@@ -769,17 +748,12 @@
                 <table class="tf-tbl tf-rcommits">
                   <tbody>
                     {#each part.commits as row, n (n)}
-                      {@const proposal = row.entity_id === null ? undefined : proposals[row.entity_id]}
                       {@const opens = row.entity_id !== null && repo !== null}
                       <tr class:tf-row={opens} onclick={(event) => openCommit(event, row)}>
                         <td class="tf-mono"
                           >{#if opens}<a href={commitHash(repo!.entity_id, row.entity_id!)}>{row.chip ?? ""}</a>{:else}{row.chip ?? ""}{/if}</td
                         >
-                        <td class:tf-dim={row.chip === null}
-                          >{row.title}{#if proposal !== undefined}{" "}<a class="tf-chip tf-info" href="#/review/{encodeURIComponent(proposal)}"
-                              >proposed link, judge it</a
-                            >{/if}</td
-                        >
+                        <td class:tf-dim={row.chip === null}>{row.title}</td>
                         <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
                       </tr>
                     {/each}

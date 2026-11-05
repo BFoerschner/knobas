@@ -7,11 +7,10 @@
  * highlight can be tested as a string.
  *
  * Prototype-6 has more first segments than nav entries: a pull request lives
- * under Code, a run under Builds, a page under Docs, an asset under
- * Dependencies. {@link SECTION_OF} is that mapping, copied from the
- * prototype's `renderNav`, so the nav lights the place a deep address belongs
- * to. `#/map` and `#/assets` are the retired global map and asset page (D13);
- * they still belong to Dependencies, which took their places.
+ * under Code, a run under Builds, a page under Docs. {@link SECTION_OF} is that
+ * mapping, copied from the prototype's `renderNav`, so the nav lights the place
+ * a deep address belongs to. The asset tree sits under Monitors, which links to
+ * it, since Dependencies went (`docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md`).
  */
 import { repoHash } from "./repo/repo";
 
@@ -23,10 +22,8 @@ export type Section =
   | "code"
   | "builds"
   | "docs"
-  | "deps"
   | "monitors"
   | "sets"
-  | "review"
   | "time"
   | "settings";
 
@@ -38,10 +35,8 @@ export const SECTION_NAME: Record<Section, string> = {
   code: "Code",
   builds: "Builds",
   docs: "Docs",
-  deps: "Dependencies",
   monitors: "Monitors",
   sets: "Link sets",
-  review: "Proposed links",
   time: "Time",
   settings: "Settings",
 };
@@ -60,7 +55,6 @@ export const HEAD_NAME: Readonly<Record<string, string>> = {
   assets: "Asset tree",
   asset: "Asset",
   route: "Route",
-  map: "Map",
   branch: "Branch",
   commit: "Commit",
   diff: "Diff",
@@ -76,10 +70,8 @@ export const NAV: readonly Exclude<Section, "job">[] = [
   "code",
   "builds",
   "docs",
-  "deps",
   "monitors",
   "sets",
-  "review",
   "time",
 ];
 
@@ -101,16 +93,13 @@ const SECTION_OF: Record<string, Section> = {
   build: "builds",
   docs: "docs",
   page: "docs",
-  deps: "deps",
-  assets: "deps",
-  asset: "deps",
-  map: "deps",
-  // A route's address (#432) opens the asset tree at the asset exposing it,
-  // which is Dependencies' *Asset tree* (#871).
-  route: "deps",
   monitors: "monitors",
+  // The asset tree (#871), which Monitors links to. A route's address (#432)
+  // opens it at the asset exposing the route.
+  assets: "monitors",
+  asset: "monitors",
+  route: "monitors",
   sets: "sets",
-  review: "review",
   time: "time",
   settings: "settings",
 };
@@ -247,7 +236,7 @@ export function isTopPage(route: TfRoute): boolean {
  * - a pull request or a repository, any tab of it → Code;
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → Dependencies;
+ * - a doc page → Docs; an asset or a route → Monitors;
  * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the

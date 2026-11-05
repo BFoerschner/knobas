@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { jobHash, NAV, parseTfHash, sectionOf, ticketHash } from "./route";
+import { jobHash, NAV, parentOf, parseTfHash, sectionOf, ticketHash } from "./route";
 
 test("the empty address is Tickets, as in prototype-6", () => {
   expect(parseTfHash("")).toEqual({ view: "tickets", rest: [] });
@@ -18,8 +18,6 @@ test("a deep address lights the section it belongs to", () => {
   expect(sectionOf(parseTfHash("#/pr/139"))).toBe("code");
   expect(sectionOf(parseTfHash("#/build/payout/1187"))).toBe("builds");
   expect(sectionOf(parseTfHash("#/page/4711"))).toBe("docs");
-  expect(sectionOf(parseTfHash("#/asset/vm-pay-01"))).toBe("deps");
-  expect(sectionOf(parseTfHash("#/review"))).toBe("review");
   expect(sectionOf(parseTfHash("#/settings/source/jira"))).toBe("settings");
 });
 
@@ -27,6 +25,21 @@ test("a space's address keeps its segment whole, with or without a source (#1455
   const docs = { view: "full", section: "docs", head: "docs" };
   expect(parseTfHash("#/docs/space/ENG")).toEqual({ ...docs, rest: ["space", "ENG"] });
   expect(parseTfHash("#/docs/space/wiki%3AENG")).toEqual({ ...docs, rest: ["space", "wiki:ENG"] });
+});
+
+test("the asset tree's addresses sit under Monitors, its parent page (2026-11-05)", () => {
+  for (const hash of ["#/assets", "#/assets/tree", "#/asset/vm-pay-01", "#/route/route:payouts"]) {
+    expect(sectionOf(parseTfHash(hash)), hash).toBe("monitors");
+    expect(parentOf(parseTfHash(hash)), hash).toBe("#/monitors");
+  }
+});
+
+test("Dependencies and Proposed links have no address and no nav entry (2026-11-05)", () => {
+  for (const hash of ["#/deps", "#/deps/job/PAY-231", "#/map", "#/review", "#/review/link%3A1"]) {
+    expect(parseTfHash(hash), hash).toEqual({ view: "unknown", hash });
+    expect(sectionOf(parseTfHash(hash)), hash).toBeNull();
+  }
+  expect(NAV).toEqual(["tickets", "inbox", "code", "builds", "docs", "monitors", "sets", "time"]);
 });
 
 test("a rooms-UI address is unknown here, not Tickets", () => {

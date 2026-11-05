@@ -136,7 +136,6 @@
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
-  import { deleteConfirm } from "../tf/deps/asset-edit";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import CreateDialog from "./CreateDialog.svelte";
   import ImportDialog from "./ImportDialog.svelte";
@@ -144,6 +143,7 @@
   import MoveDialog from "./MoveDialog.svelte";
   import RouteDialog from "./RouteDialog.svelte";
   import {
+    deleteConfirm,
     draftOf,
     inputTypeFor,
     kindFor,
@@ -2593,8 +2593,8 @@
   <TfDialog closeButton title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
     {#snippet body()}
       <!--
-        The Dependencies editor's own sentence (#1463, R-11.19a), not a copy:
-        links stay marked deleted, the routes landing on it are counted, and
+        `editing.ts`' sentence (#1463, R-11.19a): links stay marked deleted,
+        the routes landing on it are counted, and
         the history, which the backend keeps, goes unmentioned.
       -->
       <p class="ask">{ask}</p>

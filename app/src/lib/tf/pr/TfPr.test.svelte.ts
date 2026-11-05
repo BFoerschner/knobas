@@ -2,7 +2,7 @@
  * The pull request page (#841, R-8.15, R-8.16, R-8.20), mounted over stand-in
  * reads: the header and its toolbar, the tabs and their counts, Overview with
  * its checks and *Ready to merge?*, Conversation and its comment box, and
- * Commits with a proposed link. What the source's view holds is
+ * Commits. What the source's view holds is
  * `knobas-source-gitea`'s (`view/pr.rs`, its tests and `gitea-live`); here
  * it is a stand-in shaped like it.
  */
@@ -15,7 +15,6 @@ import type {
   EntityRow,
   Fact,
   SourceView,
-  SuggestionPage,
   ViewAction,
   ViewRow,
 } from "../../ipc/entity";
@@ -189,18 +188,6 @@ const CLONED: CheckoutView = {
   tree: { status: "read", branch: "feature/PAY-231-sepa-retry", head: null, upstream: null, ahead: 0, behind: 0, changed: 1, untracked: 0, conflicted: 0 },
 };
 
-const SUGGESTIONS: SuggestionPage = {
-  rows: [
-    {
-      link: { id: "link:7", from_id: C2, to_id: "jira:PAY-231" } as SuggestionPage["rows"][number]["link"],
-      from: { entity_id: C2, kind: "commit", title: "PAY-231 backoff jitter", deleted_at: null },
-      to: { entity_id: "jira:PAY-231", kind: "ticket", title: "Retry", deleted_at: null },
-    },
-  ],
-  total: 1,
-  more: [],
-};
-
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let writes: WriteOpPayload[];
@@ -229,7 +216,6 @@ function ports(over: Partial<PrPorts> & { pr?: SourceView; author?: string; chec
     entityView: async () => over.pr ?? prView(),
     listEntities: async () => ({ rows: [row(REPO, "repo", "tidewater/payout-service"), row("gitea:tidewater/ledger", "repo", "tidewater/ledger")], total: 2 }) as never,
     entityCheckout: async () => over.checkout ?? CLONED,
-    roomSuggestions: async () => SUGGESTIONS,
     resolveUrl: async (url) => (url === RUN_URL ? { entity_id: RUN, kind: "build" } : null),
     listSources: async () => [{ id: "gitea", config: { username: "mara" } }] as never,
     submitWrite: async (payload) => {
@@ -605,7 +591,7 @@ test("a muted line in Commits is drawn as a line, never as a commit; the list af
   expect(text(".tf-prline")).toBe("Commits signed by an unknown key are left out.");
   expect([...target.querySelectorAll(".tf-rcommits tr")].map(cells)).toEqual([
     "c90d11e4a7 | PAY-231: jitter in backoff | mara · 2h",
-    "a41f2c08d3 | PAY-231 backoff jitter proposed link, judge it | mara · 6h",
+    "a41f2c08d3 | PAY-231 backoff jitter | mara · 6h",
   ]);
   if (view) unmount(view);
   view = null;
@@ -631,15 +617,14 @@ test("a source that offers no comment draws no comment box", async () => {
   expect(target.querySelector(".tf-compose")).toBeNull();
 });
 
-test("Commits: each opens its diff on the repository page; one with a proposed link says judge it", async () => {
+test("Commits: each opens its diff on the repository page", async () => {
   await draw([PR, "commits"]);
   const rows = [...target.querySelectorAll(".tf-rcommits tr")];
   expect(rows.map(cells)).toEqual([
     "c90d11e4a7 | PAY-231: jitter in backoff | mara · 2h",
-    "a41f2c08d3 | PAY-231 backoff jitter proposed link, judge it | mara · 6h",
+    "a41f2c08d3 | PAY-231 backoff jitter | mara · 6h",
   ]);
   expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/commits/${encodeURIComponent(C1)}`);
-  expect(rows[1]!.querySelector("a.tf-chip")!.getAttribute("href")).toBe("#/review/link%3A7");
   (rows[0]!.querySelector("td:nth-child(2)") as HTMLElement).click();
   expect(location.hash).toBe(`#/repo/${encodeURIComponent(REPO)}/commits/${encodeURIComponent(C1)}`);
 });

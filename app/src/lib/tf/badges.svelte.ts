@@ -9,8 +9,6 @@
  *   command, and no second definition of *failing*.
  * - **Monitors**: monitors down, off `monitor_roster`, the Monitors tab's own
  *   read. A paused (tombstoned) monitor is not down; it is not watching.
- * - **Proposed links**: undecided proposals, `room_suggestions` over every
- *   source with no context, whose `total` is the count before its `limit`.
  *
  * Each is `null` until its read answers and stays at its last answer when a
  * later read fails: a badge that dropped to nothing on a failed read would
@@ -24,24 +22,22 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS } from "../ipc";
 import { monitorRoster, type MonitorRow } from "../ipc/assets";
-import { listEntities, roomSuggestions, type EntityPage } from "../ipc/entity";
+import { listEntities, type EntityPage } from "../ipc/entity";
 import type { SourceSyncStatus } from "../ipc/sources";
 
 export interface BadgePorts {
   failingBuilds: () => Promise<number>;
   monitorsDown: () => Promise<number>;
-  proposals: () => Promise<number>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
 }
 
 export interface Badges {
   readonly builds: number | null;
   readonly monitors: number | null;
-  readonly proposals: number | null;
   refresh(): Promise<void>;
   /** Subscribe to the events that move the counts. Returns the teardown. */
   start(): () => void;
-  /** Tests only: unsubscribe and forget the three counts (#1743). */
+  /** Tests only: unsubscribe and forget the counts (#1743). */
   reset(): void;
 }
 
@@ -73,15 +69,13 @@ const REAL_PORTS: BadgePorts = {
       0,
     ).then(failingIn),
   monitorsDown: () => monitorRoster().then(downIn),
-  proposals: () => roomSuggestions([], null, 1).then((page) => page.total),
   listen: (event, handler) => tauriListen(event, handler),
 };
 
 export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
-  const state = $state<{ builds: number | null; monitors: number | null; proposals: number | null }>({
+  const state = $state<{ builds: number | null; monitors: number | null }>({
     builds: null,
     monitors: null,
-    proposals: null,
   });
   let live = false;
   let stopLive: (() => void) | null = null;
@@ -98,7 +92,6 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
     await Promise.all([
       read("builds", ports.failingBuilds),
       read("monitors", ports.monitorsDown),
-      read("proposals", ports.proposals),
     ]);
   }
 
@@ -108,9 +101,6 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
     },
     get monitors() {
       return state.monitors;
-    },
-    get proposals() {
-      return state.proposals;
     },
     refresh,
     start() {
@@ -146,7 +136,6 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
       stopLive = null;
       state.builds = null;
       state.monitors = null;
-      state.proposals = null;
     },
   };
 }

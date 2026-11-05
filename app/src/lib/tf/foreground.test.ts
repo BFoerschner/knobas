@@ -57,7 +57,6 @@ test("a list, a space or the tree with nothing selected is nothing, never the la
     "#/docs/space/wiki%3AENG",
     "#/assets",
     "#/route/route%3Aget-payouts",
-    "#/deps",
     "#/code",
     "#/settings/notes",
     "#/nowhere/at-all",
