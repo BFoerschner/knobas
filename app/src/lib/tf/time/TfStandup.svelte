@@ -37,6 +37,7 @@
   without one.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { onDestroy, untrack } from "svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
 
@@ -661,11 +662,13 @@
 
       <div class="tf-pane-h">Who was there</div>
       <div class="tf-su-people">
-        {#each known as name (name)}
-          <button class="tf-su-val" aria-pressed={form.attendees.includes(name)} onclick={() => toggle(name)}>
-            {name}
-          </button>
-        {/each}
+        <div class="tf-fchips" role="group" aria-label="Who was there">
+          {#each known as name (name)}
+            <button type="button" aria-pressed={form.attendees.includes(name)} onclick={() => toggle(name)}>
+              {name}
+            </button>
+          {/each}
+        </div>
         {#if adding === "person"}
           <input
             class="tf-su-add"
@@ -699,10 +702,10 @@
           {#if made === null}
             <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket</button>
           {:else if made.ticket === null}
-            <span class="tf-chip tf-info">{made.state}</span>
+            <TfStateChip text={made.state} tone="info" />
           {:else}
             <a class="tf-mono" href={entityAddress("ticket", made.ticket)}>{keyOf(made.ticket)}</a>
-            {#if made.status}<span class="tf-chip">{made.status}</span>{/if}
+            {#if made.status}<TfStateChip text={made.status} />{/if}
           {/if}
         </div>
       {/each}

@@ -169,7 +169,7 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   expect(rows[1]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
   expect([...target.querySelectorAll("thead th")].map(text).slice(0, 3)).toEqual(["Repository", "Team", "Language"]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter by name, team or language",
+    "Filter repositories",
   );
 });
 
@@ -203,13 +203,13 @@ test("Pull requests are grouped in the attention read's order, then merged or cl
   ]);
   const rows = [...target.querySelectorAll("tbody tr")].map(cells);
   expect(rows).toEqual([
-    ["#144", `Add payout CSV export${PAYOUT}, tom`, "open", "", "today 10:20"],
-    ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "open", "PAY-231", "today 10:20"],
-    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "merged", "", "today 10:20"],
-    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "open", "", "2026-08-10"],
+    ["#144", `Add payout CSV export${PAYOUT}, tom`, "Open", "", "today 10:20"],
+    ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "Open", "PAY-231", "today 10:20"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "Merged", "", "today 10:20"],
+    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "2026-08-10"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter by title, repo, author or number",
+    "Filter PRs",
   );
   const attention = reads.find((filter) => filter.order === "attention");
   expect(attention?.kinds).toEqual(["pr"]);
@@ -221,7 +221,7 @@ test("a pull request whose state word has no tone draws its word in the neutral 
     filter.kinds.includes("repo") ? page(REPOS) : filter.kinds.includes("branch") ? page([]) : page([draft]);
   await draw(["prs"], null, ports({ listEntities }));
 
-  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "draft");
+  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "Draft");
   expect(chip?.getAttribute("class")?.trim()).toBe("tf-chip");
 });
 

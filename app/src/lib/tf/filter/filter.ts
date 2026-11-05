@@ -72,7 +72,7 @@ export interface FilterScope {
 export interface FilterConfig {
   /** The view this bar filters. State is kept per id for the session (R-2.6). */
   id: string;
-  /** Names what the field filters: "Filter by key, summary, epic or person". */
+  /** Names what the field filters: "Filter tickets", short enough to fit the field at its narrowest, 140 px. */
   placeholder: string;
   /** What the count counts, plural: "tickets". */
   noun: string;

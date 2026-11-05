@@ -252,7 +252,7 @@ const buttons = () =>
 test("the header names the pull request, its state, head into base and the reader as its author", async () => {
   await draw([PR]);
   expect(text("h1")).toBe("PR #142 SEPA retry with exponential backoff");
-  expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by you");
+  expect(text(".tf-fhead .tf-sub")).toBe("Open feature/PAY-231-sepa-retry into main, by you");
   const crumbs = [...target.querySelectorAll(".tf-crumbs a:not(.tf-esc)")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(crumbs, "the path, with no job's chip (#2228)").toEqual([
     ["Code", "#/code"],
@@ -267,7 +267,7 @@ test("somebody else's pull request names its author and offers Review…", async
   const facts = theirs.sections[0]!.blocks[0]!;
   if (facts.type === "facts") facts.facts[1] = fact("Author", "jonas");
   await draw([PR], ports({ author: "jonas", pr: theirs }));
-  expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by jonas");
+  expect(text(".tf-fhead .tf-sub")).toBe("Open feature/PAY-231-sepa-retry into main, by jonas");
   expect(buttons()).toEqual(["Merge…", "Review…", "Edit…"]);
   // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
   const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
@@ -427,7 +427,7 @@ test("Edit sends only what changed, and the header says an edit is queued", asyn
   await draw([PR]);
   button("Edit…")!.click();
   flushSync();
-  const title = document.querySelector<HTMLInputElement>(".tf-pra input[type=text]")!;
+  const title = document.querySelector<HTMLInputElement>(".tf-formgrid input[type=text]")!;
   expect(title.value).toBe("SEPA retry");
   title.value = "SEPA retry with backoff";
   title.dispatchEvent(new Event("input", { bubbles: true }));
@@ -474,7 +474,7 @@ test("Update branch queues the style picked", async () => {
   await draw([PR]);
   button("Update branch…")!.click();
   flushSync();
-  const rebase = document.querySelector<HTMLInputElement>(".tf-pra input[value=rebase]")!;
+  const rebase = document.querySelector<HTMLInputElement>(".tf-formgrid input[value=rebase]")!;
   rebase.click();
   flushSync();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Update branch")!.click();
@@ -499,8 +499,8 @@ test("a source action draws the dialog its source declares and queues SourceActi
   flushSync();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(dialog.textContent).toContain("Stamp this pull request for a release?");
-  document.querySelector<HTMLInputElement>(".tf-pra input[value=stable]")!.click();
-  const note = document.querySelector<HTMLInputElement>(".tf-pra input[type=text]")!;
+  document.querySelector<HTMLInputElement>(".tf-formgrid input[value=stable]")!.click();
+  const note = document.querySelector<HTMLInputElement>(".tf-formgrid input[type=text]")!;
   note.value = "for 2.0";
   note.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
@@ -525,7 +525,7 @@ test("a source action the source draws disabled says why and opens nothing", asy
 test("Conversation: each entry's who, when and verdict, then a comment queued and drawn at once", async () => {
   await draw([PR, "conversation"]);
   const messages = () => [...target.querySelectorAll(".tf-convo .tf-msg")].map((m) => m.textContent?.replace(/\s+/g, " ").trim());
-  expect(messages()).toEqual(["JO jonas2026-08-22 09:30 commented Should the jitter be bounded?", "MA You2026-08-22 10:20 Bounded to ±10 %."]);
+  expect(messages()).toEqual(["JO jonas2026-08-22 09:30 Commented Should the jitter be bounded?", "MA You2026-08-22 10:20 Bounded to ±10 %."]);
   const box = target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
   expect(box.placeholder).toBe("Comment on PR #142");
   // In the page body, so small (#2238 Controls).
@@ -536,7 +536,7 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   button("Comment")!.click();
   await settle();
   expect(writes).toEqual([{ Comment: { entity: PR, body: "Thanks, looks good." } }]);
-  expect(messages()[2]).toBe("MA Youqueued Thanks, looks good.");
+  expect(messages()[2]).toBe("MA YouQueued Thanks, looks good.");
   expect(box.value).toBe("");
   expect(toasts.items.at(-1)!.text).toBe("Queued: comment on PR #142.");
   expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
@@ -560,7 +560,7 @@ test("Conversation opens on the source's line where it cannot read the comments,
   await draw([PR, "conversation"], ports({ pr }));
   const convo = [...target.querySelectorAll(".tf-convo > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
   expect(convo[0]).toBe(UNREAD);
-  expect(convo[1]).toBe("PR priya.nair2026-08-22 09:30 approved");
+  expect(convo[1]).toBe("PR priya.nair2026-08-22 09:30 Approved");
   expect(target.querySelector(".tf-convo .tf-prline")!.classList.contains("tf-dim")).toBe(true);
 });
 
@@ -1014,14 +1014,14 @@ const chips = () => [...target.querySelectorAll(".tf-fhead .tf-sub .tf-chip")].m
 test("a landed close drops its chip and the holds it drove; the source reopening it later does not bring the chip back", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
   await queueClose();
-  expect(chips()).toEqual(["open", "close queued"]);
+  expect(chips()).toEqual(["Open", "close queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
-  expect(chips()).toEqual(["closed"]);
+  expect(chips()).toEqual(["Closed"]);
   expect(holdOf("Reopen…")).toEqual([null, ""]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
-  expect(chips()).toEqual(["open"]);
+  expect(chips()).toEqual(["Open"]);
   expect(holdOf("Merge…")).toEqual([null, ""]);
 });
 
@@ -1030,7 +1030,7 @@ test("a close the read still shows open keeps its chip and its holds", async () 
   await queueClose();
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
-  expect(chips()).toEqual(["open", "close queued"]);
+  expect(chips()).toEqual(["Open", "close queued"]);
   expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
 });
 
@@ -1045,10 +1045,10 @@ test("a landed merge drops its chip; an edit the queue has not sent keeps its ch
   dialogButton("Save changes").click();
   await settle();
   await queueMerge();
-  expect(chips()).toEqual(["open", "edit queued", "merge queued"]);
+  expect(chips()).toEqual(["Open", "edit queued", "merge queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT], "merged") }));
-  expect(chips()).toEqual(["merged", "edit queued"]);
+  expect(chips()).toEqual(["Merged", "edit queued"]);
 });
 
 test("a comment's mark goes once the conversation holds its words", async () => {
@@ -1085,7 +1085,7 @@ test("a close the queue refuses drops its chip and its holds, and says why", asy
   expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
   hear({ id: 31, state: "refused", detail: "403 Forbidden" } as never);
   flushSync();
-  expect(chips()).toEqual(["open"]);
+  expect(chips()).toEqual(["Open"]);
   expect(holdOf("Merge…")).toEqual([null, ""]);
   expect(toasts.items.at(-1)!.text).toBe("Close was refused: 403 Forbidden");
 });
@@ -1145,9 +1145,9 @@ test("a comment's echo says queued, then sent, and goes on the view's re-read th
   button("Comment")!.click();
   await settle();
   const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((c) => c.textContent?.trim());
-  expect(echoed()).toEqual(["queued"]);
+  expect(echoed()).toEqual(["Queued"]);
   sent(80);
-  expect(echoed()).toEqual(["sent"]);
+  expect(echoed()).toEqual(["Sent"]);
   read = withComment(prView(), "Jitter is bounded now.");
   await sync.refreshed(PR, 80);
   expect(echoed()).toEqual([]);
@@ -1200,13 +1200,13 @@ test("an edit says queued, then sent, and goes on the first live read asked once
   flushSync();
   dialogButton("Save changes").click();
   await settle();
-  expect(chips()).toEqual(["open", "edit queued"]);
+  expect(chips()).toEqual(["Open", "edit queued"]);
   await sync.ended("gitea"); // read while the edit is still open: not yet shown
-  expect(chips()).toEqual(["open", "edit queued"]);
+  expect(chips()).toEqual(["Open", "edit queued"]);
   sent(80);
-  expect(chips()).toEqual(["open", "edit sent"]);
+  expect(chips()).toEqual(["Open", "edit sent"]);
   await sync.ended("gitea");
-  expect(chips()).toEqual(["open"]);
+  expect(chips()).toEqual(["Open"]);
 });
 
 test("a review goes on the re-read of the refresh that followed it, even before the follow has heard it sent (#2103)", async () => {
@@ -1217,9 +1217,9 @@ test("a review goes on the re-read of the refresh that followed it, even before 
   flushSync();
   dialogButton("Submit review").click();
   await settle();
-  expect(chips()).toEqual(["open", "review queued"]);
+  expect(chips()).toEqual(["Open", "review queued"]);
   await sync.refreshed(PR, 80);
-  expect(chips()).toEqual(["open"]);
+  expect(chips()).toEqual(["Open"]);
 });
 
 test("a source action says queued, then sent, and goes on the re-read once sent (#2103)", async () => {
@@ -1231,11 +1231,11 @@ test("a source action says queued, then sent, and goes on the re-read once sent 
   flushSync();
   dialogButton("Stamp release").click();
   await settle();
-  expect(chips()).toEqual(["open", "stamp release queued"]);
+  expect(chips()).toEqual(["Open", "stamp release queued"]);
   sent(80);
-  expect(chips()).toEqual(["open", "stamp release sent"]);
+  expect(chips()).toEqual(["Open", "stamp release sent"]);
   await sync.refreshed(PR, 80);
-  expect(chips()).toEqual(["open"]);
+  expect(chips()).toEqual(["Open"]);
 });
 
 // -- Refresh (#2107) -----------------------------------------------------------

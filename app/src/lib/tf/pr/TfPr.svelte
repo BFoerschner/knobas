@@ -65,6 +65,7 @@
 </script>
 
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { untrack } from "svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
@@ -622,7 +623,7 @@
       <div>
         <h1>{name} {title}</h1>
         <div class="tf-sub">
-          {#if header.state !== null}<span class="tf-chip tf-{header.state.tone ?? 'muted'}">{header.state.text}</span>{/if}
+          {#if header.state !== null}<TfStateChip text={header.state.text} tone={header.state.tone ?? 'muted'} />{/if}
           {#each chips as chip (chip)}{" "}<span class="tf-chip tf-warn">{chip}</span>{/each}
           {#if header.head !== null}
             {" "}<span class="tf-mono">{header.head}</span>{#if header.base !== null}{" "}into <span class="tf-mono">{header.base}</span>{/if}{#if header.author !== null},{/if}
@@ -742,7 +743,7 @@
                   <div class="tf-msg-body">
                     <div class="tf-who">
                       <b>{own ? "You" : message.who}</b>{message.at}
-                      {#if message.verdict !== null}<span class="tf-chip tf-{message.verdict.tone ?? 'muted'}">{message.verdict.text}</span>{/if}
+                      {#if message.verdict !== null}<TfStateChip text={message.verdict.text} tone={message.verdict.tone ?? 'muted'} />{/if}
                     </div>
                     {#if message.body !== "" && message.markdown}<TfMarkdown text={message.body} />{:else if message.body !== ""}<p>{message.body}</p>{/if}
                   </div>
@@ -753,7 +754,7 @@
                 <article class="tf-msg tf-queued">
                   <span class="tf-av tf-me" aria-hidden="true">{initials(me)}</span>
                   <div class="tf-msg-body">
-                    <div class="tf-who"><b>You</b><span class="tf-chip tf-info">{echo.state}</span></div>
+                    <div class="tf-who"><b>You</b><TfStateChip text={echo.state} tone="info" /></div>
                     <p>{echo.text}</p>
                   </div>
                 </article>
@@ -865,7 +866,7 @@
                     <div class="tf-prit">
                       <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
                       <span class="tf-prgrow">{own ? "you" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim">{` · ${reviewer.note}`}</span>{/if}</span>
-                      <span class="tf-chip tf-{reviewer.tone ?? 'muted'}">{reviewer.state}</span>
+                      <TfStateChip text={reviewer.state} tone={reviewer.tone ?? 'muted'} />
                     </div>
                   {/each}
                   {#if waiting > 0}
@@ -873,7 +874,7 @@
                     <div class="tf-prit">
                       <span class="tf-av tf-me" aria-hidden="true">{initials(me ?? "you")}</span>
                       <span class="tf-prgrow">you <span class="tf-dim">· {waiting} pending {waiting === 1 ? "comment" : "comments"}</span></span>
-                      <span class="tf-chip tf-warn">Draft</span>
+                      <TfStateChip text="Draft" tone="warn" />
                     </div>
                   {/if}
                 </div>

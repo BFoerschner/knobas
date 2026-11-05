@@ -41,6 +41,7 @@
     button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel, secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
@@ -476,7 +477,7 @@
     <div>
       <h1>
         {pipeline.name} #{run.number ?? ""}
-        {#if run.state !== null}<span class={`tf-chip tf-run-chip ${chipTone(run)}`}>{chipWord(run)}</span>{/if}
+        {#if run.state !== null}<TfStateChip text={chipWord(run)} class={`tf-run-chip ${chipTone(run)}`} />{/if}
       </h1>
       <div class="tf-sub">
         {#if run.branch !== null}<span class="tf-mono">{run.branch}</span>{/if}{startedBy !== null ? `, started by ${startedBy}` : ""}{at !== null
@@ -616,7 +617,7 @@
                   <span class="tf-rend">
                     {#if artifact.meta !== null}<span class="tf-dim">{artifact.meta}</span>{/if}
                     {#if artifact.url !== null}
-                      <button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button>
+                      <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button></span></span>
                     {/if}
                   </span>
                 </div>

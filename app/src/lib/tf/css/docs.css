@@ -29,7 +29,6 @@
 .tf-rd-tree .tf-dl-queued { display: block; padding: 3px 8px; color: var(--muted); font-style: italic; }
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
-.tf-rd-main { overflow: auto; min-height: 0; }
 .tf-rd-sheet {
   display: grid; grid-template-columns: minmax(0, 1fr) 268px; column-gap: 56px; align-items: start;
   padding: 22px clamp(16px, 3vw, 48px) 90px;
@@ -50,9 +49,6 @@
 .tf-spc { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tf-spc-n { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-spc .tf-count { flex: none; }
-.tf-rd-main { scrollbar-gutter: stable; }
-.tf-dl-head .tf-seg { display: flex; }
-.tf-dl-head .tf-seg button { flex: 1; }
 .tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
@@ -61,6 +57,7 @@
    inside the sheet's own padding. The meta line under it closes the head with the rule. */
 .tf-fhead.tf-rd-head { display: flex; gap: 12px 20px; align-items: flex-start; padding: 0; margin: 8px 0 10px; flex-wrap: wrap; }
 .tf-fhead.tf-rd-head > .tf-acts { justify-content: flex-start; margin-left: 0; }
+.tf-fhead.tf-rd-head::after { content: none; }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
 /* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136). */
@@ -138,7 +135,7 @@
 }
 .tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
-.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
+.tf-ment { font-family: var(--sans); font-size: var(--t-sm); font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--mark); color: var(--ink); }
 /* A callout, the comments, a table and what the page belongs to are Archivo in the serif page: they take the interface's spacing back. */
 .tf-doc :is(.tf-callout, .tf-cmts) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(p, li, dd, dt) { letter-spacing: .006em; word-spacing: .06em; }

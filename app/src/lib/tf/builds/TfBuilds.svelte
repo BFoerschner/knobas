@@ -60,6 +60,7 @@
   import TfScope from "../filter/TfScope.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import TfBareHeader from "../TfBareHeader.svelte";
   import { flushSync, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
@@ -429,7 +430,7 @@
       </div>
     </div>
   </nav>
-  <section class="tf-bmain">
+  <TfScroller class="tf-bmain">
     {#if head === "build" && selected !== null && rest.length >= 2}
       <TfRun pipeline={selected} {rest} {job} runs={ports.runs} {crumbs} {sync} />
     {:else if head === "build"}
@@ -458,5 +459,5 @@
       {@render crumbs([{ name: "Builds" }])}
       {@render bare()}
     {/if}
-  </section>
+  </TfScroller>
 </div>

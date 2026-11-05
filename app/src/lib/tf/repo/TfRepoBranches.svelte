@@ -22,6 +22,7 @@
   event and a run's end, not only as the tab opens.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CodeFacts, ViewRow } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
@@ -242,24 +243,20 @@
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
         <tr>
           <td class="tf-mono"
-            ><Marked text={row.name} typed={filter.text} />{#if row.isDefault}{" "}<span class="tf-chip">default</span>{/if}{#if made.has(row.name)}{" "}<span
-                class="tf-chip tf-info">{made.get(row.name)}</span
-              >{/if}{#if gone !== null}{" "}<span class="tf-chip tf-info">delete {gone}</span>{/if}</td
+            ><Marked text={row.name} typed={filter.text} />{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<span class="tf-chip tf-info">delete {gone}</span>{/if}</td
           >
           <td
-            >{#if standing?.merged}<span class="tf-chip tf-ok">merged</span>{:else}{against(standing)}{/if}</td
+            >{#if standing?.merged}<TfStateChip text="merged" tone="ok" />{:else}{against(standing)}{/if}</td
           >
           <td
             >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
-                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<span class="tf-chip tf-{standing.pr.tone ?? 'info'}"
-                  >{standing.pr.state}</span
-                >{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
+                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
           <td>{row.author ?? ""}</td>
           <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
           <td class="tf-nowrap tf-racts"
-            >{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
+            ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
                   >Open PR</a
                 >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
                   type="button"
@@ -269,7 +266,7 @@
                   onclick={() => {
                     if (standing.deleteBlocked === null) deleting = row;
                   }}>Delete…</button
-                ></span>{/if}{/if}</td
+                ></span>{/if}{/if}</span></td
           >
         </tr>
       {/each}

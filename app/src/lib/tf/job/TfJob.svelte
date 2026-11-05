@@ -54,6 +54,7 @@
 -->
 <script lang="ts">
   import TfNothingHere from "../TfNothingHere.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import { onMount, untrack } from "svelte";
 
   import type { LinkEntry, LinkSetDetail, LinkSetRow } from "../../ipc/entity";
@@ -547,7 +548,7 @@
       {table}
       onlink={() => (drawer = true)}
     />
-    <section class="tf-work">
+    <TfScroller class="tf-work">
       <div class="tf-wbody">
         <div class="tf-tkread">
           <header class="tf-tkpagehead">
@@ -600,7 +601,7 @@
           </section>
         </div>
       </div>
-    </section>
+    </TfScroller>
   </div>
   </div>
   {#if drawer}

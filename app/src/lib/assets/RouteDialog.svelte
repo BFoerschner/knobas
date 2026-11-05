@@ -463,7 +463,7 @@
   /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
   .fld {
     display: grid;
-    grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr);
+    grid-template-columns: var(--tf-label) minmax(0, 1fr);
     column-gap: 12px;
     align-items: center;
   }
@@ -488,7 +488,7 @@
 
   .hint {
     margin-top: 6px;
-    font-size: 11px;
+    font-size: var(--t-2xs);
     color: var(--muted);
   }
 
@@ -504,7 +504,7 @@
     align-items: baseline;
     gap: 8px;
     margin: 0 0 6px;
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .lands .nm {
@@ -517,7 +517,7 @@
     align-items: baseline;
     gap: 4px;
     margin: 0 0 6px;
-    font-size: 11px;
+    font-size: var(--t-2xs);
     color: var(--muted);
   }
 
@@ -550,7 +550,7 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .opt:hover {
@@ -584,7 +584,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 </style>

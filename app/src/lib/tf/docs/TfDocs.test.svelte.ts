@@ -372,7 +372,7 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   const chip = doc.querySelector<HTMLAnchorElement>("a.tf-tchip")!;
   expect(chip.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
   expect(chip.textContent).toContain("On-call runbook outdated");
-  expect(chip.textContent).toContain("To Do");
+  expect(chip.textContent).toContain("To do");
   const mentions = [...doc.querySelectorAll(".tf-ment")];
   expect(mentions.map((m) => [m.textContent, m.classList.contains("tf-me")])).toEqual([
     ["@Mara", true],
@@ -1883,7 +1883,7 @@ test("Save section draws the queued text in place of the old, marked queued, unt
   await saveSection("Ask Priya.\n- or Jonas");
   expect(squash(section().querySelector(".tf-sec-queued"))).toBe("Ask Priya. - or Jonas");
   expect(section().querySelector(".tf-sec-queued")?.textContent).toContain("Ask Priya.\n- or Jonas");
-  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("queued");
+  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("Queued");
   expect(squash(section())).not.toContain("@Mara");
 
   // Read again at the same version: still on its way.
@@ -1909,7 +1909,7 @@ test("Edit section while a save is queued starts from the queued text", async ()
 test("a queued comment is drawn at the end of the list until the page holds it", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   await sendComment("Done.");
-  expect(queuedComments()).toEqual(["MA You queued Done."]);
+  expect(queuedComments()).toEqual(["MA You Queued Done."]);
   const all = [...target.querySelectorAll(".tf-cmts .tf-msg")];
   expect(all.at(-1)!.classList.contains("tf-queued")).toBe(true);
 
@@ -1925,7 +1925,7 @@ test("a queued comment drops once the read holds the comment its write was given
   // `submitWrite` answers write 1 (QUEUED); the settle stamped it with Confluence's id 360600.
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   await sendComment("X");
-  expect(queuedComments()).toEqual(["MA You queued X"]);
+  expect(queuedComments()).toEqual(["MA You Queued X"]);
 
   const stamped: DocPage["sent_comments"] = [{ write_id: QUEUED.id, comment_id: "360600" }];
   // Sent and named, not mirrored yet: somebody else's same words are not it.
@@ -1935,7 +1935,7 @@ test("a queued comment drops once the read holds the comment its write was given
     comments: [...RICH.comments, { id: "360599", author: "priya", author_name: "Priya Nair", at: "2026-10-25T09:00:00Z", blocks: [{ type: "paragraph", text: [text("X")] }] }],
   };
   await redraw(["confluence:2"], ports({ docsPage: vi.fn(async () => notYet) }));
-  expect(queuedComments()).toEqual(["MA You queued X"]);
+  expect(queuedComments()).toEqual(["MA You Queued X"]);
 
   // Edited to "meh" in Confluence before knobas read it back.
   const edited: DocPage = {
@@ -1964,7 +1964,7 @@ test("a created page is a muted row with no link under its parent in the tree, u
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   await createPage("Retry metrics", "## Dashboards");
   const rows = queuedPages();
-  expect(rows.map(squash)).toEqual(["Retry metrics queued"]);
+  expect(rows.map(squash)).toEqual(["Retry metrics Queued"]);
   expect(rows[0]!.querySelector("a")).toBeNull();
   const fold = rows[0]!.closest("details")!;
   expect(squash(fold.querySelector("summary"))).toBe("On-call handbook");
@@ -2300,10 +2300,10 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   const io = ports({ docsPage: vi.fn(async () => read), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 41 })), listen: sync.listen });
   await draw(["confluence:2"], io, follower);
   await sendComment("Done.");
-  expect(queuedComments()).toEqual(["MA You queued Done."]);
+  expect(queuedComments()).toEqual(["MA You Queued Done."]);
 
   sent(41);
-  expect(queuedComments()).toEqual(["MA You sent Done."]);
+  expect(queuedComments()).toEqual(["MA You Sent Done."]);
 
   read = {
     ...RICH,
@@ -2321,10 +2321,10 @@ test("a section edit's echo says queued, then sent, and goes once the refresh's 
   const io = ports({ docsPage: vi.fn(async () => read), docsEditSection: vi.fn(async () => ({ ...QUEUED, id: 42 })), listen: sync.listen });
   await draw(["confluence:2"], io, follower);
   await saveSection("Ask Priya.");
-  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("queued");
+  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("Queued");
 
   sent(42);
-  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("sent");
+  expect(squash(section().querySelector("h2 .tf-queued-mark"))).toBe("Sent");
   expect(squash(section().querySelector(".tf-sec-queued"))).toBe("Ask Priya.");
 
   // Another item's refresh reads nothing.
@@ -2350,10 +2350,10 @@ test("a new page's echo says queued, then sent, and goes once the refresh's tree
   });
   await draw(["confluence:2"], io, follower);
   await createPage("Retry metrics", "## Dashboards");
-  expect(queuedPages().map(squash)).toEqual(["Retry metrics queued"]);
+  expect(queuedPages().map(squash)).toEqual(["Retry metrics Queued"]);
 
   sent(43);
-  expect(queuedPages().map(squash)).toEqual(["Retry metrics sent"]);
+  expect(queuedPages().map(squash)).toEqual(["Retry metrics Sent"]);
 
   read = {
     ...TREE,

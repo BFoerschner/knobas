@@ -2,7 +2,7 @@
 /* prototype-6's `.fbody`: the tab's body beside a 300px side column. */
 .tf-cbody.tf-pr { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-pr .tf-side { display: flex; flex-direction: column; gap: 14px; }
-.tf-prready, .tf-prlocal { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
+.tf-prready, .tf-prlocal { padding: 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
 .tf-prready > span { display: flex; gap: 6px; align-items: baseline; }
 .tf-prlocal { gap: 6px; }
 .tf-prlocal-acts { display: flex; gap: var(--control-gap); }
@@ -13,16 +13,6 @@
 .tf-prline { margin: 0; font-size: var(--t-sm); }
 .tf-prdesc p { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
 .tf-dialog.tf-pr-dialog { width: min(620px, calc(100vw - 32px)); }
-/* The field's label on its left, on the dialog's one label column, as every short form has it. A sentence, a choice
-   and a tick take the whole row. */
-.tf-pra { display: grid; grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr); gap: 8px 12px; align-items: center; }
-.tf-pra > :is(p, fieldset, .tf-ck, .tf-banner, .tf-prready) { grid-column: 1 / -1; }
-.tf-pra > label:has(+ textarea) { align-self: start; padding-top: 6px; }
-.tf-pra input[type="text"], .tf-pra textarea {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink); font: inherit; width: 100%;
-}
-.tf-pra textarea { resize: vertical; }
-.tf-pra fieldset { border: 0; padding: 0; margin: 0; }
 @media (max-width: 900px) {
   .tf-cbody.tf-pr { grid-template-columns: minmax(0, 1fr); }
 }

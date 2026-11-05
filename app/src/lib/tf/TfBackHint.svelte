@@ -7,6 +7,7 @@
 <script lang="ts">
   import { backStep } from "./page-name.svelte";
   import type { EscTargetOf } from "./escape";
+  import { isKey } from "./TfKey.svelte";
 
   let {
     back,
@@ -27,8 +28,10 @@
   }
 </script>
 
+<!-- A key is told from the words by its face, so the underline stops at the words. -->
+{#snippet words()}{#if isKey(name)}<span class="tf-esc-t">Back to</span> <span class="tf-mono tf-key">{name}</span>{:else}<span class="tf-esc-t">Back to {name}</span>{/if}{/snippet}
 {#if back.hash === undefined}
-  <span class="tf-esc"><span class="tf-esc-t">Back to {name}</span> <kbd>Esc</kbd></span>
+  <span class="tf-esc">{@render words()} <kbd>Esc</kbd></span>
 {:else}
-  <a class="tf-esc" href={back.hash} onclick={press}><span class="tf-esc-t">Back to {name}</span> <kbd>Esc</kbd></a>
+  <a class="tf-esc" href={back.hash} onclick={press}>{@render words()} <kbd>Esc</kbd></a>
 {/if}

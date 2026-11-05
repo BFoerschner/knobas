@@ -112,11 +112,21 @@
 .tf-status .tf-queued .tf-need { color: var(--warn); }
 
 /* ---------- main, full views, breadcrumb ---------- */
-/* The page's scroller keeps the scrollbar's room whether or not it has one, so switching a tab moves nothing. */
-.tf-main { overflow: auto; min-height: 0; min-width: 0; scrollbar-gutter: stable; }
-/* A viewport-high page has its scroller inside it, which keeps that room at the window's edge: this one keeps none. */
-.tf-main:has(> .tf-kept:not([hidden]) > :is(.tf-tickets, .tf-bv, .tf-rd, .tf-stgpage, .tf-ticketpage)), .tf-main:has(> .tf-kept:not([hidden]) .tf-asset-tree) { scrollbar-gutter: auto; }
-/* A page keep-alive holds (#2247): the shown one lays out as if the wrapper were not there, a hidden one is not drawn. */
+/* No scroller reserves room for its bar (design system, Layout). The page is as wide as the window with a bar or without
+   one, so nothing inside it moves, and the bar takes the last 8 px of its right padding. A band ends at the bar only
+   while there is something to scroll. */
+.tf-main { overflow: hidden auto; min-height: 0; min-width: 0; }
+/* The clip holds what passes under the bar, so it is no overflow to scroll to and nothing can slide the page sideways. */
+.tf-main > .tf-kept:not([hidden]) { display: block; height: 100%; overflow-x: clip; }
+.tf-main > .tf-kept > * { width: 100vw; }
+/* A viewport-high page's inner scroller (`TfScroller.svelte`): the host is measured, the scroller fills it, and the one
+   body is the host's width, so a bar appearing moves nothing there either. */
+.tf-shost { container-type: inline-size; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
+.tf-scroller { overflow: hidden auto; min-width: 0; min-height: 0; }
+.tf-sclip { display: flex; flex-direction: column; min-height: 100%; overflow-x: clip; }
+.tf-sbody { flex: 1 0 auto; width: 100cqw; }
+/* A page keep-alive holds (#2247): a repository's tab lays out as if the wrapper were not there, a hidden one is not
+   drawn, and a shown page's wrapper is the clip above. */
 .tf-kept { display: contents; }
 .tf-kept[hidden] { display: none; }
 .tf-full { display: flex; flex-direction: column; min-height: 100%; }
@@ -129,14 +139,19 @@
 .tf-crumbs .tf-sep { color: var(--ink-2); }
 /* *Back to <name>*: a link, drawn as the crumbs are. The key beside it is a key, so the underline stops at the words. */
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.tf-crumbs .tf-esc .tf-esc-t + .tf-key { margin-left: -2px; }
 .tf-crumbs a.tf-esc .tf-esc-t { text-decoration: underline; text-underline-offset: 2px; }
 .tf-crumbs a.tf-esc:hover { color: var(--ink); }
-/* Row one is the title and the actions (Controls, *Header*). The rest of the title block runs the full width under
-   them, so a long subline is never squeezed into what the buttons leave. */
-.tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(min-content, 1fr) auto; gap: 0 12px; align-items: start; }
+/* The title and the actions share a line while both fit (Controls, *Header*). What fits decides, not the window: the
+   actions wrap as one group, under the title, never a button at a time. The rest of the title block runs the full
+   width under them, so a long subline is never squeezed into what the buttons leave. */
+.tf-fhead { padding: 16px 22px 12px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: flex-start; }
+/* A subline starts a line of its own however short it is: one held to 76ch would otherwise fit beside the actions. */
+.tf-fhead::after { content: ""; flex: 0 0 100%; order: 1; }
 .tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) { display: contents; }
-.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) > :not(h1) { grid-column: 1 / -1; }
-.tf-fhead > .tf-acts { grid-column: 2; grid-row: 1; justify-content: flex-end; }
+.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) > h1, .tf-fhead > :is(h1, .tf-board-title, .tf-fr-title) { flex: 1 1 360px; min-width: 0; }
+.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) > :not(h1) { flex: 0 0 100%; order: 2; }
+.tf-fhead > .tf-acts { flex: 0 1 auto; order: 1; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
@@ -173,6 +188,8 @@
   background: var(--sheet); font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none;
 }
 .tf-btn:hover { border-color: var(--ink-2); }
+/* An empty state's words are `--ink-2`, and its one action should not inherit that and read as disabled. */
+.tf-empty .tf-btn { color: var(--ink); }
 .tf-btn.tf-primary { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
 /* After `.tf-btn:hover` at equal weight, so the primary needs a hover of its own. A disabled one does not answer. */
 .tf-btn.tf-primary:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
@@ -182,6 +199,8 @@
 /* Disabled, one rule: no fill, muted text. In both themes any fill means it can be pressed, so a disabled primary is not
    a paler primary. `--muted` passes 4.5:1 on `--sheet-2`, so its label still reads. */
 .tf-btn[disabled], .tf-btn[aria-disabled="true"] { cursor: not-allowed; color: var(--muted); background: none; border-color: var(--rule-2); }
+/* A disabled ghost has no border: one would make it look more pressable than a working ghost. Its title says why. */
+.tf-btn.tf-ghost[disabled], .tf-btn.tf-ghost[aria-disabled="true"], .tf-btn.tf-ghost[disabled]:hover, .tf-btn.tf-ghost[aria-disabled="true"]:hover { border-color: transparent; background: none; }
 .tf-btn.tf-primary[disabled], .tf-btn.tf-primary[aria-disabled="true"], .tf-btn.tf-primary.tf-danger[disabled], .tf-btn.tf-primary.tf-danger[aria-disabled="true"] {
   color: var(--muted); background: var(--sheet-2); border-color: var(--rule);
 }
@@ -214,11 +233,20 @@
 .tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 
 /* A row's repeated actions (design system, Motion): a column of the same words on every row competes with the data, so
-   they fade in on hover and on focus within the row. Where nothing hovers they stay. An action only some rows offer
-   because of their state (*Ack*, *Open PR*) is not in this group and stays. */
+   they fade in on hover and on focus within the row, and at rest they hold no room. `.tf-rowend` is the end of the row:
+   an action only some rows offer because of their state (*Ack*, *Open PR*) stands in it and stays, and the group
+   hangs to its left, on the hover fill, over the end of the last column. Where nothing hovers the group stands in the row. */
+.tf-rowend { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--control-gap); vertical-align: middle; }
+.tf-rowacts { display: inline-flex; align-items: center; gap: var(--control-gap); }
 @media (hover: hover) {
-  .tf-rowacts { opacity: 0; transition: opacity 120ms ease-out; }
-  :is(tr, li, .tf-rowhost, .tf-ib):is(:hover, :focus-within) .tf-rowacts { opacity: 1; }
+  .tf-rowend { position: relative; min-height: 1px; }
+  .tf-rowacts {
+    position: absolute; right: 100%; top: 50%; transform: translateY(-50%); z-index: 1; padding: 0 var(--control-gap) 0 16px; white-space: nowrap;
+    background: linear-gradient(to right, transparent, var(--sheet-2) 12px); opacity: 0; pointer-events: none; transition: opacity 120ms ease-out;
+  }
+  :is(tr, li, .tf-rowhost, .tf-ib, .tf-r):is(:hover, :focus-within) .tf-rowacts, .tf-rowacts.tf-on { opacity: 1; pointer-events: auto; }
+  /* The fill the group sits on is the row's own. */
+  :is(tr, li, .tf-r):has(.tf-rowacts):hover, tr:has(.tf-rowacts):hover > td { background: var(--sheet-2); }
 }
 
 /* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's
@@ -235,7 +263,7 @@
 
 /* The segmented control and the pill toggles are page-body controls: small (Controls). The segment's
    buttons sit inside its 1px border, so the whole switch is `--control-h-sm` tall, as a small button is. */
-.tf-seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
+.tf-seg { display: inline-flex; width: fit-content; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; flex: none; }
 .tf-seg button {
   height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: var(--t-sm);
   border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
@@ -257,6 +285,11 @@
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px;
   border-radius: 3px; white-space: nowrap; background: var(--muted-bg); color: var(--muted);
 }
+/* A code value (`TfKey.svelte`): 400 in a sentence, 600 where it leads a row, a card or a pane. On a chip it holds the
+   chip's size and weight, so a key on a chip does not shrink a step under its neighbours. */
+.tf .tf-key { font-weight: 400; }
+.tf .tf-key-lead { font-weight: 600; }
+.tf .tf-chip.tf-key { font-size: var(--t-xs); font-weight: 600; }
 .tf-chip.tf-ok { background: var(--ok-bg); color: var(--ok); } .tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }
 /* A button that is part of a chip's text, drawn as that text (design system, Controls: chip buttons). */

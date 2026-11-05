@@ -9,6 +9,7 @@
   backend marks a snippet.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import type { DocInline } from "../../ipc/entity";
   import { entityAddress } from "../address";
   import TfMarked from "./TfMarked.svelte";
@@ -35,8 +36,7 @@
         run.status,
       )}<a class="tf-tchip" href={entityAddress("ticket", run.entity_id)} title={run.title ?? undefined}
         ><span class="tf-k">{run.key}</span>{#if run.title}{run.title}{/if}{#if run.status}
-          <span class="tf-chip" class:tf-ok={tone === "ok"}>{run.status}</span
-          >{/if}</a
+          <TfStateChip text={run.status} tone={tone === "ok" ? "ok" : null} />{/if}</a
       >{:else}<span class="tf-tchip"><span class="tf-k">{run.key}</span></span>{/if}{:else if run.type ===
     "mention"}<span class="tf-ment" class:tf-me={run.me}>{mentionText(run)}</span>{:else if run.type === "break"}<br
     />{/if}{/each}

@@ -34,6 +34,7 @@
   900px the columns stack and the handle is not drawn.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
@@ -218,7 +219,7 @@
     {/if}
   </div>
   <div class="tf-jobrow">
-    <span class="tf-chip">{detail.status ?? "No status"}</span>
+    <TfStateChip text={detail.status ?? "No status"} />
     {#each blockedBy as blocker (blocker)}
       <span class="tf-chip tf-err">Blocked by {blocker}</span>
     {/each}

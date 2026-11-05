@@ -1,18 +1,14 @@
 /* ---------- narrow: 1240px closes side rails, 900px stacks ---------- */
 @media (max-width: 900px) {
   .tf-search { min-width: 0; flex: none; }
-  .tf-search .tf-label { display: none; }
+  .tf-search .tf-label, .tf-search kbd { display: none; }
   .tf-brand { margin-right: 2px; }
   .tf-nav { flex: 1 1 0; }
   .tf-nav a { padding: 6px 6px; gap: 4px; }
   .tf-nav .tf-count { padding: 0 5px; }
   .tf-spacer { display: none; }
-  .tf-timer-key { display: none; }
+  .tf-timer-key { max-width: 12ch; }
   .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
-  /* A header keeps its actions on the title line (Controls, *Header*) unless there are too many to fit beside it. */
-  .tf-fhead { grid-template-columns: minmax(0, 1fr) auto; row-gap: 8px; }
-  .tf-fhead:has(> .tf-acts > :nth-child(3)) { grid-template-columns: minmax(0, 1fr); }
-  .tf-fhead:has(> .tf-acts > :nth-child(3)) > .tf-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-left: 0; }
 
   .tf-tm-row { grid-template-columns: minmax(0, 1fr) auto; }
   .tf-tm-when { flex-direction: row; align-items: baseline; gap: 8px; }

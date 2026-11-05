@@ -55,6 +55,7 @@
 </script>
 
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { flushSync } from "svelte";
   import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
@@ -317,7 +318,7 @@
   {@const resolved = talk.isResolved(thread)}
   {#if resolved && !talk.isShown(thread)}
     <div class="tf-thr-h">
-      <span class="tf-chip tf-ok">Resolved</span>
+      <TfStateChip text="Resolved" tone="ok" />
       <span class="tf-dim">{thread.resolved_by ? `by ${thread.resolved_by} · ` : ""}{thread.comments.length} {thread.comments.length === 1 ? "comment" : "comments"}</span>
       <span class="tf-thr-sp"></span>
       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, true)}>Show</button>
@@ -326,7 +327,7 @@
   {:else}
     {@render said(thread.comments)}
     {#each talk.queuedOn(thread) as body, k (k)}
-      <div class="tf-said tf-queued"><p><b>You</b> <span class="tf-chip tf-warn">queued</span> {body}</p></div>
+      <div class="tf-said tf-queued"><p><b>You</b> <TfStateChip text="queued" tone="warn" /> {body}</p></div>
     {/each}
     {#if talk.isReplying(thread)}
       <div class="tf-newc tf-reply">
@@ -387,7 +388,7 @@
   {:else if it.kind === "thread"}
     <div class="tf-thread" class:tf-on-new={split && it.onNew} class:tf-resolved={talk.isResolved(it.thread)} {@attach win.row(it.key)}>{@render conversation(it.thread)}</div>
   {:else if it.kind === "draft"}
-    <div class="tf-thread tf-pending" {@attach win.row(it.key)}><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {it.body}</p></div>
+    <div class="tf-thread tf-pending" {@attach win.row(it.key)}><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {it.body}</p></div>
   {:else}
     {@const at = targetOf(it.line)}
     {@const name = lineName(at.side, at.line)}
@@ -482,7 +483,7 @@
           <div class="tf-thread" class:tf-resolved={talk.isResolved(thread)}><span class="tf-dim">{lineName(thread.side, thread.line)}</span><TfWrittenAt {thread} {repository} />{@render conversation(thread)}</div>
         {/each}
         {#each strays as d (d.id)}
-          <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {`${lineName(d.side, d.line)}: ${d.body}`}</p></div>
+          <div class="tf-thread tf-pending"><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {`${lineName(d.side, d.line)}: ${d.body}`}</p></div>
         {/each}
       </details>
     {/if}

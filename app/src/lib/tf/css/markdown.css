@@ -8,7 +8,7 @@
 .tf-md h3 { font-size: var(--t-lg); font-weight: 700; margin-top: 20px; }
 .tf-md h4, .tf-md h5, .tf-md h6 { font-size: var(--t-md); font-weight: 700; margin-top: 16px; }
 .tf-md a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
-.tf-md a.tf-ext::after { content: " ↗"; font-size: .8em; }
+.tf-md a.tf-ext::after { content: " ↗"; font-size: var(--t-2xs); }
 .tf-md code { font: .88em var(--mono); font-size: round(.88em, 1px); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
 .tf-md ul, .tf-md ol { padding-left: 24px; }
 .tf-md li + li { margin-top: 3px; }
@@ -17,7 +17,7 @@
 .tf-md li.tf-task { list-style: none; margin-left: -24px; padding-left: 21px; position: relative; }
 .tf-doc li.tf-task { list-style: none; margin-left: -20px; display: flex; gap: 8px; align-items: baseline; }
 .tf-doc li.tf-task > div { min-width: 0; flex: 1; }
-.tf-md .tf-box, .tf-doc .tf-box { width: 13px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-grid; place-items: center; flex: none; transform: translateY(2px); font-size: 10px; line-height: 1; }
+.tf-md .tf-box, .tf-doc .tf-box { width: 13px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-grid; place-items: center; flex: none; transform: translateY(2px); font-size: var(--t-2xs); line-height: 1; }
 .tf-md .tf-box { position: absolute; left: 0; top: .28em; transform: none; }
 .tf-md .tf-box.tf-on, .tf-doc .tf-box.tf-on { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
 .tf-md .tf-box.tf-on::after, .tf-doc .tf-box.tf-on::after { content: "✓"; }

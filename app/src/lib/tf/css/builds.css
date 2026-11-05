@@ -28,7 +28,7 @@
 .tf .tf-runs .tf-dayh:first-child { margin-top: 14px; }
 .tf-runs .tf-run-dur { width: 150px; }
 .tf-runs .tf-run-at { width: 110px; }
-.tf-runs .tf-run-acts { width: 150px; text-align: right; }
+.tf-runs .tf-run-acts { width: 20px; padding-left: 0; text-align: right; }
 .tf-durbar { vertical-align: middle; margin-right: 6px; }
 .tf-durbar rect { fill: var(--ink-2); opacity: .35; }
 .tf-progress { width: 70px; height: 4px; vertical-align: middle; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
@@ -54,14 +54,6 @@
 .tf-combo .tf-opts .tf-dim { margin-left: auto; font-family: var(--sans); font-size: var(--t-2xs); }
 /* A parameter's name is long, so the Run dialog's label column is wider, and its other fields share it. */
 .tf-run-dialog { --tf-label: 180px; }
-/* A parameter's field ends on the form's one right edge; *changed* is a line under it, only when it is. */
-.tf-prm { display: grid; grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr); gap: 6px 12px; align-items: center; }
-.tf-prm .tf-k { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
-.tf-prm select, .tf-prm input {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 4px 8px; background: var(--field); color: var(--ink); width: 100%;
-}
-.tf-prm .tf-chg { grid-column: 2; margin-top: -4px; font-size: var(--t-2xs); color: var(--info); font-weight: 600; }
-.tf-prm .tf-chg:empty { display: none; }
 .tf-run-add { align-self: flex-start; }
 .tf-run-opts > summary::-webkit-details-marker { display: none; }
 .tf-run-opts > summary { list-style: none; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
@@ -94,7 +86,7 @@
   border: 1px solid var(--err); background: var(--err-bg); border-radius: 6px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 6px;
 }
-.tf-problem h3 { font-size: var(--t-md); font-weight: 700; color: var(--err); overflow-wrap: anywhere; }
+.tf-problem h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--err); overflow-wrap: anywhere; }
 .tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-problem .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-problem .tf-dim { font-size: var(--t-sm); }
@@ -137,7 +129,6 @@
 .tf-strip i.tf-run-q { background: var(--rule); }
 .tf-strip i.tf-run-muted { background: var(--muted); }
 /* The project tree, pins and *This job* (#849, #850): prototype-6's .pl details and .scope-note. */
-.tf-pl-top .tf-seg { align-self: flex-start; }
 .tf-pl-fold > summary {
   list-style: none; cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2);
   padding: 6px 8px; display: flex; gap: 6px; align-items: center;
@@ -153,7 +144,7 @@
 .tf-pi[aria-current="true"] .tf-pi-why { color: inherit; }
 .tf-scope-note { font-size: var(--t-sm); color: var(--ink-2); padding: 8px 8px 0; margin: 0; }
 /* Its own width decides when a long header label gives up its end, not the window's. */
-.tf-bmain { overflow: auto; min-width: 0; container: bmain / inline-size; scrollbar-gutter: stable; }
+.tf-shost:has(> .tf-bmain) { container-name: bmain; }
 /* *Open in <source>* is its whole name or, where the header has no room, its glyph; never words that read as a menu. */
 .tf-narrow { display: none; }
 @container bmain (max-width: 1130px) {
@@ -178,7 +169,6 @@
   .tf-runs .tf-run-tests { width: 136px; }
   .tf-runs .tf-run-dur { width: 70px; }
   .tf-runs .tf-run-at { width: 104px; }
-  .tf-runs .tf-run-acts { width: 150px; }
   .tf-durbar { display: none; }
 }
 /* Who started a run goes first: the branch is what you scan by, and keeps 190 px or more. */

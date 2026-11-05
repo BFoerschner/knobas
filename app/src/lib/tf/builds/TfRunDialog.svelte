@@ -296,7 +296,7 @@
       <p class="tf-dim tf-run-refused">{cannotOverride}</p>
     {/if}
     {#if fields.length > 0}
-      <div class="tf-prm">
+      <div class="tf-formgrid">
         {#each fields as field (field.name)}
           {@const id = `tf-run-p-${uid}-${field.name}`}
           <label class="tf-k" for={id} title={field.label !== null ? field.name : undefined}>{field.label ?? field.name}</label>
@@ -326,7 +326,7 @@
       </div>
     {/if}
     {#if extra.length > 0 && cannotOverride === null}
-      <div class="tf-prm">
+      <div class="tf-formgrid">
         {#each extra as row, at (at)}
           <input class="tf-k" type="text" placeholder="name" aria-label={`Name of added parameter ${at + 1}`} bind:value={row.name} />
           <input type="text" placeholder="value" aria-label={`Value of added parameter ${at + 1}`} bind:value={row.value} />

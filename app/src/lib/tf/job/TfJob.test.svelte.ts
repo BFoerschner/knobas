@@ -241,7 +241,7 @@ test("a key opens its ticket and promotes it once; the card shows the key and th
   ]);
   expect(card.querySelector("dl.tf-facts .tf-av.tf-me")).toBeNull();
   expect(target.querySelector(".tf-tkread .tf-tkdesc")?.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");
-  expect(card.querySelector(".tf-chip")?.textContent, "the status is the card's chip").toBe("In Progress");
+  expect(card.querySelector(".tf-chip")?.textContent, "the status is the card's chip").toBe("In progress");
   expect(card.querySelector("select"), "no status select on the card (spec #2396)").toBeNull();
 });
 
@@ -859,10 +859,10 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
   await settle();
   const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
-  expect(echoed()).toEqual(["queued"]);
+  expect(echoed()).toEqual(["Queued"]);
 
   sent(72);
-  expect(echoed()).toEqual(["sent"]);
+  expect(echoed()).toEqual(["Sent"]);
 
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];
   await sync.refreshed(ID, 72);
@@ -1032,7 +1032,7 @@ test("a comment's echo goes on a Refresh's read of the thread (#2103)", async ()
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
   await settle();
   const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
-  expect(echoed()).toEqual(["queued"]);
+  expect(echoed()).toEqual(["Queued"]);
 
   status = "In Review";
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];

@@ -8,12 +8,14 @@
 }
 .tf-fsearch {
   display: flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--field);
-  border-radius: 4px; height: var(--control-h-sm); padding: 0 8px; flex: 1 1 280px; max-width: 360px; color: var(--ink-2);
+  border-radius: 4px; height: var(--control-h-sm); padding: 0 8px; flex: 1 1 160px; min-width: 140px; max-width: 360px; color: var(--ink-2);
 }
 .tf-fsearch:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-fsearch input { border: 0; background: none; outline: none; color: var(--ink); flex: 1; min-width: 0; padding: 1px 0; }
 .tf-fsearch input:focus-visible { outline: none; }
 .tf-fclear { border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 0 2px; }
+/* The row wraps between groups only: a group of pills is one thing, so it never splits. */
+.tf-fbar .tf-fchips { flex-wrap: nowrap; flex: none; }
 .tf-fsel { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-fsel select {
   border: 1px solid var(--rule); background: var(--field); border-radius: 4px; height: var(--control-h-sm); padding: 0 6px; color: var(--ink);

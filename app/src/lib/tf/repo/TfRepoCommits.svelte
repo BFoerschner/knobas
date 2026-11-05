@@ -116,7 +116,7 @@
   const filter = $derived(sessionFilter(`repo-commits:${repoId}`));
   const config = $derived<FilterConfig>({
     id: `repo-commits:${repoId}`,
-    placeholder: "Filter commits by message, sha or author",
+    placeholder: "Filter commits",
     noun:
       branch === null
         ? "commits"

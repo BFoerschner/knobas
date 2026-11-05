@@ -98,7 +98,7 @@
   {#snippet body()}
     <form
       id="tf-prm-{uid}"
-      class="tf-pra"
+      class="tf-formgrid"
       onsubmit={(event) => {
         event.preventDefault();
         void send();

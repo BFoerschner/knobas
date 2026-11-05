@@ -540,7 +540,7 @@ test("PAY-231's card: the key with its copy button, the status chip, then Epic, 
 
   expect(page.querySelector(".tf-tkhead .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(page.querySelector(".tf-tkhead button.tf-tkcopy")?.getAttribute("aria-label")).toBe("Copy the key and the title");
-  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In Progress");
+  expect(page.querySelector(".tf-jobrow .tf-chip")?.textContent).toBe("In progress");
   expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Reporter", "Assignee", "Type", "Priority", "Labels", "Logged"]);
   expect(facts(page)[1]).toEqual(["Reporter", "LH Lena Hoffmann"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me"), "somebody else's report is not in full ink").toBe(false);

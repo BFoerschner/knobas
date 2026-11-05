@@ -38,6 +38,8 @@
 /* The import dialog's width (a dialog of its own width passes `className` to TfDialog). */
 .tf-dialog.tf-dwide { width: min(820px, calc(100vw - 32px)); }
 .tf-dialog .tf-body { padding: 14px 18px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+/* The body scrolls; nothing in it is squeezed to fit a short window. */
+.tf-dialog .tf-body > * { flex: none; }
 .tf-dialog footer {
   padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: var(--control-gap); justify-content: flex-end;
   background: var(--sheet-2);
@@ -67,21 +69,33 @@
 
 .tf-hidden { visibility: hidden; }
 /* The canonical header's actions (Controls, *Header*): a page's `.tf-fhead`, and a Settings page's `.tf-stg-h`. */
-.tf-fhead .tf-acts, .tf-stg-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+.tf-fhead .tf-acts, .tf-stg-h .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
+.tf-stg-h .tf-acts { margin-left: auto; }
 
 /* ---------- tabs ---------- */
 .tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; overflow-y: hidden; }
 
 /* ---------- forms in a dialog ---------- */
 .tf-dform { display: contents; }
-/* One label column for every form in a dialog, so a field never starts at another x under the one above it. */
-.tf-formgrid { display: grid; grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+/* One grid for every form (Controls, *Forms*). A short control has its label in the one label column, so a field never
+   starts at another x under the one above it. A wide field (a textarea, a list, a radio group, or `.tf-fwide`) takes the
+   whole row with its label above it, 4 px away. A sentence, a tick and a banner take the whole row too. */
+.tf-formgrid { display: grid; grid-template-columns: var(--tf-label) minmax(0, 1fr); gap: 8px 12px; align-items: center; }
+.tf-formgrid > :is(p, fieldset, textarea, .tf-radio, .tf-ck, .tf-banner, .tf-prready, .tf-fwide),
+.tf-formgrid > :is(label, span):has(+ :is(fieldset, textarea, .tf-radio, .tf-fwide)) { grid-column: 1 / -1; }
+.tf-formgrid > :is(label, span):has(+ :is(fieldset, textarea, .tf-radio, .tf-fwide)) { margin-bottom: -4px; }
 .tf-formgrid select, .tf-formgrid input {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
 }
-.tf-formgrid input[type="text"] { width: 100%; }
-/* A field's label: one size and tone in every dialog. */
-.tf-formgrid > :is(label, span), .tf-pra > label { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-formgrid :is(input:not([type="checkbox"], [type="radio"]), select) { width: 100%; }
+.tf-formgrid textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink); font: inherit; width: 100%; resize: vertical; }
+.tf-formgrid fieldset { border: 0; padding: 0; margin: 0; }
+/* A field's label: one size and tone in every dialog. A code value as a label (a build parameter's name) is mono. */
+.tf-formgrid > :is(label, span):not(.tf-ck) { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-formgrid > :is(label, input).tf-k { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
+/* A note on the field above it: under the field, in the field's column, only when it says something. */
+.tf-formgrid > .tf-chg { grid-column: 2; margin-top: -4px; font-size: var(--t-2xs); color: var(--info); font-weight: 600; }
+.tf-formgrid > .tf-chg:empty { display: none; }
 /* Add a source's *Install an adapter* row (#1202): the path, then its button. */
 .tf-add-more > summary::-webkit-details-marker { display: none; }
 .tf-add-more > summary { list-style: none; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); width: fit-content; }

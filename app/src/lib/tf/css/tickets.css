@@ -10,10 +10,7 @@
 .tf-views a[aria-current="true"] { background: var(--fill); color: var(--sheet); }
 .tf-views a[aria-current="true"] .tf-count { background: rgba(255,255,255,.18); color: inherit; }
 .tf-views a .tf-count { margin-left: auto; }
-.tf-board-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; }
-/* Never narrower than its placeholder, which is what the bar's wrapping is decided on: the chips that fit stay beside
-   it, and the count and *Save as a view* sit at the right of the last row. */
-.tf-board-wrap .tf-fsearch { flex: 1 1 272px; max-width: 360px; }
+.tf-board-wrap .tf-sbody { display: flex; flex-direction: column; }
 /* The board head is the canonical header (#2293): the title block left, `.tf-acts` right (the Board/List
    switch, the view's actions, Sync now), its items centred vertically since the switch is small. */
 .tf-fhead.tf-board-head { align-items: center; }
@@ -21,23 +18,25 @@
 .tf-board-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .tf-lane { padding: 14px 22px; }
 /* One band fills the pane and scrolls inside itself, so the sideways scrollbar and the column heads stay on screen. */
-.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
-.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; padding-bottom: 14px; }
+.tf-board-wrap:has(.tf-sbody > .tf-lane):not(:has(.tf-lane + .tf-lane)) .tf-sclip { height: 100%; }
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; padding-bottom: 14px; }
 .tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3 { position: sticky; top: 0; z-index: 1; background: var(--paper); margin-bottom: 0; padding-bottom: 8px; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
-.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 6px 0 8px; }
+.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 6px 0 8px; }
 /* 192 px: a card's first line fits, and at 1440 px the fifth column shows, so the board says there is more. */
 .tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(192px, 1fr); gap: 8px; align-items: start; overflow-x: auto; }
 /* A board of one or two columns (a ticket's sub-tasks) keeps a card's width, with its avatar beside its words. */
 .tf-cols:not(:has(> :nth-child(3))) { grid-auto-columns: minmax(192px, 420px); }
-/* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. */
+/* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. The body is as
+   wide as the lanes, so the heads have room to stay put at the scroller's left. */
 .tf-board-wrap:has(.tf-lane + .tf-lane) { overflow-x: auto; }
-.tf-board-wrap:has(.tf-lane + .tf-lane) > .tf-lane { width: max-content; min-width: 100%; }
-.tf-board-wrap:has(.tf-lane + .tf-lane) > .tf-lane > .tf-cols { overflow: visible; }
-.tf-board-wrap:has(.tf-lane + .tf-lane) > :is(.tf-fhead, .tf-fbar, .tf-crumbs) { position: sticky; left: 0; }
-/* Its scrollbar's room is kept, so switching Board to List moves nothing. */
-.tf-board-wrap { scrollbar-gutter: stable; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sclip { overflow-x: visible; width: max-content; min-width: 100cqw; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody { width: auto; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody > .tf-lane { width: max-content; min-width: 100%; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody > .tf-lane > .tf-cols { overflow: visible; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs) { position: sticky; left: 0; width: 100cqw; }
 /* A long list keeps its column names and its sort under the filter bar. */
 .tf-list .tf-tbl { overflow: clip; }
 .tf-list .tf-tbl th { position: sticky; top: var(--tf-fbar-h, 47px); z-index: 3; }

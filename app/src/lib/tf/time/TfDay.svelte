@@ -19,6 +19,7 @@
   ticket you are on"). Only the `running` row carries `tf-tm-run`.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { keyOf, minutesLabel } from "../../time/format";
@@ -628,12 +629,12 @@
             {/if}
           </span>
           <span class="tf-tm-state">
-            {#if row.state === "logged"}<span class="tf-chip tf-ok">logged</span>
-            {:else if row.state === "unlogged"}<span class="tf-chip tf-warn">unlogged</span>
-            {:else if row.state === "running"}<span class="tf-chip tf-info">timer running</span>
-            {:else if row.state === "label"}<span class="tf-chip">needs a ticket</span>
-            {:else if row.state === "offered"}<span class="tf-chip">offered</span>
-            {:else}<span class="tf-chip">open</span>{/if}
+            {#if row.state === "logged"}<TfStateChip text="logged" tone="ok" />
+            {:else if row.state === "unlogged"}<TfStateChip text="unlogged" tone="warn" />
+            {:else if row.state === "running"}<TfStateChip text="timer running" tone="info" />
+            {:else if row.state === "label"}<TfStateChip text="needs a ticket" />
+            {:else if row.state === "offered"}<TfStateChip text="offered" />
+            {:else}<TfStateChip text="open" />{/if}
           </span>
           <span class="tf-tm-acts">
             {#if row.state === "unlogged" && row.target?.kind === "entity"}

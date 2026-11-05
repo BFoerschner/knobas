@@ -21,6 +21,11 @@
  * - (g) an actions container other than the page header's (`.tf-fhead`, `.tf-stg-h`) is pushed to the
  *   end and laid out as a flex row by hand (`margin-left: auto` with `display: flex`): a strip's or a
  *   row's trailing group is `.tf-trail`;
+ * - (h) a `font-size` (or a `font` shorthand's size) is not a `--t-*` token, apart from the reading face and code, which
+ *   keep their own sizes (a rule that sets `--serif` or `--mono`, the `.tf-rd-title`, and the PDF's text layer);
+ * - (i) a pill toggle is drawn outside `.tf-fchips`: a class round enough to be a pill (`border-radius` of 9 px or more)
+ *   that also answers `aria-pressed`;
+ * - (j) a grid's label column is a literal `132px`: it is `var(--tf-label)`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -46,7 +51,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c" | "f" | "g";
+type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -80,6 +85,32 @@ const DIALOG = /\.(?:[\w-]*dialog[\w-]*|tf-steps)(?![\w-])/;
  * dialog's title-line cluster of actions and Close (`.tf-dctl`, #2415).
  */
 const BUTTON_ROW = /\.(?:tf-fbar|tf-fchips|tf-decide|tf-dctl|[\w-]+-btns)(?![\w-])/;
+
+/** The rooms UI's sheet, which keeps its own type until it goes (rule h does not read it). */
+const OLD_SHEET = "unported.css";
+/** What keeps its own sizes (rule h): the reading face's title, the PDF's text layer, and a box measured off-screen. */
+const OWN_TYPE = /\.(?:tf-rd-title|tf-pdf-text|tf-diagram-scratch)(?![\w-])/;
+
+/** The size a rule sets that is not on the type scale (rule h), or `null`. */
+function offScale(selector: string, decls: [string, string][]): string | null {
+  const face = decls.some(([prop, value]) => /^font(?:-family)?$/.test(prop) && /var\(--(?:serif|mono)\)/.test(value));
+  if (face || OWN_TYPE.test(selector)) return null;
+  for (const [prop, value] of decls) {
+    if (prop === "font-size" && !/^(?:var\(--t-|inherit$)/.test(value)) return `font-size: ${value}`;
+    if (prop === "font" && !/var\(--t-|^inherit$/.test(value) && /\d/.test(value)) return `font: ${value}`;
+  }
+  return null;
+}
+
+/** The classes on a selector's subject. */
+function subjectClasses(selector: string): string[] {
+  return [...(compounds(selector).at(-1) ?? "").matchAll(/\.([\w-]+)/g)].map((m) => m[1]!);
+}
+
+/** Is the rule's radius a pill's? */
+function roundRadius(decls: [string, string][]): boolean {
+  return decls.some(([prop, value]) => prop === "border-radius" && /^(?:9|[1-9]\d+)px$/.test(value));
+}
 
 /** Every `.css` and `.svelte` file under `root`, relative, sorted. */
 function files(root: string): string[] {
@@ -259,8 +290,18 @@ function scan(root: string): Violation[] {
   const add = (v: Violation) => found.set(`${v.rule} ${v.file} ${v.key}`, found.get(`${v.rule} ${v.file} ${v.key}`) ?? v);
   for (const file of files(root)) {
     const text = readFileSync(join(root, file), "utf8");
-    for (const { selectors, decls } of rules(stylesheet(file, text))) {
+    const sheet = rules(stylesheet(file, text));
+    const pressable = new Set(sheet.flatMap(({ selectors }) => selectors.filter((s) => /\[aria-pressed/.test(compounds(s).at(-1) ?? "")).flatMap(subjectClasses)));
+    for (const { selectors, decls } of sheet) {
       for (const selector of selectors) {
+        const size = file === OLD_SHEET ? null : offScale(selector, decls);
+        if (size !== null) add({ rule: "h", file, key: selector, detail: `sets ${size}, which is not on the type scale; use a \`--t-*\` token` });
+        if (roundRadius(decls) && subjectClasses(selector).some((name) => pressable.has(name))) {
+          add({ rule: "i", file, key: selector, detail: "draws a pill toggle outside `.tf-fchips`; a pill is a `button` in `.tf-fchips`" });
+        }
+        if (decls.some(([prop, value]) => prop === "grid-template-columns" && /(?<![\d.])132px/.test(value))) {
+          add({ rule: "j", file, key: selector, detail: "sets a literal 132px label column; use `var(--tf-label)`" });
+        }
         const disabled = DISABLED.test(compounds(selector).at(-1) ?? "");
         const sizing = decls.filter(([prop]) => SIZING.test(prop) || (disabled && DISABLED_LOOK.test(prop))).map(([prop]) => prop);
         if (file !== CONTROLS_SHEET && sizing.length > 0 && targetsControl(selector)) {
@@ -327,8 +368,8 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
     if (!/^\d+\.txt$/.test(entry.list)) {
       failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
-    } else if (!/^[abcfg]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
-      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g> <file> <selector or class>  <reason>\``);
+    } else if (!/^[abcfghij]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g|h|i|j> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
     } else if (listed.has(id)) {
@@ -388,8 +429,8 @@ test("(a) a control sized outside the controls stylesheet fails, and the same ru
     ".tf-pr-head .tf-btn { padding: 2px 8px; }",
     ".tf-x .tf-btn.tf-sm { height: 24px; }",
     "@media (max-width: 900px) { .tf-x > .tf-iconbtn { min-height: 30px; } }",
-    ".tf-x .tf-lg { font: 500 12px var(--sans); }",
-    ".tf-x .tf-seg button { font-size: 11px; }",
+    ".tf-x .tf-lg { font: 500 var(--t-xs) var(--sans); }",
+    ".tf-x .tf-seg button { font-size: var(--t-2xs); }",
     ".tf-rvq .tf-fchips button { padding: 1px 9px; }",
     ".tf-y, .tf-x .tf-btn { border-radius: 2px; }",
     ".tf-rd-acts .tf-refresh { padding: 3px 8px; }",
@@ -401,14 +442,14 @@ test("(a) a control sized outside the controls stylesheet fails, and the same ru
   }
   expect(planted({ "lib/tf/css/view.css": ".tf-y, .tf-x .tf-btn { border-radius: 2px; }" })[0]).toContain("`.tf-x .tf-btn`");
   // The clean twins: in the controls stylesheet, not a sizing property, or not the control itself.
-  expect(planted({ [CONTROLS_SHEET]: ".tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: 13px; }" })).toEqual([]);
+  expect(planted({ [CONTROLS_SHEET]: ".tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }" })).toEqual([]);
   expect(
     planted({
       "lib/tf/css/view.css": [
         ".tf-x .tf-btn { margin-left: auto; color: red; }",
         ".tf-iconbtn svg { width: 16px; height: 16px; }",
-        ".tf-btn kbd { font-size: 11px; padding: 0 3px; }",
-        ".tf-seg .tf-jobk { font-size: 11px; }",
+        ".tf-btn kbd { font-size: var(--t-2xs); padding: 0 3px; }",
+        ".tf-seg .tf-jobk { font-size: var(--t-2xs); }",
         ".tf-btns { padding: 4px; }",
         ".tf-x button { padding: 4px; }",
         "/* .tf-x .tf-btn { padding: 2px; } */",
@@ -430,6 +471,43 @@ test("(a) a disabled control's look set outside the controls stylesheet fails", 
   // The clean twins: in the controls stylesheet, a disabled control's placement, an enabled control's cursor.
   expect(planted({ [CONTROLS_SHEET]: ".tf-btn[disabled], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }" })).toEqual([]);
   expect(planted({ "lib/tf/css/view.css": ".tf-x .tf-btn[disabled] { margin-left: auto; }\n.tf-x .tf-btn { cursor: grab; }" })).toEqual([]);
+});
+
+test("(h) a size off the type scale fails, and the reading face, code and tokens pass", () => {
+  for (const css of [".tf-x { font-size: 12.5px; }", ".tf-x { font-size: .85em; }", ".tf-x { font: 600 12px var(--sans); }"]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(h\) lib\/tf\/css\/view\.css `\.tf-x` sets font/);
+  }
+  expect(
+    planted({
+      "lib/tf/css/view.css": [
+        ".tf-x { font-size: var(--t-sm); }",
+        ".tf-x { font: 600 var(--t-xs) var(--mono); }",
+        ".tf-x { font: inherit; }",
+        ".tf-doc { font-family: var(--serif); font-size: 17.5px; }",
+        ".tf-x code { font: .88em var(--mono); font-size: round(.88em, 1px); }",
+        ".tf .tf-rd-title { font-size: 30px; }",
+      ].join("\n"),
+    }),
+  ).toEqual([]);
+  expect(planted({ "unported.css": ".row .k { font-size: 12px; }" })).toEqual([]);
+});
+
+test("(i) a pill toggle outside .tf-fchips fails, and the pill toggles themselves and a round badge pass", () => {
+  const failures = planted({ "lib/tf/css/view.css": '.tf-x-val { border-radius: 12px; }\n.tf-x-val[aria-pressed="true"] { color: red; }' });
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatch(/^\(i\) lib\/tf\/css\/view\.css `\.tf-x-val` draws a pill toggle/);
+  expect(planted({ "lib/tf/css/view.css": ".tf-count { border-radius: 9px; }" })).toEqual([]);
+  expect(planted({ "lib/tf/css/view.css": '.tf-x-val { border-radius: 4px; }\n.tf-x-val[aria-pressed="true"] { color: red; }' })).toEqual([]);
+  expect(planted({ [CONTROLS_SHEET]: '.tf-fchips button { border-radius: 12px; }\n.tf-fchips button[aria-pressed="true"] { color: red; }' })).toEqual([]);
+});
+
+test("(j) a literal 132px label column fails, and the token and a wider measure pass", () => {
+  const failures = planted({ "lib/tf/css/view.css": ".tf-x { grid-template-columns: 132px minmax(0, 1fr); }" });
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatch(/^\(j\) lib\/tf\/css\/view\.css `\.tf-x` sets a literal 132px label column/);
+  expect(planted({ "lib/tf/css/view.css": ".tf-x { grid-template-columns: var(--tf-label) minmax(0, 1fr); }\n.tf-y { grid-template-columns: 1132px 1fr; width: 132px; }" })).toEqual([]);
 });
 
 test("(a) a component's <style> block is a stylesheet too", () => {

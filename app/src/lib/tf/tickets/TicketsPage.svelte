@@ -127,6 +127,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { sourceHash } from "../settings/settings";
@@ -343,7 +344,7 @@
         .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : field.value }));
     return {
       id: filterId,
-      placeholder: "Filter by key, summary, epic or person",
+      placeholder: "Filter tickets",
       noun: "tickets",
       one: "ticket",
       base: base ?? "",
@@ -542,7 +543,7 @@
   function fbarHeight(wrap: HTMLElement) {
     if (typeof ResizeObserver === "undefined") return;
     const seen = new ResizeObserver(() => {
-      const bar = wrap.querySelector<HTMLElement>(":scope > .tf-fbar");
+      const bar = wrap.querySelector<HTMLElement>(":scope .tf-sbody > .tf-fbar");
       if (bar) wrap.style.setProperty("--tf-fbar-h", `${bar.offsetHeight}px`);
     });
     seen.observe(wrap);
@@ -701,7 +702,7 @@
     </div>
   </nav>
 
-  <section class="tf-board-wrap" {@attach fbarHeight}>
+  <TfScroller class="tf-board-wrap" {@attach fbarHeight}>
     {#if subtasksOf !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. -->
       <TfCrumbs parts={[{ name: "Tickets" }, { name: `Sub-tasks of ${subtasksOf}` }]} {back} />
@@ -753,6 +754,29 @@
       />
     {/if}
     {#if base !== null}
+      {#snippet lanesSwitch()}
+        <!-- prototype-6 offers lanes on the ticket board only. -->
+        {#if showing.layout === "board"}
+          <label class="tf-fsel">
+            Lanes
+            <select
+              aria-label="Lanes"
+              value={showing.lanes}
+              onchange={(event) => reader.chooseLanes(event.currentTarget.value as LaneField)}
+            >
+              {#each LANE_FIELDS as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+      {/snippet}
+      {#snippet saveButton()}
+        <!-- On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
+        {#if !view?.saved_view_source || offersCopy(view)}
+          <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
+        {/if}
+      {/snippet}
       <FilterBar
         {config}
         {filter}
@@ -763,29 +787,6 @@
         after={saveButton}
       />
     {/if}
-    {#snippet lanesSwitch()}
-      <!-- prototype-6 offers lanes on the ticket board only. -->
-      {#if showing.layout === "board"}
-        <label class="tf-fsel">
-          Lanes
-          <select
-            aria-label="Lanes"
-            value={showing.lanes}
-            onchange={(event) => reader.chooseLanes(event.currentTarget.value as LaneField)}
-          >
-            {#each LANE_FIELDS as [value, label] (value)}
-              <option {value}>{label}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-    {/snippet}
-    {#snippet saveButton()}
-      <!-- On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
-      {#if !view?.saved_view_source || offersCopy(view)}
-        <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
-      {/if}
-    {/snippet}
 
     {#if viewId !== null && views !== null && view === undefined}
       <div class="tf-empty">
@@ -944,7 +945,7 @@
         {/if}
       </div>
     {/if}
-  </section>
+  </TfScroller>
 
   {#if drafting !== null}
     {@const editing = drafting.editing}

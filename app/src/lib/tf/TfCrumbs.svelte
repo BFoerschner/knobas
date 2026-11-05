@@ -22,6 +22,8 @@
   export interface Crumb {
     name: string;
     href?: string;
+    /** The name is a code value other than a ticket key, which `isKey` finds by itself: a repository's name. */
+    code?: boolean;
   }
 
   /**
@@ -42,6 +44,7 @@
 <script lang="ts">
   import { namePage } from "./page-name.svelte";
   import TfBackHint from "./TfBackHint.svelte";
+  import TfKey, { isKey } from "./TfKey.svelte";
 
   let {
     parts,
@@ -73,11 +76,14 @@
 {#if !repeatsItself}
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     {#each parts as part, at (at)}
+      {@const code = part.code === true || isKey(part.name)}
       {#if part.href !== undefined}
-        <a class="tf-crumb" href={part.href}>{part.name}</a><span class="tf-sep">›</span>
+        {#if code}<TfKey value={part.name} href={part.href} />{:else}<a class="tf-crumb" href={part.href}>{part.name}</a>{/if}<span class="tf-sep">›</span>
       {:else if at < parts.length - 1}
         <!-- A place on the path you are already at: it names itself, and a link would lead nowhere. -->
-        <span class="tf-crumb-here">{part.name}</span><span class="tf-sep">›</span>
+        {#if code}<TfKey value={part.name} class="tf-crumb-here" />{:else}<span class="tf-crumb-here">{part.name}</span>{/if}<span class="tf-sep">›</span>
+      {:else if code}
+        <strong><TfKey value={part.name} lead /></strong>
       {:else}
         <strong>{part.name}</strong>
       {/if}

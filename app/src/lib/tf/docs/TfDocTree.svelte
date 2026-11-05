@@ -10,6 +10,7 @@
   until it is opened, so the rows drawn are the rows shown.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import Self from "./TfDocTree.svelte";
   import { SvelteSet } from "svelte/reactivity";
   import type { DocNode, DocSpace } from "../../ipc/entity";
@@ -67,7 +68,7 @@
           <Self {space} parent={node.entity_id} {current} under={index} held={holding} opened={open} />
         {/if}
         {#each queued as echo, n (n)}
-          <span class="tf-dl-queued">{echo.text} <span class="tf-chip tf-info">{echo.state}</span></span>
+          <span class="tf-dl-queued">{echo.text} <TfStateChip text={echo.state} tone="info" /></span>
         {/each}
       </div>
     </details>

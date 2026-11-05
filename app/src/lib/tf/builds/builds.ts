@@ -31,14 +31,7 @@ export function isRunning(pipeline: PipelineRow): boolean {
  * A run's block in the strip: finished, its declared tone; in flight,
  * running once it started and queued before.
  */
-/** A source's state as a chip's word: TeamCity says *FAILURE*, and every other chip says *failure*, *open*, *merged*. */
-export function stateWord(text: string): string {
-  const said = text.toLowerCase();
-  // The source's words mapped to one set: a chip reads what the filters and the chart's legend read.
-  if (said === "success") return "Passed";
-  if (said === "failure") return "Failed";
-  return said.charAt(0).toUpperCase() + said.slice(1);
-}
+export { stateWord } from "../state-word";
 
 export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | "q" {
   if (run.finished === null && run.started !== null) return "run";

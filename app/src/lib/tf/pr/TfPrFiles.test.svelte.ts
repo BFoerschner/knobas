@@ -273,7 +273,7 @@ test("+ on a removed line opens a box on its old side; Add to review keeps it pe
   ]);
   expect(target.querySelector(".tf-newc")).toBeNull();
   const mine = target.querySelector(".tf-thread.tf-pending")!;
-  expect(squash(mine)).toBe("You pending Why 0.2 before?");
+  expect(squash(mine)).toBe("You Pending Why 0.2 before?");
   expect(mine.previousElementSibling).toBe(removed);
 });
 
@@ -462,7 +462,7 @@ test("#2277: Reply… queues a reply on the thread's line, drawn queued until th
       },
     },
   ]);
-  expect(squash(card.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? You queued Bounded to ±10 % now. Reply… Resolve");
+  expect(squash(card.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? You Queued Bounded to ±10 % now. Reply… Resolve");
 
   // The write landed: its refresh reads the files again, and the reply is the source's now.
   reply = "Bounded to ±10 % now.";

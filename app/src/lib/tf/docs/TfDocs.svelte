@@ -58,6 +58,7 @@
   with what was typed.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
@@ -104,6 +105,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDocsSpace from "./TfDocsSpace.svelte";
   import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -1055,7 +1057,7 @@
     <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
   {/if}
 
-  <section class="tf-rd-main" bind:this={main} onscroll={follow} onwheel={() => (pickedSection = null)}>
+  <TfScroller class="tf-rd-main" bind:ref={main} onscroll={follow} onwheel={() => (pickedSection = null)}>
     <!-- The one fold bar below 900 px. The tree it opens is a drawer, because the page does not reflow under it. -->
     {#if drawerBand.current}
       <TfRailBar label="Page" value={page?.title ?? spaceHere?.name ?? "Docs home"} open={drawer} controls="tf-docs-tree" onpress={(event) => openTree(event.currentTarget as Element)} />
@@ -1220,7 +1222,7 @@
                 <div class="tf-msg tf-queued">
                   <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
                   <div class="tf-cmt-body">
-                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{echo.state}</span></div>
+                    <div class="tf-who"><b>You</b> <TfStateChip text={echo.state} tone="info" /></div>
                     <p class="tf-cmt-queued">{echo.text}</p>
                   </div>
                 </div>
@@ -1253,7 +1255,7 @@
       <!-- A space's address the tree holds nothing at: the rail still reads, and the home is the way out. -->
       <TfNothingHere message="Nothing to read here. This space has no synced pages, or knobas does not hold it." href="#/docs" action="Docs home" />
     {/if}
-  </section>
+  </TfScroller>
 </div>
 
 {#if linking && page !== null && linkPorts}

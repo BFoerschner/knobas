@@ -4,7 +4,7 @@
 .tf-tm-wrap { padding: 16px 22px 40px; }
 .tf-navchev { width: 16px; height: 16px; flex: none; }
 .tf-tm-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
-.tf-tm-nav h2 { font-size: var(--t-xl); margin: 0 6px; font-weight: 700; }
+.tf-tm-nav h2 { font-size: var(--t-lg); margin: 0 6px; font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
 .tf-tm-sum div { display: flex; flex-direction: column; }
 .tf-tm-sum b {
@@ -135,7 +135,7 @@
 
 /* ---------- time: the Standup tab (#829) ---------- */
 .tf-su { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-.tf-su-body { padding: 4px 12px 12px; }
+.tf-su-body { padding: 12px; }
 .tf-su-body h4 { font-size: var(--t-sm); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
 .tf-su-body ul { margin: 0; padding: 0; list-style: none; }
 .tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 0; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
@@ -144,14 +144,7 @@
 .tf-su-day { font-size: var(--t-sm); }
 /* A panel heading's action sits on the right of the heading line (Controls: section heading). */
 .tf-su .tf-panel > header > .tf-btn { margin-left: auto; }
-.tf-su-people { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
-.tf-su-val {
-  border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); border-radius: 3px;
-  padding: 2px 8px; font-size: var(--t-sm); line-height: 1.35; cursor: pointer;
-}
-.tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
-/* On is ringed, not filled (Controls, *Pill toggles*): four filled names outweighed the page's real action. */
-.tf-su-val[aria-pressed="true"] { background: var(--sheet-2); border-color: var(--ink); color: var(--ink); }
+.tf-su-people { display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; margin-bottom: 8px; }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
 .tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
 .tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }

@@ -9,7 +9,7 @@
   A text is an input, a long text a text area, a choice radio buttons, a flag
   a checkbox. *Edit…* sends only what changed (#706): sent back as drawn, it
   closes without a write. Lifted from the pull request page (#1407), its
-  classes (`tf-pr-dialog`, `tf-pra`) kept with it.
+  class (`tf-pr-dialog`) kept with it.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../ipc";
@@ -83,7 +83,7 @@
   {#snippet body()}
     <form
       id="tf-pra-{uid}"
-      class="tf-pra"
+      class="tf-formgrid"
       onsubmit={(event) => {
         event.preventDefault();
         void send();

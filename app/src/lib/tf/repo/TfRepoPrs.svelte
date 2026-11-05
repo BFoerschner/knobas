@@ -6,6 +6,8 @@
   first; a row opens `#/pr/<entity id>`.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import type { EntityRow } from "../../ipc/entity";
   import { prNumber, PR_STATES } from "../code/code";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -16,7 +18,6 @@
   import { itemHash } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob, type OpenJobPorts } from "../job/open-jobs";
   import { visibleRepoPrs } from "./repo";
-  import { toneClass } from "../tone";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
 
@@ -50,7 +51,7 @@
   const filter = $derived(sessionFilter(`repo-prs:${repoId}`));
   const config = $derived<FilterConfig>({
     id: `repo-prs:${repoId}`,
-    placeholder: "Filter pull requests",
+    placeholder: "Filter PRs",
     noun: "pull requests",
     one: "pull request",
     chips: [{ key: "state", label: "State", options: PR_STATES.map((value) => ({ value, label: value })) }],
@@ -77,8 +78,8 @@
         <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
           <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td><a href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a></td>
-          <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
-          <td>{#if index.jobOf({ entity_id: row.entity_id, kind: row.kind })}<span class="tf-chip tf-chip-job tf-mono">{index.jobOf({ entity_id: row.entity_id, kind: row.kind })}</span>{/if}</td>
+          <td>{#if row.state}<TfStateChip text={row.state.text} tone={row.state.tone} />{/if}</td>
+          <td>{#if index.jobOf({ entity_id: row.entity_id, kind: row.kind })}<TfKey chip value={index.jobOf({ entity_id: row.entity_id, kind: row.kind }) ?? ""} class="tf-chip-job" />{/if}</td>
         </tr>
       {/each}
     </tbody>

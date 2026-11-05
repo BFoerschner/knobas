@@ -665,7 +665,7 @@
   /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
   .fld {
     display: grid;
-    grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr);
+    grid-template-columns: var(--tf-label) minmax(0, 1fr);
     column-gap: 12px;
     align-items: center;
   }
@@ -717,14 +717,14 @@
 
   .lead {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--muted);
     line-height: 1.5;
   }
 
   .none {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--faint);
   }
 
@@ -734,7 +734,7 @@
     padding: 0;
     display: grid;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .lst > li {
@@ -749,7 +749,7 @@
 
   .lst .id {
     margin-left: auto;
-    font: 400 11px var(--mono);
+    font: 400 var(--t-2xs) var(--mono);
     color: var(--faint);
   }
 
@@ -770,7 +770,7 @@
     display: flex;
     gap: 8px;
     align-items: baseline;
-    font-size: 11px;
+    font-size: var(--t-2xs);
   }
 
   .props .k {
@@ -790,7 +790,7 @@
 
   .hint {
     margin: 4px 0 0;
-    font-size: 11px;
+    font-size: var(--t-2xs);
     color: var(--faint);
     line-height: 1.5;
   }
@@ -801,7 +801,7 @@
     align-items: baseline;
     flex-wrap: wrap;
     margin: 6px 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .crumbed,

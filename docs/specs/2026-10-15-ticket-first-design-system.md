@@ -44,6 +44,7 @@ Tokens are the prototype's, unchanged, except `--field`, which it did not have. 
 | `--err` / `--err-bg` | `#B0262A` / `#F7DEDD` | `#FF8A80` / `#3F1F1F` | Failed, down, broken |
 | `--info` / `--info-bg` | `#2F55D4` / `#DFE6FA` | `#8AA6FF` / `#1F2A4A` | Running, queued |
 | `--muted` / `--muted-bg` | `#5F6975` / `#E6E9EC` | `#94A0AC` / `#262E37` | Unknown, no data, not monitored |
+| `--on-ink-ok` / `-warn` / `-err` / `-info` / `-muted` | `#6FCF97` / `#E5B04D` / `#FF8A80` / `#8AA6FF` / `#94A0AC` | `#0F3F24` / `#4A2E00` / `#6E1014` / `#17297A` / `#2C333B` | The tones on `--fill` (a rail's selected row). Dark's five clear 4.5:1 on the fill, at 5.62 to 6.04 |
 | `--shadow` | `0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25)` | `0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6)` | Floating things only |
 
 The ticket page's card has two moods and one markup (spec #2396). While the ticket is only read it sits on `--sheet` with `--ink` (`.tf-sheetcard`); once it is the chosen job it sits on `--card` with `--card-ink` (`.tf-card`), and the class is the only difference. The yellow follows the first rule above: the page card, the chosen job's card and row on the Tickets board and list, and the running timer. A selected card or row that is not the chosen job stays on `--sheet` with its outline in `--ink`.
@@ -54,13 +55,17 @@ I computed WCAG ratios for every text pair the prototype uses. All text passes 4
 
 One pair fails. The focus ring on the yellow card is 4.16:1 in light, which is fine for a non-text indicator, but **1.22:1 in dark**, so keyboard focus on the ticket page's yellow card or the chosen job's card on the board is invisible there. The fix belongs in the system, not in a ticket: on any `--card` surface the focus ring is `--card-ink`. That's a change from the prototype, and the first ticket that draws a card names it in its PR.
 
+The ring inside a `--fill` surface (a rail's selected row, a pressed segment) fails the same way: `--focus` on the fill is 1.10:1 in dark and 2.62:1 in light. There the ring is `--paper`, at 8.48:1 and 13.23:1. Amended 2026-11-05.
+
 ## Type
 
 Three families, each with one job.
 
 - **Archivo** (variable, `wdth` 62–125, `wght` 400–800) for the whole interface.
 - **Source Serif 4** (variable, optical size) is the reading face. It sets page bodies and titles in Docs and nowhere else.
-- **JetBrains Mono** (400, 600) only for real code values: ticket keys, shas, branch names, repository names, file paths, logs and diffs. Never for a label or a number that's just a number. Durations, counts and a number with a hash (`#1187`, `PR #142`) are Archivo with `font-variant-numeric: tabular-nums`. An asset's or a monitor's name is a name, and its path in a dialog is words: Archivo, in every place. A ticket key is mono in every place it can be: a chip, a table, a title, a rule's wording. A label inherits no mono from the code around it: a diff's *Rendered / Lines*, a tree row's *not staged* and *Clear the filter* are Archivo.
+- **JetBrains Mono** (400, 600) only for real code values: ticket keys, shas, branch names, repository names, file paths, logs and diffs. Never for a label or a number that's just a number. Durations, counts and a number with a hash (`#1187`, `PR #142`) are Archivo with `font-variant-numeric: tabular-nums`. An asset's or a monitor's name is a name, and its path in a dialog is words: Archivo, in every place. A ticket key is mono in every place it can be: a chip, a table, a title, a crumb, *Back to*, a rule's wording. A label inherits no mono from the code around it: a diff's *Rendered / Lines*, a tree row's *not staged* and *Clear the filter* are Archivo.
+
+`TfKey` draws a code value, so this is one component and not a class applied by hand. It is 600 where it leads a row, a card or a pane (`lead`) and 400 in a sentence. As a `chip` it holds the chip's size, and it names the job without yellow. A breadcrumb and *Back to* find a ticket key by themselves (`isKey`), and a crumb that is another code value, such as a repository's name, says so with `code`.
 
 Body text is Archivo 14 px / 1.45, weight 400. Weight 500 is for buttons and for a row's title, the name you scan a list by: `--t-md` where the row has a second line, `--t-sm` in a dense table. Weight 600 is the normal emphasis and covers most headings. 700 is for page titles and 800 for the narrow display figures. The prototype's single 650 becomes 600.
 
@@ -76,6 +81,8 @@ One step per level, on every page and in every column of it:
 | Dialog or drawer title | `--t-xl` |
 | Panel or section heading, side rails' included | `--t-lg`, 700, `wdth` 88 |
 | A group's label inside a panel, a rail or a section | `--t-xs`, 600, `--ink-2` |
+
+A panel's heading goes above its box, with the panel's action on the same line, and what follows it is the box. `.tf-panel > header` draws this, on every page. A panel with no heading is a plain box.
 
 Markdown a file or a comment holds keeps its own order above its body: h1 `--t-2xl`, h2 `--t-xl`, h3 `--t-lg`, h4 `--t-md`.
 
@@ -136,7 +143,7 @@ Three sizes is the complete set. A rule outside `chrome.css` doesn't set a butto
 
 - **Icon-only buttons** (`.tf-iconbtn`) are square at their row's height: `--control-h` by default, `--control-h-sm` with `.tf-sm` in a page body's row. The top bar's icon buttons are at the header height.
 - **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height from its token, with horizontal padding only. The filter bar is a page body's toolbar, so its search (`.tf-fsearch`) and its selects (`.tf-fsel select`) are `--control-h-sm`, as the segmented control and the pill toggles beside them are.
-- **Pill toggles** (`.tf-fchips`, Standup's people): off is outlined; on is ringed in `--ink` on `--sheet-2`, not filled. Several can be on at once, and a row of filled pills outweighed the one action the page exists for (reviewers, Rounds 7 and 8, on Standup's *Publish*). Only a primary, a pressed segment and a rail's selected row are filled, and a segmented control has exactly one on. Amended 2026-11-05.
+- **Pill toggles** (`.tf-fchips`, and Standup's people are one): off is outlined; on is ringed in `--ink` on `--sheet-2`, not filled. Several can be on at once, and a row of filled pills outweighed the one action the page exists for (reviewers, Rounds 7 and 8, on Standup's *Publish*). Only a primary, a pressed segment and a rail's selected row are filled, and a segmented control has exactly one on. Amended 2026-11-05. A pill's class is `.tf-fchips` alone, and the gate refuses another.
 - **Chip buttons** (`.tf-chipbtn`): a button that is part of a chip's text, drawn as that text. The State colours chip's word, which is its grip, and its *Reset* are the two (spec #2463). No border, background or padding, and the chip's own font; `chrome.css` draws it, and a view adds no size to it. Text-only styling (an underline, a weight) is the view's.
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
 
@@ -149,15 +156,23 @@ Three sizes is the complete set. A rule outside `chrome.css` doesn't set a butto
 
 ### Disabled
 
-No fill and `--muted` text: a disabled primary is on `--sheet-2` with a `--rule` border, and any other disabled button has no fill at all. In both themes any fill means it can be pressed. The rule is one rule in `chrome.css`. A control that works and opens the reasons (*Merge…* when the source blocks it) is enabled, drawn as a default button, not as a disabled primary. A primary stays disabled until there is something to do (a pattern with neither a project nor a name, a move to where the asset already is), and says why in its title or its label.
+No fill and `--muted` text: a disabled primary is on `--sheet-2` with a `--rule` border, a disabled ghost has a transparent border and a title that says why, and any other disabled button has no fill at all. In both themes any fill means it can be pressed. A border on a disabled ghost made it look more pressable than a working one, because a working ghost has none (Amended 2026-11-05). The rule is one rule in `chrome.css`. A control that works and opens the reasons (*Merge…* when the source blocks it) is enabled, drawn as a default button, not as a disabled primary. 
+
+**The enabled rule.** A primary is disabled until there is something to do (a pattern with neither a project nor a name, a move to where the asset already is), and a line beside the footer says what is missing: a tooltip alone is not enough. Needed fields are marked in words, and nothing is preselected.
+
+**The removal rule.** A press that removes something either confirms in a dialog or acts at once with *Undo* on its toast. Repeats collapse into one toast.
 
 ### Dialogs
 
-One pattern, `TfDialog`: the title line with its × on the right (every dialog but the launcher, which has its own), an optional sub line, the body, the footer. A title says what the dialog does to what (*Delete Payout stack?*, *Move knobas-gitea*, *Link SEPA payout retry design*), with no ellipsis. A delete's primary names the kind (*Delete link set*, *Delete asset*). A label beside a field is `--t-sm`, `--ink-2`, on the dialog's one label column. A list the dialog is about keeps its height in a short window, and the body scrolls.
+One pattern, `TfDialog`: the title line with its × on the right (every dialog but the launcher, which has its own), an optional sub line, the body, the footer. A title says what the dialog does to what (*Delete Payout stack?*, *Move knobas-gitea*, *Link SEPA payout retry design*), with no ellipsis. A delete's primary names the kind (*Delete link set*, *Delete asset*). A list the dialog is about keeps its height in a short window, and the body scrolls: a body's children don't shrink.
+
+### Forms
+
+One grid, `.tf-formgrid`, in a dialog or on a page. A short control has its label beside it, `--t-sm` and `--ink-2`, on the one label column (`--tf-label`, 132 px; a dialog of long names widens the token). A wide field (a textarea, a list, a radio group, or anything marked `.tf-fwide`) takes the whole row, its label above it and 4 px away. A sentence, a tick and a banner take the whole row too. This trades height for room: a dialog with a wide field is taller.
 
 ### Job scope
 
-One control, `TfScope`: *This job* with its count as a badge, *Mine* where the page has one, then *All*. Its default is *All* on every page, and a ticket card's row turns *This job* on. It does not repeat the key: the top bar names the job (*Start PAY-231*), and a page a row narrowed to another ticket says so in its bar. The button's title names the ticket. Amended 2026-11-05: Builds' rail used to default to *This job* (#850); one default means one answer to "why is this page showing fewer".
+One control, `TfScope`, as wide as its words on every page: *This job* with its count as a badge, *Mine* where the page has one, then *All*. The badge is a dash until the read answers, so the control keeps its width. Its default is *All* on every page, and a ticket card's row turns *This job* on, on each list the section holds, Builds' rail and runs alike. It does not repeat the key: the top bar names the job (*Start PAY-231*), and a page a row narrowed to another ticket says so in its bar. The button's title names the ticket. Amended 2026-11-05: Builds' rail used to default to *This job* (#850); one default means one answer to "why is this page showing fewer".
 
 ### Gap
 
@@ -165,7 +180,7 @@ Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog fo
 
 ### Header
 
-The title block on the left and `.tf-acts` on the right, on the title line, top-aligned to it. Every page uses this layout; none puts its actions on a line of their own, except the Docs reader, whose 40 px title takes the reading column. The actions come in this order:
+The title block on the left and `.tf-acts` on the right, on the title line, top-aligned to it, while both fit. What fits decides this, not the window's width: the title asks for at least 360 px, and when the actions don't fit beside that they wrap as one group, under the title and above the subline. A group never wraps a button at a time. The actions come in this order:
 
 1. the primary;
 2. the other actions;
@@ -220,6 +235,12 @@ There is no third way to draw danger.
 | Danger, starting | `.tf-btn.tf-danger:not(.tf-primary)` |
 | Danger, confirming | `.tf-btn.tf-primary.tf-danger` |
 | Large decision with a `<kbd>` hint | `.tf-btn.tf-lg kbd` |
+| A form's short field | `.tf-formgrid > input` |
+| A form's wide field | `.tf-formgrid > textarea` |
+| A panel's heading, above its box | `.tf-panel > header` |
+| A code value | `.tf-key` |
+| A state's chip | `.tf-chip.tf-err` |
+| A row's fading group | `.tf-rowend .tf-rowacts` |
 
 A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
 
@@ -232,6 +253,9 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 - **(c)** a row of buttons has a `gap` other than `var(--control-gap)`: an actions container (`.tf-acts`, any local `…acts` row with or without the hyphen, the bare `.acts`, `.tf-trail`, a dialog's `footer`; a `…facts` name is not one), or a row of controls under another name (the filter bar `.tf-fbar`, the pill toggles `.tf-fchips`, the large decision `.tf-decide`, any `…-btns` row, a dialog's title-line cluster `.tf-dctl`);
 - **(f)** a field in a row of buttons (`.tf-fsearch`, or a `select` or `input` inside a row of buttons or a `.tf-fsel`) sets a literal `height` or `min-height`, or vertical padding: it takes `height: var(--control-h…)`;
 - **(g)** an actions container outside a page header (`.tf-fhead`, `.tf-stg-h`) is pushed to the end and laid out by hand (`margin-left: auto` with `display: flex`): a strip's or a row's trailing group is `.tf-trail`;
+- **(h)** a `font-size` or a `font` shorthand's size is not a `--t-*` token, apart from the reading face and code (a rule that sets `--serif` or `--mono`), the Docs title and the PDF's text layer;
+- **(i)** a pill toggle is drawn outside `.tf-fchips`: a class with a `border-radius` of 9 px or more that also answers `aria-pressed`;
+- **(j)** a grid's label column is a literal `132px`: it is `var(--tf-label)`;
 - **(d)** an allowlist entry has no reason;
 - **(e)** an allowlist entry matches nothing.
 
@@ -245,13 +269,13 @@ A control this section doesn't name is added by amending this section, the `#/co
 
 The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (preview panes close and side rails narrow) and 900 px (columns stack). A page whose own width decides something, such as a table shedding columns or a header shortening a label, uses a container query instead. The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
 
-Below 900 px a stacked side rail folds behind one bar (`TfRailBar`) that names what is open, and a link picked in it folds it again, so the page's title stays near the top: Tickets' views, Builds' pipelines, Settings' sections and Docs' tree. Docs' tree opens as a drawer from that same bar, because the page does not reflow under it. A row keeps its state's words stacked: a dot alone says nothing. A header keeps its actions on the title line unless it holds three or more, which stack under it. A ticket's card, stacked, is its key, status and title, then *Details and connections* folded, then its foot, in the card's flow.
+Below 900 px a stacked side rail folds behind one bar (`TfRailBar`) that names what is open, and a link picked in it folds it again, so the page's title stays near the top: Tickets' views, Builds' pipelines, Settings' sections and Docs' tree. Docs' tree opens as a drawer from that same bar, because the page does not reflow under it. A row keeps its state's words stacked: a dot alone says nothing. A ticket's card, stacked, is its key, status and title, then *Details and connections* folded, then its foot, in the card's flow.
 
-A page's scroller keeps its scrollbar's room (`scrollbar-gutter: stable`): `.tf-main`, and the inner scroller of a viewport-high page (Tickets' board, Builds' right side, Docs' page, a ticket's reading column, Settings' section column). Switching a tab moves nothing. A selected tab differs by its ink and its rule, not its weight, and a filter bar's count holds its width. A table whose rows change under the reader has fixed columns.
+No page's scroller reserves room for its bar. Content is as wide as the scroller's box with a bar or without one, and the bar takes the last 8 px of the page's right padding, so a bar appearing moves nothing. For `.tf-main` the page is `100vw` wide. The inner scroller of a viewport-high page (Tickets' board, Builds' right side, Docs' page, a ticket's reading column, Settings' section column) is `TfScroller`: a host that is a size container, the scroller, and one body at `100cqw`, with a clip around the body so that what passes under the bar is no overflow to scroll to. A band ends at the bar while there is something to scroll, and 14 px, not 22, sits between content and bar. A rail's own list is not a page's scroller and may keep its room. Amended 2026-11-05, after `overflow-y: scroll` and `scrollbar-gutter: stable` each cost something else. A selected tab differs by its ink and its rule, not its weight, and a filter bar's count holds its width. A table whose rows change under the reader has fixed columns.
 
 Settings is viewport-high: its crumb and its rail stay in view, and only the section's column scrolls.
 
-The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on.
+The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on. The bar always names the job, because the job scope relies on it: below 900 px *Start* keeps the job's key and the search gives up `⌘/` first.
 
 The status bar names at most two healthy sources; past that they are one line that says how many synced and how many need a look, then the oldest age, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, at 1150 px and below it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
 
@@ -261,11 +285,13 @@ A section's own page has no breadcrumb bar, unless a ticket card's row opened it
 
 *Back to <name>* `Esc` is a link that does what the key does, drawn as the crumbs are. With no opener, `Esc` goes to the crumb above the page, as the page says it (a pull request's repository, a run's pipeline by name, an asset's holder). A section's own tabs and a pipeline picked on Builds have no parent, because their parent would be a sibling: `#/builds` reopens the pipeline you were on, and a pipeline's crumb is one crumb at both of its addresses, with nothing above it linked. Settings is the one top page `Esc` leaves: you visit it by its cog from somewhere, and every section says where.
 
+**The return contract.** The bar and the key agree whatever has focus. A hint names the real target. Back restores the list's scroll and focuses the row you opened. Leaving by `Esc` or *Back to* ends a row's narrowing. A row or link that opens a place for one thing marks that thing and draws the bar. An open panel or inline editor closes first on `Esc`.
+
 **One "nothing here" state** (`TfNothingHere`) for an address that names nothing, of any kind: centred, one sentence with no id and no word of the app's insides (*knobas does not hold this pull request. It may not have synced yet.*), one action. A bar above it keeps the path to the kind (*Code › Pull request*), never an empty crumb. A section's address with a tab it does not have says so, and is not drawn as its first tab. A read that failed for another reason is the same block with the reason and *Try again*.
 
 The asset tree (`#/assets`, `#/asset/<id>`) is viewport-high: a crumb bar drawn at both addresses, so the first click moves nothing, the canonical header (the title names the asset), its open alerts (folded once an asset is selected), a filter band, then the Miller columns scrolling sideways beside a fixed pane. It has no nav entry and nothing lights for it, because `docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md` keeps it from moving under Monitors. Its crumb starts at *Asset tree*. In a column the selected asset is the ink pill and the assets above it on the path a paler one, so the path reads and one row says where you are. An asset's kind is a two-letter tag written like an element's symbol, in sentence case and in Archivo (*Si*, *Hv*, *Vm*, *Ce*, *Ct*), with the word itself in the tag's title and heading the pane.
 
-A filter bar is a full-width band under the page's tabs, on every page.
+A filter bar is a full-width band under the page's tabs, on every page. Its search takes what the row leaves, from 140 to 360 px, so a placeholder is short enough to fit at 140. A group of pills stays whole: the row wraps between groups.
 
 A key in mono carries no underline until pointed at. A link made of words has an underline, in a sentence, on its own or in a banner, with one exception: the name of a row that opens as a whole (a table's `.tf-row`, a list row that is one link) has none until pointed at, because the row answers the pointer. A link in a row that does not open, or a second link in one that does, keeps it.
 
@@ -283,17 +309,17 @@ Motion answers something the person did, and there's very little of it.
 - The Connections drawer slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
 - A route's wire on the asset tree fades in over 160 ms when a selection brings it.
-- A row's repeated actions fade in on hover and on focus within the row (`.tf-rowacts`), holding their room; where nothing hovers they stay. An action only some rows offer because of their state (*Ack*, *Open PR*) is not in the group and stays.
+- A row's repeated actions fade in on hover and on focus within the row (`.tf-rowacts`). At rest they hold no room: `.tf-rowend` is the end of the row, and the group hangs to its left on the hover fill, over the end of the last column. Where nothing hovers they stand in the row. An action only some rows offer because of their state (*Ack*, *Open PR*) stands in `.tf-rowend`, not in the group, and stays.
 
 There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.
 
-Focus is always visible: a 2 px outline in `--focus`, offset 2 px. Inside a box that clips (the nav, a tab strip, a segmented control, a rail, a card's lists) it is offset -2 px, or the box would cut its sides. `--card-ink` replaces it on card surfaces (see Contrast).
+Focus is always visible: a 2 px outline in `--focus`, offset 2 px. Inside a box that clips (the nav, a tab strip, a segmented control, a rail, a card's lists) it is offset -2 px, or the box would cut its sides. `--card-ink` replaces it on card surfaces and `--paper` on a fill (see Contrast).
 
 A rail's selected row is an inset ink pill on every page (Tickets, Settings, Builds, Docs), with its tones re-declared for the ink (`--on-ink-*`). A list row that says why it asks for you (Docs' *For you*) does not repeat it.
 
 ## Words
 
-Copy follows prototype-6 word for word, as `requirements.md` says. When a screen needs words the prototype doesn't have, they follow its voice. Sentence case. Buttons name what happens ("Log 1h 20m", not "Submit", and "Start timer", not "No timer"), and the toast uses the same verb ("Logged 1h 20m"). Errors say what failed and what to do ("TeamCity sign-in is failing, so it waits there"). An empty view says what would fill it and offers the action.
+Copy follows prototype-6 word for word, as `requirements.md` says. When a screen needs words the prototype doesn't have, they follow its voice. Sentence case. A state's chip is `TfStateChip`, whose word comes from one function (`state-word.ts`): whatever a source writes, *FAILURE*, *In Progress* or *merged*, draws as *Failed*, *In progress* and *Merged*, and a chip reads what the filters read. Buttons name what happens ("Log 1h 20m", not "Submit", and "Start timer", not "No timer"), and the toast uses the same verb ("Logged 1h 20m"). Errors say what failed and what to do ("TeamCity sign-in is failing, so it waits there"). An empty view says what would fill it and offers the action.
 
 ## Getting it into the app
 

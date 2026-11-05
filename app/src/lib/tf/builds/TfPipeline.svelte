@@ -34,6 +34,8 @@
   button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import { secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
@@ -53,7 +55,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { runHash, runTone, shortTime, stateWord } from "./builds";
+  import { runHash, runTone, shortTime } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
@@ -426,7 +428,17 @@
     noun: "runs",
     one: "run",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "This job", title: `Runs on ${job}'s branches`, query: "" }] : []),
+      ...(job !== null
+        ? [
+            {
+              id: "job",
+              label: "This job",
+              count: all === null ? null : keptRuns(all, { text: "", scope: "job", results: [], branch: null }, jobBranches).length,
+              title: `Runs on ${job}'s branches`,
+              query: "",
+            },
+          ]
+        : []),
       { id: "mine", label: "Mine", title: "Runs you started", query: "" },
       { id: "all", label: "All", query: "" },
     ],
@@ -658,12 +670,10 @@
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
-                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "Queued" : stateWord(run.state.text)}</span>{/if}
+                {#if run.state !== null && !isStartedHere(run)}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
               </td>
               <td class="tf-mono tf-run-br" title={run.branch ?? undefined}
-                >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
-                    class="tf-chip tf-jobchip-sm">{job}</span
-                  >{/if}</td
+                >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</td
               >
               <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-run-tests"
@@ -684,7 +694,7 @@
               <td class="tf-nowrap tf-dim tf-num tf-run-at">{run.started !== null ? shortTime(run.started) : ""}</td>
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
-                  <span class="tf-rowacts">
+                  <span class="tf-rowend"><span class="tf-rowacts">
                     <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
                     {#if run.finished !== null}
                       <button
@@ -693,11 +703,8 @@
                         {...refusedAttrs(cannotRun)}
                         onclick={() => runDialog(run)}>Run again…</button
                       >
-                    {:else}
-                      <!-- The empty slot keeps *Log* in its column on a run still going. -->
-                      <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true">Run again…</span>
                     {/if}
-                  </span>
+                  </span></span>
                 {/if}
               </td>
             </tr>
@@ -766,11 +773,11 @@
                 {:else}
                   {(paramEcho(setting.name)?.text ?? setting.value) || "(empty)"}
                 {/if}
-                {#if paramEcho(setting.name) !== null}<span class="tf-chip tf-info">{paramEcho(setting.name)?.state}</span>{/if}
+                {#if paramEcho(setting.name) !== null}<TfStateChip text={paramEcho(setting.name)?.state} tone="info" />{/if}
               </td>
               <td class="tf-dim">
                 {field?.kindWord ?? "text"}
-                {#if !setting.secret && setting.inherited}<span class="tf-chip">inherited</span>{/if}
+                {#if !setting.secret && setting.inherited}<TfStateChip text="inherited" />{/if}
               </td>
               <td class="tf-nowrap">
                 {#if editing === setting.name}
@@ -805,7 +812,7 @@
           {#each settings.triggers as trigger, at (at)}
             <tr>
               <td
-                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<span class="tf-chip">disabled</span>{/if}{#if trigger.facts.length > 0}<span
+                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<TfStateChip text="disabled" />{/if}{#if trigger.facts.length > 0}<span
                     class="tf-sub">{triggerDetail(trigger)}</span
                   >{/if}</td
               >

@@ -9,7 +9,7 @@
 .tf-vw-prev { overflow: auto; padding: 16px 18px; background: var(--paper); }
 .tf-vw-sec { padding: 14px 0; border-bottom: 1px solid var(--rule-2); }
 .tf-vw-sec:last-of-type { border-bottom: 0; }
-.tf-vw-sec h3 { font-size: var(--t-md); font-weight: 600; margin: 0 0 10px; }
+.tf-vw-sec h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0 0 10px; }
 .tf-vw-sub { margin-top: 14px; }
 .tf-vw-sub h4 { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 0 0 6px; }
 .tf-vw-sub > .tf-dim, .tf-vw-sec > .tf-dim { font-size: var(--t-sm); margin: 0 0 8px; }

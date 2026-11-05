@@ -211,7 +211,7 @@
   /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
   .fld {
     display: grid;
-    grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr);
+    grid-template-columns: var(--tf-label) minmax(0, 1fr);
     column-gap: 12px;
     align-items: center;
   }
@@ -239,13 +239,13 @@
      look different. */
   .hint {
     margin-top: 6px;
-    font-size: 11px;
+    font-size: var(--t-2xs);
     color: var(--muted);
   }
 
   .in {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 

@@ -23,6 +23,8 @@
   --add-word: #B4DEC3; --del-word: #EFB9B6;
   /* The control tokens (design system, Controls; #2280): a button's three heights and the gap between buttons. */
   --control-h: 32px; --control-h-sm: 26px; --control-h-lg: 40px; --control-gap: 6px;
+  /* A form's one label column (`.tf-formgrid`). A dialog of long names widens it with this token. */
+  --tf-label: 132px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -35,7 +37,7 @@
     --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
     --sel-halo: var(--ink);
-    --on-ink-ok: #1F7444; --on-ink-warn: #8A5600; --on-ink-err: #B0262A; --on-ink-info: #2F55D4; --on-ink-muted: #5F6975;
+    --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
     --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
     color-scheme: dark;
   }
@@ -49,7 +51,7 @@
   --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
   --sel-halo: var(--ink);
-  --on-ink-ok: #1F7444; --on-ink-warn: #8A5600; --on-ink-err: #B0262A; --on-ink-info: #2F55D4; --on-ink-muted: #5F6975;
+  --on-ink-ok: #0F3F24; --on-ink-warn: #4A2E00; --on-ink-err: #6E1014; --on-ink-info: #17297A; --on-ink-muted: #2C333B;
   --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
   color-scheme: dark;
 }
@@ -59,7 +61,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
 /* Archivo's word space is narrow: at 11 to 15 px words run together, so the interface opens it a little. */
-body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; accent-color: var(--ink); }
+body { font: var(--t-sm)/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; accent-color: var(--ink); }
 /* Code keeps its columns, and the reading face its own fit. */
 :is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
 /* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. It is told from the words by its
@@ -98,6 +100,11 @@ a { color: var(--info); text-decoration: none; }
 /* Focus is always visible: 2px --focus, and --card-ink on a yellow card, where --focus is 1.22:1 in dark. */
 .tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
+/* A ring drawn inside a fill is `--paper`: `--focus` on it is 1.10:1 in dark and 2.62:1 in light, `--paper` 8.48 and 13.23. */
+.tf :is(.tf-seg button[aria-pressed="true"], .tf-pi[aria-current="true"], .tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"]):focus-visible,
+.tf :is(.tf-rd-tree details > summary.tf-cur) :focus-visible { outline-color: var(--paper); }
+/* `hidden` means hidden. A class that sets `display` beat the browser's own rule, which is how a dead tab kept its button. */
+.tf [hidden] { display: none !important; }
 
 /* A step under its context, whole pixels: 14 to 13, 13 to 12, 12 to 11, so it stays on the type scale. */
 .tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; font-size: round(.93em, 1px); }

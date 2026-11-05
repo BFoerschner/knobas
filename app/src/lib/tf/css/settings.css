@@ -1,8 +1,7 @@
 /* ---------- settings: prototype-6's .stg ---------- */
-/* The crumb and the rail stay in view; only the section's column scrolls, and it keeps its scrollbar's room. */
+/* The crumb and the rail stay in view; only the section's column scrolls. */
 .tf-stgpage { height: 100%; min-height: 0; }
 .tf-stg { display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
-.tf-stg-scroll { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
 .tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow: auto; }
 .tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
 .tf-stg-nav a:hover { background: var(--sheet-2); }
@@ -146,4 +145,4 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-sc-word { cursor: grab; overflow-wrap: anywhere; min-width: 0; text-align: left; }
 .tf-sc-from { font-weight: 400; color: var(--ink-2); }
 .tf-sc-reset { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
-.tf-sc-line code { font-size: .95em; }
+.tf-sc-line code { font-size: var(--t-xs); }

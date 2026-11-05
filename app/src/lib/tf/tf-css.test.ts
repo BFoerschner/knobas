@@ -392,7 +392,14 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
-const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap:has(.tf-lane + .tf-lane) > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)"];
+test("no page's scroller reserves room for its bar: the page is as wide as the window, and a rail's own list may keep its room", () => {
+  const gutters = [...code.matchAll(/([^{}]*)\{[^}]*scrollbar-gutter[^}]*\}/g)].map(([, selector]) => selector!.trim().split("\n").at(-1)!.trim());
+  expect(gutters).toEqual([".tf-vfind + .tf-vlist"]);
+  expect(block(code, ".tf-main")).toMatch(/overflow:\s*hidden auto/);
+  expect(block(code, ".tf-sbody")).toMatch(/width:\s*100cqw/);
+});
+
+const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap:has(.tf-lane + .tf-lane) > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]

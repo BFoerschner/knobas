@@ -424,7 +424,7 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   const what = squash(row("open").textContent);
   expect(what).toContain("No target, app open");
   expect(what).toContain("knobas was open and in front, with no timer and nothing it could name.");
-  expect(squash(row("open").querySelector(".tf-chip")?.textContent)).toBe("open");
+  expect(squash(row("open").querySelector(".tf-chip")?.textContent)).toBe("Open");
   // Dashed on the strip, and the legend says what dashed means.
   expect(target.querySelectorAll(".tf-tm-strip .tf-tm-gap")).toHaveLength(2);
   expect(squash(target.querySelector(".tf-tm-legend")?.textContent)).toContain("Open: app in front, no target");

@@ -228,7 +228,7 @@
   .fld {
     display: grid;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 
@@ -263,6 +263,6 @@
 
   .sub {
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 </style>

@@ -22,7 +22,7 @@ export type ScopedSection = Extract<Section, "code" | "builds" | "docs" | "monit
 /** The filter bars each section keeps its scope on (`sessionFilter`). */
 export const SCOPED_FILTERS: Record<ScopedSection, readonly string[]> = {
   code: ["code-repos", "code-prs"],
-  builds: ["builds-pipelines"],
+  builds: ["builds-pipelines", "builds-runs"],
   docs: ["docs"],
   monitors: ["monitors"],
 };

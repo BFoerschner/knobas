@@ -251,7 +251,7 @@ test("Boards and filters: the choice and the favourite filters saved into the co
   );
   expect(rows).toEqual([
     ["Payments and Ops flow", "Kanban board", "18 and 3 in WEB, not synced", "Hide"],
-    ["PAY without a fix version hidden", "Filter", "4", "Show"],
+    ["PAY without a fix version Hidden", "Filter", "4", "Show"],
   ]);
   boards.querySelector<HTMLButtonElement>('button[aria-label="Show PAY without a fix version"]')!.click();
   await settle();

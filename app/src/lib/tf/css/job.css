@@ -187,8 +187,8 @@
 .tf-tkatt .tf-stale { margin: 10px 12px 2px; }
 .tf-tkatt .tf-stale .tf-btn { margin-left: auto; }
 
-.tf-work { overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; min-width: 0; }
-.tf-work > * { flex: none; }
+.tf-work .tf-sbody { display: flex; flex-direction: column; }
+.tf-work .tf-sbody > * { flex: none; }
 .tf-wtabs {
   display: flex; align-items: center; gap: 2px; padding: 10px 22px 0; border-bottom: 1px solid var(--rule);
   background: var(--paper); position: sticky; top: 0; z-index: 6;
@@ -198,8 +198,13 @@
 
 /* ---------- a job section (R-4.6) ---------- */
 .tf-panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
-/* A small button's height whether or not it holds one, so panels side by side share their first rule. */
-.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; min-height: calc(var(--control-h-sm) + 12px); }
+/* One placement for a panel's heading: above its box, not in it (design system, Heading steps). A small button's height
+   whether or not it holds one, so panels side by side share their first rule. The box is what follows the heading. */
+.tf-panel:has(> header) { background: none; border: 0; border-radius: 0; }
+.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 0 0 6px; min-height: calc(var(--control-h-sm) + 6px); }
+.tf-panel:has(> header) > :not(header) { background: var(--sheet); border: solid var(--rule); border-width: 0 1px; }
+.tf-panel:has(> header) > header + * { border-top-width: 1px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
+.tf-panel:has(> header) > :not(header):last-child { border-bottom-width: 1px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; }
 .tf-panel > header h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-open {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2);
@@ -287,10 +292,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 
 /* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
 .tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }
-.tf-formgrid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
-.tf-formgrid input, .tf-formgrid select {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink); width: 100%;
-}
 /* A tick box in the grid (*Link to <job>*, #984) keeps its own size beside its words. */
 .tf-formgrid .tf-ck input[type="checkbox"] { width: auto; padding: 0; }
 .tf-radio { display: flex; flex-direction: column; gap: 6px; }

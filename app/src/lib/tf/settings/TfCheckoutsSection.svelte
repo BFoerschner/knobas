@@ -7,6 +7,7 @@
   with *Remove*: a closed one also goes on the next pull request opened.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import {
     pullRequestWorktrees,
@@ -122,7 +123,7 @@
       <tbody>
         {#each settings.applications as app (app.id)}
           <tr>
-            <td><b>{app.name}</b>{#if app.id === settings.default_application}{" "}<span class="tf-chip">default</span>{/if}</td>
+            <td><b>{app.name}</b>{#if app.id === settings.default_application}{" "}<TfStateChip text="default" />{/if}</td>
             <td class="tf-small"><span class="tf-mono">{app.command}</span></td>
             <td class="tf-small">{#if app.file_command}<span class="tf-mono">{app.file_command}</span>{:else}<span class="tf-dim">opens the checkout</span>{/if}</td>
             <td class="tf-right">
@@ -148,7 +149,7 @@
         <tbody>
           {#each worktrees as tree (tree.path)}
             <tr>
-              <td>#{tree.number}{#if tree.closed}{" "}<span class="tf-chip">closed</span>{/if}</td>
+              <td>#{tree.number}{#if tree.closed}{" "}<TfStateChip text="closed" />{/if}</td>
               <td class="tf-small"><span class="tf-mono">{tree.path}</span></td>
               <td class="tf-right"
                 ><button class="tf-btn tf-sm tf-ghost" title="Remove {tree.path}" onclick={() => void removeWorktree(tree.path)}

@@ -91,7 +91,7 @@
   const filter = sessionFilter("sets");
   const config: FilterConfig = {
     id: "sets",
-    placeholder: "Filter link sets by name or member",
+    placeholder: "Filter link sets",
     noun: "link sets",
     one: "link set",
     chips: [{ key: "by", label: "Applies by", options: APPLIES_BY.map(({ value, label }) => ({ value, label })) }],

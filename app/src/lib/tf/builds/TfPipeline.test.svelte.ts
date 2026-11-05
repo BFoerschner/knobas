@@ -640,7 +640,7 @@ test("Parameters: each default with the kind its spec gives; a secret is never d
     "text",
   ]);
   // *inherited* is a chip of its own, never a word in the kind's list (#1564); a secret draws none.
-  expect(rows.map((r) => kindCell(r).querySelector(".tf-chip")?.textContent ?? null)).toEqual([null, "inherited", null, "inherited"]);
+  expect(rows.map((r) => kindCell(r).querySelector(".tf-chip")?.textContent ?? null)).toEqual([null, "Inherited", null, "Inherited"]);
   expect(rows[2]!.textContent).toContain("(hidden)");
 });
 
@@ -660,7 +660,7 @@ test("Change… on a fixed list draws a select of it, the unlisted default first
   await settle();
   expect(drawn.writes).toEqual([{ SetParameter: { entity: PIPELINE.entity_id, name: "env", value: "prod-dryrun", base: "qa" } }]);
   expect(rows[0]!.textContent).toContain("prod-dryrun");
-  expect(rows[0]!.textContent).toContain("queued");
+  expect(rows[0]!.textContent).toContain("Queued");
   expect(toasts.items.at(-1)?.text).toBe(`Queued: set env on ${PIPELINE.name}.`);
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
 });
@@ -1165,16 +1165,16 @@ test("a parameter change says queued, then sent, and goes once the read shows th
   button("Save")!.click();
   await settle();
   const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
-  expect(chip()).toBe("queued");
+  expect(chip()).toBe("Queued");
   sent(41);
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   // A run's end whose read still holds the old value keeps it.
   await events.ended("teamcity");
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   // Somebody else's change to another value is not this one landing.
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "staging" } : p)) };
   await events.ended("teamcity");
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
   await events.refreshed(PIPELINE.entity_id, 41);
   expect(chip()).toBeNull();
@@ -1291,11 +1291,11 @@ test("a parameter change's echo goes on a refresh's read of the settings that sh
   await settle();
   const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
   sent(41);
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   // A refresh whose read still holds the old value keeps the echo.
   refreshButton()!.click();
   await settle();
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
   refreshButton()!.click();
   await settle();

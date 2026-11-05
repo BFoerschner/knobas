@@ -186,7 +186,7 @@ test("the list draws each set's contents per kind, a line per rule and its ticke
 
 test("the filter keeps sets by name or member, and by what they apply by", async () => {
   await draw([]);
-  const field = target.querySelector<HTMLInputElement>("input[placeholder='Filter link sets by name or member']")!;
+  const field = target.querySelector<HTMLInputElement>("input[placeholder='Filter link sets']")!;
   field.value = "handbook";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();

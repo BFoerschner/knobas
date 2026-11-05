@@ -94,7 +94,7 @@ test("the section draws the clones root, the git found and the applications, the
   expect(rows[1]).toContain("git at /usr/bin/git");
   const apps = [...target.querySelectorAll("tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(apps).toEqual([
-    ["VS Code default", "code {path}", "code --goto {file}:{line}", ""],
+    ["VS Code Default", "code {path}", "code --goto {file}:{line}", ""],
     ["Fork", "open -a Fork {path}", "opens the checkout", "Make default"],
   ]);
 });
@@ -104,7 +104,7 @@ test("Make default saves the list with the new default, and Change… sets the c
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
   await settle();
   expect(saved.at(-1)![1]).toBe("fork");
-  expect(text(target.querySelector("tbody tr:nth-child(2) td"))).toBe("Fork default");
+  expect(text(target.querySelector("tbody tr:nth-child(2) td"))).toBe("Fork Default");
 
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
   flushSync();
@@ -124,7 +124,7 @@ test("the section says the default is listed first and runs on Enter, and Make d
   expect(text(target.querySelector(".tf-stg-p"))).not.toContain("The first one is the default");
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
   await settle();
-  expect([...target.querySelectorAll("tbody tr")].map((tr) => text(tr.querySelector("td")))).toEqual(["VS Code", "Fork default"]);
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => text(tr.querySelector("td")))).toEqual(["VS Code", "Fork Default"]);
 });
 
 const inMono = (el: Element | null | undefined) => el?.closest(".tf-mono") != null;
@@ -174,7 +174,7 @@ test("the pull request worktrees are listed, a closed one marked, and Remove rem
   await draw();
   const section = [...target.querySelectorAll(".tf-stg-sec")].find((sec) => text(sec.querySelector("h2")) === "Pull request worktrees")!;
   const rows = () => [...section.querySelectorAll("tbody tr")].map((row) => [...row.querySelectorAll("td")].map(text).join(" | "));
-  expect(rows()).toEqual([`#7 closed | ${at(7)} | Remove`, `#8 | ${at(8)} | Remove`]);
+  expect(rows()).toEqual([`#7 Closed | ${at(7)} | Remove`, `#8 | ${at(8)} | Remove`]);
 
   section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(7)}"]`)!.click();
   await settle();

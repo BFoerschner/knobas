@@ -207,7 +207,7 @@ test("pressing Sub-tasks lands on Tickets narrowed and named, with the same bar 
   await allSections(card, ["Sub-tasks", "Code", "Builds", "Docs", "Monitors", "Assets"]);
   sectionRow(card, "Sub-tasks").click();
   await until(() => location.hash === "#/tickets", "Tickets never opened");
-  const line = () => shown("input[aria-label='Filter by key, summary, epic or person']") as HTMLInputElement | null;
+  const line = () => shown("input[aria-label='Filter tickets']") as HTMLInputElement | null;
   await until(() => shown(".tf-board-title h1")?.textContent?.includes("Sub-tasks of PAY-231") ?? false, "the title never named the narrowing");
   expect(line()?.value, "nothing is typed into the search").toBe("");
   expect(squash(shown(".tf-crumbs .tf-esc")!)).toBe("Back to PAY-231 Esc");

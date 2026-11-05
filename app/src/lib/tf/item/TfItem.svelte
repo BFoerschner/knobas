@@ -47,6 +47,7 @@
 </script>
 
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import TfNothingHere from "../TfNothingHere.svelte";
   import { actionName } from "../../detail/view/actions";
@@ -203,7 +204,7 @@
             {:else}
               {row.title}
             {/if}
-            {#if row.chip !== null}<span class="tf-chip tf-{row.tone ?? 'muted'}">{row.chip}</span>{/if}
+            {#if row.chip !== null}<TfStateChip text={row.chip} tone={row.tone ?? 'muted'} />{/if}
             {#if row.meta !== null}<span class="tf-item-meta">{row.meta}</span>{/if}
           </li>
         {/each}

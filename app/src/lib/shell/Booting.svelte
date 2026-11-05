@@ -105,7 +105,7 @@
   /* The one code value here: whatever PostgreSQL or the OS said. */
   .boot-mono {
     font-family: var(--mono);
-    font-size: 0.9em;
+    font-size: var(--t-xs);
   }
 
   .boot-fail {

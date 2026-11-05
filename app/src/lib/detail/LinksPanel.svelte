@@ -191,7 +191,7 @@
   .lnote {
     padding: 4px 0 6px 42px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--t-xs);
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;

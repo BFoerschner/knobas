@@ -92,6 +92,7 @@
 </script>
 
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
@@ -385,7 +386,7 @@
   const types = $derived([...new Set((roster ?? []).map((row) => kindWord(row.monitor_type)).filter(Boolean))].sort());
   const config = $derived<FilterConfig>({
     id: "monitors",
-    placeholder: "Filter by monitor, asset or type",
+    placeholder: "Filter monitors",
     noun: "monitors",
     one: "monitor",
     scopes: [
@@ -428,7 +429,7 @@
   /** The header's line: how many checks, from which source, synced when. */
   /** Assets nothing watches: their own band, over their name, type and owner. */
   const unwatchedFilter = sessionFilter("monitors-unwatched");
-  const unwatchedConfig: FilterConfig = { id: "monitors-unwatched", placeholder: "Filter by asset, type or owner", noun: "assets", one: "asset" };
+  const unwatchedConfig: FilterConfig = { id: "monitors-unwatched", placeholder: "Filter assets", noun: "assets", one: "asset" };
   const shownUnwatched = $derived.by(() => {
     const words = unwatchedFilter.text.trim().toLowerCase();
     if (unwatched === null || words === "") return unwatched ?? [];
@@ -657,9 +658,9 @@
                 {#if word !== null}
                   <span class="tf-chip tf-info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)}>Monitor {word}</span>
                 {:else}
-                  <span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
+                  <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
                     >Create monitor…</button
-                  ></span>
+                  ></span></span>
                 {/if}
               </td>
             </tr>
@@ -721,17 +722,17 @@
                     <span class="tf-dim">no asset</span>
                   {/each}
                 </td>
-                <td class="tf-mon-acts"><div class="tf-trail">
+                <td class="tf-mon-acts"><div class="tf-rowend">
                   {#if down}
-                    <button type="button" class="tf-btn tf-sm" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
+                    <button type="button" class="tf-btn tf-sm tf-mon-ack" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
                       >{row.entity_id in acked ? "Acked" : "Ack"}</button
                     >
                   {/if}
                   {#if toggled !== null}
                     <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
-                    <span class="tf-chip tf-info tf-queued-mark">{toggled.state}</span>
+                    <TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />
                   {/if}
-                  <span class="tf-rowacts tf-trail">
+                  <span class="tf-rowacts">
                   {#if toggled === null}
                     {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
                       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>

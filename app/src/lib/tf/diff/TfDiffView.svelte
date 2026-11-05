@@ -45,6 +45,7 @@
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { lineName } from "../../detail/view/pending-comments.svelte";
@@ -564,7 +565,7 @@
 {/snippet}
 
 {#snippet mine(body: string)}
-  <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {body}</p></div>
+  <div class="tf-thread tf-pending"><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {body}</p></div>
 {/snippet}
 
 <div class="tf-dtool">
@@ -574,16 +575,17 @@
   </div>
   {#if anyPipe}
     {@const all = pipeAll ?? piping.on}
-    <button
-      type="button"
-      class="tf-pill"
-      aria-pressed={all}
-      title="Run each file's default pipeline on both sides of this diff"
-      onclick={() => {
-        pipeAll = !all;
-        pipeOne = {};
-      }}>Run pipelines</button
-    >
+    <div class="tf-fchips">
+      <button
+        type="button"
+        aria-pressed={all}
+        title="Run each file's default pipeline on both sides of this diff"
+        onclick={() => {
+          pipeAll = !all;
+          pipeOne = {};
+        }}>Run pipelines</button
+      >
+    </div>
   {/if}
   {#if layout.chosen === "split" && narrow.current}
     <span class="tf-dim tf-dtool-why">Unified while the window is too narrow for split.</span>
@@ -691,7 +693,7 @@
         {#each stale as d (d.id)}
           <div class="tf-thread tf-pending">
             <p>
-              <b>You</b> <span class="tf-chip tf-warn">pending</span>
+              <b>You</b> <TfStateChip text="pending" tone="warn" />
               <span class="tf-mono tf-dim">{d.path}, {lineName(d.side, d.line)}{d.head ? ` at ${d.head.slice(0, 7)}` : ""}</span>
               {d.body}
             </p>

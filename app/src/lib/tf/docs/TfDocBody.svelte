@@ -18,6 +18,7 @@
   or refused save opens the editor with it.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import type { DocBlock, DocSection } from "../../ipc/entity";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
@@ -116,7 +117,7 @@
     <section data-sec={section.number}>
       <h2 id={`s-${section.number}`}>
         <TfDocInlines text={section.heading.text} {onopen} {stems} />
-        {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">{queuedState(section.number)}</span>{/if}
+        {#if queued !== null}<TfStateChip text={queuedState(section.number)} tone="info" class="tf-queued-mark" />{/if}
         <span class="tf-tools">
           <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
           {#if editable && said}

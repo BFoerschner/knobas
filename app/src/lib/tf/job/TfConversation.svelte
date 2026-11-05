@@ -22,6 +22,7 @@
   The box is one line until it is used (`job.css`).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { untrack } from "svelte";
 
   import type { Attachment, Thread } from "../../ipc/entity";
@@ -156,7 +157,7 @@
     <article class="tf-msg tf-queued">
       <span class="tf-av tf-me" aria-hidden="true">{initials(myName)}</span>
       <div class="tf-msg-body">
-        <div class="tf-who"><b>You</b><span class="tf-chip tf-info">{echo.state}</span></div>
+        <div class="tf-who"><b>You</b><TfStateChip text={echo.state} tone="info" /></div>
         <p>{echo.text}</p>
       </div>
     </article>

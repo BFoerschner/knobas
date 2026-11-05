@@ -96,7 +96,7 @@
 
   const config = $derived<FilterConfig>({
     id: "inbox",
-    placeholder: "Filter by text or ticket key",
+    placeholder: "Filter inbox",
     // The Inbox's search is the launcher's, `#i` (#2425): `/` opens it.
     search: false,
     noun: "items",
@@ -256,21 +256,28 @@
         <div class="tf-what">
           {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}{sentence(item)}
         </div>
-        <div class="tf-acts">
+        <div class="tf-acts tf-rowend">
           {#if open !== null}
             <a class="tf-btn tf-sm" href={open.href}>{open.label}</a>
           {/if}
-          {#each rowActions(entry) as action (action)}
+          {#snippet rowAction(action: ReturnType<typeof rowActions>[number], ghost: boolean)}
             <button
               type="button"
               class="tf-btn tf-sm"
-              class:tf-ghost={action === "done" || action === "snooze"}
-              class:tf-rowacts={(action === "done" || action === "snooze") && snoozing !== item.key}
+              class:tf-ghost={ghost}
               {...refusedAttrs(refusal(entry, action))}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
               onclick={() => press(entry, action)}>{labelOf(action)}</button
             >
+          {/snippet}
+          {#each rowActions(entry).filter((action) => action !== "done" && action !== "snooze") as action (action)}
+            {@render rowAction(action, false)}
           {/each}
+          <span class="tf-rowacts" class:tf-on={snoozing === item.key}>
+            {#each rowActions(entry).filter((action) => action === "done" || action === "snooze") as action (action)}
+              {" "}{@render rowAction(action, true)}
+            {/each}
+          </span>
         </div>
         <div class="tf-ctx">
           {kindOf(item.category)}{#if belongs !== null}, job <a href={ticketHash(belongsId ?? belongs)} class="tf-mono"

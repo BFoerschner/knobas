@@ -10,7 +10,9 @@
 .tf-monc-bars { width: 170px; }
 .tf-monc-num { width: 92px; }
 .tf-monc-watch { width: 17%; }
-.tf-monc-acts { width: 236px; }
+/* The actions hang over the row's end on hover (Motion), so this column holds nothing at rest but a row's *Ack*. */
+.tf-monc-acts { width: 20px; }
+.tf-mon:has(.tf-mon-ack) .tf-monc-acts { width: 72px; }
 /* A state holds its column, and says the rest in its title. */
 .tf-mon .tf-chip { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed) > td:first-child { overflow: hidden; text-overflow: ellipsis; }
@@ -31,10 +33,8 @@
   .tf-monc-state { width: 132px; }
   .tf-monc-bars { width: 122px; }
   .tf-monc-num { width: 76px; }
-  .tf-monc-acts { width: 228px; }
 }
 @media (max-width: 1040px) { .tf-mon .tf-num, .tf-monc-num { display: none; } }
-.tf-mon-acts .tf-trail { justify-content: flex-end; flex-wrap: nowrap; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; padding-right: 24px; }

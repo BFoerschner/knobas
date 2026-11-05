@@ -43,6 +43,8 @@
 </script>
 
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import { codeFacts, entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
@@ -60,7 +62,6 @@
   import { waitPhase } from "../waiting";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
-  import { toneClass } from "../tone";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     checkoutLine,
@@ -336,7 +337,7 @@
 
   const repoConfig = $derived<FilterConfig>({
     id: "code-repos",
-    placeholder: "Filter by name, team or language",
+    placeholder: "Filter repositories",
     noun: "repositories",
     one: "repository",
     scopes,
@@ -348,7 +349,7 @@
   });
   const prConfig = $derived<FilterConfig>({
     id: "code-prs",
-    placeholder: "Filter by title, repo, author or number",
+    placeholder: "Filter PRs",
     noun: "pull requests",
     one: "pull request",
     scopes,
@@ -494,14 +495,14 @@
                 ><a class="tf-mono" href={itemHash(row)}
                   ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></span
                   ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></a
-                >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job tf-mono">{job}</span>{/if}</td
+                >{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</td
               >
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
-              <td class="tf-nowrap tf-right"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></td>
+              <td class="tf-nowrap tf-right"><span class="tf-rowend"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></span></td>
             </tr>
           {/each}
           {#if repoWin.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("after")}></td></tr>{/if}
@@ -534,8 +535,8 @@
                       : ""}idle for more than 5 days{/if}</span
                 ></td
               >
-              <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
-              <td class="tf-mono tf-dim">{#if belongs !== null && belongs === job}<span class="tf-chip tf-chip-job">{belongs}</span>{:else}{belongs ?? ""}{/if}</td>
+              <td>{#if row.state}<TfStateChip text={row.state.text} tone={row.state.tone} />{/if}</td>
+              <td class="tf-mono tf-dim">{#if belongs !== null && belongs === job}<TfKey chip value={belongs} class="tf-chip-job" />{:else}{belongs ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>
           {/each}

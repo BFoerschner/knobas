@@ -277,7 +277,7 @@
   /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
   .fld {
     display: grid;
-    grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr);
+    grid-template-columns: var(--tf-label) minmax(0, 1fr);
     column-gap: 12px;
     align-items: center;
   }
@@ -314,7 +314,7 @@
     border: 1px solid var(--hair2);
     border-radius: 2px;
     background: var(--bg);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .picked > * {
@@ -345,12 +345,12 @@
   .hint {
     margin-top: 6px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .fail {
     color: var(--fail);
-    font-size: 12px;
+    font-size: var(--t-xs);
     line-height: 1.5;
   }
 </style>

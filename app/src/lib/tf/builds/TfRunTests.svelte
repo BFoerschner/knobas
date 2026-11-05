@@ -9,6 +9,7 @@
   only the rows near the viewport (`shell/windowed.svelte.ts`, #2210).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -159,8 +160,7 @@
           >
           <span class="tf-dim">{time ?? ""}</span>
           <span
-            >{#if test.status === "failed"}<span class="tf-chip tf-err">{test.muted ? "failed, muted" : "failed"}</span
-              >{:else}<span class="tf-dim">{test.status}</span>{/if}</span
+            >{#if test.status === "failed"}<TfStateChip text={test.muted ? "failed, muted" : "failed"} tone="err" />{:else}<span class="tf-dim">{test.status}</span>{/if}</span
           >
         </div>
       {:else}

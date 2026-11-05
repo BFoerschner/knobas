@@ -337,7 +337,7 @@ test("each branch's standing that lands redraws its own row, not the whole list 
     release();
     await settle();
   }
-  expect(text(rowOf("chore/").querySelectorAll("td")[1])).toBe("merged");
+  expect(text(rowOf("chore/").querySelectorAll("td")[1])).toBe("Merged");
   expect(text(rowOf("spike/").querySelectorAll("td")[1])).toBe("2 ahead, 9 behind");
   expect(filtered.calls).toBe(0);
 });
@@ -346,10 +346,10 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   await draw([REPO, "branches"]);
   const rows = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(rows).toEqual([
-    ["main default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", ""],
-    ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 open", "mara", "c90d11e4a7 · 3 hours ago", "Delete…"],
+    ["main Default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", ""],
+    ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 Open", "mara", "c90d11e4a7 · 3 hours ago", "Delete…"],
     ["spike/sepa-instant", "2 ahead, 9 behind", "none", "mara", "9a1b2c3d4e · 9 days ago", "Open PR Delete…"],
-    ["chore/bump-tokio", "merged", "none", "jonas", "77aa00bb11 · 5 days ago", "Delete…"],
+    ["chore/bump-tokio", "Merged", "none", "jonas", "77aa00bb11 · 5 days ago", "Delete…"],
     ["release/1.9", "1 ahead, 0 behind", "none", "", "1111111111 · 20 days ago", "Open PR Delete…"],
   ]);
   expect([...target.querySelectorAll(".tf-rbranches th")].map(text)).toEqual([
@@ -473,7 +473,7 @@ test("New branch… is prefilled from the job, offers every branch to start from
   await settle();
   expect(writes).toEqual([{ CreateBranch: { entity: REPO, name: "feature/PAY-231-backoff", from_ref: "main" } }]);
   // Drawn queued at once, until the listing holds it.
-  expect(text(rowOf("feature/PAY-231-backoff"))).toContain("queued");
+  expect(text(rowOf("feature/PAY-231-backoff"))).toContain("Queued");
   expect(toasts.items.at(-1)!.text).toBe("Queued: create branch feature/PAY-231-backoff in tidewater/payout-service.");
 });
 
@@ -1053,10 +1053,10 @@ test("a branch made goes once the listing's re-read the refresh event asks holds
   let listing: ViewRow[] | null = null;
   const { events, stand } = rereading(() => listing, () => null);
   await draw([REPO, "branches"], null, stand);
-  expect(branchNames().at(-1)).toBe("fix/PAY-231-readme queued");
+  expect(branchNames().at(-1)).toBe("fix/PAY-231-readme Queued");
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(`${REPO}@refs/heads/fix/PAY-231-readme`, "fix/PAY-231-readme", null, "aa · now")];
   await events.refreshed(`${REPO}@refs/heads/fix/PAY-231-readme`, 5);
-  expect(branchNames()).toEqual(["main default", "fix/PAY-231-readme"]);
+  expect(branchNames()).toEqual(["main Default", "fix/PAY-231-readme"]);
 });
 
 test("a branch deleted goes once the listing's re-read the refresh event asks no longer holds it (#2105)", async () => {
@@ -1074,7 +1074,7 @@ test("a branch deleted goes once the listing's re-read the refresh event asks no
   expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete sent");
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago")];
   await events.ended("gitea");
-  expect(branchNames()).toEqual(["main default", "feature/PAY-231-sepa-retry"]);
+  expect(branchNames()).toEqual(["main Default", "feature/PAY-231-sepa-retry"]);
   // Gone, not only out of sight: a branch made again under the name draws no old delete.
   expect(echoesOn(REPO, DELETED)).toEqual([]);
 });
@@ -1106,7 +1106,7 @@ test("a branch made, a branch deleted and a file commit the queue refuses each d
   flushSync();
   button("Delete branch", dialog()!)!.click();
   await settle();
-  expect(branchNames()).toContain("fix/refused queued");
+  expect(branchNames()).toContain("fix/refused Queued");
   expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
 
   queue.hear(1, { id: 1, state: "refused", detail: "403 Forbidden" });

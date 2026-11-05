@@ -17,6 +17,7 @@
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
   import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage, EVENTS } from "../../ipc";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
@@ -229,7 +230,7 @@
         </a>
       {/each}
     </nav>
-    <div class="tf-stg-scroll" {@attach atTopOnMove}>
+    <TfScroller class="tf-stg-scroll" {@attach atTopOnMove}>
     <div class="tf-stg-body">
       {#if place.section === "sources" && error !== null && sources !== null}
         <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
@@ -319,7 +320,7 @@
         {/key}
       {/if}
     </div>
-    </div>
+    </TfScroller>
   </div>
 </div>
 {#if adding}

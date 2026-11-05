@@ -394,7 +394,7 @@ test("#/monitors/unmonitored lists the assets and routes worth a check with env 
   ]);
   expect(rows()[1]!.querySelector("td a")?.getAttribute("href")).toBe("#/route/route%3Agitea");
   // Its own band, over its own rows.
-  expect(target.querySelector<HTMLInputElement>(".tf-fbar input")?.placeholder).toBe("Filter by asset, type or owner");
+  expect(target.querySelector<HTMLInputElement>(".tf-fbar input")?.placeholder).toBe("Filter assets");
 });
 
 test("Create monitor on a route opens as HTTP on its URL plus /health and records the name on the route", async () => {
@@ -669,18 +669,18 @@ test("a pause and a resume each draw a row echo queued, then sent, gone once the
   await settle();
   button(row("yard-planner"), "Resume")!.click();
   await settle();
-  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["queued", "queued"]);
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Queued", "Queued"]);
   expect(button(row("payouts /health"), "Pause")).toBeUndefined();
 
   heard.get(30)!(undefined);
   heard.get(31)!(undefined);
   await settle();
-  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["sent", "sent"]);
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Sent", "Sent"]);
 
   // A run's end before Kuma's /metrics moved: still on its way.
   syncEnds();
   await settle();
-  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["sent", "sent"]);
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Sent", "Sent"]);
 
   roster = ROSTER.map((one) =>
     one.entity_id === "kuma:1" ? { ...one, tombstoned: true, actions: ["resume_monitor"] } : one.entity_id === "kuma:3" ? { ...one, tombstoned: false, actions: ["pause_monitor"] } : one,
@@ -709,7 +709,7 @@ test("a row whose source reads one monitor draws Refresh, one whose source does 
 
 test("a row's Refresh is a small button in the row's trailing group, last after Pause (#2288)", async () => {
   await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "payouts /health")] }));
-  const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-trail")!;
+  const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-rowacts")!;
   expect([...trail.querySelectorAll("button")].map((b) => [text(b), b.className])).toEqual([
     ["Pause", "tf-btn tf-sm tf-ghost"],
     ["Hide", "tf-btn tf-sm tf-ghost"],
@@ -737,7 +737,7 @@ test("Refresh reads the monitor from its source, then the roster again over what
   await settle();
   heard.get(40)!(undefined);
   await settle();
-  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")?.textContent).toBe("sent");
+  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")?.textContent).toBe("Sent");
   const before = reads;
 
   const refresh = rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
