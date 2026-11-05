@@ -175,7 +175,12 @@ export function readSnapshot(snapshot: unknown): SnapshotView {
   const bag = snapshot as Record<string, unknown>;
   const live = bag.live === true;
   const version = pageVersion(bag);
-  if (typeof bag.text === "string") return { text: bag.text, live, raw: null, version };
+  // The words alone, as `body_text_shown!` shows them to every other reader:
+  // a snapshot's `body_text` still holds its marks and comment author lines,
+  // which the comparison needs and the two sides do not draw (#2455).
+  if (typeof bag.text === "string") {
+    return { text: bag.text.replace(/[\u001d\u001f][^\n]*\n?|\u001e/g, ""), live, raw: null, version };
+  }
   if (bag.text === null) return { text: null, live, raw: null, version };
   // A projection this build has no reader for. Shown verbatim rather than
   // hidden: the user is being asked to decide, and "I cannot show you what

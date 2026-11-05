@@ -506,6 +506,13 @@ test("the panel's layer closes it, and goes when the panel does", async () => {
   expect(screen.layers.open, "the panel's layer outlived it").toEqual([]);
 });
 
+test("a held side draws the words of a body_text and not its marks or author lines", () => {
+  const body = "Retry\n\nSee logs.\n\n\u001fMara Lindqvist\nBase 30 s.\n\n\u001eLimits\nFive.\n\u001dENG\u001dRunbook\u001d\nEnd.";
+  expect(readSnapshot({ op: "transition", live: true, text: body }).text).toBe(
+    "Retry\n\nSee logs.\n\nBase 30 s.\n\nLimits\nFive.\nEnd.",
+  );
+});
+
 test("a snapshot is read per op, and says so when it cannot be", () => {
   expect(readSnapshot({ op: "comment", live: true, text: "hello" })).toEqual({
     text: "hello",
