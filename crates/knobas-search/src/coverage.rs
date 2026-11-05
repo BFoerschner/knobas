@@ -184,6 +184,15 @@ select s.id as source_id,
 /// gives a blank configured username. A source that writes `''` where it means
 /// "no user" must not read as able to answer a question it cannot.
 ///
+/// **`$4` is the sources already known to be in the corpus**, for which only an
+/// authored row can change anything. It is what makes the source this module
+/// exists for cheap: a TeamCity that names nobody passes no row out of the scan, so
+/// the join to the entities has nothing to do, 22 ms against 45 at the benchmark's
+/// 100,000 items. A source it does not name passes every row in scope, since the
+/// corpus question is still open. A known source has a row here only if it is
+/// authored, so its `authored` is true whenever it appears, and [`report`] keeps
+/// what the walk said when it does not.
+///
 /// `sync.live_item`, never `sync.item` -- see the module docs for what that
 /// costs and why it is worth it. The columns are named rather than `select *`ed:
 /// the view carries a `tsvector` and reading one into a `FromRow` struct panics
@@ -195,6 +204,7 @@ select i.source_id                            as source_id,
  where i.source_id = any($1)
    and (cardinality($2::text[]) = 0 or i.kind = any($2))
    and i.kind <> all($3::text[])
+   and (i.source_id <> all($4::text[]) or nullif(i.author, '') is not null)
  group by i.source_id
 ";
 
@@ -274,22 +284,26 @@ struct NewestRows {
     read_every_row: bool,
 }
 
-/// What a walk settled: the probes it can answer for, and the sources whose
-/// verdict lies past where it stopped.
+/// What a walk settled: a probe for every source it saw in the corpus, and the
+/// sources whose verdict may lie past where it stopped.
 ///
 /// A source is settled by what the query needs of it. One row in scope answers
 /// the corpus question, so `under:` needs nothing else and an `author:` query
 /// needs one authored row too. A walk that read every row is final either way,
 /// and a source with no row in scope then has no probe at all, which is how
 /// [`coverage_of`] knows to leave it out.
+///
+/// A source can be both: in the corpus with no authored row yet. Its probe says
+/// so until the grouped read says otherwise.
 fn settle(walks: Vec<NewestRows>, by_author: bool) -> (Vec<SourceProbe>, Vec<String>) {
     let mut probes = Vec::new();
     let mut unsettled = Vec::new();
     for walk in walks {
         let answered = walk.in_scope && (walk.authored || !by_author);
         if !answered && !walk.read_every_row {
-            unsettled.push(walk.source_id);
-        } else if walk.in_scope {
+            unsettled.push(walk.source_id.clone());
+        }
+        if walk.in_scope {
             probes.push(SourceProbe {
                 source_id: walk.source_id,
                 authored: walk.authored,
@@ -297,6 +311,17 @@ fn settle(walks: Vec<NewestRows>, by_author: bool) -> (Vec<SourceProbe>, Vec<Str
         }
     }
     (probes, unsettled)
+}
+
+/// The grouped read's rows over what the walk already said: a source it names
+/// takes its answer, and a source it does not name keeps the walk's.
+fn merge(probes: &mut Vec<SourceProbe>, read: Vec<SourceProbe>) {
+    for row in read {
+        match probes.iter_mut().find(|p| p.source_id == row.source_id) {
+            Some(known) => known.authored = row.authored,
+            None => probes.push(row),
+        }
+    }
 }
 
 /// The coverage for one query, one entry per reported dimension it filtered
@@ -341,13 +366,15 @@ pub(crate) async fn report(
         .await?;
     let (mut probes, unsettled) = settle(walks, by_author);
     if !unsettled.is_empty() {
+        let in_corpus: Vec<&str> = probes.iter().map(|p| p.source_id.as_str()).collect();
         let read: Vec<SourceProbe> = sqlx::query_as(AUTHOR_COVERAGE_SQL)
             .bind(&unsettled)
             .bind(&kinds)
             .bind(&filters.hidden_kinds)
+            .bind(&in_corpus)
             .fetch_all(pool)
             .await?;
-        probes.extend(read);
+        merge(&mut probes, read);
     }
 
     let mut report = Vec::new();
@@ -518,16 +545,19 @@ mod tests {
                 read_every_row,
             }
         }
-        let unsettled = || (vec![], vec!["s".to_owned()]);
-        let no_verdict = || (vec![], vec![]);
         let verdict = |authored| (vec![probe("s", authored)], vec![]);
+        let no_verdict = || (vec![], vec![]);
+        // In the corpus, and whether anything there is authored is still open.
+        let authors_open = || (vec![probe("s", false)], vec!["s".to_owned()]);
+        // Not seen in the corpus, and the walk stopped before the source did.
+        let corpus_open = || (vec![], vec!["s".to_owned()]);
 
         // An author query needs an authored row, or the whole source.
         assert_eq!(settle(vec![walk(true, true, false)], true), verdict(true));
         assert_eq!(settle(vec![walk(true, true, true)], true), verdict(true));
-        assert_eq!(settle(vec![walk(true, false, false)], true), unsettled());
+        assert_eq!(settle(vec![walk(true, false, false)], true), authors_open());
         assert_eq!(settle(vec![walk(true, false, true)], true), verdict(false));
-        assert_eq!(settle(vec![walk(false, false, false)], true), unsettled());
+        assert_eq!(settle(vec![walk(false, false, false)], true), corpus_open());
         assert_eq!(settle(vec![walk(false, false, true)], true), no_verdict());
 
         // `under:` alone needs one row in scope: authors are not its question.
@@ -537,8 +567,33 @@ mod tests {
             verdict(false)
         );
         assert_eq!(settle(vec![walk(true, false, true)], false), verdict(false));
-        assert_eq!(settle(vec![walk(false, false, false)], false), unsettled());
+        assert_eq!(
+            settle(vec![walk(false, false, false)], false),
+            corpus_open()
+        );
         assert_eq!(settle(vec![walk(false, false, true)], false), no_verdict());
+    }
+
+    #[test]
+    fn the_grouped_read_answers_only_for_the_sources_it_names() {
+        let mut probes = vec![probe("known-open", false), probe("known-settled", true)];
+        merge(
+            &mut probes,
+            vec![probe("known-open", true), probe("newly-seen", false)],
+        );
+        assert_eq!(
+            probes,
+            [
+                probe("known-open", true),
+                probe("known-settled", true),
+                probe("newly-seen", false),
+            ]
+        );
+
+        // Named by nothing, a source keeps what the walk said.
+        let mut probes = vec![probe("known-open", false)];
+        merge(&mut probes, vec![]);
+        assert_eq!(probes, [probe("known-open", false)]);
     }
 
     /// Both verdicts, in the scope's order -- and the sources with nothing in
