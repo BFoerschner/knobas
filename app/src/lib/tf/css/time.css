@@ -25,7 +25,7 @@
 .tf-tm-b text { font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; }
 .tf-tm-b text.tf-tm-plain { font-family: var(--sans); }
 .tf-tm-b:focus-visible { outline: none; }
-.tf-tm-b.tf-tm-manual rect { fill: var(--ink); } .tf-tm-b.tf-tm-manual text { fill: var(--sheet); }
+.tf-tm-b.tf-tm-manual rect { fill: var(--fill); } .tf-tm-b.tf-tm-manual text { fill: var(--sheet); }
 .tf-tm-b.tf-tm-logged rect { fill: var(--ok-bg); stroke: var(--ok); } .tf-tm-b.tf-tm-logged text { fill: var(--ok); }
 .tf-tm-b.tf-tm-run rect { fill: var(--card); stroke: var(--card-2); } .tf-tm-b.tf-tm-run text { fill: var(--card-ink); }
 .tf-tm-b.tf-tm-label rect { fill: var(--sheet-2); stroke: var(--ink-2); } .tf-tm-b.tf-tm-label text { fill: var(--ink); }
@@ -44,7 +44,7 @@
 }
 .tf-tm-legend span { display: flex; align-items: center; gap: 6px; }
 .tf-tm-legend i { width: 16px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid transparent; }
-.tf-tm-legend i.tf-tm-manual { background: var(--ink); }
+.tf-tm-legend i.tf-tm-manual { background: var(--fill); }
 .tf-tm-legend i.tf-tm-logged { background: var(--ok-bg); border-color: var(--ok); }
 .tf-tm-legend i.tf-tm-run { background: var(--card); }
 .tf-tm-legend i.tf-tm-passive {
@@ -71,12 +71,12 @@
 .tf-tm-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; flex-wrap: wrap; }
 .tf-tm-group {
   display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
-  padding: 8px 14px; border-bottom: 1px solid var(--rule-2); background: var(--info-bg); font-size: var(--t-sm);
+  padding: 8px 14px; border-bottom: 1px solid var(--rule-2); background: var(--sheet-2); font-size: var(--t-sm);
 }
 .tf-tm-group small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
 .tf .tf-tm-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 0 0; max-width: 80ch; }
 .tf .tf-tm-foot a { text-decoration: underline; }
-.tf-tm-empty { padding: 28px; border: 1px dashed var(--rule); border-radius: 6px; max-width: 640px; }
+.tf-tm-empty { padding: 22px; color: var(--ink-2); text-align: center; }
 .tf .tf-tm-empty p { margin: 0 0 10px; }
 /* The block dialog's *On* row (#1428, #1429): the kind switch is as wide as its words and never
    grows; the field takes the rest of the row and shrinks below its own width rather than push
@@ -127,9 +127,9 @@
 .tf-su-body { padding: 4px 14px 14px; }
 .tf-su-body h4 { font-size: var(--t-sm); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
 .tf-su-body ul { margin: 0; padding: 0; list-style: none; }
-.tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 6px; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
+.tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 0; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
 .tf-su-body li > a:hover { background: var(--sheet-2); }
-.tf .tf-su-none { margin: 0; padding: 5px 6px; color: var(--ink-2); font-size: var(--t-sm); }
+.tf .tf-su-none { margin: 0; padding: 5px 0; color: var(--ink-2); font-size: var(--t-sm); }
 .tf-su-day { font-size: var(--t-sm); }
 /* A panel heading's action sits on the right of the heading line (Controls: section heading). */
 .tf-su .tf-panel > header > .tf-btn { margin-left: auto; }

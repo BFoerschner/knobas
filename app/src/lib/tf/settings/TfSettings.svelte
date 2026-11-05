@@ -193,11 +193,13 @@
   );
   const current = $derived(sourceId === null ? null : (sources?.find((row) => row.id === sourceId) ?? null));
   const sectionName = $derived(SETTINGS_SECTIONS.find(([key]) => key === place.section)?.[1] ?? "Sources");
+  /** `#/settings` itself: the *Settings* crumb would lead back to this page. */
+  const bareSettings = $derived(rest.length === 0);
   const crumbName = $derived(sourceId === null ? sectionName : (current?.display_name ?? sourceId));
 </script>
 
 <div class="tf-full">
-  <TfCrumbs parts={[{ name: "Settings", href: "#/settings" }, { name: crumbName }]} {back} />
+  <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, { name: crumbName }]} {back} />
   <div class="tf-stg">
     <nav class="tf-stg-nav" aria-label="Settings">
       {#each SETTINGS_SECTIONS as [key, label] (key)}

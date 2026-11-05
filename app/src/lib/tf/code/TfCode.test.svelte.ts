@@ -162,7 +162,7 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   expect(rows.map(cells)).toEqual([
     // A repository holding a merged pull request of yours is yours too (#966).
     ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
-    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in… ▾"],
+    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in…"],
     // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
     ["tidewater/fx-rates", "Platform", "Go", "0", "not on this machine", "today 11:00", "Clone"],
   ]);

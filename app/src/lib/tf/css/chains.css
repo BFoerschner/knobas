@@ -80,3 +80,5 @@
 .tf-tdetail .tf-tacts .tf-dim { font-size: var(--t-sm); }
 /* prototype-6 draws the Tests bar flat inside the run page: static, no frame. */
 
+/* An empty list is no card: it says so on the page (design system, Layout). */
+.tf-atree:has(> .tf-empty) { background: none; border: 0; }

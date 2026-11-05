@@ -176,7 +176,7 @@
     <table class="tf-tbl tf-tm-week">
       <thead>
         <tr>
-          <th>On</th>
+          <th>Ticket or label</th>
           {#each ready.week.days as day, index (day)}
             <th class={index > 4 ? "tf-tm-we" : ""}><a href="#/time/{day}">{columnHeading(day, index)}</a></th>
           {/each}

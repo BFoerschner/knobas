@@ -68,6 +68,14 @@ import { CORPUS, fakeRoleScope } from "./corpus";
 import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
 
+/**
+ * `?fake-empty=docs,sets,assets`: those areas answer with nothing, to draw their
+ * empty states. Read per answer, as the address can change under a dev server.
+ */
+function fakeEmpty(area: string): boolean {
+  return (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes(area);
+}
+
 /** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
 const WIKI_ROLE = "wiki";
 /** The source the fixture's spaces and pages are of. */
@@ -540,7 +548,7 @@ function generic(page: FakePage, by: string): Body {
  * tree holds no space, no page read last and no *For you*.
  */
 function tree(bulk: FakePage[]): DocsTree {
-  if (!wikiFilled()) return { spaces: [], last_read: null, for_you: [] };
+  if (!wikiFilled() || fakeEmpty("docs")) return { spaces: [], last_read: null, for_you: [] };
   const spaces: DocSpace[] = Object.entries(SPACES).map(([key, name]) => ({
     source_id: SOURCE,
     key,

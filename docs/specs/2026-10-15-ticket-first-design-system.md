@@ -38,7 +38,7 @@ Tokens are the prototype's, unchanged, except `--field`, which it did not have. 
 | `--card-ink-2` | `#5A4D1E` | `#3F3511` | Secondary text on the card |
 | `--focus` | `#2F55D4` | `#8AA6FF` | Focus ring |
 | `--mark` | `#F6E08F` | `#5C4E17` | Matched search text, and what mentions you |
-| `--fill` | `--ink` | `#BCC5CF` | Whatever is filled to say it is on: a primary, a pressed toggle, a rail's selected row. In dark it steps down from `--ink`, so it never outshouts the yellow card |
+| `--fill` | `--ink` | `#A9B3BE` | Whatever is filled to say it is on: a primary, a pressed toggle, a rail's selected row. In dark it sits below the yellow card's luminance (.44 against .50), so it never outshouts it. A tracked block on Time is this fill too |
 | `--ok` / `--ok-bg` | `#1F7444` / `#DDEFE4` | `#6FCF97` / `#1B3427` | Passed, merged, up |
 | `--warn` / `--warn-bg` | `#8A5600` / `#F6EBD3` | `#E5B04D` / `#3A2E14` | Needs attention, stale |
 | `--err` / `--err-bg` | `#B0262A` / `#F7DEDD` | `#FF8A80` / `#3F1F1F` | Failed, down, broken |
@@ -84,7 +84,7 @@ The prototype uses about 30 sizes, many of them half-pixel neighbours (11.5, 12.
 | `--t-d2` | 44 px | Display figure (`wdth` 62, 800) | 44, 48 (the job key below 900 px) |
 | `--t-d3` | 64 px | The job key | 64 |
 
-The reading face keeps its own sizes because it's a different face doing a different job: body 17.5 px / 1.65, section heads 25 px, page title 40 px (30 px below 900 px). The Docs reader sets no line length: its page runs the full width beside the tree and the outline (R-10.9, amended 2026-10-25, #2078).
+The reading face keeps its own sizes because it's a different face doing a different job: body 17.5 px / 1.65, section heads 25 px, page title 40 px (30 px below 900 px). The Docs reader sets no line length: its page runs the full width beside the tree and the outline (R-10.9, amended 2026-10-25, #2078). Its own width decides when the outline folds: below 1370 px, where the header's actions would stop fitting one row beside it.
 
 A rounding difference of half a pixel to two pixels against prototype-6 is an expected difference and doesn't need to be named in a PR one by one. A PR states once that it uses the scale.
 
@@ -212,6 +212,8 @@ A control this section doesn't name is added by amending this section, the `#/co
 
 The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (preview panes close and side rails narrow) and 900 px (columns stack). A page whose own width decides something, such as a table shedding columns or a header shortening a label, uses a container query instead. The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
 
+Below 900 px a stacked side rail (Tickets' views, Builds' pipelines) folds behind one bar that names what is open, and a link picked in it folds it again, so the page's title stays near the top. Docs' tree is a drawer instead, because the page does not reflow under it.
+
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on.
 
 The status bar names at most two healthy sources; past that they are one line that says how many synced and how many need a look, then the oldest age, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, at 1150 px and below it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
@@ -220,9 +222,13 @@ From 1240 px down the Tickets preview is closed, so one click on a card or row o
 
 A section's own page has no breadcrumb bar, unless a ticket card's row opened it narrowed to that ticket, when the bar says *Back to PAY-231* and `Esc` goes there: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
 
+The asset tree (`#/assets`, `#/asset/<id>`) is viewport-high: the canonical header, its open alerts, a filter band, then the Miller columns scrolling sideways beside a fixed pane. In a column the selected asset is the ink pill and the assets above it on the path a paler one, so the path reads and one row says where you are.
+
 A filter bar is a full-width band under the page's tabs, on every page. A key in mono carries no underline until pointed at; a link made of words always does.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
+
+The Docs home is `#/docs` (Björn, 2026-11-05): the tree on the left and, beside it, a centred column at most 980 px wide with the canonical header (*Docs*, how many spaces and pages, *Sync now*). It lists what the tree read holds, on panels in this order: *Continue reading* (the page read last) beside *For you*, the pages the chosen job reaches, then *Spaces*, a tile per space with its count and top four pages. With *This job* on, the job's pages come first. It opens no page, so it records no visit, and the rail's own *For you* steps aside while it is showing. Page titles on it keep the reading face. Docs' crumb and *Back to Docs* lead here from any page. Empty, it says whether a source is missing or has not synced.
 
 The ticket page is two columns that each scroll on their own (spec #2396): the card at `--tk-side` (320 px by default, 240 to 720 px by its handle) and the reading column, at most 880 px wide and centred in the space beside the card. Below 900 px they stack.
 
@@ -233,6 +239,7 @@ Motion answers something the person did, and there's very little of it.
 - A running build or timer pulses its dot (1.4 s, opacity to 35 %). That's the only motion nobody started.
 - The Connections drawer slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
+- A route's wire on the asset tree fades in over 160 ms when a selection brings it.
 - Row actions fade in on hover and on focus within the row.
 
 There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.

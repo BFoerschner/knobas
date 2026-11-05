@@ -65,7 +65,7 @@
 
 <span class="tf-rd-more">
   <button type="button" class="tf-btn" aria-haspopup="menu" aria-expanded={open} bind:this={button} onclick={toggle}
-    >More</button
+    >More<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
   >
   {#if open}
     <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>

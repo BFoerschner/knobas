@@ -60,7 +60,7 @@ function record(at: Date, bytes: number): BackupRecord {
 /** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
 const DECLARED_STATES: [string, [string, Tone | null][]][] = [
   ["build", [["running", "info"], ["queued", "info"], ["SUCCESS", "ok"], ["FAILURE", "err"], ["UNKNOWN", "muted"]]],
-  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "warn"], ["maintenance", "muted"]]],
+  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "info"], ["maintenance", "muted"]]],
   ["pr", [["merged", "ok"], ["open", "info"], ["closed", "muted"]]],
   ["ticket", [["Done", "ok"], ["Resolved", "ok"], ["In Progress", "info"], ["In Review", "info"], ["Closed", "muted"]]],
 ];

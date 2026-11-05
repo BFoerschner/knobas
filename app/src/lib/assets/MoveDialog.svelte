@@ -190,7 +190,7 @@
     align-items: baseline;
     gap: 4px;
     margin: 0;
-    font-size: 11px;
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 
@@ -205,7 +205,7 @@
     max-height: 240px;
     overflow: auto;
     border: 1px solid var(--hair);
-    border-radius: 2px;
+    border-radius: 4px;
   }
 
   .opts {
@@ -223,7 +223,7 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   .opt:hover {
@@ -251,7 +251,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--t-sm);
     color: var(--muted);
   }
 </style>

@@ -28,5 +28,6 @@
 @media (max-width: 900px) {
   .tf-runbody > .tf-fbar, .tf-rbar { margin-left: -16px; margin-right: -16px; }
 }
-.tf-fcount { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tf-fend { margin-left: auto; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none; }
+.tf-fcount { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 

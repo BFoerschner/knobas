@@ -7,7 +7,9 @@ import {
   docsSearchHash,
   foldsHolding,
   mentionText,
+  continueReading,
   pageToOpen,
+  topPages,
   placeOf,
   readingMinutes,
   sectionsOf,
@@ -36,8 +38,8 @@ const TREE: DocsTree = {
   for_you: [],
 };
 
-test("the three addresses read as the page read last, a space, and a page with its section", () => {
-  expect(placeOf([])).toEqual({ kind: "last" });
+test("the three addresses read as the home, a space, and a page with its section", () => {
+  expect(placeOf([])).toEqual({ kind: "home" });
   expect(placeOf(["space", "OPS"])).toEqual({ kind: "space", source: null, key: "OPS" });
   expect(placeOf(["space", "wiki:OPS"])).toEqual({ kind: "space", source: "wiki", key: "OPS" });
   expect(placeOf(["confluence:3"])).toEqual({ kind: "page", id: "confluence:3", section: null });
@@ -46,7 +48,7 @@ test("the three addresses read as the page read last, a space, and a page with i
 
 test("#/docs/search/<words> carries a search, and opens the page read last under its hits (#2425)", () => {
   expect(placeOf(["search", "sepa retry"])).toEqual({ kind: "search", words: "sepa retry" });
-  expect(placeOf(["search"])).toEqual({ kind: "last" });
+  expect(placeOf(["search"])).toEqual({ kind: "home" });
   expect(pageToOpen({ kind: "search", words: "sepa" }, TREE)).toBe("confluence:5");
   expect(pageToOpen({ kind: "search", words: "sepa" }, { ...TREE, last_read: null })).toBe("confluence:9");
 });
@@ -60,10 +62,22 @@ test("a search's address round-trips through the router whatever the words hold 
   }
 });
 
-test("#/docs opens the page read last, else the first space's first top page", () => {
-  expect(pageToOpen({ kind: "last" }, TREE)).toBe("confluence:5");
-  expect(pageToOpen({ kind: "last" }, { ...TREE, last_read: null })).toBe("confluence:9");
-  expect(pageToOpen({ kind: "last" }, { spaces: [], last_read: null, for_you: [] })).toBeNull();
+test("#/docs is the home: it opens no page, whatever was read last", () => {
+  expect(pageToOpen({ kind: "home" }, TREE)).toBeNull();
+  expect(pageToOpen({ kind: "home" }, { ...TREE, last_read: null })).toBeNull();
+});
+
+test("Continue reading is the page read last and where it sits, while the tree holds it", () => {
+  expect(continueReading(TREE)?.entity_id).toBe("confluence:5");
+  expect(continueReading(TREE)?.where.startsWith(spaceOfPage(TREE, "confluence:5")!.key)).toBe(true);
+  expect(continueReading({ ...TREE, last_read: null })).toBeNull();
+  expect(continueReading({ ...TREE, last_read: "confluence:gone" })).toBeNull();
+});
+
+test("a space's top pages are the ones with no parent", () => {
+  const space = TREE.spaces[0]!;
+  expect(topPages(space).every((page) => page.parent === null)).toBe(true);
+  expect(topPages(space).length).toBeGreaterThan(0);
 });
 
 test("a space's address opens the page at the top of its tree, not the first by title", () => {

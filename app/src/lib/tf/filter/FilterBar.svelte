@@ -150,8 +150,11 @@
     {/if}
   {/each}
   {@render extra?.()}
-  <span class="tf-fcount" aria-live="polite"
-    >{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
-  >
-  {@render after?.()}
+  <!-- One flex item, so the count and what follows it wrap together, at the right of the bar's last row. -->
+  <span class="tf-fend">
+    <span class="tf-fcount" aria-live="polite"
+      >{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
+    >
+    {@render after?.()}
+  </span>
 </div>

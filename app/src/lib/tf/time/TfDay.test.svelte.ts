@@ -272,8 +272,8 @@ test("a strip label that does not fit its block ends in an ellipsis, one with no
   const label = (cls: string) => strip(cls).querySelector("text")?.textContent ?? null;
   // 09:40 to 11:50 is 130 of 600 px, less the label's padding: PAY-231 fits whole.
   expect(label("tf-tm-manual")).toBe("PAY-231");
-  // 13:10 to 13:58 is 48 px, 36 of them for text: five characters with the ellipsis.
-  expect(label("tf-tm-label")).toBe("Stan…");
+  // 13:10 to 13:58 is 48 px, 36 of them for text: four characters and the ellipsis say nothing, so the label goes.
+  expect(label("tf-tm-label")).toBeNull();
   expect(squash(strip("tf-tm-label").querySelector("title")?.textContent)).toBe("13:10 to 13:58, Standup and planning");
   // 09:25 to 09:40 is 15 px: no room for a character and the ellipsis.
   expect(strip("tf-tm-passive").querySelector("text")).toBeNull();
@@ -446,10 +446,10 @@ test("an open stretch reads Assign… in the sans face on the strip, and pressin
   expect(gap.getAttribute("class")).toContain("tf-on");
 });
 
-test("an open stretch's Assign… is fitted to a narrow block like any label (#1523)", async () => {
+test("an open stretch's Assign… is fitted to a narrow block like any label, and dropped where it would say nothing (#1523)", async () => {
   render({ stripWidth: 600 });
   await settle();
-  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")?.textContent).toBe("As…");
+  expect(target.querySelector(".tf-tm-strip .tf-tm-gap text")).toBeNull();
 });
 
 test("an open stretch is measured in the sans face: Assign… fits where the mono face would not (#1523)", async () => {

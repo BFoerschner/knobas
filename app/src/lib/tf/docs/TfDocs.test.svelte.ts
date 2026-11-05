@@ -162,11 +162,52 @@ async function draw(rest: string[], io = ports(), follower?: WriteFollower): Pro
   return io;
 }
 
-test("#/docs opens the page read last and records the visit", async () => {
+test("#/docs is the Docs home: it opens no page, records no visit, and offers the page read last", async () => {
   const io = await draw([]);
-  expect(io.docsPage).toHaveBeenCalledWith("confluence:2");
-  expect(io.visitEntity).toHaveBeenCalledWith("confluence:2");
+  expect(io.docsPage).not.toHaveBeenCalled();
+  expect(io.visitEntity).not.toHaveBeenCalled();
+  expect(target.querySelector("h1")?.textContent).toBe("Docs");
+  expect(target.querySelector(".tf-dh section[aria-label='Continue reading'] a")?.getAttribute("href")).toBe("#/page/confluence%3A2");
+  expect(target.querySelector(".tf-rd-crumbrow"), "a section's own page has no breadcrumb").toBeNull();
+});
+
+test("the home follows from a page: what was open goes, and coming back to the page reads it again", async () => {
+  const io = ports();
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: io });
+  view = mount(TfDocs, { target, props });
+  await settle();
   expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  props.rest = [];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Docs");
+  expect(target.querySelector(".tf-rd-page")).toBeNull();
+  props.rest = ["confluence:2"];
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+  expect(target.querySelector(".tf-dh")).toBeNull();
+});
+
+test("Back to Docs and the Docs crumb lead home from any page, the one read last too", async () => {
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), back: { name: "Docs" } } });
+  await settle();
+  expect(TREE.last_read).toBe("confluence:2");
+  expect(target.querySelector(".tf-rd-crumbrow .tf-esc")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Back to Docs Esc");
+  expect(target.querySelector(".tf-rd-crumb a")?.getAttribute("href")).toBe("#/docs");
+});
+
+test("the rail shows every space on the home, and leaves For you to it", async () => {
+  await draw([], ports({ docsTree: vi.fn(async (): Promise<DocsTree> => ({ ...TREE, for_you: [{ entity_id: "confluence:2", title: "On-call handbook", space_key: "OPS", by_name: "Priya" }] })) }));
+  const rail = target.querySelector(".tf-rd-tree")!;
+  expect(rail.querySelector<HTMLSelectElement>("select")?.value).toBe("*");
+  expect(rail.querySelector(".tf-dl-for")).toBeNull();
+  expect(target.querySelector(".tf-dh section[aria-label='For you']")?.textContent).toContain("Priya mentioned you");
+});
+
+test("a space's address the tree does not hold says so, and leads home", async () => {
+  await draw(["space", "NOPE"]);
+  const empty = target.querySelector(".tf-rd-main .tf-empty")!;
+  expect(empty.textContent).toContain("Nothing to read here");
+  expect(empty.querySelector("a")?.getAttribute("href")).toBe("#/docs");
 });
 
 test("a doc page's breadcrumb names where Esc goes, and draws no hint where Esc does nothing (spec #2227, story 35)", async () => {
@@ -924,7 +965,7 @@ async function findOnPage(word: string): Promise<void> {
 }
 
 test("a wide window puts the outline in the page's right column, with match counts while finding (#2081)", async () => {
-  windowWidth(1300);
+  windowWidth(1400);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
   const aside = margin()!;
   // The page's own column, inside what scrolls, beside the page's content.
@@ -975,8 +1016,8 @@ test("a narrow window folds the outline between the meta line and the first sect
   location.hash = "";
 });
 
-test("the outline moves between the margin and the fold as the window crosses 1240px, and the fold opens closed on every page (#2081)", async () => {
-  windowWidth(1300);
+test("the outline moves between the margin and the fold as the window crosses 1370px, and the fold opens closed on every page (#2081)", async () => {
+  windowWidth(1400);
   const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? { ...OUTLINED, entity_id: id, title: "Ops home" } : OUTLINED));
   const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
   view = mount(TfDocs, { target, props });
@@ -990,7 +1031,7 @@ test("the outline moves between the margin and the fold as the window crosses 12
   await settle();
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
   expect(fold()!.open).toBe(false);
-  resize(1300);
+  resize(1400);
   await settle();
   expect(fold()).toBeNull();
   expect(margin()).not.toBeNull();
@@ -1706,7 +1747,7 @@ test("with no page to draw, Docs still draws its header with Sync now (#2286)", 
     props: { ready: true, rest: [], job: null, ports: ports({ docsTree: vi.fn(async (): Promise<DocsTree> => ({ ...TREE, spaces: [], last_read: null })) }), sync: syncSnippet },
   });
   await settle();
-  expect(target.textContent).toContain("Nothing to read yet");
+  expect(target.querySelector(".tf-rd-main .tf-empty")?.textContent).toContain("none is set up yet");
   const head = target.querySelector(".tf-rd-main .tf-fhead")!;
   expect(head.querySelector("h1")?.textContent).toBe("Docs");
   expect([...head.querySelectorAll(".tf-acts > *")]).toEqual(syncNow());

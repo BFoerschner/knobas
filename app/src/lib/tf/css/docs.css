@@ -58,7 +58,6 @@
 /* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136). */
 .tf-rd-page > .tf-banner { margin: 10px 0 0; }
 .tf-rd-more { position: relative; display: inline-flex; }
-.tf-rd-more > button::after { content: "▾"; font-size: var(--t-2xs); color: var(--ink-2); margin-left: 4px; }
 .tf-rd-more .tf-menu { left: auto; right: 0; }
 .tf-rd-more .tf-menu button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
@@ -211,6 +210,7 @@
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
   color: var(--ink-2); font-size: var(--t-md);
 }
+.tf-toc a:hover { border-left-color: var(--ink-2); color: var(--ink); }
 .tf-toc a.tf-on { border-left-color: var(--ink); color: var(--ink); font-weight: 600; }
 .tf-toc .tf-hits, .tf-rd-fold > summary .tf-hits {
   font-size: var(--t-2xs); font-weight: 700; color: var(--ink); background: var(--mark); border-radius: 8px;
@@ -258,10 +258,38 @@
   width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
   background: var(--field); color: var(--ink); resize: vertical;
 }
+/* The Docs home (`TfDocsHome`): a centred column beside the tree (design system, Layout), its own width deciding how its
+   lists sit. Page titles keep the reading face, as a search hit's do. */
+.tf-dh { max-width: 980px; margin: 0 auto; container: dhome / inline-size; }
+.tf-dh-body { display: flex; flex-direction: column; gap: 16px; padding: 0 22px 32px; }
+.tf-dh-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+@container dhome (min-width: 680px) { .tf-dh-two:has(> :nth-child(2)) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tf-dh .tf-panel > header { padding-bottom: 8px; }
+.tf-dh .tf-panel > header .tf-count { margin-left: auto; }
+.tf-dh-rows { display: flex; flex-direction: column; overflow: hidden; border-radius: 0 0 6px 6px; }
+.tf-dh-row { display: block; padding: 8px 12px; border-top: 1px solid var(--rule-2); text-decoration: none; }
+.tf-dh-row:hover { background: var(--sheet-2); }
+.tf-dh-rows :focus-visible { outline-offset: -2px; }
+.tf-dh-t { display: block; font-family: var(--serif); font-size: var(--t-lg); font-weight: 600; line-height: 1.3; letter-spacing: normal; word-spacing: normal; overflow-wrap: anywhere; }
+.tf-dh-row .tf-why { display: block; margin-top: 2px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-dh-rowt { padding: 6px 12px; }
+.tf-dh-rowt .tf-dh-t { font-size: var(--t-md); font-weight: 400; }
+.tf .tf-dh-none { padding: 2px 12px 12px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-dh-h { margin: 8px 0 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-dh-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; }
+.tf-dh-space h3 a { text-decoration: underline; text-underline-offset: 2px; }
+.tf-dh-space h3 { min-width: 0; overflow-wrap: anywhere; }
+.tf-dh-more { display: block; padding: 6px 12px 10px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
+.tf-dh-more:hover { color: var(--ink); }
+.tf-dh-wait { padding: 8px 22px; }
+.tf-fhead .tf-rd-pages svg { width: 15px; height: 15px; }
+@media (max-width: 900px) { .tf-dh-body { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }
 /* The band `READER_NARROW` (docs/docs.ts) names: the component folds the outline in it (#2081). */
-@media (max-width: 1239px) {
-  .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
+@media (max-width: 1369px) {
   .tf-rd-sheet { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1240px) {
+  .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
 }
 /*
   The band `READER_DRAWER` (docs/docs.ts) names: the tree leaves the grid and is a drawer that slides

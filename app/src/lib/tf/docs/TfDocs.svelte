@@ -1,7 +1,9 @@
 <!--
   Docs (#859 to #862, requirements §10): one screen for `#/docs`,
   `#/docs/space/[<source>:]<key>` and `#/page/<id>[/<section>]`, as prototype-6's
-  `renderDocs` → `renderPage`.
+  `renderDocs` → `renderPage`. `#/docs` is the Docs home (`TfDocsHome.svelte`):
+  the tree on the left and no page open, and it is where the crumb and *Back to
+  Docs* lead.
 
   **Left**, the space picker (*All spaces (N)*, then every space with its page
   count; it follows the open page's space until you pick one or a search
@@ -29,10 +31,10 @@
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
   keeps the query: every match is marked and the find bar steps through them
   (R-10.5, R-10.12). The outline (`TfDocOutline`, R-10.15) is the page's own
-  right column, sticking while the page scrolls; below 1240px
+  right column, sticking while the page scrolls; below 1370px
   (`READER_NARROW`, read through Svelte's `MediaQuery`) it folds between the meta
-  line and the first section instead. `#/docs` opens the page read last, and every
-  page opened is a visit (`visit_entity`), which is what "read last" reads.
+  line and the first section instead. Every page opened is a visit
+  (`visit_entity`), which is what the home's *Continue reading* reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
   `docs_search`, and `get_entity` of the open page for its *Refresh* (#2136);
@@ -104,6 +106,7 @@
   import TfDocHits from "./TfDocHits.svelte";
   import TfDocMore from "./TfDocMore.svelte";
   import TfDocOutline from "./TfDocOutline.svelte";
+  import TfDocsHome from "./TfDocsHome.svelte";
   import TfDocTree from "./TfDocTree.svelte";
   import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
@@ -298,6 +301,8 @@
 
   const place = $derived(placeOf(rest));
   const target = $derived(tree === null ? null : pageToOpen(place, tree));
+  /** `#/docs`: the Docs home, which opens no page. */
+  const home = $derived(place.kind === "home");
 
   /** The reads asked so far; an answer to an older one than the last is dropped. */
   let treeAsked = 0;
@@ -389,9 +394,14 @@
 
   $effect(() => {
     const id = target;
-    if (!ready || id === null) return;
+    if (!ready) return;
     pageError = null;
     detail = null;
+    // No page to open: what was open goes, or the home would draw under its header.
+    if (id === null) {
+      page = null;
+      return;
+    }
     untrack(() => {
       refresh.reset();
       void readPage(id, false);
@@ -432,7 +442,8 @@
   const shownSpace = $derived.by(() => {
     if (tree === null || picked === "*") return undefined;
     if (picked !== null) return tree.spaces.find((s) => spaceId(s) === picked);
-    return pageSpace ?? tree.spaces[0];
+    // The home shows every space; a page follows its own.
+    return pageSpace ?? (home ? undefined : tree.spaces[0]);
   });
   const pickerValue = $derived(picked === "*" ? "*" : shownSpace ? spaceId(shownSpace) : "*");
   const total = $derived(tree?.spaces.reduce((n, s) => n + s.pages.length, 0) ?? 0);
@@ -895,6 +906,19 @@
 
 </script>
 
+{#snippet homePages()}
+  <button
+    type="button"
+    class="tf-btn tf-rd-pages"
+    aria-controls="tf-docs-tree"
+    aria-expanded={drawer}
+    onclick={(event) => openTree(event.currentTarget)}
+    ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
+      ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
+    >Pages</button
+  >
+{/snippet}
+
 <div class="tf-rd" class:tf-rd-drawer={drawer}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <nav
@@ -966,7 +990,8 @@
           {/if}
         {/each}
       {:else}
-        {#if forYou.length > 0}
+        <!-- The home lists *For you* itself. -->
+        {#if forYou.length > 0 && !home}
           <div class="tf-dl-for">
             <h4>For you</h4>
             {#each forYou as item (item.entity_id)}
@@ -978,7 +1003,7 @@
         {/if}
         {#if tree !== null && tree.spaces.length === 0}
           <p class="tf-dl-note">No pages are synced yet. A source with pages, such as Confluence, fills this tree.</p>
-        {:else if tree !== null && picked === "*"}
+        {:else if tree !== null && shownSpace === undefined}
           {#each tree.spaces as space (spaceId(space))}
             <details open={current !== null && space.pages.some((p) => p.entity_id === current)}>
               <summary class="tf-spc">{space.key} {space.name ?? ""} <span class="tf-count">{space.pages.length}</span></summary>
@@ -1023,11 +1048,24 @@
         <button type="button" class="tf-findx" onclick={() => (find = "")} aria-label="Stop highlighting">✕</button>
       </div>
     {/if}
-    {#if page === null && (pageError !== null || treeError !== null || (tree !== null && target === null))}
+    {#if home}
+      <TfDocsHome
+        {tree}
+        failed={treeError}
+        {job}
+        groups={jobGroups}
+        jobFirst={jobOn}
+        {sync}
+        pages={drawerBand.current ? homePages : undefined}
+        onretry={() => void readTree(false)}
+      />
+    {:else if page === null && (pageError !== null || treeError !== null || (tree !== null && target === null))}
       <!-- No page to head (#2286): the view's own header, so *Sync now* is still where every view puts it. -->
       <TfBareHeader title="Docs" {sync} />
     {/if}
-    {#if pageError !== null}
+    {#if home}
+      <!-- Drawn above. -->
+    {:else if pageError !== null}
       <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
     {:else if page !== null}
       {@const p = page}
@@ -1046,7 +1084,7 @@
         >
       {/if}
       <div class="tf-rd-crumb">
-        {#if place.kind === "page" || place.kind === "space"}<a href="#/docs">Docs</a>{:else}Docs{/if}
+        <a href="#/docs">Docs</a>
         {#if p.space}
           › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
         {/if}
@@ -1056,8 +1094,7 @@
         › <strong><TfMarked text={p.title} {stems} /></strong>
       </div>
       <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
-      <!-- `#/docs` reopens the page last read: with no page behind this one, there is nowhere back to go. -->
-      {#if back !== null && !(back.name === "Docs" && tree?.last_read === p.entity_id)}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
+      {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
     </nav>
       <div class="tf-rd-sheet">
         <article class="tf-rd-page" bind:this={article}>
@@ -1193,7 +1230,11 @@
         {/if}
       </div>
     {:else if tree !== null && target === null}
-      <div class="tf-empty"><p>Nothing to read yet. Pages appear here once a docs source has synced.</p></div>
+      <!-- A space's address the tree holds nothing at: the rail still reads, and the home is the way out. -->
+      <div class="tf-empty">
+        <p>Nothing to read here. This space has no synced pages, or knobas does not hold it.</p>
+        <a class="tf-btn" href="#/docs">Docs home</a>
+      </div>
     {/if}
   </section>
 </div>

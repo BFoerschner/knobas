@@ -208,7 +208,7 @@
     onclick={(event) => {
       event.stopPropagation();
       open = !open;
-    }}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button
+    }}>Open in…<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
   >
   {#if open}
     <!-- svelte-ignore a11y_interactive_supports_focus -->

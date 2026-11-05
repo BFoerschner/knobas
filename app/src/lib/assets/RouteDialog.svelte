@@ -459,13 +459,30 @@
     gap: 12px;
   }
 
+  /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
+  .fld {
+    display: grid;
+    grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: center;
+  }
+
+  .fld > :global(*):not(.l) {
+    grid-column: 2;
+  }
+
+  .fld :global(input.inp),
+  .fld :global(select.inp) {
+    height: var(--control-h);
+  }
+
+  .fld > :global(.tf-btn) {
+    justify-self: start;
+  }
+
   .fld .l {
-    display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
-    margin-bottom: 4px;
+    font-size: var(--t-sm);
+    color: var(--ink-2);
   }
 
   .hint {

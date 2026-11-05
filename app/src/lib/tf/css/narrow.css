@@ -4,6 +4,8 @@
   .tf-search .tf-label { display: none; }
   .tf-brand { margin-right: 2px; }
   .tf-nav { flex: 1 1 0; }
+  .tf-nav a { padding: 6px 6px; gap: 4px; }
+  .tf-nav .tf-count { padding: 0 5px; }
   .tf-spacer { display: none; }
   .tf-timer-key { display: none; }
   .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }

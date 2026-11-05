@@ -221,7 +221,8 @@
           {#if form.kind === "entity" && form.picked === null}
             {#if session.error}<p class="tf-dim">{session.error}</p>{/if}
             {#if choices.length > 0}
-              <div class="tf-picklist" role="listbox" aria-label="Tickets">
+              <div class="tf-pane-h" id="tf-tm-pick-{uid}">{session.raw.trim() === "" ? "Recent tickets, pick one" : "Pick a ticket"}</div>
+              <div class="tf-picklist" role="listbox" aria-labelledby="tf-tm-pick-{uid}">
                 {#each choices as choice, index (choice.entityId)}
                   <button type="button" role="option" aria-selected={index === cursor} onclick={() => pick(choice)}>
                     <span><span class="tf-mono">{keyOf(choice.entityId)}</span> {choice.title}</span>

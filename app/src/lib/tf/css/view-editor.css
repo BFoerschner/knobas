@@ -21,6 +21,8 @@
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink); font: inherit; font-size: var(--t-md);
 }
 .tf-vw-edit input.tf-vw-name-in { font-size: var(--t-lg); font-weight: 600; }
+/* A placeholder is a hint, not a value: it does not take the name's size and weight. */
+.tf-vw-edit input.tf-vw-name-in::placeholder { font-size: var(--t-md); font-weight: 400; }
 .tf-vw-rules { display: flex; flex-direction: column; gap: 8px; }
 .tf-vw-rule {
   display: grid; grid-template-columns: 150px auto 1fr; gap: 6px 8px; align-items: center; padding: 8px;

@@ -1239,7 +1239,7 @@ export type DocsTree = {
 spaces: Array<DocSpace>, 
 /**
  * The page the reader opened most recently (`visit_entity`), while it is
- * still a live page; `#/docs` opens it.
+ * still a live page; the Docs home's *Continue reading* opens it.
  */
 last_read: string | null, 
 /**

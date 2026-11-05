@@ -207,6 +207,10 @@
     return list.find((p) => p.entity_id === rest[0]) ?? null;
   }
   const selected = $derived(all === null ? null : selectedOf(all));
+  /** The page you are on where the rail's filter leaves it out; `null` while the job's reasons are still being read. */
+  const outside = $derived(
+    selected === null || (scope === "job" && reasons === null) || kept.some((p) => p.entity_id === selected.entity_id) ? null : selected,
+  );
 
   // `#/build/<run id>` (a job's or the inbox's row) names the run alone: its
   // pipeline is the one whose recent runs hold it, else the one its view names.
@@ -300,6 +304,9 @@
   });
 
 
+  /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
+  let railOpen = $state(false);
+
   function stateText(run: RunRow): string {
     return run.state?.text ?? "";
   }
@@ -349,8 +356,21 @@
   </details>
 {/snippet}
 
-<div class="tf-bv">
-  <nav class="tf-pl" aria-label="Pipelines">
+<div class="tf-bv" class:tf-rail-shut={!railOpen}>
+  <div class="tf-railbar">
+    <button type="button" class="tf-btn tf-sm" aria-expanded={railOpen} aria-controls="tf-pipelines-rail" onclick={() => (railOpen = !railOpen)}>
+      Pipeline: <b>{selected?.name ?? "All"}</b><i class="tf-railmark" aria-hidden="true"></i>
+    </button>
+  </div>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+  <nav
+    id="tf-pipelines-rail"
+    class="tf-pl tf-rail"
+    aria-label="Pipelines"
+    onclick={(event) => {
+      if ((event.target as Element).closest("a[href]")) railOpen = false;
+    }}
+  >
     <div class="tf-pl-top">
       {#if job !== null}
         <div class="tf-seg" role="group" aria-label="Scope">
@@ -383,6 +403,15 @@
           {#if scope === "job"}<button type="button" class="tf-linkish" onclick={() => setScope("all")}>Search all pipelines</button>{/if}
         </p>
       {/if}
+      {#if outside !== null}
+        <!-- The filter hides the page you are on, so the rail would show no place at all: it stays, until you leave it. -->
+        <div class="tf-pl-pin">
+          <a class="tf-pi" href={pipelineHash(outside.entity_id)} aria-current="true" title={outside.name}>
+            <span class="tf-pi-nm" class:tf-bad={isFailing(outside)}>{outside.name}</span>
+            <span class="tf-pi-why">{scope === "job" ? `Not in ${job}` : "Hidden by the filter"}</span>
+          </a>
+        </div>
+      {/if}
       <div class="tf-pl-rows" {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
           {#if row.kind === "head"}
@@ -406,11 +435,9 @@
         <div class="tf-empty"><p>No run at this address. Pick a pipeline on the left.</p></div>
       {/if}
     {:else if selected !== null}
-      {@render crumbs([
-        { name: "Builds", href: "#/builds" },
-        ...(selected.group !== null ? [{ name: selected.group, href: "#/builds" }] : []),
-        { name: selected.name },
-      ])}
+      <!-- `#/builds` draws this page already: a crumb to it would lead nowhere. -->
+      {@const up = head === "builds" && rest.length === 0 ? {} : { href: "#/builds" }}
+      {@render crumbs([{ name: "Builds", ...up }, ...(selected.group !== null ? [{ name: selected.group, ...up }] : []), { name: selected.name }])}
       <TfPipeline
         pipeline={selected}
         {rest}

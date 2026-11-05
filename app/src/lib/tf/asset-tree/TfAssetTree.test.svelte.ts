@@ -20,6 +20,19 @@ afterEach(() => {
   location.hash = "";
 });
 
+test("the bare tree draws no breadcrumb of its own name; an asset's names the tree and the asset", () => {
+  mounted = mount(TfAssetTree, { target: document.body, props: { head: "assets", rest: [] } });
+  flushSync();
+  expect(document.querySelector(".tf-crumbs")).toBeNull();
+  void unmount(mounted);
+  mounted = mount(TfAssetTree, { target: document.body, props: { head: "asset", rest: ["gitea:acme/web"], back: { name: "Asset tree" } } });
+  flushSync();
+  const crumbs = document.querySelector(".tf-crumbs")!;
+  expect(crumbs.querySelector("a.tf-crumb")?.getAttribute("href")).toBe("#/assets");
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Asset");
+  expect(crumbs.textContent).toContain("Back to Asset tree");
+});
+
 test("the page reads its address with parseHash and go sets location.hash", () => {
   mounted = mount(TfAssetTree, {
     target: document.body,

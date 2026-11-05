@@ -168,9 +168,8 @@
 
   .wd {
     margin-left: 6px;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--t-2xs);
+    font-weight: 600;
     color: var(--amber);
   }
 

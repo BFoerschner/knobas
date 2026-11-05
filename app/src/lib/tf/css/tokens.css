@@ -27,7 +27,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #BCC5CF;
+    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE;
     --rule: #323C47; --rule-2: #28313A;
     --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
     --focus: #8AA6FF; --mark: #5C4E17;
@@ -41,7 +41,7 @@
   }
 }
 :root[data-theme="dark"] {
-  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #BCC5CF;
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --field: #12171C; --ink: #E4E9EE; --ink-2: #A0ABB7; --fill: #A9B3BE;
   --rule: #323C47; --rule-2: #28313A;
   --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
   --focus: #8AA6FF; --mark: #5C4E17;

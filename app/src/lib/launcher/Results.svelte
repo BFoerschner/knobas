@@ -24,6 +24,7 @@
     now,
     onopen,
     onhover,
+    onwiden = null,
   }: {
     response: SearchResponse;
     /** The clock an inbox line's time cell is read against (#2423). */
@@ -37,6 +38,8 @@
     chordOf?: (row: LauncherRow) => string | null;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
+    /** Drop what narrows the search, where something does: an empty answer offers it. */
+    onwiden?: (() => void) | null;
   } = $props();
 
   /** Where each group's hits start in the flat list. */
@@ -160,4 +163,10 @@
     Nothing matches
     <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
+  {#if onwiden}
+    <button type="button" class="tf-ln-opt" onclick={onwiden}>
+      <span class="tf-ln-nm">Search everything</span>
+      <span class="tf-ln-s">Every field, with no filters.</span>
+    </button>
+  {/if}
 {/if}

@@ -150,7 +150,7 @@ const items = () => [...target.querySelectorAll<HTMLButtonElement>("[role='menui
 test("the whole button opens the menu: the default first, marked and focused, then Add and Manage", async () => {
   await draw(view("/Users/mara/code/payout-service"));
   const face = target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!;
-  expect(text(face)).toBe("Open in… ▾");
+  expect(text(face)).toBe("Open in…");
   face.click();
   await settle();
   expect(items().map(text)).toEqual([

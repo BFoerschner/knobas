@@ -597,11 +597,28 @@ test("a key typed as a word finds its ticket and draws no filter chip", async ()
   expect(target.textContent).toContain("Retry failed SEPA payouts");
 });
 
-test("the placeholder reads only ⌘? for help, so no / source", async () => {
+test("an empty answer under titles only offers Search everything, which searches every field", async () => {
+  open({ ports: { launcherHome: async () => HOME, search: async () => response({ groups: [] }) } });
+  await settle();
+  await search("zzzqqq");
+  expect(target.textContent).toContain("Nothing matches");
+  const widen = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-ln-opt")].find((b) => b.textContent?.includes("Search everything"));
+  expect(widen()).toBeDefined();
+  widen()!.click();
+  await debounced();
+  // Every field is searched now, so there is nothing wider to offer.
+  expect(widen()).toBeUndefined();
+  expect(target.textContent).toContain("Nothing matches");
+});
+
+test("the placeholder says what the box does, with no grammar in it, and ⌘? is among the keys at the foot", async () => {
   open();
   await settle();
   // #2424: the grammar is on the ⌘? overlay, not in the placeholder.
-  expect(target.querySelector("input")!.placeholder).toBe("⌘? for help");
+  const placeholder = target.querySelector("input")!.placeholder;
+  expect(placeholder).toBe("Search tickets, code, builds and docs");
+  expect(placeholder).not.toMatch(/[/#:]/);
+  expect(document.body.textContent).toContain("⌘?");
 });
 
 /**

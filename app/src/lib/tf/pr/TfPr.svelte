@@ -351,6 +351,8 @@
     label: string;
     /** `update branch of`, `edit`, `close`, `reopen`: what the toast says was queued, before the PR's name. */
     phrase: string;
+    /** The dialog primary's words, where they are not the label. */
+    primary?: string;
     /** `update`, `edit`, `close`, `reopen`: the chip is `<verb> queued`. */
     verb: string;
     /** What keys its button: the verb, or a source action's own id. */
@@ -368,10 +370,17 @@
     const setState = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] !== undefined);
     const list: Write[] = [];
     if (update) list.push({ action: update, label: "Update branch", phrase: "update branch of", verb: "update", key: "update" });
-    if (edit) list.push({ action: edit, label: "Edit", phrase: "edit", verb: "edit", key: "edit" });
+    if (edit) list.push({ action: edit, label: "Edit", phrase: "edit", verb: "edit", key: "edit", primary: "Save changes" });
     if (setState) {
       const verb = setState.values["state"] === "closed" ? "close" : "reopen";
-      list.push({ action: setState, label: verb === "close" ? "Close" : "Reopen", phrase: verb, verb, key: verb });
+      list.push({
+        action: setState,
+        label: verb === "close" ? "Close" : "Reopen",
+        phrase: verb,
+        verb,
+        key: verb,
+        primary: verb === "close" ? "Close pull request" : "Reopen pull request",
+      });
     }
     for (const own of actions.filter((a) => a.write_op === "source_action")) {
       const label = actionName(own.label);
@@ -931,8 +940,9 @@
   <TfEntityAction
     action={write.action}
     entityId={prId}
-    title="{write.label} {name}"
+    title={/^add\b/i.test(write.label) ? `${write.label} to ${name}` : `${write.label} ${name}`}
     what="{write.phrase} {name}"
+    primary={write.primary ?? null}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
     onqueued={(queued) => echoChip(prId, write.verb, write.label, queued)}

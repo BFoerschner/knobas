@@ -74,13 +74,18 @@
 
 /* ---------- forms in a dialog ---------- */
 .tf-dform { display: contents; }
-.tf-formgrid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+/* One label column for every form in a dialog, so a field never starts at another x under the one above it. */
+.tf-formgrid { display: grid; grid-template-columns: var(--tf-label, 132px) minmax(0, 1fr); gap: 8px 12px; align-items: center; }
 .tf-formgrid select, .tf-formgrid input {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
 }
 .tf-formgrid input[type="text"] { width: 100%; }
 /* Add a source's *Install an adapter* row (#1202): the path, then its button. */
-.tf-add-inst { display: flex; gap: 8px; align-items: center; }
+.tf-add-more > summary::-webkit-details-marker { display: none; }
+.tf-add-more > summary { list-style: none; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); width: fit-content; }
+.tf-add-more[open] > summary { margin-bottom: 8px; }
+.tf-add-more > .tf-dlg-note { margin-top: 8px; }
+.tf-add-inst { display: flex; gap: var(--control-gap); align-items: center; }
 .tf-add-inst input[type="text"] { flex: 1; min-width: 0; }
 /* Settings › Sources › Installed adapters (#1209, #1210) */
 .tf-ext-h { display: flex; align-items: center; gap: 12px; }

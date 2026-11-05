@@ -11,8 +11,9 @@
 .tf-views a[aria-current="true"] .tf-count { background: rgba(255,255,255,.18); color: inherit; }
 .tf-views a .tf-count { margin-left: auto; }
 .tf-board-wrap { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: auto; }
-/* Capped, so at 1241 px the chips stay beside it and the bar takes two rows, not three. */
-.tf-board-wrap .tf-fsearch { flex: 1 1 200px; max-width: 280px; }
+/* Never narrower than its placeholder, which is what the bar's wrapping is decided on: the chips that fit stay beside
+   it, and the count and *Save as a view* sit at the right of the last row. */
+.tf-board-wrap .tf-fsearch { flex: 1 1 272px; max-width: 360px; }
 /* The board head is the canonical header (#2293): the title block left, `.tf-acts` right (the Board/List
    switch, the view's actions, Sync now), its items centred vertically since the switch is small. */
 .tf-fhead.tf-board-head { align-items: center; }
@@ -45,6 +46,7 @@
    outline and is the one card that floats; on the yellow the outline is the card's ink. A ring, not `outline`, so
    the focus ring never replaces it. */
 .tf-tcard.tf-card { border-color: var(--card-2); }
+.tf .tf-tcard.tf-card:hover { background: var(--card-2); border-color: var(--card-ink-2); }
 .tf-tcard.tf-sel { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
 .tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), 0 0 0 4px var(--sel-halo), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
@@ -137,8 +139,8 @@
 }
 @media (max-width: 900px) {
   .tf-tickets { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
-  /* Stacked, the rail is capped as Builds' is, or the board starts a screen and a half down. */
-  .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 26vh; }
+  /* Stacked, the rail folds behind its bar (`.tf-railbar`); open, it is capped so the board stays in reach. */
+  .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
   .tf-fbar, .tf-board-head, .tf-lane, .tf-list { padding-left: 16px; padding-right: 16px; }
 }
 

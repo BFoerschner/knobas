@@ -473,9 +473,8 @@ test("the panel is a ticket-first dialog: its title, its counts, no capitals, ev
   expect(screen.text()).toContain("Retries the waiting writes. Held writes are untouched.");
   expect(screen.layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
 
-  const capitals = uppercaseClasses();
-  expect(capitals).toContain("lab");
-  for (const name of capitals) expect(screen.target.querySelector(`.${name}`), name).toBeNull();
+  // The rooms sheet draws no capitals any more, so nothing here can reach them (design system, *Structure*).
+  expect(uppercaseClasses()).toEqual([]);
 
   const headings = [...screen.target.querySelectorAll(".tf-wq-row-h b")].map((node) => node.textContent);
   expect(headings).toEqual(["Comment on PAY-231", "Pause monitor Payments API", "Comment on PAY-300"]);

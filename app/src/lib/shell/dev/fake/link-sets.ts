@@ -139,7 +139,7 @@ function title(id: string): string | null {
 const TONES: Record<string, StateChip["tone"]> = { up: "ok", warn: "warn", down: "err", pending: "info" };
 
 /** Uptime Kuma's declared `state` chip (#1020): its four words, each in its tone. */
-const MONITOR_TONES: Record<string, StateChip["tone"]> = { up: "ok", down: "err", pending: "warn", maintenance: "muted" };
+const MONITOR_TONES: Record<string, StateChip["tone"]> = { up: "ok", down: "err", pending: "info", maintenance: "muted" };
 
 /** A member's row (#1008): its title, its line and its dot, off the fixture rows the views draw. */
 function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
@@ -412,7 +412,7 @@ export function fakeLinkSetLines(): { id: string; name: string; description: str
 
 export function handlers(): Handlers {
   return {
-    link_sets: () => [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),
+    link_sets: () => (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes("sets") ? [] : [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),
     link_set: (args) => detailOf(found(String(args["id"] ?? ""))),
     save_link_set: (args) => {
       const draft = args["draft"] as LinkSetDraft;

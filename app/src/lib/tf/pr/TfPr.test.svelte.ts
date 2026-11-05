@@ -271,7 +271,7 @@ test("somebody else's pull request names its author and offers Review…", async
   expect(buttons()).toEqual(["Merge…", "Review…", "Edit"]);
   // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
   const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
-  expect(all.slice(-2, -1)).toEqual(["Open in… ▾"]);
+  expect(all.slice(-2, -1)).toEqual(["Open in…"]);
   expect(target.querySelector(".tf-fhead .tf-acts [aria-haspopup=menu]")!.className).toContain("tf-ghost");
 });
 
@@ -326,7 +326,7 @@ test("Ready to merge? reads prototype-6's three lines, approvals, checks and con
     "✓ No conflicts with main",
   ]);
   expect(lines.map((line) => line.className)).toEqual(["tf-prck tf-warn", "tf-prck tf-err", "tf-prck tf-ok"]);
-  expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… ▾ Local changes");
+  expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… Local changes");
   expect(target.querySelector(".tf-prlocal a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/local`);
 });
 
@@ -432,7 +432,7 @@ test("Edit sends only what changed, and the header says an edit is queued", asyn
   title.value = "SEPA retry with backoff";
   title.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Edit")!.click();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Save changes")!.click();
   await settle();
   expect(writes).toEqual([{ EditPullRequest: { entity: PR, title: "SEPA retry with backoff", body: null, state: null } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
@@ -444,7 +444,7 @@ test("Close asks the source's sentence and queues the closed state", async () =>
   button("Close")!.click();
   flushSync();
   expect(document.querySelector(".tf-dialog")!.textContent).toContain("Close feature/PAY-231-sepa-retry → main without merging it?");
-  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Close")!.click();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Close pull request")!.click();
   await settle();
   expect(writes).toEqual([{ EditPullRequest: { entity: PR, title: null, body: null, state: "closed" } }]);
   expect(text(".tf-fhead .tf-sub")).toContain("close queued");
@@ -458,7 +458,7 @@ test("the entity-action dialog's destructive confirm is filled red, after a ghos
   const footer = () => [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].map((b) => [b.textContent?.trim(), b.className]);
   expect(footer()).toEqual([
     ["Cancel", "tf-btn tf-ghost"],
-    ["Close", "tf-btn tf-primary tf-danger"],
+    ["Close pull request", "tf-btn tf-primary tf-danger"],
   ]);
   document.querySelector<HTMLButtonElement>(".tf-dialog footer .tf-ghost")!.click();
   flushSync();
@@ -466,7 +466,7 @@ test("the entity-action dialog's destructive confirm is filled red, after a ghos
   flushSync();
   expect(footer()).toEqual([
     ["Cancel", "tf-btn tf-ghost"],
-    ["Edit", "tf-btn tf-primary"],
+    ["Save changes", "tf-btn tf-primary"],
   ]);
 });
 
@@ -967,7 +967,7 @@ test("after a queued close, Merge… and Close are held with close queued; Edit 
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
   button("Close")!.click();
   flushSync();
-  dialogButton("Close").click();
+  dialogButton("Close pull request").click();
   await settle();
   expect(writes).toHaveLength(1);
   expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
@@ -1005,7 +1005,7 @@ const REOPEN = action("edit_pull_request", "Reopen", { values: { state: "open" }
 async function queueClose() {
   button("Close")!.click();
   flushSync();
-  dialogButton("Close").click();
+  dialogButton("Close pull request").click();
   await settle();
 }
 
@@ -1042,7 +1042,7 @@ test("a landed merge drops its chip; an edit the queue has not sent keeps its ch
   title.value = "SEPA retry with backoff";
   title.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  dialogButton("Edit").click();
+  dialogButton("Save changes").click();
   await settle();
   await queueMerge();
   expect(chips()).toEqual(["open", "edit queued", "merge queued"]);
@@ -1162,7 +1162,7 @@ test("a merge, a close and a reopen each say queued, then sent, and go on the re
       async () => {
         button("Reopen")!.click();
         flushSync();
-        dialogButton("Reopen").click();
+        dialogButton("Reopen pull request").click();
         await settle();
       },
       "reopen",
@@ -1198,7 +1198,7 @@ test("an edit says queued, then sent, and goes on the first live read asked once
   title.value = "SEPA retry with backoff";
   title.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  dialogButton("Edit").click();
+  dialogButton("Save changes").click();
   await settle();
   expect(chips()).toEqual(["open", "edit queued"]);
   await sync.ended("gitea"); // read while the edit is still open: not yet shown

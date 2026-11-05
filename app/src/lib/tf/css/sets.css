@@ -2,50 +2,73 @@
 .tf-sets-intro { max-width: 76ch; }
 .tf-cbody.tf-sets { display: flex; flex-direction: column; gap: 12px; }
 .tf-sets .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-set-name { font-weight: 600; }
+.tf-sets-tbl td { vertical-align: top; }
+/* A row's title is the name you scan the list by (Type); a link made of words keeps its underline, here too. */
+.tf-cbody .tf-sets-tbl a.tf-set-name { font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+.tf-sets-tbl .tf-sets-now { white-space: nowrap; }
 .tf-toggle { display: flex; gap: 12px; align-items: center; padding: 12px 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font-size: var(--t-sm); }
 .tf-toggle input { width: 18px; height: 18px; accent-color: var(--ink); }
 .tf-toggle b { font-weight: 600; }
 .tf-toggle-sub { display: block; font-size: var(--t-xs); }
 /* R-7.10's hint card (#870): prototype-6's `.hint-card`. */
-.tf-hint-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 14px; border: 1px dashed var(--info); border-radius: 6px; background: var(--info-bg); font-size: var(--t-sm); }
+/* An offer, not a state: tone carries state only, so it is a dashed sheet. */
+.tf-hint-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 14px; border: 1px dashed var(--ink-2); border-radius: 6px; background: var(--sheet); font-size: var(--t-sm); }
 .tf-hint-card b { font-weight: 600; }
 .tf-set-desc:empty::before { content: attr(data-placeholder); color: var(--ink-2); }
+/* The title and the description are edited in place: the pointer finds them by a rule under the words. */
+.tf-set-title, .tf-set-desc { border-radius: 3px; cursor: text; }
+.tf-set-title:hover, .tf-set-desc:hover { box-shadow: 0 1px 0 var(--ink-2); }
+.tf-set-desc { width: fit-content; max-width: 100%; min-width: 24ch; }
 .tf-cbody.tf-set { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-set-panels, .tf-set .tf-side { display: flex; flex-direction: column; gap: 14px; }
 .tf-set .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
-.tf-set-add { margin-left: auto; display: flex; gap: 6px; }
 .tf-members { padding-bottom: 4px; }
-.tf-member { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-member { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-member:hover { background: var(--sheet-2); }
+.tf-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
 .tf-member .tf-x, .tf-rule .tf-x { margin-left: auto; }
-.tf-rule { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
-.tf-rule select { border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 3px 6px; color: var(--ink); max-width: 240px; font: inherit; }
+/* A row's *Remove* fades in on hover and on focus within the row (Motion). */
+.tf-member .tf-x { flex: none; opacity: 0; transition: opacity .1s ease-out; }
+.tf-member:is(:hover, :focus-within) .tf-x { opacity: 1; }
+/* A rule is its two choices on one line, then its count and *Remove*. Whatever the value says, the two keep their columns. */
+.tf-rule { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 6px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-rule-none { display: block; }
+.tf-rule select { width: 100%; min-width: 0; border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding-inline: 4px 6px; color: var(--ink); font: inherit; }
+.tf-rule-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); }
 .tf-rule-n { font-size: var(--t-xs); }
 .tf-rule-add { padding: 8px 12px 10px; }
 .tf-keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 12px; align-items: baseline; }
-.tf-keys a { font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; padding: 1px 6px; border-radius: 3px; background: var(--sheet-2); color: var(--ink); text-decoration: none; }
-.tf-keys a.tf-mine { background: var(--card); color: var(--card-ink); }
+/* A chip that names a ticket is neutral: yellow is only the ticket you are on. Yours carry an outline. */
+.tf-keys a { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 1px 6px; border: 1px solid transparent; border-radius: 3px; background: var(--sheet-2); color: var(--ink-2); text-decoration: none; }
+.tf-keys a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+.tf-keys a.tf-mine { border-color: var(--ink-2); color: var(--ink); }
 .tf-keys .tf-dim { font-size: var(--t-xs); }
 .tf-set-note { margin: 0; font-size: var(--t-xs); }
 .tf-fsearch.tf-wide { max-width: none; flex: none; }
 .tf-picks { display: flex; flex-direction: column; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
 .tf-picks label, .tf-picks .tf-pickrow { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-picks > :last-child { border-bottom: 0; }
+.tf-picks label:hover { background: var(--sheet-2); }
 .tf-picks label .tf-dim, .tf-picks .tf-pickrow > .tf-dim { margin-left: auto; font-size: var(--t-xs); }
-.tf-picks label.tf-in, .tf-picks .tf-pickrow.tf-in { opacity: .55; }
+.tf-picks label.tf-in, .tf-picks .tf-pickrow.tf-in { color: var(--ink-2); }
+.tf-picks label.tf-in:hover, .tf-picks .tf-pickrow.tf-in:hover { background: none; }
 /* *Apply a link set…* (#869): a set's name over what it holds. */
 .tf-pickrow .tf-pick-sub { display: block; font-size: var(--t-xs); }
 .tf-picks-more { padding: 6px 10px; margin: 0; }
+.tf-picks.tf-hidden-empty { display: none; }
 .tf-picked { margin-right: auto; align-self: center; }
 .tf-stays { margin: 0; font-size: var(--t-xs); }
 .tf-member-line { font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-pattern { align-items: flex-start; }
-.tf-pattern details { min-width: 0; }
-.tf-pattern summary { cursor: pointer; }
+.tf-pattern details { min-width: 0; padding-top: 4px; }
+.tf-pattern summary { cursor: pointer; list-style: none; }
+.tf-pattern summary::-webkit-details-marker { display: none; }
 .tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-pattern ul { margin: 6px 0 2px; padding-left: 18px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-pat-intro, .tf-pat-query { margin: 0; font-size: var(--t-sm); }
 .tf-pat-query { font-size: var(--t-xs); }
 .tf-pat-matches { max-height: 30vh; }
+.tf-pat-matches:empty { display: none; }
 .tf-pat-match { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-pat-match .tf-dim { margin-left: auto; font-size: var(--t-xs); }
 @media (max-width: 900px) {

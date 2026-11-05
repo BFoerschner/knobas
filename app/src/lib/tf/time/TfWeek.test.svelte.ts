@@ -132,7 +132,7 @@ test("reads this week, Monday first, and names it", async () => {
   ]);
   expect(text(target.querySelector("h2"))).toBe("Week of 17 August 2026");
   const heads = [...target.querySelectorAll("thead th")].map(text);
-  expect(heads).toEqual(["On", "Mon 17", "Tue 18", "Wed 19", "Thu 20", "Fri 21", "Sat 22", "Sun 23", "Week"]);
+  expect(heads).toEqual(["Ticket or label", "Mon 17", "Tue 18", "Wed 19", "Thu 20", "Fri 21", "Sat 22", "Sun 23", "Week"]);
 });
 
 test("the address's date reads that date's week, and the week after is a step forward", async () => {

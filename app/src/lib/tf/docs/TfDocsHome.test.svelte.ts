@@ -1,0 +1,157 @@
+/**
+ * The Docs home (Björn, 2026-11-05): what `#/docs` draws from the tree read,
+ * and its first-read, failed and empty states.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+import type { DocsTree } from "../../ipc/entity";
+import { sourceRoles, WIKI } from "../roles.svelte";
+import type { JobPageGroup } from "./docs";
+import TfDocsHome from "./TfDocsHome.svelte";
+
+const TREE: DocsTree = {
+  spaces: [
+    {
+      source_id: "confluence",
+      key: "OPS",
+      name: "Operations",
+      pages: [
+        { entity_id: "confluence:1", title: "Ops home", parent: null },
+        { entity_id: "confluence:2", title: "On-call handbook", parent: "confluence:1" },
+      ],
+    },
+    {
+      source_id: "confluence",
+      key: "ENG",
+      name: "Engineering",
+      pages: [
+        ...[1, 2, 3, 4, 5].map((n) => ({ entity_id: `confluence:e${n}`, title: `Top ${n}`, parent: null })),
+        { entity_id: "confluence:e6", title: "Under top 1", parent: "confluence:e1" },
+      ],
+    },
+  ],
+  last_read: "confluence:2",
+  for_you: [{ entity_id: "confluence:e1", title: "Top 1", space_key: "ENG", by_name: "Priya Nair" }],
+};
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+
+beforeEach(() => {
+  target = document.createElement("div");
+  document.body.append(target);
+});
+
+afterEach(() => {
+  if (view) void unmount(view);
+  view = null;
+  target.remove();
+  sourceRoles.forget();
+});
+
+function draw(props: { tree: DocsTree | null; failed?: string; job?: string; groups?: JobPageGroup[]; jobFirst?: boolean; onretry?: () => void }): void {
+  view = mount(TfDocsHome, { target, props: { onretry: () => {}, ...props } });
+  flushSync();
+}
+
+const section = (name: string) => target.querySelector(`section[aria-label="${name}"]`);
+const hrefs = (root: Element | null) => [...(root?.querySelectorAll("a") ?? [])].map((a) => a.getAttribute("href"));
+
+test("the header names Docs and how much it holds", () => {
+  draw({ tree: TREE });
+  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Docs");
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).toBe("2 spaces, 8 pages");
+});
+
+test("Continue reading is the page read last, with where it sits", () => {
+  draw({ tree: TREE });
+  const panel = section("Continue reading")!;
+  expect(hrefs(panel)).toEqual(["#/page/confluence%3A2"]);
+  expect(panel.textContent).toContain("On-call handbook");
+  expect(panel.textContent).toContain("OPS › Ops home");
+});
+
+test("with nothing read, or a page the tree no longer holds, there is no Continue reading", () => {
+  draw({ tree: { ...TREE, last_read: null } });
+  expect(section("Continue reading")).toBeNull();
+  void unmount(view!);
+  draw({ tree: { ...TREE, last_read: "confluence:gone" } });
+  expect(section("Continue reading")).toBeNull();
+});
+
+test("For you says who mentioned you, and says so when nobody has", () => {
+  draw({ tree: TREE });
+  expect(section("For you")?.textContent).toContain("Priya mentioned you");
+  expect(hrefs(section("For you"))).toEqual(["#/page/confluence%3Ae1"]);
+  void unmount(view!);
+  draw({ tree: { ...TREE, for_you: [] } });
+  expect(section("For you")?.textContent).toContain("No page mentions you right now.");
+});
+
+test("each space is a tile: its name links to the space, its top pages are listed, and more than fit are one link", () => {
+  draw({ tree: TREE });
+  const tiles = [...target.querySelectorAll(".tf-dh-space")];
+  expect(tiles.map((tile) => tile.querySelector("h3")?.textContent)).toEqual(["Operations", "Engineering"]);
+  expect(tiles[0]!.querySelector("h3 a")?.getAttribute("href")).toBe("#/docs/space/OPS");
+  // Four of Engineering's five top pages, then the way to all six.
+  expect(tiles[1]!.querySelectorAll(".tf-dh-row")).toHaveLength(4);
+  expect(tiles[1]!.querySelector(".tf-dh-more")?.textContent).toBe("All 6 pages");
+  // Operations lists its one top page and has a page below it.
+  expect(tiles[0]!.querySelector(".tf-dh-more")?.textContent).toBe("All 2 pages");
+});
+
+test("a space with every page listed offers no link to more", () => {
+  const space = { source_id: "confluence", key: "S", name: null, pages: [{ entity_id: "c:1", title: "One", parent: null }] };
+  draw({ tree: { spaces: [space], last_read: null, for_you: [] } });
+  expect(target.querySelector(".tf-dh-space h3")?.textContent).toBe("S");
+  expect(target.querySelector(".tf-dh-more")).toBeNull();
+});
+
+test("the job's pages have a list of their own, first while This job is on", () => {
+  const groups = [{ reason: "Linked to PAY-231", pages: [{ entity_id: "confluence:2", title: "On-call handbook", where: "OPS" }] }];
+  draw({ tree: TREE, job: "PAY-231", groups });
+  const body = target.querySelector(".tf-dh-body")!;
+  const job = section("Pages on PAY-231")!;
+  expect(job.textContent).toContain("Linked to PAY-231, OPS");
+  expect(body.firstElementChild).not.toBe(job);
+  void unmount(view!);
+  draw({ tree: TREE, job: "PAY-231", groups, jobFirst: true });
+  expect(target.querySelector(".tf-dh-body")!.firstElementChild).toBe(section("Pages on PAY-231"));
+});
+
+test("no job, or a job that reaches no page, draws no list for it", () => {
+  draw({ tree: TREE, job: "PAY-231", groups: [] });
+  expect(target.querySelector(".tf-dh-job")).toBeNull();
+});
+
+test("the first read draws a waiting state, under the header", () => {
+  draw({ tree: null });
+  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Docs");
+  expect(target.querySelector("[role='status']")?.getAttribute("aria-label")).toBe("Reading Docs");
+  expect(target.querySelector(".tf-empty")).toBeNull();
+});
+
+test("a tree that cannot be read says so and offers to try again", () => {
+  const onretry = vi.fn();
+  draw({ tree: null, failed: "the database is away", onretry });
+  expect(target.querySelector(".tf-empty")?.textContent).toContain("Could not read Docs: the database is away");
+  target.querySelector<HTMLButtonElement>(".tf-empty button")!.click();
+  expect(onretry).toHaveBeenCalledOnce();
+});
+
+test("an empty tree with no wiki source sends you to Sources", () => {
+  draw({ tree: { spaces: [], last_read: null, for_you: [] } });
+  const empty = target.querySelector(".tf-empty")!;
+  expect(empty.textContent).toContain("none is set up yet");
+  expect(empty.querySelector("a")?.getAttribute("href")).toBe("#/settings/sources");
+  expect(target.querySelector(".tf-fhead .tf-sub")).toBeNull();
+});
+
+test("an empty tree with a wiki source says it has not synced", () => {
+  sourceRoles.take([{ id: "confluence", display_name: "Confluence", roles: [{ role: WIKI }], role_misses: [], enabled: true }] as never);
+  draw({ tree: { spaces: [], last_read: null, for_you: [] } });
+  const empty = target.querySelector(".tf-empty")!;
+  expect(empty.textContent).toContain("No pages have synced yet");
+  expect(empty.querySelector("a")).toBeNull();
+});

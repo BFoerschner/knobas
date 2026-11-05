@@ -1064,7 +1064,7 @@ export function handlers(): Handlers {
     // here stays that way for as long as the page lives, so the whole create /
     // edit / move walk can be driven in a browser. Nothing is persisted --
     // reload and the estate is the fixture again.
-    asset_tree: fresh((args) => assetColumn(args)),
+    asset_tree: fresh((args) => ((new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes("assets") ? [] : assetColumn(args))),
     get_asset: fresh((args) => assetDetail(args)),
     asset_types: () => ASSET_TYPES,
     create_asset: fresh((args) => createAsset(args)),

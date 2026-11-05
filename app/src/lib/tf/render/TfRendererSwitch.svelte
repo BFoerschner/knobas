@@ -111,7 +111,7 @@
     aria-haspopup="menu"
     aria-expanded={open}
     onclick={() => (open = !open)}
-    ><span class="tf-rsw-lab">Render as</span>{" "}<b>{shown.name}</b><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+    ><span class="tf-rsw-lab">Render as</span>{" "}<b>{shown.name}</b><svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
       ><path d="M4 6l4 4 4-4" /></svg
     ></button
   >

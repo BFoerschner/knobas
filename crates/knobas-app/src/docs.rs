@@ -36,7 +36,7 @@ pub struct DocsTree {
     /// Ordered by source, then key.
     pub spaces: Vec<DocSpace>,
     /// The page the reader opened most recently (`visit_entity`), while it is
-    /// still a live page; `#/docs` opens it.
+    /// still a live page; the Docs home's *Continue reading* opens it.
     pub last_read: Option<String>,
     /// *For you* (#860, R-10.2): the pages whose mention of the reader is in
     /// the inbox now, newest first.

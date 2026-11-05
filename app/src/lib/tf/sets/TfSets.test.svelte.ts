@@ -5,7 +5,7 @@
  * as the whole set.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LinkSetDetail, LinkSetDraft, LinkSetHint, LinkSetRow, LinkSetRule, RuleTicket } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
@@ -141,8 +141,8 @@ async function settle() {
   flushSync();
 }
 
-async function draw(rest: string[]) {
-  view = mount(TfSets, { target, props: { ready: true, rest, ports: ports() } });
+async function draw(rest: string[], io: SetPorts = ports()) {
+  view = mount(TfSets, { target, props: { ready: true, rest, ports: io } });
   await settle();
 }
 
@@ -177,7 +177,7 @@ test("the list draws each set's contents per kind, a line per rule and its ticke
   expect(target.querySelectorAll("tbody tr")).toHaveLength(2);
   expect(text("tbody tr:first-child td")).toEqual([
     "Payout stackWhat a change on the payout path touches.",
-    "2 repositories2 pipelines1 page1 asset",
+    "2 repositories, 2 pipelines, 1 page, 1 asset",
     "Every ticket under epic PAY-200 Payout reliabilityPAY-228, applied by hand",
     "3 (2 yours)",
   ]);
@@ -226,13 +226,13 @@ test("the editor draws a panel per kind, the rules with live counts and the tick
     "tidewater/payout-service",
     "tidewater/psp-client",
   ]);
-  expect(text(".tf-set-panels .tf-panel:nth-child(5) .tf-member")).toEqual(["Nothing yet."]);
+  expect(text(".tf-set-panels .tf-panel:nth-child(5) .tf-member")).toEqual(["No monitors yet."]);
   expect(previews).toEqual([
     { kind: "epic", value: "jira:PAY-200" },
     { kind: "manual", value: "jira:PAY-228" },
   ]);
   expect(text(".tf-rule-n")).toEqual(["2 tickets", "1 ticket"]);
-  expect(text(".tf-roll")).toEqual(["2 of them yours. New tickets join as soon as they match."]);
+  expect(text(".tf-roll")).toEqual(["2 of them yours, outlined. New tickets join as soon as they match."]);
   expect(text(".tf-keys a.tf-mine")).toEqual(["PAY-231", "PAY-240"]);
   expect(target.querySelector<HTMLAnchorElement>(".tf-keys a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
 });
@@ -306,9 +306,9 @@ test("a member row draws its dot and its line, and a pattern its query and what 
   expect(page.querySelector(".tf-dot")?.className.trim()).toBe("tf-dot");
   expect(page.querySelector(".tf-member-line")?.textContent).toBe("ENG › Payments");
   const pipelines = target.querySelector("article[aria-label='Pipelines']")!;
-  expect(pipelines.querySelector("header .tf-dim")?.textContent).toBe("2");
+  expect(pipelines.querySelector("header .tf-count")?.textContent).toBe("2");
   expect(pipelines.querySelector("summary")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "Pattern: project:Payouts name:Payout_* (2 match now)",
+    "Pattern: project:Payouts name:Payout_* (2 matches now)",
   );
   expect([...pipelines.querySelectorAll("details li")].map((li) => li.textContent)).toEqual(["Payout_Build", "Payout_Lint"]);
   pipelines.querySelector<HTMLButtonElement>("button[aria-label='Remove the pattern project:Payouts name:Payout_*']")!.click();
@@ -366,9 +366,79 @@ test("the set editor's Delete starts a destructive action: red text, as Note's (
   expect(button("Delete").closest(".tf-fhead .tf-acts")).not.toBeNull();
 });
 
+test("the list's empty states say what fills them, offer the action, and a failed read offers to try again", async () => {
+  const base = ports();
+  await draw([], { ...base, linkSets: vi.fn(async () => []) });
+  const empty = target.querySelector(".tf-sets .tf-empty")!;
+  expect(empty.textContent).toContain("No link sets yet.");
+  expect(empty.querySelector(".tf-btn.tf-primary")?.textContent).toBe("New link set");
+  unmount(view!);
+  view = null;
+  target.replaceChildren();
+
+  let fails = true;
+  const linkSets = vi.fn(async () => {
+    if (fails) throw { code: "db", message: "the database is away" };
+    return [];
+  });
+  await draw([], { ...base, linkSets });
+  const failed = target.querySelector(".tf-sets .tf-empty")!;
+  expect(failed.textContent).toContain("Could not read the link sets");
+  fails = false;
+  failed.querySelector<HTMLButtonElement>("button")!.click();
+  await settle();
+  expect(linkSets).toHaveBeenCalledTimes(2);
+  expect(target.querySelector(".tf-sets .tf-empty")?.textContent).toContain("No link sets yet.");
+});
+
+test("a filter that leaves nothing offers to clear it", async () => {
+  await draw([]);
+  const field = target.querySelector<HTMLInputElement>(".tf-fbar input")!;
+  field.value = "zzzz";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  const empty = target.querySelector(".tf-sets .tf-empty")!;
+  expect(empty.textContent).toContain("No link sets match.");
+  empty.querySelector<HTMLButtonElement>("button")!.click();
+  await settle();
+  expect(target.querySelector(".tf-sets .tf-empty")).toBeNull();
+});
+
+test("Delete asks first, in a dialog that says what stays; Cancel keeps the set", async () => {
+  await draw(["payout-stack"]);
+  button("Delete").click();
+  await settle();
+  expect(deleted).toEqual([]);
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.textContent).toContain("Links drawn on tickets by hand stay.");
+  const footer = [...dialog.querySelectorAll<HTMLButtonElement>("footer button")];
+  expect(footer.map((b) => [b.textContent?.trim(), b.className])).toEqual([
+    ["Cancel", "tf-btn tf-ghost"],
+    ["Delete link set", "tf-btn tf-primary tf-danger"],
+  ]);
+  footer[0]!.click();
+  await settle();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(deleted).toEqual([]);
+});
+
+test("the editor's breadcrumb names the set, and leads back to Link sets", async () => {
+  await draw(["payout-stack"]);
+  const crumbs = target.querySelector(".tf-crumbs")!;
+  expect(crumbs.querySelector("a.tf-crumb")?.getAttribute("href")).toBe("#/sets");
+  expect(crumbs.querySelector("strong")?.textContent).toBe("Payout stack");
+});
+
+test("a chip for a ticket is neutral: the chosen job's yellow is on no key", async () => {
+  await draw(["payout-stack"]);
+  expect(target.querySelector(".tf-keys .tf-card")).toBeNull();
+});
+
 test("Delete removes the set and goes back to the list", async () => {
   await draw(["payout-stack"]);
   button("Delete").click();
+  await settle();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Delete link set")!.click();
   await settle();
   expect(deleted).toEqual(["payout-stack"]);
   expect(location.hash).toBe("#/sets");

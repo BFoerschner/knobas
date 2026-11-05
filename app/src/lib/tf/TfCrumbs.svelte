@@ -18,7 +18,7 @@
   import type { EscTarget } from "./escape";
   import { HEAD_NAME, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
-  /** One place on the path: linked when it has an address, the page's own name when it has none. */
+  /** One place on the path: linked when it has an address; with none, the page's own name, or a place you are already at. */
   export interface Crumb {
     name: string;
     href?: string;
@@ -74,6 +74,9 @@
     {#each parts as part, at (at)}
       {#if part.href !== undefined}
         <a class="tf-crumb" href={part.href}>{part.name}</a><span class="tf-sep">›</span>
+      {:else if at < parts.length - 1}
+        <!-- A place on the path you are already at: it names itself, and a link would lead nowhere. -->
+        <span class="tf-crumb-here">{part.name}</span><span class="tf-sep">›</span>
       {:else}
         <strong>{part.name}</strong>
       {/if}

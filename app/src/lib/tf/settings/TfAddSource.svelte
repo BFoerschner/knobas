@@ -258,8 +258,10 @@
         {/each}
       </div>
     {/if}
+    <details class="tf-add-more" open={manifest.trim() !== "" || installNote !== null}>
+      <summary>Install an adapter</summary>
     <div class="tf-formgrid">
-      <label for="tf-add-manifest">Install an adapter</label>
+      <label for="tf-add-manifest">From</label>
       <div class="tf-add-inst">
         <input
           id="tf-add-manifest"
@@ -284,6 +286,7 @@
         A GitHub repository, a manifest URL or a local manifest. Install checks it and shows what it may reach before anything is installed.
       </p>
     {/if}
+    </details>
     {#if chosen !== null}
       <div class="tf-formgrid">
         <label for="tf-add-address">Address</label>
@@ -291,7 +294,7 @@
       </div>
       {#if config.error !== null}
         <p class="tf-fail">{config.error}</p>
-      {:else}
+      {:else if config.fields.length > 0}
         <TfSchemaForm fields={config.fields} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
       {/if}
       {#if chosen.auth_methods.length > 1}

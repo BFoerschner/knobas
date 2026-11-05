@@ -590,10 +590,26 @@
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
   });
+
+  /** Below 900 px, whether the views rail is unfolded under its bar. */
+  let railOpen = $state(false);
 </script>
 
-<div class="tf-tickets">
-  <nav class="tf-views" aria-label="Ticket views">
+<div class="tf-tickets" class:tf-rail-shut={!railOpen}>
+  <div class="tf-railbar">
+    <button type="button" class="tf-btn tf-sm" aria-expanded={railOpen} aria-controls="tf-views-rail" onclick={() => (railOpen = !railOpen)}>
+      View: <b>{view?.name ?? "All tickets"}</b><i class="tf-railmark" aria-hidden="true"></i>
+    </button>
+  </div>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+  <nav
+    id="tf-views-rail"
+    class="tf-views tf-rail"
+    aria-label="Ticket views"
+    onclick={(event) => {
+      if ((event.target as Element).closest("a[href]")) railOpen = false;
+    }}
+  >
     <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" /></div>
     <div class="tf-vlist">
       <div class="tf-vw-acts">

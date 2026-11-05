@@ -30,6 +30,11 @@
   import { push } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
   import { entityAddress } from "../address";
+  import type { EscTarget } from "../escape";
+  import TfDialog from "../settings/TfDialog.svelte";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
@@ -42,16 +47,23 @@
     ready,
     id,
     ports,
+    back = null,
   }: {
     ready: boolean;
     /** The set's id, from `#/sets/<id>`. */
     id: string;
     ports: SetPorts;
+    /** Where `Esc` goes, which the breadcrumb's hint names. */
+    back?: Pick<EscTarget, "name"> | null;
   } = $props();
 
   let set = $state<LinkSetDetail | null>(null);
   let failed = $state<string | null>(null);
   let missing = $state(false);
+  /** Moves on *Try again*, which the read below follows. */
+  let attempt = $state(0);
+  /** Whether *Delete*'s confirmation is open. */
+  let deleting = $state(false);
   let choices = $state<RuleChoices | null>(null);
   /** Live ticket counts per rule, by `kind|value`. */
   let counts = $state<Record<string, number>>({});
@@ -64,6 +76,7 @@
   let saves: Promise<void> = Promise.resolve();
 
   $effect(() => {
+    void attempt;
     if (!ready) return;
     const wanted = id;
     let live = true;
@@ -145,6 +158,7 @@
 
   async function remove() {
     if (!set) return;
+    deleting = false;
     const gone = set.id;
     await saves;
     try {
@@ -236,11 +250,20 @@
   const have = $derived(new Set(set?.members.map((member) => member.entity_id) ?? []));
 </script>
 
+<TfCrumbs parts={[{ name: "Link sets", href: "#/sets" }, { name: set?.name ?? "Link set" }]} {back} />
 {#if missing}
-  <div class="tf-empty">No link set is called {id}. <a href="#/sets">All link sets</a></div>
+  <div class="tf-empty">
+    <p>No link set is called {id}. It may have been deleted.</p>
+    <a class="tf-btn tf-sm" href="#/sets">All link sets</a>
+  </div>
 {:else if failed !== null}
-  <p class="tf-ifail">Could not read the link set: {failed}</p>
-{:else if set !== null}
+  <div class="tf-empty">
+    <p class="tf-ifail">Could not read the link set: {failed}</p>
+    <button type="button" class="tf-btn" onclick={() => attempt++}>Try again</button>
+  </div>
+{:else if set === null}
+  <div class="tf-cbody"><TfWaiting phase={waitPhase({ drawn: false, reading: true, failed: false })} shape="lines" count={8}><span></span></TfWaiting></div>
+{:else}
   <header class="tf-fhead">
     {#key `${set.id}|${set.name}|${set.description}`}
     <div>
@@ -269,7 +292,7 @@
       >{set.description}</div>
     </div>
     {/key}
-    <div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => void remove()}>Delete</button></div>
+    <div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => (deleting = true)}>Delete</button></div>
   </header>
   <div class="tf-cbody tf-set">
     <div class="tf-set-panels">
@@ -279,8 +302,8 @@
         <article class="tf-panel" aria-label={KIND_LABEL[kind]}>
           <header>
             <h3>{KIND_LABEL[kind]}</h3>
-            <span class="tf-dim">{itemsOf({ members, patterns }).length}</span>
-            <span class="tf-set-add"
+            <span class="tf-count">{itemsOf({ members, patterns }).length}</span>
+            <span class="tf-set-add tf-trail"
               ><button type="button" class="tf-btn tf-sm" onclick={() => (picking = kind)}>Add…</button>{#if PATTERN_KINDS.includes(kind)}<button
                   type="button"
                   class="tf-btn tf-sm tf-ghost"
@@ -291,8 +314,8 @@
           <div class="tf-members">
             {#each patterns as pattern (pattern.at)}
               <div class="tf-member tf-pattern">
-                <details>
-                  <summary>Pattern: <code>{pattern.query}</code> <span class="tf-dim">({pattern.count} match now)</span></summary>
+                <details class="tf-set-fold">
+                  <summary>Pattern: <code>{pattern.query}</code> <span class="tf-dim">({counted(pattern.count, "match", "matches")} now)</span></summary>
                   <ul>
                     {#each pattern.matches as row (row.entity_id)}<li>{row.title ?? keyOf(row.entity_id)}</li>{/each}
                     {#if pattern.count > pattern.matches.length}<li class="tf-dim">and {pattern.count - pattern.matches.length} more</li>{/if}
@@ -309,7 +332,7 @@
             {#each members as member (member.entity_id)}
               <div class="tf-member">
                 <span class="tf-dot {toneClass(member.state)}"></span>
-                <span class:tf-mono={kind === "repo" || kind === "asset"}>{member.title ?? keyOf(member.entity_id)}</span>
+                <span class="tf-member-name" class:tf-mono={kind === "repo"}>{member.title ?? keyOf(member.entity_id)}</span>
                 {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{member.line}</span>{/if}
                 <button
                   type="button"
@@ -320,7 +343,7 @@
                 >
               </div>
             {/each}
-            {#if members.length === 0 && patterns.length === 0}<div class="tf-member tf-dim">Nothing yet.</div>{/if}
+            {#if members.length === 0 && patterns.length === 0}<div class="tf-member tf-dim">No {KIND_LABEL[kind].toLowerCase()} yet.</div>{/if}
           </div>
         </article>
       {/each}
@@ -338,11 +361,13 @@
               {#if rule.waiting}<option value="">Choose…</option>{/if}
               {#each options(rule.kind, rule.value) as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
             </select>
-            {#if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
-            <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => dropRule(rule.at)}>Remove</button>
+            <div class="tf-rule-foot">
+              {#if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
+              <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => dropRule(rule.at)}>Remove</button>
+            </div>
           </div>
         {:else}
-          <div class="tf-rule tf-dim">No rule yet. The set shows nowhere until it has one.</div>
+          <div class="tf-rule tf-rule-none tf-dim">No rule yet. The set shows nowhere until it has one.</div>
         {/each}
         <div class="tf-rule-add">
           <button type="button" class="tf-btn tf-sm" disabled={pending !== null} onclick={addRule}>Add a rule</button>
@@ -350,7 +375,7 @@
       </div>
       <div class="tf-panel">
         <header><h3>Shows on {counted(set.shows_on.length, "ticket", "tickets")} now</h3></header>
-        <div class="tf-roll">{set.shows_on.filter((ticket) => ticket.mine).length} of them yours. New tickets join as soon as they match.</div>
+        <div class="tf-roll">{set.shows_on.filter((ticket) => ticket.mine).length} of them yours, outlined. New tickets join as soon as they match.</div>
         <div class="tf-keys">
           {#each shownKeys as ticket (ticket.entity_id)}
             <a href={entityAddress("ticket", ticket.entity_id)} class:tf-mine={ticket.mine} title={ticket.title}>{keyOf(ticket.entity_id)}</a>
@@ -381,5 +406,20 @@
       onadd={(query) => addedPattern(kind, query)}
       onclose={() => (patterning = null)}
     />
+  {/if}
+  {#if deleting}
+    {@const doomed = set}
+    <TfDialog title="Delete {doomed.name}?" onclose={() => (deleting = false)}>
+      {#snippet body()}
+        <p>
+          It stops showing on {counted(doomed.shows_on.length, "ticket", "tickets")} now, and on every ticket its rules would
+          match later. Links drawn on tickets by hand stay.
+        </p>
+      {/snippet}
+      {#snippet footer()}
+        <button type="button" class="tf-btn tf-ghost" onclick={() => (deleting = false)}>Cancel</button>
+        <button type="button" class="tf-btn tf-primary tf-danger" onclick={() => void remove()}>Delete link set</button>
+      {/snippet}
+    </TfDialog>
   {/if}
 {/if}

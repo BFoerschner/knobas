@@ -14,7 +14,12 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetHint, LinkSetRow } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import type { EscTarget } from "../escape";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfWaiting from "../TfWaiting.svelte";
+  import { waitPhase } from "../waiting";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
@@ -28,18 +33,23 @@
     ready,
     rest,
     ports = defaultPorts,
+    back = null,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
     /** What follows `sets` in the address: a set's id, or nothing. */
     rest: string[];
     ports?: SetPorts;
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing. */
+    back?: Pick<EscTarget, "name"> | null;
   } = $props();
 
   const editing = $derived(rest[0] ? decodeURIComponent(rest[0]) : null);
 
   let sets = $state<LinkSetRow[] | null>(null);
   let failed = $state<string | null>(null);
+  /** Moves on *Try again*, which the read below follows. */
+  let attempt = $state(0);
   let inherit = $state<boolean | null>(null);
   let creating = $state(false);
   /** R-7.10's hints (#870); the card draws the first one not put away. */
@@ -48,6 +58,7 @@
   const hint = $derived(firstHint(hints));
 
   $effect(() => {
+    void attempt;
     if (!ready || editing !== null) return;
     let live = true;
     failed = null;
@@ -136,9 +147,11 @@
   }
 </script>
 
+<div class="tf-full">
 {#if editing !== null}
-  <TfSetEditor {ready} id={editing} {ports} />
+  <TfSetEditor {ready} id={editing} {ports} {back} />
 {:else}
+  <TfCrumbs parts={[{ name: "Link sets" }]} {back} sectionTop />
   <header class="tf-fhead">
     <div>
       <h1>Link sets</h1>
@@ -179,13 +192,17 @@
         </span>
       </div>
     {/if}
-    {#if failed !== null}
-      <p class="tf-ifail">Could not read the link sets: {failed}</p>
-    {/if}
-    {#if sets !== null}
+    {#if failed !== null && sets === null}
+      <div class="tf-empty">
+        <p class="tf-ifail">Could not read the link sets: {failed}</p>
+        <button type="button" class="tf-btn" onclick={() => attempt++}>Try again</button>
+      </div>
+    {:else if sets === null}
+      <TfWaiting phase={waitPhase({ drawn: false, reading: true, failed: false })} columns={4}><span></span></TfWaiting>
+    {:else}
       {#if rows.length > 0}
-        <table class="tf-tbl">
-          <thead><tr><th>Link set</th><th>What is in it</th><th>Applies to</th><th>Tickets now</th></tr></thead>
+        <table class="tf-tbl tf-sets-tbl">
+          <thead><tr><th>Link set</th><th>What is in it</th><th>Applies to</th><th class="tf-sets-now">Tickets now</th></tr></thead>
           <tbody>
             {#each rows as set (set.id)}
               <tr class="tf-row" onclick={(event) => open(event, set.id)}>
@@ -193,22 +210,26 @@
                   ><a class="tf-set-name" href="#/sets/{encodeURIComponent(set.id)}"><Marked text={set.name} typed={filter.text} /></a
                   >{#if set.description}<span class="tf-sub">{set.description}</span>{/if}</td
                 >
-                <td>{#each contentLines(set) as line, at (at)}{#if at > 0}<br />{/if}{line}{/each}</td>
+                <td>{#if set.members.length + set.patterns.length > 0}{contentLines(set).join(", ")}{:else}<span class="tf-dim">nothing yet</span>{/if}</td>
                 <td>
                   {#each set.rules as rule, at (at)}{#if at > 0}<br />{/if}{ruleLabel(rule)}{:else}<span class="tf-dim"
                       >nothing yet</span
                     >{/each}
                 </td>
-                <td class="tf-num">{set.tickets} <span class="tf-dim">({set.mine} yours)</span></td>
+                <td class="tf-num tf-sets-now">{set.tickets} <span class="tf-dim">({set.mine} yours)</span></td>
               </tr>
             {/each}
           </tbody>
         </table>
       {:else if sets.length === 0}
-        <div class="tf-empty">No link sets yet. <em>New link set</em> starts one.</div>
+        <div class="tf-empty">
+          <p>No link sets yet. A set names the repos, pipelines, pages, assets and monitors a kind of work needs, once.</p>
+          <button type="button" class="tf-btn tf-primary" disabled={creating} onclick={() => void newSet()}>New link set</button>
+        </div>
       {:else}
-        <div class="tf-empty">No link set matches.</div>
+        <TfNoMatch noun="link sets" {filter} />
       {/if}
     {/if}
   </div>
 {/if}
+</div>

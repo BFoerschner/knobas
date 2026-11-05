@@ -244,6 +244,21 @@
   }
 
   /**
+   * What an empty answer's *Search everything* does: the same words, with the
+   * filters gone and every field searched. `null` when nothing narrows the
+   * search, where there is nothing wider to offer.
+   */
+  function widening(words: string): (() => void) | null {
+    const filtered = session.raw.trim() !== words.trim();
+    if (!scope.titles && !filtered) return null;
+    return () => {
+      if (scope.titles) scope.toggle();
+      session.type(words);
+      session.rerun();
+    };
+  }
+
+  /**
    * The credential health the chips and the result rows are drawn from.
    *
    * **Two rounds of review live in this one line, so both are recorded.**
@@ -424,7 +439,7 @@
         ? "narrow the filters"
         : sheet.current
           ? sheet.placeholder
-          : "⌘? for help",
+          : "Search tickets, code, builds and docs",
   );
 
   /**
@@ -1086,6 +1101,7 @@
           {/if}
         {:else if session.response}
           <Results
+            onwiden={widening(session.response.interpreted.text)}
             response={session.response}
             rows={session.rows}
             chordOf={listChord}
@@ -1118,6 +1134,7 @@
       {#if sheet.onActions}<span><kbd>⌘B</kbd> bind a key</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
+      <span><kbd>⌘?</kbd> help</span>
       {#if session.canSave && session.rows.length > 0}
         <!--
           On a query and never on the board: an empty box is the board, and

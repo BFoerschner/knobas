@@ -109,7 +109,7 @@ function draw(rest: string[], head = "builds", asked: string[] = [], extra: Part
   page = mount(TfBuilds, { target, props: { ready: true, head, rest, job: null, ports, ...(sync ? { sync: syncNow } : {}) } });
 }
 
-const rows = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-pi")];
+const rows = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-pl-rows .tf-pi")];
 const names = () => rows().map((row) => row.querySelector(".tf-pi-nm")?.textContent);
 
 test("each pipeline is a row: its name, err when its latest run failed, a strip of the last twelve runs, its path on hover", async () => {
@@ -162,6 +162,23 @@ test("the chips keep the failing or the running ones", async () => {
   chip("Running").click();
   flushSync();
   expect(names()).toEqual(["Payout_Build"]);
+});
+
+test("a filter that hides the pipeline you are on keeps it pinned over the list, saying why, until you leave it", async () => {
+  draw(["teamcity:buildType:Payout_Lint"]);
+  await settle();
+  const pinned = () => target.querySelector<HTMLAnchorElement>(".tf-pl-pin a");
+  expect(pinned()).toBeNull();
+  const chip = (word: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === word)!;
+  chip("Failing").click();
+  flushSync();
+  expect(names()).not.toContain("Payout_Lint");
+  expect(pinned()?.getAttribute("aria-current")).toBe("true");
+  expect(pinned()?.textContent).toContain("Payout_Lint");
+  expect(pinned()?.textContent).toContain("Hidden by the filter");
+  chip("Failing").click();
+  flushSync();
+  expect(pinned()).toBeNull();
 });
 
 test("the source's word appears once in the list, as the header line over its pipelines", async () => {
@@ -373,6 +390,16 @@ const ON_JOB: JobPipeline[] = [
   },
   { pipeline_id: "teamcity:buildType:Payout_Deploy_Prod", reasons: [{ kind: "pr_check", pr: "gitea:svc#142" }] },
 ];
+
+test("a pipeline This job leaves out stays pinned over the list while you are on it, and says it is not on the job", async () => {
+  const off = TREE.find((p) => !ON_JOB.some((row) => row.pipeline_id === p.entity_id))!;
+  drawTree({ job: "PAY-231", reasons: ON_JOB, rest: [off.entity_id] });
+  await settle();
+  const pinned = target.querySelector<HTMLAnchorElement>(".tf-pl-pin a");
+  expect(pinned?.getAttribute("aria-current")).toBe("true");
+  expect(pinned?.textContent).toContain(off.name);
+  expect(pinned?.textContent).toContain("Not in PAY-231");
+});
 
 test("This job is on by default with a job: the tree pruned to its pipelines, each with its reasons", async () => {
   drawTree({ job: "PAY-231", reasons: ON_JOB });

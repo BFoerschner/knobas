@@ -342,8 +342,11 @@ test("the Docs reader: tree and page, the outline the page's sticky right column
   const at = code.indexOf(`@media ${READER_NARROW} {`);
   expect(at, `no rule band for ${READER_NARROW}`).toBeGreaterThan(-1);
   const band = code.slice(at, code.indexOf("\n}", at));
-  expect(band).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
   expect(band).toMatch(/\.tf-rd-sheet\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+  // The tree narrows at the shell's own 1240px breakpoint, later than the outline folds.
+  const rail = code.indexOf("@media (max-width: 1240px) {\n  .tf-rd {");
+  expect(rail, "no 1240px band for the tree").toBeGreaterThan(-1);
+  expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
 });
 
 test("nothing in the Docs reader's page is capped in width (#2081)", () => {
@@ -501,7 +504,7 @@ test("on the Tickets board and list, yellow is the chosen job's card and row, an
     .map(([, selector, body]) => ({ selector: selector!.trim(), body: body! }))
     .filter(({ selector }) => /\.tf-(tcard|row)\b/.test(selector));
   const yellow = rules.filter(({ body }) => /var\(--card(-2)?\)/.test(body)).map(({ selector }) => selector);
-  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf-row.tf-card td"]);
+  expect(yellow).toEqual([".tf-tcard.tf-card", ".tf .tf-tcard.tf-card:hover", ".tf-row.tf-card td"]);
   const lifted = rules.filter(({ body }) => body.includes("var(--shadow)")).map(({ selector }) => selector);
   expect(lifted).toEqual([".tf-tcard.tf-sel", ".tf-tcard.tf-card.tf-sel"]);
 

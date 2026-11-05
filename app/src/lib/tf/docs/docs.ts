@@ -2,8 +2,8 @@
  * The Docs reader's rules (#859, requirements §10), pure: which page an
  * address opens, what the tree holds, the header's words and the anchors.
  *
- * Prototype-6 draws all three Docs addresses with one screen: `#/docs` opens
- * the page read last, `#/docs/space/<key>` that space's first page, and
+ * One screen draws the Docs addresses: `#/docs` is the Docs home (Björn,
+ * 2026-11-05), `#/docs/space/<key>` that space's first page, and
  * `#/page/<id>[/<section>]` the page itself. A key two sources hold is
  * addressed `#/docs/space/<source>:<key>` (#1455), as a ticket key two sources
  * hold is `#/job/<source>:<key>` (#1476).
@@ -31,7 +31,7 @@ import { isDone } from "../tickets/tickets";
 
 /** Where a Docs address points. */
 export type DocsPlace =
-  | { kind: "last" }
+  | { kind: "home" }
   | { kind: "space"; source: string | null; key: string }
   | { kind: "page"; id: string; section: number | null }
   | { kind: "search"; words: string };
@@ -46,11 +46,11 @@ export type DocsPlace =
  */
 export function placeOf(rest: string[]): DocsPlace {
   const [head, next] = rest;
-  if (head === undefined || head === "") return { kind: "last" };
+  if (head === undefined || head === "") return { kind: "home" };
   // `#/docs/search/<words>` (#2425): the launcher's *Search Docs for …* row.
-  if (head === "search") return next ? { kind: "search", words: next } : { kind: "last" };
+  if (head === "search") return next ? { kind: "search", words: next } : { kind: "home" };
   if (head === "space") {
-    if (!next) return { kind: "last" };
+    if (!next) return { kind: "home" };
     const colon = next.indexOf(":");
     return colon > 0
       ? { kind: "space", source: next.slice(0, colon), key: next.slice(colon + 1) }
@@ -62,8 +62,8 @@ export function placeOf(rest: string[]): DocsPlace {
 
 /**
  * The Docs area searching for `words` (#2425): what the launcher's *Search
- * Docs for …* row opens. The page under the hits is the one read last, as
- * `#/docs`'s is.
+ * Docs for …* row opens. The page under the hits is the one read last, else
+ * the first space's first page.
  */
 export function docsSearchHash(words: string): string {
   return `#/docs/search/${encodeURIComponent(words)}`;
@@ -81,13 +81,14 @@ export function firstPage(space: DocSpace): DocNode | undefined {
 }
 
 /**
- * The page an address opens, or `null` when the tree has nothing to open.
- * `#/docs` with nothing read yet opens the first space's first page. A space
- * named with its source is matched through {@link spaceId}; a bare key opens
+ * The page an address opens, or `null` when it opens none: the Docs home opens
+ * no page, and a space the tree does not hold has none. A space named with its
+ * source is matched through {@link spaceId}; a bare key opens
  * the first space holding it, and so does a segment whose `:` belongs to the
  * key rather than naming a source.
  */
 export function pageToOpen(place: DocsPlace, tree: DocsTree): string | null {
+  if (place.kind === "home") return null;
   if (place.kind === "page") return place.id;
   if (place.kind === "space") {
     const { source, key } = place;
@@ -100,6 +101,20 @@ export function pageToOpen(place: DocsPlace, tree: DocsTree): string | null {
   if (tree.last_read !== null) return tree.last_read;
   const first = tree.spaces[0];
   return first ? (firstPage(first)?.entity_id ?? null) : null;
+}
+
+/** *Continue reading* on the Docs home: the page read last and where it sits, while the tree still holds it. */
+export function continueReading(tree: DocsTree): JobPage | null {
+  const id = tree.last_read;
+  if (id === null) return null;
+  const space = spaceOfPage(tree, id);
+  const page = space?.pages.find((p) => p.entity_id === id);
+  return space === undefined || page === undefined ? null : { entity_id: id, title: page.title, where: whereOf(space, page) };
+}
+
+/** A space's pages at the top of its tree: what its tile on the Docs home lists first. */
+export function topPages(space: DocSpace): DocNode[] {
+  return space.pages.filter((p) => p.parent === null);
 }
 
 /** The space holding a page, if the tree has it. */
@@ -531,10 +546,11 @@ export function sectionsOf(blocks: DocBlock[]): Section[] {
 
 /**
  * The windows the reader folds its outline above the page in (#2081, R-10.9):
- * narrower than 1240px. `css/docs.css` writes the same query for the same
+ * narrower than 1370px, the width the header's actions, with a job chosen, stop
+ * fitting one row beside an open outline. `css/docs.css` writes the same query for the same
  * band, and `tf-css.test.ts` holds the two together.
  */
-export const READER_NARROW = "(max-width: 1239px)";
+export const READER_NARROW = "(max-width: 1369px)";
 
 /**
  * The windows the reader's tree is a drawer over the page in (#2084, R-10.9):

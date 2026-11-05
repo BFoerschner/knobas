@@ -171,7 +171,7 @@
 .tf-tkatt .tf-stale { margin: 10px 12px 2px; }
 .tf-tkatt .tf-stale .tf-btn { margin-left: auto; }
 
-.tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
+.tf-work { overflow: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; min-width: 0; }
 .tf-work > * { flex: none; }
 .tf-wtabs {
   display: flex; align-items: center; gap: 2px; padding: 10px 22px 0; border-bottom: 1px solid var(--rule);

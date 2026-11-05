@@ -78,10 +78,14 @@
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the link sets: {failed}</p>
-    {:else if sets !== null && sets.length === 0}
-      <p class="tf-dim">No link sets yet.</p>
+    {:else if sets === null}
+      <p class="tf-dim tf-picks-more">Reading the link sets…</p>
+    {:else if sets.length === 0}
+      <p class="tf-dim tf-picks-more">No link sets yet. Manage link sets starts one.</p>
+    {:else if shown.length === 0}
+      <p class="tf-dim tf-picks-more">No link set matches “{typed.trim()}”.</p>
     {/if}
-    <div class="tf-picks" role="radiogroup" aria-label="Link sets">
+    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="radiogroup" aria-label="Link sets">
       {#each shown as set (set.id)}
         {@const on = applied.has(set.id)}
         <label class="tf-pickrow" class:tf-in={on}>

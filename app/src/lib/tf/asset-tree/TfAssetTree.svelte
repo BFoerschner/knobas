@@ -7,14 +7,29 @@
   The view takes the two things it reads off the shell's navigation, `route`
   and `go`. This page hands it the address the shell already parsed, with the
   shared `parseHash`, and `go` writes `location.hash` as the rest of the shell
-  does. The tree keeps its own look until a ticket ports it.
+  does. The page draws its own breadcrumb, which names the asset it is on.
 -->
 <script lang="ts">
   import AssetsView from "../../assets/AssetsView.svelte";
   import type { AssetsNav } from "../../assets/tree";
   import { parseHash } from "../../shell/router";
+  import type { EscTarget } from "../escape";
+  import { HEAD_NAME } from "../route";
+  import TfCrumbs from "../TfCrumbs.svelte";
 
-  let { head, rest }: { head: string; rest: string[] } = $props();
+  let {
+    head,
+    rest,
+    back = null,
+  }: {
+    head: string;
+    rest: string[];
+    /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing. */
+    back?: Pick<EscTarget, "name"> | null;
+  } = $props();
+
+  /** The asset the view has read, which the breadcrumb's last part names. */
+  let named = $state<string | null>(null);
 
   const address = $derived(`#/${[head, ...rest].map(encodeURIComponent).join("/")}`);
 
@@ -28,6 +43,13 @@
   };
 </script>
 
-<div class="tf-asset-tree">
-  <AssetsView {nav} />
+<div class="tf-full">
+  {#if head === "assets"}
+    <TfCrumbs parts={[{ name: "Asset tree" }]} {back} sectionTop />
+  {:else}
+    <TfCrumbs parts={[{ name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
+  {/if}
+  <div class="tf-asset-tree">
+    <AssetsView {nav} onnamed={(name) => (named = name)} />
+  </div>
 </div>

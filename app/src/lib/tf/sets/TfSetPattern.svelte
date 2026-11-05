@@ -100,7 +100,10 @@
       <p class="tf-ifail">{answer.refusal}</p>
     {/if}
     <div class="tf-pane-h" aria-live="polite">Matches now: {matched.count}</div>
-    <div class="tf-picks tf-pat-matches" role="list" aria-label="Matches now">
+    {#if answer !== null && matched.count === 0}
+      <p class="tf-dim tf-picks-more">Nothing matches this yet. A pattern with no matches still picks up what appears later.</p>
+    {/if}
+    <div class="tf-picks tf-pat-matches" class:tf-hidden-empty={matched.count === 0} role="list" aria-label="Matches now">
       {#each matched.matches.slice(0, DRAWN) as row (row.entity_id)}
         <div class="tf-pat-match" role="listitem">
           <span class="tf-dot {toneClass(row.state)}"></span>{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>

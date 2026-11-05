@@ -253,6 +253,7 @@
     alerts = sharedAlerts,
     now = () => new Date(),
     stripWidth,
+    onnamed,
   }: {
     nav: AssetsNav;
     ports?: Partial<AssetPorts>;
@@ -280,6 +281,8 @@
      * nothing (`stripFor`).
      */
     stripWidth?: () => number;
+    /** Told the asset the pane has read, or `null`: what the page's breadcrumb calls this address. */
+    onnamed?: (name: string | null) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -633,6 +636,8 @@
       },
     });
   });
+
+  $effect(() => onnamed?.(detail?.asset.name ?? null));
 
   function select(row: AssetRow) {
     nav.go(addressOf(row));
@@ -1445,6 +1450,14 @@
     return known.find((row) => row.id === value)?.name ?? null;
   }
 
+  /**
+   * Whether a property's value is a code value, drawn in mono: a port, an image,
+   * an address. Words with a space in them are not (design system, Type).
+   */
+  function readsAsCode(property: AssetProperty): boolean {
+    return property.value !== null && !/\s/.test(String(property.value.value));
+  }
+
   /** A property's value as text. `null` is drawn as an em dash, not as "null". */
   function reading(property: AssetProperty): string {
     if (property.value === null) return "—";
@@ -1541,19 +1554,22 @@
 -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <section class="view" onkeydown={onkeydown}>
-  <div class="room-bar">
-    <h1>Assets</h1>
+  <header class="tf-fhead">
+    <div>
+      <h1>Asset tree</h1>
+      <div class="tf-sub">The estate as columns: what holds what, what runs where, and what is wrong in it.</div>
+    </div>
     <!--
       No tab strip (#1459): its *Monitors* tab named a roster that went with
       the rooms UI (#1087), and one tab left is no strip. Monitors is a section
       of its own at `#/monitors` (R-11.3).
 
-      In the room bar, not on a column header: an import is about the
+      In the header, not on a column header: an import is about the
       whole estate, and the address that most needs it — a tree with nothing
       in it yet — has neither a column nor a selection to hang it off.
     -->
-    <button class="tf-btn imp" onclick={() => (importing = true)}>Import</button>
-  </div>
+    <div class="tf-acts"><button class="tf-btn imp" onclick={() => (importing = true)}>Import</button></div>
+  </header>
 
   {#if typesFailure}
     <!--
@@ -1561,7 +1577,7 @@
       address that most needs this message (`#/assets/tree`, nothing selected)
       has no pane to draw it in.
     -->
-    <p class="fail tf" role="alert">Creating is unavailable: {typesFailure}</p>
+    <p class="fail typesfail" role="alert">Creating is unavailable: {typesFailure}</p>
   {/if}
 
   <!--
@@ -1591,6 +1607,7 @@
   -->
   {#if alerts.count > 0}
     <section class="alerts" aria-label="Open alerts">
+      <h2>Open alerts <span class="tf-count tf-err">{alerts.count}</span></h2>
       <ul>
         {#each alerts.open as alert (alert.id)}
           {#if alert.assets.length === 0}
@@ -1639,18 +1656,23 @@
     sliver. A row of its own also keeps the box clear of the path it is about
     to open, since the offers overlay the columns and nothing else.
   -->
-  <div class="find">
-    <input
-      class="q"
-      type="search"
-      value={query}
-      placeholder="Find an asset"
-      aria-label="Find an asset in the estate"
-      autocomplete="off"
-      spellcheck="false"
-      oninput={(event) => typed(event.currentTarget.value)}
-      onkeydown={onboxkey}
-    />
+  <div class="find tf-fbar">
+    <label class="tf-fsearch">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+        ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
+      >
+      <input
+        class="q"
+        type="search"
+        value={query}
+        placeholder="Find an asset"
+        aria-label="Find an asset in the estate"
+        autocomplete="off"
+        spellcheck="false"
+        oninput={(event) => typed(event.currentTarget.value)}
+        onkeydown={onboxkey}
+      />
+    </label>
     {#if query.trim() !== ""}
       <ol class="res">
         {#each matches as match, index (match.id)}
@@ -1682,7 +1704,10 @@
   <div class="tree" bind:this={tree}>
     <div class="cols" bind:this={stripEl}>
       {#if failure}
-        <p class="empty fail">{failure}</p>
+        <div class="none tf-empty">
+          <p class="empty fail">{failure}</p>
+          <button class="tf-btn" onclick={() => (revision += 1)}>Try again</button>
+        </div>
       {:else if loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0}
         <!--
           The estate with nothing in it, which is what a fresh install has
@@ -1692,9 +1717,9 @@
           this state, because a column header with no rows under it is not
           somewhere a reader thinks to look.
         -->
-        <div class="none">
-          <p class="empty">Nothing in the estate yet.</p>
-          <button class="tf-btn tf-sm" disabled={types.length === 0} onclick={() => openCreate(0)}>
+        <div class="none tf-empty">
+          <p class="empty">Nothing in the estate yet. Import an estate file, or add the first asset by hand.</p>
+          <button class="tf-btn tf-primary" disabled={types.length === 0} onclick={() => openCreate(0)}>
             New asset
           </button>
         </div>
@@ -1731,13 +1756,15 @@
               <header class="col-h">
                 <span class="col-t">{headingFor(index)}</span>
                 <button
-                  class="plus"
+                  class="plus tf-iconbtn tf-sm"
                   disabled={types.length === 0}
                   aria-label="New asset in {headingFor(index)}"
                   title={plusTitle(index)}
                   onclick={() => openCreate(index)}
                 >
-                  +
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"
+                    ><path d="M8 3.5v9M3.5 8h9" /></svg
+                  >
                 </button>
               </header>
               <ol class="col" data-col={index} {@attach win.list}>
@@ -1747,7 +1774,7 @@
                   {@const work = workBadge(row)}
                   <li {@attach win.row(row.id)}>
                     <button
-                      class="row {chosen === row.id ? 'on' : ''}"
+                      class="row {chosen === row.id ? 'on' : ''} {row.id === selectedId ? 'tip' : ''}"
                       aria-current={chosen === row.id ? "true" : undefined}
                       data-asset={row.id}
                       title={addressOf(row)}
@@ -1828,7 +1855,7 @@
 
     <aside class="pane" bind:this={paneEl}>
       {#if detail === null}
-        <p class="empty">
+        <p class="empty paneempty">
           {loaded ? "Select an asset to see what it holds." : "Reading…"}
         </p>
       {:else}
@@ -1852,11 +1879,11 @@
             </button>
           {:else}
             <h2>{detail.asset.name}</h2>
-            <span class="kind">{detail.asset.type_label}</span>
+            <span class="kind tf-chip">{detail.asset.type_label}</span>
           {/if}
         </header>
 
-        <p class="crumb mono" title="Where this asset sits in the estate">
+        <p class="crumb" title="Where this asset sits in the estate">
           {heldByPath(detail).join(" / ")}
         </p>
 
@@ -1989,6 +2016,7 @@
                     -->
                     <button
                       class="val {property.value === null ? 'faint' : ''}"
+                      class:code={readsAsCode(property)}
                       title="Edit {property.label}"
                       onclick={() => beginEdit(property)}
                     >
@@ -2134,7 +2162,7 @@
             <span class="rname">
               <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
               {#if route.visibility === "public"}
-                <span class="vis">public</span>
+                <span class="vis tf-chip">public</span>
               {/if}
             </span>
             <button
@@ -2254,7 +2282,7 @@
         <section class="grp breaks">
           <h3 class="lab">
             Depends on this
-            {#if dependsOn !== null}<span class="n">{dependsOn.assets.length}</span>{/if}
+            {#if dependsOn !== null}<span class="n tf-count">{dependsOn.assets.length}</span>{/if}
           </h3>
           {#if dependsFailure !== null}
             <p class="empty">{dependsFailure}</p>
@@ -2618,20 +2646,26 @@
 {/if}
 
 <style>
-  /*
-    Pushed to the far end of the room bar, away from the heading: this is an
-    action on the whole estate. The room bar is the page's header, so the
-    button is `.tf-btn` at the default size (design system, Controls; #2291),
-    and only the placement is this view's.
-  */
-  .imp {
-    margin-left: auto;
+  /* The page under its breadcrumb: the header, the alerts, the filter band, and the tree taking what is left. */
+  .view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    height: auto;
+    min-height: 0;
   }
 
-  /* Three rows now: the room bar, the search strip, and the tree under both.
-     `unported.css` gives `.view` two, and the strip is this view's own. */
-  .view {
-    grid-template-rows: auto auto 1fr;
+  /* The body under the header, with the rule the bands have. */
+  .view > .tf-fhead {
+    flex: none;
+  }
+
+  .typesfail {
+    flex: none;
+    margin: 0;
+    padding: 6px 22px;
+    font-size: var(--t-sm);
+    border-bottom: 1px solid var(--rule);
   }
 
   /* Columns scroll on their own axis; the pane does not move. Story 33.
@@ -2639,8 +2673,9 @@
      pixels and positioned in them. */
   .tree {
     position: relative;
+    flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 340px;
     min-height: 0;
     overflow: hidden;
   }
@@ -2670,15 +2705,16 @@
   }
 
   .wires .halo {
-    stroke: var(--bg);
+    stroke: var(--paper);
     stroke-width: 3.2;
     opacity: 0.92;
   }
 
+  /* A wire is structure, not state, so it is ink and not a tone. */
   .wires .wire {
-    stroke: var(--amber);
+    stroke: var(--ink-2);
     stroke-width: 1;
-    opacity: 0.65;
+    opacity: 0.75;
   }
 
   /* Reached through something rather than pointed at: a spine standing in for
@@ -2688,8 +2724,8 @@
   }
 
   .wires .land {
-    fill: var(--amber);
-    opacity: 0.8;
+    fill: var(--ink-2);
+    opacity: 0.9;
   }
 
   /*
@@ -2742,17 +2778,21 @@
     width: 220px;
     flex: none;
     min-height: 0;
-    border-right: 1px solid var(--hair);
+    border-right: 1px solid var(--rule);
   }
 
   .col-h {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 6px;
-    height: 24px;
+    height: 34px;
     flex: none;
-    padding: 0 4px 0 10px;
-    border-bottom: 1px solid var(--hair);
+    padding: 0 4px 0 14px;
+    background: var(--sheet);
+    border-bottom: 1px solid var(--rule);
+    font: 600 var(--t-xs)/1.2 var(--sans);
+    color: var(--ink-2);
   }
 
   .col-h .col-t {
@@ -2761,40 +2801,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 600 10px/1 var(--disp);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
   }
 
-  .col-h .plus {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 2px;
-    color: var(--muted);
-    font: 400 14px/1 var(--sans);
-  }
-
-  .col-h .plus:hover:not(:disabled) {
-    background: var(--raised);
-    color: var(--text);
-  }
-
-  .col-h .plus:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  /*
-    The search strip: one row, the box on the right, and its offers hanging
-    over the columns rather than pushing them down while a reader types.
-  */
-  /* The open-alert strip (#444). A band above the search, the same 14px
-     gutter every strip in this view uses. */
+  /* The open-alert strip (#444): a band above the search, on the page's gutter. */
   .alerts {
-    padding: 4px 14px 6px;
-    border-bottom: 1px solid var(--hair);
+    flex: none;
+    padding: 8px 22px 10px;
+    background: var(--sheet);
+    border-top: 1px solid var(--rule);
+  }
+
+  .alerts h2 {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 4px;
+    font-size: var(--t-xs);
+    font-weight: 600;
+    color: var(--ink-2);
   }
 
   .alerts ul {
@@ -2814,25 +2838,26 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 20px;
+    min-height: 22px;
+    font-size: var(--t-sm);
   }
 
   /* The state as a dot, not a word: `down` and `warn` are two colours the
      rest of this app already uses, and a word here would repeat what the
      colour says in the space the monitor's name needs. */
   .alerts .st {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     flex: none;
   }
 
   .alerts .st.down {
-    background: var(--fail);
+    background: var(--err);
   }
 
   .alerts .st.warn {
-    background: var(--amber);
+    background: var(--warn);
   }
 
   .alerts .go {
@@ -2851,11 +2876,11 @@
 
   .alerts .go:hover .nm {
     text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .alerts .mn {
-    font: 500 11px/1.4 var(--mono);
-    color: var(--text);
+    font-weight: 500;
     white-space: nowrap;
   }
 
@@ -2863,80 +2888,85 @@
   .alerts .pth,
   .alerts .ak,
   .alerts .wh {
-    font: 400 11px/1.4 var(--mono);
+    font-size: var(--t-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   /* Pushed to the far end, so the readings line up down the strip however
-     long the names before them are. */
+     long the names before them are. A duration is Archivo with tabular figures. */
   .alerts .wh {
     margin-left: auto;
     flex: none;
+    font-variant-numeric: tabular-nums;
   }
 
+  /* The search: the filter band every list page has, its offers hanging over the
+     columns rather than pushing them down while a reader types. */
   .find {
     position: relative;
-    display: flex;
-    justify-content: flex-end;
-    padding: 5px 14px;
-    border-bottom: 1px solid var(--hair);
+    flex: none;
+    border-top: 1px solid var(--rule);
   }
 
-  .find .q {
-    width: 220px;
-    height: 24px;
-    padding: 0 8px;
-    border: 1px solid var(--hair);
-    border-radius: 2px;
-    background: var(--panel);
-    font-size: 12px;
+  .alerts + .find {
+    border-top-color: var(--rule-2);
+  }
+
+  .find .tf-fsearch {
+    flex: 0 1 360px;
+  }
+
+  .find .q::-webkit-search-cancel-button {
+    display: none;
   }
 
   .find .res {
     position: absolute;
     top: 100%;
-    right: 14px;
+    left: 22px;
     z-index: 5;
     display: grid;
     gap: 1px;
-    width: 320px;
+    width: min(440px, calc(100% - 44px));
     max-height: 320px;
     margin: 4px 0 0;
     padding: 4px;
     overflow-y: auto;
     list-style: none;
-    border: 1px solid var(--hair);
-    background: var(--panel);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--sheet);
+    box-shadow: var(--shadow);
   }
 
   .find .hit {
     display: grid;
     width: 100%;
-    padding: 4px 6px;
+    padding: 5px 8px;
+    border-radius: 4px;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   .find .hit.on,
   .find .hit:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .find .hit .pth {
-    font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: var(--t-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .find .none {
-    padding: 6px;
-    color: var(--muted);
-    font-size: 12px;
+    padding: 6px 8px;
+    color: var(--ink-2);
+    font-size: var(--t-sm);
+    display: block;
   }
 
   .col {
@@ -2945,7 +2975,8 @@
     gap: 1px;
     flex: 1;
     margin: 0;
-    padding: 6px 0;
+    padding: 6px;
+    background: none;
     list-style: none;
     overflow-y: auto;
   }
@@ -2968,22 +2999,23 @@
     width: 30px;
     flex: none;
     align-items: center;
-    padding: 6px 0;
+    padding: 8px 0;
     /* Its own, since #429 moved the full column's to the `.colw` wrapper the
        spine does not have: without it a run of spines is one grey block. */
-    border-right: 1px solid var(--hair);
-    background: var(--panel);
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--sheet);
     cursor: pointer;
   }
 
   .col.spine:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .col.spine .smg {
     flex: none;
-    font: 500 9.5px/1 var(--mono);
-    color: var(--muted);
+    font: 500 var(--t-2xs)/1 var(--mono);
+    color: var(--ink-2);
   }
 
   /* The name, turned on its side: a 30px column has no other way to carry
@@ -2994,45 +3026,62 @@
     margin: 7px 0;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    font: 600 11px/1 var(--disp);
-    letter-spacing: 0.1em;
-    color: var(--faint);
+    font: 500 var(--t-xs)/1 var(--sans);
+    color: var(--ink-2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .col.spine:hover .vn {
-    color: var(--muted);
+    color: var(--ink);
+  }
+
+  .col.spine:focus-visible,
+  .col :global(:focus-visible) {
+    outline-offset: -2px;
   }
 
   .none {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 10px 12px;
+    flex: 1;
   }
 
+  .none .empty {
+    padding: 0;
+  }
+
+  /* A row of the column: a rail's row (design system, Motion). The selected asset is the ink pill,
+     the assets above it on the path a paler one, so the path reads and one row says where you are. */
   .row {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
     height: var(--row);
-    padding: 0 8px 0 10px;
+    padding: 0 6px 0 6px;
+    border: 0;
+    border-radius: 4px;
     text-align: left;
-    color: var(--text);
-    font-size: 12px;
+    color: var(--ink);
+    font-size: var(--t-sm);
   }
 
   .row:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .row.on {
-    background: var(--raised);
-    box-shadow: inset 2px 0 0 var(--text);
+    background: var(--rule);
+  }
+
+  .row.tip {
+    background: var(--fill);
+    color: var(--sheet);
+  }
+
+  .row.tip .mg {
+    color: inherit;
+    border-color: currentColor;
   }
 
   .row .nm {
@@ -3044,40 +3093,48 @@
   }
 
   .row .chev {
-    color: var(--faint);
+    color: var(--ink-2);
     flex: none;
   }
 
-  /* Story 32's badge. Amber and red are the app's own two alarm colours
-     (`--amber`, `--fail`), and the number is monospaced so a column of them
-     lines up at one glance rather than being read one row at a time. */
+  .row.tip .chev {
+    color: inherit;
+  }
+
+  /* Story 32's badge: tabular figures, so a column of them lines up at one glance. */
   .row .badge {
     flex: none;
-    min-width: 16px;
-    padding: 0 4px;
-    border: 1px solid currentColor;
-    border-radius: 8px;
-    font-family: var(--mono);
-    font-size: 10px;
-    line-height: 14px;
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: var(--t-2xs);
+    font-weight: 600;
+    line-height: 16px;
     text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
   .row .badge.warn {
-    color: var(--amber);
+    background: var(--warn-bg);
+    color: var(--warn);
   }
 
   .row .badge.down {
-    color: var(--fail);
+    background: var(--err-bg);
+    color: var(--err);
   }
 
   /* The linked-work badge carries no alarm colour, because a linked ticket is
-     not a fault: it is the muted foreground, so it reads as a count rather
-     than as a state. It is drawn *before* the problem badge, so the two never
-     swap places on a row that has both. */
+     not a fault: it reads as a count rather than as a state. It is drawn
+     *before* the problem badge, so the two never swap places on a row that has both. */
   .row .badge.work {
-    color: var(--muted);
-    border-color: var(--hair2);
+    background: var(--rule);
+    color: var(--ink-2);
+  }
+
+  .row.tip .badge {
+    background: rgb(255 255 255 / 18%);
+    color: inherit;
   }
 
   /* Positioned so that it paints over the wire layer, which is absolute and
@@ -3085,49 +3142,89 @@
   .pane {
     position: relative;
     z-index: 1;
-    border-left: 1px solid var(--hair);
-    background: var(--panel);
-    padding: 10px 12px 18px;
+    border-left: 1px solid var(--rule);
+    background: var(--sheet);
+    padding: 14px 14px 20px;
     overflow-y: auto;
     min-width: 0;
+  }
+
+  .paneempty {
+    padding: 22px 0;
+    text-align: center;
   }
 
   .pane-h {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 4px;
   }
 
   .pane-h h2 {
-    font: 600 16px/1.2 var(--disp);
+    font-size: var(--t-xl);
+    font-weight: 600;
+    line-height: 1.25;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+  }
+
+  .pane-h .inp {
+    flex: 1;
+    width: auto;
+    min-width: 0;
   }
 
   .crumb {
-    font-size: 11px;
-    color: var(--muted);
+    font-size: var(--t-xs);
+    color: var(--ink-2);
     margin: 0 0 14px;
     overflow-wrap: anywhere;
   }
 
   .grp {
-    margin: 0 0 14px;
+    margin: 0;
+    padding: 12px 0;
+    border-top: 1px solid var(--rule-2);
+  }
+
+  .acts + .grp,
+  .crumb + .grp {
+    border-top: 0;
+    padding-top: 0;
   }
 
   .grp h3 {
-    margin: 0 0 4px;
+    margin: 0 0 6px;
+  }
+
+  /* A section's own button stands under what it adds to. */
+  .grp > :global(.tf-btn) {
+    margin-top: 8px;
+  }
+
+  .mkmon > :global(.tf-btn) {
+    margin-top: 0;
+  }
+
+  .grp .empty {
+    padding: 0;
+    font-size: var(--t-sm);
+  }
+
+  /* A link made of words is underlined (design system, Layout). */
+  .link {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-align: left;
   }
 
   /* The count beside *Depends on this* (#505): the number of assets that
      break, and never the routes, which sit under their own line below. */
   .breaks .n {
-    margin-left: 6px;
-    font: 600 11px/1 var(--mono);
-    color: var(--fg);
+    margin-left: 4px;
   }
 
   /* The routes' own line, inside the section rather than a heading of its
@@ -3168,36 +3265,38 @@
     flex: 0 0 auto;
     max-width: 100%;
     overflow-wrap: anywhere;
+    font-size: var(--t-xs);
     font-variant-ligatures: none;
   }
 
   .breaks .lst li .path {
     grid-column: 1 / -1;
+    font-size: var(--t-xs);
   }
 
   .props {
     display: grid;
-    gap: 2px;
+    gap: 4px;
     margin: 0;
   }
 
   .prop {
     display: grid;
-    grid-template-columns: 108px minmax(0, 1fr);
+    grid-template-columns: 112px minmax(0, 1fr);
     column-gap: 8px;
     align-items: baseline;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   /* A custom key is marked, so the reader can tell the schema from their own
      additions without the pane keeping a copy of the type table. */
   .prop.own dt::after {
     content: "*";
-    color: var(--faint);
+    color: var(--ink-2);
   }
 
   .prop dt {
-    color: var(--muted);
+    color: var(--ink-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3206,20 +3305,17 @@
   .prop dd {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    min-width: 0;
     margin: 0;
-    font-family: var(--mono);
     overflow-wrap: anywhere;
   }
 
   /*
      The *In force* rows stack their value and the note about where it came
-     from, rather than sharing one line: the note is a sentence, and `.prop
-     dd`'s `overflow-wrap: anywhere` -- right for an IP or an image tag --
-     breaks a sentence one character at a time in a 200px pane.
+     from, rather than sharing one line: the note is a sentence.
   */
   .prop.force dd {
-    display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 1px;
@@ -3233,16 +3329,11 @@
   */
   .prop .src {
     max-width: 100%;
-    font-family: var(--sans);
-    font-size: 11px;
+    font-size: var(--t-xs);
     text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .prop button.src {
-    text-decoration: underline;
   }
 
   /*
@@ -3252,23 +3343,51 @@
      has no such state -- and Kuma's `pending` and `maintenance` fall through
      to the inherited colour, which is what "no opinion" should look like.
   */
+  .hl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hl::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
   .prop .hl.up,
   .watch .hl.up {
     color: var(--ok);
   }
 
+  .hl.up::before {
+    background: var(--ok);
+  }
+
   .prop .hl.warn,
   .watch .hl.warn {
-    color: var(--amber);
+    color: var(--warn);
+  }
+
+  .hl.warn::before {
+    background: var(--warn);
   }
 
   .prop .hl.down,
   .watch .hl.down {
-    color: var(--fail);
+    color: var(--err);
+  }
+
+  .hl.down::before {
+    background: var(--err);
   }
 
   .prop .hl.none {
-    color: var(--faint);
+    color: var(--ink-2);
+    flex: none;
   }
 
   /* The value reads as the value it is until it is hovered: a pane of boxes
@@ -3276,45 +3395,49 @@
   .prop dd .val {
     flex: 1;
     min-width: 0;
-    padding: 0 3px;
+    margin-left: -4px;
+    padding: 0 4px;
     text-align: left;
     color: inherit;
     font: inherit;
-    border-radius: 2px;
+    border-radius: 3px;
     overflow-wrap: anywhere;
+    cursor: text;
+  }
+
+  .prop dd .val.code {
+    font-family: var(--mono);
+    font-size: var(--t-xs);
+    font-variant-ligatures: none;
+    letter-spacing: normal;
+    word-spacing: normal;
   }
 
   .prop dd .val:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .prop dd .inp {
-    height: 22px;
-    font: inherit;
+    flex: 1;
+    width: auto;
+    min-width: 0;
   }
 
   .acts {
     display: flex;
     flex-wrap: wrap;
     gap: var(--control-gap);
-    margin: 0 0 12px;
+    margin: 0 0 14px;
   }
 
   .wf {
     margin: -6px 0 12px;
-    font-size: 12px;
-  }
-
-  .tf {
-    margin: 0;
-    padding: 6px 12px;
-    font-size: 12px;
-    border-bottom: 1px solid var(--hair);
+    font-size: var(--t-sm);
   }
 
   .add {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 88px;
+    grid-template-columns: minmax(0, 1fr) 96px;
     gap: 6px;
     margin-top: 8px;
   }
@@ -3328,7 +3451,7 @@
 
   .ask {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--t-md);
   }
 
   /* One route per row: what it is called, where it answers, and where it
@@ -3342,13 +3465,13 @@
   .lst.routes li {
     display: grid;
     gap: 2px;
-    padding: 4px 0;
-    border-bottom: 1px solid var(--hair);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--rule-2);
   }
 
   .routes li.on {
-    box-shadow: inset 2px 0 0 var(--link);
-    padding-left: 6px;
+    box-shadow: inset 2px 0 0 var(--ink);
+    padding-left: 8px;
   }
 
   .routes .rname {
@@ -3357,26 +3480,22 @@
     gap: 6px;
   }
 
-  .routes .vis {
-    font: 500 9px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--amber);
-  }
-
   .routes .url {
     justify-self: start;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
-    color: var(--muted);
+    font-size: var(--t-xs);
+    font-variant-ligatures: none;
+    color: var(--ink-2);
     text-align: left;
   }
 
   .routes .url:hover {
-    color: var(--link);
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .routes .rto,
@@ -3385,7 +3504,7 @@
     flex-wrap: wrap;
     align-items: baseline;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--t-xs);
     /* A real route property can be a command line (until #634 the estate's
        tunnel routes carried a whole `ssh -N -L ...`), which wraps at no space
        there is: without this the pane scrolls
@@ -3401,7 +3520,7 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   .lst li,
@@ -3409,6 +3528,10 @@
     display: flex;
     align-items: baseline;
     gap: 8px;
+  }
+
+  .lst li .faint {
+    font-size: var(--t-xs);
   }
 
   .hist .hw {
@@ -3419,7 +3542,28 @@
 
   .hist .ha {
     flex: none;
-    font-family: var(--mono);
-    font-size: 11px;
+    font-size: var(--t-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 900px) {
+    .alerts {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .find .res {
+      left: 16px;
+      width: min(440px, calc(100% - 32px));
+    }
+
+    .tree {
+      grid-template-columns: minmax(0, 1fr) 300px;
+    }
+
+    .typesfail {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
   }
 </style>

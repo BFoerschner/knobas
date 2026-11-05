@@ -63,19 +63,27 @@
   function add() {
     const chosen = (all ?? []).filter((row) => picked.includes(row.entity_id));
     if (chosen.length > 0) onadd(chosen);
-    else onclose();
   }
 </script>
 
 <TfDialog title="Add {noun} to {setName}" {onclose}>
   {#snippet body()}
     <label class="tf-fsearch tf-wide"
+      ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+        ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
       ><input bind:value={typed} placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" /></label
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the {noun}: {failed}</p>
     {/if}
-    <div class="tf-picks" role="group" aria-label={KIND_LABEL[kind]}>
+    {#if all === null && failed === null}
+      <p class="tf-dim tf-picks-more">Reading the {noun}…</p>
+    {:else if all !== null && all.length === 0}
+      <p class="tf-dim tf-picks-more">knobas holds no {noun} yet. A source that has them fills this list once it has synced.</p>
+    {:else if all !== null && shown.length === 0}
+      <p class="tf-dim tf-picks-more">No {noun} match “{typed.trim()}”.</p>
+    {/if}
+    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="group" aria-label={KIND_LABEL[kind]}>
       {#each shown.slice(0, DRAWN) as row (row.entity_id)}
         {@const held = have.has(row.entity_id)}
         <label class:tf-in={held}
@@ -96,6 +104,6 @@
   {#snippet footer()}
     <span class="tf-dim tf-picked">{picked.length} picked</span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" onclick={add}>Add</button>
+    <button type="button" class="tf-btn tf-primary" disabled={picked.length === 0} onclick={add}>Add</button>
   {/snippet}
 </TfDialog>

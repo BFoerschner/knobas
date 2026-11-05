@@ -25,6 +25,7 @@
     entityId,
     title,
     what,
+    primary = null,
     source = null,
     submitWrite,
     onqueued,
@@ -37,6 +38,8 @@
     title: string;
     /** What the toast says was queued (`close PR #142`, `book repair on Quay crane 4 inspection`). */
     what: string;
+    /** The primary's words where the action's own name is not what happens (*Save changes*); the name when omitted. */
+    primary?: string | null;
     /** The entity's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
@@ -121,8 +124,7 @@
       type="submit"
       class="tf-btn tf-primary" class:tf-danger={action.danger}
       form="tf-pra-{uid}"
-      aria-label={actionName(action.label)}
-      disabled={busy || missing.length > 0}>{actionName(action.label)}</button
+      disabled={busy || missing.length > 0}>{primary ?? actionName(action.label)}</button
     >
   {/snippet}
 </TfDialog>
