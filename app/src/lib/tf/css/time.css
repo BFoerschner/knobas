@@ -102,7 +102,8 @@
 /* Today is marked down its column. The names and the week's total stay in view however far the days scroll. */
 .tf-tm-week th.tf-tm-today { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
 .tf-tm-week td.tf-tm-today { background: var(--sheet-2); }
-.tf-tm-week { border-collapse: separate; overflow: clip; }
+/* Clip, not hide: a table that hides its overflow would be its cells' scrollport, and they would stick to nothing. */
+.tf-tbl.tf-tm-week { border-collapse: separate; overflow: clip; }
 .tf-tm-week :is(th:first-child, td.tf-tm-t) { position: sticky; left: 0; z-index: 2; background: var(--sheet); box-shadow: inset -1px 0 0 var(--rule-2); }
 .tf-tm-week thead th:first-child { background: var(--sheet-2); }
 .tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot) { position: sticky; right: 0; z-index: 2; background: var(--sheet); box-shadow: inset 1px 0 0 var(--rule-2); }

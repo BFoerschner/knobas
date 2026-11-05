@@ -2133,7 +2133,7 @@ out of the DOM.
 
 `open-in-editor` (#501, ported to the ticket-first shell by #1084) is the
 spawn: it writes a stub executable and a fake clone into a scratch directory,
-and in Settings › *Checkouts and Open in…* sets the **Clones root** to that
+and in Settings › *Checkouts and Open in* sets the **Clones root** to that
 directory (*Change…*, *Save*) and adds an application whose command is
 `<stub> {path}` (*Edit applications…*, *Add an application…*). It opens the
 repository payout-service through the launcher, waits for its *Cloned at* line
@@ -2159,7 +2159,7 @@ uses the testenv Gitea, over **https through the https front**
 from the same tree, for the token in `./seed --env`, and the front's root trusted
 once (`just live-trust-ca`). It clones the repository into a scratch clones root and names a
 stub as the clone's `diff.guitool`, adds the Gitea in Settings › *Sources*
-(*+ Add a source*, *Test connection*, *Add source*) and an application with a
+(*Add a source…*, *Test connection*, *Add source*) and an application with a
 pull-request command, opens `SEPA retry with exponential backoff` from ⌘K once
 the source has synced it, and asserts: the application ran with the worktree
 as its only argument, the worktree is at the head and its own `FETCH_HEAD`

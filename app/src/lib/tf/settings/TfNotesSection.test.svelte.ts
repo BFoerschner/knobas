@@ -123,7 +123,7 @@ test("hidden by default: the switch is off and the shortcut says it is inactive"
 
   expect(button("Show notes").getAttribute("role")).toBe("switch");
   expect(button("Show notes").getAttribute("aria-checked")).toBe("false");
-  expect(text()).toContain("Takes effect once notes are shown.");
+  expect(text()).toContain("Inactive while notes are hidden.");
   // What On brings back (#1504, R-13a.6, D10).
   expect(text()).toContain("On, notes are back in search and open on their own page, and the capture shortcut works again.");
   expect([...target.querySelectorAll("kbd")].map((k) => k.textContent)).toEqual(["⌥", "⌘", "N"]);
@@ -158,7 +158,7 @@ test("notes shown with no shortcut stored say no key is set (#1466)", async () =
 
 test("hidden notes and a refusal win over the no-key line (#1466)", async () => {
   await render(stub({ shown: false, accelerator: null }).ports);
-  expect(text()).toContain("Takes effect once notes are shown.");
+  expect(text()).toContain("Inactive while notes are hidden.");
   expect(text()).not.toContain("No key is set");
 });
 

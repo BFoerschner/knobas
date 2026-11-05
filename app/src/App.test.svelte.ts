@@ -815,7 +815,7 @@ test("a note captured in the other window is asked for here when the capture say
     () => target.querySelector(".tf a[aria-current='page'][href='#/settings/notes']") !== null,
     "Settings never opened on Notes and capture",
   );
-  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.textContent).not.toContain("knobas has no page at this address.");
 });
 
 /** #1504: while notes are shown, *Open in knobas* lands on the note's own page. */
@@ -853,12 +853,12 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   // A ticket opens its ticket page (spec #2227), not its job.
   location.hash = "#/entity/mock:PAY-231";
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `#/entity/… stayed ${location.hash}`);
-  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(target.textContent).not.toContain("knobas has no page at this address.");
 
   // An id the mirror does not know keeps its address and says so.
   location.hash = "#/entity/mock:NOPE-1";
   await until(
-    () => target.textContent?.includes("Nothing lives at #/entity/mock:NOPE-1") ?? false,
+    () => target.textContent?.includes("knobas has no page at this address.") ?? false,
     `an unknown #/entity/… read ${target.textContent}`,
   );
   expect(location.hash).toBe("#/entity/mock:NOPE-1");
@@ -897,7 +897,7 @@ test("an inbox item arriving while the window is unfocused reaches the notify co
       () => window.location.hash === "#/pr/gitea%3Aacme%2Fpayouts%23144",
       "the click never moved the window",
     );
-    expect(target.textContent, "the click landed on a dead end").not.toContain("Nothing lives at");
+    expect(target.textContent, "the click landed on a dead end").not.toContain("knobas has no page at this address.");
   } finally {
     unfocused.mockRestore();
   }
@@ -1271,7 +1271,7 @@ test("open-in-editor: ⌘K lands on the launcher's query box", async () => {
 });
 
 test("open-in-editor: Settings › Checkouts and Open in… lands on the section open-in-editor.sh sets the root in", async () => {
-  await openSettingsSection("Checkouts and Open in…");
+  await openSettingsSection("Checkouts and Open in");
   await landsOn(landing("open-in-editor", "settings-checkouts"));
 });
 
@@ -1281,7 +1281,7 @@ test("pull-request-open-in: Settings › Sources lands on the section the driver
 });
 
 test("pull-request-open-in: Settings › Checkouts and Open in… lands on the section the driver sets the root in", async () => {
-  await openSettingsSection("Checkouts and Open in…");
+  await openSettingsSection("Checkouts and Open in");
   await landsOn(landing("pull-request-open-in", "settings-checkouts"));
 });
 

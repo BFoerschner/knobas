@@ -256,7 +256,6 @@
 .tf-flist .tf-fdir:first-child { border-top: 0; }
 .tf-flist .tf-fdir + button { border-top: 0; }
 .tf-flist button.tf-d1 { padding-left: 24px; }
-.tf-flist button[aria-current="true"] { background: var(--sheet-2); box-shadow: inset 2px 0 0 var(--ink); }
 .tf-flist .tf-fname { overflow: hidden; text-overflow: ellipsis; min-width: 0; white-space: nowrap; }
 .tf-dkeys { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 8px 2px 0; font-size: var(--t-xs); }
 .tf-dkeys span { display: inline-flex; gap: 3px; align-items: center; }
@@ -330,7 +329,8 @@
 }
 .tf-thread p { margin: 0 0 4px; overflow-wrap: anywhere; }
 /* The next author is further from the last comment than an author is from their own words. */
-.tf-thread p + b, .tf-thread .tf-md + b, .tf-thread p + .tf-who, .tf-thread .tf-md + .tf-who { display: block; margin-top: 12px; }
+.tf-said + .tf-said { margin-top: 14px; }
+.tf-said > p:first-child { margin-bottom: 2px; }
 .tf-thread p:last-child { margin-bottom: 0; }
 .tf-thread.tf-pending { border-color: var(--warn); }
 .tf-newc { margin: 4px 12px 8px 104px; display: flex; flex-direction: column; gap: 6px; font-family: var(--sans); }

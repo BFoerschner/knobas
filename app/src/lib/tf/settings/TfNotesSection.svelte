@@ -156,7 +156,7 @@
   const moveLabel = $derived(`Move ${noteCount(view?.note_count ?? 0)}`);
   const shown = $derived(view?.shown ?? false);
   const help = $derived.by(() => {
-    if (!shown) return "Takes effect once notes are shown.";
+    if (!shown) return "Inactive while notes are hidden.";
     if (view?.refusal) return `Not registered: ${view.refusal}`;
     if (view?.accelerator == null) return "No key is set. Change… to choose one.";
     return "Opens a small window over whatever you are doing.";

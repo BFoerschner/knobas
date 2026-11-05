@@ -216,6 +216,9 @@
   const parentOf = (full: string) => (full.includes("/") ? full.slice(0, full.lastIndexOf("/")) : "");
   const nameOf = (full: string) => full.slice(full.lastIndexOf("/") + 1);
 
+  /** A deep link's early read of its file has failed, or there is none: nothing but the listings can draw it now. */
+  let guessGone = $state(false);
+
   /** The entry `full` names in its parent's listing, once that is read. */
   function entryOf(full: string): TreeEntry | undefined {
     return listings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
@@ -304,8 +307,12 @@
     if (target === null) return;
     return untrack(() => {
       if (listings[parentOf(target)] !== undefined) return;
+      guessGone = false;
       const likely = likelySections(target, declared);
-      if (likely === null) return;
+      if (likely === null) {
+        guessGone = true;
+        return;
+      }
       for (const [dir, section] of Object.entries(likely.dirs))
         if (!asked.has(dir) && listings[dir] === undefined && !early.has(dirKey(dir))) askEarly(section, dirKey(dir));
       let live = true;
@@ -321,8 +328,11 @@
           if (file !== null && file.path === target) return;
           drawFile(read, fileSection ?? GUESSED);
         },
-        // Its directory's listing says whether there is such a file.
-        spent,
+        // Its directory's listing says whether there is such a file; one no listing holds has no directory to say so.
+        () => {
+          spent();
+          if (live && where === at && shown === target) guessGone = true;
+        },
       );
       return () => {
         live = false;
@@ -342,7 +352,7 @@
     if (shown === null) return null;
     // A directory on the way that its parent's listing does not hold: the file cannot be there, and its own listing never comes.
     for (const dir of ancestors(shown)) {
-      if (dir !== "" && listings[dir] === undefined && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
+      if (dir !== "" && guessGone && listings[dir] === undefined && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
     }
     if (listings[parentOf(shown)] === undefined) return null;
     const entry = entryOf(shown);

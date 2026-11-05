@@ -56,7 +56,7 @@ pid=${KNOBAS_WITNESS_PID:?the harness passes this}
 # minutes into a run, with no clue in the failure. The new shell uppercases
 # none of them, so each is spelled as the markup spells it.
 readonly SETTINGS_BUTTON='Settings'                    # TfTopBar.svelte
-readonly CHECKOUTS_SECTION='Checkouts and Open in…'    # settings/settings.ts
+readonly CHECKOUTS_SECTION='Checkouts and Open in'    # settings/settings.ts
 readonly CHANGE_ROOT='Change…'                         # TfCheckoutsSection.svelte
 readonly CLONES_ROOT_FIELD='Clones root'
 readonly SAVE_ROOT='Save'
