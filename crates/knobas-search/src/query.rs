@@ -878,7 +878,9 @@ fn apply_key_value(
             } else if key == "kind" || vocab.kinds.is_empty() || vocab.kinds.is_known(value) {
                 push_unique(&mut parsed.query.filters.kinds, value);
                 if !parsed.typed_kinds.iter().any(|(_, seen)| seen == value) {
-                    parsed.typed_kinds.push((token.to_owned(), value.to_owned()));
+                    parsed
+                        .typed_kinds
+                        .push((token.to_owned(), value.to_owned()));
                 }
             } else {
                 parsed.unknown(token);

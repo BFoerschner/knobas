@@ -18,6 +18,7 @@ function response(
       prefix: null,
       filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
+      left_out_tokens: [],
     },
     groups: [],
     total: 0,

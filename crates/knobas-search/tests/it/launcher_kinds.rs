@@ -713,10 +713,14 @@ async fn under_a_name_only_left_out_kinds_declare_says_so() {
     lone_commit(&pool, &t, &name).await;
 
     let token = format!("under:{name}");
-    for raw in [token.clone(), format!("{token} {t}"), format!("{token} nothing{t}")] {
+    for raw in [
+        token.clone(),
+        format!("{token} {t}"),
+        format!("{token} nothing{t}"),
+    ] {
         let answer = search(&pool, &raw, false).await;
         assert_eq!(answer.total, 0, "{raw}");
-        assert_eq!(answer.interpreted.left_out_tokens, [token.clone()], "{raw}");
+        assert_eq!(answer.interpreted.left_out_tokens, [token.as_str()], "{raw}");
         assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
     }
 }
@@ -776,7 +780,10 @@ async fn a_kind_the_launcher_leaves_out_says_so_in_the_spelling_typed() {
         ("kind:build kind:build".to_owned(), vec!["kind:build"]),
         (format!("kind:ticket nothing{t}"), vec![]),
         // Empty, and the kind beside it is left out all the same.
-        (format!("kind:build kind:ticket nothing{t}"), vec!["kind:build"]),
+        (
+            format!("kind:build kind:ticket nothing{t}"),
+            vec!["kind:build"],
+        ),
     ] {
         let answer = search(&pool, &raw, false).await;
         assert_eq!(answer.total, 0, "{raw}");
