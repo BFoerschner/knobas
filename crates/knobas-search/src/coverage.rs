@@ -159,9 +159,9 @@ select i.source_id                            as source_id,
 ///   declaring kind has no child row and gets it too.
 ///
 /// One probe per source, which stops at that source's first live row. The
-/// copied `source_id` is what bounds it (Björn's sign-off on #642): through
-/// `sync.item`, a second source on one adapter read every child row of the
-/// first to prove its absence, about 150 ms at the 100k benchmark.
+/// copied `source_id` is what lets it ask with no join (Björn's sign-off on
+/// #642): through `sync.item`, a second source on one adapter read every child
+/// row of the first to prove its absence, about 150 ms at the 100k benchmark.
 /// * **A `lateral ... limit 1`, not an `exists`.** Once `sync.item_parent` has
 ///   statistics the planner turns a correlated `exists` into a hash semi-join
 ///   that reads every child-arm row, every item and every entity to answer
@@ -171,10 +171,10 @@ select i.source_id                            as source_id,
 ///   Without them it answers from an empty range of `item_parent_child_idx`,
 ///   `(source_id, adapter_kind) where arm = 'child'`. With them the planner
 ///   expects a row soon and may scan `sync.item_parent` instead, which that
-///   source reads whole: one table and no join, 1.2 ms at 26,668 rows, 4.8 ms
-///   for the benchmark's three such sources. An `order by` on the index's
-///   columns does not steer it: each is equated to the outer row, so the
-///   planner drops the sort.
+///   source reads whole: one table and no join, about 1.5 ms at 26,668 rows,
+///   4.8 ms for the benchmark's three such sources, and it grows with the table
+///   (#2500). An `order by` on the index's columns does not steer it: each is
+///   equated to the outer row, so the planner drops the sort.
 const UNDER_COVERAGE_SQL: &str = r"
 select s.id
   from knobas.source_config s
