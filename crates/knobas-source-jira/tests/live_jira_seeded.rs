@@ -117,8 +117,8 @@
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
 //! from `seed-state.json` -- a stray issue deleted, a stray comment or
 //! attachment deleted, a label removed, a status moved back through the
-//! workflow -- which is the union of what can be left. Every test that asserts an exact set
-//! calls it before taking its baseline. Recovery from a dirty environment is
+//! workflow -- which is the union of what can be left. Every test that asserts
+//! an exact set calls it before taking its baseline. Recovery from a dirty environment is
 //! "run the suite again".
 //!
 //! **One owner at a time**, as for the seeded TeamCity (`testenv/README.md`):
