@@ -1206,6 +1206,21 @@ async fn each_issue_carries_its_comments_and_worklogs_as_seeded() {
                 seeded_issue.key,
                 it.body_text
             );
+            // Under its author's line (#2455): the display name a real Jira
+            // gives a comment's author, which `map::comment_text` reads.
+            let name = got["author"]["displayName"]
+                .as_str()
+                .expect("Jira names a comment's author");
+            assert!(
+                it.body_text.contains(&format!(
+                    "{}\n{}",
+                    knobas_source::docs::indexed::comment_line(Some(name)),
+                    want.body
+                )),
+                "{}: {:?}",
+                seeded_issue.key,
+                it.body_text
+            );
         }
 
         let worklogs = it.payload["fields"]["worklog"]["worklogs"]

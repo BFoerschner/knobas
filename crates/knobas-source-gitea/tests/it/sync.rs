@@ -47,7 +47,7 @@ async fn a_full_sync_emits_the_repository_and_every_branch() {
     // The position records what was seen, so the next run has something to
     // compare against.
     let position: serde_json::Value = serde_json::from_str(&cursor).expect("the cursor is JSON");
-    assert_eq!(position["v"], 3);
+    assert_eq!(position["v"], 4);
     let repo = &position["repos"]["tidewater/payout-service"];
     assert_eq!(repo["repo_updated_at"], "2026-08-22T11:42:00Z");
     assert_eq!(
@@ -477,7 +477,7 @@ async fn a_run_holding_no_position_is_a_full_sync_whatever_cursor_it_was_handed(
         ("an unreadable cursor", Some("not json".to_owned())),
         (
             "a cursor naming no repository",
-            Some(r#"{"v":3,"repos":{}}"#.into()),
+            Some(r#"{"v":4,"repos":{}}"#.into()),
         ),
     ] {
         let mut sink = VecSink(Vec::new());
@@ -1884,7 +1884,7 @@ async fn a_budget_that_stops_short_keeps_the_boundary_it_was_handed() {
 /// which turns the first run after the upgrade into a full sync.
 ///
 /// Both halves on one fixture: the same position at version 2 re-emits, and at
-/// version 3 it is idle (battery clause 2). Without the second half this would
+/// the current version it is idle (battery clause 2). Without the second half this would
 /// pass on an adapter that ignored its cursor altogether.
 #[tokio::test]
 async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits() {
@@ -1898,10 +1898,11 @@ async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budge
     let (first, current) = full(&*source).await;
     assert_eq!(ids(&first, "commit").len(), 2, "{first:?}");
 
-    // The same position, as a knobas from before #718 stored it.
+    // The same position, as a knobas from before #2455 stored it: every
+    // version below this one re-emits alike, #718's as well.
     let mut old: serde_json::Value = serde_json::from_str(&current).expect("the cursor is JSON");
-    assert_eq!(old["v"], 3, "{current}");
-    old["v"] = 2.into();
+    assert_eq!(old["v"], 4, "{current}");
+    old["v"] = 3.into();
     let old = old.to_string();
 
     let (items, upgraded) = again(&*source, &old).await;
@@ -1934,9 +1935,9 @@ async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budge
             item.body_text
         );
     }
-    assert!(upgraded.starts_with(r#"{"v":3"#), "{upgraded}");
+    assert!(upgraded.starts_with(r#"{"v":4"#), "{upgraded}");
 
-    // The same heads at version 3: nothing moved, nothing is emitted.
+    // The same heads at the current version: nothing moved, nothing is emitted.
     let (idle, same) = again(&*source, &current).await;
     assert!(idle.is_empty(), "idle run emitted {idle:?}");
     assert_eq!(same, current);

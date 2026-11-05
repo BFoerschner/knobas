@@ -7,6 +7,7 @@
 //! quietly desynchronise the app from the design it is being built to match.
 
 use knobas_source::contract::{Fault, VecSink, Walking, battery};
+use knobas_source::docs::indexed::Part;
 use knobas_source::{Capability, Source, SourceError, WriteOp};
 use knobas_source_mock::MockSource;
 
@@ -264,7 +265,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v5");
+    assert_eq!(cursor, "tidewater-v6");
     assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
@@ -281,6 +282,19 @@ async fn full_sync_emits_every_work_item() {
     assert!(ticket.body_text.contains("Retry failed SEPA payouts"));
     assert!(ticket.body_text.contains("manual review queue"));
     assert!(ticket.body_text.contains("finance wants max 5 attempts"));
+    // ...each comment under its author's line (#2455), so an excerpt names it.
+    let runs = knobas_source::docs::indexed::read(&ticket.body_text).runs;
+    let parts: Vec<_> = runs.iter().map(|run| &run.part).collect();
+    assert_eq!(
+        parts,
+        [
+            &Part::Lead,
+            &Part::Comment("Priya Nair".to_owned()),
+            &Part::Comment("Mara Lindqvist".to_owned()),
+        ]
+    );
+    assert!(runs[0].text.contains("manual review queue"));
+    assert!(runs[1].text.contains("finance wants max 5 attempts"));
     assert_eq!(ticket.payload["key"], "PAY-231");
     assert_eq!(ticket.payload["epic"], "PAY-200");
 
@@ -377,11 +391,11 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v5".into()), &mut sink)
+        .sync(Some("tidewater-v6".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v5");
+    assert_eq!(cursor, "tidewater-v6");
 }
 
 /// The upgrade path the cursor's versioning exists to provide (#234): a

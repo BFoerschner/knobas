@@ -29,7 +29,12 @@ use chrono::{DateTime, Utc};
 /// [`RepoCursor::default_branch`] beside it. Same upgrade plan: a version-2
 /// cursor stops parsing and the first run is a backfill. A commit beyond the
 /// budget keeps the version-2 object, which nothing reads a default off.
-pub(crate) const CURSOR_VERSION: u32 = 3;
+///
+/// **4** since issue #2455 writes each comment's text under its author's line
+/// in the `body_text` of a pull request and a ticket. Same upgrade plan: the
+/// first run is a backfill, which rewrites each one it emits. A pull request
+/// beyond `prs_per_repo` keeps its old text, whose excerpts name no place.
+pub(crate) const CURSOR_VERSION: u32 = 4;
 
 /// Where the next run resumes, per repository.
 ///
@@ -331,7 +336,7 @@ mod tests {
     fn serialisation_is_stable() {
         assert_eq!(sample().to_json(), sample().to_json());
         let json = sample().to_json();
-        assert!(json.starts_with(r#"{"v":3"#), "{json}");
+        assert!(json.starts_with(r#"{"v":4"#), "{json}");
     }
 
     /// Every watermark field has to survive the trip: a field dropped in
@@ -389,8 +394,8 @@ mod tests {
     /// did before: the cursor version stays where it is.
     #[test]
     fn a_commit_catch_up_from_before_its_page_still_parses() {
-        let raw = r#"{"v":3,"repos":{"tidewater/payout-service":{"commits_catching_up":{"below":"2026-08-21T08:00:00Z","newest":"2026-08-22T11:50:00Z","branches":["main"]}}}}"#;
-        let cursor = GiteaCursor::parse(Some(raw)).expect("a version-3 cursor is usable");
+        let raw = r#"{"v":4,"repos":{"tidewater/payout-service":{"commits_catching_up":{"below":"2026-08-21T08:00:00Z","newest":"2026-08-22T11:50:00Z","branches":["main"]}}}}"#;
+        let cursor = GiteaCursor::parse(Some(raw)).expect("a version-4 cursor is usable");
         let catch_up = cursor
             .repo("tidewater/payout-service")
             .commits_catching_up
@@ -425,7 +430,9 @@ mod tests {
     #[test]
     fn an_unusable_cursor_means_full_sync() {
         for raw in [
-            r#"{"v":4,"repos":{}}"#,
+            r#"{"v":5,"repos":{}}"#,
+            // From before #2455's comment lines: the full sync that writes them.
+            r#"{"v":3,"repos":{}}"#,
             r#"{"v":2,"repos":{}}"#,
             "not json",
             "",

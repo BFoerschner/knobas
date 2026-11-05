@@ -13,6 +13,9 @@ use chrono::{DateTime, Utc};
 pub(crate) struct UserRef {
     #[serde(default)]
     pub login: Option<String>,
+    /// The profile's display name; blank on an account that never set one.
+    #[serde(default)]
+    pub full_name: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -161,6 +164,9 @@ pub(crate) struct Label {
 pub(crate) struct Comment {
     #[serde(default)]
     pub body: Option<String>,
+    /// Who wrote it: what `body_text`'s comment line names (#2455).
+    #[serde(default)]
+    pub user: Option<UserRef>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
