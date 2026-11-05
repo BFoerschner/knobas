@@ -5,6 +5,10 @@
   read: the excerpts came with the answer, so the pane asks no port for
   anything. Each excerpt is a button that opens the row.
 
+  A hit with no excerpt may be one by its title, its key, a stem the excerpts'
+  rule misses or a property, and the pane cannot tell them apart, so its
+  sentence names no place (#2481).
+
   The text is the source's and is printed as text, never as markup; a mark is
   a `hit` segment (roadmap §4 gotcha 7, `knobas_search::snippet`).
 -->
@@ -34,7 +38,7 @@
   {:else}
     <p class="tf-ln-pv-h">{title}</p>
     {#if excerpts.length === 0}
-      <p class="tf-ln-none">Only the title holds the words.</p>
+      <p class="tf-ln-none">No passage to quote.</p>
     {:else}
       {#each excerpts as excerpt, i (i)}
         <button type="button" class="tf-ln-ex" onclick={onopen}>

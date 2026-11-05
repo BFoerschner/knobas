@@ -292,6 +292,57 @@ async fn a_page_hit_names_the_section_and_the_comment_its_words_sit_in() {
     );
 }
 
+/// #2481, end to end: the index finds the row by a comment author's name, and
+/// the hit quotes that line.
+#[tokio::test]
+async fn a_hit_by_a_comments_author_quotes_the_author_line() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let id = item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{}-2", t.to_uppercase()),
+        "Payout retries",
+        &format!("Payout retries\n\nThe batch fails.\n\u{1f}{t} Nair\nLooks wrong."),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+
+    let response = search(&pool, &t, false).await;
+    assert_eq!(
+        read(&the_hit(&response, &id).excerpts),
+        vec![(None, format!("Comment by {t} Nair"), vec![t.clone()])]
+    );
+}
+
+/// The stem the excerpts' rule misses (#2481, `excerpt.rs`'s module doc): the
+/// index stems `<t>xies` and `<t>xy` alike and finds the row, the reader's rule
+/// looks for `<t>xi`, and the hit quotes nothing. Why the preview's sentence
+/// for an empty list names no place: this row's title does not hold the word.
+#[tokio::test]
+async fn a_hit_through_a_stem_the_reader_misses_carries_no_excerpt() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let id = item(
+        &pool,
+        "jira",
+        "ticket",
+        &format!("{}-3", t.to_uppercase()),
+        "Payout retries",
+        &format!("Payout retries\n\nThe {t}xy batch fails."),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+
+    let response = search(&pool, &format!("{t}xies"), false).await;
+    assert!(the_hit(&response, &id).excerpts.is_empty());
+}
+
 #[tokio::test]
 async fn a_ticket_hit_quotes_its_text_and_not_its_title() {
     let pool = pool().await;

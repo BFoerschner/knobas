@@ -176,16 +176,35 @@ type Hit = SearchResponse["groups"][number]["hits"][number];
  * Everything's excerpts (#2431) as the fixture makes them: each line (a run
  * log's, numbered from `firstLine`) or sentence of `text` that holds a word,
  * the words marked, a page's `\u001e` section and `\u001f` comment marks as
- * places. **A substring match, fixture-only**: the engine's are
+ * places, and quoted themselves when they hold a word. **A substring match, fixture-only**: the engine's are
  * `knobas_search::excerpt`'s, witnessed over PostgreSQL.
  */
 function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
   const out: Hit["excerpts"] = [];
+  const quoteMark = (at: string | null, lead: string, name: string) => {
+    const lower = name.toLowerCase();
+    const word = words.find((candidate) => lower.includes(candidate));
+    if (word === undefined || out.length >= 8) return;
+    const from = lower.indexOf(word);
+    const segments: Hit["snippet"] = [];
+    if (lead !== "" || from > 0) segments.push({ text: lead + name.slice(0, from), hit: false });
+    segments.push({ text: name.slice(from, from + word.length), hit: true });
+    if (from + word.length < name.length) segments.push({ text: name.slice(from + word.length), hit: false });
+    if (!out.some((excerpt) => excerpt.place === at && JSON.stringify(excerpt.segments) === JSON.stringify(segments))) {
+      out.push({ place: at, segments });
+    }
+  };
   let place: string | null = null;
   const lines = text.startsWith(title) ? text.slice(title.length).split("\n") : text.split("\n");
   lines.forEach((line, index) => {
-    if (line.startsWith("\u001e")) return void (place = line.slice(1).trim());
-    if (line.startsWith("\u001f")) return void (place = `Comment by ${line.slice(1).trim()}`);
+    if (line.startsWith("\u001e")) {
+      quoteMark("Heading", "", line.slice(1).trim());
+      return void (place = line.slice(1).trim());
+    }
+    if (line.startsWith("\u001f")) {
+      quoteMark(null, "Comment by ", line.slice(1).trim());
+      return void (place = `Comment by ${line.slice(1).trim()}`);
+    }
     if (line.startsWith("\u001d")) return;
     const pieces = firstLine === null ? line.split(/(?<=[.!?])\s+/) : [line];
     for (const piece of pieces) {
