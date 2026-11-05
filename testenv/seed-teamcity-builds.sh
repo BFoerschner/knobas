@@ -454,7 +454,10 @@ ensure_build_type() {  # ensure_build_type <id>
     if [ "$_id" = "Payout_Build" ]; then
       add_running_steps
     else
-      add_step "$_id" "$_name" "$(step_script "$_id")"
+      # Assigned first: a `die` in a substitution among the arguments would not
+      # stop the seed, and the step would go in cut short.
+      _script=$(step_script "$_id")
+      add_step "$_id" "$_name" "$_script"
       say "added the step to $_id"
     fi
   elif [ "$_id" != "Payout_Build" ]; then
@@ -799,13 +802,17 @@ ensure_change_witness() {
       expect "read the agent of build id $_x" 200 404
       if [ "$REST_STATUS" = "404" ]; then _ag=0; continue; fi
       expect_object "read the agent of build id $_x"
-      [ "$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty')" = "knobas-agent" ] || _ag=0
+      _agent=$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty')
+      [ -n "$_agent" ] || die "build id $_x of the change witness names no agent; deleting nothing: $(printf '%s' "$REST_BODY" | head -c 400)"
+      [ "$_agent" = "knobas-agent" ] || _ag=0
     done
     _listed=''
     if [ "$_ag" = 1 ]; then
       rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
       expect "read the changes of build id $_a" 200
       expect_object "read the changes of build id $_a"
+      printf '%s' "$REST_BODY" | jq -e 'has("change")' >/dev/null \
+        || die "build id $_a answers no change list; deleting nothing: $(printf '%s' "$REST_BODY" | head -c 400)"
       _listed=$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')
     fi
     if [ "$_ag" = 1 ] && [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$_listed" = "$_sha" ]; then

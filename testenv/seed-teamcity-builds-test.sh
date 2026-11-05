@@ -3,7 +3,8 @@
 # `just witness-unit`. No server: `rest` and `gitea` are stand-ins answering what
 # each check dictates and logging every call, so what deletes a build is checked
 # without the shared TeamCity, where a delete cannot be undone. The script's own
-# functions are lifted out of it, since it cannot be sourced: it runs on load.
+# functions are lifted out of it, since it cannot be sourced: it runs on load,
+# and here they run under bash, where the seed's shebang is `sh`.
 # `./seed --teamcity` against the real server is the live witness of the shapes.
 
 set -euo pipefail
@@ -19,17 +20,19 @@ STATE=/dev/null
 # A top-level `name() {` to its closing `}`, or the one line of a one-liner.
 lift() {
   awk -v want=" $* " '
-    !inside && match($0, /^[a-z_]+\(\) \{/) {
+    !inside && match($0, /^[a-z_]+\(\) +\{/) {
       name = substr($0, 1, index($0, "(") - 1)
-      if (index(want, " " name " ")) { print; inside = ($0 !~ /; \}$/) }
+      if (index(want, " " name " ")) { print; inside = ($0 !~ /; \}( *#.*)?$/) }
       next
     }
     inside { print; if ($0 == "}") inside = 0 }
   ' "$seed"
 }
-eval "$(grep -E '^(SEEDED_[A-Z_]+|GITEA_INTERNAL_URL|GITEA_ORG|CHANGE_[A-Z]+)=' "$seed")"
+eval "$(grep -E '^(SEEDED_[A-Z_]+|GITEA_INTERNAL_URL|GITEA_ORG|CHAIN_PROJECT|CHANGE_[A-Z]+)=' "$seed")"
 eval "$(lift say die jqf expect expect_object seeded_folder_files seeded_root_files \
-             failed_test_name assert_reports ensure_current_build ensure_change_witness)"
+             failed_test_name failed_test_details fixture_log tc_escape step_script \
+             project_of name_of repo_for_project vcs_root_id add_step ensure_build_type \
+             assert_reports ensure_current_build ensure_change_witness)"
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-seed-teamcity-builds-test.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
@@ -58,6 +61,7 @@ rest() {
   echo "$1 $2" >>"$CALLS"
   case "$1 $2" in
     "DELETE "*) answer "${A_DELETE:-204 }" ;;
+    *'/steps') answer '200 {"count":0}' ;;
     *'/artifacts/children/'*) answer "${A_FOLDER:-200 $good_folder}" ;;
     *'/artifacts?'*) answer "${A_ROOT:-200 $good_root}" ;;
     *'/testOccurrences?'*) answer "${A_FAILED:-200 $good_failed}" ;;
@@ -77,7 +81,10 @@ gitea() {
 }
 
 failures=0 checks=0
-fail() { failures=$((failures + 1)); printf 'FAIL %s: %s\n' "$1" "$2"; sed 's/^/  /' "$OUT" "$CALLS"; }
+fail() {
+  failures=$((failures + 1))
+  { printf 'seed-teamcity-builds-test: FAIL %s: %s\n' "$1" "$2"; sed 's/^/  /' "$OUT" "$CALLS"; } >&2
+}
 
 run() {  # run <shell words...>: `set -e`, as the script runs, in a subshell; leaves rc
   : >"$CALLS"
@@ -143,6 +150,14 @@ A_DELETE='500 boom' run ensure_current_build 7 SUCCESS
 checks=$((checks + 1))
 if [ "$rc" = 0 ] || ! grep -qF 'delete build id 7' "$OUT"; then fail 'a refused delete stops the seed' "rc $rc"; fi
 
+# -- a fixture file missing from the checkout stops the seed before the step goes in.
+checks=$((checks + 1))
+SEEDED_BINARY_DIR=$here/teamcity-artifacts run ensure_build_type Payout_IntegrationTests
+if [ "$rc" != 0 ] || ! grep -q '^POST .*/steps$' "$CALLS"; then fail 'the step goes in' "rc $rc"; fi
+checks=$((checks + 1))
+SEEDED_BINARY_DIR=$scratch/nowhere run ensure_build_type Payout_IntegrationTests
+if [ "$rc" = 0 ] || grep -q '^POST .*/steps$' "$CALLS"; then fail 'a missing file adds no step' "rc $rc"; fi
+
 # -- assert_reports: the comparisons the live run only saw pass.
 reports() {  # reports <what> <ok|the text the refusal must hold>
   checks=$((checks + 1))
@@ -201,9 +216,11 @@ A_GITEA_BODY='{"commit":{"id":"elsewhere"}}' witness 'the branch moved' remade
 A_AGENT='500 boom' witness 'agent: HTTP 500' refused 'HTTP 500'
 A_AGENT='000 ' witness 'agent: no connection' refused 'HTTP 000'
 A_AGENT='200 <html>' witness 'agent: 200, not JSON' refused 'not a JSON object'
+A_AGENT='200 {}' witness 'agent: 200, names none' refused 'names no agent'
 A_STATE='500 boom' witness 'build: HTTP 500' refused 'HTTP 500'
 A_CHANGES='500 boom' witness 'changes: HTTP 500' refused 'HTTP 500'
 A_CHANGES='200 ' witness 'changes: 200, empty body' refused 'not a JSON object'
+A_CHANGES='200 {}' witness 'changes: 200, no list' refused 'no change list'
 A_GITEA_STATUS=500 A_GITEA_BODY=boom witness 'branch: HTTP 500' refused 'HTTP 500'
 A_GITEA_STATUS=000 A_GITEA_BODY='' witness 'branch: no connection' refused 'HTTP 000'
 A_GITEA_BODY='<html>' witness 'branch: 200, not JSON' refused 'no commit'
