@@ -26,7 +26,8 @@
   box its focus back.
 
   The actions are a table, per kind, in `sheet.ts`; each is an address of the
-  app or a write it has today, carried out here by `perform`. *Link to ⟨job⟩*
+  app or a write it has today, carried out by `SheetMode`
+  (`sheet-mode.svelte.ts`), which holds the mode. *Link to ⟨job⟩*
   comes first on every entity, with the relation picked inline by ← and → and
   written on Enter through the job's own mapping (`drawn`), against the job
   the shell names (`openEntity`: the ticket on screen, else the chosen job),
@@ -43,7 +44,7 @@
   sheet's `flow` holds its steps, the picks so far and the current step's
   choices once read. The box, labelled with the step's title, narrows them;
   Enter picks and the next step is read; the last pick runs what the flow's
-  `finish` makes of the picks, through `carry` like any other action. Esc or
+  `finish` makes of the picks, like any other action. Esc or
   Backspace on the empty box step back one step, and from the first back to
   the actions; the row stays pinned throughout.
 
@@ -52,8 +53,9 @@
   ⌘B on a selected action, or *Assign key…* on a saved list, opens the key
   panel in the sheet (the box labelled *Keys*): every press is drawn at once,
   the modifiers while held; Enter or OK keeps the chord, Backspace clears it,
-  Esc and Cancel leave things as they were. The box's own chords, the
-  shell's and the system's are refused there with a message (`keys.ts`). A
+  Esc and Cancel leave things as they were (`key-panel.svelte.ts`). The box's
+  own chords, the shell's and the system's are refused there with a message
+  (`keys.ts`). A
   bound action chord runs that action on the selected row of its kind
   (`runChord`), opening the sheet first only for a flow, a rename, the panel
   or the link; a list chord puts the list's text in the box. With the
@@ -90,26 +92,11 @@
   import QueryBox from "./QueryBox.svelte";
   import Pinned from "./Pinned.svelte";
   import Results from "./Results.svelte";
-  import {
-    type Choice,
-    type SheetAction,
-    type SheetEffect,
-    type SheetSubject,
-    type Step,
-    favouriteKeys,
-    kindOf,
-    savedListOf,
-    nameOf,
-    narrowActions,
-    sheetActions,
-    subjectOf,
-  } from "./sheet";
-  import type { LinkSetRow, ViewAction } from "../ipc/entity";
+  import KeyPanel from "./KeyPanel.svelte";
+  import SheetList from "./SheetList.svelte";
+  import { savedListOf } from "./sheet";
+  import { SheetMode } from "./sheet-mode.svelte";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
-  import { drawn } from "../detail/relations";
-  import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
-  import { linkFailureMessage } from "../detail/links";
-  import { argvText, menuOrder } from "../tf/openin/openin";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
   import { type InboxPreview, type LauncherRow, stepOf, walk } from "./rows";
   import { opener } from "../tf/inbox/inbox";
@@ -117,7 +104,7 @@
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
   import { addFilter, narrowFilters, overlayFilters } from "./syntax";
-  import { type Chord, chordOf, heldOf, isBoxChord, isHelpPress, kindInSentence, refusalOf } from "./keys";
+  import { type Chord, isBoxChord, isHelpPress } from "./keys";
   import { type KeyStore, launcherKeys } from "./keys.svelte";
   import { push } from "../shell/toasts.svelte";
 
@@ -292,124 +279,30 @@
   const io: SheetPorts = { ...realSheetPorts, ...sheetPorts };
 
   /**
-   * The open sheet, or `null` (#2426). `row` is the row it lifted, `filter`
-   * what the box holds while it is open (the search words wait in
-   * `session.raw`), `relation` the index into `JOB_LINK_RELATIONS` the link
-   * row's chips stand on, `renaming` a saved list's new name while the
-   * box asks for it, and `flow` the flow an action started (#2427).
+   * The Tab sheet, its flows and the bound chords (`sheet-mode.svelte.ts`); the
+   * key panel is one opening held on the sheet (`key-panel.svelte.ts`). This
+   * component only asks them in the order the box's keys are answered.
    */
-  let sheet = $state<{
-    rowId: string;
-    row: LauncherRow;
-    subject: SheetSubject;
-    filter: string;
-    selected: number;
-    relation: number;
-    renaming: string | null;
-    flow: Flow | null;
-    panel: KeyPanel | null;
-  } | null>(null);
-
-  /**
-   * The key panel (#2429): what the keys will bind, the chord it had, the
-   * chord pressed so far (`null` once cleared), the modifiers held now, and
-   * why the last press was refused.
-   */
-  interface KeyPanel {
-    target: { kind: "list"; id: string; label: string } | { kind: "action"; on: string; actionId: string; label: string };
-    had: Chord | null;
-    chord: Chord | null;
-    held: string[];
-    refused: string | null;
-  }
-
-  /**
-   * A flow in the sheet: `id` tells one flow's late answer from another's,
-   * `picks` are the steps answered, `asked` the choices each of them offered
-   * (so a step back draws them again without a read), and `choices` the
-   * current step's once read, `null` while reading.
-   */
-  interface Flow {
-    id: number;
-    steps: Step[];
-    finish: (picks: readonly string[]) => SheetEffect;
-    picks: string[];
-    asked: Choice[][];
-    choices: Choice[] | null;
-  }
-
-  /**
-   * Settings › Checkouts, the default first: *Open in ⟨app⟩*'s rows. Read the
-   * first time a sheet opens in an opening, so a search that acts on nothing
-   * costs no read; the rows join the sheet when the answer lands.
-   */
-  let applications = $state<{ id: string; name: string }[]>([]);
-  let applicationsRead = false;
-  /** The applications' read in flight, which a chord on *Open in ⟨app⟩* waits for (#2429). */
-  let applicationsReading: Promise<unknown> = Promise.resolve();
-  function readApplications() {
-    if (applicationsRead) return;
-    applicationsRead = true;
-    readLinkSets();
-    applicationsReading = io.checkoutSettings().then(
-      (settings) => (applications = menuOrder(settings).map(({ app }) => ({ id: app.id, name: app.name }))),
-      () => (applications = []),
-    );
-  }
-
-  /** What is a favourite now (#2428): the board's block, so the sheet offers *Unfavourite* on it. */
-  const favourites = $derived(favouriteKeys(session.home?.favourites ?? []));
-  /** Every link set: *Add to a set…*'s choices, read with the applications. */
-  let linkSets = $state<LinkSetRow[]>([]);
-  function readLinkSets() {
-    void io.linkSets().then(
-      (sets) => (linkSets = sets),
-      () => (linkSets = []),
-    );
-  }
-
-  /** The declared merge of the pull request the sheet opened on, read once per sheet: *Merge…* follows it. */
-  let merge = $state<{ prId: string; action: ViewAction | null } | null>(null);
-  /** The merge's read in flight, which a chord on *Merge…* waits for (#2429). */
-  let mergeReading: Promise<unknown> = Promise.resolve();
-  function readMerge(subject: SheetSubject) {
-    if (subject.kind !== "entity" || subject.entityKind !== "pr") return;
-    const prId = subject.entityId;
-    if (merge?.prId === prId) return;
-    merge = { prId, action: null };
-    mergeReading = io.mergeAction(prId).then(
-      (action) => {
-        if (merge?.prId === prId) merge = { prId, action };
-      },
-      () => {},
-    );
-  }
-
-  /** The declared merge read for `subject`, when it is the pull request read: *Merge…*'s source. */
-  function mergeOf(subject: SheetSubject | undefined): ViewAction | null {
-    return subject?.kind === "entity" && merge?.prId === subject.entityId ? merge.action : null;
-  }
-
-  const sheetContext = $derived({
-    job: openEntity ?? null,
-    canTime: ontimer !== undefined,
-    apps: applications,
-    favourites,
-    sets: linkSets,
-    merge: mergeOf(sheet?.subject),
-    branches: io.branches,
-    now: now ?? new Date(),
+  const sheet = new SheetMode({
+    session,
+    io,
+    get keys() {
+      return keys;
+    },
+    get job() {
+      return openEntity;
+    },
+    get ontimer() {
+      return ontimer;
+    },
+    get now() {
+      return now;
+    },
+    inboxOps: (key) => inbox?.actions?.[key] ?? [],
+    focus: (how) => box?.focus(how),
+    close: () => close(),
+    navigate: (hash) => onnavigate(hash),
   });
-  const inboxOps = (key: string) => inbox?.actions?.[key] ?? [];
-  /** The actions of `row`, in the table's order; empty for a row nothing can be done to. */
-  function actionsOf(row: LauncherRow | null): SheetAction[] {
-    const subject = row ? subjectOf(row, inboxOps) : null;
-    return subject ? sheetActions(subject, sheetContext) : [];
-  }
-  const sheetShown = $derived(sheet && !sheet.flow ? narrowActions(sheetActions(sheet.subject, sheetContext), sheet.filter) : []);
-  /** The flow's current step's choices, as the box narrows them. */
-  const flowShown = $derived(sheet?.flow ? narrowActions(sheet.flow.choices ?? [], sheet.filter) : []);
-  const flowStep = $derived(sheet?.flow ? sheet.flow.steps[sheet.flow.picks.length] : undefined);
 
   /**
    * The ⌘? overlay (#2424), or `null`: the box holds `filter`, which narrows
@@ -473,7 +366,7 @@
   let naming = $state<string | null>(null);
 
   /** Whether Tab has something to open on the selected row: the footer says so only then. */
-  const tabOpens = $derived(!overlay && naming === null && !sheet && actionsOf(session.current).length > 0);
+  const tabOpens = $derived(!overlay && naming === null && !sheet.current && sheet.opensOn(session.current));
 
   /**
    * *Everything* with a preview (#2431): the dialog grows, and over a search
@@ -481,7 +374,7 @@
    * excerpts at the right. Titles is the one list at the usual size.
    */
   const deep = $derived(scope.titles === false);
-  const split = $derived(deep && overlay === null && naming === null && sheet === null && session.mode === "results");
+  const split = $derived(deep && overlay === null && naming === null && sheet.current === null && session.mode === "results");
 
   /**
    * The row the pane draws: the selection, once it has rested for
@@ -506,9 +399,7 @@
     if (!open) {
       overlay = null;
       naming = null;
-      sheet = null;
-      applicationsRead = false;
-      merge = null;
+      sheet.reset();
     }
   });
 
@@ -522,14 +413,8 @@
       ? "Name"
       : overlay
         ? "Filter"
-        : sheet
-          ? sheet.panel
-            ? "Keys"
-            : sheet.renaming !== null
-            ? "New name"
-            : sheet.flow
-              ? (flowStep?.title ?? "Pick")
-              : "Actions"
+        : sheet.current
+          ? sheet.label
           : null,
   );
   const placeholder = $derived(
@@ -537,14 +422,8 @@
       ? "the list's name"
       : overlay
         ? "narrow the filters"
-        : sheet
-          ? sheet.panel
-            ? "press the keys"
-            : sheet.renaming !== null
-            ? "the list's new name"
-            : sheet.flow
-              ? "narrow the choices"
-              : "narrow the actions"
+        : sheet.current
+          ? sheet.placeholder
           : "⌘? for help",
   );
 
@@ -560,7 +439,7 @@
   let dismissedAt = $state<string | null>(null);
   let suggestionPicked = $state(0);
   const offer = $derived<Suggestion[]>(
-    typing && session.suggestions && session.raw !== dismissedAt && !overlay && naming === null && !sheet
+    typing && session.suggestions && session.raw !== dismissedAt && !overlay && naming === null && !sheet.current
       ? suggest(typing, session.suggestions)
       : [],
   );
@@ -615,11 +494,6 @@
     }
   }
 
-  // The sheet belongs to one row: a new answer that moves the selection off it closes it.
-  $effect(() => {
-    if (sheet && session.current?.id !== sheet.rowId) sheet = null;
-  });
-
   /**
    * The ids the options carry, so the box can name the active one (#1411,
    * #1665).
@@ -647,9 +521,7 @@
     if (!row || session.error) return undefined;
     return optionId(session.selected);
   });
-  /** How many rows the sheet draws: the flow's choices while one is open, else the actions. */
-  const sheetCount = $derived(sheet?.flow ? flowShown.length : sheetShown.length);
-  const activeSheetOption = $derived(sheet && sheet.renaming === null && sheetCount > 0 ? sheetOptionId(sheet.selected) : undefined);
+  const activeSheetOption = $derived(sheet.active === null ? undefined : sheetOptionId(sheet.active));
 
   /**
    * The list the box controls and the option it names: whichever list the
@@ -659,7 +531,7 @@
   const controlled = $derived.by(() => {
     if (overlay) return { list: resultsId, option: overlayRows.length > 0 ? optionId(overlay.selected) : undefined };
     if (offer.length > 0) return { list: suggestionsId, option: suggestionId(suggestionPicked) };
-    if (sheet) return { list: sheetId, option: activeSheetOption };
+    if (sheet.current) return { list: sheetId, option: activeSheetOption };
     return { list: resultsId, option: activeOption };
   });
 
@@ -832,7 +704,7 @@
    * No second dialog over this one; Esc goes back to the search.
    */
   function startNaming() {
-    if (!session.canSave || session.savedId !== null || sheet) return;
+    if (!session.canSave || session.savedId !== null || sheet.current) return;
     naming = session.raw.trim();
     void tick().then(() => box?.focus({ select: true }));
   }
@@ -911,494 +783,6 @@
   /** ⌘S, with no other modifier. */
   const isSaveChord = (event: KeyboardEvent) => isBoxChord(event, "s");
 
-  /** A fresh sheet on `row`: the actions, unnarrowed, the first selected. */
-  function sheetOn(row: LauncherRow, subject: SheetSubject): NonNullable<typeof sheet> {
-    return { rowId: row.id, row, subject, filter: "", selected: 0, relation: 0, renaming: null, flow: null, panel: null };
-  }
-
-  /** Tab on a row with actions: the sheet, the box emptied and labelled Actions. */
-  function openSheet() {
-    const row = session.current;
-    const subject = row ? subjectOf(row, inboxOps) : null;
-    if (!row || !subject || sheetActions(subject, sheetContext).length === 0) return;
-    sheet = sheetOn(row, subject);
-    readApplications();
-    readMerge(subject);
-    box?.focus();
-  }
-
-  /** Back to the results, the search words in the box as they were. */
-  function leaveSheet() {
-    sheet = null;
-    box?.focus();
-  }
-
-  /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
-  async function settled(work: () => Promise<unknown>, said: () => string) {
-    try {
-      await work();
-      push({ text: said() });
-      close();
-    } catch (cause) {
-      push({ text: ipcErrorMessage(cause), tone: "err" });
-      box?.focus();
-    }
-  }
-
-  /** Carry out one action of the open sheet. */
-  function perform(action: SheetAction) {
-    carry(action.does);
-  }
-
-  /**
-   * Carry out what an action, or a flow's last pick, does: the one reader of
-   * `SheetEffect`. On the open sheet's row, or on `at` when a chord runs an
-   * action that needs no sheet (#2429).
-   */
-  function carry(does: SheetEffect, at: { subject: SheetSubject; relation: number } | null = sheet) {
-    if (!at) return;
-    const { subject, relation } = at;
-    const go = (hash: string) => {
-      close();
-      onnavigate(hash);
-    };
-    switch (does.kind) {
-      case "go":
-        return go(does.hash);
-      case "copy":
-        return void settled(() => io.copyText(does.text), () => does.said);
-      case "write":
-        return void settled(() => io.submitWrite(does.payload), () => does.said);
-      case "ack":
-        return void settled(() => io.ackAlert(does.monitorId), () => does.said);
-      case "link": {
-        const job = openEntity;
-        if (!job || subject.kind !== "entity") return;
-        const picked = JOB_LINK_RELATIONS[relation] ?? JOB_LINK_RELATIONS[0]!;
-        // The job's own mapping (`TfLinkTo`): drawn from the job to the row.
-        const row = drawn(picked.id, job.entityId, subject.entityId);
-        void io.createLink(row.fromId, row.toId, row.relation).then(
-          () => {
-            push({ text: `Linked ${nameOf(subject)} to ${job.label} as ${picked.label}` });
-            close();
-          },
-          (cause: unknown) => {
-            push({ text: linkFailureMessage(cause), tone: "err" });
-            box?.focus();
-          },
-        );
-        return;
-      }
-      case "timer":
-        if (subject.kind !== "entity" || !ontimer) return;
-        ontimer(subject.entityId, subject.title);
-        return close();
-      case "open-in": {
-        if (subject.kind !== "entity") return;
-        let argv: string[] = [];
-        return void settled(
-          async () => {
-            const where = subject.entityKind === "pr" ? await io.repoOf({ sourceId: subject.sourceId, path: subject.path }) : subject.entityId;
-            if (where === null) throw new Error(`The mirror holds no repository for ${subject.title}.`);
-            argv = await io.openCheckout(where, { application: does.application });
-          },
-          () => `Started ${does.name}: ${argvText(argv)}`,
-        );
-      }
-      case "clone":
-        if (subject.kind !== "entity") return;
-        return void settled(() => io.clone({ entityId: subject.entityId, title: subject.title }), () => `Cloning ${subject.title}`);
-      case "apply":
-        if (subject.kind !== "list") return;
-        sheet = null;
-        // As Enter on the list does (#2423): its text back in the box, or why it cannot be.
-        if (subject.refusal !== null) push({ text: subject.refusal });
-        else session.set(`${subject.text} `);
-        box?.focus();
-        return;
-      case "rename":
-        if (subject.kind !== "list" || !sheet) return;
-        sheet.renaming = subject.label;
-        void tick().then(() => box?.focus({ select: true }));
-        return;
-      case "delete":
-        if (subject.kind !== "list") return;
-        sheet = null;
-        box?.focus();
-        void session.deleteList(subject.id).then((done) => done && push({ text: `Deleted ${subject.label}` }));
-        return;
-      case "favourite": {
-        // Back to the results or the board, which redraws with the block as
-        // the backend now has it; the launcher stays open.
-        sheet = null;
-        box?.focus();
-        const name = nameOf(subject);
-        void session.favourite(does.target, does.on).then((done) => {
-          if (done) push({ text: `${does.on ? "Favourited" : "Unfavourited"} ${name}` });
-          else push({ text: session.error ?? "The favourite was not kept.", tone: "err" });
-        });
-        return;
-      }
-      case "flow":
-        return startFlow(does.steps, does.finish);
-      case "bind": {
-        // *Assign key…*: the panel, on the chord the list has now.
-        if (subject.kind !== "list" || !sheet) return;
-        const had = keys.chordOfList(subject.id);
-        sheet.panel = { target: { kind: "list", id: subject.id, label: subject.label }, had, chord: had, held: [], refused: null };
-        box?.focus();
-        return;
-      }
-      case "save-set":
-        return void settled(() => io.saveLinkSet(does.draft), () => does.said);
-      case "snooze":
-        return void settled(() => io.inboxSnooze(does.key, does.until), () => does.said);
-      case "refused":
-        push({ text: does.said });
-        box?.focus();
-        return;
-      case "inbox": {
-        if (subject.kind !== "inbox") return;
-        const { item } = subject;
-        if (does.op === "rerun") {
-          return void settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
-        }
-        if (does.op === "ack") {
-          return void settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.");
-        }
-        return void settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
-      }
-    }
-  }
-
-  /** Start a flow in the sheet: the box empties, and the first step's choices are read. */
-  let flows = 0;
-  function startFlow(steps: Step[], finish: Flow["finish"]) {
-    if (!sheet || steps.length === 0) return;
-    const flow: Flow = { id: ++flows, steps, finish, picks: [], asked: [], choices: null };
-    sheet.flow = flow;
-    sheet.filter = "";
-    sheet.selected = 0;
-    void readStep(flow.id, 0);
-    box?.focus();
-  }
-
-  /** Read step `at` of flow `id`: an answer for a flow or a step no longer open is dropped. */
-  async function readStep(id: number, at: number) {
-    const flow = sheet?.flow;
-    const step = flow?.steps[at];
-    if (!flow || !step) return;
-    const picks = [...flow.picks];
-    // Still the step asked: the same flow, and the same picks (a step back and another pick reads it again).
-    const asked = () => {
-      const live = sheet?.flow;
-      return live && live.id === id && live.choices === null && live.picks.length === picks.length && live.picks.every((one, i) => one === picks[i]) ? live : null;
-    };
-    try {
-      const choices = await step.choices(picks);
-      const live = asked();
-      if (live) live.choices = choices;
-    } catch (cause) {
-      if (!sheet || !asked()) return;
-      push({ text: ipcErrorMessage(cause), tone: "err" });
-      sheet.flow = null;
-      sheet.filter = "";
-      sheet.selected = 0;
-    }
-  }
-
-  /** Take `choice` for the current step: the next step's choices, or the last pick runs the flow's finish. */
-  function pick(current: NonNullable<typeof sheet>, flow: Flow, choice: Choice) {
-    const picks = [...flow.picks, choice.id];
-    if (picks.length >= flow.steps.length) {
-      const finished = flow.finish(picks);
-      current.flow = null;
-      current.filter = "";
-      current.selected = 0;
-      carry(finished);
-      return;
-    }
-    flow.asked = [...flow.asked, flow.choices ?? []];
-    flow.picks = picks;
-    flow.choices = null;
-    current.filter = "";
-    current.selected = 0;
-    void readStep(flow.id, picks.length);
-  }
-
-  /** One step back: the step before, its choices as they were, or from the first step the actions. */
-  function stepBack(current: NonNullable<typeof sheet>, flow: Flow) {
-    current.filter = "";
-    current.selected = 0;
-    if (flow.picks.length === 0) {
-      current.flow = null;
-    } else {
-      flow.picks = flow.picks.slice(0, -1);
-      flow.choices = flow.asked.at(-1) ?? null;
-      flow.asked = flow.asked.slice(0, -1);
-      if (flow.choices === null) void readStep(flow.id, flow.picks.length);
-    }
-    box?.focus();
-  }
-
-  /** A flow's keys: the arrows walk the choices, Enter picks, Esc or Backspace on the empty box step back, Tab leaves. */
-  function flowKey(event: KeyboardEvent, current: NonNullable<typeof sheet>, flow: Flow) {
-    const to = walk(event, current.selected, flowShown.length);
-    if (to !== null) {
-      current.selected = to;
-      return;
-    }
-    switch (event.key) {
-      case "Enter": {
-        event.preventDefault();
-        const chosen = flowShown[current.selected];
-        if (chosen) pick(current, flow, chosen);
-        return;
-      }
-      case "Tab":
-        event.preventDefault();
-        leaveSheet();
-        return;
-      case "Escape":
-        // Never the dialog's: a step back.
-        event.preventDefault();
-        event.stopPropagation();
-        stepBack(current, flow);
-        return;
-      case "Backspace":
-        if (current.filter === "") {
-          event.preventDefault();
-          stepBack(current, flow);
-        }
-        return;
-      default:
-    }
-  }
-
-  /** The new name's keys: Enter keeps it, Esc goes back to the list's actions. */
-  function renamingKey(event: KeyboardEvent, current: NonNullable<typeof sheet>, name: string) {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      const label = name.trim();
-      if (label === "" || current.subject.kind !== "list") return;
-      const { id } = current.subject;
-      sheet = null;
-      box?.focus();
-      void session.renameList(id, label).then((done) => done && push({ text: `Renamed to ${label}` }));
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      current.renaming = null;
-      current.filter = "";
-      box?.focus();
-    }
-  }
-
-  /** The sheet's keys: the arrows walk, ← → pick the link's relation, Enter acts, Esc, Tab or Backspace on the empty box go back. */
-  function sheetKey(event: KeyboardEvent, current: NonNullable<typeof sheet>) {
-    if (current.renaming !== null) return renamingKey(event, current, current.renaming);
-    if (current.flow) return flowKey(event, current, current.flow);
-    const to = walk(event, current.selected, sheetShown.length);
-    if (to !== null) {
-      current.selected = to;
-      return;
-    }
-    switch (event.key) {
-      case "ArrowLeft":
-      case "ArrowRight":
-        if (sheetShown[current.selected]?.does.kind === "link") {
-          event.preventDefault();
-          const step = event.key === "ArrowRight" ? 1 : -1;
-          current.relation = (current.relation + step + JOB_LINK_RELATIONS.length) % JOB_LINK_RELATIONS.length;
-        }
-        return;
-      case "Enter": {
-        event.preventDefault();
-        const chosen = sheetShown[current.selected];
-        if (chosen) perform(chosen);
-        return;
-      }
-      case "Tab":
-        event.preventDefault();
-        leaveSheet();
-        return;
-      case "Escape":
-        // Never the dialog's: the sheet goes back to the results.
-        event.preventDefault();
-        event.stopPropagation();
-        leaveSheet();
-        return;
-      case "Backspace":
-        if (current.filter === "") {
-          event.preventDefault();
-          leaveSheet();
-        }
-        return;
-      default:
-    }
-  }
-
-  /** ⌘B (Ctrl+B off the Mac), with no other modifier, by its character or its code: the key panel for the selected action. */
-  const isBindChord = (event: KeyboardEvent) => isBoxChord(event, "b", "KeyB");
-
-  /** ⌘B on a selected action: the panel, on the chord the action has on this kind now. */
-  function openKeyPanel(current: NonNullable<typeof sheet>) {
-    const action = sheetShown[current.selected];
-    if (!action || current.flow || current.renaming !== null) return;
-    // ⌘B on *Assign key…* is that row's own panel.
-    if (action.does.kind === "bind") return carry(action.does);
-    const on = kindOf(current.subject);
-    const had = keys.chordOfAction(on, action.id);
-    current.panel = { target: { kind: "action", on, actionId: action.id, label: action.label }, had, chord: had, held: [], refused: null };
-    box?.focus();
-  }
-
-  /** Esc or Cancel: back to the actions, nothing written. */
-  function leaveKeyPanel() {
-    if (sheet) sheet.panel = null;
-    box?.focus();
-  }
-
-  /** Enter or OK: the chord in the panel, kept; no chord takes the key away. Back to the actions either way. */
-  async function keepKey() {
-    const panel = sheet?.panel;
-    if (!sheet || !panel) return;
-    sheet.panel = null;
-    box?.focus();
-    const { target, chord, had } = panel;
-    if (chord === had) return;
-    try {
-      if (target.kind === "list") {
-        await keys.bindList(target.id, chord);
-        push({ text: chord ? `${chord} opens ${target.label}` : `Key removed from ${target.label}` });
-      } else {
-        await keys.bindAction(target.on, target.actionId, chord);
-        push({ text: chord ? `${chord} runs ${target.label} on any ${kindInSentence(target.on)}` : `Key removed from ${target.label}` });
-      }
-    } catch (cause) {
-      push({ text: ipcErrorMessage(cause), tone: "err" });
-    }
-  }
-
-  /** A chord the other table holds, said as the panel says it: a list's chord is no action's, on any kind. */
-  function clashOf(target: KeyPanel["target"], chord: Chord): string | null {
-    if (target.kind === "list") {
-      const action = keys.actions.find((key) => key.chord === chord);
-      return action ? `${chord} runs an action on a ${kindInSentence(action.kind)}` : null;
-    }
-    const list = keys.listOf(chord);
-    return list ? `${chord} opens ${list.label}` : null;
-  }
-
-  /**
-   * The panel's keys. Every press is drawn: the modifiers while held, a full
-   * chord once pressed. Nothing reaches the box, the dialog or the shell: a
-   * refused ⌘D does not switch the scope, a refused ⌘T starts no timer.
-   */
-  function bindKey(event: KeyboardEvent, panel: KeyPanel) {
-    event.stopPropagation();
-    panel.held = heldOf(event);
-    const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
-    if (event.key === "Escape") {
-      event.preventDefault();
-      return leaveKeyPanel();
-    }
-    if (event.key === "Enter" && plain) {
-      event.preventDefault();
-      return void keepKey();
-    }
-    event.preventDefault();
-    if (event.key === "Backspace" && plain) {
-      panel.chord = null;
-      panel.refused = null;
-      return;
-    }
-    const refusal = refusalOf(event);
-    const chord = chordOf(event);
-    const refused = refusal ?? (chord === null ? null : clashOf(panel.target, chord));
-    if (refused !== null) {
-      panel.refused = refused;
-      panel.held = [];
-      return;
-    }
-    if (chord === null) return;
-    panel.chord = chord;
-    panel.refused = null;
-  }
-
-  // The panel draws the modifiers as they are let go, too.
-  $effect(() => {
-    if (!sheet?.panel) return;
-    const up = (event: KeyboardEvent) => {
-      if (sheet?.panel) sheet.panel.held = heldOf(event);
-    };
-    window.addEventListener("keyup", up);
-    return () => window.removeEventListener("keyup", up);
-  });
-
-  /**
-   * A bound chord, from the results or the sheet's actions: a list's applies
-   * it, an action's runs on the selected row when it is bound on that row's
-   * kind. `true` when the chord was one; every other key goes on as before.
-   */
-  function runChord(event: KeyboardEvent): boolean {
-    if (refusalOf(event) !== null) return false;
-    const chord = chordOf(event);
-    if (chord === null) return false;
-    const list = keys.listOf(chord);
-    if (list) {
-      event.preventDefault();
-      sheet = null;
-      session.set(`${list.text} `);
-      box?.focus();
-      return true;
-    }
-    const row = sheet?.row ?? session.current;
-    const subject = row ? subjectOf(row, inboxOps) : null;
-    if (!row || !subject) return false;
-    const id = keys.actionOf(kindOf(subject), chord);
-    if (id === null) return false;
-    event.preventDefault();
-    void runAction(row, subject, id, chord);
-    return true;
-  }
-
-  /**
-   * Run action `id` on `row`. An action the reads add (*Open in ⟨app⟩*,
-   * *Merge…*) waits for them. A flow, a rename, the panel and the link need
-   * the sheet under them, so it opens on the row first; the rest run as
-   * Enter on the row would, the sheet never drawn.
-   */
-  async function runAction(row: LauncherRow, subject: SheetSubject, id: string, chord: Chord) {
-    readApplications();
-    readMerge(subject);
-    const find = () =>
-      sheetActions(subject, { ...sheetContext, merge: mergeOf(subject) }).find((action) => action.id === id);
-    let action = find();
-    if (!action) {
-      await Promise.all([applicationsReading, mergeReading]);
-      // The row the chord was pressed on is no longer the one selected: nothing runs.
-      if ((sheet?.row ?? session.current)?.id !== row.id) return;
-      action = find();
-    }
-    if (!action) {
-      push({ text: `${chord} runs nothing on ${nameOf(subject)} now` });
-      return;
-    }
-    if (!["flow", "rename", "bind", "link"].includes(action.does.kind)) return carry(action.does, { subject, relation: 0 });
-    if (!sheet || sheet.rowId !== row.id) {
-      sheet = sheetOn(row, subject);
-    }
-    if (action.does.kind === "link") {
-      // The relation is picked on the row with ← →; Enter writes it.
-      sheet.filter = "";
-      sheet.selected = Math.max(0, sheetShown.findIndex((shown) => shown.id === id));
-      box?.focus();
-      return;
-    }
-    carry(action.does);
-  }
-
   function activate(row: LauncherRow) {
     const subject = savedListOf(row);
     if (subject) {
@@ -1429,7 +813,7 @@
 
   function onkeydown(event: KeyboardEvent) {
     // The key panel takes every key first: its chords are what is being bound.
-    if (sheet?.panel) return bindKey(event, sheet.panel);
+    if (sheet.current?.panel) return sheet.current.panel.press(event);
     if (isBoxChord(event, "d")) {
       // Before the webview's own ⌘D (a bookmark) and anything else the box does.
       event.preventDefault();
@@ -1443,16 +827,8 @@
       return;
     }
     // A bound chord (#2429), from the results or the sheet's actions; never in a flow, a rename or the filters.
-    if (!overlay && !(sheet && (sheet.flow || sheet.renaming !== null)) && runChord(event)) return;
-    if (sheet) {
-      // The box's own chords are not the sheet's: ⌘S and ⌘? do nothing here.
-      if (isSaveChord(event) || isHelpPress(event)) event.preventDefault();
-      else if (isBindChord(event)) {
-        event.preventDefault();
-        openKeyPanel(sheet);
-      } else sheetKey(event, sheet);
-      return;
-    }
+    if (!overlay && sheet.runChord(event)) return;
+    if (sheet.current) return sheet.key(event);
     if (isHelpPress(event)) {
       event.preventDefault();
       if (overlay) leaveOverlay();
@@ -1495,7 +871,7 @@
         // Swallowed either way, never forwarded: the default would move focus
         // out of the box. A row with no actions opens nothing.
         event.preventDefault();
-        openSheet();
+        sheet.open();
         return;
       case "Escape":
         // One rung per press, and the key never reaches the shell's ladder.
@@ -1509,12 +885,6 @@
         return;
       default:
     }
-  }
-
-  /** The chord drawn on an action row: the list's own on *Assign key…*, else the action's on the subject's kind. */
-  function boundTo(subject: SheetSubject, action: SheetAction): Chord | null {
-    if (action.does.kind === "bind" && subject.kind === "list") return keys.chordOfList(subject.id);
-    return keys.chordOfAction(kindOf(subject), action.id);
   }
 
   /** The chord drawn on a saved list's row in the results and on the board. */
@@ -1559,20 +929,16 @@
         {#if boxLabel !== null}<span class="tf-ln-mode">{boxLabel}</span>{/if}
         <QueryBox
           bind:this={box}
-          value={naming !== null ? naming : overlay ? overlay.filter : sheet ? (sheet.panel ? "" : (sheet.renaming ?? sheet.filter)) : session.raw}
+          value={naming !== null ? naming : overlay ? overlay.filter : sheet.current ? sheet.text : session.raw}
           {placeholder}
           pending={session.pending}
           controls={controlled.list}
           active={controlled.option}
           oninput={(value) => {
-            if (sheet?.panel) return;
             if (naming !== null) naming = value;
             else if (overlay) overlay = { filter: value, selected: 0 };
-            else if (sheet?.renaming != null) sheet.renaming = value;
-            else if (sheet) {
-              sheet.filter = value;
-              sheet.selected = 0;
-            } else session.type(value);
+            else if (sheet.current) sheet.type(value);
+            else session.type(value);
           }}
           {onkeydown}
           onclose={close}
@@ -1614,142 +980,20 @@
         </div>
       {/if}
 
-      {#if interpreted && !overlay && !sheet}
+      {#if interpreted && !overlay && !sheet.current}
         <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
-      {#if sheet}
-        {@const current = sheet}
+      {#if sheet.current}
+        {@const current = sheet.current}
         <!-- The row the sheet acts on, lifted under the box; the box keeps the search words aside. -->
         <Pinned row={current.row} id={`${uid}-pinned`} {now} />
         {#if current.renaming !== null}
           <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
         {:else if current.panel}
-          {@const panel = current.panel}
-          <!-- The key panel (#2429): the keys large as they are pressed; the box's keys go to `bindKey`. -->
-          <div class="tf-ln-bind" role="group" aria-label="Bind keys">
-            <p class="tf-ln-bind-what">
-              {#if panel.target.kind === "list"}
-                The keys that open <strong>{panel.target.label}</strong> from anywhere
-              {:else}
-                The keys that run <strong>{panel.target.label}</strong> on any {kindInSentence(panel.target.on)} you have selected
-              {/if}
-            </p>
-            <div class="tf-ln-bind-keys" aria-live="polite">
-              {#if panel.chord}
-                {#each [...panel.chord] as glyph, i (i)}<kbd class="tf-ln-bigkey">{glyph}</kbd>{/each}
-              {:else if panel.held.length > 0}
-                {#each panel.held as glyph, i (i)}<kbd class="tf-ln-bigkey tf-ln-held">{glyph}</kbd>{/each}
-                <span class="tf-ln-bind-hint">… and a letter or digit</span>
-              {:else}
-                <span class="tf-ln-bind-hint">Press a modifier and a letter or digit, such as ⌘⇧O</span>
-              {/if}
-            </div>
-            {#if panel.refused}<p class="tf-ln-bind-refused" role="alert">{panel.refused}</p>{/if}
-            <!-- The Controls order: the extra action (Clear) first, then a ghost Cancel, then the primary. -->
-            <div class="tf-ln-bind-btns">
-              <button
-                type="button"
-                class="tf-btn tf-sm"
-                onclick={() => {
-                  panel.chord = null;
-                  panel.refused = null;
-                  box?.focus();
-                }}>Clear</button
-              >
-              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={leaveKeyPanel}>Cancel</button>
-              <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void keepKey()}>OK</button>
-            </div>
-            <p class="tf-ln-bind-hint">Enter keeps the keys, Backspace clears them, Esc leaves things as they were.</p>
-          </div>
+          <KeyPanel panel={current.panel} />
         {:else}
-          <!--
-            Keys from a clicked chip or row land here, so Esc goes back to the
-            results and never reaches the dialog; a click gives the box its
-            focus back.
-          -->
-          <div
-            id={sheetId}
-            class="tf-ln-list tf-ln-sheet"
-            role="listbox"
-            tabindex="-1"
-            aria-label="Actions on the selected result"
-            {onkeydown}
-            onclick={() => box?.focus()}
-          >
-            {#if current.flow}
-              {@const flow = current.flow}
-              <!-- A flow's step: its title, the picks so far, and its choices as the box narrows them. -->
-              <div class="tf-ln-h">
-                <span>{flowStep?.title ?? ""}</span>
-                {#if flow.picks.length > 0}<span class="tf-ln-s">{flow.picks.join(" → ")}</span>{/if}
-              </div>
-              {#each flowShown as choice, index (choice.id)}
-                <button
-                  id={sheetOptionId(index)}
-                  class="tf-ln-opt"
-                  class:tf-ln-on={index === current.selected}
-                  role="option"
-                  aria-selected={index === current.selected}
-                  onclick={() => pick(current, flow, choice)}
-                  onmouseenter={() => (current.selected = index)}
-                >
-                  <span class="tf-ln-nm">{choice.label}</span>
-                  <span class="tf-ln-s">{choice.detail}</span>
-                </button>
-              {/each}
-              {#if flow.choices === null}
-                <p class="tf-ln-none">Reading…</p>
-              {:else if flowShown.length === 0}
-                <p class="tf-ln-none">{current.filter === "" ? "Nothing to pick here." : `Nothing matches “${current.filter}”.`}</p>
-              {/if}
-            {/if}
-            {#each sheetShown as action, index (action.id)}
-              {@const bound = boundTo(current.subject, action)}
-              {#if action.does.kind === "link"}
-                <!-- Not a button: the relation chips inside it are buttons of their own. -->
-                <div
-                  id={sheetOptionId(index)}
-                  class="tf-ln-opt tf-ln-link"
-                  class:tf-ln-on={index === current.selected}
-                  role="option"
-                  tabindex="-1"
-                  aria-selected={index === current.selected}
-                  onmouseenter={() => (current.selected = index)}
-                >
-                  <button type="button" class="tf-ln-nm" onclick={() => perform(action)}>{action.label}</button>
-                  <span class="tf-fchips" role="group" aria-label="Relation">
-                    {#each JOB_LINK_RELATIONS as relation, r (relation.id)}
-                      <button
-                        type="button"
-                        tabindex="-1"
-                        aria-pressed={r === current.relation}
-                        onclick={() => (current.relation = r)}>{relation.label}</button
-                      >
-                    {/each}
-                  </span>
-                  {#if bound}<kbd class="tf-ln-chord" title="Its key">{bound}</kbd>{/if}
-                </div>
-              {:else}
-                <button
-                  id={sheetOptionId(index)}
-                  class="tf-ln-opt"
-                  class:tf-ln-on={index === current.selected}
-                  role="option"
-                  aria-selected={index === current.selected}
-                  onclick={() => perform(action)}
-                  onmouseenter={() => (current.selected = index)}
-                >
-                  <span class="tf-ln-nm">{action.label}</span>
-                  <span class="tf-ln-s">{action.detail}</span>
-                  {#if bound}<kbd class="tf-ln-chord" title="Its key">{bound}</kbd>{/if}
-                </button>
-              {/if}
-            {/each}
-            {#if !current.flow && sheetShown.length === 0}
-              <p class="tf-ln-none">No action matches “{current.filter}”.</p>
-            {/if}
-          </div>
+          <SheetList {sheet} id={sheetId} optionId={sheetOptionId} {onkeydown} onclick={() => box?.focus()} />
         {/if}
       {:else}
       <div class="tf-ln-split" class:tf-ln-two={split}>
@@ -1871,7 +1115,7 @@
       <span><kbd>↑↓</kbd> move</span>
       <span><kbd>↵</kbd> open</span>
       {#if tabOpens}<span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>{/if}
-      {#if sheet && !sheet.flow && sheet.renaming === null && !sheet.panel}<span><kbd>⌘B</kbd> bind a key</span>{/if}
+      {#if sheet.onActions}<span><kbd>⌘B</kbd> bind a key</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
       {#if session.canSave}

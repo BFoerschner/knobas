@@ -3,7 +3,7 @@
  * kind, of what a row can have done to it from the box.
  *
  * Every row is data. `does` names an address of the app or a write it has
- * today, and `Launcher.svelte` carries it out in one place (`perform`), so
+ * today, and `sheet-mode.svelte.ts` carries it out in one place (`#carry`), so
  * this table can be read and tested without a DOM, a later action key
  * (#2429) binds to an `id`, and a flow (#2427) is one more `does` kind.
  *
@@ -61,7 +61,7 @@ export interface Step {
   choices: (picks: readonly string[]) => Promise<Choice[]>;
 }
 
-/** What choosing an action does. `Launcher.svelte`'s `perform` is the one reader. */
+/** What choosing an action does. `SheetMode`'s `#carry` is the one reader. */
 export type SheetEffect =
   /** Ask each step in turn; the last pick runs what `finish` makes of the picks. */
   | { kind: "flow"; steps: Step[]; finish: (picks: readonly string[]) => SheetEffect }
