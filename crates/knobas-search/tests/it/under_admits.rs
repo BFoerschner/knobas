@@ -8,10 +8,20 @@
 //! here, under the real Gitea descriptor, and the oracle is the statement
 //! itself, as `under::left_out_tokens` ran it before #2495. The second test
 //! holds `Searcher::search` to the same table, two names at a time, because
-//! the skip is decided over every name typed.
+//! the skip is decided over every name typed. The third does so with a filter
+//! beside the name, and the fourth holds the skip itself, which no answer can
+//! show.
+//!
+//! No shape here can show an arm added to the statement later:
+//! `corpus::tests::the_bounded_read_asks_every_under_fragment` pins those.
 
-use knobas_search::query::EffectiveFilters;
-use knobas_search::{RawHit, SearchFilters, SearchQuery, SearchResponse, Searcher, corpus, sql};
+use std::time::Duration;
+
+use knobas_search::frames::LauncherFrames;
+use knobas_search::query::{self, EffectiveFilters};
+use knobas_search::{
+    RawHit, SearchFilters, SearchQuery, SearchResponse, Searcher, Vocabulary, corpus, sql,
+};
 
 async fn pool() -> sqlx::PgPool {
     let pool = knobas_db::test_util::test_pool().await;
@@ -134,7 +144,7 @@ struct Shape {
 }
 
 /// Seeds every shape, each name carrying a fresh token. The positions the
-/// first test reads its arms by are the order here.
+/// tests below read their arms and names by are the order here.
 async fn shapes(pool: &sqlx::PgPool) -> Vec<Shape> {
     let t = token();
 
@@ -422,11 +432,136 @@ async fn a_query_skips_the_statement_only_when_no_name_typed_admits_a_row() {
     assert_eq!(answer.interpreted.left_out_tokens, ["kind:commit"], "{raw}");
 }
 
+/// How many rows the launcher's statement answers `raw` with, parsed and merged
+/// as `Searcher::search` does it, with no skip in the way.
+async fn statement_rows(pool: &sqlx::PgPool, vocab: &Vocabulary, raw: &str) -> u32 {
+    let parsed = query::parse(raw, vocab);
+    let frames = LauncherFrames::of(&vocab.declarations);
+    let filters = EffectiveFilters {
+        pipeline_kinds: frames.pipelines,
+        hidden_kinds: frames.left_out,
+        ..query::merge(&parsed, &SearchFilters::default())
+    };
+    let text = (!parsed.query.text.is_empty()).then_some(parsed.query.text.as_str());
+    let corpora = corpus::searched(corpus::ALL, false);
+    let built = sql::search_sql(&corpora, text, parsed.prefix_last_term, &filters, 50, 50);
+    let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(pool).await.unwrap();
+    u32::try_from(rows.len()).unwrap()
+}
+
+/// `source:`, `updated:` and `author:` beside a name, every shape against the
+/// statement. Each is ANDed onto the statement's every branch, so the skip may
+/// ignore them. The left-out token is asked of the name alone, so a filter that
+/// empties a kept name's answer names nothing, and a filter that matches a
+/// left-out row admits nothing beneath its name.
 #[tokio::test]
-async fn no_names_ask_nothing() {
+async fn a_filter_beside_a_name_answers_as_the_statement_does() {
     let pool = pool().await;
-    let admitting = sql::parent_positions(&pool, &[], &["commit".to_owned()])
+    let searcher = Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
         .await
         .unwrap();
-    assert_eq!(admitting, sql::ParentPositions::default());
+    let vocab = searcher.vocabulary().await.unwrap();
+    let shapes = shapes(&pool).await;
+    let (kept, commits_only) = (&shapes[0].name, &shapes[1].name);
+
+    // Both the kept row and the commit, so `author:` matches the left-out row.
+    let author = token();
+    sqlx::query("update sync.item set author = $1 where title = any($2)")
+        .bind(&author)
+        .bind(vec![kept.clone(), commits_only.clone()])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for (filter, draws_the_kept_row) in [
+        ("source:gitea".to_owned(), true),
+        ("source:gitea-as-jira".to_owned(), false),
+        ("updated:7d".to_owned(), true),
+        (format!("author:{author}"), true),
+        (format!("author:nobody{author}"), false),
+    ] {
+        for shape in &shapes {
+            let typed = format!("under:{}", shape.name);
+            let raw = format!("{typed} {filter}");
+            let answer = search(&searcher, &raw).await;
+            let rows = statement_rows(&pool, &vocab, &raw).await;
+            assert_eq!(answer.total, rows, "{raw}");
+
+            let unknown = (!shape.known).then_some(typed.as_str());
+            assert_eq!(
+                answer.interpreted.unknown_tokens,
+                Vec::from_iter(unknown),
+                "{raw}"
+            );
+            let left_out = (rows == 0 && shape.known && !shape.admits).then_some(typed.as_str());
+            assert_eq!(
+                answer.interpreted.left_out_tokens,
+                Vec::from_iter(left_out),
+                "{raw}"
+            );
+        }
+        // Or every row above is empty and the table says nothing.
+        let raw = format!("under:{kept} {filter}");
+        assert_eq!(
+            search(&searcher, &raw).await.total > 0,
+            draws_the_kept_row,
+            "{raw}"
+        );
+    }
+}
+
+/// The skip itself. Answers are the same with or without it, by design, so no
+/// answer can show it, and the budget in `tests/perf.rs` shows it only on a
+/// clock and outside the gate. A lock can: the statement reads
+/// `sync.pipeline_log` and the bounded read does not, so while that table is
+/// locked a query that asks the statement waits.
+#[tokio::test]
+async fn a_name_that_admits_nothing_does_not_ask_the_statement() {
+    let pool = pool().await;
+    let searcher = Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap();
+    let shapes = shapes(&pool).await;
+    let (kept, commits_only, nothing) = (&shapes[0].name, &shapes[1].name, &shapes[8].name);
+
+    let mut lock = pool.begin().await.unwrap();
+    sqlx::query("lock table sync.pipeline_log in access exclusive mode")
+        .execute(&mut *lock)
+        .await
+        .unwrap();
+
+    for raw in [
+        format!("under:{commits_only}"),
+        format!("under:{nothing}"),
+        format!("under:{commits_only} under:{nothing}"),
+        format!("under:{commits_only} a word"),
+    ] {
+        let answer = tokio::time::timeout(Duration::from_secs(60), search(&searcher, &raw))
+            .await
+            .unwrap_or_else(|_| panic!("{raw}: asked the statement"));
+        assert_eq!(answer.total, 0, "{raw}");
+    }
+
+    // A name that admits a row asks the statement, which waits on the lock.
+    // Otherwise the statement no longer reads the table and this test sees
+    // nothing: lock something else only the statement reads.
+    let raw = format!("under:{kept}");
+    assert!(
+        tokio::time::timeout(Duration::from_secs(1), search(&searcher, &raw))
+            .await
+            .is_err(),
+        "{raw} did not wait on sync.pipeline_log"
+    );
+    lock.rollback().await.unwrap();
+}
+
+/// No values is no lookup in production (`under::report_unknown` returns first);
+/// the read still has to stand up with an empty array.
+#[tokio::test]
+async fn no_names_have_no_positions() {
+    let pool = pool().await;
+    let positions = sql::parent_positions(&pool, &[], &["commit".to_owned()])
+        .await
+        .unwrap();
+    assert_eq!(positions, sql::ParentPositions::default());
 }
