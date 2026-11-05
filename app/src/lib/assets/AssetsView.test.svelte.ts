@@ -647,7 +647,7 @@ test("the bare address draws the roots and nothing is selected", async () => {
 /**
  * **No tab strip** (#1459): the *Monitors* tab beside *Tree* named a roster
  * that went with the rooms UI (#1087), and one tab left is no strip. The Tree
- * is reached from Monitors' *Asset tree* button.
+ * is `#/assets`, which an asset page's breadcrumb links to.
  */
 test("the Tree draws no tab strip and no Monitors tab", async () => {
   render("#/assets");

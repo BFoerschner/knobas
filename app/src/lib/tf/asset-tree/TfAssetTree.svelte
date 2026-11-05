@@ -1,8 +1,8 @@
 <!--
   The *Asset tree* in the new shell (#871): today's Miller columns
   (`assets/AssetsView.svelte`), unchanged, at `#/assets`, `#/asset/<id>` and
-  `#/route/<id>`. It has no top-bar entry (D13): it lives under Monitors, whose
-  *Asset tree* button opens it.
+  `#/route/<id>`. It has no top-bar entry (D13): a row, an alert or a search
+  opens it at an asset, and that page's breadcrumb leads to `#/assets`.
 
   The view takes the two things it reads off the shell's navigation, `route`
   and `go`. This page hands it the address the shell already parsed, with the

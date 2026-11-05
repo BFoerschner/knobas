@@ -413,7 +413,7 @@ _Avoid_: kanban, board (unqualified)
 Retired; the app no longer draws one. A gesture that made one [tile](#tile) fill a [room](#room)'s grid.
 
 **Tree**:
-The Assets view, at `#/assets` and `#/asset/<id>`, under Monitors and reached from its *Asset tree* button: the [estate](#estate) as Miller columns, one column per level. Its fixed pane offers *Create monitor for this asset* where a configured [source](#source) offers the op, and shows no control at all where none does. It has no sibling tab.
+The Assets view, at `#/assets` and `#/asset/<id>`, with no top bar entry: a row, an alert or a search opens it at an asset, and that page's breadcrumb leads to `#/assets`. It draws the [estate](#estate) as Miller columns, one column per level. Its fixed pane offers *Create monitor for this asset* where a configured [source](#source) offers the op, and shows no control at all where none does. It has no sibling tab.
 _Avoid_: board, assets board, columns view
 
 **Spine**:

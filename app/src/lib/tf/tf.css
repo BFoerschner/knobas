@@ -62,6 +62,7 @@
 @import "./css/code.css";
 @import "./css/markdown.css";
 @import "./css/monitors.css";
+@import "./css/asset-tree.css";
 @import "./css/branches.css";
 @import "./css/pr.css";
 @import "./css/sets.css";

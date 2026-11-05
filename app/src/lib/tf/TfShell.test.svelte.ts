@@ -338,6 +338,8 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   const tops = [
     ...NAV.map((section) => `#/${section}`),
     "#/settings",
+    "#/assets",
+    "#/assets/tree",
     "#/tickets/view-1",
     // Home: the chosen job's page, or the empty state with none (spec #2396).
     "#/job",
@@ -368,9 +370,8 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
     ["#/commit/gh:c-9", "#/code"],
     ["#/page/confluence:2", "#/docs"],
     ["#/docs/space/ENG", "#/docs"],
-    ["#/asset/assets:svc-1", "#/monitors"],
-    ["#/route/assets:route-1", "#/monitors"],
-    ["#/assets", "#/monitors"],
+    ["#/asset/assets:svc-1", "#/assets"],
+    ["#/route/assets:route-1", "#/assets"],
     ["#/code/repos", "#/code"],
     ["#/monitors/unmonitored", "#/monitors"],
     ["#/settings/appearance", "#/settings"],
@@ -522,9 +523,10 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   let crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
   const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
-  expect(parent.textContent).toBe("Monitors");
-  expect(parent.getAttribute("href")).toBe("#/monitors");
-  expect(escHint()).toBe("Back to Monitors Esc");
+  expect(parent.textContent).toBe("Asset tree");
+  expect(parent.getAttribute("href")).toBe("#/assets");
+  expect(escHint()).toBe("Back to Asset tree Esc");
+  expect(target.querySelector(".tf-nav a[aria-current]"), "the asset tree lights no nav entry").toBeNull();
 
   await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;

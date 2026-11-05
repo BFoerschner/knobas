@@ -12,7 +12,6 @@ import { page as controlsPage } from "./controls/page";
 import { page as diffPage } from "./diff/page";
 import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
-import { page as monitorsPage } from "./monitors/page";
 import { PAGES, pageFor } from "./pages";
 import { parseTfHash } from "./route";
 import { page as prPage } from "./pr/page";
@@ -72,8 +71,6 @@ const ADDRESSES = [
   ["#/deps", "shell"],
   ["#/deps/job/PAY-231", "shell"],
   ["#/map", "shell"],
-  ["#/monitors", "monitors"],
-  ["#/monitors/unmonitored", "monitors"],
   ["#/assets", "asset tree"],
   ["#/asset/asset:vm-pay-01", "asset tree"],
   ["#/route/route:payouts", "asset tree"],
@@ -94,7 +91,6 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [timePage, "time"],
     [settingsPage, "settings"],
     [buildsPage, "builds"],
-    [monitorsPage, "monitors"],
     [assetTreePage, "asset tree"],
     [inboxPage, "inbox"],
     [codePage, "code"],

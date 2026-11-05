@@ -220,12 +220,6 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   expect(up!.querySelector<HTMLAnchorElement>("td a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
 });
 
-test("the header links to the asset tree, the way in since Dependencies went (2026-11-05)", async () => {
-  await draw([]);
-  const link = target.querySelector<HTMLAnchorElement>(".tf-fhead a[href='#/assets']");
-  expect(text(link)).toBe("Asset tree");
-});
-
 test("Ack is on a down monitor only, acks it by the monitor, and reads Acked", async () => {
   await draw([]);
   const [down, warn] = rows();

@@ -19,7 +19,7 @@ test.each([
   ["#/monitors", "#m "],
   ["#/time", ""],
   ["#/settings", ""],
-  ["#/asset/asset%3Avm-pay-01", "#m "],
+  ["#/asset/asset%3Avm-pay-01", ""],
   ["#/sets", ""],
   ["#/note/note-1", ""],
   ["#/nowhere", ""],

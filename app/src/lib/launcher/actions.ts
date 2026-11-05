@@ -22,7 +22,7 @@ export interface LauncherAction {
 }
 
 /** What each section holds, in one line: the row's second line. */
-const SECTION_DETAIL: Record<Exclude<Section, "job">, string> = {
+const SECTION_DETAIL: Record<Exclude<Section, "job" | "assets">, string> = {
   tickets: "Every ticket from every configured source",
   inbox: "What asks for you: mentions, reviews, failed builds",
   code: "Repositories, branches and pull requests",

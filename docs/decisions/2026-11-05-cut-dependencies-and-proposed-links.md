@@ -10,6 +10,8 @@ Björn ruled this on 2026-11-05, in the request for this PR. It binds as Björn'
 
 **The backend stays, unchanged.** No crate, migration, IPC command or generated mirror changes. The wrappers in `app/src/lib/ipc/` and the `?fake-ipc` handlers stay as well. The suggestion pass still runs when a sync ends, so proposals keep collecting with nothing drawing them, and Dependencies' tables keep their rows. Link sets' picker still calls the `dependencies` read (`tf/sets/ports.ts`).
 
+**Monitors does not change.** Björn, 2026-11-05, on the PR's first version, which had added a button to Monitors and moved the asset tree under it. Monitors' page, its styles and its tests match what they were before this PR.
+
 The asset tree is neither of the two pages and stays. Where it lives now is an agent's ruling, recorded in the PR.
 
 ## Why
