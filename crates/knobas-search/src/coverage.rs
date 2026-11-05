@@ -165,16 +165,26 @@ select i.source_id                            as source_id,
 /// copied `source_id` is what bounds it (Björn's sign-off on #642): through
 /// `sync.item`, a second source on one adapter read every child row of the
 /// first to prove its absence, about 150 ms at the 100k benchmark.
+/// * **One probe per source, bounded.** A `lateral ... limit 1` rather than
+///   an `exists`: the planner may turn a correlated `exists` into a hash
+///   semi-join once `sync.item_parent` has statistics, and then reads every
+///   child-arm row, every item and every entity to answer four sources --
+///   0.03 ms to 12 ms over 25,000 items, 50 ms and more over 100,000, on
+///   every `under:` keystroke (#2495). A `limit` inside a lateral subquery
+///   cannot be pulled up, so each source is answered by one walk down
+///   `item_parent_child_idx` that stops at the first live row, whatever the
+///   statistics say.
 const UNDER_COVERAGE_SQL: &str = r"
 select s.id
   from knobas.source_config s
+ cross join lateral (select 1
+                       from sync.item_parent ip
+                       join sync.live_item i on i.entity_id = ip.entity_id
+                      where ip.arm = 'child'
+                        and ip.source_id = s.id
+                        and ip.adapter_kind = s.kind
+                      limit 1) named
  where s.id = any($1)
-   and exists (select 1
-                 from sync.item_parent ip
-                 join sync.live_item i on i.entity_id = ip.entity_id
-                where ip.arm = 'child'
-                  and ip.source_id = s.id
-                  and ip.adapter_kind = s.kind)
 ";
 
 /// What the probe answered about one source that put rows in scope.
