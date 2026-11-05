@@ -558,6 +558,11 @@ async fn under_each_seeded_configuration_answers_its_pipeline_and_its_builds_nam
                 of_config.contains(&build),
                 "fixture build {number} ({build}) of {id} is mirrored: {of_config:?}"
             );
+            assert!(
+                listed[id].contains(&build),
+                "the server lists fixture build {number} ({build}) under {id}: {:?}",
+                listed[id]
+            );
         }
         let unmirrored: Vec<&String> = listed[id].difference(&of_config).collect();
         assert!(
