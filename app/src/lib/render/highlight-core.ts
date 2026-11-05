@@ -127,15 +127,18 @@ export interface HighlightCore {
 /**
  * The worker's side: takes the port's messages, `post`s its replies.
  * `pause` yields between chunks, so a focus or a cancel is read in between.
+ * `tokenizeTimeLimit` bounds one line in ms; left out, Shiki's own bound holds.
  */
 export function createHighlightCore({
   post,
   load = loadBundled,
   pause = () => new Promise<void>((resolve) => setTimeout(resolve, 0)),
+  tokenizeTimeLimit,
 }: {
   post: (reply: HighlightReply) => void;
   load?: Loader;
   pause?: () => Promise<void>;
+  tokenizeTimeLimit?: number;
 }): HighlightCore {
   let shiki: Promise<HighlighterCore> | null = null;
   const loaded = new Map<string, Promise<void>>();
@@ -156,7 +159,13 @@ export function createHighlightCore({
   }
 
   function tokenize(h: HighlighterCore, lang: string, lines: string[], grammarState?: GrammarState) {
-    return h.codeToTokens(lines.join("\n"), { lang, theme: THEME.name, tokenizeMaxLineLength: 4000, ...(grammarState ? { grammarState } : {}) });
+    return h.codeToTokens(lines.join("\n"), {
+      lang,
+      theme: THEME.name,
+      tokenizeMaxLineLength: 4000,
+      ...(tokenizeTimeLimit === undefined ? {} : { tokenizeTimeLimit }),
+      ...(grammarState ? { grammarState } : {}),
+    });
   }
 
   async function run(job: Job, text: string, lang: string | null) {

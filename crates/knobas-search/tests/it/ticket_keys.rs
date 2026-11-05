@@ -19,12 +19,15 @@ fn q(raw: &str) -> SearchQuery {
     }
 }
 
-/// A project key unique to one test, letters only.
+/// A project key unique to one test, letters only and no vowels: a word is
+/// held anywhere inside a key, so a key must not be able to spell a word a
+/// test types (#2457).
 fn project() -> String {
+    const LETTERS: &[u8; 16] = b"BCDFGHJKLMNPQRST";
     let hex = uuid::Uuid::new_v4().simple().to_string();
     let letters: String = hex[..10]
         .chars()
-        .map(|c| char::from(b'A' + u8::try_from(c.to_digit(16).unwrap()).unwrap()))
+        .map(|c| char::from(LETTERS[usize::try_from(c.to_digit(16).unwrap()).unwrap()]))
         .collect();
     format!("T{letters}")
 }
@@ -885,6 +888,60 @@ async fn the_view_reads_phrases_negations_and_or_as_the_grammar_does() {
         .unwrap()
         .expect("a negated word narrows");
     assert!(alone.contains(&two) && !alone.contains(&one));
+}
+
+/// A word is held anywhere inside a key, not only as the whole of it (#897),
+/// and `-word` and `or` read that the same way as they read a title: a key
+/// ending in `JOB` holds `job`, so every ticket of its project meets the
+/// `job` alternative and none meets `sepa -job`. The first ticket's title has
+/// `sepa` and no `job`, so the key alone decides it.
+#[tokio::test]
+async fn a_word_inside_a_key_is_held_by_every_ticket_of_that_project() {
+    let pool = pool().await;
+    let p = format!("{}JOB", project());
+    let sepa = store(&pool, &p, 1, BASE).await;
+    let other = store(&pool, &p, 2, BASE).await;
+    for (id, title) in [(&sepa, "Fix sepa retry loop"), (&other, "Ledger letter")] {
+        sqlx::query("update sync.item set title = $2 where entity_id = $1")
+            .bind(id)
+            .bind(title)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let searcher = searcher(&pool).await;
+    for (typed, expected) in [
+        ("job", vec![&sepa, &other]),
+        ("sepa -job", vec![]),
+        ("sepa -job or job", vec![&sepa, &other]),
+    ] {
+        let ids = searcher
+            .matching_ids(&format!("project:{p} {typed}"), "ticket")
+            .await
+            .unwrap()
+            .expect("a query with a key narrows");
+        assert_eq!(
+            sorted(ids),
+            sorted(expected.into_iter().cloned().collect()),
+            "{typed}"
+        );
+    }
+}
+
+/// The fixture cannot spell a word this file types (#2457): a key is matched
+/// by what it holds anywhere inside it, so a random `...JOB` once turned
+/// `sepa -job or job` into every ticket of the project. Every fixed word this
+/// file types into the filter has a vowel, and no key has one; a test that
+/// types a key types its own, which only its own rows hold.
+#[test]
+fn a_random_project_key_has_no_vowel() {
+    for _ in 0..1000 {
+        let key = project();
+        assert!(
+            !key.chars().any(|c| "AEIOUY".contains(c)),
+            "{key} could spell a typed word"
+        );
+    }
 }
 
 /// The Tickets view's words with no key beside them (#897), which is what a

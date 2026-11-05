@@ -7,13 +7,19 @@ import { expect, test } from "vitest";
 import { CHUNK, createHighlightCore, loadBundled, languageOf } from "./highlight-core";
 import type { HighlightReply, LineTokens } from "./port";
 
-/** A core whose replies are collected, with the grammars it loaded. */
-function core() {
+/**
+ * A core whose replies are collected, with the grammars it loaded. A fresh
+ * highlighter compiles its grammar's patterns inside the first line's time
+ * limit, which a loaded machine can spend before the line ends, so the helper
+ * sets no bound a test could race (#2457).
+ */
+function core(tokenizeTimeLimit = 60_000) {
   const replies: HighlightReply[] = [];
   const grammars: string[] = [];
   let finished: () => void = () => {};
   const done = new Promise<void>((resolve) => (finished = resolve));
   const handle = createHighlightCore({
+    tokenizeTimeLimit,
     post: (reply) => {
       replies.push(reply);
       if (reply.type !== "lines") finished();
@@ -33,6 +39,15 @@ function core() {
 }
 
 const kinds = (line: LineTokens | undefined) => (line ?? []).filter(([, kind]) => kind !== "").map(([text, kind]) => `${kind}:${text.trim()}`);
+
+test("a line that runs out of its time limit ends in one token holding the rest of it", async () => {
+  const c = core(1e-6);
+  c.handle({ type: "open", id: 1, path: "web/client.ts", text: "export const a: number = 1;" });
+  await c.done;
+
+  expect(c.lineAt(0)!.map(([text]) => text).join("")).toBe("export const a: number = 1;");
+  expect(kinds(c.lineAt(0))).not.toContain("num:1");
+});
 
 test("a Rust file comes back as tokens of the knobas kinds, loading the Rust grammar alone", async () => {
   const c = core();
