@@ -39,6 +39,7 @@
 .tf-tm-b.tf-tm-run:focus-visible rect, .tf-tm-b.tf-tm-run.tf-on rect { stroke: var(--card-ink); }
 /* Ink: red means something failed, and the time of day never has. */
 .tf-tm-now { fill: var(--ink); }
+.tf-tm-nowl { fill: var(--ink); font-size: var(--t-2xs); font-weight: 600; }
 .tf-tm-legend {
   display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: var(--t-xs); color: var(--ink-2);
   margin-bottom: 18px;
@@ -101,7 +102,7 @@
 /* Today is marked down its column. The names and the week's total stay in view however far the days scroll. */
 .tf-tm-week th.tf-tm-today { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
 .tf-tm-week td.tf-tm-today { background: var(--sheet-2); }
-.tf-tm-week { border-collapse: separate; }
+.tf-tm-week { border-collapse: separate; overflow: clip; }
 .tf-tm-week :is(th:first-child, td.tf-tm-t) { position: sticky; left: 0; z-index: 2; background: var(--sheet); box-shadow: inset -1px 0 0 var(--rule-2); }
 .tf-tm-week thead th:first-child { background: var(--sheet-2); }
 .tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot) { position: sticky; right: 0; z-index: 2; background: var(--sheet); box-shadow: inset 1px 0 0 var(--rule-2); }

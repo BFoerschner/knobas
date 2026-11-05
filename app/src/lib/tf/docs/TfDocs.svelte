@@ -693,11 +693,11 @@
   }
 
   /** The outline's entry the reader clicked: it stays marked until they scroll by hand. */
-  let picked_section = $state<number | null>(null);
+  let pickedSection = $state<number | null>(null);
   $effect(() => {
-    if (place.kind === "page" && place.section !== null) picked_section = place.section;
+    if (place.kind === "page" && place.section !== null) pickedSection = place.section;
   });
-  const marked = $derived(picked_section ?? active);
+  const marked = $derived(pickedSection ?? active);
 
   // ---- actions ----
   let linking = $state(false);
@@ -1055,7 +1055,7 @@
     <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
   {/if}
 
-  <section class="tf-rd-main" bind:this={main} onscroll={follow} onwheel={() => (picked_section = null)}>
+  <section class="tf-rd-main" bind:this={main} onscroll={follow} onwheel={() => (pickedSection = null)}>
     <!-- The one fold bar below 900 px. The tree it opens is a drawer, because the page does not reflow under it. -->
     {#if drawerBand.current}
       <TfRailBar label="Page" value={page?.title ?? spaceHere?.name ?? "Docs home"} open={drawer} controls="tf-docs-tree" onpress={(event) => openTree(event.currentTarget as Element)} />

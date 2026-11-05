@@ -33,6 +33,7 @@
   .tf-stg-src { grid-template-columns: auto minmax(0, 1fr) auto; row-gap: 2px; }
   .tf-stg-src > span:nth-of-type(3) { grid-column: 2; text-align: left; padding-right: 0; }
   .tf-stg-src > span:nth-of-type(4) { grid-column: 2 / -1; }
+  .tf-stg-src > .tf-stg-go { grid-column: 3; grid-row: 1; }
 }
 /* Between the stacked layout and 1240px the nav gives up width, not items: Time stays in view at 1100px (#1430).
    A count is a state to act on (R-1.3), so Inbox and Monitors keep theirs, drawn tighter; only Proposed links' waits. */

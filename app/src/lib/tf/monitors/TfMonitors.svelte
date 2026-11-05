@@ -657,9 +657,9 @@
                 {#if word !== null}
                   <span class="tf-chip tf-info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)}>Monitor {word}</span>
                 {:else}
-                  <button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
+                  <span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
                     >Create monitor…</button
-                  >
+                  ></span>
                 {/if}
               </td>
             </tr>

@@ -132,7 +132,7 @@
             <td class="tf-small">{s.timeout_secs} s</td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {s.name}" onclick={() => editStep(at)}>Edit</button>
-              <button class="tf-btn tf-sm tf-ghost" aria-label="Remove {s.name}" onclick={() => void storeSteps(stepCommands.list.filter((_, i) => i !== at).map(stepDraft))}
+              <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {s.name}" onclick={() => void storeSteps(stepCommands.list.filter((_, i) => i !== at).map(stepDraft))}
                 >Remove</button
               >
             </td>
@@ -187,7 +187,7 @@
             <td class="tf-small tf-mono">{usedBy(p.id).join(" ")}</td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {p.name}" onclick={() => editPipe(at)}>Edit</button>
-              <button class="tf-btn tf-sm tf-ghost" aria-label="Remove {p.name}" onclick={() => void storePipes(pipelines.list.filter((_, i) => i !== at).map(pipeDraft))}
+              <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {p.name}" onclick={() => void storePipes(pipelines.list.filter((_, i) => i !== at).map(pipeDraft))}
                 >Remove</button
               >
             </td>

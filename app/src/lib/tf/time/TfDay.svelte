@@ -552,6 +552,8 @@
       <rect class="tf-tm-now" x="{nowAt}%" y="18" width="2" height="70">
         <title>Now, {clockOf(clock.toISOString())}</title>
       </rect>
+      <!-- Drawn on the bed, so it never meets an hour's label above it. -->
+      <text class="tf-tm-nowl" x="{nowAt}%" dx="5" y="80">now</text>
     {/if}
   </svg>
 

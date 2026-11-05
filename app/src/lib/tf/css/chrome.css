@@ -218,7 +218,7 @@
    because of their state (*Ack*, *Open PR*) is not in this group and stays. */
 @media (hover: hover) {
   .tf-rowacts { opacity: 0; transition: opacity 120ms ease-out; }
-  :is(tr, li, .tf-rowhost):is(:hover, :focus-within) .tf-rowacts { opacity: 1; }
+  :is(tr, li, .tf-rowhost, .tf-ib):is(:hover, :focus-within) .tf-rowacts { opacity: 1; }
 }
 
 /* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's

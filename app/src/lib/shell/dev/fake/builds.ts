@@ -476,7 +476,7 @@ function artifactRows(config: string, no: number) {
     chip: null,
     url: file ? `https://ci.tidewater.example/repository/download/${config}/${no}:id/${title}` : null,
   });
-  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 files", false)];
+  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 file", false)];
   if (/Build|Docker|Release/.test(config))
     return [
       row("payout-service-1.9.0-rc1-x86_64.tar.gz", "6.2 MB", true),

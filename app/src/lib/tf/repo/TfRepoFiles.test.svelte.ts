@@ -282,7 +282,7 @@ test("a link to a file that does not exist says so once its directory is read", 
 
   for (const read of [...source.asked]) if (!source.answered.includes(read.section)) read.release();
   await settle();
-  expect(text(target.querySelector(".tf-fileview .tf-cfail"))).toBe(`There is no file ${missing} on main.`);
+  expect(text(target.querySelector(".tf-fileview .tf-nohere p"))).toBe("main has no file at this path.");
 });
 
 test("a source that declares no tree sections asks for no section its listings have not named (#2298)", async () => {

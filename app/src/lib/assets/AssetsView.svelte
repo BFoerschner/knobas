@@ -1719,7 +1719,7 @@
   <div class="tree" bind:this={tree}>
     <div class="cols" bind:this={stripEl}>
       {#if failure === NOT_HELD}
-        <div class="none"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
+        <div class="none gone"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
       {:else if failure}
         <div class="none tf-empty">
           <p class="empty fail">{failure}</p>
@@ -2787,6 +2787,15 @@
   }
 
   /* The last column takes what the strip leaves, so no blank strip stands before the pane. */
+  /* An address that names no asset has nothing for the pane to say. */
+  .tree:has(.gone) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tree:has(.gone) .pane {
+    display: none;
+  }
+
   .cols > .colw:last-child {
     flex: 1 0 220px;
   }

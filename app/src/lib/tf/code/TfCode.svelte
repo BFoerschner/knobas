@@ -325,7 +325,9 @@
   });
 
   const scopes = $derived<FilterScope[]>([
-    ...(job !== null ? [{ id: "job", label: "This job", title: `What ${job} reaches`, query: "" }] : []),
+    ...(job !== null
+      ? [{ id: "job", label: "This job", count: (tab === "prs" ? (everyPr?.rows ?? []) : (repos?.rows ?? [])).filter((row) => held(row.entity_id)).length, title: `What ${job} reaches`, query: "" }]
+      : []),
     { id: "mine", label: "Mine", query: "" },
     { id: "all", label: "All", query: "" },
   ]);

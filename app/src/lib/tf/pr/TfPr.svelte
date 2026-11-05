@@ -607,7 +607,7 @@
     {:else if detail?.row.path}
       <span class="tf-crumb">{detail.row.path}</span><span class="tf-sep">›</span>
     {/if}
-    <strong>{name}</strong>
+    <strong>{prId === null || failed !== null ? "Pull request" : name}</strong>
     {#if back !== null}<TfBackHint {back} />{/if}
   </nav>
 

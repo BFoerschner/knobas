@@ -35,6 +35,8 @@
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
   font-size: var(--t-md); width: min(420px, 100%);
 }
+/* A select's words start where a field's do. */
+select.tf-stg-in { padding-inline-start: 4px; }
 /* A field in a row of controls takes the row's height (Controls, *Form controls*). */
 .tf-stg-c.tf-stg-row1 { flex-wrap: nowrap; }
 .tf-stg-row1 .tf-stg-in { height: var(--control-h-sm); padding-block: 0; min-width: 70px; flex: 1 1 0; }

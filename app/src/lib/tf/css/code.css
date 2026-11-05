@@ -35,7 +35,7 @@
 /* A repository's title never breaks inside its name; the actions stack under it before the two collide. */
 .tf-repohead { container: repohead / inline-size; }
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@container repohead (max-width: 860px) {
+@container repohead (max-width: 1040px) {
   .tf-repohead-in { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
   .tf-repohead-in > .tf-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-left: 0; }
 }
@@ -173,7 +173,7 @@
 .tf-dtool { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; margin-bottom: 12px; font-size: var(--t-sm); }
 .tf-dtool-why { font-size: var(--t-xs); }
 .tf-dtool-prog { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-diff { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
+.tf-diff { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: clip; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-diff + .tf-diff { margin-top: 12px; }
 /* The file's head stays in view through a long diff. */
 .tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; gap: 10px; align-items: center; position: sticky; top: 0; z-index: 2; }

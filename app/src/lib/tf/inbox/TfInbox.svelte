@@ -265,6 +265,7 @@
               type="button"
               class="tf-btn tf-sm"
               class:tf-ghost={action === "done" || action === "snooze"}
+              class:tf-rowacts={(action === "done" || action === "snooze") && snoozing !== item.key}
               {...refusedAttrs(refusal(entry, action))}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
               onclick={() => press(entry, action)}>{labelOf(action)}</button

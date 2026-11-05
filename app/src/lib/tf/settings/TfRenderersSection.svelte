@@ -250,7 +250,7 @@
               <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {r.timeout_secs} s</td>
               <td class="tf-right">
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => edit(at)}>Edit</button>
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => void remove(at)}>Remove</button>
+                <button class="tf-btn tf-sm tf-ghost tf-danger" onclick={() => void remove(at)}>Remove</button>
               </td>
             </tr>
           {/each}

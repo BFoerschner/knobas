@@ -261,7 +261,7 @@
           <td class="tf-nowrap tf-racts"
             >{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
                   >Open PR</a
-                >{" "}{/if}{#if standing.deletable}<button
+                >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"
                   aria-disabled={standing.deleteBlocked !== null ? "true" : undefined}
@@ -269,7 +269,7 @@
                   onclick={() => {
                     if (standing.deleteBlocked === null) deleting = row;
                   }}>Delete…</button
-                >{/if}{/if}</td
+                ></span>{/if}{/if}</td
           >
         </tr>
       {/each}

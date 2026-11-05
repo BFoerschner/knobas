@@ -118,6 +118,7 @@
     type TextPlace,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
@@ -341,7 +342,7 @@
     if (shown === null) return null;
     // A directory on the way that its parent's listing does not hold: the file cannot be there, and its own listing never comes.
     for (const dir of ancestors(shown)) {
-      if (dir !== "" && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
+      if (dir !== "" && listings[dir] === undefined && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
     }
     if (listings[parentOf(shown)] === undefined) return null;
     const entry = entryOf(shown);
@@ -1135,6 +1136,8 @@
       </div>
     {:else if shown === null && listings[""] !== undefined}
       <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+    {:else if fileSection === MISSING}
+      <TfNothingHere message="{branch ?? 'This branch'} has no file at this path." href={repoHash(repoId)} action="All files" />
     {:else}
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
