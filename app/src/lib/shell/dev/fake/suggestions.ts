@@ -12,7 +12,7 @@ import type {
 } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed } from "../fake-seed";
-import { CORPUS, FAKE_CONTEXTS } from "./corpus";
+import { CORPUS, bodyShown, FAKE_CONTEXTS } from "./corpus";
 import { keyOf } from "../../../time/format";
 
 /**
@@ -141,7 +141,8 @@ const KEY_RULES = ["branch_name_key", "commit_message_key", "build_parameter_key
 function textOf(entity_id: string): string {
   const entry = CORPUS.find((candidate) => candidate.entity_id === entity_id);
   if (!entry) return "";
-  return entry.body_text && entry.body_text !== entry.title ? `${entry.title}\n${entry.body_text}` : entry.title;
+  const body = bodyShown(entry.body_text);
+  return body && body !== entry.title ? `${entry.title}\n${body}` : entry.title;
 }
 
 /**

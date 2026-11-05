@@ -6,7 +6,7 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
-import { CORPUS, fakeEpicEntry, mirrorRow } from "./corpus";
+import { CORPUS, bodyShown, fakeEpicEntry, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
@@ -265,7 +265,7 @@ function getEntity(args: Record<string, unknown>) {
     // words — knobas' own vocabulary (`kinds.ts` layer 2) matches the mock's
     // declared KindInfo for every kind in this corpus.
     kind_info: null,
-    body_text: entry.body_text,
+    body_text: bodyShown(entry.body_text),
     author: entry.author,
     payload: entry.payload,
     web_url: entry.web_url,
