@@ -1033,24 +1033,58 @@ where
     query
 }
 
-/// The 1-based positions among the typed `under:` `values` that a parent
-/// answers to (#1652), for `crate::under::report_unknown`.
+/// What the mirror and the estate say of each typed `under:` value, by its
+/// 1-based position among `values`, for `crate::under::report_unknown`
+/// (#1652, #2495): whether a parent answers to it, and whether the launcher
+/// admits a row beneath it with the `hidden` kinds left out.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ParentPositions {
+    /// The positions a parent answers to, as `crate::under::parent_names!`
+    /// defines a parent.
+    pub known: Vec<i64>,
+    /// The positions beneath which the launcher's statement, asked with the
+    /// value alone and the hidden kinds, admits a row. A subset of `known`.
+    pub admitting: Vec<i64>,
+}
+
+/// [`ParentPositions`] of the typed `under:` `values`, in one bounded read.
 ///
-/// Compared in SQL on both sides, as `PARENTS_SQL` is, so a value Rust and the
-/// server lower-case differently (`İ`) is still known. The statement is built
-/// here because `AssertSqlSafe` is confined to this module; every value is a
-/// bind. The values reach `lower(p.name) = any(array[lower($1::text), ...])`,
-/// which folds to a constant, so the read stays on `item_parent_name_idx`
-/// (`lower(ip.name)`); a join on `lower(v.t)` reads the whole parent view
-/// (64 ms to 102 ms at p90 over 100,000 items).
+/// Both questions are `exists`, so the server stops at the first row that
+/// answers one, where the `in (select ...)` this replaced listed every row a
+/// name has first -- 32 ms for a name 10,000 commits carry -- and where the
+/// launcher's statement, asked whether it admits a row, read the whole
+/// mirror to say nothing (#2495). The values are compared in SQL on both
+/// sides, as `PARENTS_SQL` is, so a value Rust and the server lower-case
+/// differently (`İ`) is still known; each reaches `lower($n::text)`, which
+/// folds to a constant and keeps the read on `item_parent_name_idx`
+/// (`lower(ip.name)`). The statement is built here because `AssertSqlSafe`
+/// is confined to this module; every value is a bind.
+///
+/// **Admitting is the launcher's `under:` predicate, arm for arm**, so what
+/// `under:` admits and what `crate::under::left_out_tokens` says is left out
+/// cannot drift; `tests/it/under_admits.rs` holds the two to each other on
+/// every shape a name can have. The mirror's arm (`corpus::LIVE_ITEM.under`,
+/// which `PIPELINE_LOG` shares, and whose rows are the mirror's) is restated
+/// from the parent's side -- the index on `lower(ip.name)` first, the live
+/// row and its adapter's configuration per name found, the kind read off
+/// that row -- because the launcher's spelling, a semi-join the planner
+/// hashes, reads every live item to find none. The estate's two arms are
+/// `corpus::ASSET.under` and `corpus::ROUTE.under` verbatim, over a `ud` row
+/// holding the one value, each behind the launcher's own `kind <> all`
+/// test. A corpus with no `under` fragment admits nothing beneath any name,
+/// as in the statement.
 ///
 /// # Errors
 ///
 /// [`sqlx::Error`] if the lookup fails.
-pub(crate) async fn known_parent_positions(
+pub async fn parent_positions(
     pool: &sqlx::PgPool,
     values: &[String],
-) -> Result<Vec<i64>, sqlx::Error> {
+    hidden: &[String],
+) -> Result<ParentPositions, sqlx::Error> {
+    if values.is_empty() {
+        return Ok(ParentPositions::default());
+    }
     let lowered = format!(
         "array[{}]::text[]",
         (1..=values.len())
@@ -1058,15 +1092,39 @@ pub(crate) async fn known_parent_positions(
             .collect::<Vec<_>>()
             .join(", ")
     );
-    let mut query = sqlx::query_scalar::<Postgres, i64>(sqlx::AssertSqlSafe(format!(
-        "select o.i from unnest({lowered}) with ordinality o(l, i) \
-         where o.l in (select lower(p.name) from {} p where lower(p.name) = any({lowered}))",
+    let hidden_bind = format!("${}::text[]", values.len() + 1);
+    let asset = crate::corpus::ASSET.under.unwrap_or("false");
+    let route = crate::corpus::ROUTE.under.unwrap_or("false");
+    let mut query = sqlx::query_as::<Postgres, (i64, bool, bool)>(sqlx::AssertSqlSafe(format!(
+        "select o.i, \
+                exists (select 1 from {} p where lower(p.name) = o.v) as known, \
+                (exists (select 1 from sync.item_parent ip \
+                           join sync.live_item i on i.entity_id = ip.entity_id \
+                           join knobas.source_config s on s.id = i.source_id and s.kind = ip.adapter_kind \
+                          where lower(ip.name) = o.v and i.kind <> all({hidden_bind})) \
+                 or ('asset' <> all({hidden_bind}) and exists (select 1 from knobas.asset a \
+                           cross join (select array[o.v]::text[] as v) ud where {asset})) \
+                 or ('route' <> all({hidden_bind}) and exists (select 1 from knobas.route r \
+                           join knobas.asset ra on ra.id = r.asset_id \
+                           cross join (select array[o.v]::text[] as v) ud where {route}))) as admits \
+           from unnest({lowered}) with ordinality o(v, i)",
         crate::under::parent_names!()
     )));
     for value in values {
         query = query.bind(value.clone());
     }
-    query.fetch_all(pool).await
+    query = query.bind(hidden.to_vec());
+    let rows = query.fetch_all(pool).await?;
+    let mut positions = ParentPositions::default();
+    for (position, known, admits) in rows {
+        if known {
+            positions.known.push(position);
+        }
+        if admits {
+            positions.admitting.push(position);
+        }
+    }
+    Ok(positions)
 }
 
 /// The plan the launcher's own statement runs under.

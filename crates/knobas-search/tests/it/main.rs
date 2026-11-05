@@ -34,6 +34,7 @@ mod suggest;
 mod ticket_by_key;
 mod ticket_keys;
 mod under;
+mod under_admits;
 mod under_confluence;
 mod under_coverage;
 mod under_jira;
