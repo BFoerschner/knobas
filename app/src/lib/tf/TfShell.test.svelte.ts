@@ -516,10 +516,10 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   let crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
   const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
-  expect(parent.textContent).toBe("Monitors");
-  expect(parent.getAttribute("href")).toBe("#/monitors");
+  expect(parent.textContent).toBe("Asset tree");
+  expect(parent.getAttribute("href")).toBe("#/assets");
   expect(escHint()).toBe("Back to Asset tree Esc");
-  expect(target.querySelector(".tf-nav a[aria-current]")?.textContent, "the asset tree lights Monitors, the page it opens from").toContain("Monitors");
+  expect(target.querySelector(".tf-nav a[aria-current]"), "the asset tree has no nav entry, so nothing lights").toBeNull();
 
   await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;

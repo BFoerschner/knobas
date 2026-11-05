@@ -186,12 +186,6 @@ export function sectionOf(route: TfRoute): Section | null {
   return null;
 }
 
-/** The nav entry a route lights: its section, or for the asset tree, which has none, Monitors, the page it opens from. */
-export function navSection(route: TfRoute): Section | null {
-  const section = sectionOf(route);
-  return section === "assets" ? "monitors" : section;
-}
-
 /**
  * The address of a section's own page: `#/inbox`, `#/settings`. Job's needs a
  * ticket, so it has {@link jobHash} instead.
@@ -233,8 +227,7 @@ export function ticketHash(entityId: string, tab: string | null = null): string 
 export function isTopPage(route: TfRoute): boolean {
   if (route.view === "tickets") return true;
   if (route.view === "job") return route.tab === null;
-  // The asset tree has no nav entry, so it is not a top page: it sits under Monitors.
-  if (route.view === "full") return route.head === route.section && route.rest.length === 0 && route.head !== "assets";
+  if (route.view === "full") return route.head === route.section && route.rest.length === 0;
   return false;
 }
 
@@ -249,7 +242,7 @@ export function isTopPage(route: TfRoute): boolean {
  * - a pull request or a repository, any tab of it → Code (a pull request's page says its repository, `parentPage`);
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → the asset tree's top page (an asset's page says its holder), and the tree → Monitors;
+ * - a doc page → Docs; an asset or a route → the asset tree's top page (an asset's page says its holder);
  * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the
@@ -261,8 +254,6 @@ export function isTopPage(route: TfRoute): boolean {
  */
 export function parentOf(route: TfRoute): string | null {
   if (route.view === "ticket") return sectionHash("tickets");
-  // The asset tree has no nav entry: it opens from Monitors, which lights for it (`navSection`).
-  if (route.view === "full" && route.head === "assets") return sectionHash("monitors");
   if (route.view !== "full" || isTopPage(route)) return null;
   if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
     return repoHash(route.rest[0]);

@@ -79,7 +79,7 @@
   import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
-  import { navSection, parseTfHash, sectionOf } from "./route";
+  import { parseTfHash, sectionOf } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -590,7 +590,7 @@
 
 <div class="tf">
   <TfTopBar
-    current={navSection(route)}
+    current={sectionOf(route)}
     {inbox}
     {badges}
     {timer}

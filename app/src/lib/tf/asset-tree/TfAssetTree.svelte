@@ -50,9 +50,9 @@
 <div class="tf-full">
   <!-- Always drawn, so the first click in a column does not move the tree under the pointer. -->
   {#if head === "assets"}
-    <TfCrumbs parts={[{ name: "Monitors", href: "#/monitors" }, { name: "Asset tree" }]} {back} />
+    <TfCrumbs parts={[{ name: "Asset tree" }]} {back} />
   {:else}
-    <TfCrumbs parts={[{ name: "Monitors", href: "#/monitors" }, { name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
+    <TfCrumbs parts={[{ name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
   {/if}
   <div class="tf-asset-tree">
     <AssetsView {nav} onnamed={(name) => (named = name)} onholder={(held) => (holder = held)} />
