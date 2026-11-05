@@ -136,10 +136,10 @@
 }
 .tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
 .tf-su-val[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
-.tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--paper); color: var(--ink); font-size: var(--t-sm); }
+.tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
 .tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
 .tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }
-.tf-su-pn textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); font: inherit; font-size: var(--t-md); resize: vertical; }
+.tf-su-pn textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink); font: inherit; font-size: var(--t-md); resize: vertical; }
 .tf .tf-su-gap { margin-top: 12px; }
 .tf-su-ai { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--rule-2); font-size: var(--t-md); }
 .tf-su-ai > span:first-child { flex: 1; }

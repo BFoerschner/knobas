@@ -45,11 +45,14 @@
   let {
     parts,
     back,
+    sectionTop = false,
   }: {
     /** The path, top first; the last is the page itself. */
     parts: readonly Crumb[];
     /** Where `Esc` goes, or `null` where it does nothing. */
     back: Pick<EscTarget, "name"> | null;
+    /** The shell's own breadcrumb for a page with a nav entry: a path of one draws nothing. */
+    sectionTop?: boolean;
   } = $props();
 
   // The page's own name is the last part when it links nowhere: what *Back to <name>* calls this page once it is left.
@@ -57,17 +60,26 @@
     const own = parts.at(-1);
     return own === undefined || own.href !== undefined || own.name === "" ? null : own.name;
   });
+
+  /**
+   * A section's own page has no path to show: the nav lights the section and the page's title names it, so a bar
+   * reading only that name again is drawn nowhere. One that goes somewhere else still draws, as does any longer path.
+   * Only the shell asks for this: a page that draws its own breadcrumb, as an item's does, keeps it.
+   */
+  const repeatsItself = $derived(sectionTop && parts.length === 1 && (back === null || back.name === parts[0]?.name));
 </script>
 
-<nav class="tf-crumbs" aria-label="Breadcrumb">
-  {#each parts as part, at (at)}
-    {#if part.href !== undefined}
-      <a class="tf-crumb" href={part.href}>{part.name}</a><span class="tf-sep">›</span>
-    {:else}
-      <strong>{part.name}</strong>
+{#if !repeatsItself}
+  <nav class="tf-crumbs" aria-label="Breadcrumb">
+    {#each parts as part, at (at)}
+      {#if part.href !== undefined}
+        <a class="tf-crumb" href={part.href}>{part.name}</a><span class="tf-sep">›</span>
+      {:else}
+        <strong>{part.name}</strong>
+      {/if}
+    {/each}
+    {#if back !== null}
+      <span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>
     {/if}
-  {/each}
-  {#if back !== null}
-    <span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>
-  {/if}
-</nav>
+  </nav>
+{/if}

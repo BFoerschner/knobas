@@ -1,7 +1,7 @@
 /* ---------- Tickets (#810): views, the ticket board or list, the preview ---------- */
 /* One row bounded by the page, never sized by its content: an `auto` row made any text
    change in the preview re-lay out the whole list table (perf audit after #2200). */
-.tf-tickets { display: grid; grid-template-columns: 230px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
+.tf-tickets { display: grid; grid-template-columns: 240px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .tf-views { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-vlist { overflow: auto; padding: 12px 10px 14px; flex: 1; }
 .tf-views h2 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
@@ -105,7 +105,7 @@ p.tf-desc { white-space: pre-line; }
 .tf-go .tf-btn { justify-content: center; }
 .tf-go small { color: var(--ink-2); text-align: center; }
 @media (max-width: 1240px) {
-  .tf-tickets { grid-template-columns: 200px minmax(0, 1fr); }
+  .tf-tickets { grid-template-columns: 220px minmax(0, 1fr); }
   .tf-tickets .tf-preview { display: none; }
 }
 @media (max-width: 900px) {

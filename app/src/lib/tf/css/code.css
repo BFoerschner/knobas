@@ -303,7 +303,7 @@
 .tf-thread.tf-pending { border-color: var(--warn); }
 .tf-newc { margin: 4px 12px 8px 104px; display: flex; flex-direction: column; gap: 6px; font-family: var(--sans); }
 .tf-newc textarea {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); min-height: 54px; font: inherit;
+  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink); min-height: 54px; font: inherit;
 }
 .tf-newc .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; }
 .tf-outdated { margin: 6px 12px 10px; font: var(--t-sm) var(--sans); }
@@ -323,7 +323,7 @@
 .tf-thr-h { margin: -6px -10px; border-top: 0; background: none; }
 .tf-thr-sp { flex: 1; }
 .tf-thr-reply {
-  flex: 1; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink-2);
+  flex: 1; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink-2);
   display: flex; align-items: center; padding: 0 8px; font: var(--t-sm) var(--sans); cursor: text; text-align: left;
 }
 .tf-thr-reply + .tf-thr-sp { display: none; }
@@ -391,7 +391,7 @@
 .tf-pstep { display: inline-flex; align-items: center; height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet-2); overflow: hidden; }
 .tf-pgrip { display: inline-grid; place-items: center; width: 18px; height: 100%; padding: 0; border: 0; border-right: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: grab; }
 .tf-pname { padding: 0 8px; font-weight: 600; white-space: nowrap; }
-.tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--paper); font: var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 0 8px; color: var(--ink); }
+.tf-parg { height: 100%; border: 0; border-left: 1px solid var(--rule-2); background: var(--field); font: var(--t-xs) var(--mono); font-variant-ligatures: none; padding: 0 8px; color: var(--ink); }
 .tf-pfilter { min-width: 260px; }
 .tf-parg:focus-visible, .tf-pgrip:focus-visible, .tf-px:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
@@ -404,7 +404,7 @@
 .tf-pstep.tf-puser .tf-pname::after { content: " cmd"; font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); }
 .tf-psave { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; }
 .tf-psave label { display: inline-flex; align-items: center; gap: 6px; }
-.tf-psave input { height: var(--control-h-sm); padding: 0 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); }
+.tf-psave input { height: var(--control-h-sm); padding: 0 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-suggest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--info-bg); color: var(--info); font-size: var(--t-sm); }
 .tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }

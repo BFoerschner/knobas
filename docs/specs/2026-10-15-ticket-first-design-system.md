@@ -20,13 +20,14 @@ Rules that follow from that:
 
 ## Colour
 
-Tokens are the prototype's, unchanged. Light and dark come from the same names.
+Tokens are the prototype's, unchanged, except `--field`, which it did not have. Light and dark come from the same names.
 
 | Token | Light | Dark | Use |
 |---|---|---|---|
 | `--paper` | `#E4E8EC` | `#12171C` | Page background |
 | `--sheet` | `#F7F8F9` | `#1A2027` | Panels, bars, cards, dialogs |
 | `--sheet-2` | `#EEF1F4` | `#212932` | Inset areas, table heads, hovered rows |
+| `--field` | `#FFFFFF` | `#12171C` | What you type into: every text field, search box and textarea, and the selects beside them. Never `--paper`, which reads as disabled on a sheet |
 | `--ink` | `#17212B` | `#E4E9EE` | Text, primary buttons, toast background |
 | `--ink-2` | `#4B5663` | `#A0ABB7` | Secondary text |
 | `--rule` | `#CBD2D9` | `#323C47` | Borders between things |
@@ -61,6 +62,8 @@ Three families, each with one job.
 - **JetBrains Mono** (400, 600) only for real code values: keys, shas, branch names, paths, logs and diffs. Never for a label or a number that's just a number. Durations and counts are Archivo with `font-variant-numeric: tabular-nums`.
 
 Body text is Archivo 14 px / 1.45, weight 400. Weight 600 is the normal emphasis and covers most headings. 700 is for page titles and 800 for the narrow display figures. The prototype's single 650 becomes 600.
+
+Archivo's word space is narrow, so at interface sizes words run together. The whole interface sets `letter-spacing: .006em; word-spacing: .06em` once, on `body`. Code surfaces and the Docs reading face reset both to `normal`: code has to keep its columns, and Source Serif already has its own fit. A placeholder is `--muted`, the lightest grey that passes 4.5:1 on every field fill.
 
 ### Scale
 
@@ -207,6 +210,10 @@ A control this section doesn't name is added by amending this section, the `#/co
 ## Layout
 
 The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (side rails and preview panes close) and 900 px (columns stack). The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
+
+The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
+
+A section's own page has no breadcrumb bar: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
 

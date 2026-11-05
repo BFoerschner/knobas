@@ -9,7 +9,7 @@
 
   It never scrolls and never draws past its right edge (#1410). The healthy
   readings share one run that takes the width left over and shrinks first,
-  cut with an ellipsis; its title carries every reading's words. *Sources*,
+  showing the whole readings that fit; its title carries every reading's words. *Sources*,
   each failed credential with its *Re-enter password*, and the queue control
   sit outside that run and never shrink.
 

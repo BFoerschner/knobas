@@ -33,7 +33,7 @@
 .tf-bsettings { padding-top: 12px; }
 .tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
 .tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: var(--t-xs); }
-.tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); }
+.tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 
 /* ---------- Builds, the Run… dialog (#852): prototype-6's .combo, .prm and .runsum ---------- */
 .tf-dialog.tf-run-dialog { width: min(680px, calc(100vw - 32px)); }
@@ -49,13 +49,13 @@
 .tf-prm { display: grid; grid-template-columns: 180px minmax(0, 1fr) 80px; gap: 6px 10px; align-items: center; }
 .tf-prm .tf-k { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-prm select, .tf-prm input {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 4px 8px; background: var(--paper); color: var(--ink); width: 100%;
+  border: 1px solid var(--rule); border-radius: 4px; padding: 4px 8px; background: var(--field); color: var(--ink); width: 100%;
 }
 .tf-prm .tf-chg { font-size: var(--t-2xs); color: var(--info); font-weight: 600; }
 .tf-run-add { align-self: flex-start; }
 .tf-run-opts > summary { cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-run-opts > div { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-.tf-run-save input[type="text"] { width: 160px; padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); }
+.tf-run-save input[type="text"] { width: 160px; padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-runsum { font-size: var(--t-xs); color: var(--ink-2); margin-right: auto; align-self: center; }
 
 /* ---------- Builds, the run page (#853): prototype-6's .bhead chip, .problem and the Run panel ---------- */

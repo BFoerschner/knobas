@@ -24,7 +24,7 @@
   border-radius: 6px; padding: 10px; margin-left: 38px;
 }
 .tf-compose textarea {
-  min-height: 64px; border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper);
+  min-height: 64px; border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--field);
   color: var(--ink); resize: vertical; font: inherit;
 }
 .tf-compose .tf-acts { display: flex; justify-content: flex-end; }
@@ -61,7 +61,7 @@
 
 /* *Link to…* (#820): the picker inside the dialog. */
 .tf-dialog .tf-body > input[type="text"], .tf-field select {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink);
 }
 .tf-field { display: flex; gap: 8px; align-items: center; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-picklist { display: flex; flex-direction: column; max-height: 240px; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }

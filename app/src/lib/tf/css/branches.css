@@ -7,7 +7,7 @@
 .tf-compare { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-compare .tf-cform { padding: 14px; }
 .tf-compare .tf-formgrid textarea {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper); color: var(--ink); width: 100%;
+  border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--field); color: var(--ink); width: 100%;
   font: inherit; resize: vertical;
 }
 .tf-compare .tf-ctop { align-self: start; padding-top: 6px; }
@@ -20,7 +20,7 @@
   color: var(--ink-2); text-align: right; padding: 8px 12px 8px 0; white-space: pre; user-select: none; background: var(--sheet-2);
 }
 .tf-editor textarea {
-  border: 0; outline: none; background: var(--paper); color: var(--ink); font: inherit; padding: 8px 10px; resize: vertical;
+  border: 0; outline: none; background: var(--field); color: var(--ink); font: inherit; padding: 8px 10px; resize: vertical;
   min-height: 420px; white-space: pre; overflow: auto; tab-size: 4;
 }
 .tf-editor textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }

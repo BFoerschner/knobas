@@ -1,7 +1,7 @@
 /* ---------- ticket views (#812): the views pane, its menus, and *New view* ---------- */
 .tf-vfind { padding: 12px 10px 6px; }
 .tf-vfind input {
-  width: 100%; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px; padding: 5px 8px; color: var(--ink);
+  width: 100%; border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 5px 8px; color: var(--ink);
 }
 .tf-vfind + .tf-vlist { padding-top: 4px; }
 .tf-vw-row { position: relative; }

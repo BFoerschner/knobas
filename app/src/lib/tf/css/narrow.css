@@ -1,12 +1,14 @@
 /* ---------- narrow: 1240px closes side rails, 900px stacks ---------- */
 @media (max-width: 900px) {
-  .tf-search { min-width: 0; }
+  .tf-search { min-width: 0; flex: none; }
   .tf-search .tf-label { display: none; }
   .tf-brand { margin-right: 2px; }
-  .tf-nav { flex: 1; }
+  .tf-nav { flex: 1 1 0; }
   .tf-spacer { display: none; }
   .tf-timer-key { display: none; }
   .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
+  .tf-fhead { flex-wrap: wrap; }
+  .tf-fhead > .tf-acts { justify-content: flex-start; margin-left: 0; }
   .tf-tm-row { grid-template-columns: minmax(0, 1fr) auto; }
   .tf-tm-acts { grid-column: 1 / -1; justify-content: flex-start; }
   .tf-jobkey { font-size: var(--t-d2); }
@@ -21,13 +23,16 @@
   .tf-stg-src { grid-template-columns: auto 1fr auto; }
   .tf-stg-src .tf-stg-si { display: none; }
 }
-/* Between the stacked layout and 1240px the nav gives up width, not items: Time stays in view at 1100px (#1430). */
+/* Between the stacked layout and 1240px the nav gives up width, not items: Time stays in view at 1100px (#1430).
+   A count is a state to act on (R-1.3), so Inbox and Monitors keep theirs, drawn tighter; only Proposed links' waits. */
 @media (max-width: 1240px) and (min-width: 901px) {
-  .tf-search { min-width: 0; }
+  .tf-search { min-width: 0; flex: none; }
+  .tf-nav { flex: 0 1 auto; }
   .tf-search .tf-label, .tf-search kbd { display: none; }
   .tf-timer-key { max-width: 12ch; }
-  .tf-nav a { padding: 6px 7px; }
-  .tf-nav .tf-count { display: none; }
+  .tf-nav a { padding: 6px 6px; gap: 4px; }
+  .tf-nav .tf-count { padding: 0 5px; }
+  .tf-nav a[href="#/review"] .tf-count { display: none; }
 }
 @media (max-width: 1240px) {
   .tf-grid { grid-template-columns: minmax(0, 1fr); }

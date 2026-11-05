@@ -4,7 +4,8 @@
   background: var(--sheet); border-bottom: 1px solid var(--rule); min-width: 0;
 }
 .tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
-.tf-nav { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* The nav keeps its width while the search can give some up, so no entry slides out of view above 1240px. */
+.tf-nav { display: flex; gap: 2px; flex: none; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tf-nav a {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
   text-decoration: none; color: var(--ink-2); white-space: nowrap;
@@ -18,19 +19,24 @@
 .tf-count.tf-err { background: var(--err-bg); color: var(--err); }
 .tf-spacer { flex: 1; }
 .tf-search {
-  display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--paper);
-  border-radius: 4px; padding: 5px 10px; color: var(--ink-2); cursor: pointer; min-width: 170px;
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--field);
+  border-radius: 4px; height: var(--control-h); padding: 0 8px 0 10px; color: var(--ink-2); cursor: pointer;
+  flex: 0 1 170px; min-width: 36px; overflow: hidden; white-space: nowrap;
 }
+.tf-search svg { flex: none; }
+.tf-search:hover { border-color: var(--ink-2); }
 .tf-search kbd { margin-left: auto; }
 .tf kbd {
   font: 600 var(--t-2xs) var(--mono); font-variant-ligatures: none; padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
   border-radius: 3px; background: var(--sheet); color: var(--ink-2);
 }
 .tf-timer {
-  display: flex; align-items: center; gap: 8px; border-radius: 4px; padding: 4px 4px 4px 10px;
+  display: flex; align-items: center; gap: 8px; border-radius: 4px; height: var(--control-h); padding: 0 4px 0 10px;
   font-weight: 600; border: 0; cursor: pointer; white-space: nowrap;
 }
-.tf-timer.tf-off { background: var(--sheet-2); color: var(--ink-2); }
+/* No timer is an offer, not a dead control: it draws as a button does, at a button's weight. */
+.tf-timer.tf-off { background: var(--sheet); border: 1px solid var(--rule); color: var(--ink); font-weight: 500; }
+.tf-timer.tf-off:hover { border-color: var(--ink-2); }
 /* The target is capped, the chip's title carries the full text; a ticket key is a code value (mono), a label is not. */
 .tf-timer-key { font-size: var(--t-xs); max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-timer-key.tf-mono { font-family: var(--mono); font-variant-ligatures: none; }
@@ -52,17 +58,24 @@
 
 /* ---------- status bar ---------- */
 .tf-status {
-  display: flex; gap: 18px; align-items: center; padding: 5px 14px; font-size: var(--t-xs); color: var(--ink-2);
+  display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: var(--t-xs); color: var(--ink-2);
   background: var(--sheet); border-top: 1px solid var(--rule); overflow: hidden; white-space: nowrap;
 }
+/* Each reading starts with its state's dot, so the bar reads at a glance and the red is the dot and the fix, not a whole line of it. */
+.tf-status .tf-healthy > span::before, .tf-status .tf-bad::before {
+  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ok);
+}
+.tf-status .tf-bad::before { background: var(--err); }
 /*
-  Pin and ellipsis (#1410): everything but the healthy run keeps its width;
-  the run takes what is left and is cut at its end.
+  Pinned (#1410): everything but the healthy run keeps its width; the run takes what is left and
+  shows whole readings only. One that does not fit wraps out of sight, never cut to a stub like "Tide…";
+  the run's title and Settings › Sources keep every reading.
 */
 .tf-status > * { flex: none; }
-.tf-status > .tf-healthy { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.tf-status .tf-healthy > span + span { margin-left: 18px; }
-.tf-status .tf-bad { color: var(--err); font-weight: 600; }
+.tf-status > .tf-healthy { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; column-gap: 16px; height: 1.45em; overflow: hidden; }
+.tf-status .tf-healthy > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tf-status .tf-bad { color: var(--ink); }
+.tf-status .tf-bad a { margin-left: 4px; color: var(--err); font-weight: 600; }
 .tf-status button, .tf-status a {
   border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
 }
@@ -87,7 +100,10 @@
 .tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
 .tf-crumbs .tf-sep { color: var(--ink-2); }
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
-.tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+/* The title block gives up width first, so the actions stay on the title line (Controls, *Header*). */
+.tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px 20px; align-items: flex-start; }
+.tf-fhead > :first-child { flex: 1 1 0; min-width: 280px; }
+.tf-fhead > .tf-acts { flex: 0 1 auto; justify-content: flex-end; }
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; }
 .tf-fhead .tf-sub { color: var(--ink-2); margin-top: 4px; font-size: var(--t-sm); }
 /* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */

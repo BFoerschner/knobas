@@ -1132,7 +1132,7 @@ test("Esc on the window closes an asset dialog and leaves the page; history wait
 
 /**
  * The bar fits its width (#1410): the healthy readings share one run that
- * shrinks with an ellipsis, and its title keeps every word. A failed
+ * shows the whole readings that fit, and its title keeps every word. A failed
  * credential and the queue control sit outside it, so they never shrink.
  */
 test("only the healthy readings shrink; a failed credential and the queue stay whole", async () => {
