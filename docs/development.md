@@ -133,6 +133,56 @@ you run `xattr -dr com.apple.quarantine /Applications/knobas.app`, and Windows
 shows a SmartScreen warning. The Linux artifacts carry the runner's glibc
 floor.
 
+## README screenshots
+
+Every picture in the README is generated. `docs/screenshots/shots.txt` lists
+them, one line per picture: a name, then a route and steps in the words of
+`scripts/shot-steps.mjs`. Each line becomes `<name>.webp`, in light mode.
+
+```bash
+just readme-shots   # about 90 seconds, into docs/screenshots
+```
+
+A re-run on the same kind of machine draws the same bytes, so between two runs a
+diff means the app changed. `scripts/readme-shots.sh` says how: the page's clock,
+timezone and locale are pinned, each shot gets an empty Chrome profile, and the
+fixture is asked for its calm state (`?fake-sources-healthy&fake-timer`). The
+pictures only ever show that fixture, the fictional Tidewater, never a live source.
+
+A Mac and the Linux runner rasterize text differently, so a Mac run rewrites every
+file against what a release committed, by a few pixels of text edge. Use a Mac run
+to look at a change, then `git restore docs/screenshots` and let the next release
+commit it. Commit a Mac run only when the README cannot wait for a release, and
+expect that release to rewrite every picture again.
+
+`release.yml`'s `readme` job runs the same script on the tag once the bundles
+are built, and `scripts/readme-shots-publish.sh` commits the result to `main`
+with the tag in the README's stamp. It runs before the publish click, so the
+README is right when the release goes out. A release that drew nothing new
+commits nothing. A full set is about 1.5 MB, and only the pictures that changed
+reach the history.
+
+To add a picture, add a line to `shots.txt` and an `<img>` to the README, then
+run the recipe. Every line ends on `see:` and words from the fixture only that page
+shows, because an address with nothing behind it still draws a page. The script
+refuses a line with no `see:`, a line the README does not show and a picture the
+README asks for that no line makes.
+
+A step that finds nothing fails the run and names the step, and nothing is
+replaced. So a PR that removes a page a line shows, or a control it clicks, should
+edit the line and the README's section with it. One that does not fails the next
+release's `readme` job, with the installers already uploaded. Fix the line, run
+`just readme-shots` and commit the pictures.
+
+The diagrams in `docs/how-it-works.md` are `docs/diagrams/*.d2`, laid out by
+TALA, which ships inside d2 since v0.9.0 with no plugin and no key. They follow the
+reader's theme, so `just readme-diagrams` renders each to `<name>-light.svg` and
+`<name>-dark.svg`. Nothing runs it for you: edit the source and render when the code
+a diagram shows changes, and look at the result, because TALA can move a whole
+layout after a small edit. It refuses a d2 without TALA rather than lay them out
+with another engine. They were last checked against the code at `e3938462`.
+`suggestion-pass-*.svg` is the older hand-written kind, and nothing shows it now.
+
 ## Profiles
 
 `just dev` runs the default profile: the real data directory, database and
@@ -315,8 +365,10 @@ just shot 3 /tmp/shots '#/tickets'
 
 `?fake-ipc` turns the fake on. It only exists in the dev server: a production
 build drops it, and `vite preview` then sits on "Starting the local database".
-`?fake-db=starting|migrating|failed` holds the boot screen on one state. This
-checks layout and interaction. `just dev` or `just demo` checks the bridge.
+`?fake-db=starting|migrating|failed` holds the boot screen on one state.
+`?fake-sources-healthy` leaves no source that needs the reader, so no err tone
+draws in the status bar. This checks layout and interaction. `just dev` or
+`just demo` checks the bridge.
 
 ### Mockups
 

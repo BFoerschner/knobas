@@ -7,8 +7,9 @@
 # - two step routes that share their first 120 characters get two images;
 # - run from another directory, the script uses its own checkout;
 # and then, through scripts/shot-steps.mjs in headless Chrome (skipped where
-# Chrome is not installed), the pointer steps on a fixture page, and Chrome's
-# start (#1957): a late one passes, a dead one and a mute one fail saying so.
+# Chrome is not installed), the pointer steps on a fixture page, the pinned clock,
+# scale and WebP of the README's shots, and Chrome's start (#1957): a late one
+# passes, a dead one and a mute one fail saying so.
 set -euo pipefail
 here=$(dirname "$0")
 shot=$here/shot.sh
@@ -140,6 +141,8 @@ twice.addEventListener("dblclick", () => shown("Doubled", true));
 item.addEventListener("dblclick", () => shown("Opened", true));
 // Only the shown page's Kept draws Live: one keep-alive holds hidden comes first (#2247).
 kept.addEventListener("click", () => shown("Live", true));
+// What the page reads of the clock and the place, as a button a step can name.
+shown(`${new Date().toISOString()} ${new Date(Date.now()).toISOString()} ${new Date("2020-01-01T00:00:00Z").getUTCFullYear()} ${Intl.DateTimeFormat().resolvedOptions().timeZone} ${Intl.DateTimeFormat().resolvedOptions().locale}`, true);
 // As the app does (TfShell, #693): the press is the page's, not a history step.
 for (const type of ["mousedown", "auxclick"]) addEventListener(type, (e) => e.button > 2 && e.preventDefault());
 addEventListener("mouseup", (e) => {
@@ -164,6 +167,27 @@ steps() { # <name> <spec>: run the steps script on the fixture; its stderr lands
 printf '#!/bin/sh\nsleep 20\nexec "%s" "$@"\n' "$chrome" >"$fixture/stalled-chrome"
 chmod +x "$fixture/stalled-chrome"
 SHOT_CHROME=$fixture/stalled-chrome steps stalled '#/ + click:Late' & stalled=$!
+# SHOT_NOW and SHOT_SCALE, the README's shots: the page's clock stops at the instant,
+# in `new Date()` and `Date.now()` alike, a given date stays itself, and the place is
+# UTC and en-GB. The same step with no SHOT_NOW finds nothing, or the first proves
+# nothing. Beside the cases below, each being one Chrome's few seconds.
+pinned_now=2026-08-22T15:05:00.000Z
+pinned_clock="$pinned_now $pinned_now 2020 UTC en-GB"
+SHOT_NOW=$pinned_now steps pinned "#/ + click:$pinned_clock" & pinned=$!
+SHOT_STEP_WAIT_S=3 steps unpinned "#/ + click:$pinned_clock" & unpinned=$!
+SHOT_SCALE=2 steps scaled '#/' & scaled=$!
+# `see:`, which every README shot ends on: words the page shows pass, and words it
+# does not fail naming the step, as a page that is gone must.
+steps seen '#/ + see:a title, its key the only exact text' & seen=$!
+SHOT_STEP_WAIT_S=3 steps unseen '#/ + see:Nothing lives here' & unseen=$!
+node "$here/shot-steps.mjs" "$web" "$(free_port)" "$fixture/profile-webp" 800,600 '' "$fixture/webp.webp" '#/' 2>"$fixture/webp.err" & webp=$!
+for bad in 'SHOT_SCALE=9' 'SHOT_NOW=whenever'; do
+    if env "$bad" node "$here/shot-steps.mjs" "$web" 1 "$fixture/profile-bad" 800,600 '' "$fixture/bad.png" '#/' 2>"$fixture/bad.err"; then
+        fail "$bad passed"
+    else
+        grep -q "must be" "$fixture/bad.err" || fail "$bad's refusal: $(cat "$fixture/bad.err")"
+    fi
+done
 steps pointer '#/ + hover:Row menu + wait:200 + click:Hovered + wait:200 + dblclick:Twice + click:Doubled + dblclick:PAY-1 + click:Opened + back:Aux + click:Went back + forward:Aux + click:Went forward + click:Kept + click:Live' \
     || fail "pointer steps: $(cat "$fixture/pointer.err")"
 [ -s "$fixture/pointer.png" ] || fail "pointer steps wrote no image"
@@ -178,6 +202,21 @@ for verb in hover dblclick back forward; do
         grep -q "step '$verb:Nobody' found no" "$fixture/miss-$verb.err" || fail "$verb miss does not name its step: $(cat "$fixture/miss-$verb.err")"
     fi
 done
+
+wait "$pinned" || fail "SHOT_NOW did not pin the page's clock and place: $(cat "$fixture/pinned.err")"
+if wait "$unpinned"; then fail "the clock step found its button with no SHOT_NOW, so the pinned case proves nothing"; fi
+wait "$seen" || fail "see: missed words the page shows: $(cat "$fixture/seen.err")"
+if wait "$unseen"; then
+    fail "see: passed on words the page does not show"
+else
+    grep -q "step 'see:Nothing lives here' found no such text" "$fixture/unseen.err" || fail "see: miss does not name its step: $(cat "$fixture/unseen.err")"
+fi
+wait "$scaled" || fail "SHOT_SCALE=2 failed: $(cat "$fixture/scaled.err")"
+wide=$(node -e 'console.log(require("fs").readFileSync(process.argv[1]).readUInt32BE(16))' "$fixture/scaled.png")
+[ "$wide" = 1600 ] || fail "SHOT_SCALE=2 on an 800 wide page wrote $wide pixels"
+wait "$webp" || fail "a .webp file failed: $(cat "$fixture/webp.err")"
+magic=$(node -e 'const b = require("fs").readFileSync(process.argv[1]); console.log(b.toString("latin1", 0, 4) + b.toString("latin1", 8, 12))' "$fixture/webp.webp")
+[ "$magic" = RIFFWEBP ] || fail "a .webp file holds '$magic'"
 
 # A real fault still fails (#1957), and says what it saw: a Chrome that exits at
 # once fails without waiting out the guard, and one that never answers fails

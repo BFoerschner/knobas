@@ -1,79 +1,123 @@
-This is a toy project just to see how far agents can go with minimal supervision!
-
-
 # knobas
 
-knobas is a personal work cockpit. It is a desktop app (Rust, Tauri 2, Svelte 5)
-that syncs Jira, Confluence, Gitea, TeamCity and Uptime Kuma into one embedded
-Postgres and searches all of them from one box. On top of that mirror it keeps
-what no single source owns: links, notes, contexts, an inbox, assets and time
-tracking that turns into worklogs.
+Your tickets, code, builds, docs and monitors in one desktop app.
 
-**Status:** every planned milestone, M0 through v1.5, is closed. `v3.2.6` is
-the latest release (2026-10-27), and the manifests carry `3.2.6`.
-Ongoing work is tracked in [GitHub Issues](https://github.com/BFoerschner/knobas/issues).
+knobas syncs Jira, Confluence, Gitea, TeamCity and Uptime Kuma to your own machine, so everything is one search away and tied to the ticket you are working on.
 
-## How it works
+This is a toy project just to see how far agents can go with minimal supervision!
 
-Read the map left to right for sync and right to left for write-back. Grey
-arrows carry data in. The amber path is the only route that changes anything at
-a source. Every write goes through `knobas.write_queue`, and the flush loop is
-the only code that calls `Source::write`. A second call site fails
-`crates/knobas-sync/tests/it/write_choke_point.rs`.
+**[Download](https://github.com/BFoerschner/knobas/releases/latest)** · [Try it in a browser](#try-it-in-a-browser) · [Build it from source](#build-it-from-source) · [How it works](docs/how-it-works.md)
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/system-map-dark.svg">
-  <img alt="knobas system map: sources feed adapters, the sync scheduler upserts into the sync schema of one embedded Postgres, search and the Tauri app read it, and the only outbound path is the write queue flushed through the adapter's write call." src="docs/diagrams/system-map-light.svg">
-</picture>
+<img alt="The ticket page for PAY-231, Retry failed SEPA payouts, chosen as the job. A yellow card on the left lists its epic, people, logged time and a table of what surrounds the ticket, each row with its worst state, and a Stop and log button. On the right are the description, attachments and conversation. A timer in the top bar reads 0:34:00." src="docs/screenshots/job.webp">
 
-`submit_write` stores the write and returns at once. Before sending, the flush
-loop compares the mirror's copy of the target with the snapshot taken when the
-write was queued. A held or refused write waits for a person. Nothing times
-out or applies itself.
+<sub>Made-up data from a fictional company. Each release redraws these pictures. These are from <!-- shots-version -->main<!-- /shots-version -->.</sub>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/write-queue-dark.svg">
-  <img alt="Write queue states: a submitted write is pending; it becomes sent if the target is unchanged, held if the target changed in the mirror, or refused if the source rejects it; held and refused writes return to pending only when a person acts." src="docs/diagrams/write-queue-light.svg">
-</picture>
+## Everything about a ticket on one page
 
-The suggestion pass proposes links and never confirms one. The sync scheduler
-requests a pass whenever a sync run ends OK, and does not wait for it. Each pass
-runs on its own connection, and requests that arrive during a pass share the
-next one.
+Pick a ticket and it becomes your job. Its code, builds, docs and monitors sit on one card, so you see what is failing before you open anything.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/suggestion-pass-dark.svg">
-  <img alt="Suggestion pass: a sync run that ends OK makes the scheduler request a pass, without waiting; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; accept or dismiss updates the same row and writes an activity line." src="docs/diagrams/suggestion-pass-light.svg">
-</picture>
+## Search everything from one box
 
-The diagrams are hand-written SVG, one file per theme, checked against the code
-at `3c3bb715`. Nothing regenerates them, so update both themes when the code
-they show changes.
+Press ⌘K to find tickets, pages, pull requests and more, then act on them from the keyboard.
 
-## Quickstart
+<img alt="The launcher open over the Tickets page with the query payout. Results are grouped into ticket views, link sets and tickets, each row with a coloured kind monogram. The footer lists the keys for move, open, actions, back one step and everything, and a Save as list button." src="docs/screenshots/launcher.webp">
 
-You need [rustup](https://rustup.rs) (`rust-toolchain.toml` pins Rust 1.99),
-Node 20.19+ or 22.12+ (Vite 8's requirement) and
-[`just`](https://github.com/casey/just).
+## One inbox for whatever needs you
+
+Review requests, mentions, failed builds and alerts land in one list, each with its next step on the row.
+
+<img alt="The Inbox: a list of rows such as a review request, a monitor that is down and a failed build, each naming its job, with buttons like Review, Open monitor, Ack, Open log, Re-run, Snooze and Done." src="docs/screenshots/inbox.webp">
+
+## All your tickets on one board
+
+Every ticket system together, with saved views. *Start work* creates the branch and pull request and starts the timer.
+
+<img alt="The Tickets page. Saved views on the left, grouped into Mine, Team, Epics, Projects and Jira boards. A ticket board in the middle with To Do, In Progress, In Review and Done columns. A preview of the selected ticket on the right with a Start work button." src="docs/screenshots/tickets.webp">
+
+## Review code without leaving
+
+Read diffs, comment and merge from the same window.
+
+<img alt="Pull request 142, Idempotent retry window, on its Files changed tab. A tree of changed files on the left with its keyboard shortcuts, and a syntax-highlighted unified diff of src/sepa/retry.rs on the right with word-level marks and a resolved comment thread." src="docs/screenshots/pull-request.webp">
+
+Files draw as what they are: Markdown, diagrams, PDFs and images.
+
+<img alt="The Files tab of the payout-service repository with docs/flow.d2 selected in the file tree, drawn as a D2 diagram of boxes for shop, api, db and psp joined by labelled arrows. A Render as menu sits above it." src="docs/screenshots/file.webp">
+
+## See why a build failed
+
+A failed run opens on the failing test, and tells you whether it failed before.
+
+<img alt="Build 1187 of Payout_IntegrationTests, marked FAILURE. A coloured bar shows each build step and how long it took. A red panel names the failed test and its assertion, says it also failed in build 1185 on this branch and that build 1186 on main passed, and offers Show it in the log, Open the test file and Create ticket. Pipelines with their recent results fill the left rail." src="docs/screenshots/build.webp">
+
+## Confluence pages, drawn in full
+
+Read and write pages here, with the ones that mention you first.
+
+<img alt="The Docs page showing a page called SEPA payout retry design: a tree of the Engineering space on the left, the page in a serif typeface in the middle with an info panel that names ticket PAY-231 and its status, a YAML code block, and an On this page outline on the right." src="docs/screenshots/docs.webp">
+
+## Every monitor at a glance
+
+All your Uptime Kuma checks with their last 24 hours. Acknowledge or pause one from its row.
+
+<img alt="The Monitors table: six checks with their state, such as down, slow, pending and up, a 24-hour bar, response time and 30-day uptime, with Ack, Pause and Hide on each row." src="docs/screenshots/monitors.webp">
+
+## Time tracking that fills in your worklogs
+
+Run a timer, and knobas offers up what else you worked on. Send it all to Jira when you are done.
+
+<img alt="The Time page for one day. Totals read 4h 7m tracked, 35m logged and 2h 10m to log. A strip from 08:00 to 18:00 shows tracked, logged, offered and running blocks. Below it each block is a row with its state and buttons such as Log, Add to PAY-231 and Dismiss." src="docs/screenshots/time.webp">
+
+## Your standup, already drafted
+
+Yesterday, today and blockers, ready to copy or publish to Confluence.
+
+<img alt="The Standup tab. A digest on the left lists yesterday, today, blockers and infrastructure, with a Copy as text button. A protocol on the right has a notes field per attendee, action items, and a Publish to Confluence button." src="docs/screenshots/standup.webp">
+
+## Bring your own sources
+
+Connect the built-in sources, or install a sandboxed adapter for anything else.
+
+<img alt="Settings on its Sources page: seven sources in a list, each with a green dot, its host, its item count and when it last synced, with Add a source and Sync all buttons above." src="docs/screenshots/sources.webp">
+
+## It stays on your machine
+
+Your data syncs to a database on your computer, and your credentials stay in the OS keychain. Anything you change goes through a queue you can see, and a conflict waits for you to decide. [How it works](docs/how-it-works.md) has the details.
+
+## Get it
+
+[Download the latest release](https://github.com/BFoerschner/knobas/releases/latest) for macOS (Apple Silicon), Windows or Linux. The first launch downloads PostgreSQL once, so it needs network.
+
+Nothing is signed yet, so your system will object. On macOS, run this after installing:
 
 ```bash
-just deps     # npm ci in app/
-just check    # the full quality gate
-just dev      # the app, default profile
-just demo     # the app, demo profile, where the sample data loads
+xattr -dr com.apple.quarantine /Applications/knobas.app
 ```
 
-The first `just dev` or test run downloads PostgreSQL 18.6 once and needs
-network. [docs/development.md](docs/development.md) covers the gate, profiles,
-releases, the crates and the frontend rules.
+On Windows, choose *More info*, then *Run anyway*.
 
-## Documents
+## Try it in a browser
 
-- Design spec: `docs/specs/2026-08-23-knobas-design.md`
-- Glossary: `CONTEXT.md`
-- Architecture decisions: `docs/adr/`; dated rulings: `docs/decisions/`
-- Roadmap: `docs/roadmap.md`
-- Frozen contracts (`Source` trait, migrations, IPC): `docs/contract.md`
-- Test environment and live suites: `testenv/README.md`
-- Agent workflow: `docs/agents/`
-- UI mockups: `mockups/`
+Click around on the same made-up data as these pictures. You only need Node 20.19+ or 22.12+.
+
+```bash
+npm ci --prefix app
+npm run dev --prefix app
+```
+
+Then open <http://localhost:1420/?fake-ipc>.
+
+## Build it from source
+
+You need [rustup](https://rustup.rs), Node and [`just`](https://github.com/casey/just).
+
+```bash
+just deps
+just dev
+```
+
+[docs/development.md](docs/development.md) has everything else.
+
+## Built by agents
+
+Agents wrote knobas, in over 1,100 merged pull requests in its first eleven weeks. Björn makes the decisions, and [the working model](docs/agents/working-model.md) has the rest.

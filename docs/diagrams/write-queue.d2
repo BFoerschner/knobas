@@ -1,0 +1,42 @@
+# docs/how-it-works.md's write queue states. `just readme-diagrams` renders it in both themes.
+#
+# The states are `knobas.write_queue`'s, and the words on the arrows are the queue's
+# own buttons (app/src/lib/shell/WriteQueue.svelte). Amber is the only way out to a
+# source. TALA leaves little room for long arrow labels, so detail goes in the boxes.
+
+direction: right
+
+classes: {
+  write: {
+    style: {
+      stroke: "#D97706"
+      stroke-width: 2
+      font-color: "#D97706"
+    }
+  }
+  write-box: {
+    style: {
+      stroke: "#D97706"
+      stroke-width: 2
+    }
+  }
+}
+
+pending: "pending\n\ndue, oldest first\nwaits while the source is\nunreachable or refuses sign-in"
+held: "held\n\nthe target changed,\nthe source was turned off,\nor it was sent with no answer"
+refused: "refused\n\nthe source said no\nnever retried on its own"
+sent: "sent" {
+  class: write-box
+}
+discarded: "discarded"
+
+pending -> sent: Source::write {
+  class: write
+}
+pending -> held
+pending -> refused
+held -> pending: Send again
+refused -> pending: Edit
+pending -> discarded: Cancel
+held -> discarded: Discard
+refused -> discarded: Discard

@@ -1,5 +1,6 @@
 # The release build: for one tag, a macOS `.dmg`, a Windows `.exe`/`.msi`, and
-# a Linux `.deb`/`.rpm`/`.AppImage`.
+# a Linux `.deb`/`.rpm`/`.AppImage`; then the README's screenshots, shot from the
+# same tag and committed to `main`.
 #
 # It does not gate anything and it is not a backstop: the gate is still a local
 # `just check` (`working-model.md` review-economics rule 4). Its whole job is to
@@ -289,3 +290,66 @@ jobs:
           fi
           printf 'uploading %s\n' "${files[@]}"
           gh release upload "$TAG" "${files[@]}" --clobber
+
+  # The README's pictures, redrawn from the tag and committed to `main`
+  # (docs/development.md, *README screenshots*). After the bundles, so a release
+  # that did not build changes no README; before the publish click, so the README
+  # is already right when the release goes out. A dispatch is still the only
+  # trigger: this is a job in the release run, under the manual-only rule above.
+  #
+  # Linux because it is the cheap runner, and the app's fonts are its own (npm
+  # packages), so the pictures do not depend on what the runner has installed. No
+  # Rust: the shots run against the Vite dev server and the `?fake-ipc` fixture.
+  # A step that no longer finds its button fails this job and leaves the README's
+  # pictures as they were; the installers are already uploaded by then.
+  readme:
+    needs: [draft, bundle]
+    runs-on: ubuntu-latest
+    # The shots take about 3 minutes. What this bounds is a stuck dev server or Chrome.
+    timeout-minutes: 20
+    steps:
+      # Every tag and every branch tip: the next step reads the tags, and the
+      # commit goes on top of `main` rather than the tag it was shot from.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.draft.outputs.tag }}
+          fetch-depth: 0
+
+      # Re-running an old tag's Windows leg must not roll the README back. A tag
+      # with a suffix (`v3.0.0-rc1`) is never the newest, so a release candidate
+      # leaves it alone too. `sed -n 1p`, not `head -1`, so nothing dies of SIGPIPE.
+      # A tag from before this job has no script to run.
+      - id: plan
+        name: Is this the newest release?
+        env:
+          TAG: ${{ needs.draft.outputs.tag }}
+        run: |
+          newest=$(git tag --list 'v*' --sort=-v:refname | grep -v -e '-' | sed -n 1p)
+          if [ "$TAG" != "$newest" ]; then
+            echo "::notice::$TAG is not the newest release, $newest is; the README keeps its pictures."
+          elif [ ! -x scripts/readme-shots.sh ]; then
+            echo "::notice::$TAG has no scripts/readme-shots.sh; the README keeps its pictures."
+          else
+            echo "shoot=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.plan.outputs.shoot == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install the frontend's dependencies
+        if: steps.plan.outputs.shoot == 'true'
+        run: npm ci --prefix app
+
+      - name: Shoot the README's pictures
+        if: steps.plan.outputs.shoot == 'true'
+        run: scripts/readme-shots.sh 0 "$RUNNER_TEMP/readme-shots"
+
+      - name: Commit them to main
+        if: steps.plan.outputs.shoot == 'true'
+        env:
+          TAG: ${{ needs.draft.outputs.tag }}
+        run: scripts/readme-shots-publish.sh "$TAG" "$RUNNER_TEMP/readme-shots"

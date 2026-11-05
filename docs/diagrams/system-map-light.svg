@@ -1,192 +1,59 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- knobas system-map (light). Hand-authored SVG, checked against the code at main 3c3bb715 (2026-10-14). Edit both themes together. -->
-<svg xmlns="http://www.w3.org/2000/svg" width="1330" height="570" viewBox="0 0 1330 570" role="img" aria-label="knobas architecture: sources feed adapters, the sync scheduler upserts into the sync schema of one embedded Postgres, search and the Tauri app read it, and the only outbound path is the write queue flushed through the adapter's write call.">
-  <defs>
-    <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
-    <marker id="aha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mka" d="M0,0 L10,5 L0,10 z"/></marker>
-  </defs>
-  <style>.bx{fill:#FFFFFF;stroke:#C4C9CF;stroke-width:1}
-.bx2{fill:#F1F2F3;stroke:#C4C9CF;stroke-width:1}
-.bxd{fill:none;stroke:#C4C9CF;stroke-width:1;stroke-dasharray:4 4}
-.bxa{fill:#F1F2F3;stroke:#A86200;stroke-width:1.5}
-.grp{fill:none;stroke:#E1E4E8;stroke-width:1}
-.hl{stroke:#C4C9CF;stroke-width:1}
-.t{fill:#1D2024;font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13.5px;font-weight:600}
-.s{fill:#555C64;font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:11.5px}
-.m{fill:#1D2024;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
-.mf{fill:#68707A;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:10.5px}
-.h{fill:#68707A;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em}
-.lb{fill:#555C64;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px}
-.lba{fill:#A86200;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px}
-.bad{fill:#C2362B}
-.ar{fill:none;stroke:#555C64;stroke-width:1.25}
-.ara{fill:none;stroke:#A86200;stroke-width:1.5}
-.mk{fill:#555C64}
-.mka{fill:#A86200}</style>
-  <rect x="0" y="0" width="1330" height="570" rx="6" fill="#FAFAF9"/>
+<?xml version="1.0" encoding="utf-8"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" data-d2-version="v0.9.0" preserveAspectRatio="xMinYMin meet" viewBox="0 0 1511 1302"><svg class="d2-1313425148 d2-svg" width="1511" height="1302" viewBox="-262 -21 1511 1302"><rect x="-262" y="-21" width="1511" height="1302" rx="0" fill="#FFFFFF" class=" fill-N7" stroke-width="0" /><style type="text/css"><![CDATA[
+.d2-1313425148 .text {
+	font-family: "d2-1313425148-font-regular";
+}
+@font-face {
+	font-family: d2-1313425148-font-regular;
+	src: url("data:application/font-woff;base64,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");
+}
+.d2-1313425148 .text-bold {
+	font-family: "d2-1313425148-font-bold";
+}
+@font-face {
+	font-family: d2-1313425148-font-bold;
+	src: url("data:application/font-woff;base64,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");
+}
+.d2-1313425148 .text-italic {
+	font-family: "d2-1313425148-font-italic";
+}
+@font-face {
+	font-family: d2-1313425148-font-italic;
+	src: url("data:application/font-woff;base64,d09GRgABAAAAAA4IAAoAAAAAFewAARhRAAAAAAAAAAAAAAAAAAAAAAAAAABPUy8yAAAA9AAAAGAAAABgW1SVeGNtYXAAAAFUAAAAlgAAAMQDngPEZ2x5ZgAAAewAAAd+AAAKeEcZHc5oZWFkAAAJbAAAADYAAAA2G7Ur2mhoZWEAAAmkAAAAJAAAACQLeAjHaG10eAAACcgAAACMAAAAjDllBAJsb2NhAAAKVAAAAEgAAABIMhg07m1heHAAAAqcAAAAIAAAACAAOwD2bmFtZQAACrwAAAMrAAAIMgntVzNwb3N0AAAN6AAAACAAAAAg/8YAMgADAeEBkAAFAAACigJY//EASwKKAlgARAFeADIBIwAAAgsFAwMEAwkCBCAAAHcAAAADAAAAAAAAAABBREJPAAEAIP//Au7/BgAAA9gBESAAAZMAAAAAAeYClAAAACAAA3icdM07TsIAHIDxX2191ar1rfW5qYkn8AoOHsE4EhbCQrgNjyuQwMRdegE2WP+ETizkG3/Dh0QqQSEzQ6WUyr159+nLtx+//rR09PQjaOxjy/61dTcWdSxjFYuoYxqTmMc4RjGMQXPYVeLJi1eVR3tSzzL7Dhw6cix3onDqzLnShUtXrt24defeA2sAAAD//wMAposjTQAAeJx8lX9sG2cZx5/nvctdk7hJ7LPvYtc/Yt/5LnHOduKLfU0T/2p+ObHdNumShjVJm0KrrgtToMsEtKWloGogKJ00hIqAIQbSWP+pOgmJHxrShEQ2VAmkChWtE9pgKWqZtllRxab1Dp3jJk7/4J9Xr073Ps/z/bzP832hASQA8gx5EShohFZwgAtA44IUpem6KFCaoogsqyscx0oXcfXij+ihJ9/v/NknaoAe+8aviv85eo28+HAJL8yfP28cfv748UP37xsR/Nt9AAAEEYAcIlfAZsXUKA01lhMplhW/uS9P4fjsgx9Mfv3bUXLF+D0Of2Ys4bFLdwCAwKC5ThbIj6ENOgAaQnKyL0O0BM+7nC1ESWRIsk8WQy3E5eQx8MxKbGZldOJ4X2zm2aHkoUxoYp+1jtt+eLZ4ZWVk+MzB4gsrI0ODx1b6F1cGjq3sOfpcNYdiruN/sQJOq0phM4eg6Rol6iLDKImUrsuPEr2WK6kTC5qSttNcZjG7gxZnHfJ+SXUlvNJQMtBrOzw9+tU5rTOYNjyFcDwXi/9dDkXG5xPZtMWCQMBcx4/IKrgs4kJIVkRW5DSW1VIpLbFdGcOyPH9PSdspZ/ZyWeGJ9ES0mj4pDSX9PV2hSTHm1GydwTRZff2or/vJGSt1LjI+r2XSkfBdOQQIYXMdb2AFvNvUsZYghnE5eS2R0gWGub3/C2p5MakO8lFO9vXMpPr3dKT4kKdsOzE/fHo6HnL3CK7h5aG9ox57whmGR+yIUqdli93/h7fHQbXJ5Ss1evvCj9NTOo68/nD34/hIVcsfsAIeCNfn411Ohg0y/CMtlJZKJfuqCv8181S0ONej5/22BuOPjR1DEV+/4PdNXjUJ5egSkwu2U4sjy1Nq7EDCq7VkD4Tdds0VwHBz+05vb2AaELoB8HvkFghW74pZUr2mGj+W1ViR6p7ONufbWvelPRHHrqZd9mDXDvsx2+en8ZX+hsmJgzubdbYp0X0wY8xazNCUsIIVCECsqkHRN+rWGUasJ6hRDENto3etd0aUvCOdmYkWt/xEPH2ge3yuV87YKS57gjvdL06Guvler5jX/PE7si8phEq5k7I6Mz307OcSVj9SR05gsDvyFznUNTrbMzBg3SFCAABvk1VwW/rq+pClRM7CaLUhFbhc7mmju6bUTHJHpjRI0wVvITZCVu+nxXh+d0Ay3kLV2b6zGIkZr5imFRM+JTeIbM0tMBAsbOX6gKxu+gBn+YDCsoHL5aPkk9k3VvbNL3vIquFD/LPx/gdfPgMIqrkOn5JVcFi0kn06Z4FxOWtX/cU8c6Z8DtFOMSw28bas3U2efvgC20g5kAzQ9GZecg8rEKnmrUkUakKZbUrrRS9mWVo+KO/pbYjPhtMpms6U0zQ95iqoIxaDUb7QPYJr41Kv3qlq+d12v7Oew9ZuU/ttrEB7fQ2PY7Yydk3FtlGuZngc8ub84dtYgVbw1c/DholYUR8N+a39C+rEQmL/EbW4EIlOaqmEtdhOHh45PR3bWHN7l4f3jg0tD+8dtWKbD0wNP8LKxmyzdRW3ELHqWiy3zaeavpNlqPB0rGpQCXmQI47AL+t96iZ5LReI1gY8cPIlxJpRyf8OB7f64yxWoK2OkcDKj9g0075S1O3a1eaRSoE0rs2r6cbhHdkB4yag+Zm5juewAkr9VCX7ZEWWk331Q+ty8oL1hDDMy73z7h4hJ0fSXbtj/eq4GpvwxjgtKPemOjJ9PVO2vk450BkTPUrAk+nqzoclf6fTEw34ZUdoUI0Oh62aB811nCVLm/6a0jkxS7SqM9T5629yfTT2jzWXpPyuM7Zz/ZQ31OJptrfFbdloq2cnOvobLl3KGPccDr+/qUFnW63Yu811/BDXwL0Ve6v7uZrFXtvszIJvTB0pWY9S5xO2vbo9wGHKuMW5rZbBWcMzIWobnAcA8F1cg50A1hTyvKClrIB4cawk0QxN2yXu+2XjIa4Zd8WiKI1L6DY8G2dHAcifcA2Cj53d2lEiJcuKyDAs9ZRYakNEunVX24WinRCkWzxt5wvvHGmpfvW1Podrxnuh4VBoOIT+up0Hm8SCJBVE4wGg+YYZx3/iGngA2OrdWvr1bZW3EKapo8XtcITzbsfBktywg6LtYcd3S8Z77oHCX1m2vzGdEPGu8WGwLIqlENoffhwvq1VN5rvmHFyBJavvWCWV0qtGXHMHZ3O8nyW8X/R5vE/+IuYYlDy8W5H848sAYJogmOuwiu8QBUKQwy8BAyErJlzAV+Fj8hI0AHC6rrHsBaG1yEXw1atzc1cBzTvmt/C6+WugAFg9yErN+GbT2USiejZvHsBD5G1oBRA22lcXGOsB5YWvtQf1kxPRU0uNzpbruZenVt783bz7kvGPn8ZOHJUtLbfMA3CvdlZJOax30HpirH7H6KmnGx2tCSvEdc8lDP4kfuKIzOV+PrXy1m9r8wc3cc2qyfLnwGL5GK5VLx5hjBThBrkBzQBcHZ6vcH5RcPpEUhR4d7Cdd3cAVpk8D0vWv0Ldv6O8W/Hy7WGbl/eoPt6twv8AAAD//wMAxKwryQAAAAEAAAABGFEgTzcDXw889QABA+gAAAAA2F2gzAAAAADdZi83/r3+3QgdA8kAAgADAAIAAAAAAAAAAQAAA9j+7wAACED+vf28CB0D6ADC/9EAAAAAAAAAAAAAACMCdAAkAMgAAAIvACMCeQA8AhkAJwIYAB8BswAlAhcAJwHhACUBGgArAhMAAQILAB8A7QAfAdwAHwD4ACwDHwAfAg0AHwIDACcCF//2AVYAHwGS//wBRQA8AhAAOAHAADsCwwBGAcD/wgDy/+EA8gAXAPIAgAHj/9wBIwBBASX/1ADtAB8AAABHAPIAFwAAAC4ALgBKAHwAtADsARoBUgGMAbQB/AImAjICTAJuArAC2gMIA0IDYAOcA8oD9gQUBE4EfgScBKgEuATGBOQFAgUQBSYFPAABAAAAIwCMAAwAZgAHAAEAAAAAAAAAAAAAAAAABAADeJyclN1uGlcUhT9ioE3/Liorcm6sc5lKzuBGcZTEV+M6VkZFkDKkP1JVaYAxIGBmxAw4zhP0um/Rt8hVH6NPUfW62psNYSKrVlAUaw1n/6yz9toH2Odf9qhU7wJ/1ZeGKxzWfzZ8hy/qTcN7nNU/M1zlqPa34RqD2lvDdR7UOoY/4V31D8Of8rj6m+G7HFQvDH/Oo+q+4S/3HP8Y/orHvFvhCjzld8MVDsgM32GfXw3vcQ+rWalyj2PDNb7m0HCdQ6DLmIIpYxKGOC4ZM2TBnJickJg5Yy6JGeAI8JlS6K8JkSLH8MZfI0IK5kRacUSBY0rIlIickVV8q1kpr7Sj9Jkrkm4+BSMiepoxISLBkTIkJSFmonUKCjKe06BBTl/5ZhTkeOSMmeKRMmdIgzYXNOkyYkyO40IrCbOQlEsKroi0v7MIUaZPTEJurBYkDJSnU36xZgc0cbTJNHa7crNU4QjHj5ot3CTG8S2e/ndbzMp912wilqqnaNhjqjyvdIIjVVz6+vyguOA5bid9ykxu12ig7GTWY3osdP4yP8kTJgnOHeATqoNCdx/HmX4HhKrITwR0eUmb13T126dDB58WXQJeaG6bDo7vaNPiXDMCxauzC3VMi19wfE+gMVI7Nn1Ec/l6Q2buFu7iDLnHjEy3QGYs9xfnxztNWHYoLbkjV1f0dY8kUvZAVJE9ixiaKzJ1xUy1XHsjN/0G5gg5LXS2789lG5a2e+stvibVHXYsjJNMbsXotql6H3jmSv95RAxI6WlEn5QZDQqu9W6viFgwxXGuPn6pW1Lgb3Kkz7W6JGamDAISrTMn07+R+SY07v2S7529JbJ5M93RyeZWu3SRysnWjF6reuuz0FSOtybQsKmmliMTlsqrm4r3Jdor8Q/V/bm+bikPCbSuTLJ/4ytwzDNOOGWkXaR6wnJzJq+ERJyqAhNijZI3841q9QiPEzyecMIJz3jygZZrNs74uBKf7f4+55zR5vTW26xi25zxolTt/zv/qWyP9T6Oh5uvpztP88FHuPYbjkrvZkdfA9mgpVV7vx0tImbCxR1sa+Hu4/0HAAD//wMAcqFRQAAAAwAA//UAAP/OADIAAAAAAAAAAAAAAAAAAAAAAAAAAA==");
+}]]></style><style type="text/css"><![CDATA[.shape {
+  shape-rendering: geometricPrecision;
+  stroke-linejoin: round;
+}
+.connection {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.blend {
+  mix-blend-mode: multiply;
+  opacity: 0.5;
+}
 
-  <!-- column heads -->
-  <text class="h" x="20" y="36">SOURCES</text>
-  <text class="h" x="260" y="36">ADAPTERS</text>
-  <text class="h" x="530" y="36">BACKGROUND WORK</text>
-  <text class="h" x="820" y="36">ONE DATABASE</text>
-  <text class="h" x="1130" y="36">THE APP</text>
-  <line class="hl" x1="20" y1="46" x2="1310" y2="46"/>
-
-  <!-- A: sources -->
-  <rect class="bx" x="20" y="80" width="160" height="40" rx="3"/>
-  <text class="t" x="32" y="97">Jira DC</text><text class="s" x="32" y="112">tickets · REST v2</text>
-  <rect class="bx" x="20" y="132" width="160" height="40" rx="3"/>
-  <text class="t" x="32" y="149">Confluence DC</text><text class="s" x="32" y="164">pages · REST v1 + CQL</text>
-  <rect class="bx" x="20" y="184" width="160" height="40" rx="3"/>
-  <text class="t" x="32" y="201">Gitea</text><text class="s" x="32" y="216">repos · PRs · commits</text>
-  <rect class="bx" x="20" y="236" width="160" height="40" rx="3"/>
-  <text class="t" x="32" y="253">TeamCity</text><text class="s" x="32" y="268">builds</text>
-  <rect class="bx" x="20" y="288" width="160" height="40" rx="3"/>
-  <text class="t" x="32" y="305">Uptime Kuma</text><text class="s" x="32" y="320">monitors · /metrics</text>
-  <rect class="bxd" x="20" y="340" width="160" height="40" rx="3"/>
-  <text class="t" x="32" y="357">Tidewater fixture</text><text class="s" x="32" y="372">mock · loads in demo only</text>
-
-  <text class="lb" x="220" y="70" text-anchor="middle">HTTP(S)</text>
-  <line class="ar" x1="180" y1="100" x2="258" y2="100" marker-end="url(#ah)"/>
-  <line class="ar" x1="180" y1="152" x2="258" y2="152" marker-end="url(#ah)"/>
-  <line class="ar" x1="180" y1="204" x2="258" y2="204" marker-end="url(#ah)"/>
-  <line class="ar" x1="180" y1="256" x2="258" y2="256" marker-end="url(#ah)"/>
-  <line class="ar" x1="180" y1="308" x2="258" y2="308" marker-end="url(#ah)"/>
-  <line class="ar" x1="180" y1="360" x2="258" y2="360" marker-end="url(#ah)" stroke-dasharray="4 4"/>
-  <!-- outbound: write lands at a source -->
-  <path class="ara" d="M260,452 L200,452 L200,96" marker-end="url(#aha)"/>
-  <text class="lba" x="192" y="470" text-anchor="end">to the item's</text>
-  <text class="lba" x="192" y="484" text-anchor="end">own source</text>
-
-  <!-- B: adapter panel -->
-  <rect class="bx" x="260" y="80" width="180" height="400" rx="3"/>
-  <text class="t" x="274" y="102">Source trait</text>
-  <text class="mf" x="274" y="118">knobas-source-* · one crate each</text>
-  <text class="m" x="274" y="144">descriptor()</text>
-  <text class="m" x="274" y="164">test_connection()</text>
-  <text class="m" x="274" y="184">sync(cursor, sink)</text>
-  <text class="m" x="274" y="204">reachable_transitions()</text>
-  <text class="m" x="274" y="224">view()</text>
-  <text class="m" x="274" y="244" style="fill:#A86200">write(op)</text>
-  <line class="hl" x1="274" y1="262" x2="426" y2="262"/>
-  <text class="s" x="274" y="284">Descriptor declares kinds,</text>
-  <text class="s" x="274" y="300">capabilities and the config</text>
-  <text class="s" x="274" y="316">schema the Add-source form</text>
-  <text class="s" x="274" y="332">is generated from.</text>
-  <line class="hl" x1="274" y1="350" x2="426" y2="350"/>
-  <text class="mf" x="274" y="372">knobas-http</text>
-  <text class="s" x="274" y="388">retry · classify faults</text>
-
-  <!-- keychain -->
-  <rect class="bx2" x="260" y="510" width="180" height="44" rx="3"/>
-  <text class="t" x="274" y="528">OS keychain</text><text class="mf" x="274" y="544">knobas-secrets</text>
-  <line class="ar" x1="350" y1="510" x2="350" y2="482" marker-end="url(#ah)"/>
-  <text class="lb" x="358" y="500">secrets</text>
-
-  <!-- C: background work -->
-  <rect class="bx" x="530" y="80" width="200" height="124" rx="3"/>
-  <text class="t" x="544" y="100">Sync scheduler</text><text class="mf" x="544" y="115">knobas-sync</text>
-  <text class="s" x="544" y="137">due 5 min after last run ends</text>
-  <text class="s" x="544" y="155">≤ 3 runs, own connection each</text>
-  <text class="s" x="544" y="173">fail: 1→2→5→15→60 min</text>
-  <text class="s bad" x="544" y="191">401: stop, ask for password</text>
-
-  <line class="ar" x1="440" y1="142" x2="528" y2="142" marker-end="url(#ah)"/>
-  <text class="lb" x="485" y="135" text-anchor="middle">SyncItems</text>
-
-  <line class="ar" x1="630" y1="204" x2="630" y2="288" marker-end="url(#ah)" stroke-dasharray="4 4"/>
-  <text class="lb" x="638" y="240">run ended,</text>
-  <text class="lb" x="638" y="255">via the tray</text>
-
-  <rect class="bx" x="530" y="290" width="200" height="70" rx="3"/>
-  <text class="t" x="544" y="310">Suggestion pass</text><text class="mf" x="544" y="325">knobas-app</text>
-  <text class="s" x="544" y="345">one at a time, own connection</text>
-
-  <rect class="bxa" x="530" y="388" width="200" height="96" rx="3"/>
-  <text class="t" x="544" y="408">Write-queue flush</text><text class="mf" x="544" y="423">knobas-sync · sole caller of write()</text>
-  <text class="s" x="544" y="443">re-reads target in mirror</text>
-  <text class="s" x="544" y="461">moved since queued → held</text>
-  <text class="s" x="544" y="479">per-entity order</text>
-
-  <line class="ara" x1="530" y1="452" x2="442" y2="452" marker-end="url(#aha)"/>
-  <text class="lba" x="485" y="445" text-anchor="middle">WriteOp</text>
-
-  <!-- D: postgres -->
-  <rect class="grp" x="820" y="56" width="220" height="508" rx="4"/>
-  <text class="t" x="834" y="78">Postgres 18.6, embedded</text>
-  <text class="mf" x="834" y="94">127.0.0.1 · migrations 0001–0033</text>
-
-  <rect class="bx" x="835" y="108" width="190" height="156" rx="3"/>
-  <text class="t" x="849" y="128">sync · the mirror</text>
-  <text class="m" x="849" y="150">item <tspan class="mf">raw payload kept</tspan></text>
-  <text class="m" x="849" y="168">item_revision</text>
-  <text class="m" x="849" y="186">item_parent · item_project</text>
-  <line class="hl" x1="849" y1="200" x2="1011" y2="200"/>
-  <text class="m" x="849" y="220" style="fill:#245FC7">live_item <tspan class="mf">view</tspan></text>
-  <text class="s" x="849" y="237">not tombstoned and</text>
-  <text class="s" x="849" y="253">source enabled</text>
-
-  <rect class="bx" x="835" y="280" width="190" height="276" rx="3"/>
-  <text class="t" x="849" y="300">knobas · owned</text>
-  <text class="m" x="849" y="324">link <tspan class="mf">proposed · confirmed</tspan></text>
-  <text class="m" x="849" y="342">entity <tspan class="mf">ids · tombstones</tspan></text>
-  <text class="m" x="849" y="360">context · note</text>
-  <text class="m" x="849" y="378">asset · route</text>
-  <text class="m" x="849" y="396">block · timer · worklog</text>
-  <text class="m" x="849" y="414">heartbeat · sync_run</text>
-  <text class="m" x="849" y="432">activity <tspan class="mf">append-only</tspan></text>
-  <text class="m" x="849" y="454" style="fill:#A86200">write_queue</text>
-  <text class="m" x="849" y="476">inbox_state · smart_list</text>
-  <text class="m" x="849" y="494">source_config · setting</text>
-  <line class="hl" x1="849" y1="508" x2="1011" y2="508"/>
-  <text class="s" x="849" y="528">Never written to a source,</text>
-  <text class="s" x="849" y="544">except via write_queue.</text>
-
-  <!-- C to D -->
-  <line class="ar" x1="730" y1="142" x2="833" y2="142" marker-end="url(#ah)"/>
-  <text class="lb" x="777" y="135" text-anchor="middle">upsert</text>
-  <text class="lb" x="777" y="160" text-anchor="middle">sweep→tomb</text>
-  <line class="ar" x1="730" y1="320" x2="833" y2="320" marker-end="url(#ah)"/>
-  <text class="lb" x="777" y="313" text-anchor="middle">proposes</text>
-  <line class="ara" x1="835" y1="450" x2="732" y2="450" marker-end="url(#aha)"/>
-  <text class="lba" x="777" y="443" text-anchor="middle">due rows</text>
-
-  <!-- E: app -->
-  <rect class="bx" x="1130" y="108" width="180" height="84" rx="3"/>
-  <text class="t" x="1144" y="128">knobas-search</text>
-  <text class="s" x="1144" y="148">FTS over live items, notes,</text>
-  <text class="s" x="1144" y="164">assets and routes</text>
-  <text class="mf" x="1144" y="182">p90 &lt; 100 ms · search-perf</text>
-  <line class="ar" x1="1025" y1="150" x2="1128" y2="150" marker-end="url(#ah)"/>
-  <text class="lb" x="1077" y="143" text-anchor="middle">reads</text>
-
-  <line class="ar" x1="1220" y1="192" x2="1220" y2="222" marker-end="url(#ah)"/>
-
-  <rect class="bx" x="1130" y="224" width="180" height="150" rx="3"/>
-  <text class="t" x="1144" y="244">knobas-app</text>
-  <text class="mf" x="1144" y="259">Tauri commands · events</text>
-  <text class="s" x="1144" y="282">links, notes, contexts</text>
-  <text class="s" x="1144" y="299">timer, blocks, assets</text>
-  <text class="s" x="1144" y="316">estate, time, inbox</text>
-  <text class="s" x="1144" y="340" style="fill:#A86200">submit_write → queue</text>
-  <text class="mf" x="1144" y="360">uses knobas-core</text>
-
-  <line class="ar" x1="1130" y1="300" x2="1027" y2="300" marker-end="url(#ah)"/>
-  <text class="lb" x="1077" y="293" text-anchor="middle">writes</text>
-  <line class="ara" x1="1130" y1="336" x2="1080" y2="336" />
-  <path class="ara" d="M1080,336 L1080,450 L1027,450" marker-end="url(#aha)"/>
-  <text class="lba" x="1088" y="400">enqueue</text>
-
-  <line class="ar" x1="1220" y1="376" x2="1220" y2="406" marker-start="url(#ah)" marker-end="url(#ah)"/>
-  <text class="lb" x="1228" y="395">invoke · events</text>
-
-  <rect class="bx" x="1130" y="408" width="180" height="146" rx="3"/>
-  <text class="t" x="1144" y="428">Svelte window</text>
-  <text class="mf" x="1144" y="443">app/src</text>
-  <text class="s" x="1144" y="466">Launcher ⌘K</text>
-  <text class="s" x="1144" y="484">Rooms · tiles · tray</text>
-  <text class="s" x="1144" y="502">Detail · Inbox · Time</text>
-  <text class="s" x="1144" y="520">Assets tree</text>
-  <text class="s" x="1144" y="538">Capture window</text>
-</svg>
+		.d2-1313425148 .fill-N1{fill:#0A0F25;}
+		.d2-1313425148 .fill-N2{fill:#676C7E;}
+		.d2-1313425148 .fill-N7{fill:#FFFFFF;}
+		.d2-1313425148 .fill-B1{fill:#0A0F25;}
+		.d2-1313425148 .fill-B2{fill:#676C7E;}
+		.d2-1313425148 .fill-B4{fill:#CFD2DD;}
+		.d2-1313425148 .fill-B5{fill:#DEE1EB;}
+		.d2-1313425148 .fill-B6{fill:#EEF1F8;}
+		.d2-1313425148 .stroke-B1{stroke:#0A0F25;}
+		.d2-1313425148 .stroke-B2{stroke:#676C7E;}.appendix text.text{fill:#0A0F25}.md{--color-fg-default:#0A0F25;--color-fg-muted:#676C7E;--color-fg-subtle:#9499AB;--color-canvas-default:#FFFFFF;--color-canvas-subtle:#EEF1F8;--color-border-default:#0A0F25;--color-border-muted:#676C7E;--color-neutral-muted:#EEF1F8;--color-accent-fg:#676C7E;--color-accent-emphasis:#676C7E;--color-attention-subtle:#676C7E;--color-danger-fg:red;}.light-code{display: block}.dark-code{display: none}]]></style><g class="c291cmNlcw=="><g class="shape" ><rect x="122" y="396" width="538" height="398" stroke="#0A0F25" fill="#CFD2DD" class=" stroke-B1 fill-B4" style="stroke-width:2;" /></g><text x="391" y="429" fill="#0A0F25" class="text fill-N1" style="text-anchor:middle;font-size:28px">Sources</text></g><g class="YWRhcHRlcnM="><g class="shape" ><rect x="198" y="0" width="385" height="324" stroke="#0A0F25" fill="#CFD2DD" class=" stroke-B1 fill-B4" style="stroke-width:2;" /></g><text x="390.5" y="33" fill="#0A0F25" class="text fill-N1" style="text-anchor:middle;font-size:28px">Adapters</text></g><g class="a2V5Y2hhaW4="><g class="shape" ><rect x="0" y="99" width="132" height="66" stroke="#0A0F25" fill="#EEF1F8" class=" stroke-B1 fill-B6" style="stroke-width:2;" /></g><text x="66" y="137.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">OS keychain</text></g><g class="YmFja2dyb3VuZA=="><g class="shape" ><rect x="680" y="0" width="383" height="446" stroke="#0A0F25" fill="#CFD2DD" class=" stroke-B1 fill-B4" style="stroke-width:2;" /></g><text x="871.5" y="33" fill="#0A0F25" class="text fill-N1" style="text-anchor:middle;font-size:28px">Background work</text></g><g class="ZGI="><g class="shape" ><rect x="680" y="466" width="372" height="446" stroke="#0A0F25" fill="#CFD2DD" class=" stroke-B1 fill-B4" style="stroke-width:2;" /></g><text x="866" y="499" fill="#0A0F25" class="text fill-N1" style="text-anchor:middle;font-size:28px">Embedded Postgres 18.6</text></g><g class="YXBw"><g class="shape" ><rect x="122" y="814" width="337" height="446" stroke="#0A0F25" fill="#CFD2DD" class=" stroke-B1 fill-B4" style="stroke-width:2;" /></g><text x="290.5" y="847" fill="#0A0F25" class="text fill-N1" style="text-anchor:middle;font-size:28px">The app</text></g><g class="c291cmNlcy5qaXJh"><g class="shape" ><rect x="182" y="456" width="213" height="66" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="288.5" y="494.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">Jira Data Center</text></g><g class="c291cmNlcy5jb25mbHVlbmNl"><g class="shape" ><rect x="182" y="562" width="213" height="66" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="288.5" y="600.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">Confluence Data Center</text></g><g class="c291cmNlcy5naXRlYQ=="><g class="shape" ><rect x="182" y="668" width="213" height="66" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="288.5" y="706.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">Gitea or Forgejo</text></g><g class="c291cmNlcy50ZWFtY2l0eQ=="><g class="shape" ><rect x="435" y="456" width="165" height="66" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="517.5" y="494.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">TeamCity</text></g><g class="c291cmNlcy5rdW1h"><g class="shape" ><rect x="435" y="562" width="165" height="66" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="517.5" y="600.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">Uptime Kuma</text></g><g class="c291cmNlcy5vdGhlcg== optional"><g class="shape" ><rect x="435" y="668" width="165" height="66" stroke="#676C7E" fill="#DEE1EB" class=" stroke-B2 fill-B5" style="stroke-width:2;stroke-dasharray:8.000000,7.892511;" /></g><text x="517.5" y="706.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px">Any other source</text></g><g class="YWRhcHRlcnMuYnVpbHRpbg=="><g class="shape" ><rect x="258" y="60" width="265" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="390.5" y="98.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="390.5" dy="0">Built-in</tspan><tspan x="390.5" dy="18.5">one Rust crate per source</tspan></text></g><g class="YWRhcHRlcnMuZXh0ZXJuYWw= optional"><g class="shape" ><rect x="258" y="182" width="265" height="82" stroke="#676C7E" fill="#DEE1EB" class=" stroke-B2 fill-B5" style="stroke-width:2;stroke-dasharray:8.000000,7.892511;" /></g><text x="390.5" y="220.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="390.5" dy="0">External</tspan><tspan x="390.5" dy="18.5">a sandboxed WASM component</tspan></text></g><g class="YmFja2dyb3VuZC5zY2hlZHVsZXI="><g class="shape" ><rect x="740" y="60" width="263" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="871.5" y="98.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="871.5" dy="0">Sync scheduler</tspan><tspan x="871.5" dy="18.5">at most 5 runs at once</tspan></text></g><g class="YmFja2dyb3VuZC5zdWdnZXN0"><g class="shape" ><rect x="740" y="182" width="263" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="871.5" y="220.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="871.5" dy="0">Suggestion pass</tspan><tspan x="871.5" dy="18.5">one at a time</tspan></text></g><g class="YmFja2dyb3VuZC5mbHVzaA== write-box"><g class="shape" ><rect x="740" y="304" width="263" height="82" stroke="#D97706" fill="#DEE1EB" class=" fill-B5" style="stroke-width:2;" /></g><text x="871.5" y="342.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="871.5" dy="0">Write-queue flush</tspan><tspan x="871.5" dy="18.5">the only caller of Source::write</tspan></text></g><g class="ZGIubWlycm9y"><g class="shape" ><rect x="740" y="526" width="252" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="866" y="564.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="866" dy="0">sync: the mirror</tspan><tspan x="866" dy="18.5">items, revisions, parents</tspan></text></g><g class="ZGIub3duZWQ="><g class="shape" ><rect x="740" y="648" width="252" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="866" y="686.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="866" dy="0">knobas: what no source owns</tspan><tspan x="866" dy="18.5">links, notes, time, link sets</tspan></text></g><g class="ZGIucXVldWU= write-box"><g class="shape" ><rect x="740" y="770" width="252" height="82" stroke="#D97706" fill="#DEE1EB" class=" fill-B5" style="stroke-width:2;" /></g><text x="866" y="808.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="866" dy="0">write_queue</tspan><tspan x="866" dy="18.5">what is still to send</tspan></text></g><g class="YXBwLnNlYXJjaA=="><g class="shape" ><rect x="182" y="874" width="217" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="290.5" y="912.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="290.5" dy="0">Search</tspan><tspan x="290.5" dy="18.5">knobas-search</tspan></text></g><g class="YXBwLmNvcmU="><g class="shape" ><rect x="182" y="996" width="217" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="290.5" y="1034.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="290.5" dy="0">Tauri commands</tspan><tspan x="290.5" dy="18.5">knobas-app</tspan></text></g><g class="YXBwLndpbmRvdw=="><g class="shape" ><rect x="182" y="1118" width="217" height="82" stroke="#0A0F25" fill="#DEE1EB" class=" stroke-B1 fill-B5" style="stroke-width:2;" /></g><text x="290.5" y="1156.5" fill="#0A0F25" class="text-bold fill-N1" style="text-anchor:middle;font-size:16px"><tspan x="290.5" dy="0">Svelte window</tspan><tspan x="290.5" dy="18.5">and the capture window</tspan></text></g><g class="KHNvdXJjZXMgLSZndDsgYWRhcHRlcnMpWzBd"><marker id="mk-d2-1313425148-3488378134" markerWidth="10" markerHeight="12" refX="7" refY="6" viewBox="0 0 10 12" orient="auto" markerUnits="userSpaceOnUse"> <polygon points="0,0 10,6 0,12" fill="#0A0F25" class="connection fill-B1" stroke-width="2" /> </marker><path d="M 326 394 L 326 328" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="304.5" y="366" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">sync</text></g><g class="KGtleWNoYWluIC0mZ3Q7IGFkYXB0ZXJzKVswXQ=="><path d="M 134 132 L 194 132" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="165" y="121" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">secrets</text></g><g class="KGFkYXB0ZXJzIC0mZ3Q7IGJhY2tncm91bmQuc2NoZWR1bGVyKVswXQ=="><path d="M 585 101 L 736 101" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="661.5" y="90" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">items</text></g><g class="KGJhY2tncm91bmQuc2NoZWR1bGVyIC0mZ3Q7IGRiLm1pcnJvcilbMF0="><path d="M 1005 101 L 1073 101 S 1083 101 1083 111 L 1083 543 S 1083 553 1073 553 L 996 553" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="1149" y="182" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">upsert, tombstone</text></g><g class="YmFja2dyb3VuZC4oc2NoZWR1bGVyIC0mZ3Q7IHN1Z2dlc3QpWzBd later"><marker id="mk-d2-1313425148-2177206569" markerWidth="10" markerHeight="12" refX="7" refY="6" viewBox="0 0 10 12" orient="auto" markerUnits="userSpaceOnUse"> <polygon points="0,0 10,6 0,12" fill="#676C7E" class="connection fill-B2" stroke-width="2" /> </marker><path d="M 871.5 144 L 871.5 178" stroke="#676C7E" fill="none" class="connection stroke-B2" style="stroke-width:2;stroke-dasharray:8.000000,7.892511;" marker-end="url(#mk-d2-1313425148-2177206569)" mask="url(#d2-1313425148)" /><text x="872" y="168" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">run ended OK</text></g><g class="KGJhY2tncm91bmQuc3VnZ2VzdCAtJmd0OyBkYi5vd25lZClbMF0="><path d="M 1005 223 L 1093 223 S 1103 223 1103 233 L 1103 679 S 1103 689 1093 689 L 996 689" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="1156.5" y="298" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">proposes links</text></g><g class="KGRiLm1pcnJvciAtJmd0OyBhcHAuc2VhcmNoKVswXQ=="><path d="M 994 580 L 1073 580 S 1083 580 1083 590 L 1083 924 S 1083 934 1073 934 L 403 934" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="964" y="956" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">reads</text></g><g class="YXBwLihzZWFyY2ggLSZndDsgY29yZSlbMF0="><path d="M 290.5 958 L 290.5 992" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /></g><g class="KGRiLm93bmVkICZsdDstJmd0OyBhcHAuY29yZSlbMF0="><marker id="mk-d2-1313425148-2451250203" markerWidth="10" markerHeight="12" refX="3" refY="6" viewBox="0 0 10 12" orient="auto" markerUnits="userSpaceOnUse"> <polygon points="10,0 0,6 10,12" fill="#0A0F25" class="connection fill-B1" stroke-width="2" /> </marker><path d="M 736 689 L 720 689 S 710 689 710 699 L 710 1040 S 710 1050 700 1050 L 403 1050" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-start="url(#mk-d2-1313425148-2451250203)" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="574.5" y="1072" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px">reads, writes</text></g><g class="YXBwLihjb3JlICZsdDstJmd0OyB3aW5kb3cpWzBd"><path d="M 290.5 1082 L 290.5 1114" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-start="url(#mk-d2-1313425148-2451250203)" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /></g><g class="KGFwcC5jb3JlIC0mZ3Q7IGFkYXB0ZXJzKVswXQ=="><path d="M 180 1037 L -60 1037 S -70 1037 -70 1027 L -70 59 S -70 49 -60 49 L 194 49" stroke="#0A0F25" fill="none" class="connection stroke-B1" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-3488378134)" mask="url(#d2-1313425148)" /><text x="-159" y="533" fill="#676C7E" class="text-italic fill-N2" style="text-anchor:middle;font-size:16px"><tspan x="-159" dy="0">live reads: files, diffs, logs</tspan><tspan x="-159" dy="18.5">kept in memory</tspan></text></g><g class="KGFwcC5jb3JlIC0mZ3Q7IGRiLnF1ZXVlKVswXQ== write"><marker id="mk-d2-1313425148-1126842145" markerWidth="10" markerHeight="12" refX="7" refY="6" viewBox="0 0 10 12" orient="auto" markerUnits="userSpaceOnUse"> <polygon points="0,0 10,6 0,12" fill="#D97706" class="connection" stroke-width="2" /> </marker><path d="M 401 1023 L 856 1023 S 866 1023 866 1013 L 866 856" stroke="#D97706" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-1126842145)" mask="url(#d2-1313425148)" /><text x="559" y="1012" fill="#D97706" class="text-italic" style="text-anchor:middle;font-size:16px">submit_write</text></g><g class="KGRiLnF1ZXVlIC0mZ3Q7IGJhY2tncm91bmQuZmx1c2gpWzBd write"><path d="M 994 811 L 1153 811 S 1163 811 1163 801 L 1163 355 S 1163 345 1153 345 L 1007 345" stroke="#D97706" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-1126842145)" mask="url(#d2-1313425148)" /><text x="1199" y="589" fill="#D97706" class="text-italic" style="text-anchor:middle;font-size:16px">due rows</text></g><g class="KGJhY2tncm91bmQuZmx1c2ggLSZndDsgYWRhcHRlcnMpWzBd write"><path d="M 738 345 L 641 345 S 631 345 631 335 L 631 222 S 631 212 621 212 L 587 212" stroke="#D97706" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-1126842145)" mask="url(#d2-1313425148)" /><text x="631" y="315" fill="#D97706" class="text-italic" style="text-anchor:middle;font-size:16px">write(op)</text></g><g class="KGFkYXB0ZXJzIC0mZ3Q7IHNvdXJjZXMpWzBd write"><path d="M 454 326 L 454 392" stroke="#D97706" fill="none" class="connection" style="stroke-width:2;" marker-end="url(#mk-d2-1313425148-1126842145)" mask="url(#d2-1313425148)" /><text x="539.5" y="366" fill="#D97706" class="text-italic" style="text-anchor:middle;font-size:16px">to the item&#39;s own source</text></g><mask id="d2-1313425148" maskUnits="userSpaceOnUse" x="-262" y="-21" width="1511" height="1302">
+<rect x="-262" y="-21" width="1511" height="1302" fill="white"></rect>
+<rect x="287" y="350" width="35" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="139" y="105" width="52" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="641" y="74" width="41" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="1087" y="166" width="124" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="825" y="152" width="94" height="21" fill="black"></rect>
+<rect x="1107" y="282" width="99" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="943" y="940" width="42" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="530" y="1056" width="89" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="-244" y="517" width="170" height="37" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="513" y="996" width="92" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="1167" y="573" width="64" height="21" fill="rgba(0,0,0,0.75)"></rect>
+<rect x="600" y="299" width="62" height="21" fill="black"></rect>
+<rect x="458" y="350" width="163" height="21" fill="rgba(0,0,0,0.75)"></rect>
+</mask></svg></svg>

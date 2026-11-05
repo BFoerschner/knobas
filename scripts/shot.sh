@@ -15,6 +15,7 @@
 #                                       dblclick:<name>, back:<name>, forward:<name> (buttons 3/4)
 #            'R + wait:800 + scroll:600' pause; scroll the largest scroller (or testid=x)
 #            'R + select:Every=1 hour'  pick a <select> option by its label and text
+#            'R + see:Some words'       fail unless the page shows these words
 #          (an item with a dim description matches on its leading label: click:Import…;
 #          a query may lead a step route: '?fake-clone-percent=40#/repo/x/files + click:Clone')
 #          e.g. '#/job/PAY-231 > #/builds', '#/repo/x/branches + click:New branch…',
@@ -26,6 +27,9 @@
 #          follows unless `data-theme` is set; unset leaves Chrome's default)
 #        SHOT_FULL=1 (the whole of a long page in one image: the viewport grows to
 #          its tallest scroller's content, at most 8000 px, #1396)
+#        SHOT_SCALE=2 (device pixels per CSS pixel, 1 to 3, default 1)
+#        SHOT_NOW=2026-08-22T15:05:00Z (the same picture on any machine, any day:
+#          the page's clock stops there, in UTC and en-GB; scripts/shot-steps.mjs)
 #        SHOT_ALLOW_ERRORS=1 (keep going when a page throws: every shot runs over
 #          the DevTools protocol, prints the page's uncaught exceptions and
 #          console errors, and by default fails on an uncaught one)
@@ -55,34 +59,10 @@ dry=${SHOT_DRY_RUN:-}
 root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 profile="${TMPDIR:-/tmp}/knobas-shot-profile-$slot"
 mkdir -p "$out" "$profile"
-up() { curl -fsS -o /dev/null "http://localhost:$port/" 2>/dev/null; }
-vite_pid=
-# The server runs in its own process group (`set -m` below), and the whole group
-# is stopped: on Linux vite is a grandchild (npm -> sh -> node), which a kill of
-# the wrapper and its children missed, and the survivor served the next run's
-# shots from the old tree (#2339). Bash's job control, not `setsid`: macOS has
-# no `setsid` binary.
-stop() {
-  [ -n "$vite_pid" ] || return 0
-  kill -TERM -- "-$vite_pid" 2>/dev/null || { pkill -TERM -P "$vite_pid" 2>/dev/null || true; kill "$vite_pid" 2>/dev/null || true; }
-  wait "$vite_pid" 2>/dev/null || true
-}
-trap stop EXIT
-if [ -z "$dry" ] && ! up; then
-  log="${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log"
-  set -m
-  (cd "$root/app" && exec npx vite --port "$port" --strictPort >"$log" 2>&1) &
-  vite_pid=$!
-  set +m
-  # Polled until it answers (#1957): a loaded machine starts vite slowly, so the
-  # guard is sized past that, and a vite that died fails at once.
-  from=$SECONDS
-  until up; do
-    kill -0 "$vite_pid" 2>/dev/null || { echo "shot: the dev server on :$port exited before it answered; log: $log" >&2; exit 1; }
-    [ $((SECONDS - from)) -lt "$wait_s" ] || { echo "shot: the dev server on :$port did not answer within $wait_s s (SHOT_START_WAIT_S); log: $log" >&2; exit 1; }
-    sleep 0.5
-  done
-fi
+# shellcheck source=scripts/shot-server.sh disable=SC1091
+. "$root/scripts/shot-server.sh"
+trap shot_server_stop EXIT
+[ -n "$dry" ] || shot_server_start "$port" "$root" "$wait_s" "${TMPDIR:-/tmp}/knobas-shot-vite-$slot.log"
 for route in "$@"; do
   extra=; path=$route
   # Not `${extra/&\?/&}`: since bash 5.2 a `&` in the replacement is the matched

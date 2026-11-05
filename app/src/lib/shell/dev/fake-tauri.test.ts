@@ -21,7 +21,7 @@ import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 import type { EntityDetail, ProposalEvidence, SuggestionPage } from "../../ipc/entity";
 import type { SearchResponse } from "../../ipc/search";
 import { demoHandlers } from "./fake-tauri";
-import { FIXTURE_SOURCES } from "./fake/sources";
+import { FIXTURE_SOURCES, seed as seedSources } from "./fake/sources";
 
 test("the three suggestion commands are answered", () => {
   const handlers = demoHandlers();
@@ -1168,6 +1168,17 @@ test("the fixture has a token source whose credential needs the reader: Uptime K
   expect(kuma.health.state).toBe("missing_secret");
   const health = handlers["credential_health"]!({}) as { source_id: string; state: string }[];
   expect(health.find((row) => row.source_id === "kuma")?.state).toBe("missing_secret");
+});
+
+test("?fake-sources-healthy leaves no source that needs the reader, in its health or its last run", () => {
+  const before = demoHandlers()["credential_health"]!({}) as { state: string }[];
+  expect(before.some((row) => row.state !== "ok")).toBe(true);
+  seedSources(new URLSearchParams("fake-sources-healthy"));
+  const handlers = demoHandlers();
+  const health = handlers["credential_health"]!({}) as { state: string; detail: string | null }[];
+  expect(health.every((row) => row.state === "ok" && row.detail === null)).toBe(true);
+  const status = handlers["sync_status"]!({}) as { source_id: string; last_outcome: string | null }[];
+  expect(status.find((row) => row.source_id === "teamcity")?.last_outcome).toBe("ok");
 });
 
 test("the fixture's TeamCity has a run the server never answered, with the long transport error a live one gave (#1478)", () => {
