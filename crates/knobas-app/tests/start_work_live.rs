@@ -1201,7 +1201,8 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 /// before this one.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
-async fn under_each_seeded_repository_finds_it_its_branches_and_pulls_and_its_commits_name_it_as_parent() {
+async fn under_each_seeded_repository_finds_it_its_branches_and_pulls_and_its_commits_name_it_as_parent()
+ {
     let env = env();
     let fixture = live_under::fixture();
     let seeded = live_under::seed_state("KNOBAS_GITEA_SEED_STATE");
