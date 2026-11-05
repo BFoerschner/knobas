@@ -1062,19 +1062,21 @@ pub struct ParentPositions {
 /// here because `AssertSqlSafe` is confined to this module; every value is a
 /// bind.
 ///
-/// **Admitting is the launcher's `under:` predicate, arm for arm**, so what
-/// `under:` admits and what `crate::under::left_out_tokens` says is left out
-/// cannot drift; `tests/it/under_admits.rs` holds the two to each other on
-/// every shape a name can have. The mirror's arm (`corpus::LIVE_ITEM.under`,
-/// which `PIPELINE_LOG` shares, and whose rows are the mirror's) is restated
-/// from the parent's side -- the index on `lower(ip.name)` first, the live
-/// row and its adapter's configuration per name found, the kind read off
-/// that row -- because the launcher's spelling, a semi-join the planner
-/// hashes, reads every live item to find none. The estate's two arms are
-/// `corpus::ASSET.under` and `corpus::ROUTE.under` verbatim, over a `ud` row
-/// holding the one value, each behind the launcher's own `kind <> all`
-/// test. A corpus with no `under` fragment admits nothing beneath any name,
-/// as in the statement.
+/// **Admitting is the launcher's `under:` predicate, arm for arm**, and the
+/// launcher skips its statement on this answer, so an arm missing here loses
+/// rows. Two tests hold them together: `tests/it/under_admits.rs` compares this
+/// read with the statement on the shapes it seeds, and
+/// `corpus::tests::the_bounded_read_asks_every_under_fragment` fails on a
+/// fragment no seeded shape could show. The mirror's arm
+/// (`corpus::LIVE_ITEM.under`, which `PIPELINE_LOG` shares, and whose rows are
+/// the mirror's) is restated from the parent's side -- the index on
+/// `lower(ip.name)` first, the live row and its adapter's configuration per
+/// name found, the kind read off that row -- because the launcher's spelling,
+/// a semi-join the planner hashes, reads every live item to find none. The
+/// estate's two arms are built from `corpus::ASSET` and `corpus::ROUTE`, as
+/// `corpus_predicates` builds them, over a `ud` row holding the one value. A
+/// corpus with no `under` fragment admits nothing beneath any name, as in the
+/// statement.
 ///
 /// # Errors
 ///
@@ -1084,9 +1086,6 @@ pub async fn parent_positions(
     values: &[String],
     hidden: &[String],
 ) -> Result<ParentPositions, sqlx::Error> {
-    if values.is_empty() {
-        return Ok(ParentPositions::default());
-    }
     let lowered = format!(
         "array[{}]::text[]",
         (1..=values.len())
@@ -1095,8 +1094,15 @@ pub async fn parent_positions(
             .join(", ")
     );
     let hidden_bind = format!("${}::text[]", values.len() + 1);
-    let asset = crate::corpus::ASSET.under.unwrap_or("false");
-    let route = crate::corpus::ROUTE.under.unwrap_or("false");
+    let estate = |corpus: &Corpus| {
+        format!(
+            "({kind} <> all({hidden_bind}) and exists (select 1 from {relation} \
+               cross join (select array[o.v]::text[] as v) ud where {under}))",
+            kind = corpus.kind,
+            relation = corpus.relation,
+            under = corpus.under.unwrap_or("false"),
+        )
+    };
     let mut query = sqlx::query_as::<Postgres, (i64, bool, bool)>(sqlx::AssertSqlSafe(format!(
         "select o.i, \
                 exists (select 1 from {} p where lower(p.name) = o.v) as known, \
@@ -1104,13 +1110,11 @@ pub async fn parent_positions(
                            join sync.live_item i on i.entity_id = ip.entity_id \
                            join knobas.source_config s on s.id = i.source_id and s.kind = ip.adapter_kind \
                           where lower(ip.name) = o.v and i.kind <> all({hidden_bind})) \
-                 or ('asset' <> all({hidden_bind}) and exists (select 1 from knobas.asset a \
-                           cross join (select array[o.v]::text[] as v) ud where {asset})) \
-                 or ('route' <> all({hidden_bind}) and exists (select 1 from knobas.route r \
-                           join knobas.asset ra on ra.id = r.asset_id \
-                           cross join (select array[o.v]::text[] as v) ud where {route}))) as admits \
+                 or {} or {}) as admits \
            from unnest({lowered}) with ordinality o(v, i)",
-        crate::under::parent_names!()
+        crate::under::parent_names!(),
+        estate(&crate::corpus::ASSET),
+        estate(&crate::corpus::ROUTE),
     )));
     for value in values {
         query = query.bind(value.clone());
