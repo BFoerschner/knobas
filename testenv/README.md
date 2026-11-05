@@ -1335,8 +1335,8 @@ payload, cursor, the real 401 — and `crates/knobas-app/tests/atlassian_live.rs
 write ops read back out of Jira. Both write, and both take back what they wrote
 from a `Drop` that checks rather than assumes. What a *killed* run leaves is put
 back by the next run of the **adapter's** suite, whose leftover clearing works
-from `seed-state.json` rather than from anything a run remembers — a stray issue
-and a stray comment deleted, the `knobas-live-suite` label removed, a status
+from `seed-state.json` rather than from anything a run remembers — a stray issue,
+comment or attachment deleted, the `knobas-live-suite` label removed, a status
 moved back through the workflow — and prints what it put back. So after a green
 run the server holds exactly the seeded corpus, and recovery from a dirty one is
 "run the suite again". The one thing neither can undo is the `PAY` key counter:
@@ -1417,8 +1417,9 @@ through `POST /rest/api/2/issue/OPS-77/attachments`, skipping a name the issue
 already carries, and fails unless each is there once at its own size. They are
 on an `OPS` issue because `OPS` is the project the adapter suite narrows to ask
 as a user who may not browse it. `jira.attachments` records the issue and the
-ids and `content` addresses Jira gave them. The adapter suite reads both back
-byte for byte against the files on disk.
+ids and `content` addresses Jira gave those two and no others, so anything else
+on a seeded issue is a stray the adapter suite deletes (#2471). The adapter suite
+reads both back byte for byte against the files on disk.
 
 **Epic membership is in the Epic Link custom field, and only there.** `PAY`
 and `OPS` are *classic* Data Center projects, so `fields.parent` — the

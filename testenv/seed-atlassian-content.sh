@@ -915,8 +915,13 @@ for spec in $ATTACH_FILES; do
   _have=$(printf '%s' "$API_BODY" | jq -r --arg f "$file" '[.fields.attachment[] | select(.filename == $f) | .size] | map(tostring) | join(" ")')
   [ "$_have" = "$_want" ] || die "$ATTACH_ISSUE should carry $file once at $_want bytes; it carries [$_have]"
 done
-ATTACHMENTS=$(printf '%s' "$API_BODY" | jq --arg k "$ATTACH_ISSUE" \
-  '{issue: $k, files: [.fields.attachment[] | {id, filename, mimeType, size, content}]}')
+# Only the files named above go on record: anything else on the issue is a
+# stray the live suite's clear_leftovers deletes by its absence from this list,
+# so recording what happens to be there would make it seeded (#2471).
+ATTACHMENTS=$(printf '%s' "$API_BODY" | jq --arg k "$ATTACH_ISSUE" --arg specs "$ATTACH_FILES" \
+  '($specs | split(" ") | map(split(":")[0])) as $seeded
+   | {issue: $k, files: [.fields.attachment[] | select(.filename as $f | $seeded | index($f))
+                         | {id, filename, mimeType, size, content}]}')
 
 # -- jira's ids to seed-state.json --------------------------------------------
 JIRA_IDS='[]'
