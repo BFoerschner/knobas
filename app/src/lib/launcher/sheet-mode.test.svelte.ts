@@ -322,6 +322,27 @@ test("a step's answer that lands after a step back is dropped, and a refused rea
   expect(refused.sheet.current).not.toBeNull();
 });
 
+test("a step back and another pick: the first pick's late answer is dropped, and the second's is drawn", async () => {
+  const answers: ((value: typeof BRANCHES) => void)[] = [];
+  const { sheet } = setUp(REPO, { io: { branches: () => new Promise((resolve) => answers.push(resolve)) } });
+  sheet.open();
+  choose(sheet, "Create pull request…");
+  answers[0]?.(BRANCHES);
+  await landed();
+  sheet.pick({ id: "main", label: "main", detail: "" });
+  sheet.key(press("Escape"));
+  sheet.pick({ id: "feature", label: "feature", detail: "" });
+  expect(answers).toHaveLength(3);
+
+  answers[1]?.(BRANCHES);
+  await landed();
+  expect(sheet.current?.flow?.choices).toBeNull();
+
+  answers[2]?.(BRANCHES);
+  await landed();
+  expect(sheet.choices.map((one) => one.id)).toEqual(["main"]);
+});
+
 test("a rename asks in the box with the text selected; Enter keeps it, Esc leaves the name as it was", async () => {
   const { sheet, session, host } = setUp(LIST);
   sheet.open();
@@ -468,16 +489,31 @@ test("a chord on an action the reads add waits for them, and says so when it doe
   expect(toasts.items.at(-1)?.text).toBe("⌘⇧O runs nothing on Backoff now");
 });
 
-test("a chord still waiting when the selection moves runs nothing", async () => {
-  const actions: ActionKey[] = [{ kind: "pr", action_id: "merge", chord: "⌘⇧O" }];
-  let answer: (action: ViewAction) => void = () => {};
-  const { sheet, session, keys } = setUp(PR, { actions, io: { mergeAction: () => new Promise((resolve) => (answer = resolve)) } });
-  await keys.load();
-  sheet.runChord(CHORD());
-  session.current = OTHER;
-  flushSync();
-  answer(MERGE);
+test("a chord waiting on the applications runs on its row when they land, and runs nothing if the selection has moved", async () => {
+  const actions: ActionKey[] = [{ kind: "repo", action_id: "open-code", chord: "⌘⇧O" }];
+  const started = async () => {
+    let answer: (settings: CheckoutSettings) => void = () => {};
+    const openCheckout = vi.fn(async () => ["code", "/tmp/svc"]);
+    const set = setUp(REPO, { actions, io: { openCheckout, checkoutSettings: () => new Promise((resolve) => (answer = resolve)) } });
+    await set.keys.load();
+    set.sheet.runChord(CHORD());
+    await landed();
+    expect(openCheckout).not.toHaveBeenCalled();
+    return { ...set, openCheckout, answer };
+  };
+
+  const stays = await started();
+  stays.answer(APPS);
   await landed();
-  expect(sheet.current).toBeNull();
+  expect(stays.openCheckout).toHaveBeenCalledExactlyOnceWith("gitea:acme/svc", { application: "code" });
+  stop?.();
+  resetToasts();
+
+  const moves = await started();
+  moves.session.current = OTHER;
+  flushSync();
+  moves.answer(APPS);
+  await landed();
+  expect(moves.openCheckout).not.toHaveBeenCalled();
   expect(toasts.items).toEqual([]);
 });
