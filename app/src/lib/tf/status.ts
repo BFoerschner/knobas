@@ -89,12 +89,18 @@ export function healthyRollup(healthy: readonly SourceReading[], now: Date = new
   const having = (tone: ReadingTone) => healthy.filter((reading) => reading.tone === tone);
   const synced = having("ok");
   const oldest = synced.map((reading) => reading.syncedAt).filter((at) => at !== null).sort()[0];
-  const lines = [
-    ...(synced.length === 1 ? [`1 source synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} sources synced`, `oldest ${ago(oldest, now)}`] : []),
+  const looks = having("warn").length;
+  // What must stay: how many synced, and anything that wants the reader. The rest may drop out of sight.
+  const first = [
+    ...(synced.length === 1 ? [`1 source synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} sources synced`] : []),
+    ...(looks > 0 ? [`${looks} need${looks === 1 ? "s" : ""} a look`] : []),
+  ];
+  const second = [
+    ...(synced.length > 1 ? [`oldest ${ago(oldest, now)}`] : []),
     ...(having("info").length > 0 ? [`${having("info").length} syncing`] : []),
-    ...(having("warn").length > 0 ? [`${having("warn").length} need${having("warn").length === 1 ? "s" : ""} a look`] : []),
     ...(having("muted").length > 0 ? [`${having("muted").length} not synced yet`] : []),
   ];
+  const lines = first.length > 0 ? [first.join(", "), ...second] : second;
   const tone: ReadingTone = having("warn").length > 0 ? "warn" : having("info").length > 0 ? "info" : synced.length > 0 ? "ok" : "muted";
   return { text: lines[0]!, rest: lines.length > 1 ? lines.slice(1).join(", ") : null, tone };
 }

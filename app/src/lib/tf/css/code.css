@@ -265,7 +265,7 @@
 .tf-pdfd-head > span + span { border-left: 1px solid var(--rule); box-shadow: inset 3px 0 0 var(--ok); }
 .tf-pdfd-row { border-bottom: 1px solid var(--rule-2); box-shadow: inset 4px 0 0 transparent; }
 .tf-pdfd-at { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 4px 14px; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-pdfd-mark { padding: 0 6px; border-radius: 3px; font: 700 var(--t-2xs) var(--sans); text-transform: uppercase; letter-spacing: 0.04em; }
+.tf-pdfd-mark { padding: 0 6px; border-radius: 3px; font: 700 var(--t-2xs) var(--sans); }
 .tf-pdfd-changed { background: var(--warn-bg); box-shadow: inset 4px 0 0 var(--warn); }
 .tf-pdfd-changed .tf-pdfd-mark { background: var(--warn); color: var(--sheet); }
 .tf-pdfd-added { background: var(--ok-bg); box-shadow: inset 4px 0 0 var(--ok); }
@@ -352,7 +352,7 @@
 :is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > :is(button, a) { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
 :is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > :is(button, a):is(:hover, :focus-visible), :is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > .tf-on { background: var(--sheet-2); }
 :is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
-.tf-rsw-mh, .tf-pick-mh { padding: 6px 10px 2px; font-size: var(--t-2xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-2); }
+.tf-rsw-mh, .tf-pick-mh { padding: 6px 10px 2px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
 
 /* The renderer switcher (#2263; mockups/code-area/file.html, state "switcher"): *Render as <name> ▾*. */
 .tf-rsw { position: relative; display: inline-flex; }

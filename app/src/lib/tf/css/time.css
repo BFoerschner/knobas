@@ -65,7 +65,8 @@
 .tf-tm-row.tf-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
 .tf-tm-when { font-size: var(--t-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); display: flex; flex-direction: column; }
 .tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
-.tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
+.tf-tm-what { font-weight: 500; }
+.tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); font-weight: 400; margin-top: 2px; }
 .tf-tm-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; flex-wrap: wrap; }
 .tf-tm-group {
   display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;

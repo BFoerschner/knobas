@@ -52,6 +52,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { clones } from "../openin/clones.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { untrack } from "svelte";
@@ -333,10 +334,7 @@
 
   const repoConfig = $derived<FilterConfig>({
     id: "code-repos",
-    placeholder:
-      repos === null
-        ? "Filter repositories by name, team or language"
-        : `Filter ${repos.total} repositories by name, team or language`,
+    placeholder: "Filter by name, team or language",
     noun: "repositories",
     one: "repository",
     scopes,
@@ -526,7 +524,7 @@
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
               <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
-                ><a href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
+                ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
                   >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
                     >{/if}{#if author}{row.path ? ", " : ""}<Marked text={author} typed={prFilter.text} />{/if}{#if idle}{row.path ||
                     author
@@ -535,7 +533,7 @@
                 ></td
               >
               <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
-              <td class="tf-mono tf-dim">{belongs ?? ""}</td>
+              <td class="tf-mono tf-dim">{#if belongs !== null && belongs === job}<span class="tf-chip tf-chip-job">{belongs}</span>{:else}{belongs ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>
           {/each}
@@ -550,10 +548,9 @@
 </div>
 
 {#snippet nothing()}
-  <div class="tf-empty">
-    Nothing matches.
+  <TfNoMatch noun={tab === "prs" ? "pull requests" : "repositories"} {filter}>
     {#if filter.scope === "job"}
       <button type="button" class="tf-btn tf-sm" onclick={searchAll}>Search all of Code</button>
     {/if}
-  </div>
+  </TfNoMatch>
 {/snippet}

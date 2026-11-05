@@ -1,6 +1,7 @@
 <!--
   The reader's *More ▾* (#2082, R-10.10): in the header's actions before "Open in" (#2286),
-  holding *Export as Markdown*; later actions go here too.
+  holding what a reader reaches for less: *Link to…*, *Copy link* and *Export as Markdown*. Without them the
+  header's actions run to a second line in the reading column.
 
   The ticket view menu's pattern (`tickets/ViewMenu.svelte`), copied, not
   shared: it opens under its button with focus on the first item; `Esc`, a
@@ -10,7 +11,17 @@
 <script lang="ts">
   import { tick } from "svelte";
 
-  let { onexport }: { onexport: () => void } = $props();
+  let {
+    onlink,
+    oncopy,
+    onexport,
+  }: {
+    /** *Link to…*, where this reader can link. */
+    onlink?: (() => void) | undefined;
+    oncopy: () => void;
+    /** *Export as Markdown*, for a page that can be read here. */
+    onexport?: (() => void) | undefined;
+  } = $props();
 
   let open = $state(false);
   let button = $state<HTMLButtonElement | null>(null);
@@ -58,17 +69,9 @@
   >
   {#if open}
     <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
-      <button type="button" role="menuitem" onclick={() => pick(onexport)}
-        ><svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.4"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" /></svg
-        >Export as Markdown</button
-      >
+      {#if onlink}<button type="button" role="menuitem" onclick={() => pick(onlink)}>Link to…</button>{/if}
+      <button type="button" role="menuitem" onclick={() => pick(oncopy)}>Copy link</button>
+      {#if onexport}<button type="button" role="menuitem" onclick={() => pick(onexport)}>Export as Markdown</button>{/if}
     </div>
   {/if}
 </span>

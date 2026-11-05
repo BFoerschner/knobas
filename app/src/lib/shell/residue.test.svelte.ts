@@ -740,7 +740,7 @@ const CASES: Case[] = [
     /** The Docs reader's More menu (#2082): its outside-click listener lives while it is open. */
     name: "TfDocMore",
     source: "lib/tf/docs/TfDocMore.svelte",
-    open: (target) => ({ app: mount(TfDocMore, { target, props: { onexport: () => {} } }) }),
+    open: (target) => ({ app: mount(TfDocMore, { target, props: { oncopy: () => {}, onexport: () => {} } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
   {

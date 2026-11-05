@@ -1032,33 +1032,34 @@
     {:else if page !== null}
       {@const p = page}
       {@const created = createdBy(p)}
+    <nav class="tf-crumbs tf-rd-crumbrow" aria-label="Breadcrumb">
+      {#if drawerBand.current}
+        <button
+          type="button"
+          class="tf-btn tf-sm tf-rd-pages"
+          aria-controls="tf-docs-tree"
+          aria-expanded={drawer}
+          onclick={(event) => openTree(event.currentTarget)}
+          ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
+            ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
+          >Pages</button
+        >
+      {/if}
+      <div class="tf-rd-crumb">
+        <a href="#/docs">Docs</a>
+        {#if p.space}
+          › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
+        {/if}
+        {#if parent}
+          › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
+        {/if}
+        › <strong><TfMarked text={p.title} {stems} /></strong>
+      </div>
+      <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
+      {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
+    </nav>
       <div class="tf-rd-sheet">
         <article class="tf-rd-page" bind:this={article}>
-          <div class="tf-rd-crumbrow">
-            {#if drawerBand.current}
-              <button
-                type="button"
-                class="tf-btn tf-sm tf-rd-pages"
-                aria-controls="tf-docs-tree"
-                aria-expanded={drawer}
-                onclick={(event) => openTree(event.currentTarget)}
-                ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
-                  ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
-                >Pages</button
-              >
-            {/if}
-            <div class="tf-rd-crumb">
-              <a href="#/docs">Docs</a>
-              {#if p.space}
-                › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
-              {/if}
-              {#if parent}
-                › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
-              {/if}
-            </div>
-            <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
-            {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
-          </div>
           <!-- The canonical header (#2238, #2286): the title, and on its line the actions in the
                Controls order, "Open in" a ghost, the page's Refresh and the view's Sync now last. -->
           <div class="tf-fhead tf-rd-head">
@@ -1071,9 +1072,6 @@
                 {@const ref = jobAt ?? job}
                 <button type="button" class="tf-btn" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
               {/if}
-              {#if linkPorts}
-                <button type="button" class="tf-btn" onclick={() => (linking = true)}>Link to…</button>
-              {/if}
               {#if p.writes.includes("create_page")}
                 <button
                   type="button"
@@ -1084,10 +1082,11 @@
                   }}
                   >New page here</button>
               {/if}
-              <button type="button" class="tf-btn" onclick={() => copyLink(p)}>Copy link</button>
-              {#if p.readable}
-                <TfDocMore onexport={() => exportMarkdown(p)} />
-              {/if}
+              <TfDocMore
+                onlink={linkPorts ? () => (linking = true) : undefined}
+                oncopy={() => copyLink(p)}
+                onexport={p.readable ? () => exportMarkdown(p) : undefined}
+              />
               {#if p.web_url}
                 {@const url = p.web_url}
                 <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>

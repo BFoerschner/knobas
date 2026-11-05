@@ -117,6 +117,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
@@ -732,12 +733,11 @@
     {:else if roster.length === 0}
       <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
     {:else}
-      <div class="tf-empty">
-        No monitor matches.
+      <TfNoMatch noun="monitors" {filter}>
         {#if scope === "job"}
           <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
         {/if}
-      </div>
+      </TfNoMatch>
     {/if}
   {/if}
 </div>

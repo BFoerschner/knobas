@@ -5,7 +5,16 @@
 }
 .tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
 /* The nav keeps its width while the search can give some up, so no entry slides out of view above 1240px. */
-.tf-nav { display: flex; gap: 2px; flex: none; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tf-nav {
+  display: flex; gap: 2px; flex: none; min-width: 0; overflow-x: auto; scrollbar-width: none;
+  /* An edge shadow only where more entries are out of view: the sheet-coloured layers scroll with the entries and
+     cover the fixed shadows once that end is reached. Below 1100 px the nav has no scrollbar to say so. */
+  background:
+    linear-gradient(to right, var(--sheet) 40%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--sheet) 40%, transparent) right / 28px 100% no-repeat local,
+    linear-gradient(to right, color-mix(in srgb, var(--ink) 22%, transparent), transparent) left / 12px 100% no-repeat scroll,
+    linear-gradient(to left, color-mix(in srgb, var(--ink) 22%, transparent), transparent) right / 12px 100% no-repeat scroll;
+}
 .tf-nav a {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
   text-decoration: none; color: var(--ink-2); white-space: nowrap;
@@ -13,7 +22,7 @@
 .tf-nav a:hover { background: var(--sheet-2); color: var(--ink); }
 .tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
 .tf-count {
-  font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
+  display: inline-block; font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
   /* `--rule` shows on paper, sheet and card in both themes, and `--ink-2` on it passes 4.5:1. */
   background: var(--rule); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
@@ -110,7 +119,7 @@
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
 /* Row one is the title and the actions (Controls, *Header*). The rest of the title block runs the full width under
    them, so a long subline is never squeezed into what the buttons leave. */
-.tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 0 20px; align-items: start; }
+.tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(min-content, 1fr) auto; gap: 0 20px; align-items: start; }
 .tf-fhead > div:first-child:not(.tf-board-title):has(> h1) { display: contents; }
 .tf-fhead > div:first-child:not(.tf-board-title):has(> h1) > :not(h1) { grid-column: 1 / -1; }
 .tf-fhead > .tf-acts { grid-column: 2; grid-row: 1; justify-content: flex-end; }
@@ -118,6 +127,8 @@
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
 .tf .tf-fhead h1.tf-mono { font-size: var(--t-2xl); }
+/* A chip beside the title stays a chip, not a block the title's line height. */
+.tf-fhead h1 .tf-chip { line-height: 1.45; }
 .tf-fhead .tf-sub { color: var(--ink-2); font-size: var(--t-sm); }
 /* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */
 .tf-syncnow { align-self: flex-start; }
@@ -148,7 +159,8 @@
 .tf-btn:hover { border-color: var(--ink-2); }
 .tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
-.tf-btn.tf-ghost:hover { background: var(--sheet-2); }
+/* Not `--sheet-2`: a row's hover is that fill too, and a ghost button in the row would show no change. */
+.tf-btn.tf-ghost:hover { background: var(--rule-2); border-color: var(--rule); }
 .tf-btn[disabled], .tf-btn[aria-disabled="true"], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }
 .tf-iconbtn[disabled]:hover { background: none; }
 .tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }

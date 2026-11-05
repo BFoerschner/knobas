@@ -528,7 +528,6 @@
 <div class="tf-full">
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
-    <a class="tf-crumb" href="#/code/repos">Repositories</a><span class="tf-sep">›</span>
     {#if route.commit !== null && repoId !== null}
       <a class="tf-crumb" href={repoHash(repoId)}>{repo?.title ?? ""}</a><span class="tf-sep">›</span>
       <strong>Commit</strong>

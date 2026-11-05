@@ -37,12 +37,12 @@
 /* The page: nothing in it is capped in width (#2081). */
 .tf-rd-page { min-width: 0; }
 /* The breadcrumb row: below 900px the Pages button that opens the tree drawer starts it (#2084). */
-.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; }
+.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
 .tf-rd-pages svg { width: 15px; height: 15px; }
-.tf-rd-crumb { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-rd-crumb { font-size: var(--t-sm); color: var(--ink); min-width: 0; }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 /* *Back to <name>* beside `Esc`, at the row's end as on every breadcrumb (spec #2227). */
-.tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; }
 .tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
@@ -59,7 +59,6 @@
 .tf-rd-more > button::after { content: "▾"; font-size: var(--t-2xs); color: var(--ink-2); margin-left: 4px; }
 .tf-rd-more .tf-menu { left: auto; right: 0; }
 .tf-rd-more .tf-menu button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
-.tf-rd-more .tf-menu svg { width: 14px; height: 14px; flex: none; }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
 .tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }
 .tf-doc h2 .tf-tools {
@@ -130,7 +129,7 @@
 }
 .tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
-.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 4px; border-radius: 3px; }
+.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 3px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--card); color: var(--card-ink); }
 .tf-doc a.tf-pgl, .tf-doc .tf-doc-link {
   color: var(--info); text-decoration: underline; text-underline-offset: 2px;

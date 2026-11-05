@@ -70,6 +70,8 @@ button { cursor: pointer; }
 a { color: var(--info); text-decoration: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
+/* Where a board's two scrollbars meet: the page's own colour, not a white square. */
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* ---------- the root: its own paper, the whole window ---------- */
 .tf {

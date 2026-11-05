@@ -319,7 +319,7 @@ test("each run says how it was started; Started by me keeps the reader's; the wo
   expect(rows()[0]!.querySelector(".tf-run-trig")?.textContent).toBe("VCS change a41f2c");
   expect(rows()[1]!.querySelector(".tf-run-trig")?.textContent).toBe("you");
   const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
-  expect(input.placeholder).toBe("Filter runs by number, branch, commit or person");
+  expect(input.placeholder).toBe("Filter by number, branch or person");
   const scopes = [...target.querySelectorAll(".tf-runbar button")].map((b) => b.textContent?.trim());
   expect(scopes.indexOf("My job’s branches")).toBeLessThan(scopes.indexOf("Started by me"));
   expect(scopes.indexOf("Started by me")).toBeLessThan(scopes.indexOf("All"));

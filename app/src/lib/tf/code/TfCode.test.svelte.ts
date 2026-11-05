@@ -169,7 +169,7 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   expect(rows[1]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
   expect([...target.querySelectorAll("thead th")].map(text).slice(0, 3)).toEqual(["Repository", "Team", "Language"]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter 3 repositories by name, team or language",
+    "Filter by name, team or language",
   );
 });
 

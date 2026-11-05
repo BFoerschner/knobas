@@ -40,7 +40,8 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
-  import type { FilterConfig } from "../filter/filter";
+  import { isFiltering, type FilterConfig } from "../filter/filter";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import type { SourceFacts } from "../job/job";
   import { ticketHash } from "../route";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
@@ -297,7 +298,8 @@
       </div>
     {:else}
       {#if inbox.answered}
-        <div class="tf-empty">Nothing here. New items appear as sources sync.</div>
+        {#if isFiltering(filter)}<TfNoMatch noun="items" {filter} />
+        {:else}<div class="tf-empty">Nothing here. New items appear as sources sync.</div>{/if}
       {/if}
     {/each}
   </div>

@@ -10,6 +10,11 @@
 .tf-mon .tf-mon-type { font-size: var(--t-xs); }
 .tf-mon .tf-mon-asset { font-size: var(--t-xs); color: inherit; }
 .tf-mon-acts { white-space: nowrap; text-align: right; }
+.tf-mon tbody tr:not(.tf-mon-foldrow) > td:first-child { font-size: var(--t-md); font-weight: 500; white-space: nowrap; }
+.tf-mon .tf-mon-type { font-weight: 400; }
+/* The page never scrolls sideways: past what the table needs, the bars narrow, then the figures wait. */
+@media (max-width: 1240px) { .tf-mbar { width: 96px; } }
+@media (max-width: 1040px) { .tf-mon .tf-num { display: none; } }
 .tf-mon-acts .tf-trail { justify-content: flex-end; flex-wrap: nowrap; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */

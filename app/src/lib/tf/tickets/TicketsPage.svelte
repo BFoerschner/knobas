@@ -527,6 +527,12 @@
     });
   });
 
+  /** At 1240 px and below there is no preview to fill (design system, *Layout*), so a click opens the ticket. */
+  function clicked(card: MiniBoardCard) {
+    select(card);
+    if (window.matchMedia("(max-width: 1240px)").matches) openTicket(card);
+  }
+
   function select(card: MiniBoardCard) {
     session.selected = card.entity_id;
   }
@@ -781,7 +787,7 @@
                       {needles}
                       selected={current?.card.entity_id === card.entity_id}
                       chosen={chosenJob.id === card.entity_id}
-                      onselect={() => select(card)}
+                      onselect={() => clicked(card)}
                       onopen={() => openTicket(card)}
                     />
                   {:else}
@@ -829,7 +835,7 @@
                 aria-current={current?.card.entity_id === card.entity_id ? "true" : undefined}
                 data-entity={card.entity_id}
                 tabindex="0"
-                onclick={() => select(card)}
+                onclick={() => clicked(card)}
                 ondblclick={() => openTicket(card)}
               >
                 {#each listColumns as [column] (column)}

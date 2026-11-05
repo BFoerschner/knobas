@@ -1293,6 +1293,8 @@ test("a comment goes through the queue; copy link and the actions a source does 
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "Done." } });
+  button("More")!.click();
+  await settle();
   button("Copy link")!.click();
   await settle();
   expect(io.copy).toHaveBeenCalledWith("#/page/confluence%3A2\nhttp://wiki.example/pages/2");
@@ -1654,9 +1656,9 @@ test("This job and Link to <job> use the ticket the reader opened when two sourc
 const headActs = () => target.querySelector<HTMLElement>(".tf-rd-page .tf-fhead .tf-acts");
 const actions = () => [...(headActs()?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim());
 
-test("the actions read Link to <job> from a job, Link to…, New page here, Copy link, More, then Open in; no Comment (#2082, #2286)", async () => {
+test("the actions read Link to <job> from a job, New page here, More, then Open in; no Comment (#2082, #2286)", async () => {
   await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
-  expect(actions()).toEqual(["Link to PAY-231", "Link to…", "New page here", "Copy link", "More", "Open in Confluence"]);
+  expect(actions()).toEqual(["Link to PAY-231", "New page here", "More", "Open in Confluence"]);
 
   if (view) unmount(view);
   target.innerHTML = "";
@@ -1665,7 +1667,7 @@ test("the actions read Link to <job> from a job, Link to…, New page here, Copy
     props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), linkPorts: linkPorts() as never },
   });
   await settle();
-  expect(actions()).toEqual(["Link to…", "New page here", "Copy link", "More", "Open in Confluence"]);
+  expect(actions()).toEqual(["New page here", "More", "Open in Confluence"]);
   // The comment box at the foot is the way to comment.
   expect(button("Comment")?.closest(".tf-compose")).not.toBeNull();
 });
@@ -1711,7 +1713,7 @@ test("with no page to draw, Docs still draws its header with Sync now (#2286)", 
   expect(syncNow()).toHaveLength(1);
 });
 
-test("More opens a menu holding Export as Markdown, closing on Esc, a pick or a click outside (#2082)", async () => {
+test("More opens a menu holding Copy link and Export as Markdown, closing on Esc, a pick or a click outside (#2082)", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   const more = button("More")!;
   expect(more.getAttribute("aria-haspopup")).toBe("menu");
@@ -1725,8 +1727,8 @@ test("More opens a menu holding Export as Markdown, closing on Esc, a pick or a 
   };
 
   let open = await menu();
-  expect([...open.querySelectorAll("[role='menuitem']")].map((i) => i.textContent?.trim())).toEqual(["Export as Markdown"]);
-  expect(document.activeElement?.textContent?.trim()).toBe("Export as Markdown");
+  expect([...open.querySelectorAll("[role='menuitem']")].map((i) => i.textContent?.trim())).toEqual(["Copy link", "Export as Markdown"]);
+  expect(document.activeElement?.textContent?.trim()).toBe("Copy link");
   open.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   await settle();
   expect(target.querySelector("[role='menu']")).toBeNull();
@@ -1734,7 +1736,7 @@ test("More opens a menu holding Export as Markdown, closing on Esc, a pick or a 
   expect(document.activeElement).toBe(more);
 
   open = await menu();
-  open.querySelector<HTMLButtonElement>("[role='menuitem']")!.click();
+  [...open.querySelectorAll<HTMLButtonElement>("[role='menuitem']")].at(-1)!.click();
   await settle();
   expect(io.docsExportMarkdown).toHaveBeenCalledWith("confluence:2");
   expect(target.querySelector("[role='menu']")).toBeNull();

@@ -9,8 +9,11 @@
   .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
   .tf-fhead { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
   .tf-fhead > .tf-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-left: 0; }
-  .tf-status:has(.tf-bad) > .tf-healthy { display: none; }
+
   .tf-tm-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .tf-tm-when { flex-direction: row; align-items: baseline; gap: 8px; }
+  .tf-tm-what { grid-column: 1 / -1; grid-row: 2; }
+  .tf-tm-state { grid-column: 2; grid-row: 1; }
   .tf-tm-acts { grid-column: 1 / -1; justify-content: flex-start; }
   .tf-jobkey { font-size: var(--t-d2); }
   .tf-ws { grid-template-columns: minmax(0, 1fr); height: auto; }
@@ -38,6 +41,11 @@
 }
 @media (max-width: 1240px) {
   .tf-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The status bar's healthy line goes once it can't hold its first words beside a failure. */
+@media (max-width: 1080px) {
+  .tf-status:has(.tf-bad) > .tf-healthy { display: none; }
 }
 
 /* Reduced motion stops everything above: the pulse, the toast's rise, every transition. */

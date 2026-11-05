@@ -104,14 +104,23 @@ test("the rollup says what is not synced, and its dot takes the worst of what it
     tone: "info",
   });
   expect(healthyRollup([healthy("info"), healthy("warn"), healthy("muted")], NOW)).toEqual({
-    text: "1 syncing",
-    rest: "1 needs a look, 1 not synced yet",
+    text: "1 needs a look",
+    rest: "1 syncing, 1 not synced yet",
     tone: "warn",
   });
   expect(healthyRollup([healthy("muted"), healthy("muted"), healthy("muted")], NOW)).toEqual({
     text: "3 not synced yet",
     rest: null,
     tone: "muted",
+  });
+});
+
+test("what wants the reader stays with the count; only the age may drop out of sight", () => {
+  const synced = healthy("ok", "2026-08-22T14:28:00Z");
+  expect(healthyRollup([synced, synced, healthy("warn", "2026-08-22T14:28:00Z")], NOW)).toEqual({
+    text: "2 sources synced, 1 needs a look",
+    rest: "oldest 4 min ago",
+    tone: "warn",
   });
 });
 

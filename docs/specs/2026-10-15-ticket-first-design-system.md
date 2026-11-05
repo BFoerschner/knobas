@@ -61,7 +61,7 @@ Three families, each with one job.
 - **Source Serif 4** (variable, optical size) is the reading face. It sets page bodies and titles in Docs and nowhere else.
 - **JetBrains Mono** (400, 600) only for real code values: keys, shas, branch names, paths, logs and diffs. Never for a label or a number that's just a number. Durations and counts are Archivo with `font-variant-numeric: tabular-nums`.
 
-Body text is Archivo 14 px / 1.45, weight 400. Weight 600 is the normal emphasis and covers most headings. 700 is for page titles and 800 for the narrow display figures. The prototype's single 650 becomes 600.
+Body text is Archivo 14 px / 1.45, weight 400. Weight 500 is for buttons and for a row's title, the name you scan a list by: `--t-md` where the row has a second line, `--t-sm` in a dense table. Weight 600 is the normal emphasis and covers most headings. 700 is for page titles and 800 for the narrow display figures. The prototype's single 650 becomes 600.
 
 Archivo's word space is narrow, so at interface sizes words run together. The whole interface sets `letter-spacing: .006em; word-spacing: .06em` once, on `body`. Code surfaces and the Docs reading face reset both to `normal`: code has to keep its columns, and Source Serif already has its own fit. A placeholder is `--muted`, the lightest grey that passes 4.5:1 on every field fill.
 
@@ -213,7 +213,9 @@ The design width is 1440 × 900. Every view works from 1100 px. There are two br
 
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
 
-The status bar names at most two healthy sources; past that they are one line that keeps the oldest age and says how many need a look, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, below 900 px it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
+The status bar names at most two healthy sources; past that they are one line that says how many synced and how many need a look, then the oldest age, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, at 1080 px and below it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
+
+From 1240 px down the Tickets preview is closed, so one click on a card or row opens the ticket's page. Above that, one click fills the preview and a double click opens the page.
 
 A section's own page has no breadcrumb bar: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
 

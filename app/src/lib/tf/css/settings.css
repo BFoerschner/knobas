@@ -53,6 +53,9 @@
 .tf-stg-src:last-child { border-bottom: 0; }
 .tf-stg-src:hover { background: var(--sheet-2); }
 .tf-stg-sn { display: flex; flex-direction: column; min-width: 0; }
+.tf-stg-sn b { font-weight: 500; }
+/* A count reads down its column. */
+.tf-stg-src > span:nth-of-type(3) { text-align: right; padding-right: 12px; }
 .tf-stg-sn .tf-dim { font-size: var(--t-sm); }
 .tf-stg-si { font-size: var(--t-sm); color: var(--ink-2); }
 .tf .tf-stg-errt { color: var(--err); }

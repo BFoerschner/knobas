@@ -290,7 +290,6 @@ test("the header names the repository, its last push and its checkout; the tabs 
   );
   expect([...target.querySelectorAll(".tf-crumbs a.tf-crumb, .tf-crumbs strong")].map(text)).toEqual([
     "Code",
-    "Repositories",
     "tidewater/payout-service",
   ]);
   const tabs = [...target.querySelectorAll(".tf-tabs a")];

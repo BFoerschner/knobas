@@ -45,6 +45,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
@@ -421,7 +422,7 @@
   if (filter.scope === null) filter.scope = "all";
   const config = $derived<FilterConfig>({
     id: "builds-runs",
-    placeholder: "Filter runs by number, branch, commit or person",
+    placeholder: "Filter by number, branch or person",
     noun: "runs",
     one: "run",
     scopes: [
@@ -635,7 +636,7 @@
     {:else if all !== null && all.length === 0}
       <div class="tf-empty"><p>No runs yet.</p></div>
     {:else if all !== null && kept.length === 0}
-      <div class="tf-empty"><p>No run matches.</p></div>
+      <TfNoMatch noun="runs" {filter} />
     {/if}
     {#each days as day (day.label)}
       <h3 class="tf-dayh">{day.label}</h3>
@@ -659,7 +660,7 @@
                 {/if}
                 {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : stateWord(run.state.text)}</span>{/if}
               </td>
-              <td class="tf-mono tf-run-br"
+              <td class="tf-mono tf-run-br" title={run.branch ?? undefined}
                 >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
                     class="tf-chip tf-jobchip-sm">{job}</span
                   >{/if}</td

@@ -25,7 +25,7 @@
 .tf-lane + .tf-lane { padding-top: 4px; }
 .tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 6px 0 8px; }
 /* 192 px: a card's first line fits, and at 1440 px the fifth column shows, so the board says there is more. */
-.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(192px, 1fr); gap: 12px; align-items: start; overflow-x: auto; }
+.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(192px, 1fr); gap: 8px; align-items: start; overflow-x: auto; }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
 .tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px; background: var(--sheet-2); border-radius: 6px; }
 .tf-nothing { font-size: var(--t-sm); padding: 6px; }
@@ -48,7 +48,7 @@
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
 /* A card's first line never wraps: the key holds its width, and what follows it gives up first. */
 .tf-thead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; flex: 0 1 auto; min-width: 7ch; max-width: 66%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; flex: 0 1 auto; min-width: 7ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-tkind { font-size: var(--t-xs); flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The source, when another source holds the same key (#1476): a line of its own, or it splits the first. */
 .tf-tsrc { display: block; font-size: var(--t-xs); margin-top: 1px; }
@@ -62,7 +62,7 @@
 }
 .tf-av.tf-me { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-list { padding: 14px 22px 18px; display: flex; flex-direction: column; gap: 8px; }
-.tf-tbl { width: 100%; border-collapse: collapse; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.tf-tbl { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .tf-tbl th {
   font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); text-align: left; padding: 7px 10px;
   border-bottom: 1px solid var(--rule); background: var(--sheet-2); white-space: nowrap;
@@ -87,9 +87,14 @@
 /* A row's second line is words, even under a key: only a code value is mono. */
 .tf-tbl .tf-sub { display: block; font-family: var(--sans); font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
 /* A long key gives up its end, not the summary's room; its title has the whole of it. */
-.tf-tbl .tf-keycell { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
-/* The summary is the column you read: it takes what the others leave. */
-.tf-tbl .tf-c-summary { width: 100%; min-width: 150px; }
+.tf-tbl .tf-keycell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+/* The summary is the column you read: it takes what the others leave. A signal keeps its line, and its dot the first. */
+.tf-tbl .tf-c-summary { width: 100%; min-width: 150px; font-weight: 500; }
+.tf-tbl .tf-c-signals { white-space: nowrap; }
+.tf-tbl .tf-sub { font-weight: 400; }
+/* A row's title (design system, *Type*): the name you scan a list by. */
+.tf-tbl .tf-rowt { font-size: var(--t-md); font-weight: 500; }
+.tf .tf-tbl td:first-child > a.tf-mono { font-size: var(--t-sm); font-weight: 500; }
 .tf-list { container-type: inline-size; }
 /* A narrow pane keeps the columns you scan by; the preview beside it has the priority and the assignee. */
 @container (max-width: 760px) { .tf-tbl :is(.tf-c-priority, .tf-c-assignee) { display: none; } }
