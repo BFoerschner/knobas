@@ -76,7 +76,7 @@ const FOUND = { entity_id: "jira:OPS-77", kind: "ticket", title: "Rotate the gat
 
 function found(): SearchResponse {
   return {
-    interpreted: { text: "", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    interpreted: { text: "", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
     groups: [{ kind: "ticket", label: "Tickets", plural: "tickets", monogram: "T", total: 1, hits: [FOUND] }],
     total: 1,
     took_ms: 0,

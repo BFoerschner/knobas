@@ -514,7 +514,7 @@ test("a link, an unlink and its Undo draw the card's sections again at once, the
   const codeRow = () =>
     [...target.querySelectorAll(".tf-tksecs a")].map((a) => squash(a)).find((row) => row.startsWith("Code")) ?? null;
   const found = {
-    interpreted: { text: "retry", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [] },
+    interpreted: { text: "retry", prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
     groups: [{ kind: "pr", label: "Pull request", plural: "Pull requests", monogram: "PR", total: 1, hits: [{ ...pr, rank: 1, snippet: [] }] }],
     total: 1,
     took_ms: 1,
