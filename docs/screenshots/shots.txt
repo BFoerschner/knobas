@@ -1,7 +1,6 @@
 # The README's screenshots. One line per picture: its name, then the route and
 # steps to reach it, in the words of scripts/shot-steps.mjs. Each line becomes
-# <name>-dark.webp and <name>-light.webp beside this file, and the README shows
-# both through a <picture>.
+# <name>.webp beside this file, in light mode, and the README shows it.
 #
 #   just readme-shots          shoot them all, here, on this machine, to look at
 #   release.yml                shoots them from the tag and commits them to main

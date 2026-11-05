@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# The README's screenshots: every line of docs/screenshots/shots.txt, in both
-# themes, as WebP, shot the same way on a Mac and on a release runner.
+# The README's screenshots: every line of docs/screenshots/shots.txt, in light
+# mode, as WebP, shot the same way on a Mac and on a release runner.
 #
 # Usage: scripts/readme-shots.sh <slot> [out dir]   (`just readme-shots`)
 #   out dir defaults to docs/screenshots, where a picture no line makes any more
@@ -52,7 +52,7 @@ done <"$home/shots.txt"
 # A picture the README asks for and no line makes is a broken image on the front
 # page; one no README shows is a file every release commits for nothing. Both are
 # found here, before minutes of shooting.
-wanted=$(for name in "${names[@]}"; do printf '%s-dark.webp\n%s-light.webp\n' "$name" "$name"; done | sort)
+wanted=$(for name in "${names[@]}"; do printf '%s.webp\n' "$name"; done | sort)
 shown=$({ grep -oE 'docs/screenshots/[A-Za-z0-9._-]+\.webp' "$root/README.md" || true; } | sed 's#.*/##' | sort -u)
 missing=$(comm -13 <(printf '%s\n' "$wanted") <(printf '%s\n' "$shown"))
 unshown=$(comm -23 <(printf '%s\n' "$wanted") <(printf '%s\n' "$shown"))
@@ -60,9 +60,7 @@ unshown=$(comm -23 <(printf '%s\n' "$wanted") <(printf '%s\n' "$shown"))
 [ -z "$unshown" ] || fail "shots.txt makes pictures the README does not show: ${unshown//$'\n'/ }"
 
 if [ -n "${README_SHOTS_DRY_RUN:-}" ]; then
-  for i in "${!names[@]}"; do
-    for theme in dark light; do echo "dry: $out/${names[$i]}-$theme.webp <- ${specs[$i]}"; done
-  done
+  for i in "${!names[@]}"; do echo "dry: $out/${names[$i]}.webp <- ${specs[$i]}"; done
   exit 0
 fi
 
@@ -76,13 +74,11 @@ shot_server_start "$port" "$root" "${SHOT_START_WAIT_S:-120}" "$scratch/vite.log
 
 mkdir "$scratch/shots"
 for i in "${!names[@]}"; do
-  for theme in dark light; do
-    file=$scratch/shots/${names[$i]}-$theme.webp
-    node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$scratch/profile-${names[$i]}-$theme" "$size" "$theme" "$file" "${specs[$i]}" "$query" \
-      || fail "${names[$i]} ($theme) failed; nothing was replaced"
-    [ -s "$file" ] || fail "${names[$i]} ($theme) wrote no image; nothing was replaced"
-    echo "readme-shots: ${names[$i]}-$theme.webp  $(($(wc -c <"$file") / 1024)) KB"
-  done
+  file=$scratch/shots/${names[$i]}.webp
+  node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$scratch/profile-${names[$i]}" "$size" light "$file" "${specs[$i]}" "$query" \
+    || fail "${names[$i]} failed; nothing was replaced"
+  [ -s "$file" ] || fail "${names[$i]} wrote no image; nothing was replaced"
+  echo "readme-shots: ${names[$i]}.webp  $(($(wc -c <"$file") / 1024)) KB"
 done
 
 mkdir -p "$out"
@@ -92,4 +88,4 @@ if [ "$out" = "$home" ]; then
     [ -e "$scratch/shots/$(basename "$file")" ] || { echo "readme-shots: deleted $(basename "$file"), which no line makes"; rm -f "$file"; }
   done
 fi
-echo "readme-shots: ${#names[@]} shots in 2 themes, in $out"
+echo "readme-shots: ${#names[@]} shots in $out"

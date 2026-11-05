@@ -23,7 +23,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_AUTHOR_NAME=t GIT_A
 
 lines=$(grep -cE '^[a-z0-9-]+ ' "$here/../docs/screenshots/shots.txt")
 if planned=$(README_SHOTS_DRY_RUN=1 "$here/readme-shots.sh" 9 2>&1); then
-    [ "$(printf '%s\n' "$planned" | wc -l)" -eq $((lines * 2)) ] || fail "the real tree plans $planned, not two images for each of $lines lines"
+    [ "$(printf '%s\n' "$planned" | wc -l)" -eq "$lines" ] || fail "the real tree plans $planned, not one image for each of $lines lines"
 else
     fail "the real shots.txt and README.md disagree: $planned"
 fi
@@ -32,10 +32,10 @@ tree=$scratch/tree
 mkdir -p "$tree/scripts" "$tree/docs/screenshots"
 cp "$here/readme-shots.sh" "$here/shot-server.sh" "$tree/scripts/"
 git -C "$tree" init -q -b main
-both='docs/screenshots/job-dark.webp docs/screenshots/job-light.webp'
+shown='docs/screenshots/job.webp'
 reset_tree() {
     printf '# a comment\n\njob  #/job/x + wait:1 + see:Some words\n' >"$tree/docs/screenshots/shots.txt"
-    printf 'Pictures: %s\n' "$both" >"$tree/README.md"
+    printf 'Pictures: %s\n' "$shown" >"$tree/README.md"
 }
 dry() { README_SHOTS_DRY_RUN=1 "$tree/scripts/readme-shots.sh" 9 2>&1; }
 refused() { # refused <label> <what the message must say>
@@ -49,12 +49,12 @@ refused() { # refused <label> <what the message must say>
 }
 reset_tree
 said=$(dry) || fail "a tree that agrees was refused: $said"
-case $said in *"job-dark.webp <- #/job/x + wait:1 + see:Some words"*) ;; *) fail "the route is not read whole: $said" ;; esac
+case $said in *"job.webp <- #/job/x + wait:1 + see:Some words"*) ;; *) fail "the route is not read whole: $said" ;; esac
 
-printf 'Pictures: %s docs/screenshots/gone-dark.webp\n' "$both" >"$tree/README.md"
-refused "a picture no line makes" "no line of shots.txt makes: gone-dark.webp"
-printf 'Pictures: docs/screenshots/job-dark.webp\n' >"$tree/README.md"
-refused "a theme the README does not show" "the README does not show: job-light.webp"
+printf 'Pictures: %s docs/screenshots/gone.webp\n' "$shown" >"$tree/README.md"
+refused "a picture no line makes" "no line of shots.txt makes: gone.webp"
+printf 'No pictures here.\n' >"$tree/README.md"
+refused "a line the README does not show" "the README does not show: job.webp"
 printf 'job  #/a + see:x\njob  #/b + see:x\n' >"$tree/docs/screenshots/shots.txt"
 refused "a name twice" "'job' is there twice"
 printf 'job\n' >"$tree/docs/screenshots/shots.txt"
@@ -75,7 +75,7 @@ git clone -q "$origin" "$clone" 2>/dev/null
 g() { git -C "$clone" -c user.name=t -c user.email=t@t "$@"; }
 mkdir -p "$clone/scripts" "$clone/docs/screenshots"
 cp "$here/readme-shots-publish.sh" "$clone/scripts/"
-echo old >"$clone/docs/screenshots/job-dark.webp"
+echo old >"$clone/docs/screenshots/job.webp"
 echo 'As of <!-- shots-version -->v1.0.0<!-- /shots-version -->.' >"$clone/README.md"
 g add -A
 g commit -q -m base
@@ -87,16 +87,16 @@ git clone -q "$origin" "$other" 2>/dev/null
 
 shots=$scratch/shots
 mkdir "$shots"
-echo new >"$shots/job-dark.webp"
+echo new >"$shots/job.webp"
 g checkout -q --detach
 stood=$(g rev-parse HEAD)
 "$clone/scripts/readme-shots-publish.sh" v1.1.0 "$shots" >/dev/null 2>"$scratch/err" || fail "a release's pictures did not publish: $(cat "$scratch/err")"
 published=$(head_at)
 [ "$published" != "$stood" ] || fail "a release's pictures made no commit"
-[ "$(git -C "$origin" show main:docs/screenshots/job-dark.webp)" = new ] || fail "the picture is not on the branch"
+[ "$(git -C "$origin" show main:docs/screenshots/job.webp)" = new ] || fail "the picture is not on the branch"
 git -C "$origin" show main:README.md | grep -q 'shots-version -->v1.1.0<!--' || fail "the stamp does not name the release"
 [ "$(git -C "$origin" log -1 --format=%s main)" = "Refresh the README's screenshots for v1.1.0" ] || fail "the commit's subject: $(git -C "$origin" log -1 --format=%s main)"
-[ "$(git -C "$origin" diff --name-only "$stood" main | sort | tr '\n' ' ')" = "README.md docs/screenshots/job-dark.webp " ] || fail "the commit holds more than the pictures and the stamp"
+[ "$(git -C "$origin" diff --name-only "$stood" main | sort | tr '\n' ' ')" = "README.md docs/screenshots/job.webp " ] || fail "the commit holds more than the pictures and the stamp"
 [ "$(g rev-parse HEAD)" = "$stood" ] || fail "the checkout moved off what it stood on"
 [ "$(g worktree list | wc -l)" -eq 1 ] || fail "the worktree was left: $(g worktree list)"
 
@@ -122,12 +122,12 @@ git -C "$other" push -q origin HEAD:main
 HOOK
 chmod +x "$scratch/hooks/pre-push"
 g config core.hooksPath "$scratch/hooks"
-echo newer >"$shots/job-dark.webp"
+echo newer >"$shots/job.webp"
 "$clone/scripts/readme-shots-publish.sh" v1.2.0 "$shots" >/dev/null 2>"$scratch/err" || fail "a push another merge beat did not land: $(cat "$scratch/err")"
 [ -e "$scratch/raced" ] || fail "the race never ran, so this case proved nothing"
 [ "$(git -C "$origin" log -2 --format=%s main | tr '\n' '|')" = "Refresh the README's screenshots for v1.2.0|another merge|" ] \
     || fail "the commit is not on top of the merge that beat it: $(git -C "$origin" log -3 --format=%s main)"
-[ "$(git -C "$origin" show main:docs/screenshots/job-dark.webp)" = newer ] || fail "the rebased commit lost its picture"
+[ "$(git -C "$origin" show main:docs/screenshots/job.webp)" = newer ] || fail "the rebased commit lost its picture"
 
 if [ "$failures" -gt 0 ]; then echo "readme-shots-test: $failures failure(s)" >&2; exit 1; fi
 echo "readme-shots-test: ok"

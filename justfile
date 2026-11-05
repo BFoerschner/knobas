@@ -274,13 +274,20 @@ front-changed base="origin/main": deps
 shot slot out +routes:
     scripts/shot.sh "$@"
 
-# Every picture in the README, from `docs/screenshots/shots.txt`, in both themes:
-# about 3 minutes. A re-run on one machine draws the same bytes. A Mac and the
+# Every screenshot in the README, from `docs/screenshots/shots.txt`, in light mode:
+# about 90 seconds. A re-run on one machine draws the same bytes. A Mac and the
 # release runner differ in every picture by how they rasterize text, so the
 # release workflow's are the ones meant to stay, from the same script on the tag
 # (docs/development.md, *README screenshots*).
 readme-shots slot="90": deps
     scripts/readme-shots.sh {{slot}}
+
+# Every diagram in the README, from `docs/diagrams/*.d2`, laid out by TALA, in both
+# themes. Needs d2 v0.9.0 or newer, which bundles TALA, and no key. Refuses an older
+# d2 rather than laying them out with another engine (docs/development.md,
+# *README screenshots*).
+readme-diagrams:
+    scripts/readme-diagrams.sh
 
 # Reads live from GitHub through `gh`, no checkout needed. Serves on
 # 127.0.0.1:8765 and opens the browser; `just pr-assets 8800 --no-open`.
@@ -491,12 +498,14 @@ shell:
 # in prose, and on a table row the tree lost or a member the table lacks
 # (#1919). And the README screenshots': the shot list and the README agree or
 # the run is refused, and a release's commit lands on a branch that moved under it,
-# against a local bare repository, about 6 s.
+# against a local bare repository, about 6 s. And the README diagrams': a d2 with no
+# bundled TALA, a watermark or a failed render replaces nothing, against a stub `d2`.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/bash-guard-test.sh
     scripts/shot-test.sh
     scripts/readme-shots-test.sh
+    scripts/readme-diagrams-test.sh
     scripts/test-layout-test.sh
     scripts/ipc-mirror-check-test.sh
     scripts/test-prefix-guard-test.sh
