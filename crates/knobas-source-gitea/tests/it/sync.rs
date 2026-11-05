@@ -1883,9 +1883,10 @@ async fn a_budget_that_stops_short_keeps_the_boundary_it_was_handed() {
 /// version 1 kept none at all). The version bump makes that cursor unusable,
 /// which turns the first run after the upgrade into a full sync.
 ///
-/// Both halves on one fixture: the same position at version 2 re-emits, and at
-/// the current version it is idle (battery clause 2). Without the second half this would
-/// pass on an adapter that ignored its cursor altogether.
+/// Both halves on one fixture: the same position at the version before this
+/// one re-emits, and at the current version it is idle (battery clause 2).
+/// Without the second half this would pass on an adapter that ignored its
+/// cursor altogether.
 #[tokio::test]
 async fn a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits() {
     let fake = Fake::start(&State::tidewater()).await;
