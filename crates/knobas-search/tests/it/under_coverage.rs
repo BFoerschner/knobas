@@ -350,9 +350,9 @@ async fn a_source_whose_child_rows_are_all_withdrawn_names_no_parent() {
 #[tokio::test]
 async fn a_live_child_row_answers_wherever_it_sits_among_withdrawn_ones() {
     use FilterAnswer::{Answered, NoValues};
-    // Past what a bounded look reads (`coverage::UNDER_COVERAGE_SQL`'s 64), at two
+    // Past what a bounded look reads (`coverage::UNDER_COVERAGE_SQL`'s 256), at two
     // child rows a commit.
-    const RUN: usize = 35;
+    const RUN: usize = 135;
     // (case, withdrawn rows written before, a live one between?, withdrawn rows after)
     let cases = [
         ("live, then a run withdrawn", 0, true, RUN, Answered),
@@ -402,7 +402,7 @@ async fn a_live_child_row_of_another_adapter_names_nothing_at_either_end() {
     let full = format!("o{t}/payout-{t}");
     let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
     item(&pool, &gitea, "repo", &full, repo.clone()).await;
-    for n in 0..35 {
+    for n in 0..135 {
         item(
             &pool,
             &gitea,

@@ -36,6 +36,9 @@ const UNDER_ITS_COMMITS: &str = "gitea-commits-on-top";
 const SWEPT: &str = "gitea-swept";
 /// How many withdrawn commits [`SWEPT`] holds, at two child rows each.
 const SWEPT_COMMITS: i64 = 500;
+/// The other way round: its live child rows are at the head of the range, and the
+/// far end, where the probe looks first, is the withdrawn run.
+const SWEPT_LAST: &str = "gitea-swept-last";
 
 /// The benchmark's parents, in proportion: a Gitea source's commits and pull
 /// requests name a repository, and the other sources name nothing.
@@ -72,6 +75,9 @@ async fn corpus_with_parents() -> sqlx::PgPool {
     a_gitea(&pool, SWEPT).await;
     rows_of(&pool, SWEPT, "commit", "gone", SWEPT_COMMITS, "3 years", true).await;
     rows_of(&pool, SWEPT, "branch", "live", 20, "1 year", false).await;
+    a_gitea(&pool, SWEPT_LAST).await;
+    rows_of(&pool, SWEPT_LAST, "branch", "live", 20, "1 year", false).await;
+    rows_of(&pool, SWEPT_LAST, "commit", "gone", SWEPT_COMMITS, "3 years", true).await;
     testing::prepare(&pool).await.unwrap();
     let (child_rows,): (i64,) = sqlx::query_as(
         "select count(*) from sync.item_parent where arm = 'child' and source_id = 'gitea'",
@@ -231,16 +237,19 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
                 .await
                 .unwrap();
         }
-        // #2504. A run of withdrawn child rows ahead of the live ones costs a bounded
-        // look, whichever end the plan starts from.
-        let swept = [SWEPT.to_owned()];
-        for cache in [PlanCache::Custom, PlanCache::Generic] {
-            let plan = under_coverage_plan(&pool, &swept, cache).await.unwrap();
-            let read = rows_read_from("item_parent_child_idx", &plan);
-            assert!(
-                read <= 64.0,
-                "under:, {state}, {cache:?}: read {read} child rows of {SWEPT}:\n{plan}"
-            );
+        // #2504. A run of withdrawn child rows costs a bounded look at whichever end
+        // of the range it sits: 256 rows, and one more from the head when the far end
+        // saw nothing live.
+        for source in [SWEPT, SWEPT_LAST] {
+            let ids = [source.to_owned()];
+            for cache in [PlanCache::Custom, PlanCache::Generic] {
+                let plan = under_coverage_plan(&pool, &ids, cache).await.unwrap();
+                let read = rows_read_from("item_parent_child_idx", &plan);
+                assert!(
+                    read <= 257.0,
+                    "under:, {state}, {cache:?}: read {read} child rows of {source}:\n{plan}"
+                );
+            }
         }
         // #2503. A source under its own left-out rows is settled without a read of it.
         let under_commits = [UNDER_ITS_COMMITS.to_owned()];

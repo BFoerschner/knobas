@@ -317,7 +317,13 @@ select i.source_id                            as source_id,
 ///   the far end is what the source wrote last, which is usually live. It is a
 ///   bounded look, so it costs next to nothing when wrong, and it only ever says
 ///   yes: a live row anywhere is a live row. The head's read stays behind it, as
-///   the proof for a source with none. Its cost is unchanged, plus the 64 rows.
+///   the proof for a source with none. Its cost is unchanged, plus the look.
+/// * **Why 256, not the walk's 64.** Equal keys share posting lists of about 220
+///   rows, a sixth of a page, and a backward scan reads each one from its low end
+///   (`_bt_readpage`). So the live rows at the very end of the range can sit behind
+///   the first 220 rows it reads. Fewer than that can miss them, as 64 did for 40
+///   live rows after 1,000 withdrawn. The budget is only spent on withdrawn rows:
+///   the look stops at the first live one.
 /// * **No grouped join behind the look,** which is what #2504 proposed. It reads
 ///   every child row of the source and has nothing to stop it at the first live one.
 ///   Measured over 46,668 withdrawn rows, it took 99 to 109 ms in place of 40 to 43
@@ -357,7 +363,7 @@ select s.id
                            and ip.source_id <= s.id
                            and ip.adapter_kind = s.kind
                          order by ip.source_id desc
-                         limit 64) last_written
+                         limit 256) last_written
                   join sync.live_item i on i.entity_id = last_written.entity_id)
         or exists (select 1
                      from (select 1
