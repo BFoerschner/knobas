@@ -6,6 +6,7 @@
 use chrono::{DateTime, Utc};
 use knobas_core::entity::EntityRef;
 use knobas_source::SyncItem;
+use knobas_source::docs::indexed::comment_line;
 use serde_json::Value;
 
 use crate::model;
@@ -31,6 +32,19 @@ fn body_text(parts: impl IntoIterator<Item = String>) -> String {
         .filter(|p| !p.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+/// A comment as `body_text` holds it: its author's line, then its text, so the
+/// launcher's excerpt reads `Comment by <name>` (#2455). A comment with no text
+/// is no part. The display name, as a Jira or Confluence comment's is, and the
+/// login where the profile sets none.
+fn comment_text(comment: &model::Comment) -> Option<String> {
+    let text = comment.body.as_deref().filter(|b| !b.trim().is_empty())?;
+    let user = comment.user.as_ref();
+    let name = user
+        .and_then(|u| non_blank(u.full_name.as_deref()))
+        .or_else(|| user.and_then(|u| non_blank(u.login.as_deref())));
+    Some(format!("{}\n{text}", comment_line(name.as_deref())))
 }
 
 fn non_blank(value: Option<&str>) -> Option<String> {
@@ -231,8 +245,8 @@ pub(crate) fn pr_item(
         body_text: body_text(
             [Some(title), pr.body.clone()]
                 .into_iter()
-                .chain(comments.iter().map(|c| c.body.clone()))
-                .flatten(),
+                .flatten()
+                .chain(comments.iter().filter_map(comment_text)),
         ),
         author: pr.user.as_ref().and_then(|u| non_blank(u.login.as_deref())),
         updated_at: real_time(pr.updated_at).or_else(|| real_time(pr.created_at)),
@@ -313,8 +327,8 @@ pub(crate) fn ticket_item(
         body_text: body_text(
             [Some(title), issue.body.clone()]
                 .into_iter()
-                .chain(comments.iter().map(|c| c.body.clone()))
-                .flatten(),
+                .flatten()
+                .chain(comments.iter().filter_map(comment_text)),
         ),
         author: issue
             .user
@@ -576,8 +590,10 @@ mod tests {
         });
         let pr: crate::model::PullRequest = serde_json::from_value(raw.clone()).unwrap();
         let comments: Vec<crate::model::Comment> = serde_json::from_value(serde_json::json!([
-            { "body": "Should the jitter be bounded?" },
-            { "body": "Bounded to +/-10 % in c90d11." }
+            { "body": "Should the jitter be bounded?",
+              "user": { "login": "priya", "full_name": "Priya Nair" } },
+            { "body": "Bounded to +/-10 % in c90d11.",
+              "user": { "login": "mara", "full_name": "" } }
         ]))
         .unwrap();
         let item = pr_item(SOURCE, &raw, at(), &pr, &comments);
@@ -589,8 +605,8 @@ mod tests {
         assert_eq!(item.title, "SEPA retry with exponential backoff");
         assert_eq!(
             item.body_text,
-            "SEPA retry with exponential backoff\n\nRetries transient PSP errors.\n\nShould the \
-             jitter be bounded?\n\nBounded to +/-10 % in c90d11."
+            "SEPA retry with exponential backoff\n\nRetries transient PSP errors.\n\n\u{1f}Priya \
+             Nair\nShould the jitter be bounded?\n\n\u{1f}mara\nBounded to +/-10 % in c90d11."
         );
         assert_eq!(item.author.as_deref(), Some("mara"));
         // `updated_at` wins over `created_at`, and both are present and
@@ -707,9 +723,12 @@ mod tests {
         let raw =
             raw_issue(serde_json::json!([{ "name": "Priority/High" }, { "name": "Kind/Bug" }]));
         let issue: crate::model::Issue = serde_json::from_value(raw.clone()).unwrap();
-        let comments = [crate::model::Comment {
-            body: Some("Reproduced on main.".to_owned()),
-        }];
+        let comments: Vec<crate::model::Comment> = serde_json::from_value(serde_json::json!([
+            { "body": "Reproduced on main.", "user": { "login": "priya" } },
+            { "body": "  ", "user": { "login": "mara" } },
+            { "body": "By nobody." }
+        ]))
+        .unwrap();
         let item = ticket_item(SOURCE, &raw, at(), &issue, &comments);
         assert_eq!(
             item.entity.to_string(),
@@ -719,7 +738,8 @@ mod tests {
         assert_eq!(item.title, "Payout CSV drops the currency column");
         assert_eq!(
             item.body_text,
-            "Payout CSV drops the currency column\n\nSeen on the EUR batch.\n\nReproduced on main."
+            "Payout CSV drops the currency column\n\nSeen on the EUR batch.\n\n\u{1f}priya\n\
+             Reproduced on main.\n\n\u{1f}\nBy nobody."
         );
         assert_eq!(item.author.as_deref(), Some("mara"));
         assert_eq!(

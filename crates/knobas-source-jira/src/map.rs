@@ -2,8 +2,9 @@
 
 use knobas_core::entity::EntityRef;
 use knobas_source::SyncItem;
+use knobas_source::docs::indexed::comment_line;
 
-use crate::model::RawIssue;
+use crate::model::{RawComment, RawIssue};
 
 /// Map one issue, in the namespace of the instance that fetched it.
 ///
@@ -27,7 +28,7 @@ pub(crate) fn to_sync_item(
         [title.clone()]
             .into_iter()
             .chain(fields.description.clone())
-            .chain(comments.iter().filter_map(|c| c.body.clone())),
+            .chain(comments.iter().filter_map(comment_text)),
     );
     SyncItem {
         entity: EntityRef::new(source_id, &raw.issue.key),
@@ -166,6 +167,19 @@ fn sprint(value: &serde_json::Value) -> Option<serde_json::Value> {
     Some(serde_json::json!({ "id": id, "name": get("name"), "state": state }))
 }
 
+/// A comment as `body_text` holds it: its author's line, then its text, so the
+/// launcher's excerpt reads `Comment by <name>` (#2455). A comment with no text
+/// is no part. The display name, as a Confluence comment's is, and the username
+/// where the record has none.
+fn comment_text(comment: &RawComment) -> Option<String> {
+    let text = comment.body.as_deref().filter(|b| !b.trim().is_empty())?;
+    let author = &comment.raw["author"];
+    let name = [&author["displayName"], &author["name"]]
+        .into_iter()
+        .find_map(|name| name.as_str().filter(|n| !n.trim().is_empty()));
+    Some(format!("{}\n{text}", comment_line(name)))
+}
+
 /// Join the non-empty parts into the blob FTS indexes -- the same rule
 /// `knobas-source-mock` uses, so a Jira ticket and a mock ticket are indexed
 /// alike.
@@ -249,6 +263,80 @@ mod tests {
         assert!(item.body_text.contains("retry budget still needs a cap"));
         // No HTML: the adapter never asks for renderedFields (gotcha 7).
         assert!(!item.body_text.contains('<'), "{}", item.body_text);
+    }
+
+    /// #2455: each comment's text sits under its author's line, so a word in
+    /// a comment reads as that comment's and the description stays the lead.
+    #[test]
+    fn body_text_names_who_wrote_each_comment() {
+        use knobas_source::docs::indexed::{Part, read};
+        let p = page();
+        let item = to_sync_item(
+            "jira",
+            "https://jira.tidewater.example",
+            None,
+            None,
+            &p.issues[0],
+        );
+        let runs = read(&item.body_text).runs;
+        assert_eq!(runs[0].part, Part::Lead);
+        assert!(
+            runs[0].text.contains("retryable SEPA error"),
+            "{:?}",
+            runs[0]
+        );
+        assert_eq!(
+            (&runs[1].part, runs[1].text.as_str()),
+            (
+                &Part::Comment("Priya Raman".to_owned()),
+                "The bank returns AC04 for closed accounts - those must not be retried."
+            )
+        );
+        assert_eq!(
+            (&runs[2].part, runs[2].text.as_str()),
+            (
+                &Part::Comment("Mara Lindqvist".to_owned()),
+                "Backoff is in; the retry budget still needs a cap."
+            )
+        );
+        assert_eq!(runs.len(), 3);
+    }
+
+    /// #2455: the record's username stands in for a missing display name, a
+    /// comment naming nobody still opens its own part, and a blank one writes
+    /// no line, so no empty place reaches the excerpts.
+    #[test]
+    fn a_comment_without_a_display_name_or_a_text_reads_as_it_should() {
+        use knobas_source::docs::indexed::{Part, read};
+        let raw: SearchPage = serde_json::from_value(serde_json::json!({
+            "total": 1,
+            "issues": [{ "id": "1", "key": "PAY-1", "fields": {
+                "summary": "A ticket",
+                "comment": { "total": 3, "comments": [
+                    { "author": { "name": "priya.raman" }, "body": "By username." },
+                    { "body": "By nobody." },
+                    { "author": { "displayName": "Mara" }, "body": "  " }
+                ] }
+            } }]
+        }))
+        .unwrap();
+        let item = to_sync_item("jira", "https://j.example", None, None, &raw.issues[0]);
+        let parts: Vec<(Part, String)> = read(&item.body_text)
+            .runs
+            .into_iter()
+            .map(|r| (r.part, r.text))
+            .collect();
+        assert_eq!(
+            parts,
+            [
+                (Part::Lead, "A ticket".to_owned()),
+                (
+                    Part::Comment("priya.raman".to_owned()),
+                    "By username.".to_owned()
+                ),
+                (Part::Comment(String::new()), "By nobody.".to_owned()),
+            ]
+        );
     }
 
     /// Spec §3a: `payload` is the raw record, so a later mapping can re-project

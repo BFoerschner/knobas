@@ -18,7 +18,8 @@ import { expect, test } from "vitest";
 import type { AssetDetail, AssetRow } from "../../ipc/assets";
 import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
-import type { ProposalEvidence, SuggestionPage } from "../../ipc/entity";
+import type { EntityDetail, ProposalEvidence, SuggestionPage } from "../../ipc/entity";
+import type { SearchResponse } from "../../ipc/search";
 import { demoHandlers } from "./fake-tauri";
 import { FIXTURE_SOURCES } from "./fake/sources";
 
@@ -112,6 +113,20 @@ test("accepting or dismissing removes the row from the next read and drops the c
   expect(() => handlers["dismiss_suggestion"]!({ linkId: "link:fake-none" })).toThrow(
     expect.objectContaining({ code: "not_found" }),
   );
+});
+
+/**
+ * #2455: a word in a ticket's comment names that comment, and the detail panel
+ * shows the words without the mark, as `body_text_shown!` does.
+ */
+test("a ticket's comment reads as its author's in the search and not as a mark in the detail", () => {
+  const handlers = demoHandlers();
+  const answer = handlers["search"]!({ query: { raw: "exponential", titles: false } }) as SearchResponse;
+  const hit = answer.groups.flatMap((group) => group.hits).find((one) => one.entity_id === "mock:PAY-231");
+  expect(hit?.excerpts[0]?.place).toBe("Comment by Mara Lindqvist");
+  const detail = handlers["get_entity"]!({ entityId: "mock:PAY-231" }) as EntityDetail;
+  expect(detail.body_text).toContain("exponential");
+  expect(detail.body_text).not.toContain("\u001f");
 });
 
 /**

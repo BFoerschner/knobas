@@ -1061,7 +1061,8 @@ async fn a_synced_issue_carries_its_attachment_list() {
 /// **The full re-sync the field change orders** (#2404): a cursor this
 /// adapter wrote before `attachment` joined the field list (version 4) is
 /// read as none, so the first run after the upgrade walks every issue and
-/// each one arrives with its `fields.attachment`.
+/// each one arrives with its `fields.attachment`. So is one from before
+/// #2455's comment lines (version 5), which rewrites every `body_text`.
 #[tokio::test]
 async fn a_cursor_from_before_the_attachment_list_orders_a_full_re_sync() {
     let jira = spawn_mock_jira().await;
@@ -1074,7 +1075,26 @@ async fn a_cursor_from_before_the_attachment_list_orders_a_full_re_sync() {
     );
 
     let mut before: serde_json::Value = serde_json::from_str(&cursor).unwrap();
-    assert_eq!(before["v"], 5);
+    assert_eq!(before["v"], 6);
+    before["v"] = serde_json::json!(5);
+    let mut comment_lines = VecSink(Vec::new());
+    source
+        .sync(Some(before.to_string()), &mut comment_lines)
+        .await
+        .unwrap();
+    assert_eq!(
+        comment_lines.0.len(),
+        every.len(),
+        "a version-5 cursor walks the whole source too"
+    );
+    assert!(
+        comment_lines
+            .0
+            .iter()
+            .any(|i| i.body_text.contains(knobas_source::docs::indexed::COMMENT)),
+        "and the walk writes the comment lines"
+    );
+
     before["v"] = serde_json::json!(4);
     let mut sink = VecSink(Vec::new());
     source

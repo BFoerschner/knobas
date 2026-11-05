@@ -1,7 +1,7 @@
-//! The incremental position: `{"v":5,…}`, opaque to everything but this crate.
+//! The incremental position: `{"v":6,…}`, opaque to everything but this crate.
 //!
 //! ```text
-//! {"v":5,
+//! {"v":6,
 //!  "updated_to":"2026-08-22T11:48:00Z",   // the newest `updated` delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
 //!  "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"3f0c1a92be44d7e5"}]}
@@ -66,7 +66,11 @@ use knobas_source::watermark::{self, Advanced, Bounds, Entry, Jql};
 /// full re-sync of every Jira source that fills `fields.attachment` on every
 /// ticket mirrored before. The views and the board stamp go with the old
 /// envelope and are read again on that run.
-pub(crate) const CURSOR_VERSION: u8 = 5;
+///
+/// **6** since #2455 writes each comment's text under its author's line in
+/// `body_text`: one full sync rewrites every mirrored ticket's search text, and
+/// the excerpts of a ticket mirrored before it name their places.
+pub(crate) const CURSOR_VERSION: u8 = 6;
 
 // The overlap, the daylight-saving widening and the seen cap are
 // `knobas_source::watermark`'s (#1622), shared with Confluence. Interfaces
@@ -318,11 +322,11 @@ mod tests {
 
     /// #1700: the board-read stamp is an optional field, so the version
     /// stayed 4 and an envelope written without it still decodes, as never
-    /// read. (Version 5 since #2404, for its own reason.)
+    /// read. (Version 5 since #2404 and 6 since #2455, for their own reasons.)
     #[test]
     fn an_envelope_without_the_board_read_stamp_decodes() {
-        assert_eq!(CURSOR_VERSION, 5);
-        let old = r#"{"v":5,"updated_to":null,"tz_offset_secs":0,"seen":[],"views":[{"k":"board-1","h":"x"}]}"#;
+        assert_eq!(CURSOR_VERSION, 6);
+        let old = r#"{"v":6,"updated_to":null,"tz_offset_secs":0,"seen":[],"views":[{"k":"board-1","h":"x"}]}"#;
         let cursor = JiraCursor::parse(old).expect("an envelope without the field reads");
         assert_eq!(cursor.board_read, None);
         assert_eq!(cursor.views.len(), 1);
@@ -334,7 +338,7 @@ mod tests {
     /// no scope -- the "everything" scope included -- and the views survive.
     #[test]
     fn a_cursor_under_another_scope_drops_its_watermark_and_keeps_its_views() {
-        let old = r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[{"k":"PAY-1","u":"2026-08-22T11:48:00Z","h":"x"}],"views":[{"k":"board-1","h":"x"}]}"#;
+        let old = r#"{"v":6,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[{"k":"PAY-1","u":"2026-08-22T11:48:00Z","h":"x"}],"views":[{"k":"board-1","h":"x"}]}"#;
         let legacy = JiraCursor::parse(old).expect("an envelope without the field reads");
         assert_eq!(legacy.scope, None);
         let walked = legacy.clone().under("");
@@ -364,7 +368,7 @@ mod tests {
         // arithmetic and none of the envelope, so no stored cursor re-syncs.
         assert_eq!(
             c.encode(),
-            r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
+            r#"{"v":6,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":7200,"seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
         );
     }
 
@@ -372,12 +376,23 @@ mod tests {
     /// future cursor must not wedge a source -- it must re-sync.
     #[test]
     fn an_unreadable_cursor_means_full_sync() {
-        assert!(JiraCursor::parse(r#"{"v":6,"updated_to":null}"#).is_none());
+        assert!(JiraCursor::parse(r#"{"v":7,"updated_to":null}"#).is_none());
         // A *complete* envelope of a version this build does not know: the
         // version check has to be what rejects it, not a missing field.
         assert!(
             JiraCursor::parse(
-                r#"{"v":6,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+                r#"{"v":7,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+            )
+            .is_none()
+        );
+        // **A version-5 cursor, which is what every source stored before
+        // #2455.** Refusing it is the full sync that writes the comment marks
+        // into every stored ticket's `body_text`.
+        assert!(
+            JiraCursor::parse(
+                r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,
+                    "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}],
+                    "views":[{"k":"board-1","h":"x"}],"scope":""}"#
             )
             .is_none()
         );

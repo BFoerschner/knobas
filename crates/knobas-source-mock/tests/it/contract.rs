@@ -7,6 +7,7 @@
 //! quietly desynchronise the app from the design it is being built to match.
 
 use knobas_source::contract::{Fault, VecSink, Walking, battery};
+use knobas_source::docs::indexed::Part;
 use knobas_source::{Capability, Source, SourceError, WriteOp};
 use knobas_source_mock::MockSource;
 
@@ -264,7 +265,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v5");
+    assert_eq!(cursor, "tidewater-v6");
     assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
@@ -281,6 +282,19 @@ async fn full_sync_emits_every_work_item() {
     assert!(ticket.body_text.contains("Retry failed SEPA payouts"));
     assert!(ticket.body_text.contains("manual review queue"));
     assert!(ticket.body_text.contains("finance wants max 5 attempts"));
+    // ...each comment under its author's line (#2455), so an excerpt names it.
+    let runs = knobas_source::docs::indexed::read(&ticket.body_text).runs;
+    let parts: Vec<_> = runs.iter().map(|run| &run.part).collect();
+    assert_eq!(
+        parts,
+        [
+            &Part::Lead,
+            &Part::Comment("Priya Nair".to_owned()),
+            &Part::Comment("Mara Lindqvist".to_owned()),
+        ]
+    );
+    assert!(runs[0].text.contains("manual review queue"));
+    assert!(runs[1].text.contains("finance wants max 5 attempts"));
     assert_eq!(ticket.payload["key"], "PAY-231");
     assert_eq!(ticket.payload["epic"], "PAY-200");
 
@@ -377,11 +391,44 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v5".into()), &mut sink)
+        .sync(Some("tidewater-v6".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v5");
+    assert_eq!(cursor, "tidewater-v6");
+}
+
+/// ADR-0040: a built-in docs source writes a page's `body_text` with the shared
+/// function over its projection, so a page reads by section and by comment
+/// author as a Confluence page does (#2455).
+#[tokio::test]
+async fn a_pages_search_text_is_the_shared_functions_over_its_projection() {
+    let s = MockSource::new();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+    let pages: Vec<_> = sink.0.iter().filter(|i| i.kind == "page").collect();
+    assert!(!pages.is_empty());
+    let mut parts = Vec::new();
+    for page in pages {
+        let content = knobas_source_mock::doc_content("page", &page.payload).expect("a projection");
+        let space = page.payload["project"]["key"].as_str().expect("a space");
+        assert_eq!(
+            page.body_text,
+            knobas_source::docs::search_text(&page.title, space, &content)
+        );
+        parts.extend(
+            knobas_source::docs::indexed::read(&page.body_text)
+                .runs
+                .into_iter()
+                .map(|run| run.part),
+        );
+    }
+    assert!(parts.iter().any(|p| matches!(p, Part::Section(_))));
+    assert!(
+        parts
+            .iter()
+            .any(|p| matches!(p, Part::Comment(by) if !by.is_empty()))
+    );
 }
 
 /// The upgrade path the cursor's versioning exists to provide (#234): a

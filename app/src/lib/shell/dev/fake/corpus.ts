@@ -114,7 +114,12 @@ export const CORPUS: {
     markup: "jira_wiki",
     description:
       "Payouts to two SEPA banks fail with a *409* on retry. The retry window has to be idempotent before we can turn the scheduler back on.\n\n!psp-409-trace.png|thumbnail!\n\nThe codes are in [^sepa-error-codes.pdf].\n\n* (/) Retry only the transient codes ({{AC04}} is final)\n* (x) Cap the retry budget",
-    comments: [{ by: "mara" }, { by: "jonas" }],
+    // `name` and `text` are what `body_text` folds in, as an adapter does
+    // (#2455); the whole thread is `entity.ts`'s.
+    comments: [
+      { by: "mara", name: "Mara Lindqvist", text: "Plan: exponential backoff, base 30 s, factor 2. Max attempts still open." },
+      { by: "jonas", name: "Jonas Becker", text: "5 attempts from base 30 s is about 15 min until the last one. Fine for the 13:00 batch?" },
+    ],
     // The ticket page's attachment list (#2404), as `get_entity` answers it:
     // the four files the Tidewater fixture gives PAY-231, at the addresses
     // mockd serves them from. Only Jira declares attachments; the fake draws
@@ -368,6 +373,18 @@ CORPUS.push(
   }),
 );
 
+/** A row's `body_text` as a reader is shown it: `body_text_shown!`, without
+ * the marks and the comment author lines. */
+export function bodyShown(body: string): string {
+  return body.replace(/[\u001d\u001f][^\n]*\n?|\u001e/g, "");
+}
+
+/** A row's comments as `body_text` holds them, each under its author's line. */
+function commentParts(payload: Record<string, unknown>): string[] {
+  const comments = (payload["comments"] ?? []) as { name?: string; text?: string }[];
+  return comments.filter((comment) => comment.text).map((comment) => `\u001f${comment.name}\n${comment.text}`);
+}
+
 /** One corpus entry, with the fields every row shares filled in. */
 function row(
   entity_id: string,
@@ -383,7 +400,7 @@ function row(
     title,
     updated_at,
     author,
-    body_text: String(payload["description"] ?? title),
+    body_text: [String(payload["description"] ?? title), ...commentParts(payload)].join("\n\n"),
     web_url: `${FIXTURE_HOST}/browse/${keyOf(entity_id)}`,
     deleted_at: null as string | null,
     payload,

@@ -1784,6 +1784,19 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         "the review discussion is what FTS has to find; body_text was {:?}",
         sepa.body_text
     );
+    // ...under its author's line (#2455), off the `user` a real Gitea and a
+    // real Forgejo answer on a comment: the excerpt reads `Comment by <name>`.
+    assert!(
+        knobas_source::docs::indexed::read(&sepa.body_text)
+            .runs
+            .iter()
+            .any(|run| matches!(
+                &run.part,
+                knobas_source::docs::indexed::Part::Comment(by) if !by.is_empty()
+            ) && run.text.contains("jitter")),
+        "the comment holding the word names who wrote it: {:?}",
+        sepa.body_text
+    );
     // ...and the title is still the first thing in it. `body_text.len() >
     // title.len()` stood here until #347 and could not fail: the assertion
     // above had already put a 46-character review comment inside a `body_text`

@@ -47,6 +47,7 @@ use std::sync::{Mutex, OnceLock};
 use chrono::{DateTime, NaiveDate, Utc};
 use knobas_core::entity::EntityRef;
 use knobas_source::contract::Fault;
+use knobas_source::docs::indexed::comment_line;
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
     Capability, ConnectionInfo, Cursor, KindInfo, RefreshAnswer, Sink, Source, SourceDescriptor,
@@ -72,8 +73,9 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// corpus to get them. `v4` is #1240: the corpus gained a pipeline per build
 /// configuration, a daily protocol page and two monitors. `v5` is #2403: a
 /// ticket gained its reporter, its created date, its time spent and its
-/// worklog entries' seconds.
-const CURSOR: &str = "tidewater-v5";
+/// worklog entries' seconds. `v6` is #2455: a comment's text sits under its
+/// author's line in `body_text`, as the real adapters write it.
+const CURSOR: &str = "tidewater-v6";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
@@ -766,7 +768,10 @@ pub fn doc_content(
         .map(|c| DocComment {
             id: None,
             author: c["who"].as_str().map(str::to_owned),
-            author_name: None,
+            author_name: c["who"]
+                .as_str()
+                .and_then(|who| fixture().person(who))
+                .map(|person| person.name.clone()),
             at: c["when"].as_str().map(str::to_owned),
             blocks: vec![DocBlock::Paragraph {
                 text: text(c["text"].as_str().unwrap_or_default()),
@@ -862,6 +867,16 @@ fn branch_payload(b: &Branch) -> serde_json::Value {
     payload
 }
 
+/// A comment as `body_text` holds it: its author's line, then its text (#2455,
+/// as Jira and Gitea write it). A comment with no text is no part.
+fn comment_text(comment: &Comment) -> Option<String> {
+    if comment.text.trim().is_empty() {
+        return None;
+    }
+    let name = fixture().person(&comment.who).map(|p| p.name.as_str());
+    Some(format!("{}\n{}", comment_line(name), comment.text))
+}
+
 /// A ticket as the sync emits it, a filed one ([`filed`]) included.
 fn ticket_item(source_id: &str, t: &Ticket) -> SyncItem {
     item(
@@ -873,7 +888,7 @@ fn ticket_item(source_id: &str, t: &Ticket) -> SyncItem {
             [t.summary.clone()]
                 .into_iter()
                 .chain(t.description.clone())
-                .chain(t.comments.iter().map(|c| c.text.clone())),
+                .chain(t.comments.iter().filter_map(comment_text)),
         ),
         t.assignee.clone(),
         t.updated,
@@ -904,7 +919,7 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             body_text(
                 [p.title.clone()]
                     .into_iter()
-                    .chain(p.comments.iter().map(|c| c.text.clone())),
+                    .chain(p.comments.iter().filter_map(comment_text)),
             ),
             Some(p.by.clone()),
             p.merged.or(p.opened),
@@ -966,20 +981,20 @@ fn items(source_id: &str) -> Vec<SyncItem> {
         ));
     }
     for p in &f.pages {
+        let payload = page_payload(p);
+        // ADR-0040: a built-in docs source writes a page's `body_text` with the
+        // shared function, over the page's projection.
+        let content =
+            doc_content(knobas_source::docs::PAGE_KIND, &payload).expect("a page has a projection");
         out.push(item(
             source_id,
             "page",
             p.id.clone(),
             p.title.clone(),
-            body_text(
-                [p.title.clone()]
-                    .into_iter()
-                    .chain(p.body.clone())
-                    .chain(p.comments.iter().map(|c| c.text.clone())),
-            ),
+            knobas_source::docs::search_text(&p.title, &p.space, &content),
             Some(p.by.clone()),
             Some(p.edited),
-            &page_payload(p),
+            &payload,
             Some(format!("{MOCK_BASE}/wiki/{}/{}", p.space, p.id)),
         ));
     }
