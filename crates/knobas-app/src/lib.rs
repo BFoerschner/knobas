@@ -629,6 +629,7 @@ pub fn run() {
             commands::entity::test_history,
             commands::entity::run_artifacts,
             commands::entity::artifact_preview,
+            commands::entity::artifact_bytes,
             commands::entity::download_run_file,
             // #867's job link sets read, appended at the foot: the list is
             // append-only (§10.8).

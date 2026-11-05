@@ -508,6 +508,17 @@ impl Source for TeamCitySource {
         Ok(Some(self.rest.artifact_preview(id, path).await?))
     }
 
+    /// One artifact file up to `cap` bytes (#2417).
+    async fn artifact_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<knobas_source::view::FileBytes>, SourceError> {
+        let id = self.build_id(entity)?;
+        Ok(Some(self.rest.artifact_bytes(id, path, cap).await?))
+    }
+
     /// A log, a file, a folder or every artifact, streamed with the stored
     /// credential (D8, #856).
     async fn download(

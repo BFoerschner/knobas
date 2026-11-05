@@ -19,6 +19,7 @@ use knobas_source::run::{
     RunTest, RunTests, TEST_HISTORY_RUNS, TESTS_MAX, TestOutcome, TestStatus, is_artifact_path,
     module_of,
 };
+use knobas_source::view::FileBytes;
 
 use crate::client::HttpRest;
 use crate::ids::path_escaped;
@@ -344,24 +345,36 @@ impl HttpRest {
         id: i64,
         path: &str,
     ) -> Result<ArtifactPreview, SourceError> {
-        check_path(path)?;
-        if path.is_empty() {
-            return Err(SourceError::protocol("teamcity: a preview names a file"));
-        }
         let mut kept: Vec<u8> = Vec::new();
-        self.stream(
-            &format!(
-                "app/rest/builds/id:{id}/artifacts/files/{}",
-                escaped_path(path)
-            ),
-            &[],
-            |bytes| {
-                kept.extend_from_slice(bytes);
-                kept.len() <= PREVIEW_BYTES_MAX
-            },
-        )
+        self.stream(&artifact_file(id, path)?, &[], |bytes| {
+            kept.extend_from_slice(bytes);
+            kept.len() <= PREVIEW_BYTES_MAX
+        })
         .await?;
         Ok(preview_of(&kept))
+    }
+
+    /// One artifact file whole up to `cap` bytes (#2417); the read stops past
+    /// the cap and answers what it read as the size, never a cut file.
+    pub(crate) async fn artifact_bytes(
+        &self,
+        id: i64,
+        path: &str,
+        cap: u64,
+    ) -> Result<FileBytes, SourceError> {
+        let cap = usize::try_from(cap).unwrap_or(usize::MAX);
+        let mut kept: Vec<u8> = Vec::new();
+        self.stream(&artifact_file(id, path)?, &[], |bytes| {
+            kept.extend_from_slice(bytes);
+            kept.len() <= cap
+        })
+        .await?;
+        if kept.len() > cap {
+            return Ok(FileBytes::TooLarge {
+                size: u64::try_from(kept.len()).unwrap_or(u64::MAX),
+            });
+        }
+        Ok(FileBytes::Read(kept))
     }
 
     /// Stream `target` of build `id` into `sink` (D8, #856).
@@ -448,6 +461,19 @@ impl HttpRest {
         let number = named.number.unwrap_or_else(|| id.to_string());
         Ok((config, number))
     }
+}
+
+/// The address of one artifact file of build `id`; a path that is not one, or
+/// the root, is refused.
+fn artifact_file(id: i64, path: &str) -> Result<String, SourceError> {
+    check_path(path)?;
+    if path.is_empty() {
+        return Err(SourceError::protocol("teamcity: a read names a file"));
+    }
+    Ok(format!(
+        "app/rest/builds/id:{id}/artifacts/files/{}",
+        escaped_path(path)
+    ))
 }
 
 /// What a preview of `bytes` is: text unless it holds a NUL, cut at

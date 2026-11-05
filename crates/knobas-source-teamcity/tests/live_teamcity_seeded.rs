@@ -4473,6 +4473,33 @@ async fn a_seeded_runs_log_tests_and_artifacts_read_whole() {
         "{text}"
     );
 
+    // -- the file viewer's byte read, on the real server (#2417) --
+    let Some(knobas_source::view::FileBytes::Read(bytes)) = source
+        .artifact_bytes(
+            &run,
+            "reports/sepa-report.txt",
+            knobas_source::view::ATTACHMENT_CAP,
+        )
+        .await
+        .expect("the bytes read")
+    else {
+        panic!("the seeded report is under the cap");
+    };
+    assert!(
+        String::from_utf8_lossy(&bytes).contains(&text),
+        "the whole file holds its preview"
+    );
+    assert!(
+        matches!(
+            source
+                .artifact_bytes(&run, "reports/sepa-report.txt", 4)
+                .await
+                .expect("the short read"),
+            Some(knobas_source::view::FileBytes::TooLarge { size }) if size > 4
+        ),
+        "over the cap is refused, never cut"
+    );
+
     let mut file = Kept::default();
     assert!(
         source

@@ -344,6 +344,7 @@ pub const MINIMUMS: &[Minimum] = &[
             "test_history",
             "run_artifacts",
             "artifact_preview",
+            "artifact_bytes",
             "download",
             "run_chain",
         ],
