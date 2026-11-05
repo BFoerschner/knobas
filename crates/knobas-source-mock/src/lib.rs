@@ -768,7 +768,10 @@ pub fn doc_content(
         .map(|c| DocComment {
             id: None,
             author: c["who"].as_str().map(str::to_owned),
-            author_name: None,
+            author_name: c["who"]
+                .as_str()
+                .and_then(|who| fixture().person(who))
+                .map(|person| person.name.clone()),
             at: c["when"].as_str().map(str::to_owned),
             blocks: vec![DocBlock::Paragraph {
                 text: text(c["text"].as_str().unwrap_or_default()),
@@ -978,20 +981,20 @@ fn items(source_id: &str) -> Vec<SyncItem> {
         ));
     }
     for p in &f.pages {
+        let payload = page_payload(p);
+        // ADR-0040: a built-in docs source writes a page's `body_text` with the
+        // shared function, over the page's projection.
+        let content = doc_content(knobas_source::docs::PAGE_KIND, &payload)
+            .expect("a page has a projection");
         out.push(item(
             source_id,
             "page",
             p.id.clone(),
             p.title.clone(),
-            body_text(
-                [p.title.clone()]
-                    .into_iter()
-                    .chain(p.body.clone())
-                    .chain(p.comments.iter().filter_map(comment_text)),
-            ),
+            knobas_source::docs::search_text(&p.title, &p.space, &content),
             Some(p.by.clone()),
             Some(p.edited),
-            &page_payload(p),
+            &payload,
             Some(format!("{MOCK_BASE}/wiki/{}/{}", p.space, p.id)),
         ));
     }

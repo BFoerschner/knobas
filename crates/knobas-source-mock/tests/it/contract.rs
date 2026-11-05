@@ -398,6 +398,39 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     assert_eq!(cursor, "tidewater-v6");
 }
 
+/// ADR-0040: a built-in docs source writes a page's `body_text` with the shared
+/// function over its projection, so a page reads by section and by comment
+/// author as a Confluence page does (#2455).
+#[tokio::test]
+async fn a_pages_search_text_is_the_shared_functions_over_its_projection() {
+    let s = MockSource::new();
+    let mut sink = VecSink(Vec::new());
+    s.sync(None, &mut sink).await.expect("full sync");
+    let pages: Vec<_> = sink.0.iter().filter(|i| i.kind == "page").collect();
+    assert!(!pages.is_empty());
+    let mut parts = Vec::new();
+    for page in pages {
+        let content = knobas_source_mock::doc_content("page", &page.payload).expect("a projection");
+        let space = page.payload["project"]["key"].as_str().expect("a space");
+        assert_eq!(
+            page.body_text,
+            knobas_source::docs::search_text(&page.title, space, &content)
+        );
+        parts.extend(
+            knobas_source::docs::indexed::read(&page.body_text)
+                .runs
+                .into_iter()
+                .map(|run| run.part),
+        );
+    }
+    assert!(parts.iter().any(|p| matches!(p, Part::Section(_))));
+    assert!(
+        parts
+            .iter()
+            .any(|p| matches!(p, Part::Comment(by) if !by.is_empty()))
+    );
+}
+
 /// The upgrade path the cursor's versioning exists to provide (#234): a
 /// profile still holding the position an *older* fixture handed out is re-sent
 /// the whole corpus, new fields and all, and then settles.
