@@ -811,6 +811,12 @@ async fn the_author_probe_stays_inside_the_launchers_budget() {
             .await
             .unwrap();
         knobas_search::testing::prepare(&pool).await.unwrap();
+        // The writes above leave the shared buffers dirty, and the first read to
+        // need one writes it out. Over one source that read is serial, so one
+        // keystroke pays for the whole fixture: 75 to 108 ms, against 42 to 46 for
+        // that sample after a checkpoint (#2502). That is the bulk write's cost,
+        // once, and not the probe's.
+        sqlx::query("checkpoint").execute(&pool).await.unwrap();
 
         let s = searcher(&pool);
         // The same query with and without the author filter, so the difference
