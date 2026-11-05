@@ -15,11 +15,27 @@
 //! thousand rows are enough: the old statements fell into both traps at 3,000
 //! items, a `Seq Scan on item_parent` once analyzed and a `Seq Scan on item` at
 //! density, as they did at 100,000.
+//!
+//! Two sources here are shapes the benchmark's corpus cannot hold, and each cost
+//! tens of milliseconds a keystroke with no answer wrong: a Gitea under its own
+//! commits, which went to the grouped read (#2503), and one with a long run of
+//! withdrawn child rows at the head of its range, which read them all (#2504).
 
 use knobas_search::Searcher;
-use knobas_search::testing::{self, PlanCache, newest_rows_plan, under_coverage_plan};
+use knobas_search::testing::{
+    self, PlanCache, left_for_the_grouped_read, newest_of_each_kind_plan, newest_rows_plan,
+    under_coverage_plan,
+};
 
 const ITEMS: i64 = 3_000;
+/// A Gitea whose newest rows are commits, which the launcher leaves out, with what
+/// it keeps beneath them (#2503). `tests/it/under_coverage.rs` holds the verdict.
+const UNDER_ITS_COMMITS: &str = "gitea-commits-on-top";
+/// A Gitea with a corpus and a long run of withdrawn child rows ahead of its live
+/// ones in the index (#2504).
+const SWEPT: &str = "gitea-swept";
+/// How many withdrawn commits [`SWEPT`] holds, at two child rows each.
+const SWEPT_COMMITS: i64 = 500;
 
 /// The benchmark's parents, in proportion: a Gitea source's commits and pull
 /// requests name a repository, and the other sources name nothing.
@@ -49,6 +65,13 @@ async fn corpus_with_parents() -> sqlx::PgPool {
     .execute(&pool)
     .await
     .unwrap();
+    a_gitea(&pool, UNDER_ITS_COMMITS).await;
+    rows_of(&pool, UNDER_ITS_COMMITS, "repo", "kept-repo", 3, "2 years", false).await;
+    rows_of(&pool, UNDER_ITS_COMMITS, "branch", "kept-branch", 20, "1 year", false).await;
+    rows_of(&pool, UNDER_ITS_COMMITS, "commit", "commit", 200, "-1 year", false).await;
+    a_gitea(&pool, SWEPT).await;
+    rows_of(&pool, SWEPT, "commit", "gone", SWEPT_COMMITS, "3 years", true).await;
+    rows_of(&pool, SWEPT, "branch", "live", 20, "1 year", false).await;
     testing::prepare(&pool).await.unwrap();
     let (child_rows,): (i64,) = sqlx::query_as(
         "select count(*) from sync.item_parent where arm = 'child' and source_id = 'gitea'",
@@ -61,6 +84,60 @@ async fn corpus_with_parents() -> sqlx::PgPool {
         "no Gitea row names a parent: the fixture moved"
     );
     pool
+}
+
+async fn a_gitea(pool: &sqlx::PgPool, id: &str) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'gitea', $1, 'http://x', 'Pat')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// `count` rows of one kind under a source, written in one go and so together in
+/// the child index, each naming a repository. `age` says how old they are.
+async fn rows_of(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    tag: &str,
+    count: i64,
+    age: &str,
+    withdrawn: bool,
+) {
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title, deleted_at)
+         select $1 || ':' || $3 || '-' || g, $2, 't', case when $5 then now() end
+           from generate_series(1, $4::bigint) g",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(tag)
+    .bind(count)
+    .bind(withdrawn)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, author, item_updated_at, synced_at, payload)
+         select $1 || ':' || $3 || '-' || g, $1, $2, 't', 't', 'mara.lindqvist',
+                now() - $5::interval - make_interval(mins => g::int), now(),
+                jsonb_build_object('repository', jsonb_build_object(
+                  'name', $1 || '-repo', 'full_name', 'bench/' || $1 || '-repo'))
+           from generate_series(1, $4::bigint) g",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(tag)
+    .bind(count)
+    .bind(age)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 /// A child-arm row for every Gitea item, `per_item` of them each.
@@ -90,21 +167,26 @@ fn assert_stays_on(plan: &str, index: &str, state: &str) {
     }
 }
 
-/// How many rows came off the index over all the loops. This is what the walk
-/// read, where a `Limit` above a filter would say only what got through it.
+/// How many rows came off the index over all the loops and every scan of it. This
+/// is what the walk read, where a `Limit` above a filter would say only what got
+/// through it. A scan the statement never reached read nothing.
 fn rows_read_from(index: &str, plan: &str) -> f64 {
-    let line = plan
-        .lines()
-        .find(|line| line.contains(index))
-        .unwrap_or_else(|| panic!("no {index} in:\n{plan}"));
-    let figure = |name: &str| -> f64 {
-        line.split(name)
-            .nth(1)
-            .and_then(|rest| rest.split([' ', ')']).next())
-            .and_then(|n| n.parse().ok())
-            .unwrap_or_else(|| panic!("no {name} in {line}"))
-    };
-    figure("rows=") * figure("loops=")
+    let scans: Vec<&str> = plan.lines().filter(|line| line.contains(index)).collect();
+    assert!(!scans.is_empty(), "no {index} in:\n{plan}");
+    scans
+        .into_iter()
+        .filter(|line| !line.contains("never executed"))
+        .map(|line| {
+            let figure = |name: &str| -> f64 {
+                line.split(name)
+                    .nth(1)
+                    .and_then(|rest| rest.split([' ', ')']).next())
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or_else(|| panic!("no {name} in {line}"))
+            };
+            figure("rows=") * figure("loops=")
+        })
+        .sum()
 }
 
 /// One test and not two, because each step changes what the next one plans over.
@@ -148,6 +230,40 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
                 .execute(&pool)
                 .await
                 .unwrap();
+        }
+        // #2504. A run of withdrawn child rows ahead of the live ones costs a bounded
+        // look, whichever end the plan starts from.
+        let swept = [SWEPT.to_owned()];
+        for cache in [PlanCache::Custom, PlanCache::Generic] {
+            let plan = under_coverage_plan(&pool, &swept, cache).await.unwrap();
+            let read = rows_read_from("item_parent_child_idx", &plan);
+            assert!(
+                read <= 64.0,
+                "under:, {state}, {cache:?}: read {read} child rows of {SWEPT}:\n{plan}"
+            );
+        }
+        // #2503. A source under its own left-out rows is settled without a read of it.
+        let under_commits = [UNDER_ITS_COMMITS.to_owned()];
+        let left = left_for_the_grouped_read(&pool, &under_commits, &[], &hidden, false)
+            .await
+            .unwrap();
+        assert!(left.is_empty(), "under:, {state}: {left:?} read whole");
+        for cache in [PlanCache::Custom, PlanCache::Generic] {
+            for kinds in [
+                vec![],
+                vec!["branch".to_owned()],
+                vec!["nothing".to_owned()],
+            ] {
+                let plan =
+                    newest_of_each_kind_plan(&pool, &under_commits, &kinds, &hidden, cache)
+                        .await
+                        .unwrap();
+                let at = format!("the look at each kind, {kinds:?}, {state}, {cache:?}");
+                assert_stays_on(&plan, "item_kind_updated_idx", &at);
+                // 64 rows for each of the seven kinds, and a row each to list them.
+                let read = rows_read_from("item_kind_updated_idx", &plan);
+                assert!(read <= 7.0 * 65.0, "{at}: read {read} rows:\n{plan}");
+            }
         }
         // Thousands of child rows under one source: a bitmap would read them all
         // and sort them to give the first, so only the index's own order will do.

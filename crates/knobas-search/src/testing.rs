@@ -327,6 +327,46 @@ pub async fn newest_rows_plan(
     .await
 }
 
+/// The plan of the coverage probe's look at each kind's newest rows.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+pub async fn newest_of_each_kind_plan(
+    pool: &PgPool,
+    ids: &[String],
+    kinds: &[String],
+    hidden: &[String],
+    cache: PlanCache,
+) -> Result<String, sqlx::Error> {
+    crate::sql::explain_prepared(
+        pool,
+        crate::coverage::NEWEST_OF_EACH_KIND_SQL,
+        &[ids, kinds, hidden],
+        cache.mode(),
+    )
+    .await
+}
+
+/// The sources the coverage probe's bounded reads leave for the grouped read,
+/// which reads each of them whole. What a query pays depends on who is in this
+/// list, and no answer does, so no verdict test can see it.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if a statement fails.
+pub async fn left_for_the_grouped_read(
+    pool: &PgPool,
+    ids: &[String],
+    kinds: &[String],
+    hidden: &[String],
+    by_author: bool,
+) -> Result<Vec<String>, SearchError> {
+    let (_, unsettled) =
+        crate::coverage::walk_sources(pool, ids, kinds, hidden, by_author).await?;
+    Ok(unsettled)
+}
+
 /// Register the three sources the corpus attributes rows to.
 ///
 /// Without these, `in:ji` resolves to nothing and `@me` has no identity, so two

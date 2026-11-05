@@ -1518,6 +1518,56 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         .await
         .unwrap();
 
+    // #2503's row. A Gitea whose newest rows are commits, which the launcher leaves
+    // out, with what it keeps beneath them. The six rows above cannot see this: the
+    // fixture cycles five kinds through every source, so the walk down each source's
+    // newest rows settles it. Read whole, this source costs the grouped read on every
+    // keystroke, `under:` and `author:` alike.
+    let under_its_commits = "gitea-under-its-commits";
+    add_gitea(&pool, under_its_commits).await;
+    add_rows(&pool, under_its_commits, "commit", "c", 20_000, "-30 days", false).await;
+    add_rows(&pool, under_its_commits, "branch", "b", 300, "100 days", false).await;
+    add_rows(&pool, under_its_commits, "repo", "r", 30, "200 days", false).await;
+    testing::prepare(&pool).await.unwrap();
+    for (name, raw) in [
+        ("under its commits", "under:bench/repo-7"),
+        ("author, its commits", "@mara.lindqvist payout"),
+    ] {
+        let timing = timings(&searcher, raw, 10).await;
+        println!(
+            "{name:<20} 20000 commits on top  p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
+            timing.p50, timing.p90, timing.max
+        );
+        if timing.p90 > worst.1 {
+            worst = (name, timing.p90);
+        }
+    }
+    remove_gitea(&pool, under_its_commits).await;
+
+    // #2504's row. A source with a corpus and a long run of withdrawn child rows
+    // ahead of its live ones in the child index, which the sweep leaves there for
+    // good. Read from the head of the range, that is an item and an entity lookup
+    // for each of 46,668 rows on every `under:` keystroke.
+    let swept = "gitea-swept";
+    add_gitea(&pool, swept).await;
+    add_rows(&pool, swept, "commit", "gone", 23_334, "40 days", true).await;
+    add_rows(&pool, swept, "branch", "live", 200, "-30 days", false).await;
+    testing::prepare(&pool).await.unwrap();
+    sqlx::query("vacuum (analyze) sync.item_parent")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let name = "withdrawn ahead";
+    let timing = timings(&searcher, "under:bench/repo-7", 10).await;
+    println!(
+        "{name:<20} 46668 child rows  p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
+        timing.p50, timing.p90, timing.max
+    );
+    if timing.p90 > worst.1 {
+        worst = (name, timing.p90);
+    }
+    remove_gitea(&pool, swept).await;
+
     println!("worst p90 under under: {} ms ({})", worst.1, worst.0);
     // After the loop, so one case over the budget does not hide the other
     // cases' figures or leave their shapes unchecked.
@@ -1527,4 +1577,70 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         worst.0,
         worst.1
     );
+}
+
+async fn add_gitea(pool: &sqlx::PgPool, id: &str) {
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ($1, 'gitea', $1, 'http://x', 'Pat')",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// `count` rows of one kind under a source, written in one go and so together in
+/// the child index, each naming a repository. `age` says how old the newest is; a
+/// negative one sorts ahead of everything `seed_corpus` wrote.
+async fn add_rows(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    tag: &str,
+    count: i64,
+    age: &str,
+    withdrawn: bool,
+) {
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title, deleted_at)
+         select $1 || ':' || $3 || '-' || g, $2, 't', case when $5 then now() end
+           from generate_series(1, $4::bigint) g",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(tag)
+    .bind(count)
+    .bind(withdrawn)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, author, item_updated_at, synced_at, payload)
+         select $1 || ':' || $3 || '-' || g, $1, $2, 't', 't', 'mara.lindqvist',
+                now() - $5::interval - make_interval(mins => g::int), now(),
+                jsonb_build_object('repository', jsonb_build_object(
+                  'name', $1 || '-repo', 'full_name', 'bench/' || $1 || '-repo'))
+           from generate_series(1, $4::bigint) g",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(tag)
+    .bind(count)
+    .bind(age)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Everything [`add_gitea`] and [`add_rows`] wrote, so nothing later plans over it.
+async fn remove_gitea(pool: &sqlx::PgPool, id: &str) {
+    for statement in [
+        "delete from sync.item where source_id = $1",
+        "delete from knobas.entity where id like $1 || ':%'",
+        "delete from knobas.source_config where id = $1",
+    ] {
+        sqlx::query(statement).bind(id).execute(pool).await.unwrap();
+    }
 }
