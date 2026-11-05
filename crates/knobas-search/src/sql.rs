@@ -20,8 +20,9 @@
 //!    user typed, every source id, every kind, every limit -- travels as a
 //!    bind, and the *only* way to add one is [`Builder::param`], which returns
 //!    the placeholder that reads it. A placeholder therefore cannot drift from
-//!    its argument. The one piece of runtime-formatted text is the corpus
-//!    index, a loop counter over the caller's own slice.
+//!    its argument. The one piece of runtime-formatted text a search reaches is
+//!    the corpus index, a loop counter over the caller's own slice. Test support
+//!    formats more (`explain_prepared`'s arrays), and no search reaches it.
 //! 3. **A test**, for the day someone in a hurry adds a fourth thing.
 //!
 //! # The shape of the statement, and why
@@ -1178,23 +1179,30 @@ pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sq
 /// constant, so it can only ever show a custom plan. A statement sqlx has run
 /// five times may switch to a generic one, which sees none of the values, so a
 /// test of what the planner chooses has to look at both. `prepare` and `explain
-/// execute` are the way to reach it, and they take their arguments as text:
-/// `args` is SQL, and this is test support that is handed literals.
+/// execute` are the way to reach it, and `execute` takes no bind, so each array
+/// is written out as a `text[]` literal.
 ///
 /// Here for the reason [`explain`] is: `AssertSqlSafe` is confined to this
-/// module.
+/// module. The statement and the mode are `&'static str` and nothing outside the
+/// crate can call it, so the arrays are all it formats, and only `testing`'s plan
+/// readers hand it any.
 ///
 /// # Errors
 ///
 /// [`sqlx::Error`] if the statement cannot be planned.
 #[cfg(any(test, feature = "test-util"))]
-pub async fn explain_prepared(
+pub(crate) async fn explain_prepared(
     pool: &sqlx::PgPool,
-    statement: &str,
-    types: &str,
-    args: &str,
-    plan_cache_mode: &str,
+    statement: &'static str,
+    arrays: &[&[String]],
+    plan_cache_mode: &'static str,
 ) -> Result<String, sqlx::Error> {
+    let types = vec!["text[]"; arrays.len()].join(", ");
+    let args = arrays
+        .iter()
+        .map(|values| format!("'{{{}}}'::text[]", values.join(",")))
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut connection = pool.acquire().await?;
     sqlx::query(sqlx::AssertSqlSafe(format!(
         "set plan_cache_mode = {plan_cache_mode}"

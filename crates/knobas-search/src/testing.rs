@@ -287,11 +287,6 @@ impl PlanCache {
     }
 }
 
-/// A `text[]` literal, for [`sql::explain_prepared`](crate::sql::explain_prepared).
-fn text_array(values: &[String]) -> String {
-    format!("'{{{}}}'::text[]", values.join(","))
-}
-
 /// The plan of the `under:` coverage probe over these sources.
 ///
 /// # Errors
@@ -305,8 +300,7 @@ pub async fn under_coverage_plan(
     crate::sql::explain_prepared(
         pool,
         crate::coverage::UNDER_COVERAGE_SQL,
-        "text[]",
-        &text_array(ids),
+        &[ids],
         cache.mode(),
     )
     .await
@@ -327,13 +321,7 @@ pub async fn newest_rows_plan(
     crate::sql::explain_prepared(
         pool,
         crate::coverage::NEWEST_ROWS_SQL,
-        "text[], text[], text[]",
-        &format!(
-            "{}, {}, {}",
-            text_array(ids),
-            text_array(kinds),
-            text_array(hidden)
-        ),
+        &[ids, kinds, hidden],
         cache.mode(),
     )
     .await
