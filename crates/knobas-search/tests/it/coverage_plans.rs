@@ -16,10 +16,11 @@
 //! items, a `Seq Scan on item_parent` once analyzed and a `Seq Scan on item` at
 //! density, as they did at 100,000.
 //!
-//! Two sources here are shapes the benchmark's corpus cannot hold, and each cost
-//! tens of milliseconds a keystroke with no answer wrong: a Gitea under its own
-//! commits, which went to the grouped read (#2503), and one with a long run of
-//! withdrawn child rows at the head of its range, which read them all (#2504).
+//! The corpus also holds two shapes the benchmark's cannot, and each cost tens of
+//! milliseconds a keystroke with no answer wrong: a Gitea under its own commits, which
+//! went to the grouped read (#2503), and one with a long run of withdrawn child rows at
+//! the head of its range, which read them all (#2504). The run at the far end of a
+//! third source is what the look that reads the far end first costs when it is wrong.
 
 use knobas_search::Searcher;
 use knobas_search::testing::{

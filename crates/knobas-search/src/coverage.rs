@@ -326,10 +326,11 @@ select i.source_id                            as source_id,
 ///   live rows after 1,000 withdrawn. The budget is only spent on withdrawn rows:
 ///   the look stops at the first live one.
 /// * **No grouped join behind the look,** which is what #2504 proposed. It reads
-///   every child row of the source and has nothing to stop it at the first live one.
-///   Measured over 46,668 withdrawn rows, it took 99 to 109 ms in place of 40 to 43
-///   for the read from the head, and it would read a source's whole range to answer
-///   for one with a short run of withdrawn rows at each end.
+///   every child row of the source and has nothing to stop it at the first live one,
+///   so it would read a source's whole range to answer for one with a short run of
+///   withdrawn rows at each end. Nor is it cheaper where it has to read them all. Over
+///   46,668 withdrawn rows the read from the head took 40 to 43 ms, a plain grouped
+///   join 48, one that looks each entity up once 98, and one from the live items 306.
 /// * **Each `limit` is inside a subquery of its `exists`.** Once `sync.item_parent`
 ///   has statistics the planner turns a correlated `exists` into a hash semi-join
 ///   that reads every child-arm row, every item and every entity to answer four
