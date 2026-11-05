@@ -99,6 +99,31 @@ export function segments(row: MonitorRow, now: number): Segment[] {
   });
 }
 
+const WORST: readonly Segment[] = ["down", "warn", "paused", "up", "gap"];
+
+/** A bar to draw: its state, its key, and what its title says. */
+export interface Bar {
+  state: Segment;
+  at: number;
+  title: string;
+}
+
+/** What each state is called in a bar's title; a pale gap is a half-hour with no reading. */
+const SEGMENT_WORD: Record<Segment, string> = { up: "up", warn: "warning", down: "down", paused: "paused", gap: "no data" };
+
+/** The bars the roster draws: the 48 half-hours, or below the narrow width one bar an hour, each worst-of. */
+export function barsOf(all: readonly Segment[], hourly: boolean): Bar[] {
+  const step = hourly ? 2 : 1;
+  const bars: Bar[] = [];
+  for (let at = 0; at < all.length; at += step) {
+    const part = all.slice(at, at + step);
+    const state = WORST.find((word) => part.includes(word)) ?? "gap";
+    const hoursAgo = (all.length - at) / 2;
+    bars.push({ state, at, title: `${hoursAgo} h ago: ${SEGMENT_WORD[state]}` });
+  }
+  return bars;
+}
+
 /**
  * The kind of check in prototype-6's words. The roster carries Uptime Kuma's
  * own `monitor_type`; a word with no entry here is drawn as the source spells

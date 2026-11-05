@@ -206,9 +206,8 @@
   }
 
   /** Stores *Run pipelines on diffs*; a refusal says so and the box goes back to what is stored. */
-  function setPiping(box: HTMLInputElement) {
-    piping.set(box.checked).catch((cause: unknown) => {
-      box.checked = piping.on;
+  function togglePiping() {
+    piping.set(!piping.on).catch((cause: unknown) => {
       push({ text: `Could not save Run pipelines on diffs: ${ipcErrorMessage(cause)}`, tone: "err" });
     });
   }
@@ -226,7 +225,7 @@
     ></label
   >
   <div class="tf-stg-c tf-stg-inl">
-    <input id="tf-rnd-pipes" type="checkbox" checked={piping.on} onchange={(event) => setPiping(event.currentTarget)} /><span>On</span>
+    <button id="tf-rnd-pipes" type="button" class="tf-stg-sw" role="switch" aria-checked={piping.on} aria-label="Run pipelines on diffs" onclick={togglePiping}><i></i></button>
   </div>
 </div>
 {#if saved !== null}
@@ -363,7 +362,7 @@
     {/if}
     <div class="tf-stg-row">
       <label class="tf-stg-l" for="tf-rnd-dpat">Add a default<small>A file pattern, such as <span class="tf-mono">*.md</span> or <span class="tf-mono">docs/*.mmd</span>.</small></label>
-      <div class="tf-stg-c tf-stg-inl">
+      <div class="tf-stg-c tf-stg-row1">
         <input id="tf-rnd-dpat" class="tf-stg-in tf-mono" bind:value={adding.pattern} placeholder="*.md" />
         <select class="tf-select" aria-label="Through" bind:value={adding.pipeline}>
           <option value="">No pipeline</option>

@@ -195,7 +195,8 @@ test("a string that spans hunks is highlighted as one string on both sides", asy
 test("a labelled file is titled by its label and highlighted by its path's language", async () => {
   draw({ files: [{ ...RETRY, label: "src/retry.rs (modified, staged)" }], layout: createDiffLayout(() => null), render: shikiPort() });
   await highlighted(3);
-  expect(squash(target.querySelector(".tf-fh .tf-mono"))).toBe("src/retry.rs (modified, staged)");
+  expect(squash(target.querySelector(".tf-fh .tf-mono"))).toBe("src/retry.rs");
+  expect(squash(target.querySelector(".tf-fh .tf-state"))).toBe("modified, staged");
   expect(kinds(target.querySelectorAll(".tf-ln")[0]!)).toEqual(expect.arrayContaining(["kw:fn", "fn:retry"]));
 });
 

@@ -8,6 +8,7 @@
   and focus goes back to the button.
 -->
 <script lang="ts">
+  import { menuKeys } from "../menu-keys";
   import { tick } from "svelte";
   import type { SavedViewSource } from "../../ipc/search";
 
@@ -89,10 +90,10 @@
     onclick={toggle}>⋯</button
   >
   {#if open}
-    <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
+    <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown} {@attach menuKeys(() => (open = false))}>
       {#if savedViewKind !== null}
         <button type="button" role="menuitem" onclick={() => pick(onedit)}
-          ><b>View settings</b><span>lanes, cards and list columns</span></button
+          ><b>View settings…</b><span>lanes, cards and list columns</span></button
         >
         {#if copies}
           <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
@@ -104,7 +105,7 @@
           ><b>Hide from the list</b><span>it keeps syncing, so you can show it again</span></button
         >
       {:else}
-        <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view</b></button>
+        <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view…</b></button>
         <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate</b></button>
         <hr />
         <button type="button" role="menuitem" onclick={() => pick(ondelete)}><b>Delete</b></button>

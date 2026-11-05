@@ -43,7 +43,9 @@
   const projects = $derived(
     [...(answer?.projects ?? [])].sort((a, b) => (pipelines ? projectLabel(a).localeCompare(projectLabel(b)) : 0)),
   );
-  const addable = $derived(answer !== null && answer.refusal === null && failed === null);
+  /** A pipeline pattern with neither a project nor a name would add every pipeline: it asks for one first. */
+  const chosen = $derived(!pipelines || project !== "" || typed.trim() !== "");
+  const addable = $derived(chosen && answer !== null && answer.refusal === null && failed === null);
   /** What the query matches now; a refused query matches nothing. */
   const matched = $derived(answer && answer.refusal === null ? answer : { count: 0, matches: [] });
 
@@ -99,18 +101,18 @@
     {:else if answer?.refusal}
       <p class="tf-ifail">{answer.refusal}</p>
     {/if}
-    <div class="tf-pane-h" aria-live="polite">Matches now: {matched.count}</div>
-    {#if answer !== null && matched.count === 0}
+    {#if chosen}<div class="tf-pane-h" aria-live="polite">Matches now: {matched.count}</div>{/if}
+    {#if chosen && answer !== null && matched.count === 0}
       <p class="tf-dim tf-picks-more">Nothing matches this yet. A pattern with no matches still picks up what appears later.</p>
     {/if}
-    <div class="tf-picks tf-pat-matches" class:tf-hidden-empty={matched.count === 0} role="list" aria-label="Matches now">
+    <div class="tf-picks tf-pat-matches" class:tf-hidden-empty={matched.count === 0 || !chosen} role="list" aria-label="Matches now">
       {#each matched.matches.slice(0, DRAWN) as row (row.entity_id)}
         <div class="tf-pat-match" role="listitem">
           <span class="tf-dot {toneClass(row.state)}"></span>{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>
         </div>
       {/each}
     </div>
-    <p class="tf-dim tf-pat-query">Stored as <code>{query}</code></p>
+    {#if chosen}<p class="tf-dim tf-pat-query">Stored as <code>{query}</code></p>{:else}<p class="tf-dim tf-pat-query">Pick a project or type a name to match.</p>{/if}
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}

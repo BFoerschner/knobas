@@ -119,6 +119,8 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter, sessionFold } from "../filter/filter-state.svelte";
+  import { MediaQuery } from "svelte/reactivity";
+  import { barsOf } from "./monitors";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { listenSynced } from "../builds/pipeline-ports";
@@ -387,8 +389,8 @@
     noun: "monitors",
     one: "monitor",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" } satisfies FilterScope] : []),
-      { id: "mine", label: "My jobs", query: "" },
+      ...(job !== null ? [{ id: "job", label: "This job", count: roster === null ? null : visibleMonitors(roster, { scope: "job", job, states: [], type: "", text: "" }, index).shown.length, title: `The monitors ${job} reaches`, query: "" } satisfies FilterScope] : []),
+      { id: "mine", label: "Mine", title: "The monitors the jobs you work on reach", query: "" },
       { id: "all", label: "All", query: "" },
     ],
     chips: [{ key: "st", label: "State", options: STATE_CHIPS.map((value) => ({ value, label: value })) }],
@@ -424,13 +426,25 @@
   }
 
   /** The header's line: how many checks, from which source, synced when. */
+  /** Assets nothing watches: their own band, over their name, type and owner. */
+  const unwatchedFilter = sessionFilter("monitors-unwatched");
+  const unwatchedConfig: FilterConfig = { id: "monitors-unwatched", placeholder: "Filter by asset, type or owner", noun: "assets", one: "asset" };
+  const shownUnwatched = $derived.by(() => {
+    const words = unwatchedFilter.text.trim().toLowerCase();
+    if (unwatched === null || words === "") return unwatched ?? [];
+    return unwatched.filter((asset) => [asset.name, asset.type_label, asset.owner ?? "", asset.environment ?? ""].join(" ").toLowerCase().includes(words));
+  });
+
+  /** Below 1240 px half-hour bars would be under a pixel wide: one bar an hour, the worse of its two half-hours. */
+  const hourlyBars = new MediaQuery("(max-width: 1240px)");
+
   const header = $derived.by(() => {
     if (roster === null) return "Checks from your monitoring source, each watching an asset.";
     const sources = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
     const newest = roster.map((row) => row.checked_at).sort().at(-1) ?? null;
     const from = sources.length > 0 ? ` from ${sources.join(" and ")}` : "";
     const synced = newest !== null ? `, synced ${ago(newest, now)}` : "";
-    return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset. Bars cover the last 24 hours in half-hours.`;
+    return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset.`;
   });
 
   // -- a row's Refresh (#2138) -----------------------------------------------
@@ -512,6 +526,7 @@
         text: hidden
           ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.`
           : `${row.name} is back on the roster, and its alerts reach the inbox again.`,
+        ...(hidden ? { action: { label: "Undo", run: () => void setHidden({ ...row, hidden: true }, false) } } : {}),
       });
       revision += 1;
     } catch (error) {
@@ -599,7 +614,7 @@
 <header class="tf-fhead">
   <div>
     <h1>Monitors</h1>
-    <div class="tf-sub">{header}</div>
+    <div class="tf-sub">{tab === "unmonitored" ? "Containers, services, routes, databases and VMs that no monitor watches." : header}</div>
   </div>
   {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
@@ -617,21 +632,24 @@
   <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal}>
     {#snippet after()}{#if kept.hidden.length > 0}<span class="tf-mon-hidn">, {kept.hidden.length} hidden</span>{/if}{/snippet}
   </FilterBar>
+{:else}
+  <FilterBar config={unwatchedConfig} filter={unwatchedFilter} shown={unwatched === null ? null : shownUnwatched.length} total={unwatched?.length ?? null} />
 {/if}
 <div class="tf-cbody">
   {#if failed !== null}
     <p class="tf-ifail">Could not read the monitors: {failed}</p>
   {/if}
   {#if tab === "unmonitored"}
-    <p class="tf-dim tf-mon-lead">Containers, services, routes, databases and VMs that no monitor watches.</p>
-    {#if unwatched !== null && unwatched.length > 0}
+    {#if unwatched !== null && unwatched.length > 0 && shownUnwatched.length === 0}
+      <TfNoMatch noun="assets" filter={unwatchedFilter} />
+    {:else if unwatched !== null && unwatched.length > 0}
       <table class="tf-tbl">
         <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
-          {#each unwatched as asset (asset.id)}
+          {#each shownUnwatched as asset (asset.id)}
             {@const word = createWord(asset)}
             <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
-              <td class="tf-mono"><a href={addressOf(asset.id)}>{asset.name}</a></td>
+              <td><a href={addressOf(asset.id)}>{asset.name}</a></td>
               <td>{asset.type_label}</td>
               <td>{asset.environment ?? ""}</td>
               <td>{asset.owner ?? ""}</td>
@@ -640,7 +658,7 @@
                   <span class="tf-chip tf-info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)}>Monitor {word}</span>
                 {:else}
                   <button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
-                    >Create monitor</button
+                    >Create monitor…</button
                   >
                 {/if}
               </td>
@@ -654,8 +672,10 @@
   {:else if roster !== null}
     {#if entries.length > 0}
       <table class="tf-tbl tf-mon">
+        <!-- Fixed columns: an action taken on one row, or a filter, moves nothing in the others. -->
+        <colgroup><col class="tf-monc-name" /><col class="tf-monc-state" /><col class="tf-monc-bars" /><col class="tf-monc-num" /><col class="tf-monc-num" /><col class="tf-monc-watch" /><col class="tf-monc-acts" /></colgroup>
         <thead>
-          <tr><th>Monitor</th><th>State</th><th>Last 24 h</th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
+          <tr><th>Monitor</th><th>State</th><th>Last 24 h<span class="tf-mbar-axis" aria-hidden="true"><span>24 h ago</span><span>now</span></span></th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
         </thead>
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
@@ -686,17 +706,17 @@
               {@const refresher = refreshers.get(row.entity_id)}
               <tr class:tf-mon-hid={row.hidden} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><span class="tf-chip" class:tf-ok={tone === "ok"} class:tf-warn={tone === "warn"} class:tf-err={tone === "err"} class:tf-info={tone === "info"}>{chip.label}</span></td>
+                <td><span class="tf-chip" title={chip.label} class:tf-ok={tone === "ok"} class:tf-warn={tone === "warn"} class:tf-err={tone === "err"} class:tf-info={tone === "info"}>{chip.label}</span></td>
                 <td>
                   <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
-                    {#each segments(row, now.getTime()) as segment, at (at)}<i class="tf-seg-{segment}"></i>{/each}
+                    {#each barsOf(segments(row, now.getTime()), hourlyBars.current) as bar (bar.at)}<i class="tf-seg-{bar.state}" title={bar.title}></i>{/each}
                   </span>
                 </td>
                 <td class="tf-num">{responseText(row.response_time_ms)}</td>
                 <td class="tf-num">{uptimeText(row)}</td>
                 <td>
                   {#each row.assets as asset (asset.id)}
-                    <div><a class="tf-mono tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
+                    <div><a class="tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
                   {:else}
                     <span class="tf-dim">no asset</span>
                   {/each}
@@ -710,7 +730,9 @@
                   {#if toggled !== null}
                     <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
                     <span class="tf-chip tf-info tf-queued-mark">{toggled.state}</span>
-                  {:else}
+                  {/if}
+                  <span class="tf-rowacts tf-trail">
+                  {#if toggled === null}
                     {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
                       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
                     {/each}
@@ -723,6 +745,7 @@
                     onclick={() => void setHidden(row, !row.hidden)}>{row.hidden ? "Unhide" : "Hide"}</button
                   >
                   {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small ghost />{/if}
+                  </span>
                 </div></td>
               </tr>
             {/if}

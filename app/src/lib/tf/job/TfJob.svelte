@@ -53,6 +53,7 @@
   page drew, and the echoes settle on those reads as on any other.
 -->
 <script lang="ts">
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { onMount, untrack } from "svelte";
 
   import type { LinkEntry, LinkSetDetail, LinkSetRow } from "../../ipc/entity";
@@ -518,19 +519,16 @@
 {#if detail === undefined && failure === null}
   <div class="tf-full tf-ticketpage">
     <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: segmentKey(segment) }]} {back} />
-    <div class="tf-empty"><p>Opening {segmentKey(segment)}…</p></div>
+    <div class="tf-empty tf-nohere"><p>Opening {segmentKey(segment)}…</p></div>
   </div>
 {:else if detail === null || (detail === undefined && failure !== null)}
   <div class="tf-full tf-ticketpage">
-    <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: segmentKey(segment) }]} {back} />
-    <div class="tf-empty">
-      {#if failure !== null}
-        <p>Could not open {segmentKey(segment)}: {failure}</p>
-      {:else}
-        <p>No ticket {segmentKey(segment)} in the mirror. It may not have synced yet.</p>
-      {/if}
-      <a class="tf-btn" href="#/tickets">All tickets</a>
-    </div>
+    <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: "Ticket" }]} {back} />
+    {#if failure !== null}
+      <TfNothingHere message="This ticket could not be opened: {failure}" href="#/tickets" action="All tickets" />
+    {:else}
+      <TfNothingHere message="knobas does not hold this ticket. It may not have synced yet." href="#/tickets" action="All tickets" />
+    {/if}
   </div>
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
@@ -544,7 +542,7 @@
       {mine}
       {me}
       {pinned}
-      {action}
+      action={starting ? null : action}
       onaction={act}
       {table}
       onlink={() => (drawer = true)}

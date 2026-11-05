@@ -38,7 +38,7 @@ Tokens are the prototype's, unchanged, except `--field`, which it did not have. 
 | `--card-ink-2` | `#5A4D1E` | `#3F3511` | Secondary text on the card |
 | `--focus` | `#2F55D4` | `#8AA6FF` | Focus ring |
 | `--mark` | `#F6E08F` | `#5C4E17` | Matched search text, and what mentions you |
-| `--fill` | `--ink` | `#A9B3BE` | Whatever is filled to say it is on: a primary, a pressed toggle, a rail's selected row. In dark it sits below the yellow card's luminance (.44 against .50), so it never outshouts it. A tracked block on Time is this fill too |
+| `--fill` | `--ink` | `#A9B3BE` | Whatever is filled to say it is on: a primary, a pressed segment, a rail's selected row. In dark it sits below the yellow card's luminance (.44 against .50), so it never outshouts it. A tracked block on Time is this fill too |
 | `--ok` / `--ok-bg` | `#1F7444` / `#DDEFE4` | `#6FCF97` / `#1B3427` | Passed, merged, up |
 | `--warn` / `--warn-bg` | `#8A5600` / `#F6EBD3` | `#E5B04D` / `#3A2E14` | Needs attention, stale |
 | `--err` / `--err-bg` | `#B0262A` / `#F7DEDD` | `#FF8A80` / `#3F1F1F` | Failed, down, broken |
@@ -60,11 +60,24 @@ Three families, each with one job.
 
 - **Archivo** (variable, `wdth` 62–125, `wght` 400–800) for the whole interface.
 - **Source Serif 4** (variable, optical size) is the reading face. It sets page bodies and titles in Docs and nowhere else.
-- **JetBrains Mono** (400, 600) only for real code values: keys, shas, branch names, paths, logs and diffs. Never for a label or a number that's just a number. Durations and counts are Archivo with `font-variant-numeric: tabular-nums`.
+- **JetBrains Mono** (400, 600) only for real code values: ticket keys, shas, branch names, repository names, file paths, logs and diffs. Never for a label or a number that's just a number. Durations, counts and a number with a hash (`#1187`, `PR #142`) are Archivo with `font-variant-numeric: tabular-nums`. An asset's or a monitor's name is a name, and its path in a dialog is words: Archivo, in every place. A ticket key is mono in every place it can be: a chip, a table, a title, a rule's wording. A label inherits no mono from the code around it: a diff's *Rendered / Lines*, a tree row's *not staged* and *Clear the filter* are Archivo.
 
 Body text is Archivo 14 px / 1.45, weight 400. Weight 500 is for buttons and for a row's title, the name you scan a list by: `--t-md` where the row has a second line, `--t-sm` in a dense table. Weight 600 is the normal emphasis and covers most headings. 700 is for page titles and 800 for the narrow display figures. The prototype's single 650 becomes 600.
 
 Archivo's word space is narrow, so at interface sizes words run together. The whole interface sets `letter-spacing: .006em; word-spacing: .06em` once, on `body`. Code surfaces and the Docs reading face reset both to `normal`: code has to keep its columns, and Source Serif already has its own fit. A placeholder is `--muted`, the lightest grey that passes 4.5:1 on every field fill.
+
+### Heading steps
+
+One step per level, on every page and in every column of it:
+
+| Level | Style |
+|---|---|
+| Page title | `--t-3xl`, 700, `wdth` 85 (a code value as a title holds to `--t-2xl`) |
+| Dialog or drawer title | `--t-xl` |
+| Panel or section heading, side rails' included | `--t-lg`, 700, `wdth` 88 |
+| A group's label inside a panel, a rail or a section | `--t-xs`, 600, `--ink-2` |
+
+Markdown a file or a comment holds keeps its own order above its body: h1 `--t-2xl`, h2 `--t-xl`, h3 `--t-lg`, h4 `--t-md`.
 
 ### Scale
 
@@ -117,14 +130,34 @@ They are on `:root` in `tokens.css`. A button takes a fixed `height` from its si
 
 - **Default** (`.tf-btn`): page headers (`.tf-acts`), dialog footers and the top bar.
 - **Small** (`.tf-btn.tf-sm`): everything inside a page body. Rows, section headings, panel toolbars, tab strips, side rails, segmented-control buttons and pill toggles.
-- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the specimen's *Link them* / *Not related* / *Decide later*, the ticket preview's go button, the ticket page card's foot). No other button is large.
+- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the specimen's *Link them* / *Not related* / *Decide later*, the ticket preview's go button, the ticket page card's foot, and *Run all steps* while Start work's steps are unrun, when the foot steps aside). No other button is large.
 
 Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
 
 - **Icon-only buttons** (`.tf-iconbtn`) are square at their row's height: `--control-h` by default, `--control-h-sm` with `.tf-sm` in a page body's row. The top bar's icon buttons are at the header height.
 - **Form controls:** a `select` or `input` sitting in a row of buttons takes the row's control height from its token, with horizontal padding only. The filter bar is a page body's toolbar, so its search (`.tf-fsearch`) and its selects (`.tf-fsel select`) are `--control-h-sm`, as the segmented control and the pill toggles beside them are.
+- **Pill toggles** (`.tf-fchips`, Standup's people): off is outlined; on is ringed in `--ink` on `--sheet-2`, not filled. Several can be on at once, and a row of filled pills outweighed the one action the page exists for (reviewers, Rounds 7 and 8, on Standup's *Publish*). Only a primary, a pressed segment and a rail's selected row are filled, and a segmented control has exactly one on. Amended 2026-11-05.
 - **Chip buttons** (`.tf-chipbtn`): a button that is part of a chip's text, drawn as that text. The State colours chip's word, which is its grip, and its *Reset* are the two (spec #2463). No border, background or padding, and the chip's own font; `chrome.css` draws it, and a view adds no size to it. Text-only styling (an underline, a weight) is the view's.
 - **Exempt:** the × removers inside chips and links (the view editor's ×, a link's ×) are part of the chip, not controls.
+
+### Labels
+
+- **An ellipsis** ends a label when the press asks for more before anything happens: a dialog, a confirm, a menu that needs a choice (*Merge…*, *Edit…*, *Close…*, *Update branch…*, *Add label…*, *Move…*, *Import…*, *Delete…*, *Add a source…*, *Add a block…*). A press that acts at once has none (*Refresh*, *New link set*, *Add a rule*). It is the one character `…`, never three dots, and never in a dialog's title or a section's name.
+- **No `+`** in a label. The verb says it adds.
+- **`Open in…`** with its caret is a menu of this machine's applications, and only that. **`Open in <source>`** is a link to the thing on its source, whole, with no caret. Both are ghost buttons wherever they stand: a header at the default size, a body at the small one. Where a header has no room, `Open in <source>` is its glyph with the name as its title and label. It is never shortened to words that read as the menu.
+- **`Refresh`** reads the one thing on the page; **`Sync now`** runs the sources behind the view. They stand together only where a page is both, and then *Refresh* names its thing: *Refresh run*, *Refresh pipeline*, *Refresh page*.
+
+### Disabled
+
+No fill and `--muted` text: a disabled primary is on `--sheet-2` with a `--rule` border, and any other disabled button has no fill at all. In both themes any fill means it can be pressed. The rule is one rule in `chrome.css`. A control that works and opens the reasons (*Merge…* when the source blocks it) is enabled, drawn as a default button, not as a disabled primary. A primary stays disabled until there is something to do (a pattern with neither a project nor a name, a move to where the asset already is), and says why in its title or its label.
+
+### Dialogs
+
+One pattern, `TfDialog`: the title line with its × on the right (every dialog but the launcher, which has its own), an optional sub line, the body, the footer. A title says what the dialog does to what (*Delete Payout stack?*, *Move knobas-gitea*, *Link SEPA payout retry design*), with no ellipsis. A delete's primary names the kind (*Delete link set*, *Delete asset*). A label beside a field is `--t-sm`, `--ink-2`, on the dialog's one label column. A list the dialog is about keeps its height in a short window, and the body scrolls.
+
+### Job scope
+
+One control, `TfScope`: *This job* with its count as a badge, *Mine* where the page has one, then *All*. Its default is *All* on every page, and a ticket card's row turns *This job* on. It does not repeat the key: the top bar names the job (*Start PAY-231*), and a page a row narrowed to another ticket says so in its bar. The button's title names the ticket. Amended 2026-11-05: Builds' rail used to default to *This job* (#850); one default means one answer to "why is this page showing fewer".
 
 ### Gap
 
@@ -212,7 +245,11 @@ A control this section doesn't name is added by amending this section, the `#/co
 
 The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (preview panes close and side rails narrow) and 900 px (columns stack). A page whose own width decides something, such as a table shedding columns or a header shortening a label, uses a container query instead. The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
 
-Below 900 px a stacked side rail (Tickets' views, Builds' pipelines) folds behind one bar that names what is open, and a link picked in it folds it again, so the page's title stays near the top. Docs' tree is a drawer instead, because the page does not reflow under it.
+Below 900 px a stacked side rail folds behind one bar (`TfRailBar`) that names what is open, and a link picked in it folds it again, so the page's title stays near the top: Tickets' views, Builds' pipelines, Settings' sections and Docs' tree. Docs' tree opens as a drawer from that same bar, because the page does not reflow under it. A row keeps its state's words stacked: a dot alone says nothing. A header keeps its actions on the title line unless it holds three or more, which stack under it. A ticket's card, stacked, is its key, status and title, then *Details and connections* folded, then its foot, in the card's flow.
+
+A page's scroller keeps its scrollbar's room (`scrollbar-gutter: stable`): `.tf-main`, and the inner scroller of a viewport-high page (Tickets' board, Builds' right side, Docs' page, a ticket's reading column, Settings' section column). Switching a tab moves nothing. A selected tab differs by its ink and its rule, not its weight, and a filter bar's count holds its width. A table whose rows change under the reader has fixed columns.
+
+Settings is viewport-high: its crumb and its rail stay in view, and only the section's column scrolls.
 
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on.
 
@@ -220,15 +257,21 @@ The status bar names at most two healthy sources; past that they are one line th
 
 From 1240 px down the Tickets preview is closed, so one click on a card or row opens the ticket's page. Above that, one click fills the preview and a double click opens the page.
 
-A section's own page has no breadcrumb bar, unless a ticket card's row opened it narrowed to that ticket, when the bar says *Back to PAY-231* and `Esc` goes there: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
+A section's own page has no breadcrumb bar, unless a ticket card's row opened it narrowed to that ticket, when the bar says *Back to PAY-231* and `Esc` goes there: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before. All six rows of a ticket's card land this way, Docs' home and Sub-tasks included. Sub-tasks names the narrowing in its title (*Sub-tasks of PAY-231*), with nothing typed into the search.
 
-The asset tree (`#/assets`, `#/asset/<id>`) is viewport-high: the canonical header, its open alerts, a filter band, then the Miller columns scrolling sideways beside a fixed pane. In a column the selected asset is the ink pill and the assets above it on the path a paler one, so the path reads and one row says where you are.
+*Back to <name>* `Esc` is a link that does what the key does, drawn as the crumbs are. With no opener, `Esc` goes to the crumb above the page, as the page says it (a pull request's repository, a run's pipeline by name, an asset's holder). A section's own tabs and a pipeline picked on Builds have no parent, because their parent would be a sibling: `#/builds` reopens the pipeline you were on, and a pipeline's crumb is one crumb at both of its addresses, with nothing above it linked. Settings is the one top page `Esc` leaves: you visit it by its cog from somewhere, and every section says where.
 
-A filter bar is a full-width band under the page's tabs, on every page. A key in mono carries no underline until pointed at; a link made of words always does.
+**One "nothing here" state** (`TfNothingHere`) for an address that names nothing, of any kind: centred, one sentence with no id and no word of the app's insides (*knobas does not hold this pull request. It may not have synced yet.*), one action. A bar above it keeps the path to the kind (*Code › Pull request*), never an empty crumb. A section's address with a tab it does not have says so, and is not drawn as its first tab. A read that failed for another reason is the same block with the reason and *Try again*.
+
+The asset tree (`#/assets`, `#/asset/<id>`) is viewport-high: a crumb bar drawn at both addresses, so the first click moves nothing, the canonical header (the title names the asset), its open alerts (folded once an asset is selected), a filter band, then the Miller columns scrolling sideways beside a fixed pane. It has no nav entry: Monitors lights for it, and its crumb starts there. In a column the selected asset is the ink pill and the assets above it on the path a paler one, so the path reads and one row says where you are. An asset's kind is a two-letter tag written like an element's symbol, in sentence case and in Archivo (*Si*, *Hv*, *Vm*, *Ce*, *Ct*), with the word itself in the tag's title and heading the pane.
+
+A filter bar is a full-width band under the page's tabs, on every page.
+
+A key in mono carries no underline until pointed at. A link made of words has an underline, in a sentence, on its own or in a banner, with one exception: the name of a row that opens as a whole (a table's `.tf-row`, a list row that is one link) has none until pointed at, because the row answers the pointer. A link in a row that does not open, or a second link in one that does, keeps it.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
 
-The Docs home is `#/docs` (Björn, 2026-11-05): the tree on the left and, beside it, a centred column at most 980 px wide with the canonical header (*Docs*, how many spaces and pages, *Sync now*). It lists what the tree read holds, on panels in this order: *Continue reading* (the page read last) beside *For you*, the pages the chosen job reaches, then *Spaces*, a tile per space with its count and top four pages. With *This job* on, the job's pages come first. It opens no page, so it records no visit, and the rail's own *For you* steps aside while it is showing. Page titles on it keep the reading face. Docs' crumb and *Back to Docs* lead here from any page. Empty, it says whether a source is missing or has not synced.
+The Docs home is `#/docs` (Björn, 2026-11-05): the tree on the left and, beside it, a centred column at most 980 px wide with the canonical header (*Docs*, how many spaces and pages, *Sync now*). It lists what the tree read holds, on panels in this order: *Continue reading* (the page read last) beside *For you*, the pages the chosen job reaches, then *Spaces*, a tile per space with its count and top four pages. With *This job* on, the job's pages come first. A page is listed once, in the first panel that holds it, and its line says what else it is. A tile has one link, its title, which opens the space's own page, `#/docs/space/<key>`: every page it holds, indented. The Space picker goes there too. It opens no page, so it records no visit, and the rail's own *For you* steps aside while it is showing. Page titles on it keep the reading face. Docs' crumb and *Back to Docs* lead here from any page. Empty, it says whether a source is missing or has not synced.
 
 The ticket page is two columns that each scroll on their own (spec #2396): the card at `--tk-side` (320 px by default, 240 to 720 px by its handle) and the reading column, at most 880 px wide and centred in the space beside the card. Below 900 px they stack.
 
@@ -240,7 +283,7 @@ Motion answers something the person did, and there's very little of it.
 - The Connections drawer slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
 - A route's wire on the asset tree fades in over 160 ms when a selection brings it.
-- Row actions fade in on hover and on focus within the row.
+- A row's repeated actions fade in on hover and on focus within the row (`.tf-rowacts`), holding their room; where nothing hovers they stay. An action only some rows offer because of their state (*Ack*, *Open PR*) is not in the group and stays.
 
 There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.
 

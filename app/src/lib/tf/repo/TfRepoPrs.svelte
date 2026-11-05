@@ -75,10 +75,10 @@
     <tbody>
       {#each shown as row (row.entity_id)}
         <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
-          <td class="tf-mono"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
+          <td class="tf-prno"><Marked text={prNumber(row.entity_id) ?? ""} typed={filter.text} /></td>
           <td><a href={itemHash(row)}><Marked text={row.title} typed={filter.text} /></a></td>
           <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
-          <td class="tf-mono tf-dim">{index.jobOf({ entity_id: row.entity_id, kind: row.kind }) ?? ""}</td>
+          <td>{#if index.jobOf({ entity_id: row.entity_id, kind: row.kind })}<span class="tf-chip tf-chip-job tf-mono">{index.jobOf({ entity_id: row.entity_id, kind: row.kind })}</span>{/if}</td>
         </tr>
       {/each}
     </tbody>

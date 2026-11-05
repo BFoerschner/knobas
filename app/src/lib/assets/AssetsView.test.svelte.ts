@@ -757,7 +757,7 @@ test("a deep link to an asset that is gone says so instead of showing the last o
   nav.go("#/asset/asset:nobody");
   flushSync();
 
-  await waitFor(() => expect(text()).toContain("no asset asset:nobody"));
+  await waitFor(() => expect(text()).toContain("knobas does not hold this asset."));
   expect(text()).not.toContain("hel1 / vm-db-01 / postgres");
   expect(columns()).toEqual([]);
 });

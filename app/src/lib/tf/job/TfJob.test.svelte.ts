@@ -303,7 +303,7 @@ test("a key nothing answers to says so and offers the way back", async () => {
   open("NOPE-1");
   await settle();
   expect(calls.promote).toEqual([]);
-  expect(text()).toContain("No ticket NOPE-1 in the mirror.");
+  expect(text()).toContain("knobas does not hold this ticket.");
   expect(target.querySelector(".tf-btn")?.getAttribute("href")).toBe("#/tickets");
   expect(target.querySelector(".tf-btn kbd")).toBeNull();
 });
@@ -313,7 +313,7 @@ test("a read that fails for another reason than a miss says it failed, not that 
     ports: ports({ getEntity: () => Promise.reject({ code: "not_ready", message: "the database is starting", source_id: null }) }),
   });
   await settle();
-  expect(text()).toContain("Could not open PAY-231: the database is starting");
+  expect(text()).toContain("This ticket could not be opened: the database is starting");
   expect(text()).not.toContain("in the mirror");
   expect(calls.promote).toEqual([]);
 });
@@ -738,7 +738,7 @@ test("Start work's footer is the canonical one: its note first, the primary last
   const footer = target.querySelector(".tf-steps > footer")!;
   expect([...footer.children].map((each) => [squash(each), each.className])).toEqual([
     ["A failed step can be retried, skipped or amended.", "tf-dim tf-small tf-swhint"],
-    ["Run all steps", "tf-btn tf-primary"],
+    ["Run all steps", "tf-btn tf-primary tf-lg"],
   ]);
 });
 

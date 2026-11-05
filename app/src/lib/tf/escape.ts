@@ -24,10 +24,11 @@
  * page's own. The shell steps back in history when the opener is the entry
  * before, so `⌘]` goes forward to the detail again; otherwise it goes there.
  *
- * With no opener, the structural parent is `parentOf`'s: a run's is
- * Builds, a pull request's or a repository's Code, a commit's its
- * repository's page, a doc page's Docs, an asset's or a route's
- * the asset tree, a ticket page's Tickets, and anything else inside a section that section's top page.
+ * With no opener, the structural parent is the crumb above the page: what the
+ * page says (`parentPage`: a pull request's repository, a run's pipeline by its
+ * name, an asset's holder), else `parentOf`'s from the address. A section's own
+ * tabs and a pipeline picked on Builds have no parent: they are the section's
+ * page, so `Esc` never goes sideways to a sibling.
  * An item's page and a note's page have no parent, so rung 8 leaves them
  * where they are. `Esc` never reads "the job you were last in" (#2228); a
  * key that sometimes does nothing is what makes the others safe to press.
@@ -55,6 +56,8 @@ export interface EscState {
   opener: EscTarget | null;
   /** A ticket card's row opened this section's page, narrowed to that ticket (spec #2401). */
   fromTicketRow?: boolean;
+  /** The place the page says it sits under (`page-name.svelte.ts`), where the address cannot say it. */
+  parent?: EscTarget | null;
 }
 
 /** What one press does. */
@@ -84,7 +87,7 @@ export function escStep(state: EscState): EscStep {
     if (state.field.filter && state.field.text !== "") return { do: "clear-filter" };
     return { do: "blur" };
   }
-  const target = escTarget(state.route, state.opener, state.fromTicketRow);
+  const target = escTarget(state.route, state.opener, state.fromTicketRow, state.parent);
   return target === null ? { do: "nothing" } : { do: "go", hash: target.hash, opened: target.opened };
 }
 
@@ -93,12 +96,16 @@ export function escStep(state: EscState): EscStep {
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  * A section's top page does nothing, unless a ticket card's row opened it
  * narrowed to that ticket (`fromTicketRow`, spec #2401): then it goes back.
+ * Settings is the other: a place you visit from somewhere, by its cog, and return
+ * from, on every one of its sections alike.
  */
-export function escTarget(route: TfRoute, opener: EscTarget | null, fromTicketRow = false): EscTargetOf | null {
-  if (isTopPage(route) && !(fromTicketRow && opener !== null)) return null;
+export function escTarget(route: TfRoute, opener: EscTarget | null, fromTicketRow = false, parent: EscTarget | null = null): EscTargetOf | null {
+  const visited = route.view === "full" && route.section === "settings";
+  if (isTopPage(route) && !(opener !== null && (fromTicketRow || visited))) return null;
   if (opener !== null) return { ...opener, opened: true };
-  const parent = parentOf(route);
-  return parent === null ? null : { hash: parent, name: placeName(parseTfHash(parent)), opened: false };
+  if (parent !== null) return { ...parent, opened: false };
+  const up = parentOf(route);
+  return up === null ? null : { hash: up, name: placeName(parseTfHash(up)), opened: false };
 }
 
 /**
@@ -132,5 +139,6 @@ function placeName(route: TfRoute): string {
   if (route.view === "tickets") return SECTION_NAME.tickets;
   if (route.view === "job") return SECTION_NAME.job;
   if (route.view !== "full") return "";
+  if (route.head === "settings" && route.rest[0] === "sources") return "Sources";
   return (route.head !== route.section ? HEAD_NAME[route.head] : undefined) ?? SECTION_NAME[route.section];
 }

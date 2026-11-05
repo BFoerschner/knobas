@@ -475,6 +475,28 @@
     cards[key]?.scrollTo();
   }
 
+  /** The file rail follows the scroll: the file whose head has reached the top of the scroller is the one you are in. */
+  function spy(host: HTMLElement) {
+    const scroller = host.closest(".tf-main, .tf-bmain");
+    if (scroller === null) return;
+    const read = () => {
+      const top = scroller.getBoundingClientRect().top + 8;
+      let at: string | null = null;
+      for (const file of drawn) {
+        const key = keyOf(file);
+        const card = host.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`);
+        if (card === null) continue;
+        if (card.getBoundingClientRect().top > top) break;
+        at = key;
+      }
+      const first = drawn[0];
+      current = at ?? (first === undefined ? null : keyOf(first));
+    };
+    read();
+    scroller.addEventListener("scroll", read, { passive: true });
+    return () => scroller.removeEventListener("scroll", read);
+  }
+
   function onkey(event: KeyboardEvent) {
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
     if (inTextField(event.target) || inTextField(document.activeElement)) return;
@@ -591,6 +613,7 @@
             {@const file = row.file}
             {@const done = isViewed(file.path)}
             {@const badge = badgeOf(file)}
+            {@const how = /, (not staged|staged)\)$/.exec(row.name)?.[1] ?? null}
             <button
               type="button"
               class:tf-viewed={done}
@@ -598,7 +621,7 @@
               aria-current={current === keyOf(file) ? "true" : undefined}
               title={keyOf(file)}
               onclick={() => go(keyOf(file))}
-              ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{row.name}</span><span class="tf-n"
+              ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
                 >{#if file.change !== "binary"}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button
             >
@@ -614,7 +637,7 @@
       </p>
     </div>
   {/if}
-  <div class="tf-dfiles">
+  <div class="tf-dfiles" {@attach spy}>
     {#each drawn as file (keyOf(file))}
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
@@ -648,9 +671,11 @@
         {repository}
       />
     {/each}
-    {#if gone.length > 0 || homeless.length > 0}
+    {#if filter.trim() !== "" && drawn.length === 0}
+      <div class="tf-empty"><p>No changed file matches the filter.</p></div>
+    {:else if gone.length > 0 || homeless.length > 0}
       <details class="tf-outdated tf-gone">
-        <summary>On files this change no longer holds</summary>
+        <summary>Comments on files that are no longer in this change</summary>
         {#each gone as g, n (n)}
           <div class="tf-thread"><span class="tf-mono tf-dim">{g.path}, {lineName(g.thread.side, g.thread.line)}</span><TfWrittenAt thread={g.thread} {repository} />{@render said(g.thread.comments)}</div>
         {/each}

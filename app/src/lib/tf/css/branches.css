@@ -14,7 +14,6 @@
 .tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .tf .tf-compare .tf-cchanges { margin-top: 18px; }
 .tf-compare .tf-side { display: flex; flex-direction: column; gap: 14px; }
-.tf-compare .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
 .tf-editor { display: grid; grid-template-columns: 48px 1fr; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-editor .tf-nums {
   color: var(--ink-2); text-align: right; padding: 8px 12px 8px 0; white-space: pre; user-select: none; background: var(--sheet-2);
@@ -30,3 +29,5 @@
   .tf-compare { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Two lines, then an ellipsis: a commit title in a narrow rail, so two that start alike still differ. */
+.tf .tf-t.tf-t2 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; white-space: normal; text-overflow: clip; }

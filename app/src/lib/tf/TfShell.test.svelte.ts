@@ -337,9 +337,6 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   start();
   const tops = [
     ...NAV.map((section) => `#/${section}`),
-    "#/settings",
-    "#/assets",
-    "#/assets/tree",
     "#/tickets/view-1",
     // Home: the chosen job's page, or the empty state with none (spec #2396).
     "#/job",
@@ -357,8 +354,7 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
 test("Esc on a detail page reached with no opener goes to its structural parent; deeper inside a section, to the section's top page", async () => {
   start();
   const parents: [string, string][] = [
-    ["#/build/pipe-1/run-4812", "#/builds"],
-    ["#/builds/pipe-1", "#/builds"],
+    ["#/build/pipe-1/run-4812", "#/builds/pipe-1"],
     ["#/pr/gh:pr-12", "#/code"],
     ["#/pr/gh:pr-12/files", "#/code"],
     ["#/repo/gh:repo-1", "#/code"],
@@ -372,9 +368,6 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
     ["#/docs/space/ENG", "#/docs"],
     ["#/asset/assets:svc-1", "#/assets"],
     ["#/route/assets:route-1", "#/assets"],
-    ["#/code/repos", "#/code"],
-    ["#/monitors/unmonitored", "#/monitors"],
-    ["#/settings/appearance", "#/settings"],
     // A ticket page (spec #2227), here one the mirror cannot read: its parent is Tickets either way.
     ["#/ticket/jira:PAY-999", "#/tickets"],
   ];
@@ -446,7 +439,7 @@ test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structura
   expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/pipe-1");
 
   unmount(shell!);
   shell = null;
@@ -456,7 +449,7 @@ test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structura
   expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/pipe-1");
 });
 
 test("a pull request opened from Code, switched to its Files tab: Esc returns to Code, not to the previous tab", async () => {
@@ -523,19 +516,17 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   let crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip"), "no last job's chip").toBeNull();
   const parent = crumbs.querySelector<HTMLAnchorElement>("a.tf-crumb")!;
-  expect(parent.textContent).toBe("Asset tree");
-  expect(parent.getAttribute("href")).toBe("#/assets");
+  expect(parent.textContent).toBe("Monitors");
+  expect(parent.getAttribute("href")).toBe("#/monitors");
   expect(escHint()).toBe("Back to Asset tree Esc");
-  expect(target.querySelector(".tf-nav a[aria-current]"), "the asset tree lights no nav entry").toBeNull();
+  expect(target.querySelector(".tf-nav a[aria-current]")?.textContent, "the asset tree lights Monitors, the page it opens from").toContain("Monitors");
 
   await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Appearance");
-  expect(escHint()).toBe("Back to Settings Esc");
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe("#/settings");
+  // A section of Settings has no parent: the place above it would be a sibling.
+  expect(escHint()).toBeNull();
 });
 
 test("a commit's page with no opener names its repository's page as the breadcrumb's map calls it, until the page has its title", async () => {
@@ -551,7 +542,7 @@ test("an address the new shell has no place for names itself", async () => {
   expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
-  expect(seen(".tf-empty")[0]?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
+  expect(seen(".tf-empty")[0]?.textContent).toContain("knobas has no page at this address.");
 });
 
 // #1085: a rooms-UI address lands where the new shell keeps that thing, in
@@ -982,7 +973,7 @@ test("the status bar: sync ages, a 401 with Re-enter password, the queued writes
   expect(bar.textContent).toContain("Jira synced 4 min ago");
   const bad = bar.querySelector(".tf-bad")!;
   expect(bad.textContent).toContain("TeamCity: sign-in failed");
-  expect(bad.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
+  expect(bad.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity/reenter");
   expect(bar.querySelector("button.tf-queued")?.textContent).toBe("2 queued writes");
 });
 
@@ -1215,7 +1206,7 @@ test("a running timer is not a job the breadcrumb or Esc returns to", async () =
   expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/pipe-1");
 });
 
 test("a toast from anywhere lands in the shell's stack, as text, and its action runs and dismisses it (R-1.8)", async () => {

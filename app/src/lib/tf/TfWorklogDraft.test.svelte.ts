@@ -189,9 +189,9 @@ test("opened by a stop it offers Stop, log later, Keep running, Discard and Log"
   expect(button("Log 2h 44m to PAY-231")).toBeDefined();
 });
 
-test("opened without a stop it offers Discard and Log, and nothing about a clock", () => {
+test("opened without a stop it offers Cancel and Log, and nothing about a clock", () => {
   render({ stopped: false });
-  expect(button("Discard")).toBeDefined();
+  expect(button("Cancel")).toBeDefined();
   expect(button("Stop, log later")).toBeUndefined();
   expect(button("Keep running")).toBeUndefined();
 });

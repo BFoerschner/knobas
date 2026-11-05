@@ -162,6 +162,11 @@
   } from "./views";
   import { pageVisible } from "../kept-pages.svelte";
   import { chosenJob } from "../job/chosen.svelte";
+  import { scopedTicket } from "../job/scoped.svelte";
+  import { keyOf } from "../job/job";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
+  import type { EscTarget } from "../escape";
 
   let {
     ready,
@@ -183,6 +188,7 @@
     },
     viewId = null,
     typingPause = 90,
+    back = null,
     sync,
     syncRevision = 0,
   }: {
@@ -195,7 +201,12 @@
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
+    /** Where `Esc` goes, which the sub-tasks bar's hint names. */
+    back?: EscTarget | null;
   } & RoleFrameProps = $props();
+
+  /** The key whose sub-tasks a ticket card's row narrowed this view to (`job/scoped.svelte.ts`), or `null`. */
+  const subtasksOf = $derived(viewId === null && scopedTicket.subtasksOf !== null ? keyOf(scopedTicket.subtasksOf) : null);
 
   // ---- the views ----
   let views = $state<TicketViewRow[] | null>(null);
@@ -276,7 +287,7 @@
     ...new Set([...OWN_GROUPS, ...(views ?? []).map((row) => row.group)]),
   ]);
   /** The base query the board is read with: the view's text, `null` when there is nothing to read. */
-  const base = $derived(view === null ? "" : view === undefined || view.unreadable !== null ? null : view.query);
+  const base = $derived(view === null ? (subtasksOf === null ? "" : `under:${subtasksOf}`) : view === undefined || view.unreadable !== null ? null : view.query);
   const sessionKey = $derived(viewId ?? "");
   /** The saved view the board reads (#877), or `null`: its source decides its tickets and their order. */
   const savedViewId = $derived(view?.saved_view_source ? view.saved_view : null);
@@ -527,6 +538,28 @@
     });
   });
 
+  /** The sticky table head sits under the filter bar, however many rows the bar wrapped to. */
+  function fbarHeight(wrap: HTMLElement) {
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => {
+      const bar = wrap.querySelector<HTMLElement>(":scope > .tf-fbar");
+      if (bar) wrap.style.setProperty("--tf-fbar-h", `${bar.offsetHeight}px`);
+    });
+    seen.observe(wrap);
+    return () => seen.disconnect();
+  }
+
+  /** A long key gives up its middle, so `payout-service#143` and `#138` stay told apart. */
+  function keepsItsEnd(key: string): string {
+    return key.length <= 24 ? key : `${key.slice(0, 15)}…${key.slice(-8)}`;
+  }
+
+  /** The other layout, on the same ticket: the one the preview shows, even where nothing was picked yet. */
+  function switchLayout(next: "board" | "list") {
+    if (current !== null) session.selected = current.card.entity_id;
+    reader.chooseLayout(next);
+  }
+
   /** At 1240 px and below there is no preview to fill (design system, *Layout*), so a click opens the ticket. */
   function clicked(card: MiniBoardCard) {
     select(card);
@@ -596,11 +629,7 @@
 </script>
 
 <div class="tf-tickets" class:tf-rail-shut={!railOpen}>
-  <div class="tf-railbar">
-    <button type="button" class="tf-btn tf-sm" aria-expanded={railOpen} aria-controls="tf-views-rail" onclick={() => (railOpen = !railOpen)}>
-      View: <b>{view?.name ?? "All tickets"}</b><i class="tf-railmark" aria-hidden="true"></i>
-    </button>
-  </div>
+  <TfRailBar label="View" value={view?.name ?? (subtasksOf === null ? "All tickets" : `Sub-tasks of ${subtasksOf}`)} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <nav
     id="tf-views-rail"
@@ -613,11 +642,11 @@
     <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" /></div>
     <div class="tf-vlist">
       <div class="tf-vw-acts">
-        <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>+ New view</button>
+        <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>New view…</button>
       </div>
       {#if find.trim() === ""}
-        <a href="#/tickets" aria-current={viewId === null ? "true" : undefined}
-          >All tickets {#if viewId === null && reader.total !== null}<span class="tf-count">{reader.total}</span>{/if}</a
+        <a href="#/tickets" aria-current={viewId === null && subtasksOf === null ? "true" : undefined} onclick={() => subtasksOf !== null && scopedTicket.clear()}
+          >All tickets {#if viewId === null && subtasksOf === null && reader.total !== null}<span class="tf-count">{reader.total}</span>{/if}</a
         >
       {/if}
       {#each groups as group (group.name)}
@@ -672,10 +701,16 @@
     </div>
   </nav>
 
-  <section class="tf-board-wrap">
+  <section class="tf-board-wrap" {@attach fbarHeight}>
+    {#if subtasksOf !== null}
+      <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. -->
+      <TfCrumbs parts={[{ name: "Tickets" }, { name: `Sub-tasks of ${subtasksOf}` }]} {back} />
+    {/if}
     <header class="tf-fhead tf-board-head">
       <div class="tf-board-title">
-        <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
+        <h1>
+          {#if subtasksOf !== null}Sub-tasks of <span class="tf-mono">{subtasksOf}</span>{:else}{view?.name ?? (viewId === null ? "All tickets" : "This view")}{/if}
+        </h1>
         {#if view && view.saved_view_source === null}<span class="tf-q"
             >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
           >{/if}
@@ -683,17 +718,17 @@
       <div class="tf-acts">
         {#if view !== undefined && (view === null || view.unreadable === null)}
           <div class="tf-seg" role="group" aria-label="Layout">
-            <button type="button" aria-pressed={showing.layout === "board"} onclick={() => reader.chooseLayout("board")}
+            <button type="button" aria-pressed={showing.layout === "board"} onclick={() => switchLayout("board")}
               >Board</button
             >
-            <button type="button" aria-pressed={showing.layout === "list"} onclick={() => reader.chooseLayout("list")}
+            <button type="button" aria-pressed={showing.layout === "list"} onclick={() => switchLayout("list")}
               >List</button
             >
           </div>
         {/if}
         {#if view}
           <button type="button" class="tf-btn" onclick={() => editView(view)}
-            >{view.saved_view_source === null ? "Edit view" : "View settings"}</button
+            >{view.saved_view_source === null ? "Edit view…" : "View settings…"}</button
           >
           <ViewMenu
             name="this view"
@@ -754,7 +789,7 @@
 
     {#if viewId !== null && views !== null && view === undefined}
       <div class="tf-empty">
-        <p>No view is called {viewId}. It may have been deleted.</p>
+        <p>This view does not exist. It may have been deleted.</p>
         <a class="tf-btn tf-sm" href="#/tickets">All tickets</a>
       </div>
     {:else if view && view.unreadable !== null}
@@ -773,7 +808,22 @@
         <button type="button" class="tf-btn tf-sm" onclick={clearFilter}>Clear the filter</button>
       </div>
     {:else if reader.shown === 0}
-      <div class="tf-empty"><p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p></div>
+      {#if view}
+        <!-- A view that matches nothing is not an empty mirror. -->
+        <div class="tf-empty">
+          <p>No tickets match this view.</p>
+          {#if view.saved_view_source === null}
+            <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}>Edit view…</button>
+          {:else}
+            <a class="tf-btn tf-sm" href="#/tickets">All tickets</a>
+          {/if}
+        </div>
+      {:else}
+        <div class="tf-empty">
+          <p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p>
+          <a class="tf-btn tf-sm" href="#/settings/sources">Add a source…</a>
+        </div>
+      {/if}
     {:else if showing.layout === "board"}
       {#each reader.bands as { lane, drawn } (lane.key ?? "")}
         <div class="tf-lane">
@@ -858,7 +908,7 @@
                   {#if column === "key"}
                     {@const source = sourceOf(card)}
                     <td class="tf-mono tf-nowrap tf-keycell" title={card.key}
-                      ><Marked text={shortKey(card.key)} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
+                      ><Marked text={keepsItsEnd(shortKey(card.key))} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
                     >
                   {:else if column === "summary"}
                     <td class="tf-c-summary"

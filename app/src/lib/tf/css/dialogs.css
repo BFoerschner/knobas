@@ -80,6 +80,8 @@
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
 }
 .tf-formgrid input[type="text"] { width: 100%; }
+/* A field's label: one size and tone in every dialog. */
+.tf-formgrid > :is(label, span), .tf-pra > label { font-size: var(--t-sm); color: var(--ink-2); }
 /* Add a source's *Install an adapter* row (#1202): the path, then its button. */
 .tf-add-more > summary::-webkit-details-marker { display: none; }
 .tf-add-more > summary { list-style: none; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); width: fit-content; }
@@ -89,7 +91,7 @@
 .tf-add-inst input[type="text"] { flex: 1; min-width: 0; }
 /* Settings › Sources › Installed adapters (#1209, #1210) */
 .tf-ext-h { display: flex; align-items: center; gap: 12px; }
-.tf-ext-h h2 { font-size: var(--t-md); margin: 0; }
+.tf-ext-h h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0; }
 .tf-ext-h .tf-btn { margin-left: auto; }
 .tf-ext-row {
   display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;

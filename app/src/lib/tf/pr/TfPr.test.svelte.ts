@@ -253,7 +253,7 @@ test("the header names the pull request, its state, head into base and the reade
   await draw([PR]);
   expect(text("h1")).toBe("PR #142 SEPA retry with exponential backoff");
   expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by you");
-  const crumbs = [...target.querySelectorAll(".tf-crumbs a")].map((a) => [a.textContent, a.getAttribute("href")]);
+  const crumbs = [...target.querySelectorAll(".tf-crumbs a:not(.tf-esc)")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(crumbs, "the path, with no job's chip (#2228)").toEqual([
     ["Code", "#/code"],
     ["tidewater/payout-service", `#/repo/${encodeURIComponent(REPO)}`],
@@ -268,7 +268,7 @@ test("somebody else's pull request names its author and offers Review…", async
   if (facts.type === "facts") facts.facts[1] = fact("Author", "jonas");
   await draw([PR], ports({ author: "jonas", pr: theirs }));
   expect(text(".tf-fhead .tf-sub")).toBe("open feature/PAY-231-sepa-retry into main, by jonas");
-  expect(buttons()).toEqual(["Merge…", "Review…", "Edit"]);
+  expect(buttons()).toEqual(["Merge…", "Review…", "Edit…"]);
   // *Open in…* on the pull request (#2274): a ghost after the actions, before Refresh (#2238).
   const all = [...target.querySelectorAll(".tf-fhead .tf-acts > *")].map((el) => el.textContent?.replace(/\s+/g, " ").trim());
   expect(all.slice(-2, -1)).toEqual(["Open in…"]);
@@ -277,17 +277,17 @@ test("somebody else's pull request names its author and offers Review…", async
 
 test("the toolbar draws what the source offers, the primary first (#2238 header order): Merge…, Review…, Update branch, Edit, Close", async () => {
   await draw([PR], ports({ pr: prView([APPROVE, COMMENT, EDIT, CLOSE, UPDATE, MERGE]) }));
-  expect(buttons()).toEqual(["Merge…", "Review…", "Update branch", "Edit", "Close"]);
-  // Blocked by the source, Merge… says so (#1441) and its tooltip says why; it still opens its dialog with the reasons (#843, below).
+  expect(buttons()).toEqual(["Merge…", "Review…", "Update branch…", "Edit…", "Close…"]);
+  // Blocked by the source, Merge… is a default button, enabled, because it opens its dialog with the reasons (#843, below); its tooltip says why (#1441).
   const merge = button("Merge…")!;
-  expect(merge.getAttribute("aria-disabled")).toBe("true");
+  expect(merge.getAttribute("aria-disabled")).toBeNull();
   expect(merge.title).toBe("1 of 2 required approvals");
-  expect(merge.classList.contains("tf-primary")).toBe(true);
+  expect(merge.classList.contains("tf-primary")).toBe(false);
 });
 
 test("a pull request whose head is not behind offers no Update branch; a merged one no Close or Merge…", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT]) }));
-  expect(buttons()).toEqual(["Edit"]);
+  expect(buttons()).toEqual(["Edit…"]);
 });
 
 test("the tabs carry the sections' counts and light the one the address names", async () => {
@@ -425,7 +425,7 @@ test("a repository not on this machine draws no Local checkout", async () => {
 
 test("Edit sends only what changed, and the header says an edit is queued", async () => {
   await draw([PR]);
-  button("Edit")!.click();
+  button("Edit…")!.click();
   flushSync();
   const title = document.querySelector<HTMLInputElement>(".tf-pra input[type=text]")!;
   expect(title.value).toBe("SEPA retry");
@@ -441,7 +441,7 @@ test("Edit sends only what changed, and the header says an edit is queued", asyn
 
 test("Close asks the source's sentence and queues the closed state", async () => {
   await draw([PR]);
-  button("Close")!.click();
+  button("Close…")!.click();
   flushSync();
   expect(document.querySelector(".tf-dialog")!.textContent).toContain("Close feature/PAY-231-sepa-retry → main without merging it?");
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Close pull request")!.click();
@@ -453,7 +453,7 @@ test("Close asks the source's sentence and queues the closed state", async () =>
 /** #2289: a destructive confirm is filled red; any other confirm is the plain primary. */
 test("the entity-action dialog's destructive confirm is filled red, after a ghost Cancel", async () => {
   await draw([PR]);
-  button("Close")!.click();
+  button("Close…")!.click();
   flushSync();
   const footer = () => [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].map((b) => [b.textContent?.trim(), b.className]);
   expect(footer()).toEqual([
@@ -462,7 +462,7 @@ test("the entity-action dialog's destructive confirm is filled red, after a ghos
   ]);
   document.querySelector<HTMLButtonElement>(".tf-dialog footer .tf-ghost")!.click();
   flushSync();
-  button("Edit")!.click();
+  button("Edit…")!.click();
   flushSync();
   expect(footer()).toEqual([
     ["Cancel", "tf-btn tf-ghost"],
@@ -472,7 +472,7 @@ test("the entity-action dialog's destructive confirm is filled red, after a ghos
 
 test("Update branch queues the style picked", async () => {
   await draw([PR]);
-  button("Update branch")!.click();
+  button("Update branch…")!.click();
   flushSync();
   const rebase = document.querySelector<HTMLInputElement>(".tf-pra input[value=rebase]")!;
   rebase.click();
@@ -494,8 +494,8 @@ test("a source action draws the dialog its source declares and queues SourceActi
     values: { id: "stamp_release" },
   });
   await draw([PR], ports({ pr: prView([EDIT, stamp, MERGE]) }));
-  expect(buttons()).toEqual(["Merge…", "Edit", "Stamp release"]);
-  button("Stamp release")!.click();
+  expect(buttons()).toEqual(["Merge…", "Edit…", "Stamp release…"]);
+  button("Stamp release…")!.click();
   flushSync();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(dialog.textContent).toContain("Stamp this pull request for a release?");
@@ -560,7 +560,7 @@ test("Conversation opens on the source's line where it cannot read the comments,
   await draw([PR, "conversation"], ports({ pr }));
   const convo = [...target.querySelectorAll(".tf-convo > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
   expect(convo[0]).toBe(UNREAD);
-  expect(convo[1]).toBe("PN priya.nair2026-08-22 09:30 approved");
+  expect(convo[1]).toBe("PR priya.nair2026-08-22 09:30 approved");
   expect(target.querySelector(".tf-convo .tf-prline")!.classList.contains("tf-dim")).toBe(true);
 });
 
@@ -640,7 +640,7 @@ test("Commits: each opens its diff on the repository page", async () => {
 
 test("a pull request the mirror does not hold says why", async () => {
   await draw([PR], ports({ getEntity: async () => Promise.reject({ code: "not_found", message: "no such entity" }) }));
-  expect(text(".tf-cfail")).toContain("no such entity");
+  expect(text(".tf-nohere")).toContain("knobas does not hold this pull request.");
   vi.restoreAllMocks();
 });
 
@@ -789,7 +789,7 @@ test("a token that may not comment or review draws Comment and each verdict disa
 
 test("one's own pull request: no Review…, but Submit review once a line comment waits, Comment its only verdict", async () => {
   await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));
-  expect(buttons()).toEqual(["Merge…", "Edit"]);
+  expect(buttons()).toEqual(["Merge…", "Edit…"]);
   if (view) unmount(view);
   pending.add(PR, { path: "docs/backoff.md", side: "new", line: 3, body: "Say ±10 %." });
   await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));
@@ -955,7 +955,7 @@ test("after a queued merge, Merge… is held: aria-disabled, titled merge queued
 test("after a queued merge, Update branch, Edit and Close are held with merge queued and open nothing", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
   await queueMerge();
-  for (const name of ["Update branch", "Edit", "Close"]) {
+  for (const name of ["Update branch…", "Edit…", "Close…"]) {
     expect(holdOf(name)).toEqual(["true", "merge queued"]);
     button(name)!.click();
     flushSync();
@@ -965,15 +965,15 @@ test("after a queued merge, Update branch, Edit and Close are held with merge qu
 
 test("after a queued close, Merge… and Close are held with close queued; Edit and Update branch stay live", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
-  button("Close")!.click();
+  button("Close…")!.click();
   flushSync();
   dialogButton("Close pull request").click();
   await settle();
   expect(writes).toHaveLength(1);
   expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
-  expect(holdOf("Close")).toEqual(["true", "close queued"]);
-  expect(holdOf("Edit")).toEqual([null, ""]);
-  expect(holdOf("Update branch")).toEqual([null, ""]);
+  expect(holdOf("Close…")).toEqual(["true", "close queued"]);
+  expect(holdOf("Edit…")).toEqual([null, ""]);
+  expect(holdOf("Update branch…")).toEqual([null, ""]);
   button("Merge…")!.click();
   flushSync();
   expect(document.querySelector(".tf-dialog")).toBeNull();
@@ -988,13 +988,13 @@ test("the hold outlives leaving the page and ends with the session; a source's o
   unmount(view!);
   await draw([PR], offered());
   expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
-  expect(holdOf("Edit")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Edit…")).toEqual(["true", "merge queued"]);
   unmount(view!);
   forgetEchoes();
   await draw([PR], offered());
   expect(holdOf("Merge…")).toEqual([null, ""]);
   expect(button("Merge…")!.classList.contains("tf-primary")).toBe(true);
-  expect(holdOf("Edit")).toEqual([null, ""]);
+  expect(holdOf("Edit…")).toEqual([null, ""]);
 });
 
 // -- An echo goes once the source's read shows it (#1542) -------------
@@ -1003,7 +1003,7 @@ const REOPEN = action("edit_pull_request", "Reopen", { values: { state: "open" }
 
 /** Queue a close through Close's dialog. */
 async function queueClose() {
-  button("Close")!.click();
+  button("Close…")!.click();
   flushSync();
   dialogButton("Close pull request").click();
   await settle();
@@ -1018,7 +1018,7 @@ test("a landed close drops its chip and the holds it drove; the source reopening
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
   expect(chips()).toEqual(["closed"]);
-  expect(holdOf("Reopen")).toEqual([null, ""]);
+  expect(holdOf("Reopen…")).toEqual([null, ""]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
   expect(chips()).toEqual(["open"]);
@@ -1036,7 +1036,7 @@ test("a close the read still shows open keeps its chip and its holds", async () 
 
 test("a landed merge drops its chip; an edit the queue has not sent keeps its chip", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
-  button("Edit")!.click();
+  button("Edit…")!.click();
   flushSync();
   const title = document.querySelector<HTMLInputElement>('.tf-dialog input[aria-label="Title"]')!;
   title.value = "SEPA retry with backoff";
@@ -1160,7 +1160,7 @@ test("a merge, a close and a reopen each say queued, then sent, and go on the re
     [queueClose, "close", prView([COMMENT, EDIT, CLOSE, mergeAction(null)]), prView([COMMENT, EDIT, REOPEN], "closed")],
     [
       async () => {
-        button("Reopen")!.click();
+        button("Reopen…")!.click();
         flushSync();
         dialogButton("Reopen pull request").click();
         await settle();
@@ -1192,7 +1192,7 @@ test("an edit says queued, then sent, and goes on the first live read asked once
   const read = prView([COMMENT, EDIT, mergeAction(null)]);
   const { sync, follower, sent, io } = lifecycle(() => read);
   await draw([PR], io, follower);
-  button("Edit")!.click();
+  button("Edit…")!.click();
   flushSync();
   const title = document.querySelector<HTMLInputElement>('.tf-dialog input[aria-label="Title"]')!;
   title.value = "SEPA retry with backoff";
@@ -1341,7 +1341,7 @@ test("#2303: Request… asks the picked reviewer, under `reviewers`, and the rea
   const { sync, follower, io } = lifecycle(() => read);
   await draw([PR], io, follower);
   // Drawn in the panel, never in the toolbar.
-  expect(buttons()).toEqual(["Edit"]);
+  expect(buttons()).toEqual(["Edit…"]);
   target.querySelector<HTMLButtonElement>(".tf-prreviewers header button")!.click();
   flushSync();
   expect(lines(".tf-prpick button")).toEqual(["OL olu", "KA kai"]);

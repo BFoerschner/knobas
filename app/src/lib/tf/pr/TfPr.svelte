@@ -67,7 +67,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     entityCheckout,
     entityView,
@@ -113,6 +113,8 @@
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfBackHint from "../TfBackHint.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
@@ -122,7 +124,7 @@
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
-  import { namePage } from "../page-name.svelte";
+  import { namePage, parentPage } from "../page-name.svelte";
 
   let {
     ready,
@@ -164,6 +166,10 @@
 
   let detail = $state<EntityDetail | null>(null);
   let failed = $state<string | null>(null);
+  /** The read failed because no such pull request is held, not because the read broke. */
+  let missing = $state(false);
+  /** Bumped by *Try again*. */
+  let attempt = $state(0);
   /** `undefined` while the view has not answered; `null` for a source with none. */
   let view = $state<SourceView | null | undefined>(undefined);
   let viewFailed = $state<string | null>(null);
@@ -179,9 +185,11 @@
 
   $effect(() => {
     if (!ready || prId === null) return;
+    void attempt;
     const id = prId;
     let live = true;
     detail = null;
+    missing = false;
     failed = null;
     view = undefined;
     viewFailed = null;
@@ -206,7 +214,10 @@
         readRepo(found.row, () => live);
       },
       (error) => {
-        if (live) failed = ipcErrorMessage(error);
+        if (live) {
+          failed = ipcErrorMessage(error);
+          missing = isIpcError(error) && error.code === "not_found";
+        }
       },
     );
     readView(id, () => live);
@@ -324,6 +335,15 @@
   const counts = $derived(tabCounts(view ?? null));
   const readyRows = $derived(readyLines(view ?? null));
   const standing = $derived(readiness(view ?? null));
+  /** A button's label as words in a sentence or a title: the ellipsis is the button's alone. */
+  const plainLabel = (label: string) => label.replace(/…$/, "");
+  /** How a finished pull request ended, in one line; `null` while it is open. */
+  const outcome = $derived.by(() => {
+    const word = header.state?.text.toLowerCase();
+    if (word === "merged") return { text: header.base === null ? "Merged" : `Merged into ${header.base}`, tone: "ok" };
+    if (word === "closed") return { text: "Closed without merging", tone: "muted" };
+    return null;
+  });
   const reviewers = $derived(reviewersOf(view ?? null));
   const rail = $derived(railChecks(view ?? null));
   const conflicts = $derived(conflictsOf(view ?? null));
@@ -339,6 +359,8 @@
   const name = $derived(number === null ? "PR" : `PR ${number}`);
   // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
   namePage(() => name);
+  // A pull request sits under its repository, as its crumb has it.
+  parentPage(() => (repo === null ? null : { hash: repoHash(repo.entity_id), name: repo.title }));
 
   /** The write each toolbar button stands for, where the source offers it. */
   const offered = (test: (action: ViewAction) => boolean) => actions.find(test) ?? null;
@@ -369,13 +391,13 @@
     const edit = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] === undefined);
     const setState = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] !== undefined);
     const list: Write[] = [];
-    if (update) list.push({ action: update, label: "Update branch", phrase: "update branch of", verb: "update", key: "update" });
-    if (edit) list.push({ action: edit, label: "Edit", phrase: "edit", verb: "edit", key: "edit", primary: "Save changes" });
+    if (update) list.push({ action: update, label: "Update branch…", phrase: "update branch of", verb: "update", key: "update" });
+    if (edit) list.push({ action: edit, label: "Edit…", phrase: "edit", verb: "edit", key: "edit", primary: "Save changes" });
     if (setState) {
       const verb = setState.values["state"] === "closed" ? "close" : "reopen";
       list.push({
         action: setState,
-        label: verb === "close" ? "Close" : "Reopen",
+        label: verb === "close" ? "Close…" : "Reopen…",
         phrase: verb,
         verb,
         key: verb,
@@ -385,7 +407,8 @@
     for (const own of actions.filter((a) => a.write_op === "source_action")) {
       const label = actionName(own.label);
       const verb = label.toLowerCase();
-      list.push({ action: own, label, phrase: `${verb} on`, verb, key: `source:${own.values["id"] ?? label}` });
+      // A source's action that asks for something first says so, as every label does (design system, Labels).
+      list.push({ action: own, label: own.fields.length > 0 && !label.endsWith("…") ? `${label}…` : label, phrase: `${verb} on`, verb, key: `source:${own.values["id"] ?? label}` });
     }
     return list;
   });
@@ -585,13 +608,15 @@
       <span class="tf-crumb">{detail.row.path}</span><span class="tf-sep">›</span>
     {/if}
     <strong>{name}</strong>
-    {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
+    {#if back !== null}<TfBackHint {back} />{/if}
   </nav>
 
   {#if prId === null || failed !== null}
-    <div class="tf-cbody">
-      <p class="tf-cfail">{failed ?? "No pull request is named in the address."}</p>
-    </div>
+    {#if failed !== null && !missing}
+      <TfNothingHere message="This pull request could not be read: {failed}" onretry={() => attempt++} />
+    {:else}
+      <TfNothingHere message="knobas does not hold this pull request. It may not have synced yet." href="#/code/prs" action="All pull requests" />
+    {/if}
   {:else}
     <header class="tf-fhead">
       <div>
@@ -608,12 +633,12 @@
       <div class="tf-acts">
         {#if merge !== null}
           {@const hold = heldBy("merge")}
-          <!-- The primary comes first (#2238 header order). Blocked by the source, it still opens its dialog, which names each reason (#843); held by a queued write, it opens nothing. -->
+          <!-- The primary comes first (#2238 header order). Blocked by the source it is a default button, enabled, because it opens a dialog that names each reason (#843); held by a queued write, it opens nothing and looks it. -->
           <button
             type="button"
             class="tf-btn"
-            class:tf-primary={hold === null}
-            aria-disabled={hold !== null || merge.disabled !== null ? "true" : undefined}
+            class:tf-primary={hold === null && merge.disabled === null}
+            aria-disabled={hold !== null ? "true" : undefined}
             title={hold ?? merge.disabled ?? undefined}
             onclick={() => {
               if (hold === null) merging = true;
@@ -705,7 +730,7 @@
               {/if}
             {/each}
           {:else if tab === "conversation"}
-            <div class="tf-convo">
+            <div class="tf-convo tf-convo-full">
               {#each conversation as part, n (n)}
                 {#if "line" in part}
                   {@render mutedLine(part.line)}
@@ -777,7 +802,16 @@
           {/if}
         </div>
         <aside class="tf-side" aria-label="Pull request status">
-          <div class="tf-panel" hidden={standing.lines.length === 0}>
+          {#if standing.lines.length === 0}
+            <!-- The question makes no sense on a finished pull request: the panel says how it ended, or is not drawn. -->
+            {#if merge === null && outcome !== null}
+              <div class="tf-panel">
+                <header><h3>Outcome</h3></header>
+                <div class="tf-prready"><div class="tf-prverdict tf-{outcome.tone}">{outcome.text}</div></div>
+              </div>
+            {/if}
+          {:else}
+          <div class="tf-panel">
             <header><h3>Ready to merge?</h3></header>
             <div class="tf-prready">
               {#if standing.verdict !== null}
@@ -793,6 +827,7 @@
               {/each}
             </div>
           </div>
+          {/if}
           {#if view}
             <div class="tf-panel tf-prreviewers">
               <header
@@ -940,12 +975,12 @@
   <TfEntityAction
     action={write.action}
     entityId={prId}
-    title={/^add\b/i.test(write.label) ? `${write.label} to ${name}` : `${write.label} ${name}`}
+    title={/^add\b/i.test(write.label) ? `${plainLabel(write.label)} to ${name}` : `${plainLabel(write.label)} ${name}`}
     what="{write.phrase} {name}"
     primary={write.primary ?? null}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(queued) => echoChip(prId, write.verb, write.label, queued)}
+    onqueued={(queued) => echoChip(prId, write.verb, plainLabel(write.label), queued)}
     onclose={() => (shown = null)}
   />
 {/if}

@@ -34,6 +34,7 @@
   900px the columns stack and the handle is not drawn.
 -->
 <script lang="ts">
+  import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { ipcErrorMessage } from "../../ipc";
@@ -86,6 +87,7 @@
 
   const key = $derived(keyOf(detail.row.entity_id));
   const blockedBy = $derived(blockers(detail));
+  const stacked = new MediaQuery("(max-width: 900px)");
   const epicId = $derived(parentOf(detail.row));
   const epic = $derived(epicLine({ path: detail.row.path, parent_title: parentTitle }));
   const labels = $derived(detail.labels ?? []);
@@ -221,6 +223,10 @@
       <span class="tf-chip tf-err">Blocked by {blocker}</span>
     {/each}
   </div>
+  <!-- Stacked below 900 px the title follows the key, and the facts and rows fold, so the first screen is the ticket. -->
+  <p class="tf-tkcardtitle" aria-hidden="true">{detail.row.title}</p>
+  <details class="tf-tkstack" open={!stacked.current}>
+    <summary>Details and connections</summary>
   <dl class="tf-facts">
     {#if epic !== null && epicId !== null}
       <dt>Epic</dt>
@@ -289,6 +295,7 @@
     {/if}
     <button type="button" onclick={onlink}><span>Link something to it</span><span class="tf-chev" aria-hidden="true">›</span></button>
   </div>
+  </details>
   {#if action !== null}
     <div class="tf-go">
       <button type="button" class="tf-btn tf-primary tf-lg" onclick={onaction}>{action.label}</button>

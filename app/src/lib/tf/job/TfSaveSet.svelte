@@ -115,9 +115,8 @@
 
 <TfDialog title="Save {key}’s connections as a link set" {onclose} {layers}>
   {#snippet body()}
-    <div class="tf-formgrid">
-      <span>Name</span><input type="text" aria-label="Name" bind:value={name} />
-    </div>
+    <div class="tf-pane-h">Name</div>
+    <input class="tf-stg-in tf-set-savename" type="text" aria-label="Name" bind:value={name} />
     <div class="tf-pane-h">What goes in</div>
     <div class="tf-picks" role="group" aria-label="What goes in">
       {#each offers as offer (offer.entity_id)}

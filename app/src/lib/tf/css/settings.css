@@ -1,13 +1,14 @@
 /* ---------- settings: prototype-6's .stg ---------- */
-.tf-stg { display: grid; grid-template-columns: 230px minmax(0, 1fr); flex: 1; min-height: 0; }
-.tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; }
+/* The crumb and the rail stay in view; only the section's column scrolls, and it keeps its scrollbar's room. */
+.tf-stgpage { height: 100%; min-height: 0; }
+.tf-stg { display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
+.tf-stg-scroll { min-width: 0; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
+.tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow: auto; }
 .tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
 .tf-stg-nav a:hover { background: var(--sheet-2); }
 .tf-stg-nav a[aria-current="page"] { background: var(--fill); color: var(--sheet); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
-/* A page whose board needs the room, or its state chips read "SUCC…". */
-.tf-stg-body:has(.tf-sc-board) { max-width: 1180px; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
   font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
@@ -18,12 +19,13 @@
 .tf-stg-hline { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
 .tf-stg-h .tf-acts { justify-content: flex-end; flex: none; }
 .tf-stg-sec { margin-top: 26px; }
-.tf-stg-sec h2 { font-size: var(--t-lg); margin: 0 0 8px; font-weight: 700; }
+.tf-stg-sec h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0 0 8px; }
 .tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
 .tf-stg-gap { margin-top: 14px; }
+/* A control sits at the top of its row, beside its label's first line, however long the description runs. */
 .tf-stg-row {
-  display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; padding: 11px 0;
-  border-bottom: 1px solid var(--rule-2); align-items: center;
+  display: grid; grid-template-columns: minmax(240px, 46%) minmax(0, 1fr); gap: 16px; padding: 11px 0;
+  border-bottom: 1px solid var(--rule-2); align-items: start;
 }
 .tf-stg-l { font-weight: 500; }
 .tf-stg-l small { display: block; font-weight: 400; font-size: var(--t-sm); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
@@ -33,6 +35,10 @@
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
   font-size: var(--t-md); width: min(420px, 100%);
 }
+/* A field in a row of controls takes the row's height (Controls, *Form controls*). */
+.tf-stg-c.tf-stg-row1 { flex-wrap: nowrap; }
+.tf-stg-row1 .tf-stg-in { height: var(--control-h-sm); padding-block: 0; min-width: 70px; flex: 1 1 0; }
+.tf-stg-row1 .tf-select { min-width: 0; flex: 0 1 auto; }
 .tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 12px 0 0; }
 .tf-stg-sw {
   width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
@@ -118,11 +124,12 @@
 
 /* ---------- Appearance › State colours (#2466): six columns of state-word chips ---------- */
 .tf-sc { margin-top: 26px; }
-.tf-sc-title { font-size: var(--t-lg); margin: 0 0 8px; font-weight: 700; }
+.tf-sc-title { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0 0 8px; }
 .tf-sc-kind { margin-top: 18px; }
 .tf-sc-kind .tf-ext-h { margin-bottom: 8px; }
-.tf-sc-kind h3 { font-size: var(--t-md); margin: 0; font-weight: 700; }
-.tf-sc-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+.tf-sc-kind h3 { font-size: var(--t-xs); margin: 0; font-weight: 600; color: var(--ink-2); }
+/* Six columns share the section's width, on its one right edge. A word that does not fit wraps; it is never cut. */
+.tf-sc-board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
 /* A note under a panel is apart from it. */
 .tf-sc-line { margin-top: 8px; }
 .tf-sc-col {
@@ -133,8 +140,8 @@
 .tf-sc-col:last-child .tf-sc-colh::before {
   content: ""; width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--ink-2); box-sizing: border-box;
 }
-.tf-sc-chip { max-width: 100%; cursor: grab; gap: 4px; }
-.tf-sc-word { cursor: grab; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tf-sc-chip { max-width: 100%; cursor: grab; gap: 2px 4px; flex-wrap: wrap; white-space: normal; }
+.tf-sc-word { cursor: grab; overflow-wrap: anywhere; min-width: 0; text-align: left; }
 .tf-sc-from { font-weight: 400; color: var(--ink-2); }
 .tf-sc-reset { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
 .tf-sc-line code { font-size: .95em; }

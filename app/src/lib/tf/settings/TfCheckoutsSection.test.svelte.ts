@@ -87,7 +87,7 @@ async function draw(refuse?: (path: string | null) => Promise<void>) {
 
 test("the section draws the clones root, the git found and the applications, the default marked", async () => {
   await draw();
-  expect(text(target.querySelector("h1"))).toBe("Checkouts and Open in…");
+  expect(text(target.querySelector("h1"))).toBe("Checkouts and Open in");
   const rows = [...target.querySelectorAll(".tf-stg-row")].map(text);
   expect(rows[0]).toContain("Clones root");
   expect(rows[0]).toContain("/Users/mara/code");

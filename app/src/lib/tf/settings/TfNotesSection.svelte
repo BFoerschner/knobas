@@ -156,7 +156,7 @@
   const moveLabel = $derived(`Move ${noteCount(view?.note_count ?? 0)}`);
   const shown = $derived(view?.shown ?? false);
   const help = $derived.by(() => {
-    if (!shown) return "Inactive while notes are hidden.";
+    if (!shown) return "Takes effect once notes are shown.";
     if (view?.refusal) return `Not registered: ${view.refusal}`;
     if (view?.accelerator == null) return "No key is set. Change… to choose one.";
     return "Opens a small window over whatever you are doing.";
@@ -209,7 +209,7 @@
       {:else}
         {#each keyCaps(view.accelerator) as cap, index (index)}<kbd>{cap}</kbd>{/each}
       {/if}
-      <button class="tf-btn tf-ghost tf-sm" aria-label="Change capture shortcut" onclick={openShortcut}>Change…</button>
+      <button class="tf-btn tf-sm" aria-label="Change capture shortcut" onclick={openShortcut}>Change…</button>
     </div>
   </div>
   <div class="tf-stg-row">

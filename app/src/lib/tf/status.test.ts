@@ -60,8 +60,8 @@ test("a missing credential needs the reader too, in the source's noun; an unreac
   );
   expect(readings).toEqual([
     { id: "gitea", text: "Gitea unreachable, synced 32 min ago", tone: "warn", syncedAt: "2026-08-22T14:00:00Z", fix: null },
-    { id: "kuma", text: "Uptime Kuma: no token stored", tone: "err", syncedAt: null, fix: "Re-enter token" },
-    { id: "confluence", text: "Confluence: no password stored", tone: "err", syncedAt: null, fix: "Re-enter password" },
+    { id: "kuma", text: "Uptime Kuma: no token stored", tone: "err", syncedAt: null, fix: "Enter token" },
+    { id: "confluence", text: "Confluence: no password stored", tone: "err", syncedAt: null, fix: "Enter password" },
   ]);
 });
 

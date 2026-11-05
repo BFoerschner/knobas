@@ -84,6 +84,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // Each view's filter and fold, and the set hints *Not now* put away (#1983).
   "tf/filter/filter-state.svelte.ts#kept": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
   "tf/filter/filter-state.svelte.ts#folds": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
+  "tf/filter/filter-state.svelte.ts#values": async () => (await import("../tf/filter/filter-state.svelte")).forgetFilters(),
   "tf/sets/hints.svelte.ts#putAway": async () => (await import("../tf/sets/hints.svelte")).forgetHints(),
   // A page's session memory, held in its component's `<script module>` (#1983).
   "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),

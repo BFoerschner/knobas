@@ -103,6 +103,7 @@
     onstopped,
     onremoved,
     add,
+    reenter = false,
   }: {
     source: SourceSummary;
     /** The adapter's descriptor, or `null` until `list_adapters` answers. */
@@ -121,6 +122,8 @@
     onremoved: () => void;
     /** A value to add to a list field, unsaved: a Jira view's *Sync WEB too* (#879). */
     add?: ListAddition | undefined;
+    /** Open the credential's prompt on arrival: the status bar's *Re-enter …*. */
+    reenter?: boolean;
   } = $props();
 
   const name = $derived(source.display_name || source.id);
@@ -467,6 +470,9 @@
     secretError = null;
     reentering = true;
   }
+  $effect(() => {
+    if (reenter) untrack(openReenter);
+  });
 
   async function signIn() {
     if (!canSignIn) return;

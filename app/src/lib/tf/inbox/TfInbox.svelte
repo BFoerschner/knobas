@@ -45,7 +45,7 @@
   import type { SourceFacts } from "../job/job";
   import { ticketHash } from "../route";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, snoozedLine, untilLabel, visible } from "./inbox";
+  import { expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, snoozedRows, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -102,12 +102,16 @@
     noun: "items",
     one: "item",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" }] : []),
+      ...(job !== null ? [{ id: "job", label: "This job", count: jobCount(), title: `What is about ${job}`, query: "" }] : []),
       { id: "all", label: "All", query: "" },
     ],
     chips: [{ key: "kind", label: "Kind", options: KIND_CHIPS.map((value) => ({ value, label: value })) }],
   });
 
+  /** How many items *This job* holds, before the kind chips, for its count badge. */
+  function jobCount(): number {
+    return visible(inbox.stream, { scope: "job", job, kinds: [] }, index).length;
+  }
   let jobs = $state<OpenJob[]>([]);
   const index = $derived(jobIndex(jobs));
   const scope = $derived<"job" | "all">(job !== null && filter.scope === "job" ? "job" : "all");
@@ -115,7 +119,7 @@
   const rows = $derived(
     visible(inbox.stream, { scope, job, kinds: filter.chips["kind"] ?? [] }, index),
   );
-  const shelf = $derived(snoozedLine(inbox.snoozed));
+  const shelf = $derived(snoozedRows(inbox.snoozed));
   /** Thousands of rows draw only those near the viewport (#2209); `.tf-ib` is 63 px, 84 wrapped, 6 apart. */
   const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.item.key, estimate: 63, gap: 6 });
 
@@ -306,7 +310,18 @@
       {/if}
     {/each}
   </div>
-  {#if shelf !== null}
-    <p class="tf-dim tf-ishelf">{shelf}</p>
+  {#if shelf.length > 0}
+    <details class="tf-collapse tf-ishelf">
+      <summary>Snoozed <span class="tf-count">{shelf.length}</span></summary>
+      <ul class="tf-ishelf-rows">
+        {#each shelf as row (row.key)}
+          <li class="tf-rowhost">
+            <span>{row.what}</span>
+            {#if row.back !== null}<span class="tf-dim">back {row.back}</span>{/if}
+            <span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void inbox.snooze(row.key, new Date())}>Wake</button></span>
+          </li>
+        {/each}
+      </ul>
+    </details>
   {/if}
 </div>

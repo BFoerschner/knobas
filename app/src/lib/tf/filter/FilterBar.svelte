@@ -33,6 +33,7 @@
   import type { Snippet } from "svelte";
 
   import { countLine, type FilterConfig, type FilterState } from "./filter";
+  import TfScope from "./TfScope.svelte";
 
   let {
     config,
@@ -111,13 +112,7 @@
   </label>
   {/if}
   {#if scopes.length > 0}
-    <div class="tf-seg" role="group" aria-label="Scope">
-      {#each scopes as choice (choice.id)}
-        <button type="button" aria-pressed={scope === choice.id} onclick={() => pick(choice.id)}
-          >{choice.label}{#if choice.tag}{" "}<span class="tf-jobk">{choice.tag}</span>{/if}</button
-        >
-      {/each}
-    </div>
+    <TfScope {scopes} {scope} onpick={pick} />
   {/if}
   {#each config.chips ?? [] as group (group.key)}
     {#if group.options.length > 0}

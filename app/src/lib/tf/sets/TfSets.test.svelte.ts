@@ -222,7 +222,7 @@ test("the editor draws a panel per kind, the rules with live counts and the tick
     "Applies to",
     "Shows on 3 tickets now",
   ]);
-  expect(text(".tf-set-panels .tf-panel:first-child .tf-member > span:nth-child(2)")).toEqual([
+  expect(text(".tf-set-panels .tf-panel:first-child .tf-member > .tf-member-name")).toEqual([
     "tidewater/payout-service",
     "tidewater/psp-client",
   ]);
@@ -239,7 +239,7 @@ test("the editor draws a panel per kind, the rules with live counts and the tick
 
 test("Add… marks what is already in, and adds what was picked as one save", async () => {
   await draw(["payout-stack"]);
-  target.querySelector<HTMLButtonElement>("article[aria-label='Pages'] .tf-set-add button")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("article[aria-label='Pages'] .tf-set-add button")].at(-1)!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(dialog.querySelector("h2")?.textContent).toBe("Add pages to Payout stack");
@@ -303,7 +303,7 @@ test("a member row draws its dot and its line, and a pattern its query and what 
   expect(assets.querySelector(".tf-dot")?.className).toBe("tf-dot tf-err");
   expect(assets.querySelector(".tf-member-line")?.textContent).toBe("vm, prod");
   const page = target.querySelector("article[aria-label='Pages'] .tf-member")!;
-  expect(page.querySelector(".tf-dot")?.className.trim()).toBe("tf-dot");
+  expect(page.querySelector(".tf-dot")).toBeNull();
   expect(page.querySelector(".tf-member-line")?.textContent).toBe("ENG › Payments");
   const pipelines = target.querySelector("article[aria-label='Pipelines']")!;
   expect(pipelines.querySelector("header .tf-count")?.textContent).toBe("2");
@@ -319,7 +319,7 @@ test("a member row draws its dot and its line, and a pattern its query and what 
 test("Add a pattern… writes the fields as a query, shows what it matches now, and saves it", async () => {
   await draw(["payout-stack"]);
   expect(target.querySelector("article[aria-label='Repositories']")?.textContent).not.toContain("Add a pattern…");
-  target.querySelector("article[aria-label='Pipelines']")!.querySelectorAll<HTMLButtonElement>(".tf-set-add button")[1]!.click();
+  target.querySelector("article[aria-label='Pipelines']")!.querySelectorAll<HTMLButtonElement>(".tf-set-add button")[0]!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(dialog.querySelector("h2")?.textContent).toBe("Add a pattern to Payout stack");
@@ -348,7 +348,7 @@ test("Add a pattern… writes the fields as a query, shows what it matches now, 
 
 test("a query the backend refuses says why, and Add pattern waits", async () => {
   await draw(["payout-stack"]);
-  target.querySelector("article[aria-label='Pages']")!.querySelectorAll<HTMLButtonElement>(".tf-set-add button")[1]!.click();
+  target.querySelector("article[aria-label='Pages']")!.querySelectorAll<HTMLButtonElement>(".tf-set-add button")[0]!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(dialog.querySelector("select[aria-label='Space']")).not.toBeNull();
@@ -362,8 +362,8 @@ test("a query the backend refuses says why, and Add pattern waits", async () => 
 
 test("the set editor's Delete starts a destructive action: red text, as Note's (#2288)", async () => {
   await draw(["payout-stack"]);
-  expect(button("Delete").className).toBe("tf-btn tf-danger");
-  expect(button("Delete").closest(".tf-fhead .tf-acts")).not.toBeNull();
+  expect(button("Delete…").className).toBe("tf-btn tf-danger");
+  expect(button("Delete…").closest(".tf-fhead .tf-acts")).not.toBeNull();
 });
 
 test("the list's empty states say what fills them, offer the action, and a failed read offers to try again", async () => {
@@ -406,7 +406,7 @@ test("a filter that leaves nothing offers to clear it", async () => {
 
 test("Delete asks first, in a dialog that says what stays; Cancel keeps the set", async () => {
   await draw(["payout-stack"]);
-  button("Delete").click();
+  button("Delete…").click();
   await settle();
   expect(deleted).toEqual([]);
   const dialog = document.querySelector(".tf-dialog")!;
@@ -436,7 +436,7 @@ test("a chip for a ticket is neutral: the chosen job's yellow is on no key", asy
 
 test("Delete removes the set and goes back to the list", async () => {
   await draw(["payout-stack"]);
-  button("Delete").click();
+  button("Delete…").click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Delete link set")!.click();
   await settle();
@@ -503,5 +503,5 @@ test("Not now puts the hint away for the session and shows the next one", async 
 
 test("an id nobody holds says so", async () => {
   await draw(["gone"]);
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("No link set is called gone.");
+  expect(target.querySelector(".tf-empty")?.textContent).toContain("This link set does not exist.");
 });

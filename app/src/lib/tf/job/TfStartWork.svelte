@@ -226,6 +226,6 @@
   {/each}
   <footer>
     <span class="tf-dim tf-small tf-swhint">A failed step can be retried, skipped or amended.</span>
-    <button class="tf-btn tf-primary" disabled={flow.busy || flow.steps.length === 0} onclick={() => void runAll()}>Run all steps</button>
+    <button class="tf-btn tf-primary tf-lg" disabled={flow.busy || flow.steps.length === 0} onclick={() => void runAll()}>Run all steps</button>
   </footer>
 </div>

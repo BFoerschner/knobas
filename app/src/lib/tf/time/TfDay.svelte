@@ -463,12 +463,12 @@
 </script>
 
 <div class="tf-tm-nav">
-  <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, -1)}" aria-label="Day before">‹</a>
+  <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, -1)}" aria-label="Day before"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg></a>
   <h2>{dayLabel(key)}</h2>
   {#if key < today}
-    <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, 1)}" aria-label="Day after">›</a>
+    <a class="tf-btn tf-sm tf-ghost" href="#/time/{shiftDay(key, 1)}" aria-label="Day after"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></a>
   {:else}
-    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true">›</span>
+    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></span>
   {/if}
   {#if key !== today}
     <a class="tf-btn tf-sm" href="#/time">Today</a>
@@ -561,12 +561,17 @@
     <span><i class="tf-tm-run"></i>Timer running</span>
     <span><i class="tf-tm-passive"></i>Offered: what was in front of you</span>
     <span><i class="tf-tm-gap"></i>Open: app in front, no target</span>
-    <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>+ Add a block</button>
+    <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>Add a block…</button>
   </div>
 
   {#if rows.length === 0}
     <div class="tf-tm-empty">
-      <p>Nothing tracked on this day. ⌘T starts the timer on whatever is in front of you, and every stretch it runs lands here.</p>
+      {#if key === today}
+        <p>Nothing tracked yet today. ⌘T starts the timer on whatever is in front of you, and every stretch it runs lands here.</p>
+      {:else}
+        <p>Nothing tracked on this day. Add a block for time you spent on it.</p>
+        <button class="tf-btn tf-sm" onclick={() => open({ mode: "add" })}>Add a block…</button>
+      {/if}
     </div>
   {:else}
     <div class="tf-tm-list">

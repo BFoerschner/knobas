@@ -340,7 +340,7 @@
   {#snippet footer()}
     <button class="tf-btn tf-first" disabled={!ready || testing} onclick={() => void test()}>Test connection</button>
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
+    <button class="tf-btn tf-primary" disabled={!canAdd} title={canAdd ? undefined : (idError ?? (ready ? "Test the connection first" : "Fill in the fields it needs first"))} onclick={() => void add()}>Add source</button>
   {/snippet}
 </TfDialog>
 

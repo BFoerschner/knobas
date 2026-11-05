@@ -149,7 +149,8 @@ test("pressing Builds on a ticket only read lands on Builds with This job presse
   const thisJob = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-kept:not([hidden]) button")].find((b) => squash(b).startsWith("This job"));
   await until(() => thisJob() !== undefined, "Builds never offered This job");
   expect(thisJob()!.getAttribute("aria-pressed")).toBe("true");
-  expect(squash(thisJob()!)).toBe("This job PAY-231");
+  expect(squash(thisJob()!)).toMatch(/^This job \d+$/);
+  expect(thisJob()!.title).toContain("PAY-231");
   expect(chosenJob.id).toBeNull();
 });
 
@@ -190,7 +191,7 @@ test("pressing Monitors on a ticket only read opens Monitors on This job for tha
   await until(() => location.hash === "#/monitors", "Monitors never opened");
   const thisJob = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-kept:not([hidden]) button")].find((b) => squash(b).startsWith("This job"));
   await until(() => thisJob()?.getAttribute("aria-pressed") === "true", "Monitors never pressed This job");
-  expect(squash(thisJob()!)).toContain("PAY-231");
+  expect(thisJob()!.title).toContain("PAY-231");
 });
 
 test("Assets opens the asset tree at the first asset the ticket reaches", async () => {
@@ -200,16 +201,21 @@ test("Assets opens the asset tree at the first asset the ticket reaches", async 
   expect(sectionRow(card, "Assets").getAttribute("href")).toMatch(/^#\/asset\/asset/);
 });
 
-test("pressing Sub-tasks lands on Tickets with under:PAY-231 in the search line, and the board holds its sub-tasks", async () => {
+test("pressing Sub-tasks lands on Tickets narrowed and named, with the same bar as the other rows, and Esc goes back", async () => {
   await openOn("#/ticket/mock%3APAY-231", "Retry failed SEPA payouts");
   const card = await pageOf("PAY-231");
   await allSections(card, ["Sub-tasks", "Code", "Builds", "Docs", "Monitors", "Assets"]);
   sectionRow(card, "Sub-tasks").click();
   await until(() => location.hash === "#/tickets", "Tickets never opened");
   const line = () => shown("input[aria-label='Filter by key, summary, epic or person']") as HTMLInputElement | null;
-  await until(() => line()?.value === "under:PAY-231", "the search line never read under:PAY-231");
+  await until(() => shown(".tf-board-title h1")?.textContent?.includes("Sub-tasks of PAY-231") ?? false, "the title never named the narrowing");
+  expect(line()?.value, "nothing is typed into the search").toBe("");
+  expect(squash(shown(".tf-crumbs .tf-esc")!)).toBe("Back to PAY-231 Esc");
   const cards = () => [...target.querySelectorAll(".tf-kept:not([hidden]) .tf-tcard[data-entity]")].map((c) => c.getAttribute("data-entity")).sort();
   await until(() => cards().join() === "mock:PAY-232,mock:PAY-233", `the board drew ${cards().join()}`);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await until(() => location.hash === "#/ticket/mock%3APAY-231", `Esc went to ${location.hash}`);
+  await until(() => shown(".tf-board-title h1") === null, "Tickets stayed on screen");
 });
 
 test("OPS-77 reaches nothing and has no sub-tasks: Nothing connected yet.", async () => {

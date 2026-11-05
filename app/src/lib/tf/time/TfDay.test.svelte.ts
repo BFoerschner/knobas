@@ -511,7 +511,7 @@ test("Assign… on an offered block lists the recent tickets, and only tickets, 
 test("+ Add a block opens with the ticket search focused, and Esc closes it", async () => {
   render();
   await settle();
-  button(target, "+ Add a block").click();
+  button(target, "Add a block…").click();
   await settle();
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Search for a ticket");
   document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
@@ -522,7 +522,7 @@ test("+ Add a block opens with the ticket search focused, and Esc closes it", as
 test("+ Add a block on A label makes an ad-hoc block on that label", async () => {
   const sent = render();
   await settle();
-  button(target, "+ Add a block").click();
+  button(target, "Add a block…").click();
   await settle();
   button(target, "A label").click();
   flushSync();

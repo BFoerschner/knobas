@@ -136,6 +136,8 @@
     pick = null;
   });
   const range = $derived(pick === null ? null : rangeOf(shown, pick));
+  /** Whether any commit on screen can be picked: a list of commits the mirror holds no sha for offers no *Diff selected*. */
+  const anyPickable = $derived(shown.some((row) => shaOfCommit(row.entity_id) !== null));
   const count = $derived(pick === null ? 0 : Math.abs(pick.anchor - pick.end) + 1);
 
   /** A box clicked: a click picks its commit, a shift-click stretches the pick to it. */
@@ -165,6 +167,7 @@
     type="button"
     class="tf-btn tf-sm"
     disabled={range === null}
+    hidden={!anyPickable}
     title={range === null ? "Pick a commit's box, then shift-click another's for a range" : undefined}
     onclick={diffSelected}>Diff selected{count > 0 ? ` (${count})` : ""}</button>
 </div>
@@ -176,6 +179,7 @@
     <tbody>
       {#each shown as row, n (n)}
         <tr class:tf-row={row.entity_id !== null} class:tf-picked={picked(pick, n)} onclick={(event) => open(event, row)}>
+          {#if anyPickable}
           <td class="tf-rpick"
             ><input
               type="checkbox"
@@ -186,6 +190,7 @@
               onclick={(event) => choose(event, n)}
             /></td
           >
+          {/if}
           <td class="tf-mono"
             >{#if row.entity_id !== null}<a href={commitHash(repoId, row.entity_id)}
                 ><Marked text={row.chip ?? ""} typed={filter.text} /></a

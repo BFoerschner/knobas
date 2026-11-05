@@ -26,7 +26,7 @@
   import { draftOf } from "./apply";
   import { firstHint, notNow } from "./hints.svelte";
   import { defaultPorts, type SetPorts } from "./ports";
-  import { APPLIES_BY, contentLines, hintTickets, ruleLabel, visibleSets } from "./sets";
+  import { APPLIES_BY, contentLines, hintTickets, ruleWords, visibleSets } from "./sets";
   import TfSetEditor from "./TfSetEditor.svelte";
 
   let {
@@ -212,7 +212,7 @@
                 >
                 <td>{#if set.members.length + set.patterns.length > 0}{contentLines(set).join(", ")}{:else}<span class="tf-dim">nothing yet</span>{/if}</td>
                 <td>
-                  {#each set.rules as rule, at (at)}{#if at > 0}<br />{/if}{ruleLabel(rule)}{:else}<span class="tf-dim"
+                  {#each set.rules as rule, at (at)}<span class="tf-sets-rule">{#each ruleWords(rule) as word, w (w)}{#if word.key}<span class="tf-mono">{word.text}</span>{:else}{word.text}{/if}{/each}</span>{:else}<span class="tf-dim"
                       >nothing yet</span
                     >{/each}
                 </td>

@@ -45,6 +45,14 @@
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 /* *Back to <name>* beside `Esc`, at the row's end as on every breadcrumb (spec #2227). */
 .tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; }
+@media (max-width: 900px) { .tf-crumbs.tf-rd-crumbrow { padding-left: 16px; padding-right: 16px; } }
+/* A space's row keeps its count: the name gives up its end first. */
+.tf-spc { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tf-spc-n { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-spc .tf-count { flex: none; }
+.tf-rd-main { scrollbar-gutter: stable; }
+.tf-dl-head .tf-seg { display: flex; }
+.tf-dl-head .tf-seg button { flex: 1; }
 .tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
@@ -130,10 +138,12 @@
 }
 .tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
-.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 3px; border-radius: 3px; }
+.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--mark); color: var(--ink); }
-/* A callout and the comments are Archivo in the serif page: they take the interface's spacing back. */
-.tf-doc :is(.tf-callout, .tf-cmts) :is(p, li, h2, h3) { letter-spacing: .006em; word-spacing: .06em; }
+/* A callout, the comments, a table and what the page belongs to are Archivo in the serif page: they take the interface's spacing back. */
+.tf-doc :is(.tf-callout, .tf-cmts) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(p, li, dd, dt) { letter-spacing: .006em; word-spacing: .06em; }
+/* A match on the row you are on keeps the normal mark's pair, in both themes. */
+.tf-rd-tree a[aria-current="true"] mark { background: var(--mark); color: var(--ink); }
 .tf-cmts { font-size: var(--t-md); }
 .tf-doc a.tf-pgl, .tf-doc .tf-doc-link {
   color: var(--info); text-decoration: underline; text-underline-offset: 2px;
@@ -277,10 +287,11 @@
 .tf .tf-dh-none { padding: 2px 12px 12px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-dh-h { margin: 8px 0 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-dh-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; }
-.tf-dh-space h3 a { text-decoration: underline; text-underline-offset: 2px; }
+/* The tile's one link: its title, underlined and inked as it is pointed at. */
+.tf-dh-space h3 a { color: inherit; text-decoration: none; }
+.tf-dh-space h3 a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .tf-dh-space h3 { min-width: 0; overflow-wrap: anywhere; }
-.tf-dh-more { display: block; padding: 6px 12px 10px; border-top: 1px solid var(--rule-2); font-size: var(--t-xs); color: var(--ink-2); text-decoration: underline; text-underline-offset: 2px; }
-.tf-dh-more:hover { color: var(--ink); }
+.tf-dh-d1 { padding-left: 28px; } .tf-dh-d2 { padding-left: 44px; } .tf-dh-d3 { padding-left: 60px; } .tf-dh-d4 { padding-left: 76px; }
 .tf-dh-wait { padding: 8px 22px; }
 .tf-fhead .tf-rd-pages svg { width: 15px; height: 15px; }
 @media (max-width: 900px) { .tf-dh-body { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }

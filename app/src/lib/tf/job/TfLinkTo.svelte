@@ -126,7 +126,7 @@
       >Relation
       <select aria-label="Relation" bind:value={relation}>
         {#each OFFERED as option (option.id)}
-          <option value={option.id}>{option.label}</option>
+          <option value={option.id}>{option.label.charAt(0).toUpperCase() + option.label.slice(1)}</option>
         {/each}
       </select>
     </label>

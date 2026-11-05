@@ -9,9 +9,11 @@
 }
 .tf-launch > .tf-body { flex: 1; min-height: 0; padding: 0; gap: 0; overflow: hidden; }
 .tf-launch > footer {
-  justify-content: flex-start; align-items: center; gap: 14px; padding: 7px 18px;
+  justify-content: flex-start; align-items: center; gap: 14px; padding: 7px 18px; min-height: calc(var(--control-h-sm) + 15px);
   font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden;
 }
+/* Apart from the key hints, at the far end: it is an action, and the hints do not move when it joins them. */
+.tf-launch > footer .tf-ln-save { margin-left: auto; }
 
 /* The box: borderless 17 px over a bottom rule, and the close button (#2421: no footnote, badge or bar). */
 .tf-ln-q { display: flex; align-items: center; gap: 10px; padding: 0 12px 0 0; border-bottom: 1px solid var(--rule); flex: none; }
@@ -21,7 +23,7 @@
 .tf-ln-boxrow > .tf-ln-q { flex: 1; min-width: 0; border-bottom: 0; }
 .tf-ln-mode {
   flex: none; margin-left: 15px; padding: 2px 8px; border-radius: 3px; font-size: var(--t-sm); font-weight: 600;
-  background: var(--info-bg); color: var(--info); white-space: nowrap; user-select: none;
+  background: var(--sheet-2); color: var(--ink); white-space: nowrap; user-select: none;
 }
 .tf .tf-ln-q input {
   flex: 1; min-width: 120px; padding: 16px 0 16px 18px; font-size: var(--t-xl); color: var(--ink); background: none;
@@ -152,7 +154,7 @@
 /* The `?` card: each token inserts itself. */
 .tf-ln-help { display: grid; gap: 1px; padding: 4px 0; }
 .tf .tf-ln-opt.tf-ln-syn { grid-template-columns: 74px 1fr; padding: 4px 18px; }
-.tf-ln-tok { font-weight: 600; color: var(--info); text-align: center; border: 1px solid var(--rule); border-radius: 3px; padding: 0 2px; }
+.tf-ln-tok { font-weight: 600; color: var(--ink); text-align: center; border: 1px solid var(--rule); border-radius: 3px; padding: 0 2px; }
 /* The keys the box answers, at the bottom of the ⌘? overlay. */
 .tf-ln-keys { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-top: 1px solid var(--rule); font-size: var(--t-xs); color: var(--ink-2); }
 /* A token the parser reports rather than honours, drawn as the chip bar draws one. */

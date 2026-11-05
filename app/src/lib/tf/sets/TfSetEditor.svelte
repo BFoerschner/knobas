@@ -32,13 +32,14 @@
   import { entityAddress } from "../address";
   import type { EscTarget } from "../escape";
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
-  import { itemsOf, KIND_LABEL, MEMBER_KINDS, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
+  import { itemsOf, KIND_LABEL, MEMBER_KINDS, onePerKey, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
   import { toneClass } from "../tone";
   import TfSetPattern from "./TfSetPattern.svelte";
   import TfSetPicker from "./TfSetPicker.svelte";
@@ -149,7 +150,26 @@
     void save((draft) => (draft[field] = text));
   }
 
+  /** A set just made has the name the button gave it: its name is selected on arrival, to type over. */
+  function selectIfNew(el: HTMLElement) {
+    if (el.textContent?.trim() !== "New link set") return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const selection = getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
   function enterLeaves(event: KeyboardEvent) {
+    if (event.key === "Escape" && set) {
+      // Esc in a field that edits in place puts the old words back, and the field keeps the press.
+      const el = event.currentTarget as HTMLElement;
+      el.textContent = el.getAttribute("aria-label") === "Name" ? set.name : set.description;
+      event.stopPropagation();
+      el.blur();
+      return;
+    }
     if (event.key === "Enter") {
       event.preventDefault();
       (event.currentTarget as HTMLElement).blur();
@@ -246,16 +266,15 @@
     return rows;
   });
 
-  const shownKeys = $derived(set?.shows_on.slice(0, SHOWN_KEYS) ?? []);
+  /** The tickets it shows on, one chip a ticket: two sources holding one key are one ticket, as the ticket's page says. */
+  const shownOn = $derived(onePerKey(set?.shows_on ?? []));
+  const shownKeys = $derived(shownOn.slice(0, SHOWN_KEYS));
   const have = $derived(new Set(set?.members.map((member) => member.entity_id) ?? []));
 </script>
 
 <TfCrumbs parts={[{ name: "Link sets", href: "#/sets" }, { name: set?.name ?? "Link set" }]} {back} />
 {#if missing}
-  <div class="tf-empty">
-    <p>No link set is called {id}. It may have been deleted.</p>
-    <a class="tf-btn tf-sm" href="#/sets">All link sets</a>
-  </div>
+  <TfNothingHere message="This link set does not exist. It may have been deleted." href="#/sets" action="All link sets" />
 {:else if failed !== null}
   <div class="tf-empty">
     <p class="tf-ifail">Could not read the link set: {failed}</p>
@@ -276,6 +295,7 @@
           tabindex="0"
           aria-label="Name"
           title="Click to rename"
+          {@attach selectIfNew}
           onblur={(event) => rename(event, "name")}
           onkeydown={enterLeaves}>{set.name}</span
         >
@@ -292,7 +312,7 @@
       >{set.description}</div>
     </div>
     {/key}
-    <div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => (deleting = true)}>Delete</button></div>
+    <div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => (deleting = true)}>Delete…</button></div>
   </header>
   <div class="tf-cbody tf-set">
     <div class="tf-set-panels">
@@ -304,11 +324,11 @@
             <h3>{KIND_LABEL[kind]}</h3>
             <span class="tf-count">{itemsOf({ members, patterns }).length}</span>
             <span class="tf-set-add tf-trail"
-              ><button type="button" class="tf-btn tf-sm" onclick={() => (picking = kind)}>Add…</button>{#if PATTERN_KINDS.includes(kind)}<button
+              >{#if PATTERN_KINDS.includes(kind)}<button
                   type="button"
                   class="tf-btn tf-sm tf-ghost"
                   onclick={() => (patterning = kind)}>Add a pattern…</button
-                >{/if}</span
+                >{/if}<button type="button" class="tf-btn tf-sm" onclick={() => (picking = kind)}>Add…</button></span
             >
           </header>
           <div class="tf-members">
@@ -317,7 +337,7 @@
                 <details class="tf-set-fold">
                   <summary>Pattern: <code>{pattern.query}</code> <span class="tf-dim">({counted(pattern.count, "match", "matches")} now)</span></summary>
                   <ul>
-                    {#each pattern.matches as row (row.entity_id)}<li>{row.title ?? keyOf(row.entity_id)}</li>{/each}
+                    {#each pattern.matches as row (row.entity_id)}<li><a href={entityAddress(kind, row.entity_id)}>{row.title ?? keyOf(row.entity_id)}</a></li>{/each}
                     {#if pattern.count > pattern.matches.length}<li class="tf-dim">and {pattern.count - pattern.matches.length} more</li>{/if}
                   </ul>
                 </details>
@@ -331,8 +351,9 @@
             {/each}
             {#each members as member (member.entity_id)}
               <div class="tf-member">
-                <span class="tf-dot {toneClass(member.state)}"></span>
-                <span class="tf-member-name" class:tf-mono={kind === "repo"}>{member.title ?? keyOf(member.entity_id)}</span>
+                <!-- A dot only where the source reports a state: tone is for state, and a row of grey dots says nothing. -->
+                {#if member.state}<span class="tf-dot {toneClass(member.state)}"></span>{/if}
+                <a class="tf-member-name" class:tf-mono={kind === "repo"} href={entityAddress(kind, member.entity_id)}>{member.title ?? keyOf(member.entity_id)}</a>
                 {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{member.line}</span>{/if}
                 <button
                   type="button"
@@ -374,13 +395,17 @@
         </div>
       </div>
       <div class="tf-panel">
-        <header><h3>Shows on {counted(set.shows_on.length, "ticket", "tickets")} now</h3></header>
-        <div class="tf-roll">{set.shows_on.filter((ticket) => ticket.mine).length} of them yours, outlined. New tickets join as soon as they match.</div>
+        <header><h3>Shows on {counted(shownOn.length, "ticket", "tickets")} now</h3></header>
+        {#if shownOn.length > 0}
+          <div class="tf-roll">{shownOn.filter((ticket) => ticket.mine).length} of them yours, outlined. New tickets join as soon as they match.</div>
+        {:else}
+          <div class="tf-roll">It shows on tickets once it has a rule that matches some.</div>
+        {/if}
         <div class="tf-keys">
-          {#each shownKeys as ticket (ticket.entity_id)}
+          {#each shownKeys as ticket (keyOf(ticket.entity_id))}
             <a href={entityAddress("ticket", ticket.entity_id)} class:tf-mine={ticket.mine} title={ticket.title}>{keyOf(ticket.entity_id)}</a>
           {/each}
-          {#if set.shows_on.length > SHOWN_KEYS}<span class="tf-dim">and {set.shows_on.length - SHOWN_KEYS} more</span>{/if}
+          {#if shownOn.length > SHOWN_KEYS}<span class="tf-dim">and {shownOn.length - SHOWN_KEYS} more</span>{/if}
         </div>
       </div>
       <p class="tf-dim tf-set-note">A ticket can hide one item for itself from its connections drawer. Editing the set changes every job at once.</p>
@@ -412,7 +437,7 @@
     <TfDialog title="Delete {doomed.name}?" onclose={() => (deleting = false)}>
       {#snippet body()}
         <p>
-          It stops showing on {counted(doomed.shows_on.length, "ticket", "tickets")} now, and on every ticket its rules would
+          It stops showing on {counted(shownOn.length, "ticket", "tickets")} now, and on every ticket its rules would
           match later. Links drawn on tickets by hand stay.
         </p>
       {/snippet}

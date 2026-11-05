@@ -33,7 +33,7 @@
     file = null,
     line = null,
     size = "sm",
-    variant = null,
+    variant = "ghost",
     apps = sharedApps,
     clones = sharedClones,
     saveRoot = (path: string) => setClonesRoot(path),
@@ -49,6 +49,7 @@
     file?: string | null;
     line?: number | null;
     size?: "sm" | "md";
+    /** Ghost by default: *Open in…* is always a ghost, in a header or a row (design system, Header). */
     variant?: "primary" | "ghost" | null;
     apps?: Apps | undefined;
     clones?: Clones | undefined;

@@ -9,6 +9,7 @@ import {
   mentionText,
   continueReading,
   pageToOpen,
+  spaceAt,
   topPages,
   placeOf,
   readingMinutes,
@@ -80,9 +81,10 @@ test("a space's top pages are the ones with no parent", () => {
   expect(topPages(space).length).toBeGreaterThan(0);
 });
 
-test("a space's address opens the page at the top of its tree, not the first by title", () => {
-  expect(pageToOpen(placeOf(["space", "ENG"]), TREE)).toBe("confluence:9");
-  expect(pageToOpen(placeOf(["space", "NOPE"]), TREE)).toBeNull();
+test("a space's address names the space, and opens no page: the space has a page of its own", () => {
+  expect(pageToOpen(placeOf(["space", "ENG"]), TREE)).toBeNull();
+  expect(spaceAt(placeOf(["space", "ENG"]), TREE)?.key).toBe("ENG");
+  expect(spaceAt(placeOf(["space", "NOPE"]), TREE)).toBeUndefined();
 });
 
 /** A second source mirroring ENG too, as a Markdown wiki does during a move (D9). */
@@ -98,16 +100,16 @@ test("a space's address names its source where two sources hold the key, and ope
   const second = spaceOfPage(TWO, "wiki:home")!;
   const hash = spaceHash(TWO.spaces, second);
   expect(hash).toBe("#/docs/space/wiki%3AENG");
-  const opened = pageToOpen(placeOf(["space", decodeURIComponent(hash.split("/").at(-1)!)]), TWO)!;
-  expect(spaceId(spaceOfPage(TWO, opened)!)).toBe("wiki/ENG");
+  const opened = spaceAt(placeOf(["space", decodeURIComponent(hash.split("/").at(-1)!)]), TWO)!;
+  expect(spaceId(opened)).toBe("wiki/ENG");
   expect(spaceHash(TWO.spaces, TWO.spaces[0]!)).toBe("#/docs/space/confluence%3AENG");
 });
 
 test("a key one source holds keeps the bare address, and a bare key two hold opens the first", () => {
   expect(spaceHash(TREE.spaces, TREE.spaces[1]!)).toBe("#/docs/space/OPS");
   expect(spaceHash(TWO.spaces, TWO.spaces[1]!)).toBe("#/docs/space/OPS");
-  expect(pageToOpen(placeOf(["space", "ENG"]), TWO)).toBe("confluence:9");
-  expect(pageToOpen(placeOf(["space", "nope:ENG"]), TWO)).toBeNull();
+  expect(spaceAt(placeOf(["space", "ENG"]), TWO)?.source_id).toBe("confluence");
+  expect(spaceAt(placeOf(["space", "nope:ENG"]), TWO)).toBeUndefined();
 });
 
 test("a key holding a colon still opens by the bare address", () => {
@@ -116,7 +118,7 @@ test("a key holding a colon still opens by the bare address", () => {
     spaces: [{ source_id: "wiki", key: "a:b", name: null, pages: [{ entity_id: "wiki:1", title: "One", parent: null }] }],
   };
   expect(spaceHash(odd.spaces, odd.spaces[0]!)).toBe("#/docs/space/a%3Ab");
-  expect(pageToOpen(placeOf(["space", "a:b"]), odd)).toBe("wiki:1");
+  expect(spaceAt(placeOf(["space", "a:b"]), odd)?.key).toBe("a:b");
 });
 
 test("a fold holds every page below it, so the ones around the open page start open", () => {

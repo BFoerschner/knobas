@@ -35,7 +35,8 @@
   import { forgetHidden, keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
   import type { TfPageContext, TfPageEntry } from "./page-entry";
   import { PAGES } from "./pages";
-  import { SECTION_NAME, type TfRoute } from "./route";
+  import { SECTION_NAME, sectionOf, type TfRoute } from "./route";
+  import TfNothingHere from "./TfNothingHere.svelte";
   import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfKeptPage from "./TfKeptPage.svelte";
 
@@ -61,7 +62,10 @@
 
   const route = $derived(ctx.route);
 
-  const page = $derived(pages.find((candidate) => candidate.matches(route)));
+  const found = $derived(pages.find((candidate) => candidate.matches(route)));
+  /** The address is the page's, but names a tab or section it does not have (`knows` on its `page.ts`). */
+  const unknownTab = $derived(found !== undefined && found.knows !== undefined && !found.knows(route));
+  const page = $derived(found);
 
   /**
    * The pages keep-alive holds (#2247, `kept-pages.svelte.ts`): the shown one
@@ -72,7 +76,7 @@
   let held: Held<{ entry: TfPageEntry; route: TfRoute }>[] = [];
   let staleSeen = untrack(() => stale);
   const drawn = $derived.by(() => {
-    const entry = page;
+    const entry = unknownTab ? undefined : page;
     const at = route;
     if (stale !== staleSeen) {
       staleSeen = stale;
@@ -90,7 +94,14 @@
   <TfKeptPage entry={one.value.entry} route={one.value.route} visible={one.visible} shows={one.shows} {ctx} />
 {/each}
 
-{#if page}
+{#if page && unknownTab}
+  <!-- A section's own address with a tab it does not have: said here, not drawn as the section's first tab. -->
+  {@const section = sectionOf(route)!}
+  <div class="tf-full">
+    {#if ctx.back}<TfCrumbs parts={[{ name: SECTION_NAME[section], href: `#/${section}` }, { name: "Nothing here" }]} back={ctx.back} />{/if}
+    <TfNothingHere message="{SECTION_NAME[section]} has no page at this address." href={`#/${section}`} action={SECTION_NAME[section]} />
+  </div>
+{:else if page}
   <!-- Drawn above. -->
 {:else if route.view === "job"}
   <div class="tf-full">
@@ -122,9 +133,7 @@
 {:else}
   <!-- An unknown address, or a feature whose `page.ts` is missing. -->
   <div class="tf-full">
-    <div class="tf-empty">
-      <p>Nothing lives at <span class="tf-mono">{route.view === "unknown" ? route.hash : location.hash}</span> in the new shell.</p>
-      <a class="tf-btn" href="#/tickets">Go to Tickets</a>
-    </div>
+    {#if ctx.back}<TfCrumbs parts={[{ name: "Nothing here" }]} back={ctx.back} />{/if}
+    <TfNothingHere message="knobas has no page at this address." href="#/tickets" action="All tickets" />
   </div>
 {/if}

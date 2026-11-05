@@ -1,8 +1,8 @@
 <!--
   The breadcrumb (R-1.6, spec #2227): the real path to the page you're on,
   each place above it linking to itself, and the page's own name last, as
-  `Builds › Run #4812`. On the right, *Back to <name>* beside `Esc` names
-  where `Esc` goes; where `Esc` does nothing (a top page, an item's or a
+  `Builds › Run #4812`. On the right, *Back to <name>* beside `Esc` (a link,
+  `TfBackHint.svelte`) names where `Esc` goes; where `Esc` does nothing (a top page, an item's or a
   note's page) there is no hint. `back` is the shell's `escTarget`, the same
   answer the key acts on, so the two cannot disagree. No job's chip: the
   breadcrumb describes this page, not the job you were last in (#2228).
@@ -15,7 +15,7 @@
   calls this page once the reader has left it.
 -->
 <script module lang="ts">
-  import type { EscTarget } from "./escape";
+  import type { EscTarget, EscTargetOf } from "./escape";
   import { HEAD_NAME, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
   /** One place on the path: linked when it has an address; with none, the page's own name, or a place you are already at. */
@@ -41,6 +41,7 @@
 
 <script lang="ts">
   import { namePage } from "./page-name.svelte";
+  import TfBackHint from "./TfBackHint.svelte";
 
   let {
     parts,
@@ -50,7 +51,7 @@
     /** The path, top first; the last is the page itself. */
     parts: readonly Crumb[];
     /** Where `Esc` goes, or `null` where it does nothing. */
-    back: Pick<EscTarget, "name"> | null;
+    back: (Pick<EscTarget, "name"> & Partial<EscTargetOf>) | null;
     /** The shell's own breadcrumb for a page with a nav entry: a path of one draws nothing. */
     sectionTop?: boolean;
   } = $props();
@@ -82,7 +83,7 @@
       {/if}
     {/each}
     {#if back !== null}
-      <span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>
+      <TfBackHint {back} />
     {/if}
   </nav>
 {/if}

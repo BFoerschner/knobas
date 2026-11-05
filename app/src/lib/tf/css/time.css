@@ -2,6 +2,7 @@
    The strip is SVG, so its geometry is attributes rather than inline style.
    Yellow (--card) is the running timer's block alone. */
 .tf-tm-wrap { padding: 16px 22px 40px; }
+.tf-navchev { width: 16px; height: 16px; flex: none; }
 .tf-tm-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
 .tf-tm-nav h2 { font-size: var(--t-xl); margin: 0 6px; font-weight: 700; }
 .tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -97,6 +98,14 @@
 }
 .tf-tm-held .tf-btn { margin-left: 8px; }
 .tf-tm-scroll { overflow-x: auto; }
+/* Today is marked down its column. The names and the week's total stay in view however far the days scroll. */
+.tf-tm-week th.tf-tm-today { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+.tf-tm-week td.tf-tm-today { background: var(--sheet-2); }
+.tf-tm-week { border-collapse: separate; }
+.tf-tm-week :is(th:first-child, td.tf-tm-t) { position: sticky; left: 0; z-index: 2; background: var(--sheet); box-shadow: inset -1px 0 0 var(--rule-2); }
+.tf-tm-week thead th:first-child { background: var(--sheet-2); }
+.tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot) { position: sticky; right: 0; z-index: 2; background: var(--sheet); box-shadow: inset 1px 0 0 var(--rule-2); }
+.tf-tm-week thead th.tf-tm-tot { background: var(--sheet-2); }
 .tf-tm-week th a { color: inherit; text-decoration: none; }
 .tf-tm-week th a:hover { text-decoration: underline; }
 .tf-tm-week .tf-tm-we { background: var(--sheet-2); }
@@ -124,7 +133,7 @@
 
 /* ---------- time: the Standup tab (#829) ---------- */
 .tf-su { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-.tf-su-body { padding: 4px 14px 14px; }
+.tf-su-body { padding: 4px 12px 12px; }
 .tf-su-body h4 { font-size: var(--t-sm); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
 .tf-su-body ul { margin: 0; padding: 0; list-style: none; }
 .tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 0; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
@@ -139,7 +148,8 @@
   padding: 2px 8px; font-size: var(--t-sm); line-height: 1.35; cursor: pointer;
 }
 .tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
-.tf-su-val[aria-pressed="true"] { background: var(--fill); border-color: var(--fill); color: var(--sheet); }
+/* On is ringed, not filled (Controls, *Pill toggles*): four filled names outweighed the page's real action. */
+.tf-su-val[aria-pressed="true"] { background: var(--sheet-2); border-color: var(--ink); color: var(--ink); }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
 .tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
 .tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }

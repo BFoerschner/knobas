@@ -71,8 +71,9 @@ export function stamped(state: unknown, opened: Opened): object {
  * Which page an address is, ignoring the page's own tabs: a job's sub-tab, a
  * pull request's or a run's tab, a repository's tabs and files, a doc page's
  * section, and a section's own deeper addresses (`#/code/repos`, a pipeline
- * picked on Builds, a saved view on Tickets) are one page. A commit under its
- * repository is a page of its own, as `parentOf` has it.
+ * picked on Builds, a saved view on Tickets) are one page, and so are the asset
+ * tree and an asset in it. A commit under its repository is a page of its own,
+ * as `parentOf` has it.
  */
 export function pageOf(route: TfRoute): string {
   switch (route.view) {
@@ -87,7 +88,9 @@ export function pageOf(route: TfRoute): string {
     case "unknown":
       return route.hash;
     case "full": {
-      if (route.head === route.section) return route.head;
+      if (route.head === route.section && route.head !== "assets") return route.head;
+      // The tree and an asset in it are one page: a walk through its columns keeps how the tree was opened.
+      if (route.head === "assets" || route.head === "asset") return "assets";
       if (route.head === "repo" && route.rest[1] === "commits" && route.rest[2]) {
         return ["repo", route.rest[0], "commits", route.rest[2]].join("/");
       }

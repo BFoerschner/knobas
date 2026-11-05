@@ -319,12 +319,11 @@ test("each run says how it was started; Started by me keeps the reader's; the wo
   expect(rows()[0]!.querySelector(".tf-run-trig")?.textContent).toBe("VCS change a41f2c");
   expect(rows()[1]!.querySelector(".tf-run-trig")?.textContent).toBe("you");
   const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
-  expect(input.placeholder).toBe("Filter by number, branch or person");
+  expect(input.placeholder).toBe("Filter runs");
   const scopes = [...target.querySelectorAll(".tf-runbar button")].map((b) => b.textContent?.trim());
-  expect(scopes.indexOf("My job’s branches")).toBeLessThan(scopes.indexOf("Started by me"));
-  expect(scopes.indexOf("Started by me")).toBeLessThan(scopes.indexOf("All"));
+  expect(scopes.indexOf("Mine")).toBeLessThan(scopes.indexOf("All"));
 
-  button("Started by me")!.click();
+  button("Mine")!.click();
   flushSync();
   expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1186"]);
 
@@ -1264,7 +1263,7 @@ const headerActs = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-bhe
 test("the view's Sync now ends the header after Refresh, and gives way to a detail's own Sync now: one per header (#2287)", async () => {
   draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports }, undefined, viewSync);
   await settle();
-  expect(headerActs().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  expect(headerActs().slice(-2)).toEqual(["Refresh pipeline", "Sync now"]);
   unmount(page!);
   page = null;
   draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, undefined, viewSync);

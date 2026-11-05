@@ -28,7 +28,7 @@ const KIND: Record<InboxCategory, string> = {
  * The kind chips, in prototype-6's order. A credential expiry has none, and
  * neither has a failed sign-in (#1571): both are about a source, not work.
  */
-export const KIND_CHIPS = ["Review", "Mention", "Build", "Assignment", "Monitor"] as const;
+export const KIND_CHIPS = ["Review", "Mention", "Build", "Assignment", "Monitor", "Sign-in"] as const;
 
 /**
  * How many days before a credential expires its item arrives:
@@ -167,6 +167,14 @@ export function visible(entries: readonly InboxEntry[], filter: InboxFilter, ind
 }
 
 /** The snoozed shelf as one line (R-12.3), or `null` when nothing is snoozed. */
+/** The snoozed shelf as rows: what each is and when it comes back, in one date format. */
+export function snoozedRows(entries: readonly InboxEntry[]): { key: string; what: string; back: string | null }[] {
+  return entries.map(({ item }) => {
+    const back = item.snoozed_until ? new Date(item.snoozed_until) : null;
+    return { key: item.key, what: phrase(item), back: back && !Number.isNaN(back.getTime()) ? day(back) : null };
+  });
+}
+
 export function snoozedLine(entries: readonly InboxEntry[]): string | null {
   if (entries.length === 0) return null;
   const parts = entries.map(({ item }) => {

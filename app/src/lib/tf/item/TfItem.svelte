@@ -47,7 +47,8 @@
 </script>
 
 <script lang="ts">
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { actionName } from "../../detail/view/actions";
   import type { EscTarget } from "../escape";
   import TfCrumbs from "../TfCrumbs.svelte";
@@ -73,6 +74,8 @@
 
   let detail = $state<EntityDetail | null>(null);
   let failed = $state<string | null>(null);
+  /** The read failed because no such item is held. */
+  let notHeld = $state(false);
   /** `undefined` until the view answers; `null` when the source draws nothing for the kind. */
   let view = $state<SourceView | null | undefined>(undefined);
   let viewFailed = $state<string | null>(null);
@@ -96,7 +99,11 @@
     untrack(() => refresh.reset());
     ports.getEntity(entity).then(
       (found) => live && (detail = found),
-      (error: unknown) => live && (failed = ipcErrorMessage(error)),
+      (error: unknown) => {
+        if (!live) return;
+        failed = ipcErrorMessage(error);
+        notHeld = isIpcError(error) && error.code === "not_found";
+      },
     );
     ports.entityView(entity, null).then(
       (answer) => live && (view = answer),
@@ -215,7 +222,11 @@
   <!-- The breadcrumb names the kind (#1408): the title is the header's. -->
   {#if failed !== null}
     <TfCrumbs parts={[{ name: "Item" }]} {back} />
-    <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {failed}</p></div>
+    {#if notHeld}
+      <TfNothingHere message="knobas does not hold this. It may not have synced yet." href="#/tickets" action="All tickets" />
+    {:else}
+      <TfNothingHere message="This could not be read: {failed}" href="#/tickets" action="All tickets" />
+    {/if}
   {:else if detail !== null}
     <TfCrumbs parts={[{ name: kindLabel }]} {back} />
     <header class="tf-fhead">

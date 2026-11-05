@@ -527,9 +527,9 @@ test("Local changes draws the checkout line, the uncommitted diff with the PR's 
   expect(line.querySelector("button[aria-haspopup='menu']")).not.toBeNull();
   expect(text(target.querySelector(".tf-cbody"))).toContain("knobas never commits, stashes or pushes here");
   // The pull request's diff block (`TfDiffView`, #2266), each file marked.
-  expect([...target.querySelectorAll(".tf-cbody .tf-diff .tf-fh .tf-mono")].map(text)).toEqual([
-    "src/retry.rs (modified, not staged)",
-    "src/sepa/mod.rs (modified, staged)",
+  expect([...target.querySelectorAll(".tf-cbody .tf-diff .tf-fh")].map((head) => [text(head.querySelector(".tf-mono")), text(head.querySelector(".tf-state"))])).toEqual([
+    ["src/retry.rs", "modified, not staged"],
+    ["src/sepa/mod.rs", "modified, staged"],
   ]);
   expect([...target.querySelectorAll(".tf-untracked li")].map(text)).toEqual(["notes.txt", "scratch/"]);
 
@@ -580,7 +580,7 @@ test("Local changes for a repository not on this machine offers Clone and settin
 
 test("a repository the mirror does not hold says so", async () => {
   await draw(["gitea:tidewater/nowhere"]);
-  expect(text(target.querySelector(".tf-cbody"))).toContain("gitea:tidewater/nowhere is not in the mirror");
+  expect(text(target.querySelector(".tf-nohere"))).toContain("repository");
 });
 
 // -- Refresh (#2135) -----------------------------------------------------------

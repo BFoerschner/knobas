@@ -43,6 +43,7 @@
   instead*, so a reader who empties a field means the key to go.
 -->
 <script lang="ts">
+  import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type {
     assetTree,
@@ -368,7 +369,7 @@
                   title="Land on {row.name}"
                   onclick={() => choose(row)}
                 >
-                  <span class="mg">{row.monogram}</span>
+                  <span class="mg">{kindTag(row.monogram)}</span>
                   <span class="nm">{row.name}</span>
                   {#if row.has_children}
                     <span class="chev" aria-hidden="true">›</span>
@@ -571,7 +572,8 @@
 
   .opt .mg {
     flex: none;
-    font: 500 10px var(--mono);
+    font-size: var(--t-2xs);
+    font-weight: 500;
     color: var(--faint);
   }
 

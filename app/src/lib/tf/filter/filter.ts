@@ -59,6 +59,10 @@ export interface FilterScope {
   query: string;
   /** A code value drawn after the label in mono: *This job* names its key (prototype-6's `jobk`). */
   tag?: string;
+  /** How many this scope holds, drawn as the control's count badge. */
+  count?: number | null;
+  /** The button's title: what the scope keeps. */
+  title?: string;
 }
 
 /**

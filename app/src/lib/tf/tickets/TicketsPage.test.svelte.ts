@@ -355,7 +355,7 @@ test("the first card is selected: outlined, and the preview shows it with Start 
   // No job is chosen, so nothing is yellow (spec #2396, #2398).
   expect(target.querySelectorAll(".tf-tcard.tf-card")).toHaveLength(0);
   expect(first.textContent).toContain("Story, High");
-  expect(first.querySelector(".tf-av")!.textContent).toBe("ML");
+  expect(first.querySelector(".tf-av")!.textContent).toBe("MA");
   expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
 
   expect(preview().querySelector("h2")!.textContent).toBe("Retry failed SEPA payouts");
@@ -377,7 +377,7 @@ test("selecting another card moves the outline and the preview's button follows 
 
   pick("PAY-2").click();
   await settle();
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open job");
+  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open ticket");
   // Somebody else's ticket is only read from here (spec #2396): its page, not the job's address.
   expect(preview().querySelector(".tf-go .tf-primary")!.getAttribute("href")).toBe("#/ticket/jira%3APAY-2");
   expect(preview().textContent).toContain("Assigned to jonas.becker.");
@@ -512,7 +512,7 @@ test("an ad-hoc context draws no Not a ticket group and is never read for", asyn
   expect(h.contextReads).toBe(0);
 });
 
-const around = () => [...preview().querySelectorAll(".tf-rollup > div")].map((d) => d.textContent);
+const around = () => [...preview().querySelectorAll(".tf-rollup > *")].map((d) => d.textContent);
 
 // #1030: the preview counts what the job's sections show, from the job-reach
 // read, whether or not anybody has opened the ticket's job yet.
@@ -520,7 +520,7 @@ test("Around this ticket counts what the ticket reaches, with no context stored 
   const h = harness();
   h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
   await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing or down"]);
+  expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing"]);
   // Builds is counted as the job reads it: asked for the CI role, naming no kinds (#1295).
   const builds = h.lists.filter((filter) => filter.order === "latest_per_parent");
   expect(builds).toHaveLength(1);
@@ -537,7 +537,7 @@ test("Around this ticket counts a parent's link the reach brings in and the cont
   ];
   h.members["ctx:2"] = [PR.entity_id, BUILD_OK.entity_id];
   await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds2 builds, 1 failing or down"]);
+  expect(around()).toEqual(["Code1 pull request", "Builds2 builds, 1 failing"]);
 });
 
 test("Around this ticket says Nothing connected yet only when the reach is empty", async () => {
@@ -936,7 +936,7 @@ test("the board head is the canonical header: title left, one group right with t
   expect(acts!.matches(".tf-acts")).toBe(true);
   expect(acts!.firstElementChild!.matches('.tf-seg[aria-label="Layout"]')).toBe(true);
   const buttons = [...acts!.querySelectorAll<HTMLButtonElement>(":scope > button, :scope > * > button")].filter((b) => !b.closest(".tf-seg"));
-  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view", "⋯", "Sync now"]);
+  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view…", "⋯", "Sync now"]);
   for (const b of buttons) {
     expect(b.classList.contains("tf-btn")).toBe(true);
     expect(b.classList.contains("tf-sm")).toBe(false);
@@ -1092,7 +1092,7 @@ test("a view's list columns and card fields are what it was saved with", async (
 test("an address naming no view says so and offers All tickets", async () => {
   const h = harness([], VIEWS);
   await open(h, null, "gone");
-  expect(target.querySelector(".tf-empty")!.textContent).toContain("No view is called gone.");
+  expect(target.querySelector(".tf-empty")!.textContent).toContain("This view does not exist.");
   expect(h.reads).toEqual([]);
 });
 
@@ -1125,7 +1125,7 @@ function input(element: HTMLInputElement | HTMLSelectElement, value: string) {
 test("+ New view opens the editor: conditions write the search line, the preview counts and draws, Create view saves it", async () => {
   const h = harness();
   await open(h);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.textContent).toContain("Kept in knobas. No source sees it.");
@@ -1136,7 +1136,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
   expect(previewCols()).toEqual(["To Do12", "In Progress1", "Done5"]);
   expect(inDialog("Create view").disabled).toBe(true);
 
-  inDialog("+ Add a condition").click();
+  inDialog("Add a condition").click();
   await settle();
   // The first field is Project; pick Issue type, Bug, then is not.
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "issuetype");
@@ -1164,7 +1164,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
 test("Edit view opens the text as conditions, saves over the view under its id, and keeps a text left alone as typed", async () => {
   const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: 'issuetype:Bug   assignee:me "sepa retry"' })]);
   await open(h, null, "bugs");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("Edit Bugs");
   const fields = [...dialog()!.querySelectorAll<HTMLSelectElement>('select[aria-label="Field"]')].map((s) => s.value);
@@ -1182,7 +1182,7 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
   // Changed, it writes new text.
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   inDialog("Story").click();
   await settle();
@@ -1194,7 +1194,7 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
 test("each status sits on one column, an over-limit column is err, tickets on no column are called out, and One column per status resets", async () => {
   const h = harness();
   await open(h);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   const cols = () => [...dialog()!.querySelectorAll<HTMLElement>(".tf-vw-col")];
   const pressed = (col: HTMLElement) =>
@@ -1223,7 +1223,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   await open(h, null, "odd");
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   expect([...searchLine().querySelectorAll(".tf-vw-newq")].map((s) => s.textContent)).toEqual(["sprint:next", "-under:PAY-200"]);
   expect(searchLine().textContent).toBe("sprint:next -under:PAY-200 label:sepa");
@@ -1243,7 +1243,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   await open(h, null, "odd");
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   expect(options()).toContain("Signal");
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "signal");
@@ -1256,7 +1256,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
 test("Delete view in the editor deletes it, with Undo in the toast", async () => {
   const h = harness([], VIEWS);
   await open(h, null, "backlog");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   // #2289: an extra action that starts a destructive one, drawn by the Controls classes alone.
   expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger");
@@ -1364,7 +1364,7 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   ]);
   expect(target.querySelector(".tf-board-head .tf-q")).toBeNull();
   const settings = [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find(
-    (b) => b.textContent === "View settings",
+    (b) => b.textContent === "View settings…",
   );
   expect(settings).toBeDefined();
 
@@ -1372,7 +1372,7 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "View settingslanes, cards and list columns",
+    "View settings…lanes, cards and list columns",
     "Make an editable copyyour own view, starting from this board",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
@@ -1478,7 +1478,7 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
 test("View settings on a Jira view says how much a copy keeps and offers Make an editable copy", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain(
     "To change which tickets it holds, change it in Jira, or make your own copy. A copy keeps 1 of 2 parts of the query.",
@@ -1499,14 +1499,14 @@ test("a saved view from a source without translate_query offers no editable copy
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "View settingslanes, cards and list columns",
+    "View settings…lanes, cards and list columns",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
   menuOf("Payments and Ops flow").click();
   flushSync();
   expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view")).toBe(false);
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const text = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(text).toContain("To change which tickets it holds, change it in Jira.");
@@ -1617,7 +1617,7 @@ test("Hide from the list moves a Jira view to one hidden line, with Undo, and Sh
 test("View settings on a Jira view says Jira decides, locks its columns, and saves only how it shows", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const box = target.querySelector<HTMLElement>(".tf-vw-dialog")!;
   expect(box.querySelector("h2")!.textContent).toBe("Settings for Payments and Ops flow");
@@ -1741,7 +1741,7 @@ test("a second ticket system's view says where it comes from, what decides it, a
   noJira(target.querySelector(".tf-board-head")!.textContent);
   noJira(srcLines().join(" "));
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const settings = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(settings).toContain(
@@ -1771,7 +1771,7 @@ test("a saved view with no query says what decides it with no dangling query, in
   ]);
   expect(target.querySelector(".tf-vw-srcline code")).toBeNull();
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const settings = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(settings).toContain(
@@ -1787,7 +1787,7 @@ test("a saved view's own query and sub-query show in its source line and View se
   expect(srcLines()).toEqual([
     "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Kestrel",
   ]);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   expect(dialog()!.querySelector(".tf-vw-source-query")!.textContent).toBe("is:open milestone:train\nlabel:ops");
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain("knobas runs its query at every sync and keeps Kestrel's order.");
@@ -1800,7 +1800,7 @@ test("with two ticket systems the list's foot and a view of your own name both",
   expect(target.querySelector(".tf-vw-foot")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
     "Boards and favourite filters come in with the Jira and Kestrel sources at every sync. Choose which",
   );
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await settle();
   expect(dialog()!.textContent).toContain("Kept in knobas. Jira and Kestrel never see it.");
 });
@@ -1809,7 +1809,7 @@ test("a count of one reads in the singular: the filter bar's ticket and the edit
   const h = harness([], [], [CORPUS[0]!]);
   await open(h);
   expect(count()).toBe("1 ticket");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!, "priority");
   await previewed(h);
@@ -1935,9 +1935,7 @@ test("with no source filling the ticket system the board is read, empty, and say
   const { h, roles } = trackerHarness([]);
   await open(h);
   expect(roles[0]).toBe("ticket-system");
-  expect(target.querySelector(".tf-empty")!.textContent).toBe(
-    "No tickets synced yet. Add a ticket system in Settings and they appear here.",
-  );
+  expect(target.querySelector(".tf-empty p")!.textContent).toBe("No tickets synced yet. Add a ticket system in Settings and they appear here.");
 });
 
 test("a long list draws the rows near the viewport, and j/k walk past them, drawing and focusing each row they reach (#2209)", async () => {

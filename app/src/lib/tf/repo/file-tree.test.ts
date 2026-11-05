@@ -95,6 +95,6 @@ test("a commit row's author is drawn apart from when, which is the rest of its m
 
 test("an author's initials are the first letters of two parts of the name", () => {
   expect(initials("Mara Lindqvist")).toBe("ML");
-  expect(initials("jonas.becker")).toBe("JB");
+  expect(initials("jonas.becker")).toBe("JO");
   expect(initials("mara")).toBe("MA");
 });

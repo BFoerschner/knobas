@@ -250,7 +250,7 @@ test("an outdated thread is drawn at the commit it was written on, its hunk as i
   expect(link.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${at}%5E/${at}`);
   expect([...apart.querySelectorAll(".tf-was-hunk .tf-ln")].map((ln) => ln.className)).toEqual(["tf-ln tf-del", "tf-ln tf-add"]);
   const gone = target.querySelector("details.tf-gone")!;
-  expect(squash(gone)).toBe("On files this change no longer holds src/sepa/legacy.rs, line 3at 7be0e4c 3+ loop {}priya Ten attempts is a lot.");
+  expect(squash(gone)).toBe("Comments on files that are no longer in this change src/sepa/legacy.rs, line 3at 7be0e4c 3+ loop {}priya Ten attempts is a lot.");
   expect(gone.querySelector<HTMLAnchorElement>(".tf-was-at a")!.getAttribute("href")).toBe(link.getAttribute("href"));
 });
 

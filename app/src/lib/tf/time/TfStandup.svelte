@@ -646,7 +646,7 @@
           Publish to Confluence
         </button>
       {:else if publication.page_entity_id !== null && publication.linked}
-        <a class="tf-btn tf-sm tf-ghost" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Published</a>
+        <a class="tf-btn tf-sm tf-ghost" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Open the published page</a>
       {:else}
         <span class="tf-chip tf-open">{publication.state === "held" ? "held in the queue" : "publishing"}</span>
       {/if}
@@ -678,7 +678,7 @@
           />
         {:else}
           <button class="tf-btn tf-sm tf-ghost" disabled={!loaded || protocol === null} onclick={() => (adding = "person")}>
-            + Add someone
+            Add someone
           </button>
         {/if}
       </div>
@@ -718,7 +718,7 @@
         />
       {:else}
         <button class="tf-btn tf-sm tf-ghost" disabled={!loaded || protocol === null} onclick={() => (adding = "item")}>
-          + Add an action item
+          Add an action item
         </button>
       {/if}
 

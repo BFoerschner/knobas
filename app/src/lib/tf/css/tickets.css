@@ -29,6 +29,20 @@
 .tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 6px 0 8px; }
 /* 192 px: a card's first line fits, and at 1440 px the fifth column shows, so the board says there is more. */
 .tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(192px, 1fr); gap: 8px; align-items: start; overflow-x: auto; }
+/* A board of one or two columns (a ticket's sub-tasks) keeps a card's width, with its avatar beside its words. */
+.tf-cols:not(:has(> :nth-child(3))) { grid-auto-columns: minmax(192px, 420px); }
+/* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. */
+.tf-board-wrap:has(.tf-lane + .tf-lane) { overflow-x: auto; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) > .tf-lane { width: max-content; min-width: 100%; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) > .tf-lane > .tf-cols { overflow: visible; }
+.tf-board-wrap:has(.tf-lane + .tf-lane) > :is(.tf-fhead, .tf-fbar, .tf-crumbs) { position: sticky; left: 0; }
+/* Its scrollbar's room is kept, so switching Board to List moves nothing. */
+.tf-board-wrap { scrollbar-gutter: stable; }
+/* A long list keeps its column names and its sort under the filter bar. */
+.tf-list .tf-tbl { overflow: clip; }
+.tf-list .tf-tbl th { position: sticky; top: var(--tf-fbar-h, 47px); z-index: 3; }
+/* Focus on the chosen job's card keeps a second ring where the card's ink would melt into the dark page. */
+.tf-tcard.tf-card:focus-visible { box-shadow: 0 0 0 4px var(--sel-halo); }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
 .tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px; background: var(--sheet-2); border-radius: 6px; }
 .tf-nothing { font-size: var(--t-sm); padding: 6px; }
@@ -79,6 +93,8 @@
 .tf-tbl th[aria-sort="ascending"] button::after { content: " \25B4"; }
 .tf-sigs { display: flex; gap: 10px; flex-wrap: wrap; }
 .tf-row { cursor: pointer; }
+/* A row's name is a link with no underline at rest (design system, Layout): the row answers the pointer, and it underlines then. */
+.tf .tf-row:hover a:not(.tf-btn):hover { text-decoration: underline; text-underline-offset: 2px; }
 .tf-row:hover td { background: var(--sheet-2); }
 .tf-row.tf-card td { background: var(--card); color: var(--card-ink); }
 .tf-row.tf-card .tf-dim, .tf-row.tf-card .tf-sub { color: var(--card-ink-2); }
@@ -91,7 +107,7 @@
 /* A row's second line is words, even under a key: only a code value is mono. */
 .tf-tbl .tf-sub { display: block; font-family: var(--sans); font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
 /* A long key gives up its end, not the summary's room; its title has the whole of it. */
-.tf-tbl .tf-keycell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
+.tf-tbl .tf-keycell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
 /* The summary is the column you read: it takes what the others leave. A signal keeps its line, and its dot the first. */
 .tf-tbl .tf-c-summary { width: 100%; min-width: 150px; font-weight: 500; }
 .tf-tbl .tf-c-signals { white-space: nowrap; }
@@ -123,13 +139,17 @@
 .tf-pane-h { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 0 0 6px; }
 .tf .tf-small { font-size: var(--t-sm); }
 .tf-rollup { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; }
-.tf-rollup div {
+.tf-rollup a { color: inherit; text-decoration: none; }
+.tf-rollup a:hover { background: var(--sheet-2); }
+.tf-rollup a:hover span:first-of-type { text-decoration: underline; text-underline-offset: 2px; }
+.tf-rollup :is(div, a) {
   display: grid; grid-template-columns: 62px 1fr; gap: 8px; padding: 7px 10px; border-bottom: 1px solid var(--rule-2);
   font-size: var(--t-sm); align-items: baseline;
 }
-.tf-rollup div:last-child { border-bottom: 0; }
+.tf-rollup :is(div, a):last-child { border-bottom: 0; }
 .tf-rollup b { font-weight: 600; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-rollup .tf-bad { color: var(--err); }
+.tf-rollup .tf-bad .tf-dot { margin-right: 4px; }
 .tf-go { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; }
 .tf-go .tf-btn { justify-content: center; }
 .tf-go small { color: var(--ink-2); text-align: center; }

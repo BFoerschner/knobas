@@ -239,9 +239,9 @@ test("Run pipelines on diffs is on until turned off here, and stored (#2270, Sta
   const piping = createDiffPipelines({ read: async () => true, save: async (on) => (saved.push(on), on) });
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
   await settle();
-  const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
+  const box = target.querySelector<HTMLButtonElement>("#tf-rnd-pipes")!;
   expect(target.querySelector('label[for="tf-rnd-pipes"]')?.textContent).toMatch(/^Run pipelines on diffs/);
-  expect(box.checked).toBe(true);
+  expect(box.getAttribute("aria-checked")).toBe("true");
   box.click();
   await settle();
   expect(saved).toEqual([false]);
@@ -253,11 +253,11 @@ test("a refused save of Run pipelines on diffs puts the box back (Standards 6)",
   const piping = createDiffPipelines({ read: async () => true, save: () => Promise.reject(new Error("the database is gone")) });
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
   await settle();
-  const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
+  const box = target.querySelector<HTMLButtonElement>("#tf-rnd-pipes")!;
   box.click();
   await settle();
   expect(piping.on).toBe(true);
-  expect(box.checked).toBe(true);
+  expect(box.getAttribute("aria-checked")).toBe("true");
 });
 
 /** #2343: "Small: everything inside a page body" (Controls); a dialog has its own footer rule. */

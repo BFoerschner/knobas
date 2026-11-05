@@ -21,6 +21,7 @@
     small = false,
     ghost = false,
     button = true,
+    noun,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -42,6 +43,8 @@
      * page, whose Refresh is the keybind's alone (#2401).
      */
     button?: boolean;
+    /** The one thing *Refresh* reads, where the view's *Sync now* stands beside it. */
+    noun?: string | undefined;
   } = $props();
   /** The button's classes: the Controls button at its size and look, and `tf-refresh`, which tests find it by. */
   const classes = $derived(["tf-btn", small && "tf-sm", ghost && "tf-ghost", "tf-refresh"].filter(Boolean).join(" "));
@@ -90,7 +93,7 @@
     class={classes}
     disabled={busy}
     title="Read this item from {detail.source.display_name} again"
-    onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
+    onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}{#if noun !== undefined && !refresh.reading}<span class="tf-wide">{" "}{noun}</span>{/if}</button
   >
 {:else if sync !== null}
   <button

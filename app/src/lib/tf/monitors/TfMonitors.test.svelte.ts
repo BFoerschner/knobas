@@ -202,7 +202,7 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   await draw([]);
   expect(text(target.querySelector("h1"))).toBe("Monitors");
   expect(text(target.querySelector(".tf-sub"))).toBe(
-    "4 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset. Bars cover the last 24 hours in half-hours.",
+    "4 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset.",
   );
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Monitors 4", "Assets nothing watches 2"]);
@@ -387,18 +387,19 @@ test("This job keeps the monitors watching what the job reaches; My jobs and All
 test("#/monitors/unmonitored lists the assets and routes worth a check with env and owner, and has no filter bar", async () => {
   await draw(["unmonitored"]);
   expect(target.querySelector(".tf-tabs [aria-current='page']")?.textContent).toContain("Assets nothing watches");
-  expect(text(target.querySelector(".tf-mon-lead"))).toBe("Containers, services, routes, databases and VMs that no monitor watches.");
+  expect(text(target.querySelector(".tf-sub"))).toBe("Containers, services, routes, databases and VMs that no monitor watches.");
   expect(rows().map((tr) => [...tr.querySelectorAll("td")].map(text))).toEqual([
-    ["pg-main", "Database server", "prod", "ops", "Create monitor"],
-    ["Gitea", "Route", "prod", "ops", "Create monitor"],
+    ["pg-main", "Database server", "prod", "ops", "Create monitor…"],
+    ["Gitea", "Route", "prod", "ops", "Create monitor…"],
   ]);
   expect(rows()[1]!.querySelector("td a")?.getAttribute("href")).toBe("#/route/route%3Agitea");
-  expect(target.querySelector("input[type='search'], .tf-fbar")).toBeNull();
+  // Its own band, over its own rows.
+  expect(target.querySelector<HTMLInputElement>(".tf-fbar input")?.placeholder).toBe("Filter by asset, type or owner");
 });
 
 test("Create monitor on a route opens as HTTP on its URL plus /health and records the name on the route", async () => {
   await draw(["unmonitored"]);
-  button(rows()[1]!, "Create monitor")!.click();
+  button(rows()[1]!, "Create monitor…")!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(text(dialog.querySelector("h2"))).toBe("Create a monitor for Gitea");
@@ -418,7 +419,7 @@ test("Create monitor on a route opens as HTTP on its URL plus /health and record
 
 test("Create monitor opens prefilled as TCP, records the name on the asset, then queues the create with its kind", async () => {
   await draw(["unmonitored"]);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(text(dialog.querySelector("h2"))).toBe("Create a monitor for pg-main");
@@ -437,7 +438,7 @@ test("Create monitor opens prefilled as TCP, records the name on the asset, then
 
 test("a create the backend refuses stays open and says why", async () => {
   await draw(["unmonitored"], null, ports({ submitWrite: async () => Promise.reject({ code: "invalid", message: "no Docker host" }) }));
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Create monitor")!.click();
@@ -475,8 +476,8 @@ test("after a reload, a create on its way draws Monitor queued on its row and of
   await draw(["unmonitored"], null, ports(withCreate(() => onItsWay(7, "pending"))));
   const [pg, route] = rows();
   expect(lastCell(pg!)).toBe("Monitor queued");
-  expect(button(pg!, "Create monitor")).toBeUndefined();
-  expect(button(route!, "Create monitor")).toBeDefined();
+  expect(button(pg!, "Create monitor…")).toBeUndefined();
+  expect(button(route!, "Create monitor…")).toBeDefined();
 });
 
 test("a create pressed now draws Monitor queued at once, before the re-read answers, and the re-read keeps it", async () => {
@@ -496,7 +497,7 @@ test("a create pressed now draws Monitor queued at once, before the re-read answ
     },
   });
   await draw(["unmonitored"], null, stand);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();
@@ -505,7 +506,7 @@ test("a create pressed now draws Monitor queued at once, before the re-read answ
   answer();
   await settle();
   expect(lastCell(rows()[0]!)).toBe("Monitor queued");
-  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeUndefined();
 });
 
 test("a create the queue refuses gives Create monitor back and says why", async () => {
@@ -519,7 +520,7 @@ test("a create the queue refuses gives Create monitor back and says why", async 
     },
   });
   await draw(["unmonitored"], null, stand);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();
@@ -528,7 +529,7 @@ test("a create the queue refuses gives Create monitor back and says why", async 
   going = null;
   heard.get(1)!(onItsWay(1, "refused", "no Docker host"));
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
   expect(toasts.items.map((t) => t.text)).toContain("Monitor pg-main was refused: no Docker host");
 });
 
@@ -539,7 +540,7 @@ test("after a reload, a pending create is followed: held on drift, it gives Crea
   going = null;
   heard.get(7)!(onItsWay(7, "held"));
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
   expect(heard.size).toBe(0);
 });
 
@@ -557,13 +558,13 @@ test("after a reload, a create held as unconfirmed draws Monitor queued, says wh
   const chip = rows()[0]!.querySelector<HTMLElement>(".tf-chip.tf-info");
   expect(text(chip)).toBe("Monitor queued");
   expect(chip?.title).toBe("Sent to Uptime Kuma, which did not answer, so it may be there. Check Uptime Kuma, then send it again or discard it in the write queue.");
-  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeUndefined();
   expect([...heard.keys()]).toEqual([7]);
 
   going = null;
   heard.get(7)!(undefined);
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
 });
 
 test("a pending create the queue holds as unconfirmed stays Monitor queued and followed, with no Edit and resend (#1966)", async () => {
@@ -573,7 +574,7 @@ test("a pending create the queue holds as unconfirmed stays Monitor queued and f
   heard.get(7)!(unconfirmed(7));
   await settle();
   expect(lastCell(rows()[0]!)).toBe("Monitor queued");
-  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeUndefined();
   expect([...heard.keys()]).toEqual([7]);
   const told = toasts.items.find((t) => t.text.startsWith("Monitor pg-main may have arrived"));
   expect(told?.more ?? []).toEqual([]);
@@ -585,7 +586,7 @@ test("a create withdrawn in the queue leaves the open rows, and the re-read give
   going = null;
   heard.get(7)!(undefined);
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
 });
 
 test("a sent create reads Monitor sent until the end of the sync that brings its monitor in, and is not followed (#2105)", async () => {
@@ -628,7 +629,7 @@ test("a create says Monitor queued, then Monitor sent, and goes once the roster 
     },
   });
   await draw(["unmonitored"], null, stand);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();

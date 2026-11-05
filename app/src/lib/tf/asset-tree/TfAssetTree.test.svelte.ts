@@ -20,15 +20,15 @@ afterEach(() => {
   location.hash = "";
 });
 
-test("the bare tree draws no breadcrumb of its own name; an asset's names the tree and the asset", () => {
+test("the tree draws its crumb bar at both addresses, under Monitors; an asset's names the tree and the asset", () => {
   mounted = mount(TfAssetTree, { target: document.body, props: { head: "assets", rest: [] } });
   flushSync();
-  expect(document.querySelector(".tf-crumbs")).toBeNull();
+  expect(document.querySelector(".tf-crumbs")?.textContent).toContain("Asset tree");
   void unmount(mounted);
   mounted = mount(TfAssetTree, { target: document.body, props: { head: "asset", rest: ["gitea:acme/web"], back: { name: "Asset tree" } } });
   flushSync();
   const crumbs = document.querySelector(".tf-crumbs")!;
-  expect(crumbs.querySelector("a.tf-crumb")?.getAttribute("href")).toBe("#/assets");
+  expect([...crumbs.querySelectorAll("a.tf-crumb")].map((a) => a.getAttribute("href"))).toEqual(["#/monitors", "#/assets"]);
   expect(crumbs.querySelector("strong")?.textContent).toBe("Asset");
   expect(crumbs.textContent).toContain("Back to Asset tree");
 });

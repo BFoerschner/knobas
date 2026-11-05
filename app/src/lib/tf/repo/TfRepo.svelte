@@ -112,7 +112,7 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { EVENTS, ipcErrorMessage } from "../../ipc";
+  import { EVENTS, ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     codeFacts,
     entityCheckout,
@@ -163,12 +163,14 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfBackHint from "../TfBackHint.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { provideTabRereads } from "./refreshed.svelte";
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
-  import { namePage } from "../page-name.svelte";
+  import { namePage, parentPage } from "../page-name.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -226,6 +228,10 @@
   /** The repository's source: where its writes go, named in their toasts. */
   const source = $derived<WriteSource | null>(detail?.source ?? null);
   let failed = $state<string | null>(null);
+  /** The read failed because no such repository is held, not because the read broke. */
+  let missing = $state(false);
+  /** Bumped by *Try again*. */
+  let attempt = $state(0);
   /** `null` while the *Branches* section has not answered. */
   let branches = $state<BranchOption[] | null>(null);
   /**
@@ -255,11 +261,13 @@
 
   $effect(() => {
     if (!ready || repoId === null) return;
+    void attempt;
     const id = repoId;
     let live = true;
     const alive = () => live;
     detail = null;
     failed = null;
+    missing = false;
     branches = null;
     branchRefused = null;
     checkout = undefined;
@@ -375,7 +383,10 @@
     try {
       found = await ports.getEntity(id);
     } catch (error) {
-      if (alive() && !again) failed = ipcErrorMessage(error);
+      if (alive() && !again) {
+        failed = ipcErrorMessage(error);
+        missing = isIpcError(error) && error.code === "not_found";
+      }
       return;
     }
     if (!alive()) return;
@@ -520,6 +531,8 @@
 
   // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
   namePage(() => (route.commit !== null && repoId !== null ? "Commit" : (repo?.title ?? null)));
+  // A commit sits under its repository, by the title its crumb gives it.
+  parentPage(() => (route.commit !== null && repoId !== null && repo !== null ? { hash: repoHash(repoId), name: repo.title } : null));
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
@@ -529,25 +542,24 @@
   <nav class="tf-crumbs" aria-label="Breadcrumb">
     <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
     {#if route.commit !== null && repoId !== null}
-      <a class="tf-crumb" href={repoHash(repoId)}>{repo?.title ?? ""}</a><span class="tf-sep">›</span>
+      <a class="tf-crumb" href={repoHash(repoId)}>{repo?.title ?? "Repository"}</a><span class="tf-sep">›</span>
       <strong>Commit</strong>
     {:else}
-      <strong>{repo?.title ?? ""}</strong>
+      <strong>{repo?.title ?? "Repository"}</strong>
     {/if}
     {#if back !== null}
-      <!-- The shell names a repository's page *Repository*; this page knows its title. -->
-      <span class="tf-esc"
-        >Back to {repoId !== null && back.hash === repoHash(repoId) && repo !== null ? repo.title : back.name} <kbd>Esc</kbd></span
-      >
+      <TfBackHint {back} />
     {/if}
   </nav>
 
   {#if repoId === null || failed !== null}
-    <div class="tf-cbody">
-      <p class="tf-cfail">{failed ?? "No repository is named in the address."}</p>
-    </div>
+    {#if failed !== null && !missing}
+      <TfNothingHere message="This repository could not be read: {failed}" onretry={() => attempt++} />
+    {:else}
+      <TfNothingHere message="knobas does not hold this repository. It may not have synced yet." href="#/code" action="All repositories" />
+    {/if}
   {:else}
-    <header class="tf-fhead">
+    <div class="tf-repohead"><header class="tf-fhead tf-repohead-in">
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
@@ -587,7 +599,7 @@
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" variant="ghost" />
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
-    </header>
+    </header></div>
     {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
     <nav class="tf-tabs" aria-label="Repository">
       {#each REPO_TABS as entry, n (entry.id)}

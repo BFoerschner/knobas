@@ -143,13 +143,13 @@
 </script>
 
 <div class="tf-tm-nav">
-  <a class="tf-btn tf-sm tf-ghost" href="#/time/week/{shiftDay(monday, -7)}" aria-label="Week before">‹</a>
+  <a class="tf-btn tf-sm tf-ghost" href="#/time/week/{shiftDay(monday, -7)}" aria-label="Week before"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg></a>
   <h2>{heading(monday)}</h2>
   {#if monday < thisMonday}
-    <a class="tf-btn tf-sm tf-ghost" href={after} aria-label="Week after">›</a>
+    <a class="tf-btn tf-sm tf-ghost" href={after} aria-label="Week after"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></a>
     <a class="tf-btn tf-sm" href="#/time/week">This week</a>
   {:else}
-    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true">›</span>
+    <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true"><svg class="tf-navchev" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" /></svg></span>
   {/if}
 </div>
 
@@ -178,9 +178,9 @@
         <tr>
           <th>Ticket or label</th>
           {#each ready.week.days as day, index (day)}
-            <th class={index > 4 ? "tf-tm-we" : ""}><a href="#/time/{day}">{columnHeading(day, index)}</a></th>
+            <th class={[index > 4 && "tf-tm-we", day === dayKey(clock) && "tf-tm-today"]} aria-current={day === dayKey(clock) ? "date" : undefined}><a href="#/time/{day}">{columnHeading(day, index)}</a></th>
           {/each}
-          <th>Week</th>
+          <th class="tf-tm-tot">Week</th>
         </tr>
       </thead>
       <tbody>
@@ -203,7 +203,7 @@
               {/if}
             </td>
             {#each row.cells as cell (cell.day)}
-              <td class="tf-tm-c {cell.weekend ? 'tf-tm-we' : ''}">
+              <td class={["tf-tm-c", cell.weekend && "tf-tm-we", cell.day === dayKey(clock) && "tf-tm-today"]}>
                 {#if cell.tracked === 0 && cell.note === null}
                   <span class="tf-dim">–</span>
                 {:else}

@@ -17,6 +17,9 @@
   import { proseMarkdown, withoutAttachmentMarks, type Prose } from "../../render/prose";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { jobHash, ticketHash } from "../route";
+  import { scopedTicket, type ScopedSection } from "../job/scoped.svelte";
+  /** A line of *Around this ticket* opens its section narrowed to the ticket, as the same row on the ticket's card does. */
+  const SCOPED_SECTION: Record<string, ScopedSection | undefined> = { Code: "code", Builds: "builds", Docs: "docs", Monitors: "monitors" };
   import { columnName, epicLine, previewAction, sentenceCase, type AroundLine, type TicketFacts } from "./tickets";
 
   let {
@@ -68,11 +71,20 @@
     {#if around !== null && around.length > 0}
       <div class="tf-rollup">
         {#each around as line (line.section)}
-          <div>
-            <b>{line.section}</b><span
-              >{line.count}{#if line.failing}, <span class="tf-bad">{line.failing}</span>{/if}</span
-            >
-          </div>
+          {@const section = SCOPED_SECTION[line.section]}
+          {#if section !== undefined}
+            <a href="#/{section}" onclick={() => scopedTicket.open(section, card.entity_id)}>
+              <b>{line.section}</b><span
+                >{line.count}{#if line.failing}, <span class="tf-bad"><span class="tf-dot tf-err" aria-hidden="true"></span>{line.failing}</span>{/if}</span
+              >
+            </a>
+          {:else}
+            <div>
+              <b>{line.section}</b><span
+                >{line.count}{#if line.failing}, <span class="tf-bad"><span class="tf-dot tf-err" aria-hidden="true"></span>{line.failing}</span>{/if}</span
+              >
+            </div>
+          {/if}
         {/each}
       </div>
     {:else if around !== null}

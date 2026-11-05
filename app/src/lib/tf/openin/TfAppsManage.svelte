@@ -49,7 +49,7 @@
 </script>
 
 {#if editing === null}
-  <TfDialog title="Applications for Open in…" {onclose} {layers}>
+  <TfDialog title="Applications for Open in" {onclose} {layers}>
     {#snippet body()}
       <p class="tf-dsub">Open in… ▾ lists these, the default first. Pick the default with the round button; ↑ orders the rest. Saved in Settings › Checkouts.</p>
       <div class="tf-applist">
@@ -76,7 +76,6 @@
           </div>
         {/each}
       </div>
-      <span class="tf-dim tf-dnote">Pick the default with the round button.</span>
     {/snippet}
     {#snippet footer()}
       <button type="button" class="tf-btn tf-first" onclick={() => (editing = "add")}>Add an application…</button>

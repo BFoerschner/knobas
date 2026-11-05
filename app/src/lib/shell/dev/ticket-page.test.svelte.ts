@@ -148,7 +148,7 @@ function key(name: string, options: KeyboardEventInit = {}): void {
 }
 
 function crumbs(): (string | undefined)[] {
-  return [...(shown(".tf-crumbs")?.querySelectorAll("a, strong") ?? [])].map((part) => part.textContent?.trim());
+  return [...(shown(".tf-crumbs")?.querySelectorAll("a:not(.tf-esc), strong") ?? [])].map((part) => part.textContent?.trim());
 }
 
 function hint(): string | null {
@@ -366,7 +366,7 @@ test("a bare #/ticket lands on Tickets, and an unreadable id says it was not fou
   expect(lit()).toBe("Tickets");
 
   location.hash = "#/ticket/mock%3ANOPE-1";
-  await until(() => shown(".tf-empty")?.textContent?.includes("No ticket NOPE-1 in the mirror") ?? false, "an unreadable ticket never said so");
+  await until(() => shown(".tf-empty")?.textContent?.includes("knobas does not hold this ticket.") ?? false, "an unreadable ticket never said so");
 });
 
 /** A failed run of the fixture, and its address (`runHash`). */

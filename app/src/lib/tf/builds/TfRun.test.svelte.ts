@@ -318,10 +318,10 @@ function button(name: string): HTMLButtonElement | undefined {
 test("the header names the pipeline and number with the result, then branch, who started it, when and how long", async () => {
   draw();
   await settle();
-  expect(target.querySelector(".tf-crumbs")?.textContent).toBe("Builds › Payout_IntegrationTests › #1187");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toBe("Builds › Payouts › Payout_IntegrationTests › #1187");
   const h1 = target.querySelector("h1")!;
   expect(h1.textContent).toContain("Payout_IntegrationTests #1187");
-  expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("failure");
+  expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("Failed");
   const sub = target.querySelector(".tf-bhead .tf-sub")!.textContent!;
   expect(sub).toMatch(/^feature\/PAY-231-sepa-retry, started by VCS change a41f2c, .+, took 4 m 12 s$/);
   expect(button("Re-run")).toBeDefined();
@@ -447,7 +447,7 @@ test("a failed run's Overview leads with its first failed test, where it is, and
   expect(problem.querySelector("pre")?.textContent).toContain("at tests/sepa_retry.rs:14:5");
   const links = [...problem.querySelectorAll("a")].map((a) => [a.textContent, a.getAttribute("href")]);
   expect(links).toEqual([
-    ["Show it in the log", "#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187/log"],
+    ["Show in log", "#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187/log"],
     ["Open the test file", "#/repo/gitea%3Arepo%3Apayout-service/files/tests/sepa_retry.rs"],
   ]);
   expect(problem.querySelector(".tf-dim")?.textContent).toBe("Also failed in #1185 on this branch. #1186 on main passed.");
@@ -537,7 +537,7 @@ test("a run older than the latest page is looked for in the older pages", async 
 test("an address naming no run of the pipeline says so and leads back to it", async () => {
   draw("teamcity:build:1", undefined, {}, []);
   await settle();
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("No run of Payout_IntegrationTests at this address.");
+  expect(target.querySelector(".tf-empty")?.textContent).toContain("knobas does not hold this run.");
 });
 
 // -- Changes and Parameters (R-9.11) ------------------------------------------
@@ -746,7 +746,7 @@ test("a sync of the run's source finishing reads the run again: a running run dr
   await settle();
   expect(drawn.reads).toBe(2);
   expect(views, "the view again, and its failed test now that it finished").toEqual(["", "", "tests"]);
-  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("success");
+  expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("Passed");
   expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5 m");
   expect(button("Stop")).toBeUndefined();
   expect(button("Re-run")).toBeDefined();
@@ -864,7 +864,7 @@ test("a failed run with a failing test offers Create ticket after Open the test 
   draw();
   await settle();
   const acts = [...target.querySelectorAll(".tf-problem .tf-acts > *")].map((el) => el.textContent?.trim());
-  expect(acts).toEqual(["Show it in the log", "Open the test file", "Create ticket"]);
+  expect(acts).toEqual(["Show in log", "Open the test file", "Create ticket"]);
 });
 
 test("a green run and a failed run without a failing test draw no Create ticket", async () => {
@@ -1263,7 +1263,7 @@ const headerActs = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-bhe
 test("the view's Sync now ends the run's header after Refresh, and gives way to the run's own Sync now: one per header (#2287)", async () => {
   draw("teamcity:build:1187", undefined, { refresh: refreshProbe().ports }, RUNS, viewSync);
   await settle();
-  expect(headerActs().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  expect(headerActs().slice(-2)).toEqual(["Refresh run", "Sync now"]);
   unmount(page!);
   page = null;
   draw("teamcity:build:1187", undefined, { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, RUNS, viewSync);

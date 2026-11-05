@@ -16,5 +16,6 @@ export const page = definePage({
   role: CODE_HOST,
   component: TfCode,
   crumbs: true,
+  knows: (route) => route.rest.length === 0 || ["repos", "prs"].includes(route.rest[0]!),
   props: ({ route, ready, job }) => ({ ready, rest: route.rest, job }),
 });

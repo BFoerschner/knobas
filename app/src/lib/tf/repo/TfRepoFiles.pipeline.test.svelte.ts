@@ -113,7 +113,7 @@ const button = (label: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label || b.getAttribute("aria-label") === label) ?? null;
 
 async function addStep(label: string) {
-  button("+ Add step")!.click();
+  button("Add step")!.click();
   flushSync();
   const row = [...target.querySelectorAll<HTMLButtonElement>(".tf-pmenu [role=menuitem]")].find((b) => text(b).startsWith(label));
   expect(row, label).toBeDefined();
@@ -132,7 +132,7 @@ test("a gzipped file has no pipeline until one is added; then gunzip → jq runs
   expect(target.querySelector(".tf-pipe")).toBeNull();
   expect(asked).toEqual([]);
 
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   expect(text(target.querySelector(".tf-psteps"))).toContain("bytes→");
   await addStep("gzip · zstd · bzip2 · xz decompress");
@@ -149,7 +149,7 @@ test("a changed jq filter runs again once typing rests, and at once on Enter", a
   const { asked, piped } = pipedPort((steps) => done(JSON.stringify(steps)));
   draw(piped);
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   await addStep("jq");
@@ -181,7 +181,7 @@ test("a failed step is named, marked, and shown with what it said and the input 
   }));
   draw(piped);
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   await addStep("jq");
@@ -200,7 +200,7 @@ test("a step is moved with its grip's arrow keys and removed with its ×; Reset 
   const { asked, piped } = pipedPort(() => done("x"));
   draw(piped);
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   await addStep("Hex dump");
@@ -213,7 +213,7 @@ test("a step is moved with its grip's arrow keys and removed with its ×; Reset 
   button("Reset")!.click();
   await settle();
   expect(target.querySelector(".tf-pipe")).toBeNull();
-  expect(button("+ Pipeline")).not.toBeNull();
+  expect(button("Pipeline")).not.toBeNull();
 });
 
 const GZ_BYTES = Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0);
@@ -304,7 +304,7 @@ test("Save as default for *.json.gz… stores the pipeline by name and points th
   const pipelines = storedPipelines([]);
   draw(piped, undefined, { defaults: defaults.store, pipelines: pipelines.store });
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   button("Save as default for *.json.gz…")!.click();
@@ -327,12 +327,12 @@ test("the person's command steps are in the Add step menu, under Your commands",
   stepCommands.hold([{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }]);
   draw(piped, undefined, { stepCommands });
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
-  button("+ Add step")!.click();
+  button("Add step")!.click();
   flushSync();
   expect(text(target.querySelector(".tf-pmenu .tf-menu"))).toContain("Your commands");
-  button("+ Add step")!.click();
+  button("Add step")!.click();
   flushSync();
   await addStep("Upper");
   expect(asked.at(-1)?.steps).toEqual([{ step: "command", id: "upper" }]);

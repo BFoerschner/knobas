@@ -484,7 +484,7 @@ test("Add a source opens in the ticket-first look, and Esc closes it through the
     props: { rest: [], job: null, ready: true, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
   });
   await settle();
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   expect(dialog().querySelector("h2")?.textContent).toBe("Add a source");
   expect(dialog().querySelector(".tf-pane-h")?.textContent).toBe("What is it?");
@@ -519,7 +519,7 @@ test("Add a source: the generated form, Test connection's fills, then one add_so
     ),
   });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
   flushSync();
@@ -679,7 +679,7 @@ test("a source of an adapter just installed in Add a source opens with its descr
   p.listSources = vi.fn(() => Promise.resolve(added ? [...SOURCES, HARBOUR] : SOURCES));
   const props = await openMovable([], p);
 
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
   dialogButton("Install…").click();
@@ -755,7 +755,7 @@ test("an Uninstall takes the adapter out of what Settings offers (#1406)", async
   dialogButton("Uninstall").click();
   await settle();
 
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   const radios = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")];
   expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual(["Jira Data Center"]);
@@ -767,7 +767,7 @@ test("Add a source shows an adapter's roles, hosts and limits before it installs
     installAdapter: vi.fn(() => Promise.resolve(installAnswer())),
   });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "  /releases/knobas-adapter.json ");
   dialogButton("Install…").click();
@@ -789,7 +789,7 @@ test("Add a source shows an adapter's roles, hosts and limits before it installs
 test("Cancel on Install <name>? installs nothing and offers nothing new (#2031)", async () => {
   const p = ports({ previewInstallAdapter: vi.fn(() => Promise.resolve(previewAnswer())) });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
   dialogButton("Install…").click();
@@ -810,7 +810,7 @@ test("Add a source installs an adapter from a manifest, and it joins the radios 
   p.previewInstallAdapter = vi.fn(() => Promise.resolve(previewAnswer()));
   p.installAdapter = vi.fn(() => Promise.resolve(installAnswer()));
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   expect(dialogButton("Install…").disabled).toBe(true);
 
@@ -849,7 +849,7 @@ test("Add a source shows a refused install with its reason, and offers nothing n
     ),
   });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
   dialogButton("Install…").click();
@@ -868,7 +868,7 @@ test("Add a source shows a refused install with its reason, and offers nothing n
 
 test("Add a source waits for a passing test of what is typed now", async () => {
   await open([]);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
   flushSync();
@@ -1013,7 +1013,7 @@ async function addDialogOver(over: (jira: AdapterRow) => AdapterRow[], p: Partia
   const [jira] = (await base.listAdapters()) as AdapterRow[];
   const all = ports({ ...p, listAdapters: vi.fn(() => Promise.resolve(over(jira!) as never)) });
   await open([], all);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   return all;
 }
@@ -1193,7 +1193,7 @@ const GAP_REPORT = {
 async function testInAddDialog(prefillEpic: string | null) {
   const p = ports({ testSource: vi.fn(() => Promise.resolve(GAP_REPORT)) });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
   flushSync();
@@ -1245,7 +1245,7 @@ test("a source's page shows its runs, and Checkouts draws its own section", asyn
   });
   await settle();
   // Built since #844: its own section.
-  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Checkouts and Open in…");
+  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Checkouts and Open in");
 });
 
 test("Esc closes a dialog through the shell's layer stack", async () => {
@@ -1354,7 +1354,7 @@ test("Add a source pre-fills a floor under a minute, else 15 minutes (#1188)", a
       addSource: vi.fn(() => Promise.resolve(summary(`${kind}-2`, kind, "ok"))),
     });
     await open([], p);
-    button("+ Add a source").click();
+    button("Add a source…").click();
     await settle();
     const radio = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")].find((label) =>
       label.textContent!.includes(FLOORED.find((a) => a.adapter_kind === kind)!.name),
@@ -2019,7 +2019,7 @@ const loneRows = () => target.querySelectorAll(".tf-stg-body > .tf-stg-acts").le
 
 test("Sources and a source's page put their actions on the title line, in the header's order", async () => {
   await open([]);
-  expect(headerActions()).toEqual(["+ Add a source", "Sync all"]);
+  expect(headerActions()).toEqual(["Add a source…", "Sync all"]);
   expect(loneRows()).toBe(0);
   unmount(view!);
   view = null;
@@ -2057,7 +2057,7 @@ test("Installed adapters: Check for updates is small on the heading line; a row'
 
 test("Add a source's footer: Test connection on the far left, a ghost Cancel, then Add source", async () => {
   await open([]);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   expect([...dialog().querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [b.textContent!.trim(), b.className])).toEqual([
     ["Test connection", "tf-btn tf-first"],

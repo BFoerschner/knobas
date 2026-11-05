@@ -196,7 +196,7 @@ test("an id the mirror does not hold says so", async () => {
     entityView: () => Promise.resolve(null),
   }, "surveys:gone");
 
-  expect(target.querySelector(".tf-cfail")?.textContent).toBe("Could not read surveys:gone: surveys:gone is not in the mirror");
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("knobas does not hold this. It may not have synced yet.");
 });
 
 test("a view's source action is drawn as the page's toolbar, named as the source names it (#1407)", async () => {

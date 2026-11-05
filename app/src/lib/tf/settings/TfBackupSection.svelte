@@ -321,8 +321,8 @@
                   checked={chosen?.file === archive.file}
                   onchange={() => (pickedFile = archive.file)}
                 />
-                <span class="tf-mono">{archive.file}</span>
-                <span class="tf-dim tf-num">{formatBytes(archive.bytes)}</span>
+                <span class="tf-mono tf-bak-name" title={archive.file}>{archive.file.slice(archive.file.lastIndexOf("/") + 1)}</span>
+                <span class="tf-dim tf-num tf-bak-size">{formatBytes(archive.bytes)}</span>
               </label>
             {/each}
           </div>

@@ -27,12 +27,20 @@ export const SCOPED_FILTERS: Record<ScopedSection, readonly string[]> = {
   monitors: ["monitors"],
 };
 
-let held = $state<{ section: ScopedSection; entityId: string } | null>(null);
+let held = $state<{ section: ScopedSection | "tickets"; entityId: string } | null>(null);
 
 export const scopedTicket = {
   /** The section the ticket was opened in, or `null` when none is held. */
-  get section(): ScopedSection | null {
+  get section(): ScopedSection | "tickets" | null {
     return held?.section ?? null;
+  },
+  /** The ticket whose sub-tasks Tickets is narrowed to (the card's *Sub-tasks* row), as its entity id, or `null`. */
+  get subtasksOf(): string | null {
+    return held?.section === "tickets" ? held.entityId : null;
+  },
+  /** Open Tickets narrowed to the sub-tasks of `entityId`: the view names them, and nothing is typed into its search. */
+  openSubtasks(entityId: string): void {
+    held = { section: "tickets", entityId };
   },
   /** Open `section` narrowed to the ticket `entityId`: its filter bars on *This job*, the ticket held. */
   open(section: ScopedSection, entityId: string): void {
@@ -45,6 +53,6 @@ export const scopedTicket = {
   },
   /** The ticket a view in `section` names *This job* in place of the chosen one: the held one in its section, else `null`. */
   viewJob(section: Section | null): TicketRef | null {
-    return held !== null && held.section === section ? ticketRef(held.entityId) : null;
+    return held !== null && held.section !== "tickets" && held.section === section ? ticketRef(held.entityId) : null;
   },
 };

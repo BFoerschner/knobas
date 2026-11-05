@@ -292,6 +292,14 @@ export function focusedColumn(path: ColumnPath): number {
  */
 export type Step = { go: "asset"; id: string } | { go: "top" } | { go: "nowhere" };
 
+/**
+ * An asset's kind as a tag: two letters written like an element's symbol (*Si*, *Hv*, *Vm*, *Ce*, *Ct*), in sentence
+ * case as every label is. The word itself is the tag's title and heads the pane.
+ */
+export function kindTag(monogram: string): string {
+  return monogram.charAt(0).toUpperCase() + monogram.slice(1).toLowerCase();
+}
+
 /** The press did nothing here. */
 const NOWHERE: Step = { go: "nowhere" };
 

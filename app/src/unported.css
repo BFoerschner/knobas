@@ -44,7 +44,7 @@
 .tab:hover{color:var(--text);background:var(--raised)}
 .tab.on{color:var(--text);border-bottom-color:var(--text)}
 .tab .dot{width:6px;height:6px;border-radius:50%;background:var(--amber)}
-.mg{display:inline-flex;align-items:center;justify-content:center;width:24px;height:18px;border:1px solid var(--hair2);border-radius:3px;font:500 11px/1 var(--mono);color:var(--ink-2);flex:none}
+.mg{display:inline-flex;align-items:center;justify-content:center;width:24px;height:18px;border:1px solid var(--hair2);border-radius:3px;font:500 11px/1 var(--sans);color:var(--ink-2);flex:none}
 
 /* ---- a view's header bar: the asset tree ---- */
 .room-bar{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-bottom:1px solid var(--hair);overflow:hidden}

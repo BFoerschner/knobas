@@ -186,6 +186,12 @@ export function sectionOf(route: TfRoute): Section | null {
   return null;
 }
 
+/** The nav entry a route lights: its section, or for the asset tree, which has none, Monitors, the page it opens from. */
+export function navSection(route: TfRoute): Section | null {
+  const section = sectionOf(route);
+  return section === "assets" ? "monitors" : section;
+}
+
 /**
  * The address of a section's own page: `#/inbox`, `#/settings`. Job's needs a
  * ticket, so it has {@link jobHash} instead.
@@ -227,7 +233,8 @@ export function ticketHash(entityId: string, tab: string | null = null): string 
 export function isTopPage(route: TfRoute): boolean {
   if (route.view === "tickets") return true;
   if (route.view === "job") return route.tab === null;
-  if (route.view === "full") return route.head === route.section && route.rest.length === 0;
+  // The asset tree has no nav entry, so it is not a top page: it sits under Monitors.
+  if (route.view === "full") return route.head === route.section && route.rest.length === 0 && route.head !== "assets";
   return false;
 }
 
@@ -237,11 +244,12 @@ export function isTopPage(route: TfRoute): boolean {
  * address, which have none. Listed first, the pages whose parent is not their
  * section's top page; everything else inside a section goes to that top page.
  *
- * - a run (`#/build/…`) → Builds;
- * - a pull request or a repository, any tab of it → Code;
+ * - a run (`#/build/<pipeline>/<run>`) → its pipeline;
+ * - a pipeline, a section's own tab → none: they are the section's page;
+ * - a pull request or a repository, any tab of it → Code (a pull request's page says its repository, `parentPage`);
  * - a commit, which opens under its repository's Commits tab
  *   (`#/repo/<id>/commits/<commit>`) → that repository's page;
- * - a doc page → Docs; an asset or a route → the asset tree's top page;
+ * - a doc page → Docs; an asset or a route → the asset tree's top page (an asset's page says its holder), and the tree → Monitors;
  * - a ticket page, any tab of it → Tickets.
  *
  * A branch opens on its repository's Branches tab, so its parent is the
@@ -253,12 +261,23 @@ export function isTopPage(route: TfRoute): boolean {
  */
 export function parentOf(route: TfRoute): string | null {
   if (route.view === "ticket") return sectionHash("tickets");
+  // The asset tree has no nav entry: it opens from Monitors, which lights for it (`navSection`).
+  if (route.view === "full" && route.head === "assets") return sectionHash("monitors");
   if (route.view !== "full" || isTopPage(route)) return null;
   if (route.head === "repo" && route.rest[0] && route.rest[1] === "commits" && route.rest[2]) {
     return repoHash(route.rest[0]);
   }
+  // A run sits under its pipeline. A bare run's address names none yet.
+  if (route.head === "build" && route.rest[0] && route.rest[1]) return `#/builds/${encodeURIComponent(route.rest[0])}`;
+  // A section's own tabs, and a pipeline picked on Builds, are the section's page: its parent would be a sibling.
+  if (TABBED_HEADS.has(route.head)) return null;
+  // A source's page sits under Sources; every other section of Settings is a tab of it.
+  if (route.head === "settings") return route.rest[0] === "source" ? "#/settings/sources" : null;
   return sectionHash(route.section);
 }
+
+/** The sections whose deeper addresses are their own page's tabs or a pick in its rail. */
+const TABBED_HEADS: ReadonlySet<string> = new Set(["builds", "code", "time", "monitors", "inbox"]);
 
 function decode(segment: string): string {
   try {

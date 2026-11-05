@@ -33,7 +33,11 @@ export function isRunning(pipeline: PipelineRow): boolean {
  */
 /** A source's state as a chip's word: TeamCity says *FAILURE*, and every other chip says *failure*, *open*, *merged*. */
 export function stateWord(text: string): string {
-  return text === text.toUpperCase() ? text.toLowerCase() : text;
+  const said = text.toLowerCase();
+  // The source's words mapped to one set: a chip reads what the filters and the chart's legend read.
+  if (said === "success") return "Passed";
+  if (said === "failure") return "Failed";
+  return said.charAt(0).toUpperCase() + said.slice(1);
 }
 
 export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | "q" {

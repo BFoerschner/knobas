@@ -81,7 +81,8 @@
   landed.
 -->
 <script lang="ts">
-  import { ipcErrorMessage, type SearchResponse } from "../ipc";
+  import { ipcErrorMessage, isIpcError, type SearchResponse } from "../ipc";
+  import TfNothingHere from "../tf/TfNothingHere.svelte";
   import {
     applyEstateImport as realApplyEstateImport,
     assetTree as realAssetTree,
@@ -157,6 +158,7 @@
     emptyPath,
     estateQuery,
     heldByPath,
+    kindTag,
     landingOf,
     matchesIn,
     problemBadge,
@@ -254,6 +256,7 @@
     now = () => new Date(),
     stripWidth,
     onnamed,
+    onholder,
   }: {
     nav: AssetsNav;
     ports?: Partial<AssetPorts>;
@@ -283,6 +286,8 @@
     stripWidth?: () => number;
     /** Told the asset the pane has read, or `null`: what the page's breadcrumb calls this address. */
     onnamed?: (name: string | null) => void;
+    /** The asset holding the selected one, which the shell's `Esc` steps up to; `null` at the top. */
+    onholder?: (holder: { id: string; name: string } | null) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -348,6 +353,8 @@
   /** One list per column, aligned with `path.parents`. */
   let columns = $state<AssetRow[][]>([]);
   let failure = $state<string | null>(null);
+  /** {@link failure} when the address names nothing the estate holds: the one nothing-here state, not a failed read. */
+  const NOT_HELD = "knobas does not hold this asset. It may have been deleted, or not have synced yet.";
   /** Nothing has come back yet — told apart from "an estate with nothing in it". */
   let loaded = $state(false);
 
@@ -556,7 +563,7 @@
         // there has no path, and a pane still showing the last one would be
         // the view lying about what the address names.
         detail = null;
-        failure = ipcErrorMessage(cause);
+        failure = isIpcError(cause) && cause.code === "not_found" ? NOT_HELD : ipcErrorMessage(cause);
       },
     });
   });
@@ -638,6 +645,10 @@
   });
 
   $effect(() => onnamed?.(detail?.asset.name ?? null));
+  $effect(() => {
+    const held = detail?.held_by.at(-1) ?? null;
+    onholder?.(held === null ? null : { id: held.id, name: held.name });
+  });
 
   function select(row: AssetRow) {
     nav.go(addressOf(row));
@@ -1556,8 +1567,8 @@
 <section class="view" onkeydown={onkeydown}>
   <header class="tf-fhead">
     <div>
-      <h1>Asset tree</h1>
-      <div class="tf-sub">The estate as columns: what holds what, what runs where, and what is wrong in it.</div>
+      <h1>{detail?.asset.name ?? "Asset tree"}</h1>
+      {#if selectedId === null}<div class="tf-sub">The estate as columns: what holds what, what runs where, and what is wrong in it.</div>{/if}
     </div>
     <!--
       No tab strip (#1459): its *Monitors* tab named a roster that went with
@@ -1568,7 +1579,7 @@
       whole estate, and the address that most needs it — a tree with nothing
       in it yet — has neither a column nor a selection to hang it off.
     -->
-    <div class="tf-acts"><button class="tf-btn imp" onclick={() => (importing = true)}>Import</button></div>
+    <div class="tf-acts"><button class="tf-btn imp" onclick={() => (importing = true)}>Import…</button></div>
   </header>
 
   {#if typesFailure}
@@ -1606,8 +1617,9 @@
     is the list and the count, which is what #444 owes.
   -->
   {#if alerts.count > 0}
-    <section class="alerts" aria-label="Open alerts">
-      <h2>Open alerts <span class="tf-count tf-err">{alerts.count}</span></h2>
+    <!-- Folded once an asset is selected, so the tree starts near the top; the count stays in view. -->
+    <details class="alerts" aria-label="Open alerts" open={selectedId === null}>
+      <summary><h2>Open alerts <span class="tf-count tf-err">{alerts.count}</span></h2></summary>
       <ul>
         {#each alerts.open as alert (alert.id)}
           {#if alert.assets.length === 0}
@@ -1644,7 +1656,7 @@
           {/if}
         {/each}
       </ul>
-    </section>
+    </details>
   {/if}
 
   <!--
@@ -1672,6 +1684,9 @@
         oninput={(event) => typed(event.currentTarget.value)}
         onkeydown={onboxkey}
       />
+      {#if query !== ""}
+        <button type="button" class="tf-fclear" aria-label="Clear the search" onclick={() => typed("")}>✕</button>
+      {/if}
     </label>
     {#if query.trim() !== ""}
       <ol class="res">
@@ -1703,7 +1718,9 @@
 
   <div class="tree" bind:this={tree}>
     <div class="cols" bind:this={stripEl}>
-      {#if failure}
+      {#if failure === NOT_HELD}
+        <div class="none"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
+      {:else if failure}
         <div class="none tf-empty">
           <p class="empty fail">{failure}</p>
           <button class="tf-btn" onclick={() => (revision += 1)}>Try again</button>
@@ -1720,7 +1737,7 @@
         <div class="none tf-empty">
           <p class="empty">Nothing in the estate yet. Import an estate file, or add the first asset by hand.</p>
           <button class="tf-btn tf-primary" disabled={types.length === 0} onclick={() => openCreate(0)}>
-            New asset
+            New asset…
           </button>
         </div>
       {:else}
@@ -1740,7 +1757,7 @@
               onclick={() => (anchored = { at: index, of: selectedId })}
               title="Show what {step?.name ?? 'the estate'} holds"
             >
-              <span class="smg" aria-hidden="true">{step?.monogram ?? "··"}</span>
+              <span class="smg" aria-hidden="true">{step ? kindTag(step.monogram) : "··"}</span>
               <span class="vn">{step?.name ?? "top level"}</span>
             </button>
           {:else}
@@ -1780,7 +1797,7 @@
                       title={addressOf(row)}
                       onclick={() => select(row)}
                     >
-                      <span class="mg" title={row.type_label}>{row.monogram}</span>
+                      <span class="mg" title={row.type_label}>{kindTag(row.monogram)}</span>
                       <span class="nm">{row.name}</span>
                       {#if work !== null}
                         <!--
@@ -1860,7 +1877,7 @@
         </p>
       {:else}
         <header class="pane-h">
-          <span class="mg">{detail.asset.monogram}</span>
+          <span class="mg" title={detail.asset.type_label}>{kindTag(detail.asset.monogram)}</span>
           {#if renaming}
             <input
               class="inp"
@@ -1966,7 +1983,7 @@
           >
             Link to…
           </button>
-          <button class="tf-btn tf-sm tf-danger" onclick={() => (deleting = true)}>Delete</button>
+          <button class="tf-btn tf-sm tf-danger" onclick={() => (deleting = true)}>Delete…</button>
         </div>
 
         {#if writeFailure}
@@ -1975,6 +1992,7 @@
 
         <section class="grp">
           <h3 class="lab">Properties</h3>
+          {#if detail.properties.some((property) => property.custom)}<p class="faint legend">* added here, not from its type</p>{/if}
           <dl class="props">
             {#each detail.properties as property (property.key)}
               <div class="prop {property.custom ? 'own' : ''}">
@@ -2221,7 +2239,7 @@
               writeFailure = null;
             }}
           >
-            Add a route
+            Add a route…
           </button>
         </section>
 
@@ -2618,7 +2636,7 @@
        not reach into it. -->
   {@const doomed = detail.asset}
   {@const ask = deleteConfirm(detail)}
-  <TfDialog closeButton title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
+  <TfDialog title="Delete {doomed.name}?" onclose={() => (deleting = false)}>
     {#snippet body()}
       <!--
         `editing.ts`' sentence (#1463, R-11.19a): links stay marked deleted,
@@ -2696,7 +2714,9 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    overflow: visible;
+    /* Clipped to the tree, and behind the rows, so a wire never runs through a label or under the status bar. */
+    overflow: hidden;
+    z-index: 0;
   }
 
   .wires path {
@@ -2762,6 +2782,13 @@
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* The last column takes what the strip leaves, so no blank strip stands before the pane. */
+  .cols > .colw:last-child {
+    flex: 1 0 220px;
   }
 
   /*
@@ -2809,6 +2836,35 @@
     padding: 8px 22px 10px;
     background: var(--sheet);
     border-top: 1px solid var(--rule);
+  }
+
+  .alerts summary {
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .alerts summary::-webkit-details-marker {
+    display: none;
+  }
+
+  /* One drawn chevron, as every fold has. */
+  .alerts summary::before {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin: 0 2px 1px 2px;
+    color: var(--ink-2);
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(-45deg);
+  }
+
+  .alerts[open] summary::before {
+    transform: rotate(45deg);
   }
 
   .alerts h2 {
@@ -2929,7 +2985,7 @@
     z-index: 5;
     display: grid;
     gap: 1px;
-    width: min(440px, calc(100% - 44px));
+    width: min(360px, calc(100% - 44px));
     max-height: 320px;
     margin: 4px 0 0;
     padding: 4px;
@@ -3014,7 +3070,9 @@
 
   .col.spine .smg {
     flex: none;
-    font: 500 var(--t-2xs)/1 var(--mono);
+    font-size: var(--t-2xs);
+    line-height: 1;
+    font-weight: 500;
     color: var(--ink-2);
   }
 
@@ -3290,6 +3348,11 @@
 
   /* A custom key is marked, so the reader can tell the schema from their own
      additions without the pane keeping a copy of the type table. */
+  .legend {
+    margin: 0 0 6px;
+    font-size: var(--t-xs);
+  }
+
   .prop.own dt::after {
     content: "*";
     color: var(--ink-2);

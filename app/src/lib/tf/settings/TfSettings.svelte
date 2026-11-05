@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage, EVENTS } from "../../ipc";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
@@ -196,12 +197,29 @@
   /** `#/settings` itself: the *Settings* crumb would lead back to this page. */
   const bareSettings = $derived(rest.length === 0);
   const crumbName = $derived(sourceId === null ? sectionName : (current?.display_name ?? sourceId));
+  /** Below 900 px, whether the sections rail is unfolded under its bar. */
+  let railOpen = $state(false);
+  /** The section's column is the page's scroller, so moving to another section starts it at its top. */
+  function atTopOnMove(scroller: HTMLElement) {
+    void place.section;
+    void sourceId;
+    scroller.scrollTop = 0;
+  }
 </script>
 
-<div class="tf-full">
-  <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, { name: crumbName }]} {back} />
-  <div class="tf-stg">
-    <nav class="tf-stg-nav" aria-label="Settings">
+<div class="tf-full tf-stgpage">
+  <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, ...(sourceId === null ? [{ name: crumbName }] : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }])]} {back} />
+  <TfRailBar label="Section" value={sectionName} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} />
+  <div class="tf-stg" class:tf-rail-shut={!railOpen}>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+    <nav
+      id="tf-settings-rail"
+      class="tf-stg-nav tf-rail"
+      aria-label="Settings"
+      onclick={(event) => {
+        if ((event.target as Element).closest("a[href]")) railOpen = false;
+      }}
+    >
       {#each SETTINGS_SECTIONS as [key, label] (key)}
         <a href={settingsHash(key)} aria-current={key === place.section ? "page" : undefined}>
           {label}
@@ -211,6 +229,7 @@
         </a>
       {/each}
     </nav>
+    <div class="tf-stg-scroll" {@attach atTopOnMove}>
     <div class="tf-stg-body">
       {#if place.section === "sources" && error !== null && sources !== null}
         <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
@@ -287,6 +306,7 @@
             {ports}
             {layers}
             add={"add" in place ? place.add : undefined}
+            reenter={"reenter" in place && place.reenter === true}
             onhealth={(next) => health.patch(next)}
             onchanged={replaceRow}
             onstarted={() => markStarted(current.id)}
@@ -298,6 +318,7 @@
           />
         {/key}
       {/if}
+    </div>
     </div>
   </div>
 </div>

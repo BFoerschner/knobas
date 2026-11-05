@@ -77,7 +77,7 @@
 </script>
 
 <header class="tf-stg-h">
-  <h1>Checkouts and Open in…</h1>
+  <h1>Checkouts and Open in</h1>
   <p>Where your clones live, and the applications that open them.</p>
 </header>
 {#if settings !== null}

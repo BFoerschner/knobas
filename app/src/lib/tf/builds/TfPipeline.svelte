@@ -422,12 +422,12 @@
   if (filter.scope === null) filter.scope = "all";
   const config = $derived<FilterConfig>({
     id: "builds-runs",
-    placeholder: "Filter by number, branch or person",
+    placeholder: "Filter runs",
     noun: "runs",
     one: "run",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "My job’s branches", query: "" }] : []),
-      { id: "mine", label: "Started by me", query: "" },
+      ...(job !== null ? [{ id: "job", label: "This job", title: `Runs on ${job}'s branches`, query: "" }] : []),
+      { id: "mine", label: "Mine", title: "Runs you started", query: "" },
       { id: "all", label: "All", query: "" },
     ],
     chips: [{ key: "result", label: "Result", options: RESULTS.map((value) => ({ value, label: value })) }],
@@ -440,7 +440,7 @@
           all,
           {
             text: filter.text,
-            // *My job's branches* is only offered with a job; a remembered one without reads as *All*.
+            // *This job* is only offered with a job; a remembered one without reads as *All*.
             scope: job !== null || filter.scope !== "job" ? filter.scope : "all",
             results: filter.chips["result"] ?? [],
             branch: filter.dropdowns["branch"] ?? null,
@@ -562,9 +562,9 @@
       <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
     {/if}
     {#if pipeline.web_url !== null}
-      <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={openInSource}><span>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></span></button>
+      <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={openInSource}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
     {/if}
-    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} />
+    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
   </div>
 </header>
 {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
@@ -658,7 +658,7 @@
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
-                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : stateWord(run.state.text)}</span>{/if}
+                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "Queued" : stateWord(run.state.text)}</span>{/if}
               </td>
               <td class="tf-mono tf-run-br" title={run.branch ?? undefined}
                 >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
@@ -684,15 +684,20 @@
               <td class="tf-nowrap tf-dim tf-num tf-run-at">{run.started !== null ? shortTime(run.started) : ""}</td>
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
-                  <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
-                  {#if run.finished !== null}
-                    <button
-                      type="button"
-                      class="tf-btn tf-sm tf-ghost"
-                      {...refusedAttrs(cannotRun)}
-                      onclick={() => runDialog(run)}>Run again…</button
-                    >
-                  {/if}
+                  <span class="tf-rowacts">
+                    <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
+                    {#if run.finished !== null}
+                      <button
+                        type="button"
+                        class="tf-btn tf-sm tf-ghost"
+                        {...refusedAttrs(cannotRun)}
+                        onclick={() => runDialog(run)}>Run again…</button
+                      >
+                    {:else}
+                      <!-- The empty slot keeps *Log* in its column on a run still going. -->
+                      <span class="tf-btn tf-sm tf-ghost tf-hidden" aria-hidden="true">Run again…</span>
+                    {/if}
+                  </span>
                 {/if}
               </td>
             </tr>

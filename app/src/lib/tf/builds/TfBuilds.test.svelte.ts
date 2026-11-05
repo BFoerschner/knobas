@@ -8,6 +8,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import * as entityIpc from "../../ipc/entity";
+import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 
 // Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
@@ -138,7 +139,7 @@ test("a bare #/builds selects the first failing pipeline and lists its runs newe
   expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout_IntegrationTests");
   const first = target.querySelector(".tf-runs tbody tr");
   expect(first?.textContent).toContain("#1187");
-  expect(first?.textContent).toContain("failure");
+  expect(first?.textContent).toContain("Failed");
   expect(first?.textContent).toContain("4 m 12 s");
   expect(target.querySelectorAll(".tf-runs tbody tr")).toHaveLength(14);
 });
@@ -209,7 +210,7 @@ test("a run's address without its pipeline moves to the full address of the pipe
 test("a run's address no pipeline ran says so", async () => {
   draw(["teamcity:build:1"], "build", [], { view: () => Promise.resolve(null) });
   await settle();
-  expect(target.querySelector(".tf-bmain .tf-empty")?.textContent).toContain("No run at this address.");
+  expect(target.querySelector(".tf-bmain .tf-empty")?.textContent).toContain("knobas does not hold this run.");
 });
 
 test("no pipelines says what would fill the list", async () => {
@@ -393,6 +394,7 @@ const ON_JOB: JobPipeline[] = [
 
 test("a pipeline This job leaves out stays pinned over the list while you are on it, and says it is not on the job", async () => {
   const off = TREE.find((p) => !ON_JOB.some((row) => row.pipeline_id === p.entity_id))!;
+  sessionFilter("builds-pipelines").scope = "job";
   drawTree({ job: "PAY-231", reasons: ON_JOB, rest: [off.entity_id] });
   await settle();
   const pinned = target.querySelector<HTMLAnchorElement>(".tf-pl-pin a");
@@ -401,14 +403,17 @@ test("a pipeline This job leaves out stays pinned over the list while you are on
   expect(pinned?.textContent).toContain("Not in PAY-231");
 });
 
-test("This job is on by default with a job: the tree pruned to its pipelines, each with its reasons", async () => {
+test("All is the default, as on every page; This job prunes the tree to its pipelines, each with its reasons", async () => {
   drawTree({ job: "PAY-231", reasons: ON_JOB });
   await settle();
   const scope = [...target.querySelectorAll<HTMLButtonElement>(".tf-pl .tf-seg button")];
-  expect(scope.map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
-    ["This job PAY-231", "true"],
-    ["All", "false"],
+  expect(scope.map((b) => [b.textContent?.replace(/\s+/g, " ").trim(), b.getAttribute("aria-pressed")])).toEqual([
+    [`This job ${ON_JOB.length}`, "false"],
+    ["All", "true"],
   ]);
+  scope[0]!.click();
+  flushSync();
+  await settle();
   expect(target.querySelector(".tf-scope-note")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
     "2 of 5 pipelines are relevant to PAY-231. Show all",
   );
@@ -431,6 +436,7 @@ test("This job is on by default with a job: the tree pruned to its pipelines, ea
 });
 
 test("a job with no pipelines says so and offers to search all of them", async () => {
+  sessionFilter("builds-pipelines").scope = "job";
   drawTree({ job: "PAY-999", reasons: [] });
   await settle();
   const note = [...target.querySelectorAll(".tf-pl-note")].map((n) => n.textContent?.replace(/\s+/g, " ").trim());

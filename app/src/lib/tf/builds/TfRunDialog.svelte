@@ -336,7 +336,7 @@
     {/if}
     <button
       type="button"
-      class="tf-linkish tf-run-add"
+      class="tf-btn tf-sm tf-run-add"
       {...refusedAttrs(cannotOverride)}
       onclick={() => {
         if (cannotOverride === null) extra = [...extra, { name: "", value: "" }];

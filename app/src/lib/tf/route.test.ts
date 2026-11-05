@@ -36,10 +36,10 @@ test("the asset tree is a section of its own, with no nav entry, and an asset's 
   expect(NAV).not.toContain("assets");
 });
 
-test("every address of the tree with nothing selected is its top page, whatever tab name it still carries", () => {
+test("every address of the tree with nothing selected sits under Monitors, whatever tab name it still carries", () => {
   for (const hash of ["#/assets", "#/assets/tree"]) {
-    expect(isTopPage(parseTfHash(hash)), hash).toBe(true);
-    expect(parentOf(parseTfHash(hash)), hash).toBeNull();
+    expect(isTopPage(parseTfHash(hash)), hash).toBe(false);
+    expect(parentOf(parseTfHash(hash)), hash).toBe("#/monitors");
   }
 });
 

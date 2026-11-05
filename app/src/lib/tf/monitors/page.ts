@@ -14,5 +14,6 @@ export const page = definePage({
   role: MONITORING,
   component: TfMonitors,
   crumbs: true,
+  knows: (route) => route.rest.length === 0 || route.rest[0] === "unmonitored",
   props: ({ route, ready, job }) => ({ ready, rest: route.rest, job }),
 });

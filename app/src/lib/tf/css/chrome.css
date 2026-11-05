@@ -68,12 +68,12 @@
 
 /* ---------- status bar ---------- */
 /* A rail's selected row is on the fill: the tones on it are the ones that read there. */
-.tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"] {
+.tf-pi[aria-current="true"], .tf-stg-nav a[aria-current="page"], .tf-views a[aria-current="true"], .tf-rd-tree a[aria-current="true"], .tf-rd-tree details > summary.tf-cur, .tf-ftree a[aria-current="true"] {
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
 }
 
 /* Inside a box that clips, a ring outside the element loses its sides: it draws inside. */
-:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc, .tf-picks, .tf-picklist) :focus-visible { outline-offset: -2px; }
+:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc, .tf-picks, .tf-picklist, .tf-tbl) :focus-visible { outline-offset: -2px; }
 
 .tf-status {
   display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: var(--t-xs); color: var(--ink-2);
@@ -112,8 +112,10 @@
 .tf-status .tf-queued .tf-need { color: var(--warn); }
 
 /* ---------- main, full views, breadcrumb ---------- */
-/* One rule on every page: a scrollbar only where there is something to scroll, so a band reaches the window's edge. */
-.tf-main { overflow: auto; min-height: 0; min-width: 0; }
+/* The page's scroller keeps the scrollbar's room whether or not it has one, so switching a tab moves nothing. */
+.tf-main { overflow: auto; min-height: 0; min-width: 0; scrollbar-gutter: stable; }
+/* A viewport-high page has its scroller inside it, which keeps that room at the window's edge: this one keeps none. */
+.tf-main:has(> .tf-kept:not([hidden]) > :is(.tf-tickets, .tf-bv, .tf-rd, .tf-stgpage, .tf-ticketpage)), .tf-main:has(> .tf-kept:not([hidden]) .tf-asset-tree) { scrollbar-gutter: auto; }
 /* A page keep-alive holds (#2247): the shown one lays out as if the wrapper were not there, a hidden one is not drawn. */
 .tf-kept { display: contents; }
 .tf-kept[hidden] { display: none; }
@@ -125,7 +127,10 @@
 .tf-crumbs a { text-decoration: none; }
 .tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
 .tf-crumbs .tf-sep { color: var(--ink-2); }
-.tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
+/* *Back to <name>*: a link, drawn as the crumbs are. The key beside it is a key, so the underline stops at the words. */
+.tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.tf-crumbs a.tf-esc .tf-esc-t { text-decoration: underline; text-underline-offset: 2px; }
+.tf-crumbs a.tf-esc:hover { color: var(--ink); }
 /* Row one is the title and the actions (Controls, *Header*). The rest of the title block runs the full width under
    them, so a long subline is never squeezed into what the buttons leave. */
 .tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(min-content, 1fr) auto; gap: 0 12px; align-items: start; }
@@ -152,6 +157,8 @@
 /* An empty state: centred, says what would fill it, offers the action. */
 .tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .tf-empty p { max-width: 60ch; }
+/* The one "nothing here" state (`TfNothingHere.svelte`): the same block, held down the page so it reads as the page's answer. */
+.tf-nohere { padding-top: 72px; }
 
 /* The job key: Archivo at width 62, weight 800, 64px. The identity of the app. */
 .tf-jobkey { font-weight: 800; font-variation-settings: "wdth" 62; font-size: var(--t-d3); line-height: 1; letter-spacing: -.01em; }
@@ -172,7 +179,15 @@
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 /* Not `--sheet-2`: a row's hover is that fill too, and a ghost button in the row would show no change. */
 .tf-btn.tf-ghost:hover { background: var(--rule-2); border-color: var(--rule); }
-.tf-btn[disabled], .tf-btn[aria-disabled="true"], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }
+/* Disabled, one rule: no fill, muted text. In both themes any fill means it can be pressed, so a disabled primary is not
+   a paler primary. `--muted` passes 4.5:1 on `--sheet-2`, so its label still reads. */
+.tf-btn[disabled], .tf-btn[aria-disabled="true"] { cursor: not-allowed; color: var(--muted); background: none; border-color: var(--rule-2); }
+.tf-btn.tf-primary[disabled], .tf-btn.tf-primary[aria-disabled="true"], .tf-btn.tf-primary.tf-danger[disabled], .tf-btn.tf-primary.tf-danger[aria-disabled="true"] {
+  color: var(--muted); background: var(--sheet-2); border-color: var(--rule);
+}
+.tf-btn[disabled]:hover, .tf-btn[aria-disabled="true"]:hover { border-color: var(--rule-2); background: none; }
+.tf-btn.tf-primary[disabled]:hover, .tf-btn.tf-primary[aria-disabled="true"]:hover { border-color: var(--rule); background: var(--sheet-2); }
+.tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }
 .tf-iconbtn[disabled]:hover { background: none; }
 .tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
 .tf-btn.tf-lg { height: var(--control-h-lg); padding: 0 16px; font-size: var(--t-md); }
@@ -198,15 +213,24 @@
 .tf-railbar [aria-expanded="true"] .tf-railmark { transform: rotate(-135deg); margin-bottom: -2px; }
 .tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 
+/* A row's repeated actions (design system, Motion): a column of the same words on every row competes with the data, so
+   they fade in on hover and on focus within the row. Where nothing hovers they stay. An action only some rows offer
+   because of their state (*Ack*, *Open PR*) is not in this group and stays. */
+@media (hover: hover) {
+  .tf-rowacts { opacity: 0; transition: opacity 120ms ease-out; }
+  :is(tr, li, .tf-rowhost):is(:hover, :focus-within) .tf-rowacts { opacity: 1; }
+}
+
 /* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's
    `.tf-wtabs` (`role="tab"`, `aria-selected`) draw their tabs with this one rule. */
 :is(.tf-tabs, .tf-wtabs) a {
   border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
-  margin-bottom: -1px; white-space: nowrap; text-decoration: none;
+  margin-bottom: -1px; white-space: nowrap; text-decoration: none; font-weight: 500;
 }
 :is(.tf-tabs, .tf-wtabs) a:hover { color: var(--ink); border-bottom-color: var(--rule); }
+/* The ink and the rule say which tab: one weight, so choosing a tab moves none of its neighbours. */
 :is(.tf-tabs, .tf-wtabs) a:is([aria-current="page"], [aria-selected="true"]) {
-  color: var(--ink); border-bottom-color: var(--ink); font-weight: 600;
+  color: var(--ink); border-bottom-color: var(--ink);
 }
 
 /* The segmented control and the pill toggles are page-body controls: small (Controls). The segment's
@@ -224,7 +248,9 @@
   border: 1px solid var(--rule); background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
 .tf-fchips button:hover { border-color: var(--ink-2); }
-.tf-fchips button[aria-pressed="true"] { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
+/* A pill that is on is ringed and on the inset fill, not filled: several can be on at once, and a row of filled pills
+   outweighed the one action a page exists for (Standup's people against *Publish*). Only one thing a row is filled. */
+.tf-fchips button[aria-pressed="true"] { background: var(--sheet-2); color: var(--ink); border-color: var(--ink); }
 
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {

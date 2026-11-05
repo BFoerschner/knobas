@@ -19,6 +19,7 @@
     inbox,
     badges,
     timer,
+    job = null,
     onsearch,
     ontimer,
     ontheme,
@@ -28,6 +29,8 @@
     inbox: Pick<Inbox, "count">;
     badges: Pick<Badges, "builds" | "monitors">;
     timer: Pick<Timer, "current" | "elapsed">;
+    /** The chosen job, as its key: what *Start* starts on, so the bar always names the job. */
+    job?: string | null;
     onsearch: () => void;
     /** Stop the timer into the worklog draft, or start one: the shell's verb. */
     ontimer: (() => void) | undefined;
@@ -98,11 +101,11 @@
   {:else}
     <button
       class="tf-timer tf-off"
-      title="Timer (⌘T)"
+      title={job === null ? "Timer (⌘T)" : `Start the timer on ${job} (⌘T)`}
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
     >
-      <span>Start timer</span>
+      <span>Start{#if job !== null}{" "}<span class="tf-timer-key tf-mono">{job}</span>{:else}{" "}timer{/if}</span>
       <span class="tf-timer-stop" aria-hidden="true">▶</span>
     </button>
   {/if}

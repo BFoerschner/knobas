@@ -1,7 +1,7 @@
 /* ---------- Code (#837, R-8.1, R-8.2) ---------- */
 .tf-cbody { padding: 16px 22px 40px; }
 .tf-cbody .tf-tbl a { color: inherit; text-decoration: none; }
-.tf .tf-cgroup-h { font-size: var(--t-sm); font-weight: 600; margin: 18px 0 8px; display: flex; gap: 8px; align-items: center; }
+.tf .tf-cgroup-h { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 18px 0 8px; display: flex; gap: 8px; align-items: center; }
 .tf .tf-cgroup-h:first-child { margin-top: 0; }
 /* One column grid for every group's table, so the groups line up. */
 .tf-cprs { table-layout: fixed; }
@@ -26,12 +26,19 @@
 .tf-bsel:hover { border-color: var(--ink-2); }
 .tf-bsel svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .tf-bsel select {
-  height: 100%; border: 0; background: none; color: inherit; cursor: pointer; max-width: 220px;
+  height: 100%; border: 0; background: none; color: inherit; cursor: pointer; min-width: 64px; max-width: 220px; padding-right: 6px;
   font: 600 var(--t-sm) var(--mono); font-variant-ligatures: none;
 }
 .tf-bsel select:focus-visible { outline: none; }
 .tf-bsel:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tf-bsel:has(select:disabled) { opacity: .55; }
+/* A repository's title never breaks inside its name; the actions stack under it before the two collide. */
+.tf-repohead { container: repohead / inline-size; }
+.tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@container repohead (max-width: 860px) {
+  .tf-repohead-in { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .tf-repohead-in > .tf-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-left: 0; }
+}
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-repo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
 /* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */
@@ -144,6 +151,8 @@
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
+/* A pull request's number is a number: Archivo in tabular figures, not a code value. */
+.tf-prno { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 500; }
 /* The sha, in the repository's table and a pull request's: its own width, and the message takes the rest. */
 .tf-rcommits td.tf-mono { width: 110px; white-space: nowrap; }
 .tf-rcommits td.tf-nowrap { width: 1%; }
@@ -166,7 +175,8 @@
 .tf-dtool-prog { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-diff { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-diff + .tf-diff { margin-top: 12px; }
-.tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; gap: 10px; align-items: center; }
+/* The file's head stays in view through a long diff. */
+.tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; gap: 10px; align-items: center; position: sticky; top: 0; z-index: 2; }
 .tf-diff .tf-ln { display: grid; grid-template-columns: 46px 46px 1fr auto; white-space: pre; position: relative; }
 .tf-diff.tf-split .tf-ln { grid-template-columns: 46px minmax(0, 1fr) auto; overflow: hidden; }
 .tf-diff .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
@@ -217,7 +227,7 @@
 /* Bounded by the window, with a scroll of its own, so a long list's last file is in reach (#2091). */
 .tf-flist {
   display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px;
-  font-size: var(--t-sm); position: sticky; top: 64px; max-height: calc(100vh - 160px); overflow: auto;
+  font-size: var(--t-sm); position: sticky; top: 12px; max-height: calc(100vh - 140px); overflow: auto;
 }
 .tf-flist button {
   display: flex; gap: 8px; padding: 6px 10px; border: 0; border-top: 1px solid var(--rule-2); background: none; color: var(--ink);
@@ -225,9 +235,21 @@
 }
 .tf-flist button:first-of-type { border-top: 0; }
 .tf-flist button:hover { background: var(--sheet-2); }
+/* The file you are in is the rail's ink pill, as every rail's selected row is. */
+.tf-flist button[aria-current="true"] {
+  background: var(--fill); color: var(--sheet); border-radius: 4px; margin: 0 2px; width: calc(100% - 4px);
+  --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
+}
+.tf-flist button[aria-current="true"] :is(.tf-add-n, .tf-del-n) { color: inherit; }
 .tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
 .tf-flist .tf-viewed { color: var(--muted); }
-.tf-flist-none { padding: 8px; }
+.tf-state { flex: none; font: 400 var(--t-2xs) var(--sans); color: var(--ink-2); white-space: nowrap; }
+.tf-fh .tf-state { margin-left: -2px; font-size: var(--t-xs); }
+.tf-flist button[aria-current="true"] .tf-state { color: inherit; }
+.tf-flist-none { padding: 8px; font-family: var(--sans); }
+.tf-flist-none .tf-linkish { font-family: var(--sans); }
+.tf-diff .tf-fh-acts { font-family: var(--sans); }
+.tf-ftree .tf-state, .tf-flist .tf-state { font-family: var(--sans); }
 .tf-diff .tf-fh-open { margin-left: auto; font: 400 var(--t-sm) var(--sans); }
 .tf-diff .tf-fh-viewed + .tf-fh-open { margin-left: 0; }
 .tf-flist .tf-fdir { padding: 6px 10px 2px; border-top: 1px solid var(--rule-2); color: var(--ink-2); font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
@@ -307,6 +329,8 @@
   background: var(--sheet); font: var(--t-sm)/1.5 var(--sans); white-space: normal;
 }
 .tf-thread p { margin: 0 0 4px; overflow-wrap: anywhere; }
+/* The next author is further from the last comment than an author is from their own words. */
+.tf-thread p + b, .tf-thread .tf-md + b, .tf-thread p + .tf-who, .tf-thread .tf-md + .tf-who { display: block; margin-top: 12px; }
 .tf-thread p:last-child { margin-bottom: 0; }
 .tf-thread.tf-pending { border-color: var(--warn); }
 .tf-newc { margin: 4px 12px 8px 104px; display: flex; flex-direction: column; gap: 6px; font-family: var(--sans); }

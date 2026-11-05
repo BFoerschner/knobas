@@ -25,6 +25,7 @@
     was not there teaches a reader nothing about why.
 -->
 <script lang="ts">
+  import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type { assetTree, AssetRow, moveAsset } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
@@ -67,6 +68,8 @@
 
   /** Where the picker is standing, in words. */
   const here = $derived(crumb.at(-1)?.name ?? "the top of the estate");
+  /** Standing on the asset's own parent: moving it there would change nothing. */
+  const alreadyHere = $derived(at === asset.parent_id);
 
   /**
    * The level the picker is standing on.
@@ -120,10 +123,10 @@
   }
 </script>
 
-<TfDialog closeButton title="Move to…" subtitle={asset.name} {onclose}>
+<TfDialog title="Move {asset.name}" {onclose}>
   {#snippet body()}
     <div class="picker">
-      <p class="crumb mono">
+      <p class="crumb">
         <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
           Estate
         </button>
@@ -150,8 +153,9 @@
                 it. The chevron still says which rows have a level under them.
               -->
               <button class="opt" title="Open {row.name}" onclick={() => into(row)}>
-                <span class="mg">{row.monogram}</span>
+                <span class="mg">{kindTag(row.monogram)}</span>
                 <span class="nm">{row.name}</span>
+                {#if row.id === asset.id}<span class="faint">this asset</span>{/if}
                 {#if row.has_children}
                   <span class="chev" aria-hidden="true">›</span>
                 {/if}
@@ -172,8 +176,8 @@
 
   {#snippet footer()}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button class="tf-btn tf-primary" disabled={writing} onclick={() => void submit()}>
-      {writing ? "Moving…" : `Move into ${here}`}
+    <button class="tf-btn tf-primary" disabled={writing || alreadyHere} title={alreadyHere ? `${asset.name} is already here` : undefined} onclick={() => void submit()}>
+      {writing ? "Moving…" : alreadyHere ? "Already here" : `Move into ${here}`}
     </button>
   {/snippet}
 </TfDialog>
@@ -240,7 +244,8 @@
 
   .opt .mg {
     flex: none;
-    font: 500 10px var(--mono);
+    font-size: var(--t-2xs);
+    font-weight: 500;
     color: var(--faint);
   }
 

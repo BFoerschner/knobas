@@ -13,7 +13,8 @@
   import AssetsView from "../../assets/AssetsView.svelte";
   import type { AssetsNav } from "../../assets/tree";
   import { parseHash } from "../../shell/router";
-  import type { EscTarget } from "../escape";
+  import type { EscTarget, EscTargetOf } from "../escape";
+  import { parentPage } from "../page-name.svelte";
   import { HEAD_NAME } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
 
@@ -25,11 +26,14 @@
     head: string;
     rest: string[];
     /** Where `Esc` goes, which the breadcrumb's hint names; `null` where it does nothing. */
-    back?: Pick<EscTarget, "name"> | null;
+    back?: (Pick<EscTarget, "name"> & Partial<EscTargetOf>) | null;
   } = $props();
 
   /** The asset the view has read, which the breadcrumb's last part names. */
   let named = $state<string | null>(null);
+  /** The asset holding it, where `Esc` steps up to; `null` at the estate's top, whose parent the address says. */
+  let holder = $state<{ id: string; name: string } | null>(null);
+  parentPage(() => (head === "asset" ? (holder === null ? { hash: "#/assets", name: "Asset tree" } : { hash: `#/asset/${encodeURIComponent(holder.id)}`, name: holder.name }) : null));
 
   const address = $derived(`#/${[head, ...rest].map(encodeURIComponent).join("/")}`);
 
@@ -44,12 +48,13 @@
 </script>
 
 <div class="tf-full">
+  <!-- Always drawn, so the first click in a column does not move the tree under the pointer. -->
   {#if head === "assets"}
-    <TfCrumbs parts={[{ name: "Asset tree" }]} {back} sectionTop />
+    <TfCrumbs parts={[{ name: "Monitors", href: "#/monitors" }, { name: "Asset tree" }]} {back} />
   {:else}
-    <TfCrumbs parts={[{ name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
+    <TfCrumbs parts={[{ name: "Monitors", href: "#/monitors" }, { name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
   {/if}
   <div class="tf-asset-tree">
-    <AssetsView {nav} onnamed={(name) => (named = name)} />
+    <AssetsView {nav} onnamed={(name) => (named = name)} onholder={(held) => (holder = held)} />
   </div>
 </div>

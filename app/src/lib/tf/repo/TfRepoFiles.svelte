@@ -338,7 +338,12 @@
    * `missing` where the directory holds no such file.
    */
   const fileSection = $derived.by((): string | null => {
-    if (shown === null || listings[parentOf(shown)] === undefined) return null;
+    if (shown === null) return null;
+    // A directory on the way that its parent's listing does not hold: the file cannot be there, and its own listing never comes.
+    for (const dir of ancestors(shown)) {
+      if (dir !== "" && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
+    }
+    if (listings[parentOf(shown)] === undefined) return null;
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
@@ -1150,7 +1155,7 @@
           {/if}
           {#if steps === null && ports.piped !== undefined && suggested === null}
             {@const at = file.path}
-            <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>+ Pipeline</button>
+            <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>Pipeline</button>
           {/if}
           <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
           <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />

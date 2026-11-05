@@ -3,8 +3,10 @@
 .tf-cbody.tf-sets { display: flex; flex-direction: column; gap: 12px; }
 .tf-sets .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-sets-tbl td { vertical-align: top; }
-/* A row's title is the name you scan the list by (Type); a link made of words keeps its underline, here too. */
-.tf-cbody .tf-sets-tbl a.tf-set-name { font-weight: 500; text-decoration: underline; text-underline-offset: 2px; }
+/* A row's title is the name you scan the list by (Type). The row opens it, so it has no underline until pointed at (Layout). */
+.tf-cbody .tf-sets-tbl a.tf-set-name { font-weight: 500; }
+/* One rule a line, a wrapped line hanging under its start, so two rules never read as four. */
+.tf-sets-rule { display: block; padding-left: 12px; text-indent: -12px; }
 .tf-sets-tbl .tf-sets-now { white-space: nowrap; }
 .tf-toggle { display: flex; gap: 12px; align-items: center; padding: 12px 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font-size: var(--t-sm); }
 .tf-toggle input { width: 18px; height: 18px; accent-color: var(--ink); }
@@ -21,11 +23,11 @@
 .tf-set-desc { width: fit-content; max-width: 100%; min-width: 24ch; }
 .tf-cbody.tf-set { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-set-panels, .tf-set .tf-side { display: flex; flex-direction: column; gap: 14px; }
-.tf-set .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
 .tf-members { padding-bottom: 4px; }
 .tf-member { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-member:hover { background: var(--sheet-2); }
-.tf-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; }
+/* The row itself does not open, so its name is a link with its underline (Layout). */
+.tf-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-member .tf-x, .tf-rule .tf-x { margin-left: auto; }
 /* A row's *Remove* fades in on hover and on focus within the row (Motion). */
 .tf-member .tf-x { flex: none; opacity: 0; transition: opacity .1s ease-out; }
@@ -45,7 +47,8 @@
 .tf-keys .tf-dim { font-size: var(--t-xs); }
 .tf-set-note { margin: 0; font-size: var(--t-xs); }
 .tf-fsearch.tf-wide { max-width: none; flex: none; }
-.tf-picks { display: flex; flex-direction: column; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
+/* It keeps its height in a short window, and the dialog's body scrolls: you can always see what you are saving. */
+.tf-picks { display: flex; flex-direction: column; flex: none; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
 .tf-picks label, .tf-picks .tf-pickrow { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-picks > :last-child { border-bottom: 0; }
 .tf-picks label:hover { background: var(--sheet-2); }
@@ -55,11 +58,17 @@
 /* *Apply a link set…* (#869): a set's name over what it holds. */
 .tf-pickrow .tf-pick-sub { display: block; font-size: var(--t-xs); }
 .tf-picks-more { padding: 6px 10px; margin: 0; }
+.tf-set-savename { width: 100%; }
+/* A file's name takes what is left and is cut, never pushed sideways; its size keeps a fixed column. */
+.tf-picks { overflow-x: hidden; }
+.tf-bak-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-picks .tf-pickrow > .tf-bak-size { flex: none; width: 72px; text-align: right; white-space: nowrap; }
 .tf-picks.tf-hidden-empty { display: none; }
 .tf-picked { margin-right: auto; align-self: center; }
 .tf-stays { margin: 0; font-size: var(--t-xs); }
 .tf-member-line { font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-pattern { align-items: flex-start; }
+.tf-pattern a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-pattern details { min-width: 0; padding-top: 4px; }
 .tf-pattern summary { cursor: pointer; list-style: none; }
 .tf-pattern summary::-webkit-details-marker { display: none; }
@@ -73,5 +82,7 @@
 .tf-pat-match .tf-dim { margin-left: auto; font-size: var(--t-xs); }
 @media (max-width: 900px) {
   .tf-cbody.tf-set { grid-template-columns: minmax(0, 1fr); }
+  /* What decides where the set shows comes first when stacked, not two screens down. */
+  .tf-set .tf-side { order: -1; }
 }
 

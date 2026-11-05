@@ -17,9 +17,9 @@
 .tf-fsel { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-fsel select {
   border: 1px solid var(--rule); background: var(--field); border-radius: 4px; height: var(--control-h-sm); padding: 0 6px; color: var(--ink);
-  max-width: 180px;
+  max-width: 180px; field-sizing: content; padding-right: 2px;
 }
-.tf-fsel select.tf-set { border-color: var(--ink); font-weight: 600; }
+.tf-fsel select.tf-set { border-color: var(--ink); }
 /* A filter bar has one look on every page: a full-width band under the page's tabs. One whose page pads its body pulls
    back out to the window's edges. */
 .tf-runbody > .tf-fbar { margin: -16px -22px 14px; position: static; }
@@ -29,5 +29,6 @@
   .tf-runbody > .tf-fbar, .tf-rbar { margin-left: -16px; margin-right: -16px; }
 }
 .tf-fend { margin-left: auto; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none; }
-.tf-fcount { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Room for "0 of 34 tickets" at rest, so filtering moves nothing left of it. */
+.tf-fcount { display: inline-block; min-width: 15ch; text-align: right; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 

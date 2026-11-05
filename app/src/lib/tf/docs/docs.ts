@@ -90,17 +90,19 @@ export function firstPage(space: DocSpace): DocNode | undefined {
 export function pageToOpen(place: DocsPlace, tree: DocsTree): string | null {
   if (place.kind === "home") return null;
   if (place.kind === "page") return place.id;
-  if (place.kind === "space") {
-    const { source, key } = place;
-    const named = source === null ? undefined : spaceId({ source_id: source, key });
-    const space =
-      tree.spaces.find((s) => spaceId(s) === named) ??
-      tree.spaces.find((s) => s.key === (source === null ? key : `${source}:${key}`));
-    return space ? (firstPage(space)?.entity_id ?? null) : null;
-  }
+  // A space has a page of its own, which lists what it holds and opens none of them.
+  if (place.kind === "space") return null;
   if (tree.last_read !== null) return tree.last_read;
   const first = tree.spaces[0];
   return first ? (firstPage(first)?.entity_id ?? null) : null;
+}
+
+/** The space a `#/docs/space/<key>` address names, or `undefined` when the tree holds none. */
+export function spaceAt(place: DocsPlace, tree: DocsTree): DocSpace | undefined {
+  if (place.kind !== "space") return undefined;
+  const { source, key } = place;
+  const named = source === null ? undefined : spaceId({ source_id: source, key });
+  return tree.spaces.find((s) => spaceId(s) === named) ?? tree.spaces.find((s) => s.key === (source === null ? key : `${source}:${key}`));
 }
 
 /** *Continue reading* on the Docs home: the page read last and where it sits, while the tree still holds it. */
@@ -153,7 +155,7 @@ export function spaceHash(spaces: readonly SpaceRef[], space: SpaceRef): string 
 
 /** The picker's words for a space: *ENG Engineering (12)*. */
 export function spaceLabel(space: DocSpace): string {
-  return `${space.key} ${space.name ?? ""}`.trim() + ` (${space.pages.length})`;
+  return `${space.name ?? space.key} (${space.pages.length})`;
 }
 
 /**

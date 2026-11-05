@@ -10,6 +10,7 @@ import { emptyFilter, type FilterState } from "./filter";
 
 const kept = new Map<string, FilterState>();
 const folds = new Map<string, { open: boolean | null }>();
+const values = new Map<string, { value: string | null }>();
 
 /** The view's filter, the same object every time it is asked for this session. */
 export function sessionFilter(id: string): FilterState {
@@ -33,8 +34,18 @@ export function sessionFold(id: string): { open: boolean | null } {
   return fresh;
 }
 
+/** A value a view keeps for the session (the pipeline `#/builds` reopens), `null` until it says one. */
+export function sessionValue(id: string): { value: string | null } {
+  const held = values.get(id);
+  if (held) return held;
+  const fresh = $state<{ value: string | null }>({ value: null });
+  values.set(id, fresh);
+  return fresh;
+}
+
 /** Forget every view's filter and fold: a new session, which is what each test is. */
 export function forgetFilters(): void {
   kept.clear();
   folds.clear();
+  values.clear();
 }

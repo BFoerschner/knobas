@@ -481,7 +481,7 @@ test("Try it on an application being edited saves the edit over it and opens it 
 
 test("Manage applications: the radio picks the default, ↑ moves one up, Edit… opens it with Remove", async () => {
   const dialog = await openDialog("Manage applications…");
-  expect(text(dialog.querySelector("h2"))).toBe("Applications for Open in…");
+  expect(text(dialog.querySelector("h2"))).toBe("Applications for Open in");
   // #2289: the extra action on the far left, then the primary.
   expect([...dialog.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b), b.className])).toEqual([
     ["Add an application…", "tf-btn tf-first"],

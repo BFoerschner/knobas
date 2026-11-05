@@ -52,7 +52,7 @@
     type ConditionField,
     type EditColumn,
   } from "./editor";
-  import { columnName, LANE_FIELDS, splitLanes } from "./tickets";
+  import { columnName, LANE_FIELDS, sentenceCase, splitLanes } from "./tickets";
   import { counted } from "../counted";
   import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
@@ -472,7 +472,7 @@
             {/each}
           </div>
           <div class="tf-vw-btns">
-            <button type="button" class="tf-btn tf-sm" onclick={addCondition}>+ Add a condition</button>
+            <button type="button" class="tf-btn tf-sm" onclick={addCondition}>Add a condition</button>
             <span class="tf-dim">Every condition has to hold. Values in one condition mean any of them.</span>
           </div>
           <label class="tf-vw-words">
@@ -523,7 +523,7 @@
                           class="tf-vw-val"
                           aria-pressed={column.statuses.includes(status)}
                           disabled={fixedSource !== null}
-                          onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{status}</button
+                          onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{sentenceCase(status)}</button
                         >
                       {/each}
                     </div>
@@ -572,7 +572,7 @@
                   type="button"
                   class="tf-btn tf-sm"
                   onclick={() => (columns = [...(columns ?? []), { name: "New column", statuses: [], limit: null }])}
-                  >+ Add a column</button
+                  >Add a column</button
                 >
                 <button type="button" class="tf-btn tf-sm tf-ghost" onclick={resetColumns}>One column per status</button>
               </div>

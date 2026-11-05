@@ -200,7 +200,8 @@ test("the rail shows every space on the home, and leaves For you to it", async (
   const rail = target.querySelector(".tf-rd-tree")!;
   expect(rail.querySelector<HTMLSelectElement>("select")?.value).toBe("*");
   expect(rail.querySelector(".tf-dl-for")).toBeNull();
-  expect(target.querySelector(".tf-dh section[aria-label='For you']")?.textContent).toContain("Priya mentioned you");
+  // The page read last is the one that mentions you: it is listed once, and says so.
+  expect(target.querySelector(".tf-dh section[aria-label='Continue reading']")?.textContent).toContain("mentions you");
 });
 
 test("a space's address the tree does not hold says so, and leads home", async () => {
@@ -222,9 +223,12 @@ test("a doc page's breadcrumb names where Esc goes, and draws no hint where Esc 
   expect(target.querySelector(".tf-esc")).toBeNull();
 });
 
-test("a space's address opens the page at the top of its tree", async () => {
+test("a space's address lists its pages under its own title, and opens none of them", async () => {
   const io = await draw(["space", "ENG"]);
-  expect(io.docsPage).toHaveBeenCalledWith("confluence:9");
+  expect(io.docsPage).not.toHaveBeenCalled();
+  expect(target.querySelector(".tf-dh h1")?.textContent).toBe("Engineering");
+  expect(target.querySelector(".tf-dh-rows a")?.getAttribute("href")).toBe("#/page/confluence%3A9");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toContain("Docs");
 });
 
 test("the header: breadcrumb, who edited when, version, reading time and labels", async () => {
@@ -275,7 +279,7 @@ test("on a page of the second source holding ENG, the breadcrumb's space link op
   const route = parseTfHash(link.getAttribute("href")!);
   props.rest = route.view === "full" ? route.rest : [];
   await settle();
-  expect(io.docsPage).toHaveBeenLastCalledWith("wiki:home");
+  expect(target.querySelector(".tf-dh h1")?.textContent).toBe("Engineering");
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("wiki/ENG");
 });
 
@@ -284,8 +288,8 @@ test("the picker lists every space with its count and follows the open page", as
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
   expect([...select.options].map((o) => o.textContent)).toEqual([
     "All spaces (3)",
-    "OPS Operations (2)",
-    "ENG Engineering (1)",
+    "Operations (2)",
+    "Engineering (1)",
   ]);
   expect(select.value).toBe("confluence/OPS");
 });
@@ -1040,16 +1044,14 @@ test("the outline moves between the margin and the fold as the window crosses 13
 // -- below 900px the tree is a drawer over the page (#2084) --
 
 const tree = () => target.querySelector<HTMLElement>("nav[aria-label='Docs']")!;
-const pages = () => target.querySelector<HTMLButtonElement>(".tf-rd-crumbrow button.tf-rd-pages");
+const pages = () => target.querySelector<HTMLButtonElement>(".tf-railbar button");
 const drawerOpen = () => target.querySelector(".tf-rd")!.classList.contains("tf-rd-drawer");
 
-test("below 900px a Pages button starts the breadcrumb row, naming the tree it opens; at 900px there is none (#2084)", async () => {
+test("below 900px the fold bar names the page and opens the tree; at 900px there is none (#2084)", async () => {
   windowWidth(899);
   await draw(["confluence:2"]);
   const button = pages()!;
-  expect(button.textContent?.trim()).toBe("Pages");
-  expect(button.querySelector("svg")).not.toBeNull();
-  expect(button.nextElementSibling?.classList.contains("tf-rd-crumb")).toBe(true);
+  expect(button.textContent?.replace(/\s+/g, " ").trim()).toBe("Page: On-call handbook");
   expect(button.getAttribute("aria-controls")).toBe(tree().id);
   expect(tree().id).not.toBe("");
   expect(button.getAttribute("aria-expanded")).toBe("false");
@@ -1581,14 +1583,14 @@ async function drawJob(rest: string[], links?: unknown, io = ports({ jobReach: v
   return io;
 }
 
-const scope = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-dl-scope button")];
+const scope = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-dl-head .tf-seg button")];
 
 test("This job is off by default; on, it lists the job's pages by reason and hides the space picker", async () => {
   const io = await drawJob(["confluence:2"]);
   expect(io.jobReach).toHaveBeenCalledWith("jira:PAY-231");
   expect(scope().map((b) => [b.textContent?.replace(/\s+/g, " ").trim(), b.getAttribute("aria-pressed")])).toEqual([
-    ["This job PAY-231 2", "false"],
-    ["All pages", "true"],
+    ["This job 2", "false"],
+    ["All", "true"],
   ]);
   expect(target.querySelector("select[aria-label='Space']")).not.toBeNull();
 
@@ -1625,7 +1627,7 @@ test("with This job on, the search reads every space and keeps the job's pages, 
 
 test("a job that reaches no page says so and offers Search all pages; the count waits for a page", async () => {
   await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => [REACH[1]!]) }));
-  expect(scope()[0]!.textContent?.replace(/\s+/g, " ").trim()).toBe("This job PAY-231");
+  expect(scope()[0]!.textContent?.replace(/\s+/g, " ").trim()).toBe("This job 0");
   scope()[0]!.click();
   await settle();
   expect(target.querySelector(".tf-dl-body")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
@@ -1813,7 +1815,7 @@ test("Docs draws the spaces as read and keeps none by source: the read narrows i
   await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree) }));
 
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
-  expect([...select.options].map((o) => o.textContent)).toContain("HB Handbook (1)");
+  expect([...select.options].map((o) => o.textContent)).toContain("Handbook (1)");
   expect(select.options).toHaveLength(tree.spaces.length + 1);
 });
 
@@ -2507,7 +2509,7 @@ test("the view's Sync now ends the header after Refresh, and gives way to the pa
     await settle();
   };
   await mountWith(true);
-  expect(actions().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  expect(actions().slice(-2)).toEqual(["Refresh page", "Sync now"]);
   expect(syncNow()).toHaveLength(1);
 
   unmount(view!);

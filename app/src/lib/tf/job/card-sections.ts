@@ -7,18 +7,16 @@
  *
  * Pressing a section row opens that section's view on *This job* narrowed to
  * the ticket, chosen or not (`scoped.svelte.ts`); Assets opens the asset tree
- * at the ticket's first asset; Sub-tasks writes `under:<key>` in the Tickets
- * view's search line.
+ * at the ticket's first asset; Sub-tasks narrows Tickets to `under:<key>` and
+ * names it in the title. All six land under the same bar, *Back to <key>*.
  */
 import type { EntityRow } from "../../ipc/entity";
-import { sessionFilter } from "../filter/filter-state.svelte";
 import { sectionHash } from "../route";
 import type { Subtasks } from "./job-reader.svelte";
 import {
   assetsRollup,
   buildsRollup,
   codeRollup,
-  keyOf,
   monitorsRollup,
   pagesRollup,
   worstSignal,
@@ -27,9 +25,6 @@ import {
   type Signal,
 } from "./job";
 import { scopedTicket, type ScopedSection } from "./scoped.svelte";
-
-/** The Tickets view's filter bar with no saved view open (`TicketsPage.svelte`). */
-export const TICKETS_FILTER = "tickets-all";
 
 /** One row of the table. */
 export interface CardSection {
@@ -95,6 +90,6 @@ export function cardSections(read: CardReads): CardTable {
 
 /** What a press on `row` sets before its address is followed. */
 export function pressSection(row: CardSection, entityId: string): void {
-  if (row.opens === "subtasks") sessionFilter(TICKETS_FILTER).text = `under:${keyOf(entityId)}`;
+  if (row.opens === "subtasks") scopedTicket.openSubtasks(entityId);
   else if (row.opens !== null) scopedTicket.open(row.opens, entityId);
 }

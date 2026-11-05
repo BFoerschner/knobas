@@ -112,6 +112,22 @@
 /* The one decision at the card's foot: the card's own ink, large. */
 /* The one decision the card exists for stays on screen when a short window makes the card scroll. */
 .tf-ticketcard .tf-go { margin-top: auto; padding: 8px 0 18px; margin-bottom: -18px; position: sticky; bottom: -18px; background: var(--card); }
+/* The card's fold holds its facts and rows at their spacing. Only stacked does it have a summary, or close. */
+.tf-tkstack { flex: none; }
+.tf-tkstack > * + * { margin-top: 14px; }
+.tf-tkstack > summary { display: none; }
+.tf-tkcardtitle { display: none; }
+@media (max-width: 900px) {
+  .tf-tkcardtitle { display: block; font-size: var(--t-2xl); font-weight: 700; font-variation-settings: "wdth" 85; line-height: 1.2; color: inherit; overflow-wrap: anywhere; }
+  .tf-ticketcard p.tf-tkcardtitle { color: inherit; }
+  .tf-tkread .tf-tkpagehead h1 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .tf-tkstack > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; list-style: none; }
+  .tf-tkstack > summary::-webkit-details-marker { display: none; }
+  .tf-tkstack > summary::before { content: ""; width: 6px; height: 6px; margin: 0 4px 1px 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
+  .tf-tkstack[open] > summary::before { transform: rotate(45deg); }
+  /* The foot ends the card's flow: pinned, it sliced the rows above it in half. */
+  .tf-ticketcard .tf-go { position: static; margin: 0; padding: 0; background: none; }
+}
 .tf-sheetcard.tf-ticketcard .tf-go { background: var(--sheet); }
 /* On the yellow the scrollbar's thumb is the card's own, not a grey strip. */
 .tf-ticketcard.tf-card::-webkit-scrollbar-thumb { background: var(--card-2); }
@@ -182,7 +198,8 @@
 
 /* ---------- a job section (R-4.6) ---------- */
 .tf-panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
-.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
+/* A small button's height whether or not it holds one, so panels side by side share their first rule. */
+.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; min-height: calc(var(--control-h-sm) + 12px); }
 .tf-panel > header h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-open {
   display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2);
@@ -226,7 +243,7 @@ a.tf-r:hover { background: var(--sheet-2); }
   margin: 0 12px 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--warn);
   font-size: var(--t-xs); display: flex; gap: 8px; align-items: center;
 }
-.tf-stale a { margin-left: auto; color: inherit; font-weight: 600; }
+.tf-stale a { margin-left: auto; color: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; white-space: nowrap; }
 
 /* ---------- the blocked banner (R-4.8) ---------- */
 .tf-blocked {

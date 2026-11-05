@@ -64,6 +64,8 @@
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
+  import { goWithoutOpener } from "../tf/opener";
+  import { NAV, SECTION_NAME, sectionHash } from "../tf/route";
 
   import {
     addFavourite as defaultAddFavourite,
@@ -880,6 +882,8 @@
         }
         const row = session.current;
         if (row) activate(row);
+        else if (sectionHits[0]) goToSection(sectionHits[0].hash);
+        else widen?.();
         return;
       }
       case "Tab":
@@ -908,6 +912,25 @@
     return list && keys.chordOfList(list.id);
   }
 
+  /** The app's places by name, which the search's index does not hold. */
+  const GO_PLACES = [
+    ...NAV.map((section) => ({ name: SECTION_NAME[section], hash: sectionHash(section) })),
+    { name: "Settings", hash: sectionHash("settings") },
+    { name: "Asset tree", hash: sectionHash("assets") },
+  ];
+  /** *Search everything* where nothing matched: the row that is selected, so ↵ runs it. */
+  const widen = $derived(session.mode === "results" && session.response && session.rows.length === 0 ? widening(session.response.interpreted.text) : null);
+  /** A place of the app whose name the words match, offered where nothing else answered: *settings*, *asset tree*. */
+  const sectionHits = $derived.by(() => {
+    if (session.mode !== "results" || session.rows.length > 0) return [];
+    const words = (session.response?.interpreted.text ?? "").trim().toLowerCase();
+    if (words === "") return [];
+    return GO_PLACES.filter((place) => place.name.toLowerCase().includes(words));
+  });
+  function goToSection(hash: string) {
+    close();
+    goWithoutOpener(hash);
+  }
   /** The keys the box answers, at the bottom of the ⌘? overlay. */
   const boxKeys: [string, string][] = [
     ["↵", "open"],
@@ -1101,7 +1124,9 @@
           {/if}
         {:else if session.response}
           <Results
-            onwiden={widening(session.response.interpreted.text)}
+            onwiden={widen}
+            places={sectionHits}
+            ongo={goToSection}
             response={session.response}
             rows={session.rows}
             chordOf={listChord}
@@ -1128,13 +1153,22 @@
     {/snippet}
 
     {#snippet footer()}
-      <span><kbd>↑↓</kbd> move</span>
-      <span><kbd>↵</kbd> open</span>
+      <!-- Only what a key does here. The ⌘? overlay and the help card carry their own legend, so this one steps aside. -->
+      {#if overlay === null && session.mode !== "help"}
+      {#if sectionHits[0]}
+        <span><kbd>↵</kbd> go to {sectionHits[0].name}</span>
+      {:else if widen !== null}
+        <span><kbd>↵</kbd> search everything</span>
+      {:else if session.rows.length > 0}
+        <span><kbd>↑↓</kbd> move</span>
+        <span><kbd>↵</kbd> open</span>
+      {/if}
       {#if tabOpens}<span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>{/if}
       {#if sheet.onActions}<span><kbd>⌘B</kbd> bind a key</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
       <span><kbd>⌘?</kbd> help</span>
+      {/if}
       {#if session.canSave && session.rows.length > 0}
         <!--
           On a query and never on the board: an empty box is the board, and

@@ -249,7 +249,7 @@
     <span class="tf-pstep tf-prenderer">{shownAs}</span>
     <span class="tf-pmenu">
       <button bind:this={face} type="button" class="tf-btn tf-sm tf-ghost" aria-haspopup="menu" aria-expanded={adding} onclick={() => (adding = !adding)}
-        >+ Add step</button
+        >Add step</button
       >
       {#if adding}
         <!-- svelte-ignore a11y_interactive_supports_focus -->

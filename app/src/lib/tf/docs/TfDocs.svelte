@@ -63,7 +63,7 @@
   import type { RoleFrameProps } from "../page-entry";
   import { MediaQuery } from "svelte/reactivity";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     docsCreatePage as realDocsCreatePage,
     docsEditSection as realDocsEditSection,
@@ -98,6 +98,12 @@
   import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfBareHeader from "../TfBareHeader.svelte";
+  import TfScope from "../filter/TfScope.svelte";
+  import TfBackHint from "../TfBackHint.svelte";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import TfDocsSpace from "./TfDocsSpace.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -123,6 +129,7 @@
     jobPageGroups,
     pageHash,
     pageToOpen,
+    spaceAt,
     READER_DRAWER,
     READER_NARROW,
     person,
@@ -236,6 +243,8 @@
   // What *Back to <name>* calls a doc page once it is left: its title (spec #2227).
   namePage(() => page?.title ?? null);
   let pageError = $state<string | null>(null);
+  /** The page could not be opened because no such page is held. */
+  let pageMissing = $state(false);
   /** The picked space (`spaceId`), `*` for all, or `null` to follow the page. */
   let picked = $state<string | null>(null);
 
@@ -300,7 +309,16 @@
   );
 
   const place = $derived(placeOf(rest));
+  // *Continue reading* is the tree's: back on the home, it is read again, so it names the page read last.
+  let wasHome = false;
+  $effect(() => {
+    const now = place.kind === "home";
+    if (now && !wasHome && ready && untrack(() => tree) !== null) untrack(() => void readTree(true));
+    wasHome = now;
+  });
   const target = $derived(tree === null ? null : pageToOpen(place, tree));
+  /** `#/docs/space/<key>`: the space's own page, which lists its pages. */
+  const spaceHere = $derived(tree === null ? undefined : spaceAt(place, tree));
   /** `#/docs`: the Docs home, which opens no page. */
   const home = $derived(place.kind === "home");
 
@@ -343,7 +361,10 @@
         if (opens) void io.visitEntity(id).catch(() => {});
       },
       (cause: unknown) => {
-        if (mine === pageAsked && (!quiet || page?.entity_id !== id)) pageError = ipcErrorMessage(cause);
+        if (mine === pageAsked && (!quiet || page?.entity_id !== id)) {
+          pageError = ipcErrorMessage(cause);
+          pageMissing = isIpcError(cause) && cause.code === "not_found";
+        }
       },
     );
   }
@@ -443,7 +464,7 @@
     if (tree === null || picked === "*") return undefined;
     if (picked !== null) return tree.spaces.find((s) => spaceId(s) === picked);
     // The home shows every space; a page follows its own.
-    return pageSpace ?? (home ? undefined : tree.spaces[0]);
+    return pageSpace ?? spaceHere ?? (home ? undefined : tree.spaces[0]);
   });
   const pickerValue = $derived(picked === "*" ? "*" : shownSpace ? spaceId(shownSpace) : "*");
   const total = $derived(tree?.spaces.reduce((n, s) => n + s.pages.length, 0) ?? 0);
@@ -661,11 +682,22 @@
     if (!main || !article) return;
     const top = main.getBoundingClientRect().top + 90;
     let now: number | null = null;
+    let last: number | null = null;
     for (const h of article.querySelectorAll<HTMLElement>("h2[id^='s-']")) {
       if (h.getBoundingClientRect().top < top) now = Number(h.id.slice(2));
+      last = Number(h.id.slice(2));
     }
+    // At the end of the page the last section is the one you are in, however short it is.
+    if (last !== null && main.scrollTop > 0 && main.scrollTop + main.clientHeight >= main.scrollHeight - 4) now = last;
     active = now;
   }
+
+  /** The outline's entry the reader clicked: it stays marked until they scroll by hand. */
+  let picked_section = $state<number | null>(null);
+  $effect(() => {
+    if (place.kind === "page" && place.section !== null) picked_section = place.section;
+  });
+  const marked = $derived(picked_section ?? active);
 
   // ---- actions ----
   let linking = $state(false);
@@ -906,19 +938,6 @@
 
 </script>
 
-{#snippet homePages()}
-  <button
-    type="button"
-    class="tf-btn tf-rd-pages"
-    aria-controls="tf-docs-tree"
-    aria-expanded={drawer}
-    onclick={(event) => openTree(event.currentTarget)}
-    ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
-      ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
-    >Pages</button
-  >
-{/snippet}
-
 <div class="tf-rd" class:tf-rd-drawer={drawer}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <nav
@@ -932,17 +951,16 @@
   >
     <div class="tf-dl-head">
       {#if job !== null}
-        <div class="tf-seg tf-dl-scope" role="group" aria-label="Scope">
-          <button type="button" aria-pressed={jobOn} onclick={() => (filter.scope = "job")}
-            >This job <span class="tf-jobk">{job}</span>{#if jobIds !== null && jobIds.size > 0}{" "}{jobIds.size}{/if}</button
-          >
-          <button type="button" aria-pressed={!jobOn} onclick={() => (filter.scope = "all")}>All pages</button>
-        </div>
+        <TfScope
+          scopes={[{ id: "job", label: "This job", count: jobIds?.size ?? null, title: `The pages ${job} reaches` }, { id: "all", label: "All" }]}
+          scope={jobOn ? "job" : "all"}
+          onpick={(id) => (filter.scope = id)}
+        />
       {/if}
-      {#if !jobOn}
-        <select aria-label="Space" value={pickerValue} onchange={pick}>
+      {#if !jobOn && tree !== null && tree.spaces.length > 0}
+        <select aria-label="Space" value={pageError !== null ? "*" : pickerValue} title={shownSpace?.name ?? undefined} onchange={pick}>
           <option value="*">All spaces ({total})</option>
-          {#each tree?.spaces ?? [] as space (spaceId(space))}
+          {#each tree.spaces as space (spaceId(space))}
             <option value={spaceId(space)}>{spaceLabel(space)}</option>
           {/each}
         </select>
@@ -1002,11 +1020,11 @@
           </div>
         {/if}
         {#if tree !== null && tree.spaces.length === 0}
-          <p class="tf-dl-note">No pages are synced yet. A source with pages, such as Confluence, fills this tree.</p>
+          <p class="tf-dl-note">No pages yet.</p>
         {:else if tree !== null && shownSpace === undefined}
           {#each tree.spaces as space (spaceId(space))}
             <details open={current !== null && space.pages.some((p) => p.entity_id === current)}>
-              <summary class="tf-spc">{space.key} {space.name ?? ""} <span class="tf-count">{space.pages.length}</span></summary>
+              <summary class="tf-spc"><span class="tf-spc-n" title={space.name ?? space.key}>{space.name ?? space.key}</span> <span class="tf-count">{space.pages.length}</span></summary>
               <TfDocTree {space} {current} />
             </details>
           {/each}
@@ -1037,7 +1055,11 @@
     <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
   {/if}
 
-  <section class="tf-rd-main" bind:this={main} onscroll={follow}>
+  <section class="tf-rd-main" bind:this={main} onscroll={follow} onwheel={() => (picked_section = null)}>
+    <!-- The one fold bar below 900 px. The tree it opens is a drawer, because the page does not reflow under it. -->
+    {#if drawerBand.current}
+      <TfRailBar label="Page" value={page?.title ?? spaceHere?.name ?? "Docs home"} open={drawer} controls="tf-docs-tree" onpress={(event) => openTree(event.currentTarget as Element)} />
+    {/if}
     {#if find !== "" && page !== null}
       <div class="tf-findbar" role="search">
         <span>Matches for</span>
@@ -1049,6 +1071,8 @@
       </div>
     {/if}
     {#if home}
+      <!-- A ticket card's row opened the home narrowed to that ticket: the same bar its other rows land under. -->
+      {#if back !== null}<TfCrumbs parts={[{ name: "Docs" }]} {back} />{/if}
       <TfDocsHome
         {tree}
         failed={treeError}
@@ -1056,33 +1080,29 @@
         groups={jobGroups}
         jobFirst={jobOn}
         {sync}
-        pages={drawerBand.current ? homePages : undefined}
         onretry={() => void readTree(false)}
       />
+    {:else if spaceHere !== undefined}
+      <TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: spaceHere.name ?? spaceHere.key }]} {back} />
+      <TfDocsSpace space={spaceHere} {sync} />
     {:else if page === null && (pageError !== null || treeError !== null || (tree !== null && target === null))}
       <!-- No page to head (#2286): the view's own header, so *Sync now* is still where every view puts it. -->
-      <TfBareHeader title="Docs" {sync} />
+      {#if pageError === null}<TfBareHeader title="Docs" {sync} />{/if}
     {/if}
-    {#if home}
+    {#if home || spaceHere !== undefined}
       <!-- Drawn above. -->
     {:else if pageError !== null}
-      <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
+      {#if pageMissing}
+        <TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: "Page" }]} {back} />
+        <TfNothingHere message="knobas does not hold this page. It may not have synced yet." href="#/docs" action="Docs home" />
+      {:else}
+        <TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: "Page" }]} {back} />
+        <TfNothingHere message="This page could not be opened: {pageError}" href="#/docs" action="Docs home" />
+      {/if}
     {:else if page !== null}
       {@const p = page}
       {@const created = createdBy(p)}
     <nav class="tf-crumbs tf-rd-crumbrow" aria-label="Breadcrumb">
-      {#if drawerBand.current}
-        <button
-          type="button"
-          class="tf-btn tf-sm tf-rd-pages"
-          aria-controls="tf-docs-tree"
-          aria-expanded={drawer}
-          onclick={(event) => openTree(event.currentTarget)}
-          ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
-            ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
-          >Pages</button
-        >
-      {/if}
       <div class="tf-rd-crumb">
         <a href="#/docs">Docs</a>
         {#if p.space}
@@ -1094,7 +1114,7 @@
         › <strong><TfMarked text={p.title} {stems} /></strong>
       </div>
       <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
-      {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
+      {#if back !== null}<TfBackHint {back} />{/if}
     </nav>
       <div class="tf-rd-sheet">
         <article class="tf-rd-page" bind:this={article}>
@@ -1129,7 +1149,7 @@
                 {@const url = p.web_url}
                 <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
               {/if}
-              <TfHeaderRefresh {detail} {refresh} {reread} {sync} />
+              <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />
             </div>
           </div>
           <div class="tf-rd-meta">
@@ -1149,7 +1169,7 @@
           {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
           {#if narrow.current}
             {#key p.entity_id}
-              <TfDocOutline page={p} {stems} {active} folded />
+              <TfDocOutline page={p} {stems} active={marked} folded />
             {/key}
           {/if}
           <div class="tf-doc">
@@ -1226,15 +1246,12 @@
           </div>
         </article>
         {#if !narrow.current}
-          <TfDocOutline page={p} {stems} {active} folded={false} />
+          <TfDocOutline page={p} {stems} active={marked} folded={false} />
         {/if}
       </div>
     {:else if tree !== null && target === null}
       <!-- A space's address the tree holds nothing at: the rail still reads, and the home is the way out. -->
-      <div class="tf-empty">
-        <p>Nothing to read here. This space has no synced pages, or knobas does not hold it.</p>
-        <a class="tf-btn" href="#/docs">Docs home</a>
-      </div>
+      <TfNothingHere message="Nothing to read here. This space has no synced pages, or knobas does not hold it." href="#/docs" action="Docs home" />
     {/if}
   </section>
 </div>

@@ -69,7 +69,7 @@ test("Continue reading is the page read last, with where it sits", () => {
   const panel = section("Continue reading")!;
   expect(hrefs(panel)).toEqual(["#/page/confluence%3A2"]);
   expect(panel.textContent).toContain("On-call handbook");
-  expect(panel.textContent).toContain("OPS › Ops home");
+  expect(panel.textContent).toContain("Operations › Ops home");
 });
 
 test("with nothing read, or a page the tree no longer holds, there is no Continue reading", () => {
@@ -89,16 +89,15 @@ test("For you says who mentioned you, and says so when nobody has", () => {
   expect(section("For you")?.textContent).toContain("No page mentions you right now.");
 });
 
-test("each space is a tile: its name links to the space, its top pages are listed, and more than fit are one link", () => {
+test("each space is a tile: its one link is its name, which opens the space, and its top pages are listed", () => {
   draw({ tree: TREE });
   const tiles = [...target.querySelectorAll(".tf-dh-space")];
   expect(tiles.map((tile) => tile.querySelector("h3")?.textContent)).toEqual(["Operations", "Engineering"]);
   expect(tiles[0]!.querySelector("h3 a")?.getAttribute("href")).toBe("#/docs/space/OPS");
-  // Four of Engineering's five top pages, then the way to all six.
+  // Four of Engineering's five top pages.
   expect(tiles[1]!.querySelectorAll(".tf-dh-row")).toHaveLength(4);
-  expect(tiles[1]!.querySelector(".tf-dh-more")?.textContent).toBe("All 6 pages");
-  // Operations lists its one top page and has a page below it.
-  expect(tiles[0]!.querySelector(".tf-dh-more")?.textContent).toBe("All 2 pages");
+  expect(tiles[1]!.querySelector("h3 .tf-dh-more")).toBeNull();
+  expect(tiles[1]!.querySelectorAll("a[href^='#/docs/space']")).toHaveLength(1);
 });
 
 test("a space with every page listed offers no link to more", () => {
@@ -109,11 +108,13 @@ test("a space with every page listed offers no link to more", () => {
 });
 
 test("the job's pages have a list of their own, first while This job is on", () => {
-  const groups = [{ reason: "Linked to PAY-231", pages: [{ entity_id: "confluence:2", title: "On-call handbook", where: "OPS" }] }];
+  const groups = [{ reason: "Linked to PAY-231", pages: [{ entity_id: "confluence:9", title: "Engineering home", where: "OPS" }] }];
   draw({ tree: TREE, job: "PAY-231", groups });
   const body = target.querySelector(".tf-dh-body")!;
   const job = section("Pages on PAY-231")!;
-  expect(job.textContent).toContain("Linked to PAY-231, OPS");
+  // The job is the heading, and a space goes by its name.
+  expect(job.textContent).toContain("Operations");
+  expect(job.textContent).not.toContain("Linked to PAY-231");
   expect(body.firstElementChild).not.toBe(job);
   void unmount(view!);
   draw({ tree: TREE, job: "PAY-231", groups, jobFirst: true });

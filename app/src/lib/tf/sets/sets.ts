@@ -64,6 +64,25 @@ export const APPLIES_BY: readonly { value: LinkSetRuleKind; label: string }[] = 
  * *Every sub-task of PAY-231*, *PAY-231, applied by hand*. The epic's title
  * follows its key only when the source gave it one of its own.
  */
+/** One row a ticket: two sources holding one key are one ticket. A row that is the reader's wins. */
+export function onePerKey<Row extends { entity_id: string; mine: boolean }>(rows: readonly Row[]): Row[] {
+  const seen = new Map<string, Row>();
+  for (const row of rows) {
+    const key = keyOf(row.entity_id);
+    const had = seen.get(key);
+    if (had === undefined || (!had.mine && row.mine)) seen.set(key, row);
+  }
+  return [...seen.values()];
+}
+
+/** A rule's label in parts, its ticket key apart: a key is mono wherever it appears. */
+export function ruleWords(rule: LinkSetRuleRow): { text: string; key: boolean }[] {
+  return ruleLabel(rule)
+    .split(/([A-Z][A-Z0-9]+-\d+)/)
+    .filter((text) => text !== "")
+    .map((text) => ({ text, key: /^[A-Z][A-Z0-9]+-\d+$/.test(text) }));
+}
+
 export function ruleLabel(rule: LinkSetRuleRow): string {
   // The value is an entity id or `<source>:<project key>`: either way, its key half.
   const key = keyOf(rule.value);

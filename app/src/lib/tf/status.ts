@@ -59,7 +59,7 @@ export function sourceReadings(
       const failedAt =
         run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
       const text = `${name}: ${failure(ago(failedAt, now), secretNoun(source.auth_kind))}`;
-      return { id: source.id, text, tone: "err", syncedAt: run?.last_finished_at ?? null, fix: reenterWords(source.auth_kind) };
+      return { id: source.id, text, tone: "err", syncedAt: run?.last_finished_at ?? null, fix: state.state === "missing_secret" ? `Enter ${secretNoun(source.auth_kind)}` : reenterWords(source.auth_kind) };
     }
     const syncedAt = run?.last_finished_at ?? null;
     if (run?.running) return { id: source.id, text: `${name} syncing…`, tone: "info", syncedAt, fix: null };

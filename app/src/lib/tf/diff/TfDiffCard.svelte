@@ -267,6 +267,9 @@
 
   const SIGN = { context: " ", add: "+", del: "−" } as const;
   const old = $derived(file.old_path && file.old_path !== file.path ? file.old_path : null);
+  /** A local change's label says how it stands (*modified, not staged*): words, so not in the path's mono. */
+  const shownHow = $derived(/ \(([^()]*(?:not staged|staged))\)$/.exec(keyOf(file))?.[1] ?? null);
+  const shownPath = $derived(shownHow === null ? keyOf(file) : keyOf(file).slice(0, keyOf(file).lastIndexOf(" (")));
   const badge = $derived(badgeOf(file));
   const chip = $derived(isLock(file.path) ? "lock file" : isGenerated(file.path) ? "generated" : null);
   const changed = $derived(file.additions + file.deletions);
@@ -398,13 +401,13 @@
   {/if}
 {/snippet}
 
-<div class="tf-diff" class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root}>
+<div class="tf-diff" data-file={keyOf(file)} class:tf-viewed={done} class:tf-split={split} class:tf-closed={closed} class:tf-current={current} bind:this={root}>
   <div class="tf-fh">
     <button type="button" class="tf-fh-caret" aria-expanded={!closed} aria-label="{closed ? 'Expand' : 'Collapse'} {keyOf(file)}" onclick={ontoggle}
       ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d={closed ? "m6 4 4 4-4 4" : "m4 6 4 4 4-4"} /></svg></button
     >
     <span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}" title={file.change}>{badge}</span>
-    <span class="tf-mono">{old ? `${old} → ${keyOf(file)}` : keyOf(file)}</span>
+    <span class="tf-mono">{old ? `${old} → ${shownPath}` : shownPath}</span>{#if shownHow !== null}<span class="tf-state">{shownHow}</span>{/if}
     {#if file.change !== "binary"}
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>

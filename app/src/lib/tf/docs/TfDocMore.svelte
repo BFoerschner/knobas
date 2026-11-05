@@ -9,6 +9,7 @@
   goes back to *More*.
 -->
 <script lang="ts">
+  import { menuKeys } from "../menu-keys";
   import { tick } from "svelte";
 
   let {
@@ -68,7 +69,7 @@
     >More<svg class="tf-caret" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg></button
   >
   {#if open}
-    <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
+    <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown} {@attach menuKeys(() => (open = false))}>
       {#if onlink}<button type="button" role="menuitem" onclick={() => pick(onlink)}>Link to…</button>{/if}
       <button type="button" role="menuitem" onclick={() => pick(oncopy)}>Copy link</button>
       {#if onexport}<button type="button" role="menuitem" onclick={() => pick(onexport)}>Export as Markdown</button>{/if}

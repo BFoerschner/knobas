@@ -419,7 +419,7 @@ test("the first Publish asks where protocols go", async () => {
 test("a published protocol links its page", async () => {
   open({ publication: { write_id: 5, state: "sent", detail: null, page_entity_id: "wiki:901", linked: true } });
   await settle();
-  const link = [...target.querySelectorAll("a")].find((found) => found.textContent?.trim() === "Published");
+  const link = [...target.querySelectorAll("a")].find((found) => found.textContent?.trim() === "Open the published page");
   expect(link?.getAttribute("href")).toBe("#/page/wiki%3A901");
 });
 
@@ -589,8 +589,8 @@ test("a filed ticket the queue holds as unconfirmed stays queued, told once, wit
 });
 
 for (const [name, field] of [
-  ["+ Add someone", "Who else was there"],
-  ["+ Add an action item", "New action item"],
+  ["Add someone", "Who else was there"],
+  ["Add an action item", "New action item"],
 ] as const) {
   test(`${name} puts the cursor in its field even while a notes box holds it (#1511)`, async () => {
     open();

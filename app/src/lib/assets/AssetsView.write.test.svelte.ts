@@ -717,7 +717,7 @@ test("the first column's plus creates at the top of the estate", async () => {
   expect(marked()).toEqual(["fsn1"]);
   // The type's monogram, resolved by the backend out of the table — the chip a
   // column row draws.
-  expect(target.querySelector("ol.col button.row.on span.mg")?.textContent?.trim()).toBe("SI");
+  expect(target.querySelector("ol.col button.row.on span.mg")?.textContent?.trim()).toBe("Si");
   expect(text()).toContain("Created");
 });
 
@@ -758,7 +758,7 @@ test("a deeper column's plus creates inside that column's asset, with its conven
   // `site`, so `"SI"` is what a constant, the wrong row and the right row all
   // say alike. Here the created row is a `service` beside a `container`, and
   // the two chips differ.
-  expect(chips()).toEqual([["SI"], ["VM", "VM"], ["CT", "SV"]]);
+  expect(chips()).toEqual([["Si"], ["Vm", "Vm"], ["Ct", "Sv"]]);
 });
 
 /**
@@ -820,8 +820,8 @@ test("moving an asset redraws the columns at its new path", async () => {
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Move…");
-  // The picker opens where the asset already is, so its own path is the crumb.
-  expect(text()).toContain("Move into vm-db-01");
+  // The picker opens where the asset already is, which is nowhere to move it to.
+  expect(text()).toContain("Already here");
   click("Estate");
   expect(text()).toContain("Move into the top of the estate");
   await walkInto("hel1");
@@ -890,13 +890,13 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
   const { nav } = render("#/asset/asset:postgres", store);
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
-  click("Delete");
+  click("Delete…");
   expect(text()).toContain("Delete postgres?");
   click("Cancel");
   expect(text()).not.toContain("Delete postgres?");
   expect(store.rows).toHaveLength(4);
 
-  click("Delete");
+  click("Delete…");
   click("Delete");
 
   await waitFor(() =>
@@ -929,7 +929,7 @@ test("the delete confirm counts the routes landing on the asset and says nothing
   render("#/asset/asset:postgres", store);
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
-  click("Delete");
+  click("Delete…");
   const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
   expect(ask).toBe("Delete postgres? 2 routes landing on it will land on nothing. Links to it stay, marked deleted.");
   expect(ask).not.toMatch(/history/i);
@@ -939,7 +939,7 @@ test("with no route landing on it, the delete confirm has no routes clause", asy
   render("#/asset/asset:postgres", estate(seed()));
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
-  click("Delete");
+  click("Delete…");
   const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
   expect(ask).toBe("Delete postgres? Links to it stay, marked deleted.");
 });
@@ -957,7 +957,7 @@ test("deleting a branch is refused by name and nothing is removed", async () => 
   render("#/asset/asset:vm-db-01", store);
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01"));
 
-  click("Delete");
+  click("Delete…");
   click("Delete");
 
   await waitFor(() =>
@@ -1001,9 +1001,9 @@ test("a type table that will not load is said out loud, not left as a dead plus"
  */
 test.each([
   ["New asset in vm-db-01", "Create"],
-  ["Move…", "Move into hel1"],
-  ["Delete", "Delete"],
-  ["Add a route", "Expose"],
+  ["Move…", "Already here"],
+  ["Delete…", "Delete"],
+  ["Add a route…", "Expose"],
 ])("%s opens a dialog on the layer stack, and its close shuts it (#1527)", async (opener, inside) => {
   const store = estate(seed());
   render("#/asset/asset:vm-db-01", store);
@@ -1041,9 +1041,9 @@ function drawnAs(control: Element): string {
  */
 test.each([
   ["New asset in vm-db-01", ["Cancel: ghost", "Create: primary"]],
-  ["Move…", ["Cancel: ghost", "Move into hel1: primary"]],
-  ["Delete", ["Cancel: ghost", "Delete: confirm, red"]],
-  ["Add a route", ["Cancel: ghost", "Expose: primary"]],
+  ["Move…", ["Cancel: ghost", "Already here: primary"]],
+  ["Delete…", ["Cancel: ghost", "Delete: confirm, red"]],
+  ["Add a route…", ["Cancel: ghost", "Expose: primary"]],
   ["Edit…", ["Delete: far left, red", "Cancel: ghost", "Save: primary"]],
 ])("%s opens a dialog with the canonical footer", async (opener, footer) => {
   const store = estate(seed(), [
@@ -1082,7 +1082,7 @@ test("an open dialog closes when the address names another asset", async () => {
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
   click("Move…");
-  expect(text()).toContain("Move into vm-db-01");
+  expect(text()).toContain("Already here");
 
   nav.go("#/asset/asset:vm-app-02");
   flushSync();
@@ -1209,7 +1209,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
   const { nav } = render("#/asset/asset:vm-db-01", store);
   await waitFor(() => expect(text()).toContain("Exposes No routes."));
 
-  click("Add a route");
+  click("Add a route…");
   expect(text()).toContain("On vm-db-01");
   type("Name", "Postgres UI");
   type("URL or endpoint", "https://pg.hel1.example/");
@@ -1261,7 +1261,7 @@ test("a route with no scheme is refused in place and nothing is written", async 
   render("#/asset/asset:vm-db-01", store);
   await waitFor(() => expect(text()).toContain("Exposes No routes."));
 
-  click("Add a route");
+  click("Add a route…");
   type("Name", "Postgres UI");
   type("URL or endpoint", "pg.hel1.example");
   click("Expose");

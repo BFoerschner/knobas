@@ -679,6 +679,25 @@
     height: var(--control-h);
   }
 
+  /* The file control's button is drawn as the app's default button, not the browser's. */
+  .fld input[type="file"]::file-selector-button {
+    height: 100%;
+    margin-right: 10px;
+    padding: 0 11px;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--sheet);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .fld input[type="file"] {
+    padding: 0;
+    overflow: hidden;
+  }
+
   .fld > :global(.tf-btn) {
     justify-self: start;
   }

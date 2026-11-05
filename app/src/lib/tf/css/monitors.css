@@ -1,8 +1,20 @@
 /* Monitors (#864): prototype-6's `.bar`, the roster's columns, the unwatched tab. */
 .tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-/* 48 half-hours at 2 px and a 1 px gap: at 96 px wide the bars were a shimmer of one-pixel lines. */
-.tf-mbar { display: inline-flex; gap: 1px; height: 14px; width: 143px; flex: none; vertical-align: middle; }
-.tf-mbar i { flex: 1; border-radius: 1px; background: var(--ok); opacity: .8; }
+/* 48 half-hours at 2 px and a 1 px gap, whole pixels at any scale. Narrow, 24 hours at 3 px: `barsOf` merges them. */
+.tf-mbar { display: inline-flex; gap: 1px; height: 14px; flex: none; vertical-align: middle; }
+.tf-mbar i { flex: none; width: 2px; border-radius: 1px; background: var(--ok); opacity: .8; }
+.tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: var(--t-2xs); font-weight: 400; color: var(--ink-2); }
+.tf-mon { table-layout: fixed; }
+.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed):hover > td { background: var(--sheet-2); }
+.tf-monc-state { width: 176px; }
+.tf-monc-bars { width: 170px; }
+.tf-monc-num { width: 92px; }
+.tf-monc-watch { width: 17%; }
+.tf-monc-acts { width: 236px; }
+/* A state holds its column, and says the rest in its title. */
+.tf-mon .tf-chip { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed) > td:first-child { overflow: hidden; text-overflow: ellipsis; }
+.tf-mon a.tf-mon-asset { text-decoration: underline; text-underline-offset: 2px; }
 .tf-mbar i.tf-seg-down { background: var(--err); opacity: 1; }
 .tf-mbar i.tf-seg-warn { background: var(--warn); opacity: 1; }
 .tf-mbar i.tf-seg-paused { background: var(--rule); opacity: 1; }
@@ -13,8 +25,15 @@
 .tf-mon tbody tr:not(.tf-mon-foldrow) > td:first-child { font-size: var(--t-md); font-weight: 500; white-space: nowrap; }
 .tf-mon .tf-mon-type { font-weight: 400; }
 /* The page never scrolls sideways: past what the table needs, the bars narrow, then the figures wait. */
-@media (max-width: 1240px) { .tf-mbar { width: 96px; } }
-@media (max-width: 1040px) { .tf-mon .tf-num { display: none; } }
+@media (max-width: 1240px) {
+  .tf-mbar i { width: 3px; }
+  .tf-mbar-axis { width: 95px; }
+  .tf-monc-state { width: 132px; }
+  .tf-monc-bars { width: 122px; }
+  .tf-monc-num { width: 76px; }
+  .tf-monc-acts { width: 228px; }
+}
+@media (max-width: 1040px) { .tf-mon .tf-num, .tf-monc-num { display: none; } }
 .tf-mon-acts .tf-trail { justify-content: flex-end; flex-wrap: nowrap; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */

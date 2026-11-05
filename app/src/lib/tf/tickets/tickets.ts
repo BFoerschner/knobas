@@ -112,14 +112,15 @@ export function commentsLine(count: number | null): string | null {
 }
 
 /**
- * The initials in a card's corner: the first letters of an account's first
- * two parts (`mara.lindqvist` is *ML*), or its first two letters, or *–* for
- * nobody.
+ * The initials on an avatar: a display name's first and last letters (*Lena Hoffmann* is *LH*), else the first two
+ * letters of an account's first part, or *–* for nobody. One account has one avatar, whichever form a read answered:
+ * `mara` and `mara.lindqvist` are both *MA*.
  */
 export function initials(assignee: string | null): string {
   if (assignee === null) return "–";
+  const names = assignee.trim().split(/\s+/);
+  if (names.length >= 2) return (names[0]![0]! + names.at(-1)![0]!).toUpperCase();
   const parts = assignee.split(/[.\s_@-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
   return (parts[0] ?? assignee).slice(0, 2).toUpperCase();
 }
 
@@ -186,9 +187,9 @@ export function previewAction(
       chooses: true,
     };
   }
-  if (lower === "done") return { label: "Open job", note: "Done. Opening shows what was attached.", chooses: false };
+  if (lower === "done") return { label: "Open ticket", note: "Done. Opening shows what was attached.", chooses: false };
   if (!card.mine) {
-    return { label: "Open job", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned.", chooses: false };
+    return { label: "Open ticket", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned.", chooses: false };
   }
   return {
     label: "Resume work",
@@ -240,7 +241,7 @@ export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTal
       return {
         section: held.label,
         count: `${held.n} ${noun}`,
-        failing: held.bad > 0 ? `${held.bad} failing or down` : null,
+        failing: held.bad > 0 ? `${held.bad} ${held.label === "Monitors" ? "down" : "failing"}` : null,
       };
     });
 }

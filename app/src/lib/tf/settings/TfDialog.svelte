@@ -35,7 +35,7 @@
     body,
     footer,
     className = "",
-    closeButton = false,
+    closeButton = true,
     actions,
   }: {
     /** Text, or a snippet when the title holds markup (#2346); either way it names the dialog. */
@@ -48,7 +48,7 @@
     footer?: Snippet;
     /** A class beside `tf-dialog`, for a dialog of its own size (the view editor's, the import dialog's `tf-dwide`). */
     className?: string;
-    /** A Close icon button on the right of the title line. */
+    /** The Close icon button on the right of the title line: every dialog has one (design system, Dialogs). */
     closeButton?: boolean;
     /** Buttons on the right of the title line, before the Close: the title line is the dialog's header. */
     actions?: Snippet;

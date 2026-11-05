@@ -149,7 +149,7 @@
   }
 </script>
 
-<TfDialog closeButton title="Link to…" subtitle={fromTitle} {onclose}>
+<TfDialog title="Link {fromTitle}" {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">

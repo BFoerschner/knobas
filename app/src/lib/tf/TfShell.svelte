@@ -77,9 +77,9 @@
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
   import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
-  import { provideShownPageName } from "./page-name.svelte";
+  import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
-  import { parseTfHash, sectionOf } from "./route";
+  import { navSection, parseTfHash, sectionOf } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -200,6 +200,8 @@
 
   /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
   const shownPage = provideShownPageName();
+  // A press on *Back to <name>* is the key's own step.
+  provideBackStep((to, opened) => leave(to, opened));
 
   /**
    * The address moved (#2229). An entry already stamped is one history
@@ -284,13 +286,20 @@
     if (shownSection !== null && section !== shownSection && shownSection === scopedTicket.section) untrack(() => scopedTicket.clear());
     shownSection = section;
   });
+  // Tickets and a ticket's page light one section: the sub-tasks narrowing goes when the bare list is left.
+  let onBareTickets = false;
+  $effect(() => {
+    const bare = route.view === "tickets" && route.rest.length === 0;
+    if (onBareTickets && !bare && untrack(() => scopedTicket.section) === "tickets") untrack(() => scopedTicket.clear());
+    onBareTickets = bare;
+  });
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
    * the ladder's own rungs, so the hint names what the key does.
    */
-  const fromTicketRow = $derived(scopedTicket.section !== null && scopedTicket.section === sectionOf(route));
-  const back = $derived(escTarget(route, here.opener, fromTicketRow));
+  const fromTicketRow = $derived(scopedTicket.section !== null && scopedTicket.section === sectionOf(route) && route.view !== "ticket" && route.view !== "job");
+  const back = $derived(escTarget(route, here.opener, fromTicketRow, shownPage.parent));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -522,6 +531,7 @@
       route,
       opener: here.opener,
       fromTicketRow,
+      parent: shownPage.parent,
     });
     if (step.do === "nothing") return;
     event.preventDefault();
@@ -580,10 +590,11 @@
 
 <div class="tf">
   <TfTopBar
-    current={sectionOf(route)}
+    current={navSection(route)}
     {inbox}
     {badges}
     {timer}
+    job={chosen?.key ?? null}
     onsearch={() => onsearch(sectionFilter(route))}
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}

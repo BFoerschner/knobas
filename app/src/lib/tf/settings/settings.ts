@@ -33,7 +33,7 @@ export type SettingsSection =
 /** The left-hand navigation, top to bottom, with prototype-6's names. */
 export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] = [
   ["sources", "Sources"],
-  ["checkouts", "Checkouts and Open in…"],
+  ["checkouts", "Checkouts and Open in"],
   ["time", "Time"],
   ["notifications", "Desktop notifications"],
   ["standup", "Standup"],
@@ -50,7 +50,7 @@ export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] 
 /** Where in Settings the reader is: a section, or one source's page. */
 export type SettingsPlace =
   | { section: SettingsSection }
-  | { section: "sources"; source: string; add?: ListAddition };
+  | { section: "sources"; source: string; add?: ListAddition; reenter?: boolean };
 
 /** A value an address adds to a list field of a source's config, unsaved (#879). */
 export interface ListAddition {
@@ -69,9 +69,17 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
   const [head, arg, verb, field, value] = rest;
   if (head === "source" && arg && verb === "add" && field && value)
     return { section: "sources", source: arg, add: { field, value } };
+  // The status bar's *Re-enter password*: the page with its prompt already open.
+  if (head === "source" && arg && verb === "reenter") return { section: "sources", source: arg, reenter: true };
   if (head === "source" && arg) return { section: "sources", source: arg };
   const known = SETTINGS_SECTIONS.find(([key]) => key === head);
   return { section: known ? known[0] : "sources" };
+}
+
+/** Whether what follows `#/settings` names a section or a source's page: an address that names neither has no page. */
+export function settingsKnows(rest: readonly string[]): boolean {
+  const [head, arg] = rest;
+  return head === undefined || (head === "source" && !!arg) || SETTINGS_SECTIONS.some(([key]) => key === head);
 }
 
 /** The address of a section of Settings. */

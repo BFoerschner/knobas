@@ -53,7 +53,7 @@
     <p>Where knobas reads from. Each source syncs on its own schedule; writes go back through the queue.</p>
   </div>
   <div class="tf-acts">
-    <button class="tf-btn tf-primary" onclick={onadd}>+ Add a source</button>
+    <button class="tf-btn tf-primary" onclick={onadd}>Add a source…</button>
     {#if sources.length > 0}
       <button class="tf-btn" onclick={() => void syncAll()}>Sync all</button>
     {/if}

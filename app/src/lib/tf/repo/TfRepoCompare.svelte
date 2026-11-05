@@ -335,7 +335,7 @@
       <header><h3>Commits</h3></header>
       <div class="tf-rows">
         {#each standing?.commits ?? [] as commit, n (n)}
-          <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t">{commit.title}</span></div>
+          <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}>{commit.title}</span></div>
         {/each}
       </div>
     </div>

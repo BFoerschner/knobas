@@ -177,7 +177,7 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
   ]);
   expect(rowOf("Idempotent").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
   expect(text(target.querySelector(".tf-ishelf"))).toBe(
-    "Snoozed: the Jira credential expires on Monday 7 Sep 2026 (back 2026-08-29).",
+    "Snoozed 1 the Jira credential expires on Monday 7 Sep 2026 back 2026-08-29 Wake",
   );
 });
 
@@ -193,7 +193,7 @@ test("a row no open job reaches says no job; an open job's context names it", as
 test("All is the first scope shown; This job keeps what the job reaches", async () => {
   await open({ job: "PAY-231" });
   const scopes = [...target.querySelectorAll(".tf-seg button")];
-  expect(scopes.map((scope) => text(scope))).toEqual(["This job PAY-231", "All"]);
+  expect(scopes.map((scope) => text(scope))).toEqual(["This job 3", "All"]);
   expect(rows()).toHaveLength(4);
   (scopes[0] as HTMLButtonElement).click();
   flushSync();
@@ -285,7 +285,7 @@ test("Snooze offers the presets, and one moves the item to the snoozed line", as
   expect(calls).toEqual([`snooze review_request:gitea:payouts#142 ${monday}`]);
   expect(toasts.items.map((toast) => toast.text)).toContain("Snoozed until Monday 09:00");
   expect(text(target.querySelector(".tf-ishelf"))).toBe(
-    "Snoozed: the Jira credential expires on Monday 7 Sep 2026 (back 2026-08-29), jonas asked for your review: Idempotent retry window (back 2026-08-24).",
+    "Snoozed 2 the Jira credential expires on Monday 7 Sep 2026 back 2026-08-29 Wakejonas asked for your review: Idempotent retry window back 2026-08-24 Wake",
   );
 });
 

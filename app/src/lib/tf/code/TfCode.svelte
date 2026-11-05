@@ -325,7 +325,7 @@
   });
 
   const scopes = $derived<FilterScope[]>([
-    ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" }] : []),
+    ...(job !== null ? [{ id: "job", label: "This job", title: `What ${job} reaches`, query: "" }] : []),
     { id: "mine", label: "Mine", query: "" },
     { id: "all", label: "All", query: "" },
   ]);
@@ -437,7 +437,7 @@
   </div>
   <div class="tf-acts">
     {#if compare !== null}
-      <a class="tf-btn" href={compare}>New pull request</a>
+      <a class="tf-btn tf-primary" href={compare}>New pull request</a>
     {:else}
       <!-- Focusable, so the reason in its title reaches the keyboard too. -->
       <button
@@ -492,14 +492,14 @@
                 ><a class="tf-mono" href={itemHash(row)}
                   ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></span
                   ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></a
-                >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
+                >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job tf-mono">{job}</span>{/if}</td
               >
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
-              <td class="tf-nowrap"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></td>
+              <td class="tf-nowrap tf-right"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></td>
             </tr>
           {/each}
           {#if repoWin.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("after")}></td></tr>{/if}
@@ -522,7 +522,7 @@
           {#each win.slice(kept) as { row, number, idle, author } (row.entity_id)}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
-              <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
+              <td class="tf-prno"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
                 ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
                   >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span

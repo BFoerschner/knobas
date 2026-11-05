@@ -83,8 +83,10 @@ test("Show N more counts what the column holds past what it draws, Done saying s
   expect(moreLine(column("To Do", 5), 5)).toBeNull();
 });
 
-test("initials are the account's two parts, or its first two letters, or a dash for nobody", () => {
-  expect(initials("mara.lindqvist")).toBe("ML");
+test("initials are a person's first and last names' letters, an account's first two letters, or a dash for nobody", () => {
+  expect(initials("mara.lindqvist")).toBe("MA");
+  expect(initials("mara")).toBe("MA");
+  expect(initials("Lena Hoffmann")).toBe("LH");
   expect(initials("jonas")).toBe("JO");
   expect(initials(null)).toBe("–");
 });
@@ -100,8 +102,8 @@ test("the preview's button: Start work, Resume work or Open job by the ticket's 
   });
   expect(previewAction(mine("In Progress"), true).note).toBe("Your timer is running on this ticket.");
   // *Open job* only reads (spec #2396): it goes to the ticket's page and chooses nothing.
-  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open job", chooses: false });
-  expect(previewAction(theirs, false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker.", chooses: false });
+  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open ticket", chooses: false });
+  expect(previewAction(theirs, false)).toEqual({ label: "Open ticket", note: "Assigned to jonas.becker.", chooses: false });
   expect(previewAction({ assignee: null, mine: false, status: "To Do" }, false).note).toBe("Unassigned.");
 });
 
@@ -110,7 +112,7 @@ test("the preview's button reads the card's status, not the column it stands in 
   const [ready] = named("Ready", ["To Do"]).cards;
   expect(previewAction({ ...ready!, assignee: "mara", mine: true }, false).label).toBe("Start work");
   const [shipped] = named("Shipped", ["Done"]).cards;
-  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open job");
+  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open ticket");
 });
 
 test("Around this ticket groups the context's kinds as the room's tiles do, and counts what fails", () => {
@@ -126,9 +128,9 @@ test("Around this ticket groups the context's kinds as the room's tiles do, and 
     ]),
   ).toEqual([
     { section: "Code", count: "5 items", failing: null },
-    { section: "Builds", count: "7 builds", failing: "1 failing or down" },
+    { section: "Builds", count: "7 builds", failing: "1 failing" },
     { section: "Docs", count: "3 pages", failing: null },
-    { section: "Monitors", count: "1 monitor", failing: "1 failing or down" },
+    { section: "Monitors", count: "1 monitor", failing: "1 down" },
   ]);
   expect(aroundLines(null)).toEqual([]);
 });
@@ -138,7 +140,7 @@ test("Around this ticket counts what the Builds read answered under Builds, what
     { kind: "build", tone: "ok" as const, count: 1, section: "builds" as const },
     { kind: "workflow_run", tone: "err" as const, count: 2, section: "builds" as const },
   ];
-  expect(aroundLines(tally)).toEqual([{ section: "Builds", count: "3 items", failing: "2 failing or down" }]);
+  expect(aroundLines(tally)).toEqual([{ section: "Builds", count: "3 items", failing: "2 failing" }]);
   // A line no section read counted is grouped by its kind alone.
   const loose = tally.map(({ kind, tone, count }) => ({ kind, tone, count }));
   expect(aroundLines(loose).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);

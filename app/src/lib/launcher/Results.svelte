@@ -25,6 +25,8 @@
     onopen,
     onhover,
     onwiden = null,
+    places = [],
+    ongo = () => {},
   }: {
     response: SearchResponse;
     /** The clock an inbox line's time cell is read against (#2423). */
@@ -40,6 +42,9 @@
     onhover: (index: number) => void;
     /** Drop what narrows the search, where something does: an empty answer offers it. */
     onwiden?: (() => void) | null;
+    /** Places of the app the words name, offered where nothing else answered. */
+    places?: readonly { name: string; hash: string }[];
+    ongo?: (hash: string) => void;
   } = $props();
 
   /** Where each group's hits start in the flat list. */
@@ -159,12 +164,18 @@
 {/each}
 
 {#if response.groups.length === 0 && !rows.some((row) => row.kind === "inbox")}
+  {#each places as place, n (place.hash)}
+    <button type="button" class="tf-ln-opt" class:tf-ln-on={n === 0} onclick={() => ongo(place.hash)}>
+      <span class="tf-ln-nm">{place.name}</span>
+      <span class="tf-ln-s">Go to this page.</span>
+    </button>
+  {/each}
   <p class="tf-ln-none">
     Nothing matches
     <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
   {#if onwiden}
-    <button type="button" class="tf-ln-opt" onclick={onwiden}>
+    <button type="button" class="tf-ln-opt" class:tf-ln-on={places.length === 0} onclick={onwiden}>
       <span class="tf-ln-nm">Search everything</span>
       <span class="tf-ln-s">Every field, with no filters.</span>
     </button>

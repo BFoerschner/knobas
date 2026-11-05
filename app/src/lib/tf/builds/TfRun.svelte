@@ -53,6 +53,8 @@
   import { settleEchoes } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import { parentPage } from "../page-name.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { fitLabel } from "../time/day-view";
@@ -440,6 +442,9 @@
     void queue(request);
   }
 
+  // A run sits under its pipeline, by the name its crumb gives it.
+  parentPage(() => ({ hash: pipelineHash(pipelineId), name: pipeline.name }));
+
   /** A top-level artifact file into the downloads folder (D8, #856). */
   const downloadFile = (name: string) => downloadAndSay(ports.download, runId, { kind: "file", path: name }, name);
 
@@ -453,20 +458,18 @@
 </script>
 
 {@render crumbs([
-  { name: "Builds", href: "#/builds" },
+  { name: "Builds" },
+  ...(pipeline.group !== null ? [{ name: pipeline.group }] : []),
   { name: pipeline.name, href: pipelineHash(pipelineId) },
   { name: run?.number != null ? `#${run.number}` : "Run" },
 ])}
 
 {#if runsFailed !== null && held === null}
-  <div class="tf-empty"><p>Runs could not be read: {runsFailed}</p></div>
+  <TfNothingHere message="This pipeline's runs could not be read: {runsFailed}" />
 {:else if held === null}
   <p class="tf-dim tf-runs">Reading the run…</p>
 {:else if run === null}
-  <div class="tf-empty">
-    <p>No run of {pipeline.name} at this address.</p>
-    <a class="tf-btn" href={pipelineHash(pipelineId)}>Back to the pipeline</a>
-  </div>
+  <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
   <header class="tf-fhead tf-bhead">
@@ -501,9 +504,9 @@
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
       {/if}
       {#if run.web_url !== null}
-        <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}><span>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></span></button>
+        <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
       {/if}
-      <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} />
+      <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} noun="run" />
     </div>
   </header>
   {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
@@ -559,7 +562,7 @@
             <h3>{failureHeading(failure)}</h3>
             {#if failure.details !== null}<pre>{failure.details}</pre>{/if}
             <div class="tf-acts">
-              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")}>Show it in the log</a>
+              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")}>Show in log</a>
               {#if failure.location !== null && repoId !== null}
                 <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, failure.location.path)}>Open the test file</a>
               {/if}

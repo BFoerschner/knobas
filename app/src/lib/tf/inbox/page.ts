@@ -12,5 +12,6 @@ export const page = definePage({
   matches: (route): route is InboxRoute => route.view === "full" && route.section === "inbox",
   component: TfInbox,
   crumbs: true,
+  knows: (route) => route.rest.length === 0,
   props: ({ ready, job }) => ({ ready, job }),
 });

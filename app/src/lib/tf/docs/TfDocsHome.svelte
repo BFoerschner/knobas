@@ -27,7 +27,6 @@
     groups = [],
     jobFirst = false,
     sync,
-    pages,
     onretry,
   }: {
     /** The tree as read, `null` until its first answer. */
@@ -41,8 +40,6 @@
     jobFirst?: boolean;
     /** The frame's *Sync now*, last in the header. */
     sync?: Snippet | undefined;
-    /** What opens the tree where it is a drawer, first in the header. */
-    pages?: Snippet | undefined;
     onretry: () => void;
   } = $props();
 
@@ -54,7 +51,22 @@
   const total = $derived(tree?.spaces.reduce((n, space) => n + space.pages.length, 0) ?? 0);
   const last = $derived(tree === null ? null : continueReading(tree));
   const forYou = $derived(tree?.for_you ?? []);
-  const jobPages = $derived(groups.flatMap((group) => group.pages.map((page) => ({ ...page, reason: group.reason }))));
+  /** Where a page sits, with its space by name, as the crumb has it: *Payments team*, not *PAY*. */
+  function whereWords(where: string): string {
+    const [first, ...rest] = where.split(" › ");
+    return [tree?.spaces.find((row) => row.key === first)?.name ?? first, ...rest].join(" › ");
+  }
+  /** A page's why under the job's heading: the job is the heading, and a space goes by its name, as the crumb has it. */
+  function whyOnJob(reason: string, where: string): string {
+    const space = whereWords(where);
+    return reason === `Linked to ${job}` ? space : `${reason}, ${space}`;
+  }
+  const allJobPages = $derived(groups.flatMap((group) => group.pages.map((page) => ({ ...page, reason: group.reason }))));
+  /** A page is listed once on the home, in the first panel that shows it, and says why it is there. */
+  const onJob = $derived(new Set(allJobPages.map((page) => page.entity_id)));
+  const jobPages = $derived(jobFirst ? allJobPages : allJobPages.filter((page) => page.entity_id !== last?.entity_id && !forYou.some((item) => item.entity_id === page.entity_id)));
+  const lastShown = $derived(last !== null && jobFirst && onJob.has(last.entity_id) ? null : last);
+  const forYouRows = $derived(forYou.filter((item) => item.entity_id !== lastShown?.entity_id && !(jobFirst && onJob.has(item.entity_id))));
   /** Whether some source that is turned on fills the wiki role: what an empty tree is waiting for. */
   const hasSource = $derived(sourceRoles.syncs(WIKI));
 </script>
@@ -62,12 +74,12 @@
 {#snippet jobList()}
   {#if job !== null && jobPages.length > 0}
     <section class="tf-panel tf-dh-job" aria-label="Pages on {job}">
-      <header><h3>Pages on <span class="tf-jobk">{job}</span></h3><span class="tf-count">{jobPages.length}</span></header>
+      <header><h3>Pages on <span class="tf-mono">{job}</span></h3><span class="tf-count">{jobPages.length}</span></header>
       <div class="tf-dh-rows">
         {#each jobPages.slice(0, JOB_PAGES) as page (page.entity_id)}
           <a class="tf-dh-row" href={pageHash(page.entity_id)}>
             <span class="tf-dh-t">{page.title}</span>
-            <span class="tf-why">{page.reason}, {page.where}</span>
+            <span class="tf-why">{whyOnJob(page.reason, page.where)}</span>
           </a>
         {/each}
       </div>
@@ -83,8 +95,8 @@
         <div class="tf-sub">{counted(tree.spaces.length, "space", "spaces")}, {counted(total, "page", "pages")}</div>
       {/if}
     </div>
-    {#if pages || sync}
-      <div class="tf-acts">{@render pages?.()}{@render sync?.()}</div>
+    {#if sync}
+      <div class="tf-acts">{@render sync()}</div>
     {/if}
   </header>
 
@@ -101,6 +113,7 @@
     <div class="tf-empty">
       {#if hasSource}
         <p>No pages have synced yet. Sync now reads them, and they show here.</p>
+        {#if sync}{@render sync()}{/if}
       {:else}
         <p>Docs reads pages from a wiki source such as Confluence, and none is set up yet.</p>
         <a class="tf-btn tf-primary" href="#/settings/sources">Open Settings › Sources</a>
@@ -110,27 +123,29 @@
     <div class="tf-dh-body">
       {#if jobFirst}{@render jobList()}{/if}
       <div class="tf-dh-two">
-        {#if last !== null}
+        {#if lastShown !== null}
           <section class="tf-panel" aria-label="Continue reading">
             <header><h3>Continue reading</h3></header>
             <div class="tf-dh-rows">
-              <a class="tf-dh-row" href={pageHash(last.entity_id)}>
-                <span class="tf-dh-t">{last.title}</span>
-                <span class="tf-why">{last.where}</span>
+              <a class="tf-dh-row" href={pageHash(lastShown.entity_id)}>
+                <span class="tf-dh-t">{lastShown.title}</span>
+                <span class="tf-why">{whereWords(lastShown.where)}{#if onJob.has(lastShown.entity_id)}, on this job{/if}{#if forYou.some((item) => item.entity_id === lastShown.entity_id)}, mentions you{/if}</span>
               </a>
             </div>
           </section>
         {/if}
         <section class="tf-panel" aria-label="For you">
-          <header><h3>For you</h3>{#if forYou.length > 0}<span class="tf-count">{forYou.length}</span>{/if}</header>
+          <header><h3>For you</h3>{#if forYouRows.length > 0}<span class="tf-count">{forYouRows.length}</span>{/if}</header>
           {#if forYou.length === 0}
             <p class="tf-dh-none">No page mentions you right now.</p>
+          {:else if forYouRows.length === 0}
+            <p class="tf-dh-none">Nothing else mentions you right now.</p>
           {:else}
             <div class="tf-dh-rows">
-              {#each forYou as item (item.entity_id)}
+              {#each forYouRows as item (item.entity_id)}
                 <a class="tf-dh-row" href={pageHash(item.entity_id)}>
                   <span class="tf-dh-t">{item.title}</span>
-                  <span class="tf-why">{forYouWhy(item)}</span>
+                  <span class="tf-why">{forYouWhy(item)}{#if onJob.has(item.entity_id)}, on this job{/if}</span>
                 </a>
               {/each}
             </div>
@@ -156,9 +171,6 @@
                     <a class="tf-dh-row tf-dh-rowt" href={pageHash(page.entity_id)}><span class="tf-dh-t">{page.title}</span></a>
                   {/each}
                 </div>
-                {#if space.pages.length > Math.min(top.length, TOP_PAGES)}
-                  <a class="tf-dh-more" href={spaceHash(tree.spaces, space)}>All {counted(space.pages.length, "page", "pages")}</a>
-                {/if}
               {/if}
             </article>
           {/each}

@@ -227,7 +227,7 @@
           Keep running
         </button>
       {/if}
-      <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
+      <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>{stopped ? "Discard" : "Cancel"}</button>
       <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
         Log {form.reading} to {form.key}
       </button>
