@@ -313,7 +313,7 @@ text: string, prefix: Prefix | null, filters: SearchFilters,
  */
 unknown_tokens: Array<string>, 
 /**
- * Typed `under:` and `kind:` tokens that explain an empty answer: the
+ * Typed `under:`, `kind:` and `type:` tokens that explain an empty answer: the
  * launcher leaves out the kind named, or everything beneath the name
  * (#2488, [`crate::frames`]). Not unknown, because the grammar and the
  * mirror both know them. Empty unless the launcher's answer is.
