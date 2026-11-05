@@ -2,7 +2,7 @@
 .tf-ibody { padding: 16px 22px 40px; display: flex; flex-direction: column; gap: 12px; }
 /* One sheet of rows, as every other list: rows that belong together are divided, not boxed. */
 .tf-inbox:has(> .tf-empty) { background: none; border: 0; }
-.tf-inbox { display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+.tf-inbox, .tf-ishelf-rows { display: flex; flex-direction: column; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .tf-ib {
   display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 1px 14px; padding: 9px 14px;
   border-bottom: 1px solid var(--rule-2); align-items: center;
@@ -17,21 +17,23 @@
 .tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
 .tf-isnooze { grid-column: 2 / span 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 0 0 14px; }
 .tf-isnooze input { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 6px; background: var(--field); color: var(--ink); font: inherit; font-size: var(--t-sm); }
-.tf-ishelf { font-size: var(--t-sm); margin-top: 12px; }
-.tf-ishelf > summary { list-style: none; cursor: pointer; font-weight: 600; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
-.tf-ishelf > summary::-webkit-details-marker { display: none; }
-.tf-ishelf-rows { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.tf-ishelf-rows li { display: flex; align-items: center; gap: 10px; padding: 4px 10px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; min-height: 34px; }
+/* The fold is a heading over a sheet of rows in the list's shape, so its titles start on the list's edge. */
+.tf-ishelf.tf-collapse { border: 0; border-radius: 0; margin: 12px 0 0; }
+.tf-ishelf.tf-collapse > summary { padding: 0; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-ishelf.tf-collapse > .tf-ishelf-rows { margin-top: 8px; padding: 0; }
+.tf-ishelf.tf-collapse > .tf-ishelf-rows > :last-child { margin-bottom: 0; }
 .tf-ifail { color: var(--err); font-size: var(--t-sm); }
 @media (max-width: 900px) {
   .tf-ibody { padding-left: 16px; padding-right: 16px; }
   .tf-ib { grid-template-columns: minmax(0, 1fr); }
   .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
+  /* Stacked, the time and the actions keep the titles' edge: a failure's dot still hangs in the gutter. */
+  .tf-ib time, .tf-ib .tf-acts { margin-left: 14px; }
   .tf-ib { position: relative; }
   .tf-ib .tf-acts { justify-content: flex-start; order: 3; }
   /* Stacked, the end of the row is the row: the group hangs at its top right, over the time's line. */
   .tf-ib .tf-acts.tf-rowend { position: static; }
   .tf-ib .tf-rowacts { right: 14px; top: 6px; transform: none; }
-  .tf-isnooze { order: 4; padding-left: 0; }
+  .tf-isnooze { order: 4; }
 }
 

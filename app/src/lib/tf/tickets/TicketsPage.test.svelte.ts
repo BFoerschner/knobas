@@ -512,7 +512,7 @@ test("an ad-hoc context draws no Not a ticket group and is never read for", asyn
   expect(h.contextReads).toBe(0);
 });
 
-const around = () => [...preview().querySelectorAll(".tf-rollup > *")].map((d) => d.textContent);
+const around = () => [...preview().querySelectorAll(".tf-tktable > a")].map((row) => [...row.children].map((part) => part.textContent).join("|"));
 
 // #1030: the preview counts what the job's sections show, from the job-reach
 // read, whether or not anybody has opened the ticket's job yet.
@@ -520,7 +520,7 @@ test("Around this ticket counts what the ticket reaches, with no context stored 
   const h = harness();
   h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
   await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing"]);
+  expect(around()).toEqual(["Code|1||›", "Builds|1|1 failing|›"]);
   // Builds is counted as the job reads it: asked for the CI role, naming no kinds (#1295).
   const builds = h.lists.filter((filter) => filter.order === "latest_per_parent");
   expect(builds).toHaveLength(1);
@@ -537,7 +537,7 @@ test("Around this ticket counts a parent's link the reach brings in and the cont
   ];
   h.members["ctx:2"] = [PR.entity_id, BUILD_OK.entity_id];
   await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds2 builds, 1 failing"]);
+  expect(around()).toEqual(["Code|1||›", "Builds|2|1 failing|›"]);
 });
 
 test("Around this ticket says Nothing connected yet only when the reach is empty", async () => {
@@ -548,7 +548,7 @@ test("Around this ticket says Nothing connected yet only when the reach is empty
   expect(preview().textContent).toContain("Nothing connected yet.");
   target.querySelector<HTMLButtonElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.click();
   await settle();
-  expect(around()).toEqual(["Code1 pull request"]);
+  expect(around()).toEqual(["Code|1||›"]);
 });
 
 test("selecting a card never creates a context", async () => {
@@ -559,7 +559,7 @@ test("selecting a card never creates a context", async () => {
     target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!.click();
     await settle();
   }
-  expect(around()).toEqual(["Code1 pull request"]);
+  expect(around()).toEqual(["Code|1||›"]);
   expect(bridged).not.toContain("promote_context");
   expect(h.lists.every((filter) => filter.context === null)).toBe(true);
 });

@@ -17,6 +17,7 @@
   import type { MiniBoardCard } from "../../ipc/entity";
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import Signals from "./Signals.svelte";
   import { commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
 
@@ -69,7 +70,7 @@
   </span>
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {needles} /></span>
-  {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
+  {#if epic && shows("epic")}<span class="tf-cep"><TfKeyed text={epic} /></span>{/if}
   <span class="tf-meta">
     {#if shows("signals")}<Signals signals={card.signals} />{/if}
     {#each labels as label (label)}<span class="tf-lab">{label}</span>{/each}

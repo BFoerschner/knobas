@@ -28,7 +28,7 @@
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { EVENTS, ipcErrorMessage } from "../ipc";
+import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
 import { ackAlert as realAck } from "../ipc/assets";
 import {
   completeInboxItem as realComplete,
@@ -61,6 +61,13 @@ export interface InboxPorts {
   listen: (event: string, handler: () => void) => Promise<() => void>;
 }
 
+/** Why an answer failed. `gone`: the item left the inbox at its source while the list was on screen. */
+export interface InboxRefusal {
+  reason: string;
+  gone: boolean;
+}
+export type Refused = (refusal: InboxRefusal) => void;
+
 export interface Inbox {
   /** What needs you now, newest first. */
   readonly stream: InboxEntry[];
@@ -87,8 +94,9 @@ export interface Inbox {
   refreshCount(): Promise<void>;
   /** Read both shelves and the count, together. */
   refresh(): Promise<void>;
-  snooze(itemKey: string, until: Date): Promise<void>;
-  complete(itemKey: string): Promise<void>;
+  /** `refused` hears why this answer failed, so the row that asked can say so where the reader is looking. */
+  snooze(itemKey: string, until: Date, refused?: Refused): Promise<void>;
+  complete(itemKey: string, refused?: Refused): Promise<void>;
   /**
    * Seen, not fixed: clears this alert's item and leaves the alert open.
    *
@@ -98,7 +106,7 @@ export interface Inbox {
    * bridge is here — beside the other two key-takers — rather than in a
    * component.
    */
-  ack(itemKey: string): Promise<void>;
+  ack(itemKey: string, refused?: Refused): Promise<void>;
   /**
    * Subscribe to the two signals the inbox moves on. Returns the teardown;
    * calling `start` twice is harmless.
@@ -220,7 +228,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
    * draw back the row the second one is still taking away. A failed answer
    * comes back with that re-read, and its reason stays said.
    */
-  async function act(draw: () => void, run: () => Promise<void>): Promise<void> {
+  async function act(draw: () => void, run: () => Promise<void>, refused?: Refused): Promise<void> {
     draw();
     answers += 1;
     inFlight += 1;
@@ -232,6 +240,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       // list was on screen, so the list is the stale thing that caused it —
       // which the re-read below fixes.
       refusal = ipcErrorMessage(error);
+      refused?.({ reason: refusal, gone: isIpcError(error) && error.code === "not_found" });
     }
     answers += 1;
     inFlight -= 1;
@@ -286,13 +295,14 @@ export function createInbox(ports?: InboxPorts): Inbox {
     },
     refreshCount,
     refresh,
-    snooze: (itemKey, until) =>
+    snooze: (itemKey, until, refused) =>
       act(
         () => drawSnooze(itemKey, until),
         () => io.snoozeInboxItem(itemKey, until.toISOString()),
+        refused,
       ),
-    complete: (itemKey) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey)),
-    ack: (itemKey) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey))),
+    complete: (itemKey, refused) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey), refused),
+    ack: (itemKey, refused) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey)), refused),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*

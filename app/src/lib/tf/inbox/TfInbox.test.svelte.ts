@@ -12,7 +12,7 @@ import { createInbox, type Inbox } from "../../inbox/inbox.svelte";
 import type { ContextRow, EntityDetail, InboxEntry, InboxItem, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
-import { toasts } from "../../shell/toasts.svelte";
+import { dismiss, toasts } from "../../shell/toasts.svelte";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import TfInbox from "./TfInbox.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
@@ -61,6 +61,7 @@ let asked: string[];
 
 beforeEach(() => {
   toasts.items.length = 0;
+  failing = {};
   calls = [];
   asked = [];
   target = document.createElement("div");
@@ -80,20 +81,32 @@ async function settle() {
   flushSync();
 }
 
+/** Answers that fail, by item key, with what the bridge throws. */
+let failing: Record<string, unknown> = {};
+
 function store(extra: InboxEntry[] = []): Inbox {
   let stream = [...STREAM, ...extra];
   let snoozed = SNOOZED.slice();
+  let done: InboxEntry[] = [];
   return createInbox({
     inboxItems: async (shelf) => (shelf === "snoozed" ? snoozed.slice() : stream.slice()),
     inboxCount: async () => stream.length,
     snoozeInboxItem: async (key, until) => {
       calls.push(`snooze ${key} ${until}`);
-      const moved = stream.find((row) => row.item.key === key)!;
-      stream = stream.filter((row) => row !== moved);
-      snoozed = [...snoozed, { ...moved, item: { ...moved.item, snoozed_until: until } }];
+      if (key in failing) throw failing[key];
+      // The backend's upsert: whichever shelf holds it, and a date now brings it back, from *Done* too.
+      const moved = [...stream, ...snoozed, ...done].find((row) => row.item.key === key)!;
+      stream = stream.filter((row) => row.item.key !== key);
+      snoozed = snoozed.filter((row) => row.item.key !== key);
+      done = done.filter((row) => row.item.key !== key);
+      // These tests' dates are their own clock's, so only a date of the real now is a wake.
+      if (Math.abs(new Date(until).getTime() - Date.now()) > 5_000) snoozed = [...snoozed, { ...moved, item: { ...moved.item, snoozed_until: until } }];
+      else stream = [...stream, { ...moved, item: { ...moved.item, snoozed_until: null } }];
     },
     completeInboxItem: async (key) => {
       calls.push(`done ${key}`);
+      if (key in failing) throw failing[key];
+      done = [...done, ...stream.filter((row) => row.item.key === key)];
       stream = stream.filter((row) => row.item.key !== key);
     },
     ackAlert: async (monitor) => {
@@ -127,7 +140,7 @@ async function open(
       return over.refused ? over.refused(asks) : [];
     },
     listContexts: async () => over.contexts ?? [],
-    listSources: async () => [sourceFacts("jira"), sourceFacts("gitea"), sourceFacts("tc", { display_name: "TeamCity" })],
+    listSources: async () => [sourceFacts("jira"), sourceFacts("gitea"), sourceFacts("tc", { display_name: "TeamCity" }), sourceFacts("kuma", { auth_kind: "ApiToken" })],
     getEntity: async (id: string) => {
       if (id !== "jira:PAY-231") throw { code: "not_found", message: "no", source_id: null };
       return { row: { entity_id: id, kind: "ticket" } } as unknown as EntityDetail;
@@ -144,7 +157,8 @@ async function open(
 }
 
 const text = (node: Element | null) => node?.textContent?.replace(/\s+/g, " ").trim();
-const rows = () => [...target.querySelectorAll(".tf-ib")];
+const rows = () => [...target.querySelectorAll(".tf-inbox > .tf-ib")];
+const shelfRows = () => [...target.querySelectorAll(".tf-ishelf-rows > .tf-ib")];
 const whats = () => rows().map((row) => text(row.querySelector(".tf-what")));
 const ctxs = () => rows().map((row) => text(row.querySelector(".tf-ctx")));
 function button(row: Element, label: string): HTMLButtonElement {
@@ -176,9 +190,10 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
     "Open ticket Snooze Done",
   ]);
   expect(rowOf("Idempotent").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
-  expect(text(target.querySelector(".tf-ishelf"))).toBe(
-    "Snoozed 1 the Jira credential expires on Monday 7 Sep 2026 back 2026-08-29 Wake",
-  );
+  expect(text(target.querySelector(".tf-ishelf summary"))).toBe("Snoozed 1");
+  expect(shelfRows().map((row) => text(row.querySelector(".tf-what")))).toEqual(["The Jira credential expires on Monday 7 Sep 2026"]);
+  expect(shelfRows().map((row) => text(row.querySelector(".tf-ctx")))).toEqual(["Credential, no job, back Saturday 29 Aug 2026"]);
+  expect(shelfRows().map((row) => text(row.querySelector(".tf-acts")))).toEqual(["Wake"]);
 });
 
 test("a row no open job reaches says no job; an open job's context names it", async () => {
@@ -284,9 +299,90 @@ test("Snooze offers the presets, and one moves the item to the snoozed line", as
   const monday = new Date(2026, 7, 24, 9, 0).toISOString();
   expect(calls).toEqual([`snooze review_request:gitea:payouts#142 ${monday}`]);
   expect(toasts.items.map((toast) => toast.text)).toContain("Snoozed until Monday 09:00");
-  expect(text(target.querySelector(".tf-ishelf"))).toBe(
-    "Snoozed 2 the Jira credential expires on Monday 7 Sep 2026 back 2026-08-29 Wakejonas asked for your review: Idempotent retry window back 2026-08-24 Wake",
-  );
+  expect(shelfRows().map((row) => text(row.querySelector(".tf-ctx")))).toEqual([
+    "Credential, no job, back Saturday 29 Aug 2026",
+    "Review, no job, back Monday 24 Aug 2026",
+  ]);
+});
+
+test("a snooze's toast takes it back with Undo", async () => {
+  await open({ clock: true });
+  const row = rowOf("Idempotent");
+  button(row, "Snooze").click();
+  flushSync();
+  button(row, "Tomorrow").click();
+  await settle();
+  expect(rows().some((one) => one.textContent?.includes("Idempotent"))).toBe(false);
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(rows().some((one) => one.textContent?.includes("Idempotent"))).toBe(true);
+});
+
+test("rapid Done is one toast, and its Undo brings them all back", async () => {
+  await open();
+  for (const words of ["dashboard", "Idempotent", "flows-stage"]) button(rowOf(words), "Done").click();
+  flushSync();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["3 items done"]);
+  await settle();
+  expect(rows()).toHaveLength(1);
+  toasts.items[0]!.action!.run();
+  await settle();
+  expect(rows()).toHaveLength(4);
+});
+
+test("a tally starts again once its toast has gone", async () => {
+  await open();
+  button(rowOf("dashboard"), "Done").click();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Done: Assigned to you: Payout dashboard latency"]);
+  dismiss(toasts.items[0]!.id);
+  button(rowOf("Idempotent"), "Done").click();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Done: jonas asked for your review: Idempotent retry window"]);
+});
+
+test("a Wake that fails says so in a toast with a way to try again, and draws no line above the list", async () => {
+  failing["credential_expiry:jira"] = { code: "internal", message: "the database is away", source_id: null };
+  await open();
+  button(shelfRows()[0]!, "Wake").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.tone).toBe("err");
+  expect(toast.text).toBe("Could not wake The Jira credential expires on Monday 7 Sep 2026: the database is away");
+  expect(toast.action?.label).toBe("Try again");
+  expect(target.querySelector(".tf-ifail")).toBeNull();
+  expect(shelfRows()).toHaveLength(1);
+  delete failing["credential_expiry:jira"];
+  toast.action!.run();
+  await settle();
+  expect(shelfRows()).toHaveLength(0);
+});
+
+test("an item that left at its source says so in words, not its key", async () => {
+  failing["new_assignment:jira:PAY-240"] = { code: "not_found", message: "no inbox item new_assignment:jira:PAY-240", source_id: null };
+  await open();
+  button(rowOf("dashboard"), "Done").click();
+  await settle();
+  expect(toasts.items.at(-1)!.text).toBe("Assigned to you: Payout dashboard latency has already left the inbox. It was resolved at its source.");
+  expect(target.textContent).not.toContain("no inbox item");
+});
+
+test("with no job chosen the bar draws no scope control", async () => {
+  await open({ job: null });
+  expect(target.querySelector(".tf-fbar .tf-seg")).toBeNull();
+  expect(rows()).toHaveLength(4);
+});
+
+test("a credential row says its fix in the status bar's words and opens the prompt", async () => {
+  health.replace([{ source_id: "kuma", state: "missing_secret", checked_at: at(9, 0), detail: null } as never]);
+  await open({
+    extra: [
+      entry({ key: "failed_sign_in:kuma", category: "failed_sign_in", source_id: "kuma", entity_id: null, kind: null, title: "Kuma", reason: "no credential is stored for Kuma" }),
+      entry({ key: "failed_sign_in:tc", category: "failed_sign_in", source_id: "tc", entity_id: null, kind: null, title: "TeamCity", reason: "the TeamCity sign-in was rejected" }),
+    ],
+  });
+  const link = (words: string) => rowOf(words).querySelector<HTMLAnchorElement>(".tf-acts a")!;
+  expect(text(link("No credential"))).toBe("Enter token");
+  expect(link("No credential").getAttribute("href")).toBe("#/settings/source/kuma/reenter");
+  expect(text(link("was rejected"))).toBe("Re-enter password");
 });
 
 function picker(row: Element): HTMLInputElement {

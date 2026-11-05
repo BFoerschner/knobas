@@ -16,7 +16,7 @@ import {
   opener,
   rowActions,
   sentence,
-  snoozedLine,
+  backLabel,
   untilLabel,
   visible,
 } from "./inbox";
@@ -139,13 +139,13 @@ describe("where a row opens", () => {
   });
   test("a failed sign-in opens its source's settings, where Re-enter is", () => {
     expect(opener(item({ category: "failed_sign_in", source_id: "teamcity", entity_id: null, kind: null }))).toEqual({
-      label: "Open source",
+      label: "Source settings",
       href: "#/settings/source/teamcity",
     });
   });
   test("a credential expiry opens its source's settings", () => {
     expect(opener(item({ category: "credential_expiry", source_id: "jira", entity_id: null, kind: null }))).toEqual({
-      label: "Open source",
+      label: "Source settings",
       href: "#/settings/source/jira",
     });
   });
@@ -216,15 +216,15 @@ describe("the filter", () => {
   });
 });
 
-test("the snoozed line names each item and its return date", () => {
-  const shelf = [
-    entry({ category: "credential_expiry", entity_id: null, kind: null, title: "Jira", reason: "the Jira credential expires on Monday 7 Sep 2026", snoozed_until: new Date(2026, 7, 29, 9).toISOString() }),
-    entry({ title: "Idempotent retry window", snoozed_until: new Date(2026, 8, 1, 9).toISOString() }),
-  ];
-  expect(snoozedLine(shelf)).toBe(
-    "Snoozed: the Jira credential expires on Monday 7 Sep 2026 (back 2026-08-29), jonas asked for your review: Idempotent retry window (back 2026-09-01).",
-  );
-  expect(snoozedLine([])).toBeNull();
+test("a snoozed row says when it comes back in the words a credential's sentence dates itself in", () => {
+  expect(backLabel({ snoozed_until: new Date(2026, 7, 29, 9).toISOString() })).toBe("Saturday 29 Aug 2026");
+  expect(backLabel({ snoozed_until: null })).toBeNull();
+});
+
+test("a credential row says its fix once the sources are read, and opens the prompt", () => {
+  const row = item({ category: "failed_sign_in", source_id: "kuma", entity_id: null, kind: null });
+  expect(opener(row, () => "Enter token")).toEqual({ label: "Enter token", href: "#/settings/source/kuma/reenter" });
+  expect(opener(row, () => null)).toEqual({ label: "Source settings", href: "#/settings/source/kuma" });
 });
 
 test("a snooze's toast names the day within a week, the date beyond", () => {

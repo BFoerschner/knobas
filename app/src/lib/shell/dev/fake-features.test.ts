@@ -44,11 +44,16 @@ test("the inbox: snooze moves a row to the other shelf, done removes it, the cou
   const stream = h["inbox_items"]!({ shelf: "stream" }) as { item: { key: string } }[];
   expect(h["inbox_count"]!({})).toBe(stream.length);
   const [first, second] = stream;
-  h["snooze_inbox_item"]!({ itemKey: first!.item.key, until: "2026-09-01T07:00:00Z" });
+  h["snooze_inbox_item"]!({ itemKey: first!.item.key, until: new Date(Date.now() + 86_400_000).toISOString() });
   h["complete_inbox_item"]!({ itemKey: second!.item.key });
   expect(h["inbox_count"]!({})).toBe(stream.length - 2);
   const later = h["inbox_items"]!({ shelf: "snoozed" }) as { item: { key: string; snoozed_until: string } }[];
   expect(later[0]!.item.key).toBe(first!.item.key);
+  // A snooze until now wakes it, from the shelf as the backend's upsert does (*Wake*, *Undo*).
+  h["snooze_inbox_item"]!({ itemKey: first!.item.key, until: new Date().toISOString() });
+  expect(h["inbox_count"]!({})).toBe(stream.length - 1);
+  const shelf = h["inbox_items"]!({ shelf: "snoozed" }) as { item: { key: string } }[];
+  expect(shelf.some((row) => row.item.key === first!.item.key)).toBe(false);
   expect(() => h["complete_inbox_item"]!({ itemKey: "nope" })).toThrow();
 });
 

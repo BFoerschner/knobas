@@ -9,10 +9,10 @@
   blocks by id), and `list_sources` for the source names ("Goes to Jira",
   "10:02, Gitea").
 
-  **Which buttons depends on what opened it.** After a stop: *Stop, log
-  later*, *Keep running*, *Discard* and *Log*. Without one (the ad-hoc
-  dialog's *Log to a ticket…*): *Discard* and *Log*, with nothing about a
-  clock. A stop's draft opens over the running clock (#896); what each button
+  **Which buttons depends on what opened it.** After a stop: *Discard*, set
+  apart as the one that drops the time, then *Stop, log later*, *Cancel, keep
+  running* and *Log*. Without one (the ad-hoc dialog's *Log to a ticket…*):
+  *Cancel* and *Log*, with nothing about a clock. A stop's draft opens over the running clock (#896); what each button
   does to it is `drafting.svelte.ts`'s, and this answers with an outcome,
   except that *Log* awaits `onbeforelog` (the clock stopping) before it sends.
   `Esc` and the backdrop are the quiet answer: a stop's draft stops the clock
@@ -179,36 +179,45 @@
 <!-- `Esc` and the backdrop leave quietly, through `TfDialog`'s `onclose`. -->
 <TfDialog title={heading} subtitle={title} onclose={leave} {layers}>
   {#snippet body()}
-      <div class="tf-dur">
-        <label><span>From</span><input type="time" aria-label="From" bind:value={form.began} /></label>
-        <label><span>Minutes</span><input type="number" min="1" step="1" aria-label="Minutes" bind:value={form.minutes} /></label>
-        <b>{form.reading}</b>
-        <span class="tf-dim">{intervals}</span>
+      <div class="tf-formgrid">
+        <label for="tf-log-from">From</label>
+        <div class="tf-dur"><input id="tf-log-from" type="time" aria-label="From" bind:value={form.began} /></div>
+        <label for="tf-log-minutes">Minutes</label>
+        <div class="tf-dur">
+          <input id="tf-log-minutes" type="number" min="1" step="1" aria-label="Minutes" bind:value={form.minutes} />
+          <b>{form.reading}</b>
+        </div>
+        <p class="tf-dim tf-note">{intervals}</p>
+
+        {#if draft.candidates.length > 0}
+          <fieldset class="tf-cands">
+            <legend class="tf-pane-h">What you did in that time</legend>
+            {#each draft.candidates as candidate (candidate.id)}
+              <label class="tf-ck tf-cand">
+                <input
+                  type="checkbox"
+                  checked={form.ticked.has(candidate.id)}
+                  onchange={() => form.toggle(candidate.id)}
+                />
+                <span>{candidate.bullet.replace(/^- /, "")}</span>
+                <span class="tf-dim">{clockReading(candidate.at)}, {seenIn(candidate)}</span>
+              </label>
+            {/each}
+          </fieldset>
+        {:else}
+          <p class="tf-pane-h">knobas saw nothing else in that time. The comment is yours to write.</p>
+        {/if}
+
+        <label for="tf-log-comment">Comment</label>
+        <textarea
+          id="tf-log-comment"
+          rows={Math.min(6, Math.max(3, draft.candidates.length))}
+          aria-label="Worklog comment"
+          value={form.comment}
+          oninput={(event) => form.takeOver(event.currentTarget.value)}
+        ></textarea>
       </div>
-
-      {#if draft.candidates.length > 0}
-        <div class="tf-pane-h">What you did in that time</div>
-        {#each draft.candidates as candidate (candidate.id)}
-          <label class="tf-ck tf-cand">
-            <input
-              type="checkbox"
-              checked={form.ticked.has(candidate.id)}
-              onchange={() => form.toggle(candidate.id)}
-            />
-            <span>{candidate.bullet.replace(/^- /, "")}</span>
-            <span class="tf-dim">{clockReading(candidate.at)}, {seenIn(candidate)}</span>
-          </label>
-        {/each}
-      {:else}
-        <div class="tf-pane-h">knobas saw nothing else in that time. The comment is yours to write.</div>
-      {/if}
-
-      <textarea
-        rows="3"
-        aria-label="Worklog comment"
-        value={form.comment}
-        oninput={(event) => form.takeOver(event.currentTarget.value)}
-      ></textarea>
+      {#if form.seconds <= 0}<p class="tf-dim tf-note">Nothing to log yet: enter the minutes.</p>{/if}
       <p class="tf-dim tf-note">
         Goes to {sourceName(draft.entity_id)} through the write queue.
         {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}
@@ -220,14 +229,16 @@
   {/snippet}
   {#snippet footer()}
       {#if stopped}
-        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("later")}>
+        <button class="tf-btn tf-ghost tf-danger tf-first" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("later")}>
           Stop, log later
         </button>
         <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("keep")}>
-          Keep running
+          Cancel, keep running
         </button>
+      {:else}
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Cancel</button>
       {/if}
-      <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>{stopped ? "Discard" : "Cancel"}</button>
       <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
         Log {form.reading} to {form.key}
       </button>

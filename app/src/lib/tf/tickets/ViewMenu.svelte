@@ -108,7 +108,7 @@
         <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view…</b></button>
         <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate</b></button>
         <hr />
-        <button type="button" role="menuitem" onclick={() => pick(ondelete)}><b>Delete</b></button>
+        <button type="button" role="menuitem" class="tf-menu-danger" onclick={() => pick(ondelete)}><b>Delete</b></button>
       {/if}
     </div>
   {/if}

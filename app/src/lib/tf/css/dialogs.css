@@ -66,14 +66,11 @@
 .tf-fail { color: var(--err); font-size: var(--t-sm); }
 
 /* The worklog draft's duration: the start and the minutes, then the reading in the job key's width. */
-.tf-dur { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
-.tf-dur label { display: flex; flex-direction: column; gap: 2px; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-dur input {
-  width: 92px; height: 32px; font: 600 var(--t-lg) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); border-radius: 4px; padding: 4px 6px;
-  background: var(--field); color: var(--ink);
-}
-.tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; }
-.tf-dur .tf-dim { font-size: var(--t-xs); flex-basis: 100%; }
+.tf-dur { display: flex; gap: 10px; align-items: center; }
+.tf-dialog .tf-formgrid .tf-dur input { width: 112px; font-family: var(--mono); font-variant-ligatures: none; }
+.tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; line-height: 1; }
+.tf-cands { display: flex; flex-direction: column; gap: 6px; }
+.tf-cands legend { padding: 0 0 6px; }
 
 .tf-hidden { visibility: hidden; }
 /* The canonical header's actions (Controls, *Header*): a page's `.tf-fhead`, and a Settings page's `.tf-stg-h`. */

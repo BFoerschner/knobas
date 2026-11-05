@@ -201,10 +201,16 @@ export function previewAction(
 /** One line of *Around this ticket*: a section and what it holds. */
 export interface AroundLine {
   section: string;
-  /** "7 builds" */
+  /** How many: what its row's figure says. */
+  n: number;
+  /** "7 builds": the row's title. */
   count: string;
-  /** "1 failing or down", or `null` when nothing is. */
+  /** "1 failing" or "1 down", or `null` when nothing is. */
   failing: string | null;
+  /** Words in the state's place where the figure stands for two kinds: "2 repos, 1 PR". */
+  note: string | null;
+  /** The first thing counted, for a section that lands on one thing (Assets). */
+  first: string | null;
 }
 
 /**
@@ -213,35 +219,44 @@ export interface AroundLine {
  * (`reachTally`, #1030) — so a build is its configuration's latest, and a
  * ticket nobody has opened yet counts what it reaches — grouped the way the room's tiles
  * group kinds (`sectionOf`). Tickets are the view's own and not a section
- * here. A section of one kind says that kind's plural; a mixed one (Code)
- * says *items*. Tone `err` is what fails or is down. A line the Builds read
+ * here. A section of one kind says that kind's plural; a mixed one says
+ * *items*. Code counts what its landing's two tabs show, as the card's row does
+ * (`card-sections.ts`), and where it holds both its note says how the figure
+ * divides. Tone `err` is what fails or is down. A line the Builds read
  * counted (`section: "builds"`) counts under Builds whatever its run kind
  * (#1256): the mirror answered it for the CI role, so the shell need not know
  * the role's run kinds (#1300).
  */
-export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTally, "section">>)[] | null): AroundLine[] {
-  const sections = new Map<string, { label: string; order: number; kinds: Set<string>; n: number; bad: number }>();
+export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTally, "section" | "first">>)[] | null): AroundLine[] {
+  const sections = new Map<string, { label: string; order: number; kinds: Map<string, number>; bad: number; first: string | null }>();
   for (const line of tally ?? []) {
     if (line.kind === "ticket" || line.count === 0) continue;
     const section = sectionOf(line.section === "builds" ? "build" : line.kind);
-    const held = sections.get(section.id) ?? { label: section.label, order: section.order, kinds: new Set(), n: 0, bad: 0 };
-    held.kinds.add(line.kind);
-    held.n += line.count;
+    const held = sections.get(section.id) ?? { label: section.label, order: section.order, kinds: new Map<string, number>(), bad: 0, first: null };
+    held.kinds.set(line.kind, (held.kinds.get(line.kind) ?? 0) + line.count);
     if (line.tone === "err") held.bad += line.count;
+    held.first ??= line.first ?? null;
     sections.set(section.id, held);
   }
   return [...sections.values()]
     .sort((a, b) => a.order - b.order)
     .map((held) => {
-      const only = held.kinds.size === 1 ? [...held.kinds][0]! : null;
-      const one = held.n === 1;
-      const noun = (
-        only === null ? (one ? "item" : "items") : one ? kindSingular(only) : kindLabel(only)
-      ).toLowerCase();
+      const repos = held.kinds.get("repo") ?? 0;
+      const prs = held.kinds.get("pr") ?? 0;
+      const code = held.label === "Code" && repos + prs > 0;
+      const kinds = code ? [...held.kinds.keys()].filter((kind) => kind === "repo" || kind === "pr") : [...held.kinds.keys()];
+      const n = code ? repos + prs : [...held.kinds.values()].reduce((all, one) => all + one, 0);
+      const only = kinds.length === 1 ? kinds[0]! : null;
+      const one = n === 1;
+      const noun = (only === null ? (one ? "item" : "items") : one ? kindSingular(only) : kindLabel(only)).toLowerCase();
+      const bad = Math.min(held.bad, n);
       return {
         section: held.label,
-        count: `${held.n} ${noun}`,
-        failing: held.bad > 0 ? `${held.bad} ${held.label === "Monitors" ? "down" : "failing"}` : null,
+        n,
+        count: `${n} ${noun}`,
+        failing: bad > 0 ? `${bad} ${held.label === "Monitors" ? "down" : "failing"}` : null,
+        note: code && repos > 0 && prs > 0 ? `${repos} ${repos === 1 ? "repo" : "repos"}, ${prs} ${prs === 1 ? "PR" : "PRs"}` : null,
+        first: held.first,
       };
     });
 }

@@ -20,6 +20,7 @@
 .tf-vw-menu .tf-menu { width: 200px; }
 .tf-vw-menu .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
 .tf-vw-menu .tf-menu b { font-weight: 500; }
+.tf-vw-menu .tf-menu .tf-menu-danger { color: var(--err); }
 .tf-vw-none { font-size: var(--t-sm); margin: 8px; }
 /* Jira views (#877): the groups' source note, the list's foot, View settings' Jira part. */
 .tf-vw-sync { font-weight: 400; color: var(--ink-2); }

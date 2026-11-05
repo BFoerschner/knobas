@@ -26,6 +26,7 @@
 -->
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
+  import TfKey from "../TfKey.svelte";
 
   import type { EntityDetail, StartWorkStep } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
@@ -196,13 +197,13 @@
           <input aria-label={row.label} value={text(op(of)["title"])} disabled={!of || !editable(of.outcome)} onchange={(event) => amend(of, "title", event.currentTarget.value)} />
           <span class="tf-dim tf-small">draft, to {text(op(of)["base"]) || "main"}</span>
         {:else if row.id === "link"}
-          <input aria-label={row.label} value="{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} {key}" readonly />
+          <span class="tf-stepval">{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} <TfKey value={key} /></span>
           <span class="tf-dim tf-small">stays in knobas</span>
         {:else if row.id === "status"}
           <input aria-label={row.label} value="{detail.status ?? 'To Do'} to {text(op(of)['status']) || 'In Progress'}" readonly {...refusedAttrs(moveRefused)} />
           <span class="tf-dim tf-small">{detail.source.display_name} transition</span>
         {:else}
-          <input aria-label={row.label} value={key} readonly />
+          <span class="tf-stepval"><TfKey value={key} /></span>
           <span class="tf-dim tf-small">{otherTimer ? `stops the timer on ${otherTimer} first` : ""}</span>
         {/if}
         {#if of && current?.id === of.id && (of.outcome === "failed" || of.outcome === "queued")}

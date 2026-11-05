@@ -53,6 +53,7 @@
   page drew, and the echoes settle on those reads as on any other.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfScroller from "../TfScroller.svelte";
   import { onMount, untrack } from "svelte";
@@ -561,9 +562,9 @@
           {/if}
           {#each blocked as blocker (blocker.entityId)}
             <div class="tf-blocked">
-              <strong>Blocked by {blocker.key} {blocker.title}</strong>
+              <strong>Blocked by <TfKey value={blocker.key} /> {blocker.title}</strong>
               {#if blocker.note}<span>{blocker.note}</span>{/if}
-              <a class="tf-btn tf-sm" href={entityAddress("ticket", blocker.entityId)}>Open {blocker.key}</a>
+              <a class="tf-btn tf-sm" href={entityAddress("ticket", blocker.entityId)}>Open <TfKey value={blocker.key} /></a>
             </div>
           {/each}
           {#if starting}

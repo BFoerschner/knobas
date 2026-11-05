@@ -4,7 +4,14 @@
   The filter bar (*This job / All*, the kind chips; its search is the launcher's `#i`, #2425), then a row per item
   newest first: the time, the item as one sentence (an err dot for a failure),
   its actions, and a second line with its kind and the job it belongs to as a
-  link. The snoozed shelf is one line under the list, with return dates.
+  link. The snoozed shelf is a fold under the list, its rows in the list's shape,
+  each saying when it comes back, with *Wake*.
+
+  Answers are drawn at once (#775), so a press says so in a toast that collapses
+  repeats (`tally.ts`) and takes them back with *Undo*: a snooze with a date now
+  brings an item back from the shelf or from *Done*, because the backend's snooze
+  clears `done_at`. An ack has no way back, and its toast says what it left open.
+  An answer that fails says so in a toast too, where the reader is looking.
   A long inbox draws only the rows near the viewport (`shell/windowed.svelte.ts`, #2209).
 
   Over the inbox store the rooms UI already uses (`inbox/inbox.svelte.ts`:
@@ -20,6 +27,7 @@
   import { onDestroy } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import { health } from "../../shell/health.svelte";
   import {
     getEntity,
     jobReach,
@@ -32,7 +40,7 @@
   } from "../../ipc/entity";
   import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
   import { ACTION_FORMS } from "../../inbox/actions";
-  import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox } from "../../inbox/inbox.svelte";
+  import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox, type InboxRefusal } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
@@ -44,8 +52,11 @@
   import TfNoMatch from "../filter/TfNoMatch.svelte";
   import type { SourceFacts } from "../job/job";
   import { ticketHash } from "../route";
+  import { reenterWords, secretNoun } from "../settings/settings";
+  import TfKey from "../TfKey.svelte";
+  import { tally } from "./tally";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, snoozedRows, untilLabel, visible } from "./inbox";
+  import { backLabel, expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -101,10 +112,8 @@
     search: false,
     noun: "items",
     one: "item",
-    scopes: [
-      ...(job !== null ? [{ id: "job", label: "This job", count: jobCount(), title: `What is about ${job}`, query: "" }] : []),
-      { id: "all", label: "All", query: "" },
-    ],
+    // With no job there is nothing to choose between, so a lone *All* is not drawn.
+    scopes: job === null ? [] : [{ id: "job", label: "This job", count: jobCount(), title: `What is about ${job}`, query: "" }, { id: "all", label: "All", query: "" }],
     chips: [{ key: "kind", label: "Kind", options: KIND_CHIPS.map((value) => ({ value, label: value })) }],
   });
 
@@ -119,7 +128,7 @@
   const rows = $derived(
     visible(inbox.stream, { scope, job, kinds: filter.chips["kind"] ?? [] }, index),
   );
-  const shelf = $derived(snoozedRows(inbox.snoozed));
+  const shelf = $derived(inbox.snoozed);
   /** Thousands of rows draw only those near the viewport (#2209); `.tf-ib` is 63 px, 84 wrapped, 6 apart. */
   const win = new Windowed({ count: () => rows.length, key: (i) => rows[i]!.item.key, estimate: 63, gap: 6 });
 
@@ -139,6 +148,28 @@
   $effect(() => {
     if (ready) void inbox.refresh();
   });
+
+  /** The sources, once read: what a credential row calls its fix. A failed read leaves the row saying where it goes. */
+  let sources = $state<SourceFacts[] | null>(null);
+  $effect(() => {
+    if (!ready) return;
+    let live = true;
+    ports.listSources().then(
+      (read) => {
+        if (live) sources = read;
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  /** A credential row's fix, in the status bar's words (`status.ts`): the same problem, the same press. */
+  function credentialFix(sourceId: string): string | null {
+    const source = sources?.find((row) => row.id === sourceId);
+    if (source === undefined) return null;
+    return health.get(sourceId)?.state === "missing_secret" ? `Enter ${secretNoun(source.auth_kind)}` : reenterWords(source.auth_kind);
+  }
 
   /** The row writes the sources' credentials cannot make, asked after the rows are drawn (#2040). */
   let refused = $state<RefusedWrite[]>([]);
@@ -195,15 +226,61 @@
     }
   }
 
-  function ack(entry: InboxEntry) {
-    push({ text: "Acked. The alert stays open until the monitor recovers." });
-    void inbox.ack(entry.item.key);
+  /** The reason a toast has said, so the line above the list does not say it again. */
+  let toasted = $state<string | null>(null);
+
+  /** An answer that failed, in a toast at the press: the row may be far below the list's top. */
+  function saysFailure(what: string, verb: string, again: () => void) {
+    return ({ reason, gone }: InboxRefusal) => {
+      toasted = reason;
+      if (gone) push({ text: `${what} has already left the inbox. It was resolved at its source.` });
+      else push({ text: `Could not ${verb} ${what}: ${reason}`, tone: "err", action: { label: "Try again", run: again } });
+    };
   }
+
+  /** Back in the stream: a snooze until now, which clears a snooze and a *Done* alike. */
+  function bringBack(entry: InboxEntry) {
+    const what = sentence(entry.item);
+    void inbox.snooze(entry.item.key, new Date(), saysFailure(what, "bring back", () => bringBack(entry)));
+  }
+
+  const ackToast = tally<null>((held) => ({
+    text: held.length === 1 ? "Acked. The alert stays open until the monitor recovers." : `${held.length} alerts acked. They stay open until their monitors recover.`,
+  }));
+
+  function ack(entry: InboxEntry) {
+    ackToast(null);
+    void inbox.ack(entry.item.key, saysFailure(sentence(entry.item), "ack", () => ack(entry)));
+  }
+
+  const snoozeToast = tally<{ entry: InboxEntry; until: string }>((held) => {
+    const until = new Set(held.map((one) => one.until));
+    const when = until.size === 1 ? ` until ${held[0]!.until}` : "";
+    return {
+      text: held.length === 1 ? `Snoozed${when}` : `${held.length} items snoozed${when}`,
+      action: { label: "Undo", run: () => held.forEach((one) => bringBack(one.entry)) },
+    };
+  });
 
   function snooze(entry: InboxEntry, at: Date) {
     snoozing = null;
-    push({ text: `Snoozed until ${untilLabel(at, now)}` });
-    void inbox.snooze(entry.item.key, at);
+    snoozeToast({ entry, until: untilLabel(at, now) });
+    void inbox.snooze(entry.item.key, at, saysFailure(sentence(entry.item), "snooze", () => snooze(entry, at)));
+  }
+
+  const doneToast = tally<InboxEntry>((held) => ({
+    text: held.length === 1 ? `Done: ${sentence(held[0]!.item)}` : `${held.length} items done`,
+    action: { label: "Undo", run: () => held.forEach(bringBack) },
+  }));
+
+  function done(entry: InboxEntry) {
+    doneToast(entry);
+    void inbox.complete(entry.item.key, saysFailure(sentence(entry.item), "finish", () => done(entry)));
+  }
+
+  /** *Wake*: back in the stream now. */
+  function wake(entry: InboxEntry) {
+    void inbox.snooze(entry.item.key, new Date(), saysFailure(sentence(entry.item), "wake", () => wake(entry)));
   }
 
   /** A date the picker produced, at 09:00 local, as the presets are. */
@@ -227,10 +304,7 @@
       pickedValue = "";
       snoozing = snoozing === entry.item.key ? null : entry.item.key;
     }
-    else if (action === "done") {
-      push({ text: `Done: ${sentence(entry.item)}` });
-      void inbox.complete(entry.item.key);
-    }
+    else if (action === "done") done(entry);
   }
 </script>
 
@@ -242,15 +316,20 @@
 </header>
 <FilterBar {config} {filter} shown={inbox.answered ? rows.length : null} total={inbox.answered ? inbox.stream.length : null} />
 <div class="tf-ibody">
-  {#if inbox.error !== null}
-    <p class="tf-ifail">{inbox.error}</p>
+  {#if inbox.error !== null && inbox.error !== toasted}
+    <p class="tf-ifail">Could not read the inbox: {inbox.error}</p>
   {/if}
+  {#snippet context(item: InboxEntry["item"], back: string | null)}
+    {@const belongs = index.jobOf(item)}
+    {@const belongsId = index.jobIdOf(item)}
+    <div class="tf-ctx">
+      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}
+    </div>
+  {/snippet}
   <div class="tf-inbox" {@attach win.list}>
     {#each win.slice(rows) as entry (entry.item.key)}
       {@const item = entry.item}
-      {@const open = opener(item)}
-      {@const belongs = index.jobOf(item)}
-      {@const belongsId = index.jobIdOf(item)}
+      {@const open = opener(item, credentialFix)}
       <div class="tf-ib" {@attach win.row(item.key)}>
         <time datetime={item.occurred_at}>{clockLabel(item.occurred_at, now, true)}</time>
         <div class="tf-what">
@@ -279,11 +358,7 @@
             {/each}
           </span>
         </div>
-        <div class="tf-ctx">
-          {kindOf(item.category)}{#if belongs !== null}, job <a href={ticketHash(belongsId ?? belongs)} class="tf-mono"
-              >{belongs}</a
-            >{:else}, no job{/if}
-        </div>
+        {@render context(item, null)}
         {#if snoozing === item.key}
           <div class="tf-isnooze" role="group" aria-label="Snooze until">
             {#each snoozePresets(now, expiryOf(item)) as preset (preset.label)}
@@ -321,15 +396,20 @@
   {#if shelf.length > 0}
     <details class="tf-collapse tf-ishelf">
       <summary>Snoozed <span class="tf-count">{shelf.length}</span></summary>
-      <ul class="tf-ishelf-rows">
-        {#each shelf as row (row.key)}
-          <li class="tf-rowhost">
-            <span>{row.what}</span>
-            {#if row.back !== null}<span class="tf-dim">back {row.back}</span>{/if}
-            <span class="tf-trail"><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void inbox.snooze(row.key, new Date())}>Wake</button></span>
-          </li>
+      <div class="tf-ishelf-rows">
+        {#each shelf as entry (entry.item.key)}
+          <div class="tf-ib">
+            <time datetime={entry.item.occurred_at}>{clockLabel(entry.item.occurred_at, now, true)}</time>
+            <div class="tf-what">
+              {#if failed(entry.item)}<span class="tf-dot tf-err"></span>{" "}{/if}{sentence(entry.item)}
+            </div>
+            <div class="tf-acts tf-rowend">
+              <button type="button" class="tf-btn tf-sm" onclick={() => wake(entry)}>Wake</button>
+            </div>
+            {@render context(entry.item, backLabel(entry.item))}
+          </div>
         {/each}
-      </ul>
+      </div>
     </details>
   {/if}
 </div>

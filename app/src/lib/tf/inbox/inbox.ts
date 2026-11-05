@@ -114,11 +114,18 @@ export interface Opener {
  * which draws the same page brought to the newest comment that mentions the
  * reader (`TfConversation`'s `toMention`). An alert's key names its monitor
  * (`alert:<monitor id>`), so *Open monitor* opens Monitors with that row marked.
+ * A row about a credential says the fix in the status bar's words and goes where
+ * its link goes (`credentialFix`); until the sources are read it says what it opens.
  */
-export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id"> & Partial<Pick<InboxItem, "key">>): Opener | null {
+export function opener(
+  item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id"> & Partial<Pick<InboxItem, "key">>,
+  credentialFix?: (sourceId: string) => string | null,
+): Opener | null {
   // Both are about the source itself, whose page holds *Re-enter* (#1571).
   if (item.category === "credential_expiry" || item.category === "failed_sign_in") {
-    return { label: "Open source", href: `#/settings/source/${encodeURIComponent(item.source_id)}` };
+    const page = `#/settings/source/${encodeURIComponent(item.source_id)}`;
+    const fix = credentialFix?.(item.source_id) ?? null;
+    return fix === null ? { label: "Source settings", href: page } : { label: fix, href: `${page}/reenter` };
   }
   if (item.category === "alert") {
     const monitor = item.key?.startsWith(ALERT_KEY) ? item.key.slice(ALERT_KEY.length) : "";
@@ -173,21 +180,15 @@ export function visible(entries: readonly InboxEntry[], filter: InboxFilter, ind
   });
 }
 
-/** The snoozed shelf as one line (R-12.3), or `null` when nothing is snoozed. */
-/** The snoozed shelf as rows: what each is and when it comes back, in one date format. */
-export function snoozedRows(entries: readonly InboxEntry[]): { key: string; what: string; back: string | null }[] {
-  return entries.map(({ item }) => {
-    const back = item.snoozed_until ? new Date(item.snoozed_until) : null;
-    return { key: item.key, what: phrase(item), back: back && !Number.isNaN(back.getTime()) ? day(back) : null };
-  });
+/** When a snoozed item comes back, in the words a credential's own sentence dates itself in; `null` with no date. */
+export function backLabel(item: Pick<InboxItem, "snoozed_until">): string | null {
+  const back = item.snoozed_until ? new Date(item.snoozed_until) : null;
+  return back && !Number.isNaN(back.getTime()) ? sentenceDay(back) : null;
 }
 
-export function snoozedLine(entries: readonly InboxEntry[]): string | null {
-  if (entries.length === 0) return null;
-  const parts = entries.map(({ item }) => {
-    const back = item.snoozed_until ? new Date(item.snoozed_until) : null;
-    const date = back && !Number.isNaN(back.getTime()) ? ` (back ${day(back)})` : "";
-    return `${phrase(item)}${date}`;
-  });
-  return `Snoozed: ${parts.join(", ")}.`;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A day as `knobas_core::inbox` writes one in a reason: *Thursday 3 Sep 2026*. */
+export function sentenceDay(at: Date): string {
+  return `${at.toLocaleDateString("en-GB", { weekday: "long" })} ${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}`;
 }

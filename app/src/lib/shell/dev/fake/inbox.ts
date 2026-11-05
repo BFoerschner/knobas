@@ -36,13 +36,17 @@
  *   page draws it; the backend's default is none ("every kind is off by
  *   default"), so a screenshot of the empty state needs the toggles clicked off.
  * - *Done* removes a row for the session, and a snooze moves it to the
- *   snoozed shelf until `until`. Neither survives a reload.
+ *   snoozed shelf until `until`. Neither survives a reload. A snooze writes
+ *   the item's `snoozed_until` whichever shelf holds it, as the backend's
+ *   upsert does (`knobas_core::inbox`), so one whose `until` has passed (*Wake*,
+ *   *Undo*) puts the item back in the stream, from the shelf or from *Done*.
  * - `?fake-inbox-items=<n>` appends `n` generated rows after prototype-6's,
  *   a minute apart and cycling the five kinds the chips name, to measure the
  *   Inbox at size (`&fake-inbox-items=4000`).
  */
 import type { Handlers } from "../fake-tauri";
 import { CORPUS } from "./corpus";
+import { sentenceDay } from "../../../tf/inbox/inbox";
 import { signInFails } from "../../health.svelte";
 import { fakeHiddenMonitors, fakeOpenAlerts } from "./monitors";
 import { FIXTURE_SOURCES } from "./sources";
@@ -138,14 +142,15 @@ function prototype(): InboxEntry[] {
 
 /** The snoozed shelf: prototype-6's footer, back on 2026-08-29. */
 function snoozed(): InboxEntry[] {
-  const back = "2026-08-29T07:00:00Z";
-  const row = (source: string, name: string, expires: string): InboxEntry => {
+  const daysOn = (days: number) => new Date(Date.now() + days * 86_400_000);
+  const back = daysOn(3).toISOString();
+  const row = (source: string, name: string, expires: Date): InboxEntry => {
     const made = entry(`credential_expiry:${source}`, "credential_expiry", source, null, null, name,
-      `the ${name} credential expires on ${expires}`, 3_000, []);
+      `the ${name} credential expires on ${sentenceDay(expires)}`, 3_000, []);
     made.item.snoozed_until = back;
     return made;
   };
-  return [row("jira", "Tidewater Jira", "Thursday 3 Sep 2026"), row("gitea", "Tidewater Gitea", "Monday 31 Aug 2026")];
+  return [row("jira", "Tidewater Jira", daysOn(9)), row("gitea", "Tidewater Gitea", daysOn(7))];
 }
 
 /**
@@ -191,6 +196,8 @@ function bulkItems(n: number): InboxEntry[] {
 export function handlers(params: URLSearchParams): Handlers {
   let live = [...stream(), ...bulkItems(Number(params.get("fake-inbox-items") ?? 0) || 0)];
   let later = snoozed();
+  /** Items *Done* answered: a snooze brings one back, since the backend's upsert clears `done_at`. */
+  let done: InboxEntry[] = [];
   let kinds: InboxCategory[] = KINDS.slice();
 
   const take = (key: unknown) => {
@@ -210,18 +217,25 @@ export function handlers(params: URLSearchParams): Handlers {
       return live.filter((candidate) => !acked(candidate)).length;
     },
     snooze_inbox_item: (args) => {
-      const moved = take(args["itemKey"]);
-      moved.item.snoozed_until = String(args["until"]);
-      later = [moved, ...later];
+      const key = args["itemKey"];
+      const moved = later.find((candidate) => candidate.item.key === key) ?? done.find((candidate) => candidate.item.key === key) ?? take(key);
+      later = later.filter((candidate) => candidate !== moved);
+      done = done.filter((candidate) => candidate !== moved);
+      const until = String(args["until"]);
+      if (new Date(until).getTime() > Date.now()) {
+        moved.item.snoozed_until = until;
+        later = [moved, ...later];
+      } else {
+        moved.item.snoozed_until = null;
+        live = [moved, ...live].sort((a, b) => b.item.occurred_at.localeCompare(a.item.occurred_at));
+      }
       return null;
     },
     complete_inbox_item: (args) => {
       const key = args["itemKey"];
-      if (later.some((candidate) => candidate.item.key === key)) {
-        later = later.filter((candidate) => candidate.item.key !== key);
-        return null;
-      }
-      take(key);
+      const shelved = later.find((candidate) => candidate.item.key === key);
+      later = later.filter((candidate) => candidate !== shelved);
+      done = [shelved ?? take(key), ...done];
       return null;
     },
     notification_kinds: () => kinds.slice(),

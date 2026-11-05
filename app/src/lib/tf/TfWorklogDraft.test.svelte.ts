@@ -181,10 +181,10 @@ test("it says where the worklog goes, and quotes ADR-0012", async () => {
   );
 });
 
-test("opened by a stop it offers Stop, log later, Keep running, Discard and Log", () => {
+test("opened by a stop it offers Discard, Stop, log later, Cancel, keep running and Log", () => {
   render({ stopped: true });
   expect(button("Stop, log later")).toBeDefined();
-  expect(button("Keep running")).toBeDefined();
+  expect(button("Cancel, keep running")).toBeDefined();
   expect(button("Discard")).toBeDefined();
   expect(button("Log 2h 44m to PAY-231")).toBeDefined();
 });
@@ -193,12 +193,12 @@ test("opened without a stop it offers Cancel and Log, and nothing about a clock"
   render({ stopped: false });
   expect(button("Cancel")).toBeDefined();
   expect(button("Stop, log later")).toBeUndefined();
-  expect(button("Keep running")).toBeUndefined();
+  expect(button("Cancel, keep running")).toBeUndefined();
 });
 
 test("each button answers with its outcome", () => {
   const { outcomes } = render();
-  button("Keep running")!.click();
+  button("Cancel, keep running")!.click();
   button("Stop, log later")!.click();
   button("Discard")!.click();
   expect(outcomes).toEqual(["keep", "later", "discard"]);
@@ -263,7 +263,7 @@ test("a clock that will not stop is said, and nothing is sent", async () => {
   await waitFor(() => expect(target.textContent).toContain("no timer to stop"));
   expect(order).toEqual(["stop"]);
   expect(outcomes).toEqual([]);
-  expect(button("Keep running")?.disabled).toBe(false);
+  expect(button("Cancel, keep running")?.disabled).toBe(false);
 });
 
 test("over a running clock the open stretch is one of the blocks, and it runs to now", async () => {

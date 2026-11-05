@@ -126,13 +126,17 @@ test("Around this ticket groups the context's kinds as the room's tiles do, and 
       { kind: "page", tone: null, count: 3 },
       { kind: "monitor", tone: "err", count: 1 },
     ]),
-  ).toEqual([
-    { section: "Code", count: "5 items", failing: null },
-    { section: "Builds", count: "7 builds", failing: "1 failing" },
-    { section: "Docs", count: "3 pages", failing: null },
-    { section: "Monitors", count: "1 monitor", failing: "1 down" },
+  ).toMatchObject([
+    // Code counts what its landing shows, as the card's row does: pull requests and repositories, not commits.
+    { section: "Code", n: 2, count: "2 pull requests", failing: null, note: null },
+    { section: "Builds", n: 7, count: "7 builds", failing: "1 failing", note: null },
+    { section: "Docs", n: 3, count: "3 pages", failing: null, note: null },
+    { section: "Monitors", n: 1, count: "1 monitor", failing: "1 down", note: null },
   ]);
   expect(aroundLines(null)).toEqual([]);
+  expect(aroundLines([{ kind: "commit", tone: null, count: 3 }])).toMatchObject([{ section: "Code", n: 3, count: "3 commits" }]);
+  expect(aroundLines([{ kind: "repo", tone: null, count: 2 }, { kind: "pr", tone: "info", count: 1 }])).toMatchObject([{ section: "Code", n: 3, count: "3 items", note: "2 repos, 1 PR" }]);
+  expect(aroundLines([{ kind: "asset", tone: null, count: 2, section: "assets", first: "asset:a" }])).toMatchObject([{ section: "Assets", n: 2, first: "asset:a" }]);
 });
 
 test("Around this ticket counts what the Builds read answered under Builds, whatever its run kind (#1256, #1300)", () => {
@@ -140,7 +144,7 @@ test("Around this ticket counts what the Builds read answered under Builds, what
     { kind: "build", tone: "ok" as const, count: 1, section: "builds" as const },
     { kind: "workflow_run", tone: "err" as const, count: 2, section: "builds" as const },
   ];
-  expect(aroundLines(tally)).toEqual([{ section: "Builds", count: "3 items", failing: "2 failing" }]);
+  expect(aroundLines(tally)).toMatchObject([{ section: "Builds", n: 3, count: "3 items", failing: "2 failing" }]);
   // A line no section read counted is grouped by its kind alone.
   const loose = tally.map(({ kind, tone, count }) => ({ kind, tone, count }));
   expect(aroundLines(loose).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);

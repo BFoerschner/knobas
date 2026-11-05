@@ -84,6 +84,8 @@ export interface ReachPorts {
  */
 export interface SectionTally extends KindTally {
   section: Section | "assets";
+  /** The first row counted here, for a line that opens at one thing: Assets lands on an asset. */
+  first?: string;
 }
 
 /**
@@ -107,13 +109,14 @@ export async function reachTally(ports: ReachPorts, id: string): Promise<Section
     .catch(() => [] as Reached[]);
   const rows = (await Promise.all(reads)).flat();
   const counted = new Map<string, SectionTally>();
-  const add = (section: SectionTally["section"], kind: string, tone: KindTally["tone"]) => {
+  const add = (section: SectionTally["section"], kind: string, tone: KindTally["tone"], first?: string) => {
     const key = `${section}\u0000${kind}\u0000${tone ?? ""}`;
     const held = counted.get(key) ?? { kind, tone, count: 0, section };
     held.count += 1;
+    if (first !== undefined) held.first ??= first;
     counted.set(key, held);
   };
   for (const { section, row } of rows) add(section, row.kind, row.state?.tone ?? null);
-  for (const asset of await assets) add("assets", asset.kind, null);
+  for (const asset of await assets) add("assets", asset.kind, null, asset.entity_id);
   return [...counted.values()];
 }

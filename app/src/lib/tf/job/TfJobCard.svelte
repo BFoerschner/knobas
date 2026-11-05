@@ -34,6 +34,8 @@
   900px the columns stack and the handle is not drawn.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
@@ -164,6 +166,22 @@
     event.preventDefault();
   }
 
+  /** While rows pass under the pinned foot, a line on its top edge: the rows end at it. Gone at the end of the card's scroll, where nothing is cut. */
+  const footLine = (node: HTMLElement) => {
+    if (typeof ResizeObserver === "undefined") return;
+    const measure = () => node.classList.toggle("tf-tkcut", node.scrollHeight - node.clientHeight - node.scrollTop > 1);
+    const seen = new ResizeObserver(measure);
+    seen.observe(node);
+    for (const child of node.children) seen.observe(child);
+    node.addEventListener("scroll", measure, { passive: true });
+    node.addEventListener("toggle", measure, true);
+    return () => {
+      seen.disconnect();
+      node.removeEventListener("scroll", measure);
+      node.removeEventListener("toggle", measure, true);
+    };
+  };
+
   /** *Open in <source>*: the ticket's web address through the browser, never the webview. */
   function openWeb(event: MouseEvent, url: string) {
     event.preventDefault();
@@ -178,6 +196,7 @@
   class:tf-sheetcard={!pinned}
   class:tf-tkdragging={release !== null}
   aria-label={pinned ? "Job card" : "Ticket"}
+  {@attach footLine}
 >
   {#if !narrow}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
@@ -221,7 +240,7 @@
   <div class="tf-jobrow">
     <TfStateChip text={detail.status ?? "No status"} />
     {#each blockedBy as blocker (blocker)}
-      <span class="tf-chip tf-err">Blocked by {blocker}</span>
+      <span class="tf-chip tf-err">Blocked by <TfKey value={blocker} /></span>
     {/each}
   </div>
   <!-- Stacked below 900 px the title follows the key, and the facts and rows fold, so the first screen is the ticket. -->
@@ -231,7 +250,7 @@
   <dl class="tf-facts">
     {#if epic !== null && epicId !== null}
       <dt>Epic</dt>
-      <dd><a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}>{epic}</a></dd>
+      <dd><a class="tf-chip tf-tkepicchip" href={ticketHash(epicId)} title={epic}><TfKeyed text={epic} lead /></a></dd>
     {/if}
     {#if reporter !== null}
       <dt>Reporter</dt>

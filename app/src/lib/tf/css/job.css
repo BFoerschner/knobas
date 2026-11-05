@@ -44,6 +44,8 @@
    text, a chip or an avatar, so the rhythm holds. */
 .tf-ticketcard .tf-facts { grid-template-columns: 68px minmax(0, 1fr); gap: 8px 10px; align-items: center; }
 .tf-ticketcard .tf-facts dt, .tf-ticketcard .tf-facts dd { line-height: 20px; min-height: 20px; }
+/* *Logged* reads on its value's line, with the meter under both. */
+.tf-ticketcard .tf-facts dt:has(+ dd .tf-tkmeter) { align-self: start; }
 .tf-ticketcard .tf-facts dt { color: var(--card-ink-2); }
 .tf-sheetcard .tf-facts dt { color: var(--ink-2); }
 .tf-ticketcard .tf-facts dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
@@ -103,15 +105,19 @@
 .tf-tktable .tf-dot { width: 7px; height: 7px; flex: none; }
 .tf-tktable .tf-chev { color: var(--card-ink-2); font-size: var(--t-lg); line-height: 1; text-align: right; }
 .tf-tknone { font-size: var(--t-sm); color: var(--card-ink-2); }
-.tf-sheetcard .tf-tktable { border-color: var(--rule); background: var(--paper); }
-.tf-sheetcard .tf-tktable > a, .tf-sheetcard .tf-tktable > button { border-top-color: var(--rule-2); }
-.tf-sheetcard .tf-tktable > :first-child { border-top: 0; }
-.tf-sheetcard .tf-tktable > a:hover, .tf-sheetcard .tf-tktable > button:hover { background: var(--sheet-2); }
-.tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
-.tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
+/* The same rows on a sheet: a ticket only read, and the Tickets preview's *Around this ticket*. */
+:is(.tf-sheetcard, .tf-preview) .tf-tktable { border-color: var(--rule); background: var(--paper); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable > a, :is(.tf-sheetcard, .tf-preview) .tf-tktable > button { border-top-color: var(--rule-2); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable > :first-child { border-top: 0; }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable > a:hover, :is(.tf-sheetcard, .tf-preview) .tf-tktable > button:hover { background: var(--sheet-2); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-n, :is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-st, :is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
+:is(.tf-sheetcard, .tf-preview) .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
 /* The one decision the card exists for stays on screen when a short window makes the card scroll. */
 .tf-ticketcard .tf-go { margin-top: auto; padding: 8px 0 18px; margin-bottom: -18px; position: sticky; bottom: -18px; background: var(--card); }
+/* On a window too short for the card, the rows passing under the foot end at a line (`TfJobCard`'s `footLine`). */
+.tf-ticketcard.tf-tkcut .tf-go { border-top: 1px solid rgba(0,0,0,.2); }
+.tf-sheetcard.tf-ticketcard.tf-tkcut .tf-go { border-top-color: var(--rule); }
 /* The card's fold holds its facts and rows at their spacing. Only stacked does it have a summary, or close. */
 .tf-tkstack { flex: none; }
 .tf-tkstack > * + * { margin-top: 14px; }
@@ -126,7 +132,7 @@
   .tf-tkstack > summary::before { content: ""; width: 6px; height: 6px; margin: 0 4px 1px 2px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
   .tf-tkstack[open] > summary::before { transform: rotate(45deg); }
   /* The foot ends the card's flow: pinned, it sliced the rows above it in half. */
-  .tf-ticketcard .tf-go { position: static; margin: 0; padding: 0; background: none; }
+  .tf-ticketcard .tf-go, .tf-ticketcard.tf-tkcut .tf-go { position: static; margin: 0; padding: 0; background: none; border-top: 0; }
 }
 .tf-sheetcard.tf-ticketcard .tf-go { background: var(--sheet); }
 /* On the yellow the scrollbar's thumb is the card's own, not a grey strip. */
@@ -279,7 +285,9 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 /* A step's select shows its choice whole, and a value you cannot edit reads as words. */
 .tf-step select { width: auto; max-width: 100%; }
-.tf-step input[readonly] { background: none; border-color: transparent; padding-left: 0; font-family: var(--sans); }
+.tf-step input[readonly] { background: none; border-color: transparent; border-left: 0; padding-left: 0; font-family: var(--sans); }
+/* A step's fixed value as words, with its key in mono, as wide as a step's field so the notes beside them line up. */
+.tf-stepval { font-size: var(--t-sm); padding: 4px 0; width: 100%; max-width: 400px; }
 .tf .tf-step input[aria-label="Open pull request"] { font-family: var(--sans); }
 .tf-step .tf-state { grid-row: 1 / span 2; grid-column: 3; font-size: var(--t-xs); }
 .tf-step .tf-swdetail { grid-column: 2; margin: 0; color: var(--ink-2); }

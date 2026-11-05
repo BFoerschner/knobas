@@ -127,6 +127,8 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import TfScroller from "../TfScroller.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
@@ -705,12 +707,12 @@
   <TfScroller class="tf-board-wrap" {@attach fbarHeight}>
     {#if subtasksOf !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. -->
-      <TfCrumbs parts={[{ name: "Tickets" }, { name: `Sub-tasks of ${subtasksOf}` }]} {back} />
+      <TfCrumbs parts={[{ name: "Tickets" }]} {back} />
     {/if}
     <header class="tf-fhead tf-board-head">
       <div class="tf-board-title">
         <h1>
-          {#if subtasksOf !== null}Sub-tasks of <span class="tf-mono">{subtasksOf}</span>{:else}{view?.name ?? (viewId === null ? "All tickets" : "This view")}{/if}
+          {#if subtasksOf !== null}Sub-tasks of <TfKey value={subtasksOf} />{:else}{view?.name ?? (viewId === null ? "All tickets" : "This view")}{/if}
         </h1>
         {#if view && view.saved_view_source === null}<span class="tf-q"
             >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
@@ -827,7 +829,7 @@
       {/if}
     {:else if showing.layout === "board"}
       {#each reader.bands as { lane, drawn } (lane.key ?? "")}
-        <div class="tf-lane">
+        <div class="tf-lane" class:tf-laned={reader.laned}>
           {#if lane.key !== null}
             <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
           {/if}
@@ -871,7 +873,7 @@
       {/each}
       {@const moreLanesText = reader.laned && reader.board !== null ? moreLanesLine(reader.board.more_lanes) : null}
       {#if moreLanesText}
-        <button type="button" class="tf-btn tf-sm" onclick={reader.moreLanes}>{moreLanesText}</button>
+        <button type="button" class="tf-btn tf-sm tf-lanes-more" onclick={reader.moreLanes}>{moreLanesText}</button>
       {/if}
     {:else}
       <div class="tf-list">
@@ -914,7 +916,7 @@
                   {:else if column === "summary"}
                     <td class="tf-c-summary"
                       ><Marked text={card.title} {needles} />{#if card.path}<span class="tf-sub"
-                          >{card.path}</span
+                          ><TfKeyed text={card.path} /></span
                         >{/if}</td
                     >
                   {:else if column === "status"}
@@ -979,6 +981,7 @@
       chosen={chosenJob.id === current.card.entity_id}
     />
   {:else}
-    <aside class="tf-preview" aria-label="Selected ticket"><p>Select a ticket to see what is around it.</p></aside>
+    <!-- The first ticket on screen is always selected, so no ticket here means there is none to choose. -->
+    <aside class="tf-preview" aria-label="Selected ticket">{#if reader.board !== null || base === null}<p class="tf-dim tf-small">No ticket to show here.</p>{/if}</aside>
   {/if}
 </div>
