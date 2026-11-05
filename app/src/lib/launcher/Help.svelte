@@ -14,6 +14,7 @@
   launcher reads (#2467).
 -->
 <script lang="ts">
+  import { kindTag } from "../assets/tree";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindLabel, kindMonogram } from "../shell/kinds";
   import type { LegendLine } from "./legend";
@@ -82,7 +83,7 @@
         <span class="tf-ln-lgk">{kindLabel(line.kind, info)}</span>
         {#each line.tones as entry (entry.tone)}
           <span class="tf-ln-lgt"
-            ><span class="tf-ln-mg" data-tone={entry.tone} aria-hidden="true">{kindMonogram(line.kind, info)}</span><span
+            ><span class="tf-ln-mg" data-tone={entry.tone} aria-hidden="true">{kindTag(kindMonogram(line.kind, info))}</span><span
               >{entry.words.join(", ")}</span
             ></span
           >

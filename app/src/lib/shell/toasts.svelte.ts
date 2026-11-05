@@ -28,6 +28,8 @@ export interface ToastSpec {
   more?: ToastAction[];
   /** How long before it dismisses itself. */
   ms?: number;
+  /** One toast per key: a repeat replaces the one showing, so rapid presses never stack (the removal rule). */
+  key?: string;
 }
 
 export interface ToastItem extends ToastSpec {
@@ -53,6 +55,8 @@ export const toasts = $state<{ items: ToastItem[] }>({ items: [] });
 
 /** Raise a toast. Returns its id, so a caller can dismiss it early. */
 export function push(spec: ToastSpec): number {
+  const showing = spec.key === undefined ? undefined : toasts.items.find((toast) => toast.key === spec.key);
+  if (showing) dismiss(showing.id);
   const id = ++nextId;
   toasts.items.push({ ...spec, id });
   const ms = spec.ms ?? DEFAULT_MS;

@@ -1054,9 +1054,9 @@ test("a view, a set and a pipeline each draw their group and their key cell (#24
     row.querySelector(".tf-ln-t")?.textContent?.trim(),
   ]);
   expect(rows).toEqual([
-    ["VW", "Team", "Payments backlog"],
-    ["LS", "link set", "Payout stack"],
-    ["PL", "Payouts", "Payout_Deploy"],
+    ["Vw", "Team", "Payments backlog"],
+    ["Ls", "link set", "Payout stack"],
+    ["Pl", "Payouts", "Payout_Deploy"],
   ]);
   // A pipeline is coloured by its newest run, the engine's state.
   expect(target.querySelectorAll(".tf-ln-mg")[2]?.getAttribute("data-tone")).toBe("err");
@@ -1374,7 +1374,7 @@ test("enter on a saved list applies its text in the box and stays", async () => 
   await settle();
   await search("#l");
   const row = target.querySelector(".tf-ln-res");
-  expect(row?.querySelector(".tf-ln-mg")?.textContent).toBe("LI");
+  expect(row?.querySelector(".tf-ln-mg")?.textContent).toBe("Li");
   expect(row?.querySelector(".tf-ln-k")?.textContent).toBe("list");
   expect(row?.querySelector(".tf-ln-t")?.textContent).toBe("SEPA tickets");
 
@@ -2362,7 +2362,7 @@ test("⌘K opens with an empty box every time, never the last query (#2425)", as
   expect(searched).toEqual(["PAY-231", "ledger"]);
 });
 
-test("opened with a section's filter, the box starts with it, the caret after it, and asks for it (#2425)", async () => {
+test("opened with a section's filter, the query holds it and the box draws its section's name as a chip (F-008, #2425)", async () => {
   const searched: string[] = [];
   open({
     query: "#b ",
@@ -2371,16 +2371,209 @@ test("opened with a section's filter, the box starts with it, the caret after it
   await settle();
   await debounced();
   const input = target.querySelector("input")!;
-  expect(input.value).toBe("#b ");
+  expect(input.value, "no grammar in the box").toBe("");
+  expect(input.placeholder).toBe("Search builds");
+  expect(target.querySelector(".tf-ln-seed")?.textContent?.trim()).toBe("Builds");
   expect(document.activeElement).toBe(input);
-  expect(input.selectionStart, "typing goes after the filter, not over it").toBe(3);
-  expect(input.selectionEnd).toBe(3);
   expect(searched).toEqual(["#b "]);
 
   // ⌘K after that is the global search: empty, whatever the last opening held.
   closeByX();
   await reopen();
   expect(target.querySelector("input")!.value).toBe("");
+  expect(target.querySelector(".tf-ln-seed")).toBeNull();
+});
+
+test("words typed after the chip are asked under its filter, and the box holds only the words", async () => {
+  const searched: string[] = [];
+  open({
+    query: "#rp ",
+    ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME },
+  });
+  await settle();
+  await debounced();
+  typeInBox("ledger");
+  await debounced();
+  expect(target.querySelector("input")!.value).toBe("ledger");
+  expect(searched.at(-1)).toBe("#rp ledger");
+});
+
+test("Esc takes the words and then closes, so a seeded box with no words closes in one press (F-008)", async () => {
+  const onclose = vi.fn();
+  open({ query: "#b ", onclose, ports: { search: async () => response(), launcherHome: async () => HOME } });
+  await settle();
+  await debounced();
+  typeInBox("ledger");
+  await debounced();
+  press("Escape");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe("");
+  expect(target.querySelector(".tf-ln-seed"), "the chip outlives the words").not.toBeNull();
+  expect(onclose).not.toHaveBeenCalled();
+  press("Escape");
+  await settle();
+  expect(onclose).toHaveBeenCalledOnce();
+});
+
+test.each([
+  ["Backspace on the empty box", () => press("Backspace")],
+  ["its ×", () => target.querySelector<HTMLButtonElement>(".tf-ln-seedx")!.click()],
+])("%s takes the chip off, and the box is the whole search again (F-008)", async (_, remove) => {
+  open({ query: "#b ", ports: { search: async () => response(), launcherHome: async () => HOME } });
+  await settle();
+  await debounced();
+  remove();
+  await settle();
+  expect(target.querySelector(".tf-ln-seed")).toBeNull();
+  expect(target.querySelector("input")!.placeholder).toBe("Search tickets, code, builds and docs");
+});
+
+test("Backspace with words in the box edits them and leaves the chip", async () => {
+  open({ query: "#b ", ports: { search: async () => response(), launcherHome: async () => HOME } });
+  await settle();
+  await debounced();
+  typeInBox("le");
+  await debounced();
+  press("Backspace");
+  await settle();
+  expect(target.querySelector(".tf-ln-seed")).not.toBeNull();
+});
+
+test("text that leads with its own panel goes in the box whole, not under the chip", async () => {
+  const searched: string[] = [];
+  open({ query: "#b ", ports: { search: async (query: SearchQuery) => (searched.push(query.raw), response()), launcherHome: async () => HOME } });
+  await settle();
+  await debounced();
+  typeInBox(">");
+  await debounced();
+  expect(searched.at(-1)).toBe(">");
+  expect(target.querySelector(".tf-ln-seed")).toBeNull();
+});
+
+test("the bar under the box does not repeat the kinds the chip names", async () => {
+  const interpreted = {
+    text: "",
+    prefix: null,
+    filters: { sources: [], kinds: ["repo", "pr"], updated_within_days: null, mine: true, authors: [] },
+    unknown_tokens: [],
+    left_out_tokens: [],
+  };
+  open({ query: "#rp ", ports: { search: async () => response({ interpreted }), launcherHome: async () => HOME } });
+  await settle();
+  await debounced();
+  const bar = [...target.querySelectorAll(".tf-ln-fbar .tf-ln-fchip")].map((chip) => chip.textContent);
+  expect(bar).toEqual(["@me"]);
+});
+
+/** An answer of no hits to `text`, with nothing else narrowing it. */
+const noHits = (text: string) =>
+  response({
+    groups: [],
+    interpreted: { text, prefix: null, filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] },
+  });
+
+const optionNames = () => [...target.querySelectorAll('[role="option"]')].map((row) => (row.querySelector(".tf-ln-nm") ?? row).textContent?.trim());
+const onRow = () => target.querySelector('[role="option"].tf-ln-on .tf-ln-nm')?.textContent?.trim();
+
+test("a place's name is offered above the answer, on part of a word (F-603)", async () => {
+  const onnavigate = vi.fn();
+  open({ onnavigate, ports: { search: async (query: SearchQuery) => noHits(query.raw), launcherHome: async () => HOME } });
+  await settle();
+  await search("sett");
+  expect(optionNames()[0]).toBe("Settings");
+  expect(target.querySelector(".tf-ln-h")?.textContent?.trim()).toBe("Go to");
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith("#/settings");
+});
+
+test("a place stays on top of a search that found things, and a hit is one ↓ away (F-603)", async () => {
+  const onnavigate = vi.fn();
+  const words = "code";
+  open({
+    onnavigate,
+    ports: {
+      search: async () => {
+        const answer = response(EVERY_KIND);
+        return { ...answer, interpreted: { ...answer.interpreted, text: words } };
+      },
+      launcherHome: async () => HOME,
+    },
+  });
+  await settle();
+  await search(words);
+  expect(optionNames()[0]).toBe("Code");
+  expect(onRow()).toBe("Code");
+  press("ArrowDown");
+  await settle();
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith(expect.stringContaining("PAY-231"));
+});
+
+test("Settings' sections are offered by their own names, and by what they hold where nothing answered (F-603)", async () => {
+  open({ ports: { search: async (query: SearchQuery) => noHits(query.raw), launcherHome: async () => HOME } });
+  await settle();
+  await search("appearance");
+  expect(optionNames()).toContain("Settings › Appearance");
+  await search("theme");
+  expect(optionNames()).toContain("Settings › Appearance");
+  // Not fourteen rows for the one word.
+  await search("settings");
+  expect(optionNames().filter((name) => name?.startsWith("Settings"))).toEqual(["Settings"]);
+});
+
+test("a filtered search offers no place: the reader is narrowing, not naming one", async () => {
+  open({
+    query: "#b ",
+    ports: {
+      search: async () => ({ ...noHits("settings") }),
+      launcherHome: async () => HOME,
+    },
+  });
+  await settle();
+  await debounced();
+  typeInBox("settings");
+  await debounced();
+  expect(optionNames()).not.toContain("Settings");
+});
+
+test("nothing found: the line says so under the place, and ↑↓ reach Search everything (F-602)", async () => {
+  open({ scope: createScope(() => null), ports: { search: async (query: SearchQuery) => noHits(query.raw), launcherHome: async () => HOME } });
+  await settle();
+  await search("settings");
+  expect(optionNames()).toEqual(["Settings", "Search everything"]);
+  expect(onRow()).toBe("Settings");
+  const line = target.querySelector(".tf-ln-none")!;
+  expect(line.textContent).toContain("No tickets, code, builds or docs match");
+  expect(line.compareDocumentPosition(target.querySelector('[role="option"]')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  press("ArrowDown");
+  await settle();
+  expect(onRow()).toBe("Search everything");
+  press("ArrowUp");
+  await settle();
+  expect(onRow()).toBe("Settings");
+});
+
+const footerWords = () => [...target.querySelectorAll(".tf-launch > footer > span")].map((hint) => hint.textContent?.trim());
+
+test("the footer says what ↵ does: go to a place, search everything, or save a name (F-607)", async () => {
+  open({ scope: createScope(() => null), ports: { search: async (query: SearchQuery) => noHits(query.raw), launcherHome: async () => HOME } });
+  await settle();
+  await search("settings");
+  expect(footerWords()).toContain("↵ go to Settings");
+  press("ArrowDown");
+  await settle();
+  expect(footerWords()).toContain("↵ search everything");
+});
+
+test("the ⌘? overlay has its own legend and no band for one (F-607)", async () => {
+  open();
+  await settle();
+  press("?", { metaKey: true });
+  await settle();
+  expect(target.querySelector(".tf-ln-keys")).not.toBeNull();
+  expect(target.querySelector(".tf-launch > footer")).toBeNull();
 });
 
 /** A `#d` answer: pages only, as the engine sends it for `#d ledger retry`. */
@@ -2476,16 +2669,16 @@ test("a result row is three cells, the key cell following the kind's rule", asyn
   await search("sepa");
 
   expect(cells()).toEqual([
-    ["TK", "PAY-231", "Retry failed SEPA payouts"],
-    ["PR", "payout-service", "Backoff on SEPA retries"],
+    ["Tk", "PAY-231", "Retry failed SEPA payouts"],
+    ["Pr", "payout-service", "Backoff on SEPA retries"],
     // The owner is the cell, so the repository's own name is the title.
-    ["RP", "tidewater", "payout-service"],
-    ["PG", "Engineering", "SEPA retry design"],
-    ["PL", "Payout service", "Build"],
-    ["MO", "http", "payout health"],
-    ["VW", "Payments", "My open SEPA work"],
+    ["Rp", "tidewater", "payout-service"],
+    ["Pg", "Engineering", "SEPA retry design"],
+    ["Pl", "Payout service", "Build"],
+    ["Mo", "http", "payout health"],
+    ["Vw", "Payments", "My open SEPA work"],
     // Nothing better known: the kind's word.
-    ["NT", "note", "Ask Jonas about the cut-off"],
+    ["Nt", "note", "Ask Jonas about the cut-off"],
   ]);
   // Only a ticket's key is an identifier, drawn in the mono face.
   const mono = [...target.querySelectorAll(".tf-ln-res .tf-ln-k")].map((cell) => cell.classList.contains("tf-ln-mono"));
@@ -2517,12 +2710,12 @@ test("a row draws the key cell the engine sends, on a hit and on the board", asy
     },
   });
   await settle();
-  expect(cells()).toEqual([["MO", "keyword", "ledger health"]]);
+  expect(cells()).toEqual([["Mo", "keyword", "ledger health"]]);
 
   await search("health");
   expect(cells()).toEqual([
-    ["PG", "Engineering", "SEPA retry design"],
-    ["MO", "http", "payout health"],
+    ["Pg", "Engineering", "SEPA retry design"],
+    ["Mo", "http", "payout health"],
   ]);
 });
 
@@ -2578,8 +2771,8 @@ test("the empty box draws the recent items alone, with the same three cells", as
   const headings = [...target.querySelectorAll(".tf-ln-h .tf-ln-lab")].map((el) => el.textContent?.trim());
   expect(headings).toEqual(["Recent"]);
   expect(cells()).toEqual([
-    ["TK", "PAY-240", "Reconcile mandates"],
-    ["RP", "tidewater", "ledger"],
+    ["Tk", "PAY-240", "Reconcile mandates"],
+    ["Rp", "tidewater", "ledger"],
   ]);
   expect(target.querySelector<HTMLElement>(".tf-ln-res .tf-ln-mg")!.dataset["tone"]).toBe("ok");
   // No smart lists, inbox, time or source strip.

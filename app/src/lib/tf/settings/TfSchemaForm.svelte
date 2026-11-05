@@ -167,7 +167,7 @@
 {:else}
   <div class="tf-formgrid tf-sf-grid">
     {#each fields as field (field.key)}
-      <label for={controlId(field.key)}>{field.label}</label>
+      <label for={controlId(field.key)}>{field.label}{#if field.required}{" "}<small class="tf-req">required</small>{/if}</label>
       <div class="tf-sf-c">
         {@render control(field)}
         {@render notes(field, true)}

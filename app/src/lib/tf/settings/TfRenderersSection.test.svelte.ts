@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { RenderContent, UserRenderer, UserRendererDraft } from "../../ipc/app";
 import { installCommands } from "../../render/command";
 import { renderersFor, renderersForFence } from "../../render/registry";
+import { toasts } from "../../shell/toasts.svelte";
 import TfRenderersSection, { type RendererPorts } from "./TfRenderersSection.svelte";
 import type { RendererDefault } from "../../render/defaults";
 import { createRendererDefaults } from "../../render/defaults.svelte";
@@ -155,6 +156,25 @@ test("Remove saves the list without it, and the registry drops it", async () => 
 
   expect(sent).toEqual([[]]);
   expect(renderersFor({ path: "a.page", binary: false }).map((r) => r.id)).toEqual(["source"]);
+});
+
+test("Remove says so on one toast with Undo, however many went, and Undo puts them all back in their places (F-611)", async () => {
+  const one = (id: string): UserRenderer => ({ id, name: id, command: "cat", patterns: [`*.${id}`], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false });
+  const { ports, sent } = backend([one("a"), one("b"), one("c")]);
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+
+  target.querySelector<HTMLButtonElement>('button[aria-label="Remove a"]')!.click();
+  await settle();
+  const removals = () => toasts.items.filter((toast) => toast.text.startsWith("Removed"));
+  expect(removals().map((toast) => [toast.text, toast.action?.label])).toEqual([["Removed a", "Undo"]]);
+  target.querySelector<HTMLButtonElement>('button[aria-label="Remove b"]')!.click();
+  await settle();
+  expect(removals().map((toast) => toast.text), "repeats collapse").toEqual(["Removed 2 renderers"]);
+
+  removals()[0]!.action!.run();
+  await settle();
+  expect(sent.at(-1)!.map((draft) => draft.id)).toEqual(["a", "b", "c"]);
 });
 
 test("a command the backend refuses is said beside the form, which stays open", async () => {

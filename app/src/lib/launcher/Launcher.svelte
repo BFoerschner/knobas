@@ -38,6 +38,15 @@
   *Start timer* is a ticket's row alone, and the shell does the rest: it
   stops the running timer first and makes the ticket the chosen job.
 
+  ## A section's filter (#2425)
+
+  `/`, ⌘/ and the top bar's button open the box on the section's filter. The
+  query holds its grammar (`#rp `), and the box does not: it draws a chip named
+  for the section (*Code*) in front of the words, removed by its × or by
+  Backspace on the empty box. `Esc` takes the words first and then closes, so
+  an opening with no words closes in one press wherever it was opened. Text
+  that leads with its own panel (`>`, `?`, a pasted link) replaces the filter.
+
   ## Flows (#2427)
 
   An action that asks something is a flow (`does.kind === "flow"`): the
@@ -64,9 +73,6 @@
 -->
 <script lang="ts">
   import { onMount, tick, untrack } from "svelte";
-  import { goWithoutOpener } from "../tf/opener";
-  import { NAV, SECTION_NAME, sectionHash } from "../tf/route";
-
   import {
     addFavourite as defaultAddFavourite,
     createSmartList as defaultCreateSmartList,
@@ -99,8 +105,10 @@
   import { savedListOf } from "./sheet";
   import { SheetMode } from "./sheet-mode.svelte";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
-  import { type LauncherAction, filterActions, navigationActions } from "./actions";
-  import { type InboxPreview, type LauncherRow, stepOf, walk } from "./rows";
+  import { type LauncherAction, filterActions, navigationActions, placeActions } from "./actions";
+  import { type InboxPreview, type LauncherRow, holdsAnswer, stepOf, walk } from "./rows";
+  import { seedKinds, seedName } from "./section";
+  import { pastedUrl } from "./url";
   import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type ScopeChoice, launcherScope } from "./scope.svelte";
@@ -128,6 +136,7 @@
     openExternal = realOpenExternal,
     scope = launcherScope,
     keys = launcherKeys,
+    places = placeActions(),
   }: {
     open?: boolean;
     /**
@@ -208,6 +217,8 @@
     scope?: ScopeChoice;
     /** The keys bound (#2429): the window's store, which the shell reads too; injectable for a test. */
     keys?: KeyStore;
+    /** The app's places, which *Go to* offers by name over a search's answer; injectable for a test about something else. */
+    places?: readonly LauncherAction[];
     /**
      * How *Open in browser* on an unresolved paste reaches the OS. Injectable
      * for the same reason `AssetsView`'s is: the assertion is that the button
@@ -245,19 +256,36 @@
     if (session.raw.trim() !== "") session.rerun();
   }
 
+  /** What an empty answer's *Search everything* does: the same words, with the filters gone and every field searched. */
+  function widen(words: string) {
+    if (scope.titles) scope.toggle();
+    session.type(words);
+    session.rerun();
+  }
+
   /**
-   * What an empty answer's *Search everything* does: the same words, with the
-   * filters gone and every field searched. `null` when nothing narrows the
-   * search, where there is nothing wider to offer.
+   * The section's filter the box opened on, while the query still starts with
+   * it: drawn as a chip, never as text. The query keeps it, because it is what
+   * the backend parses and what a saved list saves.
    */
-  function widening(words: string): (() => void) | null {
-    const filtered = session.raw.trim() !== words.trim();
-    if (!scope.titles && !filtered) return null;
-    return () => {
-      if (scope.titles) scope.toggle();
-      session.type(words);
-      session.rerun();
-    };
+  let seed = $state<string | null>(null);
+  const seeded = $derived(seed !== null && session.raw.startsWith(seed) ? seed : null);
+  const seedLabel = $derived(seeded === null ? null : seedName(seeded));
+  /** What the box shows of the query: the words after the chip. */
+  const boxWords = $derived(seeded === null ? session.raw : session.raw.slice(seeded.length));
+
+  /** The query for what the box now holds. Text that leads with its own panel does not go under the section's filter. */
+  function queryFor(words: string): string {
+    if (seeded === null) return words;
+    const panel = session.syntax.some((row) => (row.prefix === "action" || row.prefix === "help") && words.startsWith(row.token));
+    return panel || pastedUrl(words) !== null ? words : `${seeded}${words}`;
+  }
+
+  /** The chip's ×, or Backspace on the empty box: the search is everything again. */
+  function dropSeed() {
+    seed = null;
+    session.set("");
+    box?.focus();
   }
 
   /**
@@ -391,7 +419,7 @@
    * excerpts at the right. Titles is the one list at the usual size.
    */
   const deep = $derived(scope.titles === false);
-  const split = $derived(deep && overlay === null && naming === null && sheet.current === null && session.mode === "results");
+  const split = $derived(deep && overlay === null && naming === null && sheet.current === null && session.mode === "results" && holdsAnswer(session.rows));
 
   /**
    * The row the pane draws: the selection, once it has rested for
@@ -441,7 +469,9 @@
         ? "narrow the filters"
         : sheet.current
           ? sheet.placeholder
-          : "Search tickets, code, builds and docs",
+          : seedLabel !== null
+            ? `Search ${seedLabel.toLowerCase()}`
+            : "Search tickets, code, builds and docs",
   );
 
   /**
@@ -576,7 +606,7 @@
 
   /** The shell's inbox, which `#i` answers from (#2423). */
   $effect.pre(() => {
-    session.extras = { inbox: inbox ?? null };
+    session.extras = { inbox: inbox ?? null, places, widens: true };
   });
 
   /**
@@ -603,6 +633,7 @@
       // and a section's filter for its keys, with the caret after it. Read
       // untracked, so typing into the box does not run this again.
       untrack(() => {
+        seed = seedName(query) === null ? null : query;
         if (session.raw !== query) session.set(query);
       });
       void tick().then(() => box?.focus());
@@ -671,6 +702,7 @@
       // A syntax row does not navigate: it rewrites the box, which is what
       // makes it a *filter* rather than a destination.
       case "syntax":
+      case "widen":
         return null;
     }
   }
@@ -722,7 +754,7 @@
    */
   function startNaming() {
     if (!session.canSave || session.savedId !== null || sheet.current) return;
-    naming = session.raw.trim();
+    naming = boxWords.trim() || seedLabel || session.raw.trim();
     void tick().then(() => box?.focus({ select: true }));
   }
 
@@ -801,6 +833,11 @@
   const isSaveChord = (event: KeyboardEvent) => isBoxChord(event, "s");
 
   function activate(row: LauncherRow) {
+    if (row.kind === "widen") {
+      widen(row.words);
+      box?.focus();
+      return;
+    }
     const subject = savedListOf(row);
     if (subject) {
       // A saved list, its `#l` hit or a favourite, applies by its own text
@@ -882,8 +919,6 @@
         }
         const row = session.current;
         if (row) activate(row);
-        else if (sectionHits[0]) goToSection(sectionHits[0].hash);
-        else widen?.();
         return;
       }
       case "Tab":
@@ -896,10 +931,17 @@
         // One rung per press, and the key never reaches the shell's ladder.
         event.preventDefault();
         event.stopPropagation();
-        if (session.raw !== "") {
-          session.set("");
+        // The chip stays with the words gone, and the next press closes.
+        if (boxWords !== "") {
+          session.set(seeded ?? "");
         } else {
           close();
+        }
+        return;
+      case "Backspace":
+        if (seeded !== null && boxWords === "") {
+          event.preventDefault();
+          dropSeed();
         }
         return;
       default:
@@ -912,25 +954,6 @@
     return list && keys.chordOfList(list.id);
   }
 
-  /** The app's places by name, which the search's index does not hold. */
-  const GO_PLACES = [
-    ...NAV.map((section) => ({ name: SECTION_NAME[section], hash: sectionHash(section) })),
-    { name: "Settings", hash: sectionHash("settings") },
-    { name: "Asset tree", hash: sectionHash("assets") },
-  ];
-  /** *Search everything* where nothing matched: the row that is selected, so ↵ runs it. */
-  const widen = $derived(session.mode === "results" && session.response && session.rows.length === 0 ? widening(session.response.interpreted.text) : null);
-  /** A place of the app whose name the words match, offered where nothing else answered: *settings*, *asset tree*. */
-  const sectionHits = $derived.by(() => {
-    if (session.mode !== "results" || session.rows.length > 0) return [];
-    const words = (session.response?.interpreted.text ?? "").trim().toLowerCase();
-    if (words === "") return [];
-    return GO_PLACES.filter((place) => place.name.toLowerCase().includes(words));
-  });
-  function goToSection(hash: string) {
-    close();
-    goWithoutOpener(hash);
-  }
   /** The keys the box answers, at the bottom of the ⌘? overlay. */
   const boxKeys: [string, string][] = [
     ["↵", "open"],
@@ -945,7 +968,61 @@
   /** The chips render from the answer; before one lands there is nothing to
       say about a query nobody has interpreted yet. */
   const interpreted = $derived(session.response?.interpreted ?? null);
+  /** Whether the footer's *Save as list* is on offer: an answer to save, and no mode over it that has its own keys. */
+  const saveShown = $derived(session.canSave && holdsAnswer(session.rows) && overlay === null && naming === null && sheet.current === null);
+
+  /**
+   * The keys the footer names, for what the box answers right now: one list per
+   * mode, so `↵` always says what it does. The ⌘? overlay has its own legend and
+   * the key panel its own hint, so they have none here.
+   */
+  const footerKeys = $derived.by((): [string, string, string?][] => {
+    if (overlay !== null) return [];
+    if (naming !== null) return [["↵", "save"], ["Esc", "keep searching"]];
+    const open = sheet.current;
+    if (open) {
+      if (open.panel) return [];
+      if (open.renaming !== null) return [["↵", "keep the name"], ["Esc", "leave it as it was"]];
+      if (open.flow) return [["↑↓", "move"], ["↵", "pick"], ["Esc", "back one step"]];
+      return [["↑↓", "move"], ["↵", "run"], ["⌘B", "bind a key"], ["Esc", "back to the results"]];
+    }
+    const row = session.current;
+    const enter: [string, string, string?][] =
+      session.mode === "url"
+        ? session.urlAnswer?.match === null
+          ? [["↵", "open in browser"]]
+          : []
+        : session.mode === "help"
+          ? [["↑↓", "move"], ["↵", "put in the box"]]
+          : row === null
+            ? []
+            : [["↑↓", "move"], ["↵", row.kind === "widen" ? "search everything" : row.kind === "action" ? `go to ${row.action.label}` : "open"]];
+    return [
+      ...enter,
+      ...(tabOpens ? ([["Tab", "actions", "Actions on the selected result"]] as [string, string, string][]) : []),
+      ["Esc", boxWords === "" ? "close" : "clear the words"],
+      ["⌘D", scope.titles ? "everything" : "titles only"],
+      ["⌘?", "help"],
+    ];
+  });
 </script>
+
+{#snippet keysAndSave()}
+  <!-- Only what a key does here. The band is gone when it has nothing to say. -->
+  {#each footerKeys as [key, what, title] (key)}
+    <span {title}><kbd>{key}</kbd> {what}</span>
+  {/each}
+  {#if saveShown}
+    <!--
+      On a query and never on the board: an empty box is the board, and
+      there is nothing there to save. `canSave` is the session's, so the
+      control and the write agree about when there is a query.
+    -->
+    <button class="tf-btn tf-sm tf-ln-save" onclick={startNaming} disabled={session.savedId !== null}>
+      {session.savedId === null ? "Save as list" : "Saved as list"}
+    </button>
+  {/if}
+{/snippet}
 
 {#if open}
   <!--
@@ -957,17 +1034,31 @@
     alone here: the box takes it for the action sheet and says so with
     `preventDefault`.
   -->
-  <TfDialog title="Search and actions" className={deep ? "tf-launch tf-launch-deep" : "tf-launch"} onclose={close}>
+  <TfDialog
+    title="Search and actions"
+    className={deep ? "tf-launch tf-launch-deep" : "tf-launch"}
+    onclose={close}
+    footer={footerKeys.length > 0 || saveShown ? keysAndSave : undefined}
+  >
     {#snippet body()}
       <!--
         The label is its own element in front of the box (#2424): what the box
         asks for, highlighted, never part of the text and so never deletable.
       -->
       <div class="tf-ln-boxrow">
-        {#if boxLabel !== null}<span class="tf-ln-mode">{boxLabel}</span>{/if}
+        {#if boxLabel !== null}
+          <span class="tf-ln-mode">{boxLabel}</span>
+        {:else if seedLabel !== null}
+          <!-- The section's filter, by the section's name: a chip like the bar's, with its own way off. -->
+          <span class="tf-ln-fchip tf-ln-set tf-ln-seed" title="Searching {seedLabel} only. Backspace on the empty box searches everything">
+            {seedLabel}<button type="button" class="tf-ln-seedx" aria-label="Search everything, not only {seedLabel}" onclick={dropSeed}>
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            </button>
+          </span>
+        {/if}
         <QueryBox
           bind:this={box}
-          value={naming !== null ? naming : overlay ? overlay.filter : sheet.current ? sheet.text : session.raw}
+          value={naming !== null ? naming : overlay ? overlay.filter : sheet.current ? sheet.text : boxWords}
           {placeholder}
           pending={session.pending}
           controls={controlled.list}
@@ -976,7 +1067,7 @@
             if (naming !== null) naming = value;
             else if (overlay) overlay = { filter: value, selected: 0 };
             else if (sheet.current) sheet.type(value);
-            else session.type(value);
+            else session.type(queryFor(value));
           }}
           {onkeydown}
           onclose={close}
@@ -1019,7 +1110,7 @@
       {/if}
 
       {#if interpreted && !overlay && !sheet.current}
-        <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
+        <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} hiddenKinds={seeded === null ? [] : seedKinds(seeded, session.syntax)} />
       {/if}
 
       {#if sheet.current}
@@ -1124,9 +1215,6 @@
           {/if}
         {:else if session.response}
           <Results
-            onwiden={widen}
-            places={sectionHits}
-            ongo={goToSection}
             response={session.response}
             rows={session.rows}
             chordOf={listChord}
@@ -1149,35 +1237,6 @@
       {/if}
       </div>
 
-      {/if}
-    {/snippet}
-
-    {#snippet footer()}
-      <!-- Only what a key does here. The ⌘? overlay and the help card carry their own legend, so this one steps aside. -->
-      {#if overlay === null && session.mode !== "help"}
-      {#if sectionHits[0]}
-        <span><kbd>↵</kbd> go to {sectionHits[0].name}</span>
-      {:else if widen !== null}
-        <span><kbd>↵</kbd> search everything</span>
-      {:else if session.rows.length > 0}
-        <span><kbd>↑↓</kbd> move</span>
-        <span><kbd>↵</kbd> open</span>
-      {/if}
-      {#if tabOpens}<span title="Actions on the selected result"><kbd>Tab</kbd> actions</span>{/if}
-      {#if sheet.onActions}<span><kbd>⌘B</kbd> bind a key</span>{/if}
-      <span><kbd>Esc</kbd> back one step</span>
-      <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
-      <span><kbd>⌘?</kbd> help</span>
-      {/if}
-      {#if session.canSave && session.rows.length > 0}
-        <!--
-          On a query and never on the board: an empty box is the board, and
-          there is nothing there to save. `canSave` is the session's, so the
-          control and the write agree about when there is a query.
-        -->
-        <button class="tf-btn tf-sm tf-ln-save" onclick={startNaming} disabled={session.savedId !== null || naming !== null}>
-          {session.savedId === null ? "Save as list" : "Saved as list"}
-        </button>
       {/if}
     {/snippet}
   </TfDialog>

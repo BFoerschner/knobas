@@ -300,6 +300,14 @@ export function reenterWords(auth: AuthMethod | null | undefined): string {
   return `Re-enter ${secretNoun(auth)}`;
 }
 
+/**
+ * The fix for a credential, by whether one is stored: *Enter token* where none
+ * is, so nothing claims there was one to re-enter; else {@link reenterWords}.
+ */
+export function credentialFix(auth: AuthMethod | null | undefined, state: CredentialHealth["state"] | undefined): string {
+  return state === "missing_secret" ? `Enter ${secretNoun(auth)}` : reenterWords(auth);
+}
+
 /** One row of *Sync runs*. */
 export interface RunRow {
   id: number;

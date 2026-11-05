@@ -13,7 +13,7 @@
   import Row from "./Row.svelte";
   import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
-  import { ticketsFirst, type LauncherRow } from "./rows";
+  import { holdsAnswer, ticketsFirst, type LauncherRow } from "./rows";
 
   let {
     response,
@@ -24,9 +24,6 @@
     now,
     onopen,
     onhover,
-    onwiden = null,
-    places = [],
-    ongo = () => {},
   }: {
     response: SearchResponse;
     /** The clock an inbox line's time cell is read against (#2423). */
@@ -40,17 +37,15 @@
     chordOf?: (row: LauncherRow) => string | null;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
-    /** Drop what narrows the search, where something does: an empty answer offers it. */
-    onwiden?: (() => void) | null;
-    /** Places of the app the words name, offered where nothing else answered. */
-    places?: readonly { name: string; hash: string }[];
-    ongo?: (hash: string) => void;
   } = $props();
+
+  /** The *Go to* rows, which come first in the flat list. */
+  const placeCount = $derived(rows.filter((row) => row.kind === "action").length);
 
   /** Where each group's hits start in the flat list. */
   const offsets = $derived.by(() => {
     const out: number[] = [];
-    let at = 0;
+    let at = placeCount;
     for (const group of ticketsFirst(response)) {
       out.push(at);
       at += group.hits.length;
@@ -94,6 +89,27 @@
       {/each}
     </ul>
   </div>
+{/if}
+
+<!-- Places the words name, above their answer: a name is the likeliest thing the reader is after. -->
+{#if placeCount > 0}
+  <div class="tf-ln-h"><span class="tf-ln-lab">Go to</span></div>
+  {#each rows as row, index (row.id)}
+    {#if row.kind === "action"}
+      <button
+        id={optionId(index)}
+        class="tf-ln-opt"
+        class:tf-ln-on={index === selected}
+        role="option"
+        aria-selected={index === selected}
+        onclick={() => onopen(row)}
+        onmouseenter={() => onhover(index)}
+      >
+        <span class="tf-ln-nm">{row.action.label}</span>
+        <span class="tf-ln-s">{row.action.detail}</span>
+      </button>
+    {/if}
+  {/each}
 {/if}
 
 <!-- No count on a heading (#2421): the list is quiet, and the rows are what is read. -->
@@ -163,21 +179,26 @@
   {/if}
 {/each}
 
-{#if response.groups.length === 0 && !rows.some((row) => row.kind === "inbox")}
-  {#each places as place, n (place.hash)}
-    <button type="button" class="tf-ln-opt" class:tf-ln-on={n === 0} onclick={() => ongo(place.hash)}>
-      <span class="tf-ln-nm">{place.name}</span>
-      <span class="tf-ln-s">Go to this page.</span>
-    </button>
-  {/each}
+{#if !holdsAnswer(rows)}
+  <!-- Under any place row, so the line is about the search and not about the row above it. -->
   <p class="tf-ln-none">
-    Nothing matches
+    {#if placeCount > 0}No tickets, code, builds or docs match{:else}Nothing matches{/if}
     <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
-  {#if onwiden}
-    <button type="button" class="tf-ln-opt" class:tf-ln-on={places.length === 0} onclick={onwiden}>
-      <span class="tf-ln-nm">Search everything</span>
-      <span class="tf-ln-s">Every field, with no filters.</span>
-    </button>
-  {/if}
+  {#each rows as row, index (row.id)}
+    {#if row.kind === "widen"}
+      <button
+        id={optionId(index)}
+        class="tf-ln-opt"
+        class:tf-ln-on={index === selected}
+        role="option"
+        aria-selected={index === selected}
+        onclick={() => onopen(row)}
+        onmouseenter={() => onhover(index)}
+      >
+        <span class="tf-ln-nm">Search everything</span>
+        <span class="tf-ln-s">Every field, with no filters.</span>
+      </button>
+    {/if}
+  {/each}
 {/if}

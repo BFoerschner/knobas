@@ -49,7 +49,8 @@
   {#each failed as reading (reading.id)}
     <span class="tf-bad">
       <span class="tf-bad-t" title={reading.text}>{reading.text}</span>
-      <a href="#/settings/source/{encodeURIComponent(reading.id)}/reenter">{reading.fix}</a>
+      <!-- It opens the credential's dialog, so it says there is more to come. -->
+      <a href="#/settings/source/{encodeURIComponent(reading.id)}/reenter">{reading.fix}…</a>
     </span>
   {/each}
   <span class="tf-queue">

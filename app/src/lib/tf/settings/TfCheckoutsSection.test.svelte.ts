@@ -108,13 +108,22 @@ test("Make default saves the list with the new default, and Change… sets the c
 
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
   flushSync();
-  const field = target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")!;
+  // A dialog, like every other *Change…* in Settings (F-605), with the footer's order and its primary held until there is a change.
+  const dialog = target.querySelector('[role="dialog"]')!;
+  expect(text(dialog.querySelector("h2"))).toBe("Change the clones root");
+  const field = dialog.querySelector<HTMLInputElement>("#tf-stg-root-in")!;
+  const save = () => [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Save")!;
+  expect(save().disabled, "nothing changed yet").toBe(true);
+  expect(text(dialog.querySelector(".tf-dwhy"))).toBe("This is the root already.");
   field.value = "~/src";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Save")!.click();
+  expect(save().disabled).toBe(false);
+  expect(dialog.querySelector(".tf-dwhy")).toBeNull();
+  save().click();
   await settle();
   expect(roots).toEqual(["~/src"]);
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
   expect(text(target.querySelector(".tf-stg-row"))).toContain("~/src");
 });
 
@@ -147,25 +156,25 @@ test("with no clones root, Not set is not in the mono face (#1444)", async () =>
   expect(inMono(notSet)).toBe(false);
 });
 
-test("a clones root the setter refuses is said on the page, and the field stays open with what was typed (#1661)", async () => {
+test("a clones root the setter refuses is said in the dialog, which stays open with what was typed (#1661)", async () => {
   reset();
   await draw(() =>
     Promise.reject({ code: "invalid", message: 'the clones root must be an absolute path (or start with ~/), not "Code"', source_id: null }),
   );
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
   flushSync();
-  const field = target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")!;
+  const field = target.querySelector<HTMLInputElement>("#tf-stg-root-in")!;
   field.value = "Code";
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Save")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>('[role="dialog"] footer button')].find((b) => text(b) === "Save")!.click();
   await settle();
-  expect(toasts.items.map((t) => t.text)).toEqual([expect.stringContaining("must be an absolute path")]);
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")?.value).toBe("Code");
+  expect(text(target.querySelector('[role="dialog"] [role="alert"]'))).toContain("must be an absolute path");
+  expect(target.querySelector<HTMLInputElement>("#tf-stg-root-in")?.value).toBe("Code");
   expect(roots).toEqual([]);
 });
 
-test("the pull request worktrees are listed, a closed one marked, and Remove removes one", async () => {
+test("the pull request worktrees are listed, a closed one marked, and Remove… confirms before it removes one", async () => {
   const at = (n: number) => `/Users/mara/code/pull-requests/tidewater/payout-service-${n}`;
   worktrees = [
     { repo_entity_id: "gitea:tidewater/payout-service", number: 7, path: at(7), closed: true },
@@ -174,16 +183,24 @@ test("the pull request worktrees are listed, a closed one marked, and Remove rem
   await draw();
   const section = [...target.querySelectorAll(".tf-stg-sec")].find((sec) => text(sec.querySelector("h2")) === "Pull request worktrees")!;
   const rows = () => [...section.querySelectorAll("tbody tr")].map((row) => [...row.querySelectorAll("td")].map(text).join(" | "));
-  expect(rows()).toEqual([`#7 Closed | ${at(7)} | Remove`, `#8 | ${at(8)} | Remove`]);
+  expect(rows()).toEqual([`#7 Closed | ${at(7)} | Remove…`, `#8 | ${at(8)} | Remove…`]);
+  const confirm = async () => {
+    [...target.querySelectorAll<HTMLButtonElement>('[role="dialog"] footer button')].find((b) => text(b) === "Remove worktree")!.click();
+    await settle();
+  };
 
   section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(7)}"]`)!.click();
   await settle();
-  expect(rows()).toEqual([`#8 | ${at(8)} | Remove`]);
+  expect(rows(), "nothing goes before the dialog is answered").toHaveLength(2);
+  expect(text(target.querySelector('[role="dialog"] h2'))).toBe("Remove the worktree of #7?");
+  await confirm();
+  expect(rows()).toEqual([`#8 | ${at(8)} | Remove…`]);
 
   refuseRemove = true;
   section.querySelector<HTMLButtonElement>(`button[title="Remove ${at(8)}"]`)!.click();
   await settle();
-  expect(rows()).toEqual([`#8 | ${at(8)} | Remove`]);
+  await confirm();
+  expect(rows()).toEqual([`#8 | ${at(8)} | Remove…`]);
   expect(toasts.items.map((toast) => toast.text)).toContain(
     `Could not remove the worktree: git would not remove ${at(8)}: it contains modified or untracked files`,
   );

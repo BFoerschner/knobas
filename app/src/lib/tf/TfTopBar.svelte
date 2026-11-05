@@ -136,7 +136,7 @@
       <circle cx="8" cy="8" r="1.3" stroke-width="1.4" />
     </svg>
   </a>
-  <button class="tf-iconbtn" aria-label="Toggle colour theme" onclick={ontheme}>
+  <button class="tf-iconbtn" aria-label="Toggle colour theme" title="Toggle colour theme" onclick={ontheme}>
     <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 12.5v-11a5.5 5.5 0 0 1 0 11z" />
     </svg>

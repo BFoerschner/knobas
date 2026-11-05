@@ -30,6 +30,8 @@
   default, and its page changes that.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import type { AdapterPreview, AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
   import { ACCOUNT_INCOMPLETE, accountHalfDone, accountOf } from "../../sources/account";
@@ -82,6 +84,8 @@
   let confirming = $state<{ input: string; preview: AdapterPreview } | null>(null);
   /** The last install's answer: what was installed, or why it was refused. */
   let installNote = $state<{ ok: boolean; text: string } | null>(null);
+  let radios = $state<HTMLElement | null>(null);
+  let form = $state<HTMLElement | null>(null);
 
   $effect(() => {
     let dead = false;
@@ -90,8 +94,12 @@
       .then((rows) => {
         if (dead) return;
         adapters = rows;
-        // The first one is chosen, as prototype-6 opens, so the form is there to fill.
-        if (chosen === null && rows[0]) choose(rows[0]);
+        // Nothing is preselected (Controls, the enabled rule), unless there is nothing to choose between.
+        if (chosen === null && rows.length === 1) choose(rows[0]!);
+        // What the dialog asks first arrived after it opened, so focus goes in now.
+        void tick().then(() => {
+          if (!dead) (form?.querySelector<HTMLElement>("#tf-add-address") ?? radios?.querySelector<HTMLElement>("input"))?.focus();
+        });
       })
       .catch((cause) => {
         if (!dead) adaptersError = ipcErrorMessage(cause);
@@ -127,6 +135,20 @@
       Object.keys(validated.errors).length === 0,
   );
   const canAdd = $derived(ready && idError === null && report?.ok === true && tested === draft && !saving);
+
+  /** What *Add source* is waiting for, in words beside the footer (Controls, the enabled rule); `null` when nothing. */
+  const missing = $derived.by((): string | null => {
+    if (canAdd || saving) return null;
+    if (chosen === null) return adapters === null ? null : "Choose what it is first.";
+    const needs = [
+      ...(baseUrl.trim() === "" ? ["the address"] : []),
+      ...config.fields.filter((field) => validated.errors[field.key]).map((field) => field.label),
+      ...(secret === "" ? [`the ${secretWord.toLowerCase()}`] : []),
+    ];
+    if (needs.length > 0) return `Still needs ${needs.length > 1 ? `${needs.slice(0, -1).join(", ")} and ${needs.at(-1)}` : needs[0]}.`;
+    if (idError !== null || accountHalf || config.error !== null) return "Fix what is marked above.";
+    return "Test the connection first.";
+  });
 
   /** What an adapter holds, as prototype-6 describes each one. */
   function kindsHeld(adapter: SourceDescriptor): string {
@@ -249,7 +271,7 @@
     {#if adaptersError !== null}
       <p class="tf-fail">Could not read the adapters: {adaptersError}</p>
     {:else if adapters !== null}
-      <div class="tf-radio" role="radiogroup" aria-label="What is it?">
+      <div class="tf-radio" role="radiogroup" aria-label="What is it?" bind:this={radios}>
         {#each adapters as adapter (adapter.id)}
           <label>
             <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => choose(adapter)} />
@@ -288,9 +310,9 @@
     {/if}
     </details>
     {#if chosen !== null}
-      <div class="tf-formgrid">
-        <label for="tf-add-address">Address</label>
-        <input id="tf-add-address" type="text" placeholder="https://" autocomplete="off" bind:value={baseUrl} />
+      <div class="tf-formgrid" bind:this={form}>
+        <label for="tf-add-address">Address <small class="tf-req">required</small></label>
+        <input id="tf-add-address" type="text" placeholder="https://" autocomplete="off" required bind:value={baseUrl} />
       </div>
       {#if config.error !== null}
         <p class="tf-fail">{config.error}</p>
@@ -308,8 +330,8 @@
         </div>
       {/if}
       <div class="tf-formgrid">
-        <label for="tf-add-secret">{secretWord}</label>
-        <input id="tf-add-secret" type="password" autocomplete="off" bind:value={secret} />
+        <label for="tf-add-secret">{secretWord} <small class="tf-req">required</small></label>
+        <input id="tf-add-secret" type="password" autocomplete="off" required bind:value={secret} />
         {#if chosen.accepts_account}
           <label for="tf-add-account-user">Account</label>
           <input id="tf-add-account-user" type="text" autocomplete="off" placeholder="Username (optional)" bind:value={accountUser} />
@@ -339,8 +361,9 @@
   {/snippet}
   {#snippet footer()}
     <button class="tf-btn tf-first" disabled={!ready || testing} onclick={() => void test()}>Test connection</button>
+    {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button class="tf-btn tf-primary" disabled={!canAdd} title={canAdd ? undefined : (idError ?? (ready ? "Test the connection first" : "Fill in the fields it needs first"))} onclick={() => void add()}>Add source</button>
+    <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
   {/snippet}
 </TfDialog>
 

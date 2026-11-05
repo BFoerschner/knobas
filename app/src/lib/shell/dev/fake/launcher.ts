@@ -3,6 +3,7 @@
  * `>` palette (#1417) and the query box's suggestions (#601).
  */
 import type { SearchResponse } from "../../../ipc/search";
+import { SYNTAX } from "../../../launcher/syntax";
 import type { Handlers } from "../fake-tauri";
 import { fakePipelines, fixtureRun } from "./builds";
 import { fakeNotesAreShown } from "./capture";
@@ -302,15 +303,23 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
  * **A substring match, fixture-only**, like the estate search below: it
  * answers the shape and not the engine's question. The ranking, the excerpt
  * and the grammar are the engine's, witnessed over a real PostgreSQL in
- * `knobas-search`'s integration tests. A query with a prefix or a `:` token
- * is not answered here.
+ * `knobas-search`'s integration tests. A leading `#` filter narrows to its
+ * kinds (`SYNTAX`'s letters), so a section's search can be looked at too. Any
+ * other prefix or a `:` token is not answered here.
  */
 function wordSearch(raw: string, titles: boolean): SearchResponse | null {
-  const text = raw.trim();
-  if (text === "" || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
-  const words = text.toLowerCase().split(/\s+/);
+  const asked = raw.trim();
+  const filter = /^#([a-z]+)(?:\s+(.*))?$/i.exec(asked);
+  const letters = [...(filter?.[1]?.toLowerCase() ?? "")];
+  const kinds = letters.flatMap((letter) => SYNTAX.find((row) => row.token === `#${letter}`)?.kind ?? []);
+  if (kinds.length !== letters.length) return null;
+  const text = filter ? (filter[2] ?? "").trim() : asked;
+  if ((text === "" && filter === null) || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
   const byKind = new Map<string, SearchResponse["groups"][number]["hits"]>();
+  const wanted = (kind: string) => filter === null || kinds.includes(kind);
   for (const { haystack, hit, log } of launcherKindHits()) {
+    if (!wanted(hit.kind)) continue;
     // Everything (#2431): a pipeline is found by its newest run's log too.
     const body = titles ? "" : (log ?? "");
     if (!words.every((word) => `${haystack} ${body}`.toLowerCase().includes(word))) continue;
@@ -319,7 +328,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     byKind.set(hit.kind, hits);
   }
   for (const entry of CORPUS) {
-    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind)) continue;
+    if (entry.deleted_at !== null || LEFT_OUT.has(entry.kind) || !wanted(entry.kind)) continue;
     const row = mirrorRow(entry);
     const body = titles ? "" : entry.body_text;
     const haystack = `${keyOf(entry.entity_id)} ${entry.title} ${row.path ?? ""} ${row.cell ?? ""} ${body}`.toLowerCase();
@@ -344,7 +353,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
     interpreted: {
       text,
       prefix: null,
-      filters: { sources: [], kinds: [], updated_within_days: null, mine: false, authors: [] },
+      filters: { sources: [], kinds, updated_within_days: null, mine: false, authors: [] },
       unknown_tokens: [],
       left_out_tokens: [],
     },

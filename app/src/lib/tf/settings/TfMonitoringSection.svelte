@@ -19,6 +19,8 @@
   };
 
   let stored = $state<MonitoringSettings | null>(null);
+  /** Why the last value typed into a field was not what got stored, said under that field. */
+  let refused = $state<Partial<Record<keyof MonitoringSettings, string>>>({});
 
   $effect(() => {
     void ports
@@ -31,6 +33,10 @@
     if (stored === null) return;
     const [min, max] = BOUNDS[field];
     const value = boundedNumber(input.value, min, max, stored[field]);
+    // A value out of range is brought into it, and that is said rather than done silently.
+    const typed = Number.parseInt(input.value, 10);
+    const inRange = typed >= min && typed <= max;
+    refused = { ...refused, [field]: inRange ? undefined : `Takes ${min} to ${max}, so this is ${value}.` };
     if (value === stored[field]) {
       input.value = String(value);
       return;
@@ -38,7 +44,7 @@
     try {
       stored = await ports.setMonitoringSettings({ ...stored, [field]: value });
     } catch (cause) {
-      push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
+      refused = { ...refused, [field]: `Not saved: ${ipcErrorMessage(cause)}. Still ${stored[field]}.` };
     }
     input.value = String(stored[field]);
   }
@@ -56,9 +62,12 @@
         max="600000"
         class="tf-stg-in tf-stg-n90"
         value={stored.response_time_warn_ms}
+        aria-invalid={refused.response_time_warn_ms ? "true" : undefined}
+        aria-describedby={refused.response_time_warn_ms ? "tf-mon-slow-why" : undefined}
         onchange={(event) => void save("response_time_warn_ms", event.currentTarget)}
       />
       <span>ms</span>
+      {#if refused.response_time_warn_ms}<small class="tf-stg-why" id="tf-mon-slow-why" role="alert">{refused.response_time_warn_ms}</small>{/if}
     </div>
   </div>
   <div class="tf-stg-row">
@@ -71,9 +80,12 @@
         max="3650"
         class="tf-stg-in tf-stg-n70"
         value={stored.sample_retention_days}
+        aria-invalid={refused.sample_retention_days ? "true" : undefined}
+        aria-describedby={refused.sample_retention_days ? "tf-mon-keep-why" : undefined}
         onchange={(event) => void save("sample_retention_days", event.currentTarget)}
       />
       <span>days</span>
+      {#if refused.sample_retention_days}<small class="tf-stg-why" id="tf-mon-keep-why" role="alert">{refused.sample_retention_days}</small>{/if}
     </div>
   </div>
 {/if}

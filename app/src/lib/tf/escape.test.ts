@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { escStep, escTarget, openerName } from "./escape";
+import { escStep, escTarget, openerName, windowTitle } from "./escape";
 import { parseTfHash } from "./route";
 
 const TICKET = { hash: "#/ticket/mock%3APAY-231", name: "PAY-231" };
@@ -49,4 +49,10 @@ test("a marked monitor with no opener goes to Monitors, with one to what opened 
   expect(escTarget(marked, null)).toEqual({ hash: "#/monitors", name: "Monitors", opened: false });
   const inbox = { hash: "#/inbox", name: "Inbox" };
   expect(escTarget(marked, inbox)).toEqual({ ...inbox, opened: true });
+});
+
+test("the window is named for the page, by what the page calls itself (F-015)", () => {
+  expect(windowTitle(parseTfHash("#/code"), null)).toBe("Code · knobas");
+  expect(windowTitle(parseTfHash("#/settings/appearance"), "Appearance")).toBe("Appearance · knobas");
+  expect(windowTitle(parseTfHash("#/ticket/jira%3APAY-231"), "PAY-231")).toBe("PAY-231 · knobas");
 });

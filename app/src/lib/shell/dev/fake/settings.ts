@@ -218,8 +218,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     monitoring_settings: () => monitoring,
     set_monitoring_settings: (args) => {
       const next = args["settings"] as MonitoringSettings;
-      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 1)) {
-        throw { code: "invalid", message: "both numbers must be at least 1", source_id: null };
+      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 0)) {
+        throw { code: "invalid", message: "retention must be at least 1 day", source_id: null };
       }
       monitoring = next;
       return monitoring;

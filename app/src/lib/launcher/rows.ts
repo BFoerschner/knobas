@@ -12,7 +12,7 @@
  */
 import type { LauncherHome, ResultGroup, SearchHit, SearchResponse } from "../ipc";
 import type { EntityRow, InboxItem } from "../ipc/entity";
-import type { LauncherAction } from "./actions";
+import { type LauncherAction, matchingPlaces } from "./actions";
 import type { SyntaxEntry } from "./syntax";
 
 /**
@@ -29,6 +29,14 @@ export interface InboxPreview {
 /** What the shell hands in beside `LauncherHome`. */
 export interface BoardExtras {
   inbox: InboxPreview | null;
+  /**
+   * The app's places, which a search with no filter offers by name above its
+   * answer. The launcher's; a link picker built on the session has none, since
+   * it is choosing a target and not going anywhere.
+   */
+  places?: readonly LauncherAction[];
+  /** Whether an empty answer offers *Search everything*: the launcher's, as `places` is. */
+  widens?: boolean;
 }
 
 /** One selectable line. */
@@ -45,7 +53,9 @@ export type LauncherRow =
   | { kind: "action"; id: string; action: LauncherAction }
   | { kind: "syntax"; id: string; entry: SyntaxEntry }
   /** *Search Docs for …* at the end of a `#d` answer (#2425): the Docs area, searching `words`. */
-  | { kind: "docs"; id: string; words: string };
+  | { kind: "docs"; id: string; words: string }
+  /** *Search everything* under an empty answer: the same `words`, with the filters gone and every field searched. */
+  | { kind: "widen"; id: string; words: string };
 
 /**
  * Which panel the body draws.
@@ -93,6 +103,8 @@ export function flatten(input: {
   extras?: BoardExtras;
   /** *Titles* rather than *Everything* (the query's `titles` flag): `#i` matches a line's title alone. */
   titles?: boolean;
+  /** The box's text, which says whether anything narrows the search beyond its words. */
+  raw?: string;
 }): LauncherRow[] {
   switch (input.mode) {
     // A pasted link is not a list: the entity it names is opened, and a link
@@ -137,9 +149,25 @@ export function flatten(input: {
           }),
         ),
       );
-      return [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
+      const answer = [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
+      const words = response.interpreted.text;
+      // Filters or a prefix mean the reader is narrowing a search, not naming a place.
+      const filtered = (input.raw ?? words).trim() !== words.trim();
+      const places = filtered ? [] : placeRows(input.extras?.places ?? [], words, answer.length === 0);
+      const widen = answer.length === 0 && input.extras?.widens === true && (filtered || input.titles === true);
+      return [...places, ...answer, ...(widen ? [{ kind: "widen", id: "widen", words } as const] : [])];
     }
   }
+}
+
+/** The *Go to* rows over an answer: by name, and by what a place holds where nothing else answered. */
+function placeRows(places: readonly LauncherAction[], words: string, nothingElse: boolean): LauncherRow[] {
+  return matchingPlaces(places, words, nothingElse).map((action) => ({ kind: "action", id: `action:${action.id}`, action }));
+}
+
+/** Whether `rows` hold an answer, as against only the rows that lead elsewhere (*Go to*, *Search everything*). */
+export function holdsAnswer(rows: readonly LauncherRow[]): boolean {
+  return rows.some((row) => row.kind !== "action" && row.kind !== "widen");
 }
 
 /**

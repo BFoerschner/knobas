@@ -45,7 +45,7 @@
     onclose: () => void;
     layers?: Layers;
     body: Snippet;
-    footer?: Snippet;
+    footer?: Snippet | undefined;
     /** A class beside `tf-dialog`, for a dialog of its own size (the view editor's, the import dialog's `tf-dwide`). */
     className?: string;
     /** The Close icon button on the right of the title line: every dialog has one (design system, Dialogs). */
@@ -61,10 +61,15 @@
   const FOCUSABLE =
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+  /** What matches `selector` and can take focus: a field in a closed fold can't, and `focus()` on it does nothing. */
+  function reachable(selector: string): HTMLElement[] {
+    if (!dialog) return [];
+    return [...dialog.querySelectorAll<HTMLElement>(selector)].filter((element) => !element.closest("details:not([open])"));
+  }
+
   /** Everything inside the dialog a Tab can reach, in document order. */
   function focusable(): HTMLElement[] {
-    if (!dialog) return [];
-    return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)];
+    return reachable(FOCUSABLE);
   }
 
   /** This dialog's entry on the layer stack. */
@@ -76,10 +81,7 @@
     const off = untrack(() => layers.add(layer));
     // The first field, else the body's first control: the header's Close comes first in document order,
     // and a reader who opened a dialog to type would type into nothing (#1431). Close only when nothing else.
-    const first =
-      dialog?.querySelector<HTMLElement>("input:not([disabled]):not([type=radio])") ??
-      dialog?.querySelector<HTMLElement>(`.tf-body :is(${FOCUSABLE})`) ??
-      focusable()[0];
+    const first = reachable("input:not([disabled]):not([type=radio])")[0] ?? reachable(`.tf-body :is(${FOCUSABLE})`)[0] ?? focusable()[0];
     first?.focus();
     return () => {
       untrack(off);

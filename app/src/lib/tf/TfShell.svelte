@@ -71,7 +71,7 @@
     type WriteQueue as Queue,
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
-  import { escStep, escTarget, openerName } from "./escape";
+  import { escStep, escTarget, openerName, windowTitle } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
@@ -244,6 +244,10 @@
 
   /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
   const shownPage = provideShownPageName();
+  // The window's name follows the page (F-015); `document.title` was always *knobas*.
+  $effect(() => {
+    document.title = windowTitle(route, shownPage.name);
+  });
   // A press on *Back to <name>* is the key's own step.
   provideBackStep((to, opened) => leave(to, opened));
 

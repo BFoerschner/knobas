@@ -76,15 +76,17 @@
     declaresUser,
     intervalOptions,
     intervalWords,
-    reenterWords,
+    credentialFix,
     runProgressWords,
     runRow,
     secretWord,
     sourceLine,
+    sourceHash,
     sourceState,
     userOf,
     type ListAddition,
   } from "./settings";
+  import { replaceAddress } from "../opener";
   import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
 
@@ -463,6 +465,15 @@
   const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
   const canSignIn = $derived(!signingIn && !half && (secret !== "" || account !== null));
 
+  /** Nothing is stored yet, so nothing here speaks of entering it again. */
+  const noneStored = $derived(health?.state === "missing_secret");
+
+  /** The prompt shuts; opened by its address (the status bar's link), the address goes back to the page's, so a reload does not ask again. */
+  function closeReenter() {
+    reentering = false;
+    if (reenter) replaceAddress(sourceHash(source.id));
+  }
+
   function openReenter() {
     secret = "";
     accountUser = "";
@@ -488,7 +499,7 @@
         secretError = `${name} refused it${next.detail ? `: ${next.detail}` : ""}.`;
         return;
       }
-      reentering = false;
+      closeReenter();
       push({ text: `Signed in to ${name}. Syncing now.` });
       onstarted();
       // The sync is the follow-through, not the transaction: a disabled or
@@ -544,7 +555,7 @@
 {#if alert !== null}
   <div class="tf-stg-alert" role="alert">
     <span class="tf-dot tf-err"></span><span>{alert}</span>
-    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>{reenterWords(source.auth_kind)}</button>
+    <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>{credentialFix(source.auth_kind, health?.state)}…</button>
   </div>
 {/if}
 {#each missLines as line (line)}
@@ -569,11 +580,11 @@
     <div class="tf-stg-row">
       <div class="tf-stg-l">{word}</div>
       <div class="tf-stg-c tf-stg-inl">
-        <span>{health?.state === "missing_secret" ? "None stored" : stored}</span>
+        <span>{noneStored ? "None stored" : stored}</span>
         {#if expiry !== null}
           <span class="tf-stg-exp {EXPIRY_CLASS[expiry.tone]}">{expiry.text}</span>
         {/if}
-        <button class="tf-btn tf-sm" onclick={openReenter}>Re-enter…</button>
+        <button class="tf-btn tf-sm" onclick={openReenter}>{noneStored ? "Enter…" : "Re-enter…"}</button>
       </div>
     </div>
   {/if}
@@ -741,7 +752,7 @@
 </section>
 
 {#if reentering}
-  <TfDialog title="Re-enter the {name} {word.toLowerCase()}" {layers} onclose={() => (reentering = false)}>
+  <TfDialog title="{noneStored ? 'Enter' : 'Re-enter'} the {name} {word.toLowerCase()}" {layers} onclose={closeReenter}>
     {#snippet body()}
       <form
         class="tf-formgrid"
@@ -763,13 +774,14 @@
       {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
       {#if secretError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{secretError}</p>{/if}
       <p class="tf-dlg-note">
-        {stored}. Writes waiting for {name} go out once it signs in.{acceptsAccount
+        {noneStored ? "" : `${stored}. `}Writes waiting for {name} go out once it signs in.{acceptsAccount && !noneStored
           ? " A field left empty keeps what is stored."
           : ""}
       </p>
     {/snippet}
     {#snippet footer()}
-      <button class="tf-btn tf-ghost" onclick={() => (reentering = false)}>Cancel</button>
+      {#if !canSignIn && !signingIn && !half}<p class="tf-dwhy" role="status">Type the {word.toLowerCase()} to sign in.</p>{/if}
+      <button class="tf-btn tf-ghost" onclick={closeReenter}>Cancel</button>
       <button class="tf-btn tf-primary" type="submit" form="tf-reenter" disabled={!canSignIn}>Sign in</button>
     {/snippet}
   </TfDialog>

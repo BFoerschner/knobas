@@ -85,6 +85,35 @@ export function navigationActions(): LauncherAction[] {
   ];
 }
 
+/**
+ * The app's places, as *Go to* offers them above a search's answer: the `>`
+ * rows, and the asset tree, which has no nav entry and so is reached by name.
+ */
+export function placeActions(): LauncherAction[] {
+  return [
+    ...navigationActions(),
+    { id: "assets", label: SECTION_NAME.assets, detail: "The estate's assets, in columns", hash: sectionHash("assets") },
+  ];
+}
+
+/** Whether `words` start at the start of a word of `text`, both lower case. */
+const startsAWord = (text: string, words: string) => text.startsWith(words) || text.includes(` ${words}`);
+
+/**
+ * The places `typed` names, from `places`: the start of a word of the name
+ * (`sett`, `asset tree`), and a settings section by its own name, so *settings*
+ * is one row and not fourteen. With `andDetails`, where nothing else answered,
+ * the start of a word of what the place holds too (`theme`), after the names.
+ * Two letters at least: one matches too much to be worth a row over the answer.
+ */
+export function matchingPlaces(places: readonly LauncherAction[], typed: string, andDetails: boolean): LauncherAction[] {
+  const words = typed.trim().toLowerCase();
+  if (words.length < 2) return [];
+  const named = places.filter((place) => startsAWord((place.label.split(" › ").at(-1) ?? "").toLowerCase(), words));
+  if (!andDetails) return named;
+  return [...named, ...places.filter((place) => !named.includes(place) && startsAWord(place.detail.toLowerCase(), words))];
+}
+
 /** The actions matching `text`, in the order they were declared. */
 export function filterActions(actions: LauncherAction[], text: string): LauncherAction[] {
   const needle = text.trim().toLowerCase();

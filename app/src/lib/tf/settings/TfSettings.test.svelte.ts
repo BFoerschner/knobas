@@ -866,6 +866,57 @@ test("Add a source shows a refused install with its reason, and offers nothing n
   expect(dialog().querySelector<HTMLInputElement>("#tf-add-manifest")!.value).toBe("/releases/knobas-adapter.json");
 });
 
+test("Add a source with several adapters preselects none, takes focus inside, and says what is missing (F-015, F-610)", async () => {
+  const p = ports();
+  const [jira] = await p.listAdapters();
+  p.listAdapters = vi.fn(() => Promise.resolve([jira!, { ...jira!, id: "other", adapter_kind: "other", name: "Other" }]));
+  await open([], p);
+  button("Add a source…").click();
+  await settle();
+  const radios = [...dialog().querySelectorAll<HTMLInputElement>('.tf-radio input[type="radio"]')];
+  expect(radios.some((radio) => radio.checked), "nothing is preselected").toBe(false);
+  expect(document.activeElement, "focus is inside, on what it asks first").toBe(radios[0]);
+  expect(dialog().querySelector("#tf-add-address")).toBeNull();
+  expect(dialog().querySelector(".tf-dwhy")?.textContent).toBe("Choose what it is first.");
+  expect(dialogButton("Add source").disabled).toBe(true);
+
+  radios[0]!.click();
+  await settle();
+  expect(dialog().querySelector(".tf-dwhy")?.textContent).toMatch(/^Still needs the address.* and the (token|password)\.$/);
+  expect(dialog().querySelector('label[for="tf-add-address"] .tf-req')?.textContent, "marked in words").toBe("required");
+  expect(dialog().querySelector('label[for="tf-add-secret"] .tf-req')?.textContent).toBe("required");
+});
+
+test("with nothing stored the credential is entered, not re-entered, with no word of where one is kept (F-608)", async () => {
+  const kuma = summary("kuma", "Uptime Kuma", "missing_secret", { auth_kind: "ApiToken", config: {} });
+  await open(["source", "kuma"], ports({ listSources: vi.fn(() => Promise.resolve([...SOURCES, kuma])) }));
+  expect(button("Enter…")).toBeTruthy();
+  button("Enter token…").click();
+  flushSync();
+  expect(dialog().querySelector("h2")?.textContent).toBe("Enter the Uptime Kuma token");
+  expect(dialog().textContent).not.toMatch(/keychain|re-enter/i);
+  expect(dialog().querySelector(".tf-dwhy")?.textContent).toBe("Type the token to sign in.");
+});
+
+test("the prompt opened by its address drops it on Cancel, so a reload does not ask again (F-613)", async () => {
+  location.hash = "#/settings/source/teamcity/reenter";
+  await open(["source", "teamcity", "reenter"]);
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  dialogButton("Cancel").click();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(location.hash).toBe("#/settings/source/teamcity");
+  location.hash = "";
+});
+
+test("an address that names no section keeps the rail, lights nothing, and says so (F-613)", async () => {
+  await open(["nope"]);
+  expect(target.querySelector('.tf-stg-nav a[href="#/settings/appearance"]')).not.toBeNull();
+  expect(target.querySelector(".tf-stg-nav a[aria-current]")).toBeNull();
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("Settings has no such section.");
+  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Settings");
+});
+
 test("Add a source waits for a passing test of what is typed now", async () => {
   await open([]);
   button("Add a source…").click();
@@ -968,7 +1019,7 @@ test("a failing credential is said on top, and Re-enter password stores the new 
     "Sign-in failed 38 min ago (401). Writes to TeamCity wait in the queue until you re-enter the password.",
   );
 
-  button("Re-enter password").click();
+  button("Re-enter password…").click();
   flushSync();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Re-enter the TeamCity password");
   expect(button("Sign in").disabled).toBe(true);
@@ -987,7 +1038,7 @@ async function storedLines(secretsInMemory: boolean): Promise<{ row: string; not
   await open(["source", "teamcity"], ports({ appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: secretsInMemory })) }));
   const row = [...target.querySelectorAll(".tf-stg-row")].find((el) => el.querySelector(".tf-stg-l")?.textContent === "Password");
   const line = row?.querySelector(".tf-stg-c > span")?.textContent ?? "";
-  button("Re-enter password").click();
+  button("Re-enter password…").click();
   flushSync();
   const note = [...target.querySelectorAll('[role="dialog"] .tf-dlg-note')].map((el) => el.textContent ?? "").join(" ");
   return { row: line, note };
@@ -1158,7 +1209,7 @@ test("Add a source: a discovered key the adapter does not declare never reaches 
 test("a password the source refuses keeps the dialog open and says so", async () => {
   const refuse = ports({ setSourceSecret: vi.fn((id: string) => Promise.resolve(healthOf(id, "unauthorized"))) });
   await open(["source", "teamcity"], refuse);
-  button("Re-enter password").click();
+  button("Re-enter password…").click();
   flushSync();
   type("#tf-reenter-secret", "wrong");
   button("Sign in").click();
@@ -1869,7 +1920,7 @@ test("a token source with no token stored is never told about a password (#1405)
 
   const alert = target.querySelector('[role="alert"]')!;
   expect(alert.textContent).toContain("No token is stored for Uptime Kuma.");
-  expect(button("Re-enter token")).toBeTruthy();
+  expect(button("Enter token…")).toBeTruthy();
   expect(target.textContent).not.toMatch(/password/i);
   unmount(view!);
   view = null;

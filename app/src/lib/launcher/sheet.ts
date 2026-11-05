@@ -185,6 +185,7 @@ export function subjectOf(row: LauncherRow, inboxOps: (key: string) => readonly 
     case "action":
     case "syntax":
     case "docs":
+    case "widen":
       return null;
   }
 }

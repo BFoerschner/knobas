@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { parseTfHash, sectionOf } from "../tf/route";
 import { settingsPlace } from "../tf/settings/settings";
-import { filterActions, navigationActions } from "./actions";
+import { filterActions, matchingPlaces, navigationActions, placeActions } from "./actions";
 
 /**
  * #1417: `>` with an empty query is the app's navigation menu (spec §4): the
@@ -102,4 +102,24 @@ test("typing after > narrows the menu", () => {
       .map((action) => action.label)
       .filter((label) => label.startsWith("Settings")),
   ]);
+});
+
+const PLACES = placeActions();
+const names = (typed: string, andDetails = false) => matchingPlaces(PLACES, typed, andDetails).map((place) => place.label);
+
+test("a place matches at the start of a word of its name, and a settings section by its own name (F-603)", () => {
+  expect(names("sett")).toEqual(["Settings"]);
+  expect(names("asset tree")).toEqual(["Asset tree"]);
+  expect(names("tree")).toEqual(["Asset tree"]);
+  expect(names("appearance")).toEqual(["Settings › Appearance"]);
+  expect(names("time")).toEqual(["Time", "Settings › Time"]);
+  // Not fourteen rows for one word, and not the inside of a word.
+  expect(names("settings")).toEqual(["Settings"]);
+  expect(names("ettings")).toEqual([]);
+  expect(names("s")).toEqual([]);
+});
+
+test("where nothing else answered, what a place holds counts too, after the names", () => {
+  expect(names("theme")).toEqual([]);
+  expect(names("theme", true)).toEqual(["Settings › Appearance"]);
 });

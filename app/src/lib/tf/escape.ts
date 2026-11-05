@@ -136,6 +136,12 @@ export function openerName(route: TfRoute, own: string | null): string {
   return placeName(route) || "the last page";
 }
 
+/** What the window calls itself on a page: the page's name first, so a window list says where it is. */
+export function windowTitle(route: TfRoute, own: string | null): string {
+  const name = openerName(route, own);
+  return name === "the last page" ? "knobas" : `${name} · knobas`;
+}
+
 /**
  * What the breadcrumb calls a place `Esc` goes to: a section's name for its
  * own pages, else what {@link HEAD_NAME} calls a deeper address (a

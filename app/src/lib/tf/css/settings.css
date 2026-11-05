@@ -1,6 +1,8 @@
 /* ---------- settings: prototype-6's .stg ---------- */
 /* The crumb and the rail stay in view; only the section's column scrolls. */
 .tf-stgpage { height: 100%; min-height: 0; }
+/* The bar is one height with or without its *Back to* hint, whose key is a fraction taller: the rail below stays put between pages. */
+.tf-stgpage > .tf-crumbs { flex: none; min-height: 38px; }
 .tf-stg { display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden; }
 .tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; overflow: auto; }
 .tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
@@ -21,10 +23,17 @@
 .tf-stg-sec h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 0 0 8px; }
 .tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
 .tf-stg-gap { margin-top: 14px; }
-/* A control sits at the top of its row, beside its label's first line, however long the description runs. */
+/* A control sits at the top of its row, its text on one line with its label's first, however long the description runs.
+   A switch and a textarea have no line of text to share, so they start at the top instead. */
 .tf-stg-row {
   display: grid; grid-template-columns: minmax(240px, 46%) minmax(0, 1fr); gap: 16px; padding: 11px 0;
-  border-bottom: 1px solid var(--rule-2); align-items: start;
+  border-bottom: 1px solid var(--rule-2); align-items: first baseline;
+}
+.tf-stg-row:has(.tf-stg-sw, textarea) { align-items: start; }
+.tf-stg-row:has(textarea) > .tf-stg-l { padding-top: 6px; }
+/* Where the section's column is too narrow for both, the label goes above its control: a control keeps its whole width. */
+@container (max-width: 720px) {
+  .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
 }
 .tf-stg-l { font-weight: 500; }
 .tf-stg-l small { display: block; font-weight: 400; font-size: var(--t-sm); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
@@ -38,8 +47,9 @@
 select.tf-stg-in { padding-inline-start: 4px; }
 /* A field in a row of controls takes the row's height (Controls, *Form controls*). */
 .tf-stg-c.tf-stg-row1 { flex-wrap: nowrap; }
-.tf-stg-row1 .tf-stg-in { height: var(--control-h-sm); padding-block: 0; min-width: 70px; flex: 1 1 0; }
-.tf-stg-row1 .tf-select { min-width: 0; flex: 0 1 auto; }
+/* Named at this weight because the one field height in dialogs.css is an `:is()` list that outweighs a two-class rule. */
+.tf .tf-stg-c.tf-stg-row1 .tf-stg-in { height: var(--control-h-sm); padding-block: 0; min-width: 70px; flex: 1 1 0; }
+.tf-stg-row1 .tf-select { flex: none; }
 .tf-stg-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; margin: 12px 0 0; }
 .tf-stg-sw {
   width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
@@ -84,6 +94,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-run progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
 .tf-stg-run progress::-webkit-progress-value { background: var(--info); border-radius: 2px; }
 .tf-stg-run p { font: 400 var(--t-sm)/1.5 var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
+/* Why a number typed here was not what got stored (F-613), on its own line under the field. */
+.tf-stg-why { flex-basis: 100%; font-size: var(--t-xs); color: var(--err); }
+.tf-stg-c [aria-invalid="true"] { border-color: var(--err); }
 .tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
 /* a value the address added to the config, beside its Save until saved (#1404) */
 .tf-stg-pend { align-self: center; font-size: var(--t-sm); color: var(--ink-2); }
@@ -98,7 +111,6 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); font-variant-ligatures: none; }
 /* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
 .tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
-.tf-sf-row .tf-stg-l { align-self: start; padding-top: 5px; }
 .tf-sf-grid { align-items: start; }
 .tf-sf-grid > label { padding-top: 5px; }
 .tf-sf-area { resize: vertical; min-height: 54px; line-height: 1.45; font: inherit; }
@@ -112,6 +124,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: var(--t-md); }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
+/* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line. */
+.tf-stg-body .tf-tbl :is(td.tf-mono, td .tf-mono) { white-space: normal; overflow-wrap: anywhere; }
+.tf-stg-body .tf-tbl td.tf-right { white-space: nowrap; }
 .tf-select { height: var(--control-h-sm); padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
 /* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */
@@ -129,8 +144,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-sc-kind { margin-top: 18px; }
 .tf-sc-kind .tf-ext-h { margin-bottom: 8px; }
 .tf-sc-kind h3 { font-size: var(--t-xs); margin: 0; font-weight: 600; color: var(--ink-2); }
-/* Six columns share the section's width, on its one right edge. A word that does not fit wraps; it is never cut. */
+/* Six columns share the section's width, on its one right edge, or three where six would split a word. */
 .tf-sc-board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+@container (max-width: 720px) { .tf-sc-board { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 /* A note under a panel is apart from it. */
 .tf-sc-line { margin-top: 8px; }
 .tf-sc-col {

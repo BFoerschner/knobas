@@ -515,4 +515,6 @@ test("Manage applications: the radio picks the default, â†‘ moves one up, Editâ€
   await settle();
   expect(calls.saved.at(-1)![0].map((draft) => draft.id)).toEqual(["terminal"]);
   expect(toasts.items.map((toast) => toast.text)).toContain("Removed the application");
+  // The removal rule: it acted at once, so its toast offers the way back.
+  expect(toasts.items.find((toast) => toast.text === "Removed the application")?.action?.label).toBe("Undo");
 });

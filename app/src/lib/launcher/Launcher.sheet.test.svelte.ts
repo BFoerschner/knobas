@@ -165,6 +165,8 @@ function mountIt(props: Record<string, unknown> = {}) {
     target,
     props: {
       open: true,
+      // These tests type a kind's word to reach its row; *Go to* has its own.
+      places: [],
       onnavigate: calls.navigate,
       onclose: () => {},
       ontimer: calls.timer,

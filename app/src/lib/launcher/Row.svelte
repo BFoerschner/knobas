@@ -14,6 +14,7 @@
   gotcha 7).
 -->
 <script lang="ts">
+  import { kindTag } from "../assets/tree";
   import type { Tone } from "../ipc/entity";
 
   let {
@@ -58,7 +59,7 @@
   onclick={onopen}
   onmouseenter={onhover}
 >
-  <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{monogram}</span>
+  <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{kindTag(monogram)}</span>
   <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>
   <span class="tf-ln-t">{title}</span>
   {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}

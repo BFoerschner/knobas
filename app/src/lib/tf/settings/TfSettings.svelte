@@ -31,7 +31,8 @@
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
-  import { SETTINGS_SECTIONS, settingsHash, settingsPlace, sourceState } from "./settings";
+  import { SETTINGS_SECTIONS, settingsHash, settingsKnows, settingsPlace, sourceState } from "./settings";
+  import TfNothingHere from "../TfNothingHere.svelte";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
@@ -83,6 +84,8 @@
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
+  /** An address that names neither a section nor a source: the rail stays, so the way back is one click. */
+  const known = $derived(settingsKnows(rest));
 
   let sources = $state<SourceSummary[] | null>(null);
   let error = $state<string | null>(null);
@@ -197,7 +200,7 @@
   const sectionName = $derived(SETTINGS_SECTIONS.find(([key]) => key === place.section)?.[1] ?? "Sources");
   /** `#/settings` itself: the *Settings* crumb would lead back to this page. */
   const bareSettings = $derived(rest.length === 0);
-  const crumbName = $derived(sourceId === null ? sectionName : (current?.display_name ?? sourceId));
+  const crumbName = $derived(!known ? "Nothing here" : sourceId === null ? sectionName : (current?.display_name ?? sourceId));
   /** Below 900 px, whether the sections rail is unfolded under its bar. */
   let railOpen = $state(false);
   /** The section's column is the page's scroller, so moving to another section starts it at its top. */
@@ -210,7 +213,7 @@
 
 <div class="tf-full tf-stgpage">
   <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, ...(sourceId === null ? [{ name: crumbName }] : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }])]} {back} />
-  <TfRailBar label="Section" value={sectionName} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} />
+  <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} />
   <div class="tf-stg" class:tf-rail-shut={!railOpen}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <nav
@@ -222,7 +225,7 @@
       }}
     >
       {#each SETTINGS_SECTIONS as [key, label] (key)}
-        <a href={settingsHash(key)} aria-current={key === place.section ? "page" : undefined}>
+        <a href={settingsHash(key)} aria-current={known && key === place.section ? "page" : undefined}>
           {label}
           {#if key === "sources" && anyFailing}
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
@@ -232,11 +235,16 @@
     </nav>
     <TfScroller class="tf-stg-scroll" {@attach atTopOnMove}>
     <div class="tf-stg-body">
-      {#if place.section === "sources" && error !== null && sources !== null}
+      {#if !known}
+        <header class="tf-stg-h"><h1>Settings</h1></header>
+        <TfNothingHere message="Settings has no such section." href={settingsHash("sources")} action="Sources" />
+      {:else if place.section === "sources" && error !== null && sources !== null}
         <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
         <p class="tf-stg-p tf-stg-errt" role="status">Could not read the sources again: {error}</p>
       {/if}
-      {#if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
+      {#if !known}
+        <!-- Said above. -->
+      {:else if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
         <!-- Their reads wait for the database, as the source list does. -->
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
       {:else if place.section === "time"}

@@ -103,13 +103,13 @@
     await apps.save(list, list.some((app) => app.id === current) ? current : null);
   }
 
-  async function write(list: CheckoutApplication[], said: string) {
+  async function write(list: CheckoutApplication[], said: string, undo?: () => void) {
     busy = true;
     error = null;
     try {
       await store(list);
       beforeTry = null;
-      push({ text: said });
+      push({ text: said, ...(undo ? { key: "application-removed", action: { label: "Undo", run: undo } } : {}) });
       onclose();
     } catch (cause) {
       error = ipcErrorMessage(cause);
@@ -141,8 +141,14 @@
 
   function remove() {
     if (index === null) return;
-    const list = (apps.settings?.applications ?? []).filter((_, at) => at !== index);
-    void write(list, "Removed the application");
+    const had = [...(apps.settings?.applications ?? [])];
+    const wasDefault = apps.settings?.default_application ?? null;
+    const list = had.filter((_, at) => at !== index);
+    // The removal rule (Controls, *Disabled*): gone at once, with *Undo* on its toast.
+    const undo = () => {
+      apps.save(had, wasDefault).catch((cause: unknown) => push({ text: `Could not put the application back: ${ipcErrorMessage(cause)}`, tone: "err" }));
+    };
+    void write(list, "Removed the application", undo);
   }
 
   async function tryIt() {

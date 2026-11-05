@@ -22,6 +22,7 @@
     interpreted,
     sources,
     sourcesRead = true,
+    hiddenKinds = [],
   }: {
     interpreted: ParsedQuery;
     sources: CredentialHealth[];
@@ -31,6 +32,8 @@
      * the sources are not read yet.
      */
     sourcesRead?: boolean;
+    /** The kinds the chip in front of the box already names (a section's filter), not said again here. */
+    hiddenKinds?: readonly string[];
   } = $props();
 
   /** The prefix chip, in the words the `?` card uses. */
@@ -118,6 +121,7 @@
       });
     }
     for (const kind of interpreted.filters.kinds) {
+      if (hiddenKinds.includes(kind)) continue;
       out.push({ key: `kind:${kind}`, text: kindLabel(kind), title: "kind", fail: false });
     }
     if (interpreted.filters.updated_within_days !== null) {

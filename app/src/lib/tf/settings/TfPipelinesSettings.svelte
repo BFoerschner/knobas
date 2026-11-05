@@ -16,6 +16,7 @@
   import type { RendererDefaults } from "../../render/defaults.svelte";
   import type { CommandSteps, NamedPipelines } from "../../render/pipelines.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { putBack, removalToast } from "./removed";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
@@ -24,6 +25,20 @@
     void pipelines.load().catch((cause) => push({ text: `Could not read the pipelines: ${ipcErrorMessage(cause)}`, tone: "err" }));
     void stepCommands.load().catch((cause) => push({ text: `Could not read the command steps: ${ipcErrorMessage(cause)}`, tone: "err" }));
   });
+
+  // The removal rule: gone at once, with *Undo* on one toast however many went.
+  const stepRemoved = removalToast<CommandStepDraft>("step-removed", "command steps", (removed) => void storeSteps(putBack(stepCommands.list.map(stepDraft), removed)));
+  const pipeRemoved = removalToast<NamedPipelineDraft>("pipeline-removed", "pipelines", (removed) => void storePipes(putBack(pipelines.list.map(pipeDraft), removed)));
+
+  async function removeStep(at: number) {
+    const gone = stepCommands.list[at]!;
+    if (await storeSteps(stepCommands.list.filter((_, i) => i !== at).map(stepDraft))) stepRemoved({ name: gone.name, at, item: stepDraft(gone) });
+  }
+
+  async function removePipe(at: number) {
+    const gone = pipelines.list[at]!;
+    if (await storePipes(pipelines.list.filter((_, i) => i !== at).map(pipeDraft))) pipeRemoved({ name: gone.name, at, item: pipeDraft(gone) });
+  }
 
   // Command steps.
   let editingStep = $state<number | "new" | null>(null);
@@ -132,7 +147,7 @@
             <td class="tf-small">{s.timeout_secs} s</td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {s.name}" onclick={() => editStep(at)}>Edit</button>
-              <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {s.name}" onclick={() => void storeSteps(stepCommands.list.filter((_, i) => i !== at).map(stepDraft))}
+              <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {s.name}" onclick={() => void removeStep(at)}
                 >Remove</button
               >
             </td>
@@ -187,7 +202,7 @@
             <td class="tf-small tf-mono">{usedBy(p.id).join(" ")}</td>
             <td class="tf-right">
               <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {p.name}" onclick={() => editPipe(at)}>Edit</button>
-              <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {p.name}" onclick={() => void storePipes(pipelines.list.filter((_, i) => i !== at).map(pipeDraft))}
+              <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {p.name}" onclick={() => void removePipe(at)}
                 >Remove</button
               >
             </td>

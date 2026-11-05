@@ -205,6 +205,7 @@ export class Session {
       syntax: this.syntax,
       extras: this.extras,
       titles: this.#titles(),
+      raw: this.raw,
     });
   }
 

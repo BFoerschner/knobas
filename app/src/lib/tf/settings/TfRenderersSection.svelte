@@ -52,6 +52,7 @@
   import { rendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
   import { commandSteps, namedPipelines, type CommandSteps, type NamedPipelines } from "../../render/pipelines.svelte";
   import TfPipelinesSettings from "./TfPipelinesSettings.svelte";
+  import { putBack, removalToast } from "./removed";
   import { push } from "../../shell/toasts.svelte";
   import TfCommandOutput from "../render/TfCommandOutput.svelte";
   import { diffPipelines, type DiffPipelinesSetting } from "../diff/diff-pipelines.svelte";
@@ -190,9 +191,25 @@
     }
   }
 
+  /** The removal rule: gone at once, with *Undo* on one toast however many went. */
+  const rendererRemoved = removalToast<UserRendererDraft>("renderer-removed", "renderers", (removed) => {
+    if (saved !== null) void store(putBack(saved.map(draftOf), removed));
+  });
+  const defaultRemoved = removalToast<RendererDefault>("default-removed", "defaults", (removed) => void storeDefaults(putBack(defaults.list, removed)));
+
   async function remove(at: number) {
     if (saved === null) return;
-    await store(saved.filter((_, i) => i !== at).map(draftOf));
+    const gone = saved[at]!;
+    if (!(await store(saved.filter((_, i) => i !== at).map(draftOf)))) return;
+    // The form below was open on a row by its place: the same renderer keeps it, or it shuts with its row.
+    if (editing === at) editing = null;
+    else if (typeof editing === "number" && editing > at) editing -= 1;
+    rendererRemoved({ name: gone.name, at, item: draftOf(gone) });
+  }
+
+  async function removeDefault(at: number) {
+    const gone = defaults.list[at]!;
+    if (await storeDefaults(defaults.list.filter((_, i) => i !== at))) defaultRemoved({ name: gone.pattern, at, item: gone });
   }
 
   function runTest() {
@@ -238,7 +255,7 @@
     {#if saved.length === 0}
       <p class="tf-dim">No command renderers yet.</p>
     {:else}
-      <table class="tf-tbl">
+      <table class="tf-tbl tf-rnd-own">
         <thead><tr><th>Renderer</th><th>Command</th><th>Files</th><th>Fences</th><th>Reads → writes</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each saved as r, at (r.id)}
@@ -250,7 +267,7 @@
               <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {r.timeout_secs} s</td>
               <td class="tf-right">
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => edit(at)}>Edit</button>
-                <button class="tf-btn tf-sm tf-ghost tf-danger" onclick={() => void remove(at)}>Remove</button>
+                <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {r.name}" onclick={() => void remove(at)}>Remove</button>
               </td>
             </tr>
           {/each}
@@ -353,7 +370,7 @@
                 {#if d.renderer !== "" && nameOf(d.renderer) === null}<span class="tf-small tf-dim">Not installed: the built-in default applies.</span>{/if}
               </td>
               <td class="tf-right">
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => void storeDefaults(defaults.list.filter((_, i) => i !== at))}>Remove</button>
+                <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove the default for {d.pattern}" onclick={() => void removeDefault(at)}>Remove</button>
               </td>
             </tr>
           {/each}

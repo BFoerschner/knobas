@@ -104,6 +104,8 @@ function mountIt(backend = keyBackend()) {
     target,
     props: {
       open: true,
+      // These tests type a kind's word to reach its row; *Go to* has its own.
+      places: [],
       onnavigate: calls.navigate,
       onclose: () => {},
       ontimer: vi.fn(),

@@ -45,6 +45,14 @@
   background: var(--sheet-2);
 }
 .tf-dialog footer .tf-first { margin-right: auto; }
+/* The enabled rule (Controls, *Disabled*): what a disabled primary is waiting for, in words beside the buttons. */
+.tf-dialog footer .tf-dwhy { flex: 1 1 0; min-width: 0; margin: 0; align-self: center; font-size: var(--t-xs); line-height: 1.3; color: var(--ink-2); text-align: right; }
+/* A radio's line under its name takes a step of the scale, not the browser's `smaller`. */
+.tf-radio small { font-size: var(--t-xs); }
+/* A needed field says so in words, in its label. */
+.tf-req { font-size: var(--t-2xs); font-weight: 400; color: var(--ink-2); }
+/* A link in a dialog's sentence is drawn as one. */
+.tf .tf-dlink { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
 .tf-dialog textarea {
   border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--field); color: var(--ink); width: 100%;
   resize: vertical;

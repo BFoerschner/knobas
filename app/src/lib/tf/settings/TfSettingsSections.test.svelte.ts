@@ -878,6 +878,23 @@ test("Standup puts a failed read's Try again on the title line (#2284)", async (
   expect(loneRows()).toBe(0);
 });
 
+test("a number Monitoring did not take marks its field and says why, under it (F-613)", async () => {
+  const refusal = { code: "invalid", message: "no", source_id: null };
+  await open("monitoring", sectionPorts({ setMonitoringSettings: vi.fn(() => Promise.reject(refusal)) }));
+  const field = target.querySelector<HTMLInputElement>("#tf-mon-keep")!;
+  field.value = "5000";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  expect(target.querySelector("#tf-mon-keep-why")?.textContent).toContain("Not saved");
+  expect(field.value).toBe("30");
+
+  field.value = "90";
+  field.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(target.querySelector("#tf-mon-keep-why")?.textContent).toContain("Not saved");
+});
+
 test.each(["time", "notifications", "standup", "monitoring", "backup", "appearance", "performance", "renderers", "keyboard", "logs", "checkouts"])(
   "Settings › %s draws no action row of its own under the title (#2284)",
   async (section) => {
