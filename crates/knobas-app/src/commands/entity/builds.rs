@@ -578,6 +578,62 @@ pub async fn artifact_preview_inner(
         .map_err(|error| run_read_failed(&entity, error))
 }
 
+/// The media type a data URL draws an artifact under: its name's, the viewer's
+/// image and PDF kinds, else `application/octet-stream`. An artifact listing
+/// carries no media type (#2417).
+fn artifact_mime(path: &str) -> &'static str {
+    let extension = path
+        .rsplit_once('.')
+        .map_or_else(String::new, |(_, it)| it.to_ascii_lowercase());
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+/// One artifact file of run `run_id` whole, for the file viewer's image or
+/// PDF (#2417). Capped as an attachment is
+/// ([`ATTACHMENT_CAP`](knobas_source::view::ATTACHMENT_CAP)), read live and
+/// never stored. `None` for a source that reads no artifact's bytes.
+///
+/// # Errors
+///
+/// As [`run_artifacts_inner`]; `invalid` for a file over the cap, naming it.
+pub async fn artifact_bytes_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    run_id: &str,
+    path: &str,
+) -> Result<Option<AttachmentBytes>, IpcError> {
+    use base64::Engine as _;
+    use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
+    artifact_path(path)?;
+    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
+    let read = source
+        .artifact_bytes(&entity.to_string(), path, ATTACHMENT_CAP)
+        .await
+        .map_err(|error| run_read_failed(&entity, error))?;
+    match read {
+        Some(FileBytes::Read(bytes)) => Ok(Some(AttachmentBytes {
+            mime: artifact_mime(path).to_owned(),
+            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        })),
+        Some(FileBytes::TooLarge { .. }) => {
+            let cap = mebibytes(ATTACHMENT_CAP);
+            Err(IpcError::invalid(format!(
+                "{path} is over {cap}; knobas previews an artifact up to {cap}"
+            )))
+        }
+        None => Ok(None),
+    }
+}
+
 /// Stream `target` of run `run_id` into a new file in `dir` with the stored
 /// credential (D8, #856), and answer the file's path; `None` for a source
 /// that keeps no runs. The file is named as the source suggests
@@ -725,6 +781,29 @@ pub async fn artifact_preview<R: tauri::Runtime>(
 ) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
     let state = crate::sources::state(&app)?;
     artifact_preview_inner(
+        &state.pool,
+        &state.secrets,
+        &state.registry,
+        &state.live,
+        &run_id,
+        &path,
+    )
+    .await
+}
+
+/// One artifact file whole, for the file viewer (#2417).
+///
+/// # Errors
+///
+/// See [`artifact_bytes_inner`].
+#[tauri::command]
+pub async fn artifact_bytes<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+    path: String,
+) -> Result<Option<AttachmentBytes>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    artifact_bytes_inner(
         &state.pool,
         &state.secrets,
         &state.registry,

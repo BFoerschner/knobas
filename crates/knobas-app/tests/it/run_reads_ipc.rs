@@ -7,13 +7,14 @@
 
 use knobas_app::IpcErrorCode;
 use knobas_app::commands::entity::{
-    artifact_preview_inner, download_run_file_inner, run_artifacts_inner, run_log_inner,
-    run_tests_inner, test_history_inner,
+    artifact_bytes_inner, artifact_preview_inner, download_run_file_inner, run_artifacts_inner,
+    run_log_inner, run_tests_inner, test_history_inner,
 };
 use knobas_source::run::{
     ArtifactEntry, ArtifactPreview, DownloadSink, DownloadTarget, LOG_LINES_MAX, RunLog, RunTests,
     TestOutcome, TestStatus,
 };
+use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
 use knobas_source::{Source, SourceError};
 
 async fn pool() -> sqlx::PgPool {
@@ -168,6 +169,23 @@ impl Source for Answers {
             truncated: false,
         }))
     }
+    /// `huge.png` is over any cap; `bare.png` is a read this source has no
+    /// answer for; a file is otherwise its path's bytes behind a NUL, as long
+    /// as the app asks for the 5 MiB cap.
+    async fn artifact_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<FileBytes>, SourceError> {
+        self.check(entity)?;
+        assert_eq!(cap, ATTACHMENT_CAP, "the app asks for the attachment cap");
+        Ok(match path {
+            "huge.png" => Some(FileBytes::TooLarge { size: cap + 1 }),
+            "bare.png" => None,
+            _ => Some(FileBytes::Read([b"\0", path.as_bytes()].concat())),
+        })
+    }
     async fn download(
         &self,
         entity: &str,
@@ -295,6 +313,57 @@ async fn each_run_read_reaches_the_runs_own_source_with_the_cap_applied() {
     .unwrap()
     .unwrap();
     assert_eq!(preview.text.as_deref(), Some("logs/a.log"));
+}
+
+/// The viewer's byte read (#2417): base64 under the media type the name gives,
+/// a file over the cap refused naming it, a source with no answer `None`.
+#[tokio::test]
+async fn an_artifacts_bytes_are_base64_under_their_names_media_type() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let run = format!("{tc}:build:7");
+    let s = no_secrets();
+    let read = |path: &'static str| {
+        let (pool, s, run) = (pool.clone(), s.clone(), run.clone());
+        async move {
+            artifact_bytes_inner(
+                &pool,
+                &s,
+                &answering(),
+                &knobas_app::sources::live::LiveSources::default(),
+                &run,
+                path,
+            )
+            .await
+        }
+    };
+    // "\0a.png" in base64, worked by hand: 00 61 2e 70 6e 67.
+    let png = read("a.png").await.unwrap().unwrap();
+    assert_eq!(png.mime, "image/png");
+    assert_eq!(png.data, "AGEucG5n");
+    for (path, mime) in [
+        ("shots/b.PNG", "image/png"),
+        ("b.jpg", "image/jpeg"),
+        ("b.jpeg", "image/jpeg"),
+        ("b.gif", "image/gif"),
+        ("b.webp", "image/webp"),
+        ("report.pdf", "application/pdf"),
+        ("trace.bin", "application/octet-stream"),
+        ("SHA256SUMS", "application/octet-stream"),
+    ] {
+        assert_eq!(read(path).await.unwrap().unwrap().mime, mime, "{path}");
+    }
+    let refused = read("huge.png").await.unwrap_err();
+    assert_eq!(refused.code, IpcErrorCode::Invalid);
+    assert_eq!(
+        refused.message,
+        "huge.png is over 5 MiB; knobas previews an artifact up to 5 MiB"
+    );
+    assert_eq!(read("bare.png").await.unwrap(), None);
+    assert_eq!(
+        read("../etc/passwd").await.unwrap_err().code,
+        IpcErrorCode::Invalid
+    );
 }
 
 #[tokio::test]

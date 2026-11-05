@@ -22,7 +22,7 @@ const WIDTH = 480;
 const HEIGHT = 180;
 
 /** A screenshot-like picture of a log panel, as a 24-bit BMP `data:` URL: a dark title bar, grey lines, one red. */
-function picture(seed: number): string {
+export function picture(seed: number): string {
   const row = Math.ceil((WIDTH * 3) / 4) * 4;
   const bytes = new Uint8Array(54 + row * HEIGHT);
   const view = new DataView(bytes.buffer);

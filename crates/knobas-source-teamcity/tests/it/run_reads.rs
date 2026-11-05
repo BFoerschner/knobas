@@ -9,6 +9,7 @@
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::run::{DownloadSink, DownloadTarget, TestStatus};
+use knobas_source::view::FileBytes;
 use knobas_source::{AuthMethod, Source, SourceError, Tone};
 use serde_json::json;
 use wiremock::matchers::{header, method, path, query_param, query_param_contains};
@@ -281,6 +282,88 @@ async fn a_preview_is_the_files_text() {
         Some("10:08:41 POST /batches 503\n")
     );
     assert!(!preview.truncated);
+}
+
+/// An artifact's bytes come back as the server sent them, NULs and all, which
+/// a preview's text could not carry (#2417).
+#[tokio::test]
+async fn an_artifacts_bytes_are_the_whole_file_up_to_the_cap() {
+    let server = MockServer::builder().start().await;
+    let png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    get("/app/rest/builds/id:2401/artifacts/files/shots/login%20page.png")
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(png.clone()))
+        .mount(&server)
+        .await;
+    let source = source(&server);
+    let cap = u64::try_from(png.len()).unwrap();
+    assert_eq!(
+        source
+            .artifact_bytes(BUILD, "shots/login page.png", cap)
+            .await
+            .unwrap(),
+        Some(FileBytes::Read(png.clone())),
+        "exactly the cap is still the whole file"
+    );
+    assert_eq!(
+        source
+            .artifact_bytes(BUILD, "shots/login page.png", cap - 1)
+            .await
+            .unwrap(),
+        Some(FileBytes::TooLarge { size: cap }),
+        "one byte over is refused, never cut"
+    );
+}
+
+/// A chunk that ends exactly on the cap says nothing of what follows: the read
+/// goes on, and a file one chunk longer is refused, never answered cut. A real
+/// socket, because wiremock sends its body as one chunk.
+#[tokio::test]
+async fn an_artifacts_bytes_read_past_a_chunk_that_ends_on_the_cap() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut request = [0u8; 4096];
+        let _ = socket.read(&mut request).await.unwrap();
+        for part in [
+            "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nabcd\r\n",
+            "1\r\ne\r\n0\r\n\r\n",
+        ] {
+            socket.write_all(part.as_bytes()).await.unwrap();
+            socket.flush().await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+    let source = knobas_source_teamcity::build(instance(format!("http://{address}")))
+        .unwrap_or_else(|e| panic!("the adapter builds: {e:?}"));
+    assert_eq!(
+        source.artifact_bytes(BUILD, "shot.png", 4).await.unwrap(),
+        Some(FileBytes::TooLarge { size: 5 })
+    );
+}
+
+#[tokio::test]
+async fn an_artifacts_bytes_refuse_the_root_a_bad_path_and_a_failed_read() {
+    let server = MockServer::builder().start().await;
+    get("/app/rest/builds/id:2401/artifacts/files/gone.pdf")
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    let source = source(&server);
+    for refused in ["", "a/../b"] {
+        assert!(
+            matches!(
+                source.artifact_bytes(BUILD, refused, 1024).await,
+                Err(SourceError::Protocol { .. })
+            ),
+            "{refused:?}"
+        );
+    }
+    assert!(matches!(
+        source.artifact_bytes(BUILD, "gone.pdf", 1024).await,
+        Err(SourceError::Unauthorized { status: Some(403) })
+    ));
 }
 
 #[derive(Default)]

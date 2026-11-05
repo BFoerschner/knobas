@@ -709,6 +709,8 @@ pub fn run() {
             commands::search::keys,
             commands::search::bind_list_key,
             commands::search::bind_action_key,
+            // #2417's artifact bytes, appended at the foot (§10.8).
+            commands::entity::artifact_bytes,
         ])
         .build(context)
         .expect("build the tauri application")

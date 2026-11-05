@@ -268,14 +268,14 @@ pub async fn get_entity(
 
 // -- an attachment's bytes (spec #2396, #2405) -------------------------------
 
-/// What [`attachment_bytes`] answers: the file's media type and its bytes in
-/// base64, which the shell draws as a `data:` image (the webview loads
-/// nothing from the source itself).
+/// What [`attachment_bytes`] and [`artifact_bytes`] answer: the file's media
+/// type and its bytes in base64, which the shell draws as a `data:` image (the
+/// webview loads nothing from the source itself).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[ts(export_to = "entity.ts")]
 pub struct AttachmentBytes {
-    /// The media type the mirror's list gives the file, else
-    /// `application/octet-stream`.
+    /// The media type the mirror's list gives the file (an artifact's name
+    /// gives it), else `application/octet-stream`.
     pub mime: String,
     /// The whole file, base64 (standard alphabet, padded).
     pub data: String,

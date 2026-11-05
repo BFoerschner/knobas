@@ -2287,6 +2287,21 @@ pub trait Source: Send + Sync {
         let _ = (entity, path);
         Ok(None)
     }
+    /// One artifact file of run `entity`, read whole up to `cap` bytes with the
+    /// stored credential (#2417): the file viewer's image or PDF. A file
+    /// longer than `cap` is [`FileBytes::TooLarge`](view::FileBytes::TooLarge),
+    /// its size what the adapter read before it stopped, so more than `cap`;
+    /// never a cut file. `Ok(None)` as for [`run_log`](Source::run_log), and
+    /// for an adapter that reads no artifact's bytes.
+    async fn artifact_bytes(
+        &self,
+        entity: &str,
+        path: &str,
+        cap: u64,
+    ) -> Result<Option<view::FileBytes>, SourceError> {
+        let _ = (entity, path, cap);
+        Ok(None)
+    }
     /// A saved view's query read into knobas' search grammar (#1208,
     /// ADR-0029): the conditions knobas can test and the parts left out, each
     /// with its reason, for *Make an editable copy*. `view` is the saved

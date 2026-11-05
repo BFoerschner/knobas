@@ -456,6 +456,18 @@ export function artifactPreview(runId: string, path: string): Promise<ArtifactPr
 }
 
 /**
+ * One artifact file whole, base64, for the file viewer's image or PDF
+ * (`knobas_app::commands::entity::artifact_bytes`, #2417). Read live and never
+ * stored; `null` for a source that reads no artifact's bytes.
+ *
+ * Rejects with `invalid` for a file over 5 MiB (the message names the file and
+ * the cap), and as `runArtifacts` does.
+ */
+export function artifactBytes(runId: string, path: string): Promise<AttachmentBytes | null> {
+  return invoke<AttachmentBytes | null>("artifact_bytes", { runId, path });
+}
+
+/**
  * Stream a log, file, folder or every artifact into the downloads folder
  * with the stored credential (D8, #856); the saved file's path, or `null`
  * for a source that keeps no runs.

@@ -47,6 +47,7 @@ pub fn descriptor_template() -> SourceDescriptor {
                 "test_history",
                 "run_artifacts",
                 "artifact_preview",
+                "artifact_bytes",
                 "download",
                 "run_chain",
             ],

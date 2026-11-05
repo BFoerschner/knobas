@@ -160,14 +160,14 @@ content_url: string,
 thumbnail_url: string | null, };
 
 /**
- * What [`attachment_bytes`] answers: the file's media type and its bytes in
- * base64, which the shell draws as a `data:` image (the webview loads
- * nothing from the source itself).
+ * What [`attachment_bytes`] and [`artifact_bytes`] answer: the file's media
+ * type and its bytes in base64, which the shell draws as a `data:` image (the
+ * webview loads nothing from the source itself).
  */
 export type AttachmentBytes = { 
 /**
- * The media type the mirror's list gives the file, else
- * `application/octet-stream`.
+ * The media type the mirror's list gives the file (an artifact's name
+ * gives it), else `application/octet-stream`.
  */
 mime: string, 
 /**

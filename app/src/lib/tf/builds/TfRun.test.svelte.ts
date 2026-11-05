@@ -254,6 +254,7 @@ function draw(
     tests: () => Promise.resolve(null),
     history: () => Promise.resolve(null),
     artifacts: () => Promise.resolve([]),
+    bytes: () => Promise.resolve(null),
     preview: () => Promise.resolve(null),
     download: (_runId, target) => {
       drawn.downloads.push(target);
