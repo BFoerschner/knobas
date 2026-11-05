@@ -38,7 +38,6 @@
   .tf-timer-key { max-width: 12ch; }
   .tf-nav a { padding: 6px 6px; gap: 4px; }
   .tf-nav .tf-count { padding: 0 5px; }
-  .tf-nav a[href="#/review"] .tf-count { display: none; }
   .tf-tm-row { grid-template-columns: 120px minmax(0, 1fr) 100px 280px; }
 }
 @media (max-width: 1240px) {

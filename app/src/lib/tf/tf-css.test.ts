@@ -245,9 +245,8 @@ test("the top bar's timer target is capped with an ellipsis, a label is sans and
   expect(band).toMatch(/\.tf-search \.tf-label, \.tf-search kbd\s*\{[^}]*display:\s*none/);
   expect(band).toMatch(/\.tf-timer-key\s*\{[^}]*max-width:\s*12ch/);
   expect(band).toMatch(/\.tf-nav a\s*\{[^}]*padding:/);
-  // A count is a state to act on (R-1.3): Inbox and Monitors keep theirs in the band, only Proposed links' waits.
+  // A count is a state to act on (R-1.3): Inbox and Monitors keep theirs in the band.
   expect(band).not.toMatch(/\.tf-nav \.tf-count\s*\{[^}]*display:\s*none/);
-  expect(band).toMatch(/\.tf-nav a\[href="#\/review"\] \.tf-count\s*\{[^}]*display:\s*none/);
 });
 
 /**
