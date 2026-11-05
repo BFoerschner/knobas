@@ -63,7 +63,7 @@ function memoryStorage() {
 function shikiPort(): RenderPort {
   return workerPort(() => {
     let listen: (event: { data: HighlightReply }) => void = () => {};
-    const core = createHighlightCore({ post: (reply) => listen({ data: reply }) });
+    const core = createHighlightCore({ tokenizeTimeLimit: 60_000, post: (reply) => listen({ data: reply }) });
     return {
       postMessage: (message: HighlightMessage) => core.handle(message),
       addEventListener: (_type: string, handler: (event: { data: HighlightReply }) => void) => (listen = handler),
