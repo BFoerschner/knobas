@@ -118,8 +118,8 @@
 //! from `seed-state.json` -- a stray issue deleted, a stray comment or
 //! attachment deleted, a label removed, a status moved back through the
 //! workflow -- which is the union of what can be left. Every test that asserts
-//! an exact set calls it before taking its baseline. Recovery from a dirty environment is
-//! "run the suite again".
+//! an exact set calls it before taking its baseline. Recovery from a dirty
+//! environment is "run the suite again".
 //!
 //! **One owner at a time**, as for the seeded TeamCity (`testenv/README.md`):
 //! the exact-set assertions and clause 2 mean nothing while somebody else is
@@ -129,7 +129,10 @@
 //!
 //! When the fake and the server disagree the **fake** is wrong; when the
 //! adapter and the server disagree the **adapter** is. A failure here names a
-//! defect at one of those two ends.
+//! defect at one of those two ends. The one exception says so in its message:
+//! "NOT WITNESSABLE" means the target did not produce the collision #345 is
+//! about, so [`two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink`]
+//! reached no verdict (#2472).
 //!
 //! # What the seed cannot reproduce, and so what is not asserted
 //!
@@ -542,7 +545,7 @@ impl Seeded {
     ///   [`each_issue_carries_its_comments_and_worklogs_as_seeded`]'s exact id
     ///   list means something;
     /// * an attachment whose id the seed did not record is **deleted** (#2471:
-    ///   something uploaded one to OPS-77 from outside this repository, and
+    ///   one turned up on OPS-77 that nothing in this repository uploads, and
     ///   [`the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_them`]'s
     ///   exact list went red). Left alone by a `seed-state.json` that records no
     ///   attachments, which cannot say which are strays;
@@ -551,10 +554,10 @@ impl Seeded {
     ///   [`a_full_sync_mirrors_every_seeded_issue_across_both_projects`]'s
     ///   per-issue status assertion does too.
     ///
-    /// The last two are what a killed `knobas-app` run leaves, and without them
-    /// the next run would fail two tests here on diffs that never name the
-    /// cause -- which is the failure the TeamCity suite built its own refusal
-    /// check around. Every test that asserts an exact set calls this before
+    /// The comment and the status are what a killed `knobas-app` run leaves,
+    /// and without them the next run would fail two tests here on diffs that
+    /// never name the cause -- which is the failure the TeamCity suite built its
+    /// own refusal check around. Every test that asserts an exact set calls this before
     /// taking its baseline. Read-only in the ordinary case: a clean server
     /// costs one search.
     ///
@@ -662,8 +665,8 @@ impl Seeded {
             return;
         }
         println!(
-            "live suite: put back {} thing(s) a run that was killed rather than failed left \
-             behind: {}",
+            "live suite: put back {} thing(s) that a killed run, or something outside this \
+             suite, left behind: {}",
             cleared.len(),
             cleared.join("; ")
         );
@@ -875,13 +878,16 @@ fn updated_to(cursor: &str) -> chrono::DateTime<chrono::Utc> {
 ///
 /// **Jira's clock, because `stamp` is Jira's.** This used to compare with the
 /// test machine's clock, and measured over the tunnel to the remote target
-/// (#2472) Jira's ran about 60 ms behind it. So the edit after this wait landed
-/// in the last milliseconds of Jira's *previous* second, every time: an edit
-/// meant for a later second could share `stamp`'s, and
+/// (#2472) Jira's ran about 55 ms behind it. So the edit after this wait landed
+/// in the last milliseconds of Jira's *previous* second: an edit meant for a
+/// later second could share `stamp`'s, and
 /// [`two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink`]'s
-/// second change, some 100 ms on, always crossed the boundary its first had just
-/// missed. `serverInfo` reports the time to the millisecond without writing
-/// anything.
+/// second change, some 100 ms on, crossed the boundary its first had just
+/// missed. The evidence is attempt counts, not a mutant: 14 of 15 attempts that
+/// waited missed the second, and 9 of 9 runs have collided at once since. Putting
+/// the old wait back stays green now and then, because an attempt whose baseline
+/// is stale did not wait at all. `serverInfo` reports the time to the millisecond
+/// without writing anything.
 ///
 /// **Early in the second** so that what follows has most of it to land in. It
 /// costs at most a little over a second.
@@ -2791,7 +2797,7 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 /// # Why this retries, and what it does *not* retry
 ///
 /// The collision cannot be commanded: it needs the reassignment to land in the
-/// same wall-clock second as the change the intervening run recorded, and
+/// same second of Jira's clock as the change the intervening run recorded, and
 /// between them sits a wait on Jira's asynchronous search index -- the one this
 /// file budgets [`INDEX_BUDGET`] for and #325 records. Measured on this
 /// container that wait is usually zero polls, so the pair usually shares a
@@ -2799,11 +2805,11 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 /// asserted the shared second outright, which meant a slow index failed the
 /// suite with no bug present.
 ///
-/// So each attempt starts early in one of Jira's seconds (#2472, see
-/// [`after_the_second_of`]), resets the issue, tries again, and **only the
-/// collision is retried**. Once one is achieved the delivery assertion is made
-/// once and is not retried at all: a reassignment that did not arrive is a
-/// failure, never something to poll past.
+/// So each attempt resets the issue, takes a position, waits until early in one
+/// of Jira's seconds (#2472, see [`after_the_second_of`]) and makes the two
+/// changes, and **only the collision is retried**. Once one is achieved the
+/// delivery assertion is made once and is not retried at all: a reassignment
+/// that did not arrive is a failure, never something to poll past.
 ///
 /// # When the attempts run out
 ///
@@ -2811,7 +2817,8 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 /// the shape, so the criterion went **not witnessed**. It is still red, and
 /// says "NOT WITNESSABLE" with every gap it measured, because this is the one
 /// test that witnesses #345 against a real server, and a green line would let
-/// that witness go dark with nobody looking.
+/// that witness go dark with nobody looking. The cost: like any red here, it
+/// stops `just jira-live` before `atlassian_live` and `share_exit`.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink() {
