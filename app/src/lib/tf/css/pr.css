@@ -76,7 +76,9 @@
 .tf-prreq { font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
 .tf-prnote { margin: 0; padding: 10px 12px; font-size: var(--t-xs); color: var(--ink-2); }
 /* *Request…*'s picker (#2303): the people the source names, one button each, under the panel's header. */
-.tf-prpick { display: flex; flex-direction: column; margin: 12px 12px 0; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+.tf-prpick { display: flex; flex-direction: column; }
+/* It is a band of the panel's box, which its siblings continue, so a rule ends it and not a box of its own. */
+.tf-panel:has(> header) > .tf-prpick { border-bottom: 1px solid var(--rule-2); }
 .tf-prpick-h { margin: 0; padding: 6px 8px 4px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
 .tf-prpick button {
   display: flex; align-items: center; gap: 8px; height: var(--control-h-sm); padding: 0 8px; border: 0; background: none;
