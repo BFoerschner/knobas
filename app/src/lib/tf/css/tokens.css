@@ -53,10 +53,13 @@ html, body { height: 100%; overflow: hidden; background: var(--paper); color: va
 /* Archivo's word space is narrow: at 11 to 15 px words run together, so the interface opens it a little. */
 body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; }
 /* Code keeps its columns, and the reading face its own fit. */
-:is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-doc) { letter-spacing: normal; word-spacing: normal; }
+:is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-doc, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input) { letter-spacing: normal; word-spacing: normal; }
 /* A placeholder is text: `--muted` is the lightest grey that passes on every field fill (4.5:1). */
 ::placeholder { color: var(--muted); opacity: 1; }
-button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; }
+/* A browser resets a form control's spacing to `normal`, so a control has to ask for the interface's. */
+button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; letter-spacing: inherit; word-spacing: inherit; }
+/* No word alone on a last line, where the engine can avoid it. */
+.tf p, .tf small, .tf .tf-sub { text-wrap: pretty; }
 button { cursor: pointer; }
 a { color: var(--info); text-decoration: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }

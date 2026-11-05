@@ -19,7 +19,7 @@
 .tf-member { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-member .tf-x, .tf-rule .tf-x { margin-left: auto; }
 .tf-rule { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
-.tf-rule select { border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 3px 6px; color: var(--ink); max-width: 240px; font: inherit; }
+.tf-rule select { border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 3px 6px; color: var(--ink); max-width: 240px; font: inherit; }
 .tf-rule-n { font-size: var(--t-xs); }
 .tf-rule-add { padding: 8px 12px 10px; }
 .tf-keys { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 12px; align-items: baseline; }

@@ -115,7 +115,7 @@
 .tf-tm-num { font-variant-numeric: tabular-nums; }
 .tf-tm-comment { width: 100%; }
 .tf-tm-comment textarea {
-  width: 100%; resize: vertical; font: inherit; border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--paper); color: var(--ink);
+  width: 100%; resize: vertical; font: inherit; border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--field); color: var(--ink);
 }
 
 /* ---------- time: the Standup tab (#829) ---------- */

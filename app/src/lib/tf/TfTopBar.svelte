@@ -96,7 +96,7 @@
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
     >
-      <span>No timer</span>
+      <span>Start timer</span>
       <span class="tf-timer-stop" aria-hidden="true">▶</span>
     </button>
   {/if}

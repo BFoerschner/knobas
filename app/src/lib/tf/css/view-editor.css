@@ -1,5 +1,5 @@
 /* ---------- the view editor (#814): the form on the left, the live preview on the right ---------- */
-.tf-vw-acts { padding: 4px 8px 2px; }
+.tf-vw-acts { padding: 2px 0 6px; }
 .tf-vw-acts .tf-btn { width: 100%; justify-content: center; }
 .tf-dialog.tf-vw-dialog { width: min(1080px, calc(100vw - 32px)); max-height: 88vh; }
 .tf-vw-dialog .tf-body { padding: 0; overflow: hidden; display: flex; min-height: 0; flex: 1; }
@@ -18,7 +18,7 @@
 .tf-vw-two label, .tf-vw-words { display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-vw-two small { font-size: var(--t-2xs); }
 .tf-vw-edit input[type="text"], .tf-vw-edit input[type="number"], .tf-vw-edit select {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink); font: inherit; font-size: var(--t-md);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink); font: inherit; font-size: var(--t-md);
 }
 .tf-vw-edit input.tf-vw-name-in { font-size: var(--t-lg); font-weight: 600; }
 .tf-vw-rules { display: flex; flex-direction: column; gap: 8px; }

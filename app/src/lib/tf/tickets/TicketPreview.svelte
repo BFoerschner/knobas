@@ -14,10 +14,10 @@
 -->
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { proseMarkdown, type Prose } from "../../render/prose";
+  import { proseMarkdown, withoutAttachmentMarks, type Prose } from "../../render/prose";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { jobHash, ticketHash } from "../route";
-  import { columnName, epicLine, previewAction, type AroundLine, type TicketFacts } from "./tickets";
+  import { columnName, epicLine, previewAction, sentenceCase, type AroundLine, type TicketFacts } from "./tickets";
 
   let {
     card,
@@ -37,7 +37,8 @@
 
   const action = $derived(previewAction(card, timerOnIt));
   const epic = $derived(epicLine(card));
-  const markdown = $derived(description === null ? null : proseMarkdown(description.text, description.markup));
+  // The preview has no attachment list to resolve a wiki's `!name!` against, so it says the file's name instead of the mark.
+  const markdown = $derived(description === null ? null : proseMarkdown(withoutAttachmentMarks(description.text, description.markup), description.markup));
 </script>
 
 <aside class="tf-preview" aria-label="Selected ticket">
@@ -51,7 +52,7 @@
     <dt>Assignee</dt>
     <dd>{card.assignee ?? "Unassigned"}</dd>
     <dt>Priority</dt>
-    <dd>{card.priority ?? "None"}</dd>
+    <dd>{sentenceCase(card.priority) ?? "None"}</dd>
     {#if epic}<dt>Epic</dt>
       <dd>{epic}</dd>{/if}
     <dt>Updated</dt>

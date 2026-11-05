@@ -213,6 +213,8 @@ The design width is 1440 × 900. Every view works from 1100 px. There are two br
 
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
 
+The status bar names at most two healthy sources; past that they are one line that keeps the oldest age, and its title and Settings › Sources keep every reading. When room runs out the healthy line goes first, then a failure's words. A failure's fix and the write queue never shrink.
+
 A section's own page has no breadcrumb bar: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
@@ -234,7 +236,7 @@ Focus is always visible: a 2 px outline in `--focus`, offset 2 px. `--card-ink` 
 
 ## Words
 
-Copy follows prototype-6 word for word, as `requirements.md` says. When a screen needs words the prototype doesn't have, they follow its voice. Sentence case. Buttons name what happens ("Log 1h 20m", not "Submit"), and the toast uses the same verb ("Logged 1h 20m"). Errors say what failed and what to do ("TeamCity sign-in is failing, so it waits there"). An empty view says what would fill it and offers the action.
+Copy follows prototype-6 word for word, as `requirements.md` says. When a screen needs words the prototype doesn't have, they follow its voice. Sentence case. Buttons name what happens ("Log 1h 20m", not "Submit", and "Start timer", not "No timer"), and the toast uses the same verb ("Logged 1h 20m"). Errors say what failed and what to do ("TeamCity sign-in is failing, so it waits there"). An empty view says what would fill it and offers the action.
 
 ## Getting it into the app
 

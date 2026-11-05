@@ -18,7 +18,7 @@
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
   import Signals from "./Signals.svelte";
-  import { commentsLine, epicLine, initials } from "./tickets";
+  import { commentsLine, epicLine, initials, sentenceCase } from "./tickets";
 
   let {
     card,
@@ -48,7 +48,7 @@
   /** Labels are shown only when a view asks for them, as in prototype-6. */
   const labels = $derived(fields?.includes("labels") ? card.labels : []);
 
-  const kind = $derived([card.issue_type, card.priority].filter(Boolean).join(", "));
+  const kind = $derived([card.issue_type, sentenceCase(card.priority)].filter(Boolean).join(", "));
   const epic = $derived(epicLine(card));
   const comments = $derived(commentsLine(card.comment_count));
 </script>
@@ -63,9 +63,11 @@
   onclick={onselect}
   ondblclick={onopen}
 >
-  <span class="tf-k"><Marked text={card.key} {needles} /></span>
+  <span class="tf-thead">
+    <span class="tf-k" title={card.key}><Marked text={card.key} {needles} /></span>
+    {#if kind && shows("type")}<span class="tf-dim tf-tkind" title={kind}>{kind}</span>{/if}
+  </span>
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
-  {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {needles} /></span>
   {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
   <span class="tf-meta">

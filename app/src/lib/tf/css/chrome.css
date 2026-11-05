@@ -17,6 +17,8 @@
   background: var(--muted-bg); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
 .tf-count.tf-err { background: var(--err-bg); color: var(--err); }
+/* On the page's paper `--muted-bg` is 1.01:1 in light, so a count there is a bare number in one theme and a pill in the other. */
+:is(.tf-tabs, .tf-wtabs, .tf-col h3, .tf-lane > h2) .tf-count:not(.tf-err):not(.tf-warn):not(.tf-info) { background: var(--rule); }
 .tf-spacer { flex: 1; }
 .tf-search {
   display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--field);
@@ -62,20 +64,25 @@
   background: var(--sheet); border-top: 1px solid var(--rule); overflow: hidden; white-space: nowrap;
 }
 /* Each reading starts with its state's dot, so the bar reads at a glance and the red is the dot and the fix, not a whole line of it. */
-.tf-status .tf-healthy > span::before, .tf-status .tf-bad::before {
-  content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ok);
+.tf-status .tf-read::before, .tf-status .tf-bad::before {
+  content: ""; display: inline-block; flex: none; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--ok);
 }
-.tf-status .tf-bad::before { background: var(--err); }
+.tf-status .tf-read.tf-info::before { background: var(--info); }
+.tf-status .tf-read.tf-warn::before { background: var(--warn); }
+.tf-status .tf-read.tf-muted::before { background: var(--muted); }
+.tf-status .tf-bad::before { background: var(--err); align-self: center; }
 /*
-  Pinned (#1410): everything but the healthy run keeps its width; the run takes what is left and
-  shows whole readings only. One that does not fit wraps out of sight, never cut to a stub like "Tide…";
-  the run's title and Settings › Sources keep every reading.
+  Pinned (#1410): the queue always keeps its width. Past two healthy sources the run is one rollup line; the
+  run's title and Settings › Sources keep every reading. It gives up width first, then a failure's words,
+  and a failure's fix never shrinks, so the way out of a failure stays on screen.
 */
 .tf-status > * { flex: none; }
-.tf-status > .tf-healthy { flex: 0 1 auto; min-width: 0; display: flex; flex-wrap: wrap; column-gap: 16px; height: 1.45em; overflow: hidden; }
+.tf-status > .tf-healthy { flex: 0 1000 auto; min-width: 0; display: flex; flex-wrap: wrap; column-gap: 16px; height: 1.45em; overflow: hidden; }
+.tf-status > .tf-bad { display: inline-flex; align-items: baseline; flex: 0 1 auto; min-width: 0; }
+.tf-status .tf-bad-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-status .tf-healthy > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .tf-status .tf-bad { color: var(--ink); }
-.tf-status .tf-bad a { margin-left: 4px; color: var(--err); font-weight: 600; }
+.tf-status .tf-bad a { flex: none; margin-left: 6px; color: var(--err); font-weight: 600; }
 .tf-status button, .tf-status a {
   border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
 }
@@ -104,8 +111,11 @@
 .tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px 20px; align-items: flex-start; }
 .tf-fhead > :first-child { flex: 1 1 0; min-width: 280px; }
 .tf-fhead > .tf-acts { flex: 0 1 auto; justify-content: flex-end; }
-.tf-fhead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; }
-.tf-fhead .tf-sub { color: var(--ink-2); margin-top: 4px; font-size: var(--t-sm); }
+/* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
+.tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
+/* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
+.tf .tf-fhead h1.tf-mono { font-size: var(--t-2xl); }
+.tf-fhead .tf-sub { color: var(--ink-2); font-size: var(--t-sm); }
 /* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */
 .tf-syncnow { align-self: flex-start; }
 

@@ -37,7 +37,15 @@ export function isDone(status: string | null): boolean {
  * name; a ticket's status is its card's (#1423).
  */
 export function columnName(status: string | null): string {
-  return status ?? "No status";
+  return sentenceCase(status) ?? "No status";
+}
+
+/**
+ * A source's word as a label: Gitea says *closed* and *high* where Jira says *Done* and *High*, and the shell's
+ * labels are sentence case. Only the first letter moves, so *In Progress* stays as its source wrote it.
+ */
+export function sentenceCase<Word extends string | null>(word: Word): Word | string {
+  return word === null || word === "" ? word : word[0]!.toLocaleUpperCase() + word.slice(1);
 }
 
 /**

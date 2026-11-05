@@ -2,6 +2,7 @@
 .tf-bhead { padding-bottom: 8px; }
 .tf-bhead .tf-sub { max-width: 80ch; }
 .tf-bhead .tf-sub a { color: inherit; }
+.tf-bhead .tf-sub .tf-mono { white-space: nowrap; }
 .tf-bstale { margin: 0 22px 10px; }
 .tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
 .tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
@@ -143,7 +144,7 @@
 /* One layout for every day's table (#1452): the widths are the colgroup's, the branch takes what is left, and a long name wraps in its column. */
 .tf-runs .tf-runtbl { table-layout: fixed; }
 .tf-runs .tf-run-br { font-size: var(--t-xs); overflow-wrap: anywhere; }
-.tf-runs .tf-run-trig { width: 140px; font-size: var(--t-sm); overflow-wrap: anywhere; }
+.tf-runs .tf-run-trig { width: 170px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
 @media (max-width: 900px) {

@@ -5,10 +5,10 @@
 .tf-stg-nav a:hover { background: var(--sheet-2); }
 .tf-stg-nav a[aria-current="page"] { background: var(--ink); color: var(--sheet); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
-.tf-stg-body { padding: 18px 28px 48px; max-width: 860px; min-width: 0; }
+.tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
-  font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
+  font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
 }
 .tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: var(--t-md); max-width: 70ch; }
 /* A Settings page whose header carries actions: the title block on the left, `.tf-acts` on the right of its

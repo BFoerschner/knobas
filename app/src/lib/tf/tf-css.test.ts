@@ -35,6 +35,17 @@ function block(source: string, selector: string): string {
   return source.slice(at, source.indexOf("}", at));
 }
 
+test("a field is on `--field`: `--paper` and `--sheet` read as disabled", () => {
+  const onPage = [...code.matchAll(/([^{}]+)\{([^{}]*)\}/g)].flatMap(([, selectors, body]) => {
+    if (!/background:\s*var\(--(paper|sheet)\)/.test(body!)) return [];
+    return selectors!
+      .split(",")
+      .map((selector) => selector.trim())
+      .filter((selector) => /(^|[\s>+~])(input|textarea|select)\b[^\s>+~]*$/.test(selector) && !/checkbox|radio/.test(selector));
+  });
+  expect(onPage).toEqual([]);
+});
+
 /** `--token` → [light, dark], from the spec's colour table. */
 const COLOURS: [string, string, string][] = [...spec.matchAll(/^\| `(--[a-z0-9-]+)`(?: \/ `(--[a-z0-9-]+)`)? \| `(#[0-9A-F]{6})`(?: \/ `(#[0-9A-F]{6})`)? \| `(#[0-9A-F]{6})`(?: \/ `(#[0-9A-F]{6})`)? \|/gm)].flatMap(
   (row) => {

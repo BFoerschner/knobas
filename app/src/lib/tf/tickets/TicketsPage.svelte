@@ -137,7 +137,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sharedKeys, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -835,7 +835,7 @@
                 {#each listColumns as [column] (column)}
                   {#if column === "key"}
                     {@const source = sourceOf(card)}
-                    <td class="tf-mono tf-nowrap"
+                    <td class="tf-mono tf-nowrap tf-keycell" title={card.key}
                       ><Marked text={card.key} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
                     >
                   {:else if column === "summary"}
@@ -847,13 +847,13 @@
                   {:else if column === "status"}
                     <td class="tf-nowrap">{columnName(card.status)}</td>
                   {:else if column === "priority"}
-                    <td>{card.priority ?? ""}</td>
+                    <td>{sentenceCase(card.priority) ?? ""}</td>
                   {:else if column === "signals"}
                     <td><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                   {:else if column === "assignee"}
                     <td>{card.assignee ?? "Unassigned"}</td>
                   {:else if column === "updated"}
-                    <td class="tf-dim">{clockLabel(card.updated_at)}</td>
+                    <td class="tf-dim tf-nowrap">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}
                     <td class="tf-mono tf-nowrap">{card.path ?? ""}</td>
                   {:else}

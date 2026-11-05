@@ -24,7 +24,7 @@
   background: var(--info-bg); color: var(--info); white-space: nowrap; user-select: none;
 }
 .tf .tf-ln-q input {
-  flex: 1; min-width: 120px; padding: 16px 0 16px 18px; font-size: var(--t-xl); color: var(--ink); background: var(--sheet);
+  flex: 1; min-width: 120px; padding: 16px 0 16px 18px; font-size: var(--t-xl); color: var(--ink); background: none;
   border: 0; outline: none;
 }
 /* No ring on the box (#1422, prototype-6's `outline:none`): it holds focus for as long as the dialog is
