@@ -1289,12 +1289,28 @@ async fn the_estate_is_under_the_same_budget_beside_a_hundred_thousand_items() {
 }
 
 /// How many repositories [`under_is_under_the_same_budget_beside_a_hundred_thousand_items`]
-/// spreads the Gitea commits across.
+/// spreads the Gitea pull requests across.
 ///
 /// Prime, and so coprime to the fifteen `seed_corpus` cycles source and kind
-/// over: every repo gets commits. Forty would leave `repo-7` empty, since a
-/// Gitea commit's number is 4 mod 5 and so never 7 mod 40.
+/// over: every repo gets pull requests. Forty would leave `repo-7` empty, since
+/// a Gitea pull request's number is 1 mod 5 and so never 7 mod 40.
 const REPOS: i64 = 41;
+
+/// What one `under:` case has to answer, so that its timing is a reading of
+/// that shape. An answer of the wrong shape is a fixture that moved, and it
+/// could well be inside the budget.
+enum UnderAnswer {
+    /// Rows, and no token to explain them.
+    Draws,
+    /// No rows: the name is known and only what the launcher leaves out sits
+    /// beneath it. The token comes back as left out, for the chip (#2488).
+    LeftOut,
+    /// No rows: the name is known with kept rows beneath it, and the word
+    /// missed. Nothing to explain, and the left-out check still ran to say so.
+    WordMisses,
+    /// No rows: no parent answers to the name, so the token comes back unknown.
+    Unknown,
+}
 
 /// `under:` over the 100 k mirror with parents declared and present (#627).
 ///
@@ -1307,17 +1323,24 @@ const REPOS: i64 = 41;
 /// parent into a payload, so a declared-parent read over it has nothing to
 /// walk, and nothing above binds a declaration.
 ///
-/// So this gives the corpus's Gitea commits -- 6,667 of the 100,000 -- the
-/// `repository` object the Gitea adapter's `map` writes, spread over
-/// [`REPOS`] repositories, binds the real Gitea descriptor, and seeds the
-/// estate beside them, because `under:` also answers to an asset's name. It
+/// So this gives parents to two of the corpus's Gitea kinds, 6,667 rows of the
+/// 100,000 each, and binds the real Gitea descriptor. **Pull requests**, which
+/// the launcher keeps, get the `base.repo` Gitea's record carries, spread over
+/// [`REPOS`] repositories: they are what the repo cases draw. **Commits**, which
+/// it leaves out (#2422), get the `repository` object the adapter's `map` writes:
+/// a quarter of them across the same repositories, and the other 5,000 under
+/// `bench/commits-only`, a name with only commits beneath it. The estate is
+/// seeded beside them, because `under:` also answers to an asset's name. It
 /// **rewrites payloads**, which every test that runs after it would inherit,
 /// so its name sorts after every other test in this file (the module docs'
 /// "one database" paragraph).
 ///
 /// The timing is the **whole** `search` call: the unknown-token lookup, the
 /// scoped statement and the `under:` coverage probe together, which is what
-/// the launcher waits for. A second, empty Gitea source is configured so the
+/// the launcher waits for. An empty answer pays once more for each known name
+/// typed, the launcher's statement asked whether it admits a row beneath that
+/// name (`under::left_out_tokens`, #2488), and the two empty shapes on a known
+/// name are here to gate that. A second, empty Gitea source is configured so the
 /// probe pays its worst case, two sources on one adapter (#642).
 #[tokio::test]
 #[ignore = "seeds a 100k corpus with declared parents and asserts on wall-clock time; run it deliberately"]
@@ -1343,15 +1366,25 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     testing::seed_estate(&pool, "bench").await.unwrap();
     // Timed too, and the larger part of the write cost: the seed's rows carry
     // no parent, so its trigger walk finds nothing, while this update gives
-    // 6,667 rows one and the trigger resolves each of them.
+    // 13,334 rows one and the trigger resolves each of them.
     let parenting = Instant::now();
     let parented = sqlx::query(
-        "update sync.item
-            set payload = payload || jsonb_build_object('repository', jsonb_build_object(
-                  'id', (payload->>'n')::int % $1,
-                  'name', 'repo-' || (payload->>'n')::int % $1,
-                  'full_name', 'bench/repo-' || (payload->>'n')::int % $1))
-          where source_id = 'gitea' and kind = 'commit'",
+        "update sync.item i
+            set payload = i.payload || case i.kind
+                  when 'commit' then jsonb_build_object('repository', r.repo)
+                  else jsonb_build_object('base', jsonb_build_object('repo', r.repo))
+                end
+           from (select entity_id,
+                        jsonb_build_object('id', hashtext(name), 'name', name,
+                                           'full_name', 'bench/' || name) as repo
+                   from (select entity_id,
+                                case when kind = 'commit' and (payload->>'n')::int % 4 <> 0
+                                     then 'commits-only'
+                                     else 'repo-' || (payload->>'n')::int % $1
+                                end as name
+                           from sync.item
+                          where source_id = 'gitea' and kind in ('commit', 'pr')) named) r
+          where i.entity_id = r.entity_id",
     )
     .bind(REPOS)
     .execute(&pool)
@@ -1359,7 +1392,7 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     .unwrap()
     .rows_affected();
     println!(
-        "under: giving {parented} commits a repository took {} ms",
+        "under: giving {parented} commits and pull requests a repository took {} ms",
         parenting.elapsed().as_millis()
     );
     // A second Gitea source that has synced nothing: the coverage probe's old
@@ -1377,30 +1410,46 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     .await
     .unwrap();
     testing::prepare(&pool).await.unwrap();
-    println!("under: {parented} commits across {REPOS} repos, beside 100000 mirror items");
+    println!(
+        "under: {parented} commits and pull requests across {REPOS} repos and commits-only, \
+         beside 100000 mirror items"
+    );
     assert!(
         parented > 0,
-        "no Gitea commit in the corpus: the fixture moved"
+        "no Gitea commit or pull request in the corpus: the fixture moved"
     );
 
     for _ in 0..3 {
         searcher.search(q("under:bench/repo-7")).await.unwrap();
     }
 
-    // (name, raw, whether it should draw rows)
-    let cases: &[(&str, &str, bool)] = &[
-        ("repo, full name", "under:bench/repo-7", true),
-        ("repo, bare name", "under:repo-7", true),
+    let cases: &[(&str, &str, UnderAnswer)] = &[
+        ("repo, full name", "under:bench/repo-7", UnderAnswer::Draws),
+        ("repo, bare name", "under:repo-7", UnderAnswer::Draws),
         // `w219` is one of `seed_corpus`'s 512 body words, in about 4,000
-        // rows of the corpus and 8 of `repo-7`'s 162 commits. Not `payout`:
-        // that word is in rows whose number is 0 mod 20, and a Gitea
-        // commit's number is 4 mod 5, so no commit carries it.
-        ("repo + word", "under:bench/repo-7 w219", true),
-        ("name nothing has", "under:zzzznothing", false),
+        // rows of the corpus and 7 of `repo-7`'s 162 pull requests. Not
+        // `payout`: that word is in rows whose number is 0 mod 20, and a Gitea
+        // pull request's number is 1 mod 5, so no pull request carries it.
+        ("repo + word", "under:bench/repo-7 w219", UnderAnswer::Draws),
+        (
+            "only commits beneath",
+            "under:bench/commits-only",
+            UnderAnswer::LeftOut,
+        ),
+        (
+            "repo + word missing",
+            "under:bench/repo-7 zzzznothing",
+            UnderAnswer::WordMisses,
+        ),
+        (
+            "name nothing has",
+            "under:zzzznothing",
+            UnderAnswer::Unknown,
+        ),
     ];
 
-    let mut worst = 0_u128;
-    for (name, raw, draws) in cases {
+    let mut worst = ("", 0_u128);
+    for (name, raw, answer) in cases {
         let timing = timings(&searcher, raw, 10).await;
         let response = searcher.search(q(raw)).await.unwrap();
         let hits: usize = response.groups.iter().map(|group| group.hits.len()).sum();
@@ -1408,25 +1457,38 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
             "{name:<20} {hits:>4} drawn  p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
             timing.p50, timing.p90, timing.max
         );
-        // A repo case that draws nothing, or an unknown one that draws
-        // something, is a fixture that stopped being the one this measures.
+        // Each token is the query itself where one is owed. A case whose answer
+        // is any other shape is a fixture that stopped being the one this
+        // measures.
+        let (unknown, left_out) = match answer {
+            UnderAnswer::Draws | UnderAnswer::WordMisses => (vec![], vec![]),
+            UnderAnswer::LeftOut => (vec![], vec![*raw]),
+            UnderAnswer::Unknown => (vec![*raw], vec![]),
+        };
         assert_eq!(
             hits > 0,
-            *draws,
+            matches!(answer, UnderAnswer::Draws),
             "{name} ({raw}) drew {hits}: the fixture moved"
         );
         assert_eq!(
-            response.interpreted.unknown_tokens.is_empty(),
-            *draws,
-            "{name} ({raw}) unknown tokens: {:?}",
-            response.interpreted.unknown_tokens
+            response.interpreted.unknown_tokens, unknown,
+            "{name} ({raw}) unknown tokens: the fixture moved"
         );
-        assert!(
-            timing.p90 < BUDGET_MS,
-            "{name} took {} ms at p90 (budget {BUDGET_MS} ms)",
-            timing.p90
+        assert_eq!(
+            response.interpreted.left_out_tokens, left_out,
+            "{name} ({raw}) left-out tokens: the fixture moved"
         );
-        worst = worst.max(timing.p90);
+        if timing.p90 > worst.1 {
+            worst = (name, timing.p90);
+        }
     }
-    println!("worst p90 under under: {worst} ms");
+    println!("worst p90 under under: {} ms ({})", worst.1, worst.0);
+    // After the loop, so one case over the budget does not hide the other
+    // cases' figures or leave their shapes unchecked.
+    assert!(
+        worst.1 < BUDGET_MS,
+        "{} took {} ms at p90 (budget {BUDGET_MS} ms)",
+        worst.0,
+        worst.1
+    );
 }
