@@ -174,6 +174,10 @@ pub struct Parsed {
     /// mirror, asked after the parse, and the answer is reported in the
     /// spelling the reader typed.
     pub under: Vec<(String, String)>,
+    /// The `kind:` and `type:` values, one per kind, each with the token it
+    /// was typed as: the same kinds [`SearchFilters`] carries, the token kept
+    /// for `crate::under::left_out_tokens` to report (#2488).
+    pub typed_kinds: Vec<(String, String)>,
     /// The `reach:` values (#817), as typed, in the order typed: each a
     /// ticket key or id whose job-reach read the row must be in. Typed only,
     /// for `under:`'s reason.
@@ -512,10 +516,12 @@ impl Parsed {
                 prefix: None,
                 filters: SearchFilters::default(),
                 unknown_tokens: Vec::new(),
+                left_out_tokens: Vec::new(),
             },
             prefix_last_term: false,
             identity: vocab.identity.clone(),
             under: Vec::new(),
+            typed_kinds: Vec::new(),
             reach: Vec::new(),
             names: Vec::new(),
             declarations: vocab.declarations.clone(),
@@ -871,6 +877,9 @@ fn apply_key_value(
                 parsed.unknown(token);
             } else if key == "kind" || vocab.kinds.is_empty() || vocab.kinds.is_known(value) {
                 push_unique(&mut parsed.query.filters.kinds, value);
+                if !parsed.typed_kinds.iter().any(|(_, seen)| seen == value) {
+                    parsed.typed_kinds.push((token.to_owned(), value.to_owned()));
+                }
             } else {
                 parsed.unknown(token);
             }

@@ -96,6 +96,12 @@ pub struct ParsedQuery {
     /// `key:value` pairs the parser did not recognise, so the UI can say so
     /// instead of silently ignoring them.
     pub unknown_tokens: Vec<String>,
+    /// Typed `under:` and `kind:` tokens that explain an empty answer: the
+    /// launcher leaves out the kind named, or everything beneath the name
+    /// (#2488, [`crate::frames`]). Not unknown, because the grammar and the
+    /// mirror both know them. Empty unless the launcher's answer is.
+    #[serde(default)]
+    pub left_out_tokens: Vec<String>,
 }
 
 /// The launcher's prefixes (§4): `>` `@` `t ` `note:` `asset:` `?`, and

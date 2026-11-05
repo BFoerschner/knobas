@@ -376,7 +376,7 @@ impl Searcher {
             hidden_kinds: frames.left_out,
             ..query::merge(&parsed, &query.filters)
         };
-        let interpreted = ParsedQuery {
+        let mut interpreted = ParsedQuery {
             filters: filters.echo(),
             ..parsed.query.clone()
         };
@@ -405,6 +405,10 @@ impl Searcher {
             query.limit,
         );
         let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        if rows.is_empty() {
+            interpreted.left_out_tokens =
+                under::left_out_tokens(&self.pool, &corpora, &parsed, &filters).await?;
+        }
         let mut groups = if filters.excerpts {
             group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
         } else {

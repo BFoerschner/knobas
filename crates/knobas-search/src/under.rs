@@ -23,8 +23,9 @@
 
 use sqlx::PgPool;
 
-use crate::SearchError;
-use crate::query::Parsed;
+use crate::corpus::Corpus;
+use crate::query::{EffectiveFilters, Parsed};
+use crate::{RawHit, SearchError};
 
 /// Every `(name, kind)` a parent answers to, as a table expression -- the one
 /// place the parent arms are put together, read by [`crate::sql::known_parent_positions`] and by
@@ -95,4 +96,65 @@ pub(crate) async fn report_unknown(pool: &PgPool, parsed: &mut Parsed) -> Result
         parsed.unknown(&token);
     }
     Ok(())
+}
+
+/// The typed tokens that explain an empty launcher answer by what it leaves
+/// out (#2488, [`crate::frames`]), in the spelling typed: each `kind:` naming
+/// a left-out kind, then each `under:` value with left-out rows beneath it and
+/// nothing else.
+///
+/// Read only after an empty answer, so an answer that holds rows pays nothing.
+/// Each value is asked of the launcher's own statement twice, with nothing
+/// beside it, so what `under:` admits and what this says cannot drift: the
+/// words and the `source:` and `kind:` scope are not asked, as
+/// [`report_unknown`] does not ask them, because a word matching nothing
+/// beneath the name is not what the launcher left out.
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if a statement fails.
+pub(crate) async fn left_out_tokens(
+    pool: &PgPool,
+    corpora: &[&Corpus],
+    parsed: &Parsed,
+    filters: &EffectiveFilters,
+) -> Result<Vec<String>, SearchError> {
+    let mut tokens: Vec<String> = parsed
+        .typed_kinds
+        .iter()
+        .filter(|(_, kind)| filters.hidden_kinds.contains(kind))
+        .map(|(token, _)| token.clone())
+        .collect();
+    for (token, value) in &parsed.under {
+        let beneath = EffectiveFilters {
+            under: vec![value.clone()],
+            declarations: filters.declarations.clone(),
+            ..EffectiveFilters::default()
+        };
+        let answered = EffectiveFilters {
+            hidden_kinds: filters.hidden_kinds.clone(),
+            ..beneath.clone()
+        };
+        let left_out = EffectiveFilters {
+            kinds: filters.hidden_kinds.clone(),
+            ..beneath
+        };
+        if !admits_a_row(pool, corpora, &answered).await?
+            && admits_a_row(pool, corpora, &left_out).await?
+        {
+            tokens.push(token.clone());
+        }
+    }
+    Ok(tokens)
+}
+
+/// Whether the launcher's statement admits any row under `filters`.
+async fn admits_a_row(
+    pool: &PgPool,
+    corpora: &[&Corpus],
+    filters: &EffectiveFilters,
+) -> Result<bool, SearchError> {
+    let built = crate::sql::search_sql(corpora, None, false, filters, 1, 1);
+    let rows: Vec<RawHit> = crate::sql::query_as_with(built).fetch_all(pool).await?;
+    Ok(!rows.is_empty())
 }
