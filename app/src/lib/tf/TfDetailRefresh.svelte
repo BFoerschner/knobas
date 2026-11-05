@@ -93,7 +93,7 @@
     class={classes}
     disabled={busy}
     title="Read this item from {detail.source.display_name} again"
-    onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}{#if noun !== undefined && !refresh.reading}<span class="tf-wide">{" "}{noun}</span>{/if}</button
+    onclick={press}>{refresh.reading ? "Refreshing…" : noun === undefined ? "Refresh" : `Refresh ${noun}`}</button
   >
 {:else if sync !== null}
   <button

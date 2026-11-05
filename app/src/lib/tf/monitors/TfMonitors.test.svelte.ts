@@ -198,6 +198,22 @@ const rows = () => [...target.querySelectorAll("tbody tr")];
 const button = (tr: Element, label: string) =>
   [...tr.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label);
 
+test("a down monitor's chip holds the word, and the time beside it is plain text", async () => {
+  const at = new Date(NOW.getTime() - 60 * 60_000).toISOString();
+  const down = monitor("kuma:9", "jira", { state: "down", samples: [{ taken_at: at, state: "down" }] });
+  await draw([], null, ports({ monitorRoster: async () => [down] }));
+  expect(text(rows()[0]!.querySelector(".tf-chip"))).toBe("Down");
+  expect(text(rows()[0]!.querySelector(".tf-mon-since"))).toMatch(/^since \d\d:\d\d$/);
+});
+
+test("Hide and Unhide tell the nav's badge, which leaves a hidden monitor out", async () => {
+  let told = 0;
+  await draw([], "PAY-231", ports({ badgesChanged: () => (told += 1) }));
+  button(rows()[0]!, "Hide")!.click();
+  await settle();
+  expect(told).toBe(1);
+});
+
 test("#/monitors draws the header, both tabs with counts, and the roster sorted down, warning, paused, up", async () => {
   await draw([]);
   expect(text(target.querySelector("h1"))).toBe("Monitors");
@@ -215,7 +231,8 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   ]);
   const [, , , up] = rows();
   const cells = [...up!.querySelectorAll("td")].map(text);
-  expect(cells.slice(1, 6)).toEqual(["up", "", "140 ms", "99.98 %", "payouts Service"]);
+  // The second is the figures under the bars, which CSS draws only where their columns have gone.
+  expect(cells.slice(1, 6)).toEqual(["Up", "140 ms, 99.98 %", "140 ms", "99.98 %", "payouts Service"]);
   expect(up!.querySelectorAll(".tf-mbar i")).toHaveLength(48);
   expect(up!.querySelector<HTMLAnchorElement>("td a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
 });
@@ -306,7 +323,7 @@ test("Hide moves a monitor into the closed fold at the roster's end; opened, it 
   expect(hides).toEqual([["kuma:2", true]]);
   expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health"]);
   expect(fold()!.open).toBe(false);
-  expect(text(fold()!.querySelector("summary"))).toBe("1 hidden monitor Their alerts don’t reach the inbox or notify you.");
+  expect(text(fold()!.querySelector("summary"))).toBe("1 hidden monitor Its alerts don’t reach the inbox or notify you.");
   expect(rows().at(-1)!.classList.contains("tf-mon-foldrow")).toBe(true);
   expect(count()).toBe("3 monitors, 1 hidden");
   expect(toasts.items.map((t) => t.text)).toContain(

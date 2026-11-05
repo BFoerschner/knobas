@@ -88,11 +88,14 @@
     follower: () => WriteFollower;
     /** A row's *Refresh* and *Sync now* (#2138); the bridge's when left out. */
     refresh?: DetailRefreshPorts;
+    /** The roster changed what the nav's badge counts: a monitor hidden or back. */
+    badgesChanged?: () => void;
   }
 </script>
 
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
+  import { badges } from "../badges.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
   import { tick, untrack } from "svelte";
   import { MONITOR_AT } from "../route";
@@ -170,6 +173,7 @@
       jobReach: (entityId) => jobReach(entityId),
       listen: (event, handler) => tauriListen(event, handler),
       follower: () => writeFollower(),
+      badgesChanged: () => void badges.refresh(),
     },
     now: fixedNow,
     sync,
@@ -544,6 +548,8 @@
     try {
       await ports.setMonitorHidden(row.entity_id, hidden);
       if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
+      // A hidden monitor is not down as far as the nav says: there is nothing left to act on.
+      ports.badgesChanged?.();
       push({
         text: hidden
           ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.`
@@ -667,7 +673,7 @@
     {#if unwatched !== null && unwatched.length > 0 && shownUnwatched.length === 0}
       <TfNoMatch noun="assets" filter={unwatchedFilter} />
     {:else if unwatched !== null && unwatched.length > 0}
-      <table class="tf-tbl">
+      <table class="tf-tbl tf-mon-gaps">
         <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each shownUnwatched as asset (asset.id)}
@@ -679,7 +685,7 @@
               <td>{asset.owner ?? ""}</td>
               <td class="tf-mon-acts">
                 {#if word !== null}
-                  <span class="tf-chip tf-info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)}>Monitor {word}</span>
+                  <TfStateChip text="Monitor {word}" tone="info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)} />
                 {:else}
                   <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" disabled={opening === asset.id} onclick={() => void openCreate(asset)}
                     >Create monitor…</button
@@ -712,7 +718,7 @@
                   <details class="tf-mon-fold" open={foldOpen} ontoggle={toggleFold}>
                     <summary
                       ><span>{counted(kept.hidden.length, "hidden monitor", "hidden monitors")}</span>
-                      <span class="tf-dim">Their alerts don’t reach the inbox or notify you.</span></summary
+                      <span class="tf-dim">{kept.hidden.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span></summary
                     >
                   </details>
                 </td>
@@ -730,11 +736,13 @@
               {@const refresher = refreshers.get(row.entity_id)}
               <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><span class="tf-chip" title={chip.label} class:tf-ok={tone === "ok"} class:tf-warn={tone === "warn"} class:tf-err={tone === "err"} class:tf-info={tone === "info"}>{chip.label}</span></td>
+                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
                 <td>
                   <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
                     {#each barsOf(segments(row, now.getTime()), hourlyBars.current) as bar (bar.at)}<i class="tf-seg-{bar.state}" title={bar.title}></i>{/each}
                   </span>
+                  <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
+                  <span class="tf-mon-figs" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
                 </td>
                 <td class="tf-num">{responseText(row.response_time_ms)}</td>
                 <td class="tf-num">{uptimeText(row)}</td>
@@ -781,7 +789,7 @@
       <div class="tf-empty">No monitors yet. Add an Uptime Kuma source under Settings › Sources and its checks show here.</div>
     {:else}
       <TfNoMatch noun="monitors" {filter}>
-        {#if scope === "job"}
+        {#if scope !== "all"}
           <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Search all monitors</button>
         {/if}
       </TfNoMatch>

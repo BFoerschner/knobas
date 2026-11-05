@@ -76,28 +76,26 @@ describe("the state chip", () => {
     });
     const chip = stateChip(down, new Date(NOW));
     expect(chip.tone).toBe("err");
-    expect(chip.label).toMatch(/^down since \d\d:\d\d$/);
+    expect(chip.label).toBe("down");
+    expect(chip.since).toMatch(/^since \d\d:\d\d$/);
     const at = new Date(NOW - 60 * 60_000);
     const pad = (n: number) => String(n).padStart(2, "0");
-    expect(chip.label).toBe(`down since ${pad(at.getHours())}:${pad(at.getMinutes())}`);
+    expect(chip.since).toBe(`since ${pad(at.getHours())}:${pad(at.getMinutes())}`);
   });
 
   test("keeps the day on a monitor down since before today (#1986)", () => {
     const at = (day: number) => ({ taken_at: new Date(2026, 9, day, 12, 40).toISOString(), state: "down" });
     const now = new Date(2026, 9, 16, 9, 0);
-    expect(stateChip(row({ state: "down", samples: [at(15)] }), now).label).toBe("down since yesterday 12:40");
-    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).label).toBe("down since 2026-10-12 12:40");
+    expect(stateChip(row({ state: "down", samples: [at(15)] }), now).since).toBe("since yesterday 12:40");
+    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).since).toBe("since 2026-10-12 12:40");
   });
 
   test("says down alone when no sample says since when", () => {
     expect(stateChip(row({ state: "down" }))).toEqual({ label: "down", tone: "err" });
   });
 
-  test("says slow with the response on a warning", () => {
-    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({
-      label: "slow, 8\u00a0400 ms",
-      tone: "warn",
-    });
+  test("says slow on a warning with a response, whose time is the row's Response", () => {
+    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({ label: "slow", tone: "warn" });
   });
 
   test("says paused for a tombstone whatever its last reading", () => {

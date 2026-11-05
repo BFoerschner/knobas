@@ -290,10 +290,10 @@ test("Add to <ticket> gives an offered block to the ticket it is linked to", asy
   expect(sent.updates).toEqual([[2, at(9, 25), at(9, 40), { kind: "entity", entity_id: "jira:PAY-228" }]]);
 });
 
-test("Log to <ticket> gives a label block the ticket ad_hoc_block suggests", async () => {
+test("Assign to <ticket> gives a label block the ticket ad_hoc_block suggests", async () => {
   const sent = render();
   await settle();
-  button(row("label"), "Log to PAY-200").click();
+  button(row("label"), "Assign to PAY-200").click();
   await settle();
   expect(sent.updates).toEqual([[5, at(13, 10), at(13, 58), { kind: "entity", entity_id: "jira:PAY-200" }]]);
 });
@@ -328,7 +328,7 @@ test("Log… on a ticket whose source's credential cannot log work is drawn disa
 test("Edit moves a block and keeps its target, and the dialog sits on the shell's layers", async () => {
   const sent = render();
   await settle();
-  button(row("unlogged"), "Edit").click();
+  button(row("unlogged"), "Edit…").click();
   flushSync();
   expect(sent.layers.open).toHaveLength(1);
   const from = target.querySelector<HTMLInputElement>("#tf-tm-from")!;
@@ -350,7 +350,7 @@ test("Delete block hides the block at once and sends the delete when the toast's
   try {
     const sent = render();
     await settle();
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     flushSync();
     button(target, "Delete block").click();
     await settle();
@@ -376,7 +376,7 @@ test("Undo on the delete toast puts the block back and no delete is ever sent", 
   try {
     const sent = render();
     await settle();
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     flushSync();
     button(target, "Delete block").click();
     await settle();
@@ -398,7 +398,7 @@ test("a held delete the backend refuses brings the block back and says why", asy
   try {
     render({ refuseDelete: true });
     await settle();
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     flushSync();
     button(target, "Delete block").click();
     await settle();
@@ -491,6 +491,24 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
 });
 
+test("the picker marks no row until the arrow keys move, the footer says what Assign waits for, and a pick clears it (design system, Forms)", async () => {
+  render();
+  await settle();
+  button(row("offered"), "Assign…").click();
+  await settle();
+  const marked = () => target.querySelectorAll('[role="dialog"] [role="option"][aria-selected="true"]').length;
+  expect(marked()).toBe(0);
+  expect(squash(target.querySelector(".tf-tm-need")?.textContent)).toBe("Pick a ticket first.");
+  const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  flushSync();
+  expect(marked()).toBe(1);
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  flushSync();
+  expect(target.querySelector(".tf-tm-need")).toBeNull();
+  expect(target.querySelector(".tf-tm-picked svg")).not.toBeNull();
+});
+
 test("Assign… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
   const sent = render();
   await settle();
@@ -559,7 +577,7 @@ test("the On row's field takes the row and shows what the block is on; the kind 
   try {
     render();
     await settle();
-    button(row("label"), "Edit").click();
+    button(row("label"), "Edit…").click();
     await settle();
     const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
     expect(on.value).toBe("Standup and planning");
@@ -570,7 +588,7 @@ test("the On row's field takes the row and shows what the block is on; the kind 
     flushSync();
 
     // A ticket reads by its key and title, in a field that grows the same way.
-    button(row("unlogged"), "Edit").click();
+    button(row("unlogged"), "Edit…").click();
     await settle();
     const picked = target.querySelector<HTMLElement>(".tf-tm-on > .tf-tm-picked")!;
     expect(squash(picked.textContent)).toBe("PAY-231 Retry failed SEPA payouts");

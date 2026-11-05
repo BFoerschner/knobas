@@ -17,7 +17,12 @@
 
 /* The run page's Log, Tests and Artifacts tabs (#854, #855, #856): prototype-6's
    .logbar, .logv, .ll, .trow, .tdetail, .atree, .arow, .apreview. */
-.tf-logbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 0; position: sticky; top: 0; background: var(--paper); z-index: 4; }
+/* The same band the Tests tab's filter bar is (`.tf-runbody > .tf-fbar`), and it stays while the log scrolls. */
+.tf-logbar {
+  display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; margin: -16px -22px 14px; padding: 10px 22px;
+  position: sticky; top: 0; background: var(--sheet); border-bottom: 1px solid var(--rule); z-index: 4;
+}
+@media (max-width: 900px) { .tf-logbar { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; } }
 .tf-logbar .tf-fsearch { max-width: 320px; }
 .tf-logbar .tf-lqn { font-size: var(--t-xs); white-space: nowrap; }
 .tf-nav2 { display: flex; gap: 2px; }
@@ -30,8 +35,6 @@
 .tf-logloose-end { padding-bottom: 4px; }
 .tf-logv summary { list-style: none; cursor: pointer; padding: 6px 12px; display: flex; gap: 10px; align-items: center; font-family: var(--sans); font-size: var(--t-sm); background: var(--sheet-2); }
 .tf-logv summary::-webkit-details-marker { display: none; }
-.tf-logv summary::before { content: "▸"; font-size: var(--t-2xs); color: var(--ink-2); }
-.tf-logv details[open] > summary::before { content: "▾"; }
 .tf-logv summary .tf-d { margin-left: auto; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-ll { display: grid; grid-template-columns: 52px 70px 1fr; white-space: pre; padding: 0 12px 0 0; }
 .tf-logv.tf-wrap .tf-ll { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -44,11 +47,12 @@
 .tf-ll mark.tf-curm { outline: 2px solid var(--ink); }
 .tf-logfoot { font-size: var(--t-sm); margin: 8px 0 0; }
 .tf-atree { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+/* A row's *Download* hangs over its end on hover (Motion), so the size ends the row at rest. */
+.tf-arow:hover { background: var(--sheet-2); }
 .tf-arow { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-arow:first-child { border-top: 0; }
 .tf-arow .tf-nm { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-arow .tf-sz { text-align: right; color: var(--ink-2); font-size: var(--t-xs); }
-.tf-arow .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; }
 .tf-arow.tf-dir { font-weight: 600; background: var(--sheet-2); }
 .tf-arow.tf-dir > button.tf-fold { all: unset; cursor: pointer; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-arow.tf-dir > button.tf-fold:focus-visible { outline: 2px solid var(--focus); }
@@ -68,7 +72,9 @@
 .tf-arow > button.tf-aopen:hover { text-decoration: underline; text-underline-offset: 3px; }
 .tf-arow > button.tf-aopen:focus-visible { outline: 2px solid var(--focus); }
 .tf-tres { margin-top: 10px; }
-.tf-trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+/* Fixed end columns: each row is its own grid, so `auto` put a failed row's time somewhere else. */
+.tf-trow > :nth-child(n + 3) { text-align: right; font-variant-numeric: tabular-nums; }
+.tf-trow { display: grid; grid-template-columns: 12px minmax(0, 1fr) 76px 104px; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-trow:first-child { border-top: 0; }
 .tf-trow .tf-nm { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); overflow-wrap: anywhere; }
 .tf-trow .tf-nm button { all: unset; cursor: pointer; }

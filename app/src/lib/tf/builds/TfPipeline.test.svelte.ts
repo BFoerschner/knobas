@@ -1312,3 +1312,16 @@ test("⌘R on a pipeline runs its Refresh, as a click does (#2156)", async () =>
   await settle();
   expect(probe.refreshed).toEqual([PIPELINE.entity_id]);
 });
+
+test("This job with no run on its branches says so, and offers the way back to all runs", async () => {
+  draw([PIPELINE.entity_id], "PAY-231", { jobBranches: () => Promise.resolve([]) });
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-runbar button")].find((b) => b.textContent?.trim().startsWith("This job"))!.click();
+  await settle();
+  expect(target.querySelector(".tf-runs .tf-empty")?.textContent).toContain("No runs match.");
+  expect(button("Clear the filter")).toBeUndefined();
+  button("Show all runs")!.click();
+  await settle();
+  expect(target.querySelector(".tf-runs .tf-empty")).toBeNull();
+  expect(button("Show all runs")).toBeUndefined();
+});

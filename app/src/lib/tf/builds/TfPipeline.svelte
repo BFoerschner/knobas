@@ -648,7 +648,11 @@
     {:else if all !== null && all.length === 0}
       <div class="tf-empty"><p>No runs yet.</p></div>
     {:else if all !== null && kept.length === 0}
-      <TfNoMatch noun="runs" {filter} />
+      <TfNoMatch noun="runs" {filter}>
+        {#if filter.scope !== "all"}
+          <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Show all runs</button>
+        {/if}
+      </TfNoMatch>
     {/if}
     {#each days as day (day.label)}
       <h3 class="tf-dayh">{day.label}</h3>

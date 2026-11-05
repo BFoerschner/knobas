@@ -76,8 +76,7 @@
   background: none; padding: 6px 10px; text-align: left; cursor: pointer; color: var(--ink);
 }
 .tf-picklist button:first-child { border-top: 0; }
-.tf-picklist button:hover { background: var(--sheet-2); }
-/* The row `Enter` takes: an edge, not a fill, so a list of one does not read as a field already filled in. */
+.tf-picklist button:is(:hover, :focus-visible) { background: var(--sheet-2); }
 /* A list's option, not a field and not yet a choice: the fill alone says which the keys are on. */
 .tf-picklist button[aria-selected="true"] { background: var(--sheet-2); }
 .tf-pane-h:has(+ .tf-picklist) { margin-bottom: -6px; }

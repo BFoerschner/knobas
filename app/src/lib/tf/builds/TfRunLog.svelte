@@ -27,6 +27,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { marks } from "../filter/filter";
   import type { RunPorts } from "./pipeline-ports";
+  import { isCommand } from "./run-reads";
   import {
     findCount,
     hitsIn,
@@ -261,7 +262,7 @@
           {@attach win.row(row.key)}
         >
           <summary
-            ><span class={`tf-dot tf-${st}`}></span>{block.step.name}<span class="tf-d">{stepSummary(block.step, st)}</span></summary
+            ><span class={`tf-dot tf-${st}`}></span><span class:tf-mono={isCommand(block.step.name)}>{block.step.name}</span><span class="tf-d">{stepSummary(block.step, st)}</span></summary
           >
         </details>
       {:else}

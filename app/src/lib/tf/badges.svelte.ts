@@ -8,7 +8,9 @@
  *   the failing configurations are the `err` lines of that tally. No new
  *   command, and no second definition of *failing*.
  * - **Monitors**: monitors down, off `monitor_roster`, the Monitors tab's own
- *   read. A paused (tombstoned) monitor is not down; it is not watching.
+ *   read. A paused (tombstoned) monitor is not down; it is not watching. A
+ *   hidden one is left out too: its alerts reach nobody, so the count would be
+ *   a state the reader cannot act on.
  *
  * Each is `null` until its read answers and stays at its last answer when a
  * later read fails: a badge that dropped to nothing on a failed read would
@@ -48,9 +50,9 @@ export function failingIn(page: Pick<EntityPage, "tally">): number {
     .reduce((all, line) => all + line.count, 0);
 }
 
-/** Monitors whose last reading is down, paused ones left out. */
-export function downIn(rows: Pick<MonitorRow, "state" | "tombstoned">[]): number {
-  return rows.filter((row) => row.state === "down" && !row.tombstoned).length;
+/** Monitors whose last reading is down, paused and hidden ones left out. */
+export function downIn(rows: Pick<MonitorRow, "state" | "tombstoned" | "hidden">[]): number {
+  return rows.filter((row) => row.state === "down" && !row.tombstoned && !row.hidden).length;
 }
 
 const REAL_PORTS: BadgePorts = {

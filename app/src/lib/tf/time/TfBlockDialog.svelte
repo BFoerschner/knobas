@@ -17,7 +17,10 @@
   on no ticket.
 
   **The On row** (#1428): the kind switch is as wide as its words, and the
-  field beside it takes the rest of the row (`time.css`).
+  field beside it takes the rest of the row (`time.css`). The list of tickets
+  is a wide field under it. Nothing in the list looks chosen until the arrow
+  keys reach it, and a picked ticket is ringed and ticked (design system,
+  Forms). What the primary waits for is said beside it, in the footer.
 
   A refusal stays in the dialog beside the fields it is about, and the dialog
   stays open. It is a `TfDialog` (#2346), so `Esc` closes it first.
@@ -97,6 +100,8 @@
    * not `session.selected`, which counts the rows the ticket filter drops.
    */
   let cursor = $state(0);
+  /** Whether the arrow keys have moved: until then no row is marked, though `Enter` takes the first. */
+  let keyed = $state(false);
 
   /**
    * What the picker offers: the recent tickets on an empty box, the hits on a
@@ -116,6 +121,8 @@
 
   const keyOf = (entityId: string) => targetReading({ kind: "entity", entity_id: entityId });
   const ready = $derived(form.kind === "entity" ? form.picked !== null : form.label.trim() !== "");
+  /** What the primary waits for, said beside it. */
+  const missing = $derived(ready ? null : form.kind === "entity" ? "Pick a ticket first." : "Say what it was first.");
 
   const uid = $props.id();
   let field = $state<HTMLInputElement | null>(null);
@@ -132,18 +139,21 @@
   function change() {
     form.picked = null;
     cursor = 0;
+    keyed = false;
     // The box is drawn again on the next tick; focus it there.
     void tick().then(() => field?.focus());
   }
 
   function onsearch(event: Event & { currentTarget: HTMLInputElement }) {
     cursor = 0;
+    keyed = false;
     session.type(event.currentTarget.value);
   }
 
   function onsearchkey(event: KeyboardEvent) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
+      keyed = true;
       const last = choices.length - 1;
       cursor = Math.min(Math.max(0, last), Math.max(0, cursor + (event.key === "ArrowDown" ? 1 : -1)));
     } else if (event.key === "Enter") {
@@ -179,9 +189,8 @@
           <label for="tf-tm-to">To</label>
           <input id="tf-tm-to" type="time" bind:value={form.to} />
         {/if}
-        <span id="tf-tm-on-l" class="tf-tm-on-l">On</span>
-        <div class="tf-tm-target" role="group" aria-labelledby="tf-tm-on-l">
-          <div class="tf-tm-on">
+        <span id="tf-tm-on-l">On</span>
+        <div class="tf-tm-on" role="group" aria-labelledby="tf-tm-on-l">
             <div class="tf-seg" role="group" aria-label="What the time was on">
               <button type="button" aria-pressed={form.kind === "entity"} onclick={() => (form.kind = "entity")}
                 >A ticket</button
@@ -201,8 +210,9 @@
               />
             {:else if form.picked !== null}
               <span class="tf-tm-picked"
-                ><span class="tf-mono">{keyOf(form.picked.entityId)}</span>
-                {form.picked.title}</span
+                ><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" /></svg
+                ><span class="tf-tm-pickedt" title="{keyOf(form.picked.entityId)} {form.picked.title}"><span class="tf-mono">{keyOf(form.picked.entityId)}</span>
+                {form.picked.title}</span></span
               >
               <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
             {:else}
@@ -217,21 +227,22 @@
                 onkeydown={onsearchkey}
               />
             {/if}
-          </div>
-          {#if form.kind === "entity" && form.picked === null}
-            {#if session.error}<p class="tf-dim">{session.error}</p>{/if}
-            {#if choices.length > 0}
+        </div>
+        {#if form.kind === "entity" && form.picked === null}
+          {#if session.error}<p class="tf-dim">{session.error}</p>{/if}
+          {#if choices.length > 0}
+            <div class="tf-fwide tf-tm-choices">
               <div class="tf-pane-h" id="tf-tm-pick-{uid}">{session.raw.trim() === "" ? "Recent tickets, pick one" : "Pick a ticket"}</div>
               <div class="tf-picklist" role="listbox" aria-labelledby="tf-tm-pick-{uid}">
                 {#each choices as choice, index (choice.entityId)}
-                  <button type="button" role="option" aria-selected={index === cursor} onclick={() => pick(choice)}>
+                  <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(choice)}>
                     <span><span class="tf-mono">{keyOf(choice.entityId)}</span> {choice.title}</span>
                   </button>
                 {/each}
               </div>
-            {/if}
+            </div>
           {/if}
-        </div>
+        {/if}
       </div>
       {#if refusal !== null}
         <p class="tf-tm-refusal" role="alert">{refusal}</p>
@@ -242,6 +253,7 @@
       {#if mode === "edit"}
         <button type="button" class="tf-btn tf-ghost tf-danger tf-first" onclick={ondelete}>Delete block</button>
       {/if}
+      {#if missing !== null}<span class="tf-tm-need">{missing}</span>{/if}
       <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
       <button type="submit" class="tf-btn tf-primary" form="tf-tm-form-{uid}" disabled={!ready}>{SAVE[mode]}</button>
   {/snippet}

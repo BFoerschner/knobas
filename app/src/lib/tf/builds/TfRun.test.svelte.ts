@@ -864,25 +864,25 @@ test("a failed run with a failing test offers Create ticket after Open the test 
   draw();
   await settle();
   const acts = [...target.querySelectorAll(".tf-problem .tf-acts > *")].map((el) => el.textContent?.trim());
-  expect(acts).toEqual(["Show in log", "Open the test file", "Create ticket"]);
+  expect(acts).toEqual(["Show in log", "Open the test file", "Create ticket…"]);
 });
 
 test("a green run and a failed run without a failing test draw no Create ticket", async () => {
   draw("teamcity:build:1186");
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   if (page) unmount(page);
   page = null;
   draw("teamcity:build:1185", undefined, { view: noFailedTests });
   await settle();
   expect(target.querySelector("h1 .tf-chip.tf-err")).not.toBeNull();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 test("Create ticket opens the dialog prefilled from the failing test, its assertion and the run's address", async () => {
   draw();
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const title = document.querySelector<HTMLInputElement>(".tf-dialog input[aria-label='Ticket title']")!;
   expect(title.value).toBe(FILED_TITLE);
@@ -906,7 +906,7 @@ test("filing queues a CreateTicket in the picked project, linked to the run, and
     },
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:WEB";
@@ -923,7 +923,7 @@ test("filing queues a CreateTicket in the picked project, linked to the run, and
   expect(linked).toEqual(["teamcity:build:1187"]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
   expect(toasts.items.at(-1)!.text).toBe(`Queued: ticket ${FILED_TITLE}.`);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket queued");
   expect(echoesOn("teamcity:build:1187", "ticket").map((m) => m.text)).toEqual([FILED_TITLE]);
 });
@@ -938,7 +938,7 @@ test("a project the source's credential cannot file in draws Create ticket disab
     },
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   expect(asked).toContainEqual([
     { entity: "jira:PAY", op: "create_ticket" },
@@ -966,7 +966,7 @@ test("once a sync brings the ticket in, the run page draws the linked ticket in 
   let links: LinkEntry[] = [];
   const drawn = draw("teamcity:build:1187", undefined, { links: () => Promise.resolve(links) });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:PAY";
@@ -982,7 +982,7 @@ test("once a sync brings the ticket in, the run page draws the linked ticket in 
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-342");
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
   expect(echoesOn("teamcity:build:1187", "ticket")).toEqual([]);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 test("a run a ticket is already linked to draws the ticket and no Create ticket", async () => {
@@ -991,7 +991,7 @@ test("a run a ticket is already linked to draws the ticket and no Create ticket"
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-300"));
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-300");
   expect(ticket?.title).toBe("Flaky SEPA retry");
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 // -- A reload before the ticket's sync (#1953) ---------------------------------
@@ -1015,7 +1015,7 @@ test("after a reload, a ticket filed from the run and still queued draws Ticket 
   });
   await settle();
   expect(asked).toEqual(["teamcity:build:1187"]);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   const chip = target.querySelector<HTMLElement>(".tf-problem .tf-acts .tf-chip");
   expect(chip?.textContent).toBe("Ticket queued");
   expect(chip?.title).toBe(FILED_TITLE);
@@ -1030,7 +1030,7 @@ test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until
     links: () => Promise.resolve(links),
   });
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket sent");
   // The ticket's listen for the sync that brings it in, beside the page's own.
   const listening = drawn.listening();
@@ -1038,7 +1038,7 @@ test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until
   // A sync that does not bring it in: still on its way.
   drawn.sync({ source_id: "teamcity", running: false });
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).toContain("Ticket sent");
 
   // Jira's sync brings it in: the read links it and names it no more.
@@ -1049,14 +1049,14 @@ test("after a reload, a ticket sent and not mirrored yet reads Ticket sent until
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-342");
   expect(echoesOn("teamcity:build:1187", "ticket")).toEqual([]);
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(drawn.listening()).toBe(listening - 1);
 });
 
 test("after a reload, a ticket held on drift or refused offers Create ticket: it waits on the reader in the queue", async () => {
   draw("teamcity:build:1187", undefined, { owedTickets: () => Promise.resolve([owedWrite(41, "refused"), owedWrite(42, "held")]) });
   await settle();
-  expect(button("Create ticket")).toBeDefined();
+  expect(button("Create ticket…")).toBeDefined();
   expect(target.querySelector(".tf-problem .tf-acts")?.textContent).not.toContain("Ticket queued");
 });
 
@@ -1076,17 +1076,17 @@ test("after a reload, a ticket held as unconfirmed draws Ticket queued and is fo
     }),
   });
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   expect(target.querySelector(".tf-problem .tf-acts .tf-chip")?.textContent).toBe("Ticket queued");
   expect(hearing).toHaveLength(1);
   // Still held as unconfirmed on the next read: still on its way.
   hearing[0]!(unconfirmed);
   await settle();
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
   // The reader discards it in the queue: the create is offered again.
   noteWithdrawn(41);
   await settle();
-  expect(button("Create ticket")).toBeDefined();
+  expect(button("Create ticket…")).toBeDefined();
 });
 
 test("after a reload, a queued ticket is followed: refused, it gives Create ticket back and Edit and resend reopens what was filed", async () => {
@@ -1104,7 +1104,7 @@ test("after a reload, a queued ticket is followed: refused, it gives Create tick
   expect(hearing).toHaveLength(1);
   hearing[0]!({ ...owedWrite(41, "refused"), detail: "Summary is required" });
   await settle();
-  expect(button("Create ticket")).toBeDefined();
+  expect(button("Create ticket…")).toBeDefined();
   const toast = toasts.items.at(-1)!;
   expect(toast.text).toBe("Ticket was refused: Summary is required");
   toast.more!.find((a) => a.label === "Edit and resend")!.run();
@@ -1128,7 +1128,7 @@ test("after a reload, a ticket the owed read links as it answers is drawn, and C
   await settle();
   const ticket = [...target.querySelectorAll<HTMLAnchorElement>(".tf-problem a")].find((a) => a.textContent?.includes("PAY-342"));
   expect(ticket?.getAttribute("href")).toBe("#/ticket/jira%3APAY-342");
-  expect(button("Create ticket")).toBeUndefined();
+  expect(button("Create ticket…")).toBeUndefined();
 });
 
 test("an owed read that answers before the create's own answer marks it once, and a refusal toasts once", async () => {
@@ -1146,7 +1146,7 @@ test("an owed read that answers before the create's own answer marks it once, an
     }),
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:PAY";
@@ -1181,7 +1181,7 @@ test("Ticket queued goes Ticket sent on landing, and goes once the refresh's rea
     follower: () => follower,
   });
   await settle();
-  button("Create ticket")!.click();
+  button("Create ticket…")!.click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:PAY";

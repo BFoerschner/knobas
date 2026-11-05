@@ -58,23 +58,22 @@ function downSince(row: MonitorRow): Date | null {
 }
 
 /**
- * The state chip: its words, as prototype-6 words them, and its tone. *down
- * since 12:40* today, else *yesterday 12:40* or *2026-10-12 12:40*
- * (`stampLabel`, #1986).
+ * The state chip: the word and its tone. A chip holds the state alone, so it
+ * never gives up its end: how long a monitor has been down is `since`, plain
+ * text beside it (*since 12:40* today, else *since yesterday 12:40* or *since
+ * 2026-10-12 12:40*, `stampLabel`, #1986), and a slow monitor's time is the
+ * row's Response.
  */
-export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone } {
+export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone; since?: string } {
   switch (chipStateOf(row)) {
     case "paused":
       return { label: "paused", tone: null };
     case "down": {
       const since = downSince(row);
-      return { label: since ? `down since ${stampLabel(since.toISOString(), now, true)}` : "down", tone: "err" };
+      return since ? { label: "down", tone: "err", since: `since ${stampLabel(since.toISOString(), now, true)}` } : { label: "down", tone: "err" };
     }
     case "warn":
-      return {
-        label: row.response_time_ms !== null ? `slow, ${responseText(row.response_time_ms)}` : "warning",
-        tone: "warn",
-      };
+      return { label: row.response_time_ms !== null ? "slow" : "warning", tone: "warn" };
     case "up":
       return { label: "up", tone: "ok" };
     case "pending":

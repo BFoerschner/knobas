@@ -192,9 +192,14 @@ function fakeTime(params: URLSearchParams): Handlers {
   };
   const titleOf = (target: FakeTarget) =>
     target.kind === "entity" ? (CORPUS.find((row) => row.entity_id === target.entity_id)?.title ?? null) : null;
+  // Manual only, as the crate's `unlogged`: an offered block is logged by no one until it is added to the ticket.
   const unlogged = (entityId: string) =>
     blocks.filter(
-      (block) => block.worklog_id === null && block.target.kind === "entity" && block.target.entity_id === entityId,
+      (block) =>
+        block.worklog_id === null &&
+        block.kind === "manual" &&
+        block.target.kind === "entity" &&
+        block.target.entity_id === entityId,
     );
   const candidates = (from: string): Candidate[] => {
     const at = (minutes: number) => new Date(new Date(from).getTime() + minutes * 60_000).toISOString();

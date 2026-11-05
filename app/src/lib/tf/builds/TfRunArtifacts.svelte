@@ -171,25 +171,25 @@
       {@const indent = `tf-ad${Math.min(depth, DEPTH_MAX)}`}
       {#if entry.folder}
         {@const isOpen = open[entry.path] ?? false}
-        <div class={`tf-arow tf-dir ${indent}`}>
+        <div class={`tf-arow tf-rowhost tf-dir ${indent}`}>
           <button type="button" class="tf-fold" aria-expanded={isOpen} onclick={() => toggle(entry.path)}
-            >{isOpen ? "▾" : "▸"} {entry.name}/</button
+            >{entry.name}/</button
           >
           <span class="tf-sz">{filesText(entry) ?? ""}</span>
-          <span class="tf-acts"
+          <span class="tf-rowend"><span class="tf-rowacts"
             ><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => download({ kind: "folder", path: entry.path }, `${entry.name}/`)}
               >Download folder</button
-            ></span
+            ></span></span
           >
         </div>
         {#if isOpen}{@render tree(entry.path, depth + 1)}{/if}
       {:else}
-        <div class={`tf-arow ${indent}`}>
+        <div class={`tf-arow tf-rowhost ${indent}`}>
           <button type="button" class="tf-nm tf-aopen" title="Open {entry.name}" onclick={() => showPreview(entry)}>{entry.name}</button>
           <span class="tf-sz">{entry.size === null ? "" : sizeText(entry.size)}</span>
-          <span class="tf-acts">
+          <span class="tf-rowend"><span class="tf-rowacts">
             <button type="button" class="tf-btn tf-sm" onclick={() => download({ kind: "file", path: entry.path }, entry.name)}>Download</button>
-          </span>
+          </span></span>
         </div>
       {/if}
     {/each}

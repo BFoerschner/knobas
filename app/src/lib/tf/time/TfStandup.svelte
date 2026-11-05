@@ -644,7 +644,8 @@
           {...refusedAttrs(publishRefusal)}
           onclick={() => void publish()}
         >
-          Publish to Confluence
+          <!-- The first publish asks where, so it has the ellipsis; with a target stored it acts at once. -->
+          Publish to Confluence{target === null ? "…" : ""}
         </button>
       {:else if publication.page_entity_id !== null && publication.linked}
         <a class="tf-btn tf-sm tf-ghost" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Open the published page</a>
@@ -700,7 +701,7 @@
         <div class="tf-su-ai">
           <span class:tf-su-done={item.done}>{owner.what}{#if owner.who}{" "}<span class="tf-dim">{owner.who}</span>{/if}</span>
           {#if made === null}
-            <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket</button>
+            <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket…</button>
           {:else if made.ticket === null}
             <TfStateChip text={made.state} tone="info" />
           {:else}

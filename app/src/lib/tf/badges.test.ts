@@ -18,12 +18,16 @@ test("failing configurations are the err lines of the Builds tile's tally", () =
 test("a paused monitor is not down", () => {
   expect(
     downIn([
-      { state: "down", tombstoned: false },
-      { state: "down", tombstoned: true },
-      { state: "up", tombstoned: false },
-      { state: "warn", tombstoned: false },
+      { state: "down", tombstoned: false, hidden: false },
+      { state: "down", tombstoned: true, hidden: false },
+      { state: "up", tombstoned: false, hidden: false },
+      { state: "warn", tombstoned: false, hidden: false },
     ]),
   ).toBe(1);
+});
+
+test("a hidden monitor is not down either: its alerts reach nobody", () => {
+  expect(downIn([{ state: "down", tombstoned: false, hidden: true }])).toBe(0);
 });
 
 function ports(over: Partial<BadgePorts> = {}): BadgePorts & { fire: (event: string, payload: unknown) => void } {

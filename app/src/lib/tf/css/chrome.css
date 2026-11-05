@@ -165,11 +165,11 @@
 .tf-syncnow { align-self: flex-start; }
 
 /* A fold's mark: one drawn chevron, so it is the same size and weight in every list. */
-:is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts) > summary::before, .tf-rd-linked summary::before, .tf-rd-tree details > summary::before {
+:is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts) > summary::before, .tf-rd-linked summary::before, .tf-rd-tree details > summary::before, .tf-logv details > summary::before, .tf-arow > .tf-fold::before {
   content: ""; display: inline-block; flex: none; width: 6px; height: 6px; margin: 0 6px 1px 2px; color: var(--ink-2);
   border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg);
 }
-:is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts)[open] > summary::before, .tf-rd-linked details[open] > summary::before, .tf-rd-tree details[open] > summary::before { transform: rotate(45deg); }
+:is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts)[open] > summary::before, .tf-rd-linked details[open] > summary::before, .tf-rd-tree details[open] > summary::before, .tf-logv details[open] > summary::before, .tf-arow > .tf-fold[aria-expanded="true"]::before { transform: rotate(45deg); }
 
 /* An empty state: centred, says what would fill it, offers the action. */
 .tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }

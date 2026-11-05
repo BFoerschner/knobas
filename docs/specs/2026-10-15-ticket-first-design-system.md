@@ -170,6 +170,8 @@ One pattern, `TfDialog`: the title line with its × on the right (every dialog b
 
 One grid, `.tf-formgrid`, in a dialog or on a page. A short control has its label beside it, `--t-sm` and `--ink-2`, on the one label column (`--tf-label`, 132 px; a dialog of long names widens the token). A wide field (a textarea, a list, a radio group, or anything marked `.tf-fwide`) takes the whole row, its label above it and 4 px away. A sentence, a tick and a banner take the whole row too. This trades height for room: a dialog with a wide field is taller.
 
+A list of options (`.tf-picklist`) rests unfilled, and fills on hover, on focus and under the arrow keys. Nothing looks chosen until it is: the picked one shows a tick and an `--ink` ring. A lone recent ticket therefore takes one more click, and `Enter` still takes the first.
+
 ### Job scope
 
 One control, `TfScope`, as wide as its words on every page: *This job* with its count as a badge, *Mine* where the page has one, then *All*. The badge is a dash until the read answers, so the control keeps its width. Its default is *All* on every page, and a ticket card's row turns *This job* on, on each list the section holds, Builds' rail and runs alike. It does not repeat the key: the top bar names the job (*Start PAY-231*), and a page a row narrowed to another ticket says so in its bar. The button's title names the ticket. Amended 2026-11-05: Builds' rail used to default to *This job* (#850); one default means one answer to "why is this page showing fewer".
@@ -300,6 +302,10 @@ A key in mono carries no underline until pointed at. A link made of words has an
 A diff shows split only while its own column has 900 px, and says so where it shows unified instead, because the choice is one for the whole app. Half a row has no room to scroll in, so a split line wraps. A unified line scrolls sideways inside its file.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
+
+Monitors' columns stay fixed. The state chip holds the word (*Down*), and how long is plain `--t-xs` text: beside the chip from 1241 px up, under it below that, so a down row is two lines there. State takes its room from Monitor. A slow monitor's time is its Response. Below 1041 px Response and 30 days leave their columns and stay in the row, under the bars.
+
+A run's steps bar draws each step as wide as its time and, where the bar has room for every name, at least as wide as its name; with no room the short names stay whole and the longest give up their ends. A step's name that is a command line is code, there and in the Log tab's step heads.
 
 The Docs home is `#/docs` (Björn, 2026-11-05): the tree on the left and, beside it, a centred column at most 980 px wide with the canonical header (*Docs*, how many spaces and pages, *Sync now*). It lists what the tree read holds, on panels in this order: *Continue reading* (the page read last) beside *For you*, the pages the chosen job reaches, then *Spaces*, a tile per space with its count and top four pages. With *This job* on, the job's pages come first. A page is listed once, in the first panel that holds it, and its line says what else it is. A tile has one link, its title, which opens the space's own page, `#/docs/space/<key>`: every page it holds, indented. The Space picker goes there too. It opens no page, so it records no visit, and the rail's own *For you* steps aside while it is showing. Page titles on it keep the reading face. Docs' crumb and *Back to Docs* lead here from any page. Empty, it says whether a source is missing or has not synced.
 

@@ -229,7 +229,7 @@
         <tr class="tf-tm-total">
           <td>Every day</td>
           {#each shown.dayTotals as total, index (index)}
-            <td class="tf-tm-c {index > 4 ? 'tf-tm-we' : ''}"><b>{total > 0 ? minutesLabel(total) : "–"}</b></td>
+            <td class={["tf-tm-c", index > 4 && "tf-tm-we", ready.week.days[index] === dayKey(clock) && "tf-tm-today"]}><b>{total > 0 ? minutesLabel(total) : "–"}</b></td>
           {/each}
           <td class="tf-tm-c tf-tm-tot"><b>{minutesLabel(shown.figures.tracked)}</b></td>
         </tr>

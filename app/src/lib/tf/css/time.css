@@ -3,7 +3,8 @@
    Yellow (--card) is the running timer's block alone. */
 .tf-tm-wrap { padding: 16px 22px 40px; }
 .tf-navchev { width: 16px; height: 16px; flex: none; }
-.tf-tm-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+/* The first chevron's glyph starts on the page's edge: its button's padding hangs out to the left. */
+.tf-tm-nav { display: flex; align-items: center; gap: 6px; margin: 0 0 14px -9px; }
 .tf-tm-nav h2 { font-size: var(--t-lg); margin: 0 6px; font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
 .tf-tm-sum div { display: flex; flex-direction: column; }
@@ -83,16 +84,24 @@
 /* The block dialog's *On* row (#1428, #1429): the kind switch is as wide as its words and never
    grows; the field takes the rest of the row and shrinks below its own width rather than push
    out of it. job.css's `.tf-formgrid input { width: 100% }` stays: `flex: 1` sets the basis.
-   "On" stays level with the row's first line when the picker's list opens below it. */
-.tf-tm-on-l { align-self: start; padding-top: 6px; }
-.tf-tm-target { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+   The list under it is a wide field. */
+.tf-tm-choices { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .tf-tm-on { display: flex; gap: 8px; align-items: center; min-width: 0; }
 .tf-tm-on > .tf-seg { flex: none; }
 .tf-tm-on > input, .tf-tm-on > .tf-tm-picked { flex: 1; min-width: 0; }
-.tf-tm-picked { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A picked ticket (Forms): a tick and an ink ring, at a field's height. */
+.tf-tm-picked {
+  display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 8px; border-radius: 4px; color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink); font-size: var(--t-sm);
+}
+.tf-tm-picked > svg { flex: none; }
+.tf-tm-pickedt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* What the primary waits for, on the footer's line. */
+.tf-tm-need { margin-right: auto; align-self: center; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-first ~ .tf-tm-need { margin-left: 12px; }
 .tf-tm-refusal { color: var(--err); font-size: var(--t-sm); }
 
-/* The Week tab (#828): a row per target, a column per day, the weekend shaded. */
+/* The Week tab (#828): a row per target, a column per day. Today alone is tinted; the weekend goes quiet with muted figures and no fill. */
 .tf-tm-held {
   display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; border: 1px solid var(--rule);
   border-left: 3px solid var(--warn); border-radius: 4px; background: var(--sheet); margin-bottom: 14px; font-size: var(--t-sm);
@@ -110,7 +119,8 @@
 .tf-tm-week thead th.tf-tm-tot { background: var(--sheet-2); }
 .tf-tm-week th a { color: inherit; text-decoration: none; }
 .tf-tm-week th a:hover { text-decoration: underline; }
-.tf-tm-week .tf-tm-we { background: var(--sheet-2); }
+.tf-tm-week td.tf-tm-we:not(.tf-tm-today), .tf-tm-week td.tf-tm-we:not(.tf-tm-today) :is(b, small) { color: var(--ink-2); }
+.tf-tm-week td.tf-tm-we:not(.tf-tm-today) b { font-weight: 500; }
 .tf-tm-t { min-width: 240px; }
 .tf-tm-t small { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-tm-t a { color: inherit; }
@@ -125,6 +135,8 @@
 .tf-tm-bar-hd { fill: var(--warn); }
 .tf-tm-bar-un { fill: var(--ink-2); }
 .tf-tm-total td { background: var(--sheet-2); font-weight: 600; }
+/* The total row is filled throughout, so today's column carries on as its rule at the head does. */
+.tf-tm-total td.tf-tm-today { box-shadow: inset 0 2px 0 var(--ink); }
 /* *Log all…*: wider than a form dialog, for the comment column. */
 .tf-dialog.tf-tm-logall { width: min(720px, calc(100vw - 32px)); }
 .tf-tm-num { font-variant-numeric: tabular-nums; }
@@ -142,6 +154,8 @@
 .tf-su-body li > a:hover { background: var(--sheet-2); }
 .tf .tf-su-none { margin: 0; padding: 5px 0; color: var(--ink-2); font-size: var(--t-sm); }
 .tf-su-day { font-size: var(--t-sm); }
+/* A ghost that starts a list starts where the list's words do: its 8 px of padding and 1 px of border hang out to the left. */
+.tf-su-body > .tf-btn.tf-ghost { margin-left: -9px; }
 /* A panel heading's action sits on the right of the heading line (Controls: section heading). */
 .tf-su .tf-panel > header > .tf-btn { margin-left: auto; }
 .tf-su-people { display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; margin-bottom: 8px; }

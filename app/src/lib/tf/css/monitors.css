@@ -6,15 +6,22 @@
 .tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: var(--t-2xs); font-weight: 400; color: var(--ink-2); }
 .tf-mon { table-layout: fixed; }
 .tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed):hover > td { background: var(--sheet-2); }
-.tf-monc-state { width: 176px; }
+.tf-monc-state { width: 216px; }
 .tf-monc-bars { width: 170px; }
 .tf-monc-num { width: 92px; }
 .tf-monc-watch { width: 17%; }
 /* The actions hang over the row's end on hover (Motion), so this column holds nothing at rest but a row's *Ack*. */
 .tf-monc-acts { width: 20px; }
 .tf-mon:has(.tf-mon-ack) .tf-monc-acts { width: 72px; }
-/* A state holds its column, and says the rest in its title. */
-.tf-mon .tf-chip { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+/* The chip holds the word and the time is plain text: beside it here, under it where the column narrows. Neither is cut. */
+.tf-mon-state { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; }
+.tf-mon-since { font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-mon-figs { display: none; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The heads stay under the filter bar on a long list. At 900 px and below `.tf-cbody` scrolls sideways, so it would be their scrollport and they stay put. */
+@media (min-width: 901px) {
+  .tf-tbl:is(.tf-mon, .tf-mon-gaps) { overflow: clip; }
+  :is(.tf-mon, .tf-mon-gaps) thead th { position: sticky; top: 47px; z-index: 3; }
+}
 .tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed) > td:first-child { overflow: hidden; text-overflow: ellipsis; }
 .tf-mon a.tf-mon-asset { text-decoration: underline; text-underline-offset: 2px; }
 .tf-mbar i.tf-seg-down { background: var(--err); opacity: 1; }
@@ -30,11 +37,17 @@
 @media (max-width: 1240px) {
   .tf-mbar i { width: 3px; }
   .tf-mbar-axis { width: 95px; }
-  .tf-monc-state { width: 132px; }
+  .tf-monc-state { width: 160px; }
   .tf-monc-bars { width: 122px; }
   .tf-monc-num { width: 76px; }
+  .tf-monc-watch { width: 24%; }
+  .tf-mon-state { flex-direction: column; align-items: flex-start; }
 }
-@media (max-width: 1040px) { .tf-mon .tf-num, .tf-monc-num { display: none; } }
+/* The figures' columns go, and the figures stay: under the bars, in the row. */
+@media (max-width: 1040px) {
+  .tf-mon .tf-num, .tf-monc-num { display: none; }
+  .tf-mon-figs { display: block; margin-top: 2px; }
+}
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; padding-right: 24px; }

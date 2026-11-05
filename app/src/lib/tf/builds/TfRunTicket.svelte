@@ -182,7 +182,7 @@
   {#if queued !== null}
     <span class="tf-chip tf-info" title={queued.text}>Ticket {queued.state}</span>
   {:else}
-    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void open(draft)}>Create ticket</button>
+    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void open(draft)}>Create ticket…</button>
   {/if}
 {/each}
 

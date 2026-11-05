@@ -21,6 +21,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import type { RunPorts } from "./pipeline-ports";
+  import { stateWord } from "../state-word";
   import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
 
   let {
@@ -160,7 +161,7 @@
           >
           <span class="tf-dim">{time ?? ""}</span>
           <span
-            >{#if test.status === "failed"}<TfStateChip text={test.muted ? "failed, muted" : "failed"} tone="err" />{:else}<span class="tf-dim">{test.status}</span>{/if}</span
+            >{#if test.status === "failed"}<TfStateChip text={test.muted ? "failed, muted" : "failed"} tone="err" />{:else}<span class="tf-dim">{stateWord(test.status)}</span>{/if}</span
           >
         </div>
       {:else}

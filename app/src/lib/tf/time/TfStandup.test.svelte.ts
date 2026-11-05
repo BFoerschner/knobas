@@ -334,7 +334,7 @@ test("a note typed under someone's name is saved as their bullet", async () => {
 test("Create ticket files the action item, shows it queued, then its key and status once it lands", async () => {
   const { calls, hears } = open();
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -354,7 +354,7 @@ test("Create ticket in a project the source's credential cannot file in is drawn
   const reason = "This Jira user cannot create tickets in OPS: it lacks the Create Issues permission";
   const { calls } = open({ refused: () => Promise.resolve([{ entity: "jira:OPS", op: "create_ticket", reason }]) });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -410,7 +410,7 @@ test("the first Publish asks where protocols go", async () => {
   const { calls } = open({ stored: null });
   await settle();
   expect(text()).toContain("The first publish asks where.");
-  button("Publish to Confluence").click();
+  button("Publish to Confluence…").click();
   await settle();
   expect(document.querySelector(".tf-dialog h2")?.textContent).toBe("Where do standup protocols go?");
   expect(calls.published).toEqual([]);
@@ -429,7 +429,7 @@ test("an item whose ticket the protocol already links shows its key and status, 
   const rows = [...target.querySelectorAll(".tf-su-ai")];
   expect(rows).toHaveLength(2);
   // The item with no link keeps its button.
-  expect(rows[0]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  expect(rows[0]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket…");
   // The linked one reads the ticket's key and status, as a create that landed in this session does.
   expect(rows[1]!.querySelector("button")).toBeNull();
   expect(rows[1]!.querySelector("a")?.getAttribute("href")).toBe("#/ticket/jira%3AOPS-131");
@@ -447,7 +447,7 @@ test("only a ticket titled exactly as the item answers for it: another kind, ano
   });
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
-  expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+  expect(buttons).toEqual(["Create ticket…", "Create ticket…"]);
   expect(target.querySelector(".tf-su-ai a")).toBeNull();
 });
 
@@ -455,7 +455,7 @@ test("after a create, leaving the tab and coming back shows the ticket's key, no
   const links: LinkEntry[] = [];
   const { hears } = open({ links });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -494,7 +494,7 @@ test("a reload before the sync shows a filed item sent, not Create ticket (#1951
   expect(rows[0]!.querySelector("button")).toBeNull();
   expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("Sent");
   // The other item filed nothing and keeps its button.
-  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket…");
 });
 
 test("after a reload, the sync that brings the ticket in replaces sent with its key (#1951, #2104)", async () => {
@@ -520,7 +520,7 @@ test("after a reload, the sync that brings the ticket in replaces sent with its 
 test("a create whose ticket the post-write read missed reads sent and is named by a later sync (#1951, #2104)", async () => {
   const { hears, mirror, emit } = open({ mirrored: false });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -542,7 +542,7 @@ test("after a reload, a create held on drift or refused in the queue offers Crea
   open({ owed: [owed({ state: "held" }), owed({ write_id: 10, state: "refused", title: "Update the on-call runbook (Tomasz Wójcik)" })], mirrored: false });
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
-  expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+  expect(buttons).toEqual(["Create ticket…", "Create ticket…"]);
 });
 
 test("after a reload, a create held as unconfirmed is on its way and followed, and one held on drift is offered again (#1966)", async () => {
@@ -555,7 +555,7 @@ test("after a reload, a create held as unconfirmed is on its way and followed, a
   expect(rows[0]!.querySelector("button")).toBeNull();
   expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("Queued");
   // Held on drift: never sent, so the item offers the create again.
-  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket…");
   // Followed, so the reader's discard in the queue is heard.
   expect(hears.has(9)).toBe(true);
 });
@@ -563,7 +563,7 @@ test("after a reload, a create held as unconfirmed is on its way and followed, a
 test("a filed ticket the queue holds as unconfirmed stays queued, told once, with no Edit and resend (#1966)", async () => {
   const { hears } = open({ mirrored: false });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -645,7 +645,7 @@ test("a refused save does not break the chain: the next save still lands (#1679)
 test("an action item's ticket echo says queued, then sent, and goes once the refresh event's read names the ticket (#2104)", async () => {
   const { hears, mirror, emit } = open({ mirrored: false });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";

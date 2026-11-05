@@ -93,6 +93,16 @@ export const JOB_ROWS = [
     source: "kuma",
   }),
   row("confluence:psp-codes", "page", "PSP error codes", "2026-08-19T14:00:00Z", { path: "Engineering › Payments", source: "confluence" }),
+  row("mock:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry", "branch", "feature/PAY-231-sepa-retry", "2026-08-22T09:40:00Z", {
+    name: "feature/PAY-231-sepa-retry",
+    repository: "tidewater/payout-service",
+    path: "tidewater/payout-service",
+  }),
+  row("mock:tidewater/payout-service@refs/heads/feature/PAY-231-temp-unavailable", "branch", "feature/PAY-231-temp-unavailable", "2026-08-22T09:40:00Z", {
+    name: "feature/PAY-231-temp-unavailable",
+    repository: "tidewater/payout-service",
+    path: "tidewater/payout-service",
+  }),
   row("confluence:manual-review", "page", "Manual review queue", "2026-08-18T10:00:00Z", { path: "Engineering › Payments", source: "confluence" }),
 ];
 
@@ -100,6 +110,9 @@ export const JOB_ROWS = [
 const PAY_231: [id: string, kind: string, step: string][] = [
   ["mock:tidewater/payout-service", "repo", "mock:tidewater/payout-service"],
   ["mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry", "branch", "mock:payout-service#142"],
+  // The branches its runs are on (`builds.ts`), so a run's *This job* and the rail's *your branch* read one reach.
+  ["mock:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry", "branch", "mock:payout-service#142"],
+  ["mock:tidewater/payout-service@refs/heads/feature/PAY-231-temp-unavailable", "branch", "mock:payout-service#142"],
   ["mock:payout-service#142", "pr", "mock:payout-service#142"],
   ["mock:9f2c1ab", "commit", "mock:payout-service#142"],
   ["teamcity:build:Payout_Build-1188", "build", "mock:payout-service#142"],

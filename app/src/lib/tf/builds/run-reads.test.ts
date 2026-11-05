@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import type { ArtifactEntry, LogLine, RunLog, RunTest, TestOutcome } from "../../ipc/entity";
 import {
@@ -15,6 +15,8 @@ import {
   sizeText,
   stepMatch,
   stepOpens,
+  fitSteps,
+  isCommand,
   stepSegments,
   stepState,
   stepSummary,
@@ -219,4 +221,39 @@ test("artifact words: sizes as the view writes them, folder counts, what preview
   ]);
   expect(previewable(entry("logs", true))).toBe(false);
   expect(savedText("/Users/mara/Downloads/junit (1).xml")).toBe("Saved junit (1).xml to ~/Downloads");
+});
+
+test("a step's name that is a command line is told from one that is words", () => {
+  for (const name of ["cargo test --test sepa_retry", "cargo build --tests", "npm test", "./deploy.sh staging", "run-it -v"]) expect(isCommand(name)).toBe(true);
+  for (const name of ["Checkout", "Start PSP sandbox stub", "Go live", "Make the image", "Build - release"]) expect(isCommand(name)).toBe(false);
+});
+
+describe("the steps bar once it is measured", () => {
+  const step = (name: string, x: number, width: number) => ({ name, x, width });
+  const twoPxALetter = (name: string) => name.length * 2;
+
+  test("a step too short for its name widens to it, and the others give it up by their time", () => {
+    const fitted = fitSteps([step("Checkout", 0, 1), step("aaaa", 1, 49.5), step("bbbb", 50.5, 49.5)], 1000, twoPxALetter);
+    expect(fitted[0]!.width).toBeCloseTo(1.6, 5);
+    expect(fitted[1]!.width).toBeCloseTo(49.2, 5);
+    expect(fitted[2]!.x).toBeCloseTo(50.8, 5);
+    expect(fitted[2]!.width).toBeCloseTo(49.2, 5);
+  });
+
+  test("steps that all fit their names keep their widths", () => {
+    const steps = [step("a", 0, 30), step("b", 30, 70)];
+    expect(fitSteps(steps, 1000, twoPxALetter).map((s) => s.width)).toEqual([30, 70]);
+  });
+
+  test("with no room for every name, a short name stays whole, the longest share what is left, and the bar still ends at 100", () => {
+    const fitted = fitSteps([step("aa", 0, 90), step("bbbbbbbbbbbbbbbbbbbb", 90, 5), step("cccccccccccccccccccc", 95, 5)], 54, twoPxALetter);
+    expect(fitted[0]!.width).toBeCloseTo((4 / 54) * 100, 5);
+    expect(fitted[1]!.width).toBeCloseTo(fitted[2]!.width, 5);
+    expect(fitted[2]!.x + fitted[2]!.width).toBeCloseTo(100, 5);
+  });
+
+  test("an unmeasured bar stays as its time says", () => {
+    const steps = [step("Checkout", 0, 1), step("b", 1, 99)];
+    expect(fitSteps(steps, 0, twoPxALetter)).toEqual(steps);
+  });
 });

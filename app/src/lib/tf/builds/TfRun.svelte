@@ -85,7 +85,7 @@
   import TfRunLog from "./TfRunLog.svelte";
   import TfRunTests from "./TfRunTests.svelte";
   import TfRunTicket from "./TfRunTicket.svelte";
-  import { downloadAndSay, stepSegments } from "./run-reads";
+  import { downloadAndSay, fitSteps, isCommand, stepSegments } from "./run-reads";
   import {
     RUN_TABS,
     artifactsOf,
@@ -370,7 +370,7 @@
   const inFlight = $derived(run !== null && run.finished === null);
   const stale = $derived(staleLine(pipeline, sources, sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
-  const segments = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
+  const read = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
   /** A step's name at what its segment holds: whole, or ended with an ellipsis, never cut mid-letter. */
@@ -382,13 +382,21 @@
     seen.observe(bar);
     return () => seen.disconnect();
   }
+  /** A name's width as `.tf-stepsbar text` draws it: 12 px, or 11 px of code; 0 with no canvas to measure on. */
+  function nameWidth(name: string, text = name): number {
+    pen ??= document.createElement("canvas").getContext("2d");
+    if (pen === null) return 0;
+    const face = isCommand(name) ? "--mono" : "--sans";
+    pen.font = `400 ${isCommand(name) ? 11 : 12}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
+    return pen.measureText(text).width;
+  }
+  /** What a label's inset takes from its segment: 10 px before it, 8 px after. */
+  const STEP_INSET = 18;
+  /** A px over its measure, so percentages rounding on the way back cannot cost a name its end. */
+  const segments = $derived(fitSteps(read, barPx, (name) => nameWidth(name) + STEP_INSET + 1));
   function stepLabel(name: string, widthPct: number): string | null {
     if (barPx === 0) return name;
-    pen ??= document.createElement("canvas").getContext("2d");
-    const measuring = pen;
-    if (measuring === null) return name;
-    measuring.font = `400 11px ${getComputedStyle(document.body).getPropertyValue("--sans")}`;
-    return fitLabel(name, (widthPct / 100) * barPx - 18, (text) => measuring.measureText(text).width);
+    return fitLabel(name, (widthPct / 100) * barPx - STEP_INSET, (text) => nameWidth(name, text));
   }
 
   function chipWord(r: RunRow): string {
@@ -525,7 +533,7 @@
             <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
               <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
               {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
-              {#if stepLabel(segment.name, segment.width) !== null}<text x="10" y="19">{stepLabel(segment.name, segment.width)}</text>{/if}
+              {#if stepLabel(segment.name, segment.width) !== null}<text class:tf-sbcmd={isCommand(segment.name)} x="10" y="19">{stepLabel(segment.name, segment.width)}</text>{/if}
             </svg>
           </a>
         {/each}

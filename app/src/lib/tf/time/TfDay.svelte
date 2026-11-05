@@ -336,7 +336,7 @@
 
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
 
-  /** *Add to <ticket>* on an offered block, *Log to <ticket>* on a label block. */
+  /** *Add to <ticket>* on an offered block, *Assign to <ticket>* on a label block: neither logs anything. */
   function giveTo(row: DayRow, entityId: string, said: string) {
     const block = row.block;
     if (block === null) return;
@@ -553,8 +553,8 @@
       <rect class="tf-tm-now" x="{nowAt}%" y="18" width="2" height="70">
         <title>Now, {clockOf(clock.toISOString())}</title>
       </rect>
-      <!-- Drawn on the bed, so it never meets an hour's label above it. -->
-      <text class="tf-tm-nowl" x="{nowAt}%" dx="5" y="80">now</text>
+      <!-- Drawn on the bed, so it never meets an hour's label above it; late in the day, on the line's left, so it stays on the bed. -->
+      <text class="tf-tm-nowl" x="{nowAt}%" dx={nowAt > 96 ? -5 : 5} y="80" text-anchor={nowAt > 96 ? "end" : "start"}>now</text>
     {/if}
   </svg>
 
@@ -644,7 +644,7 @@
               {/if}
               {@const cannot = refusalOf(refused, on, "log_work")}
               <button class="tf-btn tf-sm" {...refusedAttrs(cannot)} onclick={() => cannot === null && onlog?.(on, key)}>Log…</button>
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit</button>
+              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit…</button>
             {:else if row.state === "running"}
               <button class="tf-btn tf-sm" onclick={() => ontimer?.()}>Stop and log…</button>
             {:else if row.state === "label"}
@@ -654,13 +654,13 @@
                   class="tf-btn tf-sm"
                   onclick={() => giveTo(row, to, `Assigned to ${keyOf(to)}. It is in Log all now.`)}
                 >
-                  Log to {keyOf(to)}
+                  Assign to {keyOf(to)}
                 </button>
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
               {:else}
                 <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit</button>
+              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit…</button>
             {:else if row.state === "offered"}
               {#if row.suggestion}
                 {@const to = row.suggestion.entity_id}

@@ -73,7 +73,9 @@
 .tf-sbseg.tf-err { fill: var(--err); }
 .tf-sbseg.tf-run { fill: var(--info); }
 .tf-sbseg.tf-wait { fill: var(--rule); }
-.tf-stepsbar text { fill: var(--ink); font-size: var(--t-2xs); pointer-events: none; }
+.tf-stepsbar text { fill: var(--ink); font-size: var(--t-xs); pointer-events: none; }
+/* A command is code, a size down so its wider face holds the bar's line. `nameWidth` in `TfRun.svelte` measures both. */
+.tf-stepsbar text.tf-sbcmd { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-2xs); }
 .tf-sbseg:is(.tf-err, .tf-run) ~ text { fill: var(--sheet); }
 .tf-sbseg.tf-wait ~ text { fill: var(--ink-2); }
 .tf-stepsbar a { cursor: pointer; }
