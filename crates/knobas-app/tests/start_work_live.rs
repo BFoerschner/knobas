@@ -1179,7 +1179,13 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 }
 
 /// **`under:` a repository, by its full name and by its bare name, finds it
-/// and everything mirrored in it, through the search the app runs** (#644).
+/// and what the launcher answers with of everything in it, through the search
+/// the app runs, and each of its commits names it as parent** (#644, spec #2419
+/// story 16).
+///
+/// The launcher leaves commits out of every answer (#2422), so they are held
+/// where it cannot show them: the parents the `sync.item_parent` trigger stored
+/// off Gitea's real records.
 ///
 /// The source is configured with every repository `work.json` names, so the
 /// three repositories' `under:` sets have to be told apart. What sits in a repository is asked of
@@ -1187,15 +1193,16 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 /// not read off the mirror, and not off `repository` or `base.repo`, where the
 /// descriptor declares the parent -- so a declaration that missed, or an
 /// adapter that filed an item under the wrong repository, leaves this set full
-/// and the search's wrong. Each fixture branch, pull request and commit of the
-/// repository is checked to be in it (the last two by the index and sha
+/// and the search or the stored parents wrong. Each fixture branch, pull
+/// request and commit of the repository is checked to be in it (the last two by
+/// the index and sha
 /// `seed-state.json` says Gitea and git assigned), so an empty server cannot
 /// pass. Read-only at Gitea: it syncs into a database of its own, with its own
 /// source configured here; the round trip above owns the litter, and runs
 /// before this one.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
-async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commits() {
+async fn under_each_seeded_repository_finds_its_branches_and_pulls_and_its_commits_name_it() {
     let env = env();
     let fixture = live_under::fixture();
     let seeded = live_under::seed_state("KNOBAS_GITEA_SEED_STATE");
@@ -1261,7 +1268,17 @@ async fn under_each_seeded_repository_finds_it_and_its_branches_pulls_and_commit
             );
         }
 
-        live_under::each_exactly(&state.pool, GITEA, &[full_name, name.clone()], &by_kind).await;
+        let mut answered = by_kind;
+        let commits = answered.remove("commit").unwrap_or_default();
+        let names = [full_name, name.clone()];
+        live_under::each_exactly(&state.pool, GITEA, &names, &answered).await;
+        for parent in &names {
+            assert_eq!(
+                live_under::children_named(&state.pool, GITEA, "commit", parent).await,
+                commits,
+                "the commits that name {parent} as parent are the ones Gitea lists in it"
+            );
+        }
     }
     state.scheduler.shutdown().await;
 }

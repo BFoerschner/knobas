@@ -9,7 +9,8 @@
 //! the searcher is built the way the app builds it,
 //! [`knobas_app::commands::search::searcher`], which writes
 //! `sync.parent_declaration` before it answers, and the query goes through
-//! `Searcher::search` as the launcher sends it.
+//! `Searcher::search` as the launcher sends it. The kinds the launcher leaves
+//! out cannot go that way, so [`children_named`] reads their stored parents.
 //!
 //! A directory rather than a test target, for `live_digest`'s reason: cargo
 //! does not pick it up on its own, and each suite that wants it says
@@ -60,9 +61,9 @@ pub async fn declare(pool: &sqlx::PgPool) {
 /// the page shows.
 ///
 /// Per kind because the page is: the search caps each kind's group at
-/// `knobas_search`'s `PER_GROUP` (ten rows, so one flood of commits cannot own
+/// `knobas_search`'s `PER_GROUP` (ten rows, so one flood of one kind cannot own
 /// the launcher) and reports the kind's true `total` beside it. A repository
-/// with nineteen commits therefore shows ten of them, and the other nine are a
+/// with nineteen branches therefore shows ten of them, and the other nine are a
 /// count. [`exactly`] holds both halves to the expected set.
 #[derive(Debug)]
 pub struct Found {
@@ -201,6 +202,41 @@ pub async fn each_exactly(
                 .collect::<Vec<_>>()
         );
     }
+}
+
+/// The mirrored items of `kind` whose own record names `parent` as their parent,
+/// as the `sync.item_parent` trigger stored it: ignoring case and through the
+/// read-time `source_config` join, as `under:` reads it, and only the `child`
+/// arm, so a parent answering to its own name is not its own child.
+///
+/// For the kinds the launcher leaves out (a run, a commit: spec #2419, story
+/// 16), which [`search`] cannot show: the resolution still decides what sits
+/// where for every other reader of `sync.item_parent`, and a server's real
+/// records must still reach it. It witnesses the declaration and the trigger on
+/// those records, not the parser or the `under:` predicate, which only
+/// [`search`] runs. The expected set stays the suite's, from outside the
+/// declared parent path.
+pub async fn children_named(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    parent: &str,
+) -> BTreeSet<String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "select distinct i.entity_id
+           from sync.live_item i
+           join sync.item_parent p on p.entity_id = i.entity_id
+           join knobas.source_config s on s.id = i.source_id and s.kind = p.adapter_kind
+          where i.source_id = $1 and i.kind = $2
+            and p.arm = 'child' and lower(p.name) = lower($3)",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(parent)
+    .fetch_all(pool)
+    .await
+    .expect("the stored parents are readable");
+    rows.into_iter().map(|(id,)| id).collect()
 }
 
 /// `fixtures/tidewater/work.json`, the corpus every seed is derived from.

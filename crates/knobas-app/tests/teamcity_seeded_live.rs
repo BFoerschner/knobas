@@ -52,7 +52,8 @@
 //!
 //! The second test is the SQL `under:` path on this server's records: each
 //! fixture configuration, by its id and its name, through the app's own
-//! search. Read-only too, and for the same reason it lives here and not in the
+//! search, and its builds' stored parents, which that search no longer shows.
+//! Read-only too, and for the same reason it lives here and not in the
 //! adapter's crate: the search is an app-crate read.
 //!
 //! # A build leads to its code (issue #683)
@@ -146,6 +147,22 @@ fn env() -> Env {
 }
 
 impl Env {
+    /// Every finished build of `config`, as the entity ids the mirror should
+    /// give them, asked of the server's own listing with the locator of the
+    /// sync's finished walk (`knobas-source-teamcity`'s `sync.rs`).
+    async fn finished_builds(&self, config: &str) -> BTreeSet<String> {
+        self.get(&format!(
+            "app/rest/builds?locator=buildType:(id:{config}),state:finished,canceled:any,\
+             failedToStart:any,branch:default:any,count:10000&fields=build(id)"
+        ))
+        .await["build"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{config}: the server lists builds"))
+            .iter()
+            .map(|b| format!("{TEAMCITY}:build:{}", b["id"].as_i64().expect("a build id")))
+            .collect()
+    }
+
     async fn get(&self, path_and_query: &str) -> serde_json::Value {
         let response = reqwest::Client::builder()
             .timeout(REQUEST_BUDGET)
@@ -461,29 +478,35 @@ async fn a_seeded_build_the_mirror_attributes_to_the_reader_is_on_that_days_dige
     state.scheduler.shutdown().await;
 }
 
-/// **`under:` a configuration, by its id and by its name, finds it and its
-/// builds through the search the app runs** (#644).
+/// **`under:` a configuration, by its id and by its name, answers with its
+/// pipeline through the search the app runs, and each of its builds names it as
+/// parent** (#644, spec #2419 story 16).
 ///
 /// The configurations are the fixture's: `work.json`'s build `cfg`s, each named
 /// by `seed-teamcity-builds.sh`'s rule -- the id is the `cfg` byte for byte, the
 /// name is what follows its first `_`, with `_` as a space. A name with a space
 /// is typed quoted, as the query box writes it (#601).
 ///
+/// The launcher answers a configuration as kind `pipeline` and leaves a run out
+/// (#2422), so the search's answer is the pipeline alone, and a run in it fails
+/// this test. The builds are then held where the launcher cannot show them: the
+/// parents the `sync.item_parent` trigger stored off the server's real records.
+///
 /// Which builds sit in a configuration is read off `buildTypeId`, the field the
 /// server sends at the build's root -- not the `buildType` object the
 /// descriptor declares the parent at -- so a declaration that missed would
-/// leave this set full and the search's empty. The set is every mirrored build
-/// of that configuration, plus the configuration itself, which answers to its
-/// own name and id as a parent. Each fixture build the seed recorded in
-/// `seed-state.json` is checked to be in its configuration's set, so an empty
-/// mirror cannot pass. Read-only, like the digest test above.
+/// leave this set full and the stored parents empty. That field is the mirror's
+/// copy, so a build the sync dropped would leave both short: every build the
+/// server's own listing says had finished before the sync
+/// ([`Env::finished_builds`]) has to be in the set, and each fixture build the
+/// seed recorded in `seed-state.json` too, so an empty mirror cannot pass.
+/// Read-only, like the digest test above.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
-async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name() {
+async fn under_each_seeded_configuration_answers_its_pipeline_and_its_builds_name_it_as_parent() {
     let env = env();
     let account = env.account().await;
     let state = app(&env, &account).await;
-    sync(&state, TEAMCITY).await;
 
     let fixture = live_under::fixture();
     let mut configurations: Vec<String> = live_under::rows(&fixture, "builds")
@@ -497,6 +520,14 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
         3,
         "the fixture's three configurations"
     );
+
+    // Before the sync, so a build finishing during it cannot be in the listing
+    // and not yet in the mirror.
+    let mut listed = BTreeMap::new();
+    for id in &configurations {
+        listed.insert(id.clone(), env.finished_builds(id).await);
+    }
+    sync(&state, TEAMCITY).await;
 
     let builds: Vec<(String, String)> = sqlx::query_as(
         "select entity_id, payload->>'buildTypeId'
@@ -527,16 +558,31 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
                 of_config.contains(&build),
                 "fixture build {number} ({build}) of {id} is mirrored: {of_config:?}"
             );
+            assert!(
+                listed[id].contains(&build),
+                "the server lists fixture build {number} ({build}) under {id}: {:?}",
+                listed[id]
+            );
         }
-        let mut expected = BTreeMap::from([(
-            "build_config".to_owned(),
+        let unmirrored: Vec<&String> = listed[id].difference(&of_config).collect();
+        assert!(
+            unmirrored.is_empty(),
+            "every finished build the server lists under {id} is mirrored there: {unmirrored:?}"
+        );
+        let expected = BTreeMap::from([(
+            "pipeline".to_owned(),
             BTreeSet::from([format!("{TEAMCITY}:buildType:{id}")]),
         )]);
-        if !of_config.is_empty() {
-            expected.insert("build".to_owned(), of_config);
-        }
 
-        live_under::each_exactly(&state.pool, TEAMCITY, &[id.clone(), name], &expected).await;
+        let names = [id.clone(), name];
+        live_under::each_exactly(&state.pool, TEAMCITY, &names, &expected).await;
+        for parent in &names {
+            assert_eq!(
+                live_under::children_named(&state.pool, TEAMCITY, "build", parent).await,
+                of_config,
+                "the builds that name {parent} as parent are the ones whose buildTypeId is {id}"
+            );
+        }
     }
     state.scheduler.shutdown().await;
 }
