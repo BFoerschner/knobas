@@ -501,8 +501,9 @@ export type SearchHit = { rank: number, snippet: Array<Segment>,
  * Where the words appear in the row's text, each with its place
  * (#2431): what the launcher's preview draws under *Everything*, so the
  * preview is this list and no second read. Empty under *Titles*, for a
- * browse, and for a row whose text holds none of the words (a hit by its
- * title alone). Read from the index: a page's section and comment marks
+ * browse, and for a row with nothing to quote: a hit by its title, its
+ * key or a stem the excerpts' rule misses. Read from the index: a page's
+ * section and comment marks, the heading and the author among the text,
  * (`knobas_source::docs::indexed`), a pipeline's stored latest run log
  * (migration `0067`), a ticket's, pull request's or note's text.
  */

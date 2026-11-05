@@ -79,7 +79,11 @@ pub fn excerpts(
         match &run.part {
             Part::Lead => {}
             Part::Section(heading) => {
-                keep(Some("Heading".to_owned()), marked(heading, &stems), &mut out);
+                keep(
+                    Some("Heading".to_owned()),
+                    marked(heading, &stems),
+                    &mut out,
+                );
             }
             // The line reads as its own place, so it names none.
             Part::Comment(by) => keep(None, author_line(by, &stems), &mut out),
@@ -279,7 +283,10 @@ mod tests {
             None,
             &needles(&["priya"]),
         );
-        assert_eq!(flat(&out), vec![(None, "Comment by [Priya] Nair".to_owned())]);
+        assert_eq!(
+            flat(&out),
+            vec![(None, "Comment by [Priya] Nair".to_owned())]
+        );
     }
 
     /// The name is what is marked: `Comment by` is this module's wording and
@@ -312,7 +319,10 @@ mod tests {
     #[test]
     fn a_comment_by_nobody_quotes_only_its_text() {
         let out = excerpts("T", "T\n\u{1f}\nCap the retry.", None, &needles(&["retry"]));
-        assert_eq!(flat(&out), vec![(Some("Comment"), "Cap the [retry].".to_owned())]);
+        assert_eq!(
+            flat(&out),
+            vec![(Some("Comment"), "Cap the [retry].".to_owned())]
+        );
     }
 
     /// The same cause as the author line: a heading is indexed and sits only
@@ -325,7 +335,10 @@ mod tests {
             None,
             &needles(&["backoff"]),
         );
-        assert_eq!(flat(&out), vec![(Some("Heading"), "[Backoff] policy".to_owned())]);
+        assert_eq!(
+            flat(&out),
+            vec![(Some("Heading"), "[Backoff] policy".to_owned())]
+        );
     }
 
     #[test]
