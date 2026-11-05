@@ -1569,6 +1569,14 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     // ahead of its live ones in the child index, which the sweep leaves there for
     // good. Read from the head of the range, that is an item and an entity lookup
     // for each of 46,668 rows on every `under:` keystroke.
+    //
+    // The rows above left free pages behind, and rows written into those can land
+    // ahead of the withdrawn run, which then costs nothing: 157 ms in one run and 49
+    // in the next. Compacted first, the rows go where they are written.
+    sqlx::query("vacuum full sync.item_parent")
+        .execute(&pool)
+        .await
+        .unwrap();
     let swept = "gitea-swept";
     add_gitea(&pool, swept).await;
     add_rows(&pool, swept, "commit", "gone", 23_334, "40 days", true).await;
@@ -1578,6 +1586,21 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         .execute(&pool)
         .await
         .unwrap();
+    let (ahead,): (bool,) = sqlx::query_as(
+        "select max(ip.ctid) filter (where e.deleted_at is not null)
+                  < min(ip.ctid) filter (where e.deleted_at is null)
+           from sync.item_parent ip
+           join knobas.entity e on e.id = ip.entity_id
+          where ip.arm = 'child' and ip.source_id = $1",
+    )
+    .bind(swept)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        ahead,
+        "no run of withdrawn child rows ahead: the fixture moved"
+    );
     let name = "withdrawn ahead";
     let timing = timings(&searcher, "under:bench/repo-7", 10).await;
     println!(
