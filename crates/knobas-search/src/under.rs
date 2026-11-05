@@ -1,4 +1,5 @@
-//! Which `under:` values name a parent at all (ADR-0018, #595), and which
+//! Which `under:` values name a parent at all (ADR-0018, #595), which of
+//! those have nothing the launcher admits beneath them (#2495), and which
 //! typed tokens explain an empty answer by what the launcher left out (#2488).
 //!
 //! The grammar cannot say: a parent lives in its children's records -- the
@@ -24,12 +25,11 @@
 
 use sqlx::PgPool;
 
-use crate::corpus::Corpus;
+use crate::SearchError;
 use crate::query::{EffectiveFilters, Parsed};
-use crate::{RawHit, SearchError};
 
 /// Every `(name, kind)` a parent answers to, as a table expression -- the one
-/// place the parent arms are put together, read by [`crate::sql::known_parent_positions`] and by
+/// place the parent arms are put together, read by [`crate::sql::parent_positions`] and by
 /// `crate::suggest`'s `PARENTS_SQL`, so what `under:` knows and what the box
 /// offers for it cannot drift apart (#615).
 ///
@@ -66,9 +66,29 @@ macro_rules! parent_names {
 }
 pub(crate) use parent_names;
 
+/// What the typed `under:` values came to.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct KnownUnder {
+    /// Whether values were typed and the launcher admits a row beneath none of
+    /// them. Such a query answers with nothing before the statement is asked
+    /// (#2495). False with no `under:` typed, which scopes nothing.
+    pub admits_nothing: bool,
+    /// The tokens a parent answers to beneath which the launcher admits no
+    /// row: a name only left-out kinds sit under (#2488), in the order typed.
+    pub left_out: Vec<String>,
+}
+
 /// Report every `under:` value no parent answers to as an unknown token, in
-/// the spelling the reader typed it, and hand back the values one does answer
-/// to, for [`left_out_tokens`].
+/// the spelling the reader typed it, and hand back what the launcher admits
+/// beneath the values with its `hidden` kinds left out: whether it admits
+/// anything, and the known names it admits nothing beneath, for
+/// [`left_out_tokens`].
+///
+/// One bounded read for both questions ([`crate::sql::parent_positions`]),
+/// so an `under:` keystroke pays, per value, an index probe of the mirror and
+/// a scan of the estate, where the statement read the whole mirror. A name
+/// still being typed answers to nothing: 2 ms at `testing::seed_estate`'s
+/// upper bound.
 ///
 /// The value stays in the filter: `under:a under:typo` still scopes to `a`,
 /// and `under:typo` alone answers with nothing -- which is true -- while the
@@ -80,82 +100,56 @@ pub(crate) use parent_names;
 pub(crate) async fn report_unknown(
     pool: &PgPool,
     parsed: &mut Parsed,
-) -> Result<Vec<(String, String)>, SearchError> {
+    hidden: &[String],
+) -> Result<KnownUnder, SearchError> {
     if parsed.under.is_empty() {
-        return Ok(Vec::new());
+        return Ok(KnownUnder::default());
     }
     let values: Vec<String> = parsed
         .under
         .iter()
         .map(|(_, value)| value.clone())
         .collect();
-    let positions = crate::sql::known_parent_positions(pool, &values).await?;
-    let (known, unknown): (Vec<_>, Vec<_>) = parsed
-        .under
-        .iter()
-        .cloned()
-        .zip(1_i64..)
-        .partition(|(_, position)| positions.contains(position));
-    for ((token, _), _) in unknown {
-        parsed.unknown(&token);
+    let positions = crate::sql::parent_positions(pool, &values, hidden).await?;
+    let mut known_under = KnownUnder {
+        admits_nothing: positions.admitting.is_empty(),
+        left_out: Vec::new(),
+    };
+    let typed: Vec<(String, String)> = parsed.under.clone();
+    for ((token, _), position) in typed.into_iter().zip(1_i64..) {
+        if !positions.known.contains(&position) {
+            parsed.unknown(&token);
+        } else if !positions.admitting.contains(&position) {
+            known_under.left_out.push(token);
+        }
     }
-    Ok(known.into_iter().map(|(under, _)| under).collect())
+    Ok(known_under)
 }
 
 /// The typed tokens that explain an empty launcher answer by what it leaves
 /// out (#2488, [`crate::frames`]), in the spelling typed: each `kind:` naming
-/// a left-out kind, then each name in `known_under` the launcher's own
-/// statement admits no row beneath.
+/// a left-out kind, then each `under:` name the launcher admits no row
+/// beneath, as [`report_unknown`] found them.
 ///
-/// Read only after an empty answer, so an answer that holds rows pays nothing.
-/// The launcher's statement runs once more per value in `known_under`, one at
-/// a time, and a query's length bounds how many there are. A name no parent
-/// answers to is not in it, which is what a name still being typed is at every
-/// keystroke, so typing one pays nothing here. A known name beneath which the
-/// statement admits nothing has only left-out rows there, since the known name
-/// came from a live row. The statement is asked with nothing beside the name,
-/// so what `under:` admits and what this says cannot drift: the words and the
-/// `source:` and `kind:` scope are not asked, as [`report_unknown`] does not
-/// ask them, because a word matching nothing beneath the name is not what the
-/// launcher left out.
-///
-/// # Errors
-///
-/// [`SearchError::Db`] if a statement fails.
-pub(crate) async fn left_out_tokens(
-    pool: &PgPool,
-    corpora: &[&Corpus],
+/// A known name beneath which nothing is admitted has only left-out rows
+/// there, since the known name came from a live row. It was asked with
+/// nothing beside the name: the words and the `source:` and `kind:` scope are
+/// not asked, as [`report_unknown`] does not ask them, because a word
+/// matching nothing beneath the name is not what the launcher left out. And
+/// it was asked of the launcher's own `under:` predicate, arm for arm
+/// ([`crate::sql::parent_positions`], whose doc names the tests that hold the
+/// two together).
+pub(crate) fn left_out_tokens(
     parsed: &Parsed,
-    known_under: &[(String, String)],
+    known_under: &KnownUnder,
     filters: &EffectiveFilters,
-) -> Result<Vec<String>, SearchError> {
+) -> Vec<String> {
     let mut tokens: Vec<String> = parsed
         .typed_kinds
         .iter()
         .filter(|(_, kind)| filters.hidden_kinds.contains(kind))
         .map(|(token, _)| token.clone())
         .collect();
-    for (token, value) in known_under {
-        let answered = EffectiveFilters {
-            under: vec![value.clone()],
-            declarations: filters.declarations.clone(),
-            hidden_kinds: filters.hidden_kinds.clone(),
-            ..EffectiveFilters::default()
-        };
-        if !admits_a_row(pool, corpora, &answered).await? {
-            tokens.push(token.clone());
-        }
-    }
-    Ok(tokens)
-}
-
-/// Whether the launcher's statement admits any row under `filters`.
-async fn admits_a_row(
-    pool: &PgPool,
-    corpora: &[&Corpus],
-    filters: &EffectiveFilters,
-) -> Result<bool, SearchError> {
-    let built = crate::sql::search_sql(corpora, None, false, filters, 1, 1);
-    let rows: Vec<RawHit> = crate::sql::query_as_with(built).fetch_all(pool).await?;
-    Ok(!rows.is_empty())
+    tokens.extend(known_under.left_out.iter().cloned());
+    tokens
 }

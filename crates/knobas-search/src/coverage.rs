@@ -158,23 +158,34 @@ select i.source_id                            as source_id,
 ///   [`FilterAnswer::NoValues`], which is true of that corpus; a source with no
 ///   declaring kind has no child row and gets it too.
 ///
-/// `exists` per source, served by `item_parent_child_idx` on
-/// `(source_id, adapter_kind) where arm = 'child'`: a source with no child
-/// rows answers from an empty range, whatever another source of the same
-/// adapter has, and one that has them answers on its first live one. The
-/// copied `source_id` is what bounds it (Björn's sign-off on #642): through
-/// `sync.item`, a second source on one adapter read every child row of the
-/// first to prove its absence, about 150 ms at the 100k benchmark.
+/// One probe per source, which stops at that source's first live row. The
+/// copied `source_id` is what lets it ask with no join (Björn's sign-off on
+/// #642): through `sync.item`, a second source on one adapter read every child
+/// row of the first to prove its absence, about 150 ms at the 100k benchmark.
+/// * **A `lateral ... limit 1`, not an `exists`.** Once `sync.item_parent` has
+///   statistics the planner turns a correlated `exists` into a hash semi-join
+///   that reads every child-arm row, every item and every entity to answer
+///   four sources: 61 ms over 100,000 items, on every `under:` keystroke
+///   (#2495). A `limit` inside a lateral subquery cannot be pulled up.
+/// * **What a source with no child row costs depends on the statistics.**
+///   Without them it answers from an empty range of `item_parent_child_idx`,
+///   `(source_id, adapter_kind) where arm = 'child'`. With them the planner
+///   expects a row soon and may scan `sync.item_parent` instead, which that
+///   source reads whole: one table and no join, about 1.5 ms at 26,668 rows,
+///   4.8 ms for the benchmark's three such sources, and it grows with the table
+///   (#2500). An `order by` on the index's columns does not steer it: each is
+///   equated to the outer row, so the planner drops the sort.
 const UNDER_COVERAGE_SQL: &str = r"
 select s.id
   from knobas.source_config s
+ cross join lateral (select 1
+                       from sync.item_parent ip
+                       join sync.live_item i on i.entity_id = ip.entity_id
+                      where ip.arm = 'child'
+                        and ip.source_id = s.id
+                        and ip.adapter_kind = s.kind
+                      limit 1) named
  where s.id = any($1)
-   and exists (select 1
-                 from sync.item_parent ip
-                 join sync.live_item i on i.entity_id = ip.entity_id
-                where ip.arm = 'child'
-                  and ip.source_id = s.id
-                  and ip.adapter_kind = s.kind)
 ";
 
 /// What the probe answered about one source that put rows in scope.

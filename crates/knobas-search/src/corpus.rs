@@ -227,6 +227,12 @@ pub struct Corpus {
     /// For the estate it is no payload read at all (#600): an asset's parent
     /// is its `parent_id` column and a route's is the asset exposing it
     /// (ADR-0014), so both read [`estate_subtree!`]'s walk over those columns.
+    ///
+    /// [`crate::sql::parent_positions`] asks these too, and the launcher skips
+    /// its statement when that read finds nothing (#2495), so a fragment it
+    /// does not ask loses rows. A new fragment, or a change to the mirror's,
+    /// changes that read as well; `the_bounded_read_asks_every_under_fragment`
+    /// fails until it does.
     pub(crate) under: Option<&'static str>,
     /// What each ticket key matches (#811), as a predicate over a row, the
     /// statement's [`FIELD_PATHS`] CTEs (`fp`, `lp`) and a relation `fd`
@@ -475,7 +481,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
 ///
 /// What an asset answers to is spelled twice, here and in
 /// the asset arm of `crate::under`'s `parent_names!`, through which
-/// `sql::known_parent_positions` reports a value no asset is called as an unknown token. Change
+/// `sql::parent_positions` reports a value no asset is called as an unknown token. Change
 /// one and the other must follow.
 macro_rules! estate_subtree {
     () => {
@@ -1091,6 +1097,45 @@ mod tests {
         assert!(!has_logs(&searched(ALL, true)));
         assert!(!has_logs(&searched(WITHOUT_NOTES, true)));
         assert_eq!(searched(ALL, true).len(), ALL.len() - 1);
+    }
+
+    /// `sql::parent_positions` decides whether the launcher runs its statement
+    /// (#2495). `tests/it/under_admits.rs` compares the two on the shapes it
+    /// seeds, and no seeded shape can show an arm added later: a new corpus
+    /// with a fragment, a second table in the mirror's, a fragment of the run
+    /// logs' own. Any of those loses rows with every other test green. So this
+    /// pins what that read was written against. When it fails, change the read,
+    /// add the shape to `under_admits.rs`, then change this.
+    #[test]
+    fn the_bounded_read_asks_every_under_fragment() {
+        let answering: Vec<&str> = ALL
+            .iter()
+            .filter(|corpus| corpus.under.is_some())
+            .map(|corpus| corpus.relation)
+            .collect();
+        assert_eq!(
+            answering,
+            [
+                LIVE_ITEM.relation,
+                ASSET.relation,
+                ROUTE.relation,
+                PIPELINE_LOG.relation
+            ],
+        );
+        // A run log's row is a mirror row behind the same two tests, so the
+        // mirror's arm answers for it.
+        assert_eq!(PIPELINE_LOG.under, LIVE_ITEM.under);
+        assert_eq!(PIPELINE_LOG.kind, LIVE_ITEM.kind);
+        // What the mirror's arm in `parent_positions` restates.
+        assert_eq!(
+            LIVE_ITEM.under,
+            Some(
+                "i.entity_id in (select ip.entity_id from sync.item_parent ip \
+                 join sync.item x on x.entity_id = ip.entity_id \
+                 join knobas.source_config s on s.id = x.source_id and s.kind = ip.adapter_kind \
+                 where lower(ip.name) = any(ud.v))"
+            ),
+        );
     }
 
     /// Migration `0068` stores the key cell through `sync.key_cell_of`, which

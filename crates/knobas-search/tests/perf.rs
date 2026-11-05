@@ -1337,11 +1337,14 @@ enum UnderAnswer {
 ///
 /// The timing is the **whole** `search` call: the unknown-token lookup, the
 /// scoped statement and the `under:` coverage probe together, which is what
-/// the launcher waits for. An empty answer pays once more for each known name
-/// typed, the launcher's statement asked whether it admits a row beneath that
-/// name (`under::left_out_tokens`, #2488), and the two empty shapes on a known
-/// name are here to gate that. A second, empty Gitea source is configured so the
-/// probe pays its worst case, two sources on one adapter (#642).
+/// the launcher waits for. The lookup also says which known names have
+/// nothing the launcher admits beneath them (`sql::parent_positions`, #2495):
+/// a query scoped to such names alone skips the statement, which would read
+/// the whole mirror to say nothing, and names them as left out
+/// (`under::left_out_tokens`, #2488). The three empty shapes are here to gate
+/// that path, `only commits beneath` at its costly end, a name 5,000 commits
+/// carry. A second, empty Gitea source is configured so the probe pays its
+/// worst case, two sources on one adapter (#642).
 #[tokio::test]
 #[ignore = "seeds a 100k corpus with declared parents and asserts on wall-clock time; run it deliberately"]
 async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {

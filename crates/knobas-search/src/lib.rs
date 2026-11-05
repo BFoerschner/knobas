@@ -363,12 +363,14 @@ impl Searcher {
 
         let vocab = self.vocabulary().await?;
         let mut parsed = query::parse(&query.raw, &vocab);
-        // Whether an `under:` value names any parent is the mirror's to say,
-        // and it is said before the echo is built so the greyed-out token
-        // rides back with everything else the parse reported.
-        let known_under = under::report_unknown(&self.pool, &mut parsed).await?;
         // Pipelines under the shell's word, and no runs or commits (#2422).
         let frames = frames::LauncherFrames::of(&vocab.declarations);
+        // Whether an `under:` value names any parent is the mirror's to say,
+        // and it is said before the echo is built so the greyed-out token
+        // rides back with everything else the parse reported. The same read
+        // says which known names have nothing the launcher admits beneath
+        // them, the left-out kinds being what it leaves out (#2495).
+        let known_under = under::report_unknown(&self.pool, &mut parsed, &frames.left_out).await?;
         let filters = EffectiveFilters {
             titles: query.titles,
             excerpts: !query.titles,
@@ -395,20 +397,26 @@ impl Searcher {
             return Ok(empty(interpreted, started));
         }
 
-        let corpora = corpus::searched(self.corpora(), filters.titles);
-        let built = sql::search_sql(
-            &corpora,
-            text,
-            parsed.prefix_last_term,
-            &filters,
-            PER_GROUP,
-            query.limit,
-        );
-        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        // An `under:` scoped to names with nothing admitted beneath any of
+        // them answers with nothing, and the statement is not asked: to say
+        // nothing, it reads the whole mirror twice, for the live items and
+        // for the run logs (#2495).
+        let rows: Vec<RawHit> = if known_under.admits_nothing {
+            Vec::new()
+        } else {
+            let corpora = corpus::searched(self.corpora(), filters.titles);
+            let built = sql::search_sql(
+                &corpora,
+                text,
+                parsed.prefix_last_term,
+                &filters,
+                PER_GROUP,
+                query.limit,
+            );
+            sql::query_as_with(built).fetch_all(&self.pool).await?
+        };
         if rows.is_empty() {
-            interpreted.left_out_tokens =
-                under::left_out_tokens(&self.pool, &corpora, &parsed, &known_under, &filters)
-                    .await?;
+            interpreted.left_out_tokens = under::left_out_tokens(&parsed, &known_under, &filters);
         }
         let mut groups = if filters.excerpts {
             group::with_excerpts(rows, &vocab.kinds, &query::needles(&parsed.query.text))
@@ -529,7 +537,7 @@ impl Searcher {
         })?;
         let vocab = self.vocabulary().await?;
         let mut parsed = query::parse(&query.raw, &vocab);
-        under::report_unknown(&self.pool, &mut parsed).await?;
+        under::report_unknown(&self.pool, &mut parsed, &[]).await?;
         let mut filters = query::merge(&parsed, &query.filters);
         let text = (!parsed.query.text.trim().is_empty()).then_some(parsed.query.text.as_str());
         if text.is_none() && filters.is_empty() {
