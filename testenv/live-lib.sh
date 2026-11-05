@@ -707,16 +707,35 @@ _live_lock_keep() {
 # killed without giving the lock back leaves its pid behind, and macOS may
 # hand that pid to any process since: one started after the epoch, or one
 # running something else, is not the keeper.
+#
+# `env LC_ALL=C`, not a bare prefix: Homebrew's bash crashes setting its own
+# locale in a forked child, after the command has printed (#2483).
 _live_lock_is_keeper() {
   local cmd start
-  cmd=$(ps -o command= -p "$1" 2>/dev/null) || return 1
+  cmd=$(_live_lock_ps command "$1") || return 1
   case $cmd in *"live up $3"*) ;; *) return 1 ;; esac
-  start=$(LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null) || return 1
+  start=$(_live_lock_ps lstart "$1") || return 1
   read -r start <<<"$start" # ps pads the field
   # BSD date (macOS), else GNU's.
-  start=$(LC_ALL=C date -j -f '%a %b %d %T %Y' "$start" +%s 2>/dev/null ||
-    LC_ALL=C date -d "$start" +%s 2>/dev/null) || return 1
+  start=$(env LC_ALL=C date -j -f '%a %b %d %T %Y' "$start" +%s 2>/dev/null ||
+    env LC_ALL=C date -d "$start" +%s 2>/dev/null) || return 1
   [ "$start" -le "$2" ]
+}
+
+# _live_lock_ps <field> <pid> -- one field of the pid. Exit 1 is `ps` saying
+# there is no such process, an answer; a read that died says nothing about the
+# pid, so it is read again, and a pid still unread fails as a gone one does:
+# `live_down` signals only what it has read as the keeper (#2145, #2483).
+_live_lock_ps() {
+  local out rc i
+  for ((i = 0; i < 3; i++)); do
+    rc=0
+    out=$(env LC_ALL=C ps -o "$1=" -p "$2" 2>/dev/null) || rc=$?
+    [ "$rc" -gt 1 ] || break
+    sleep 0.2
+  done
+  printf '%s\n' "$out"
+  return "$rc"
 }
 
 # _live_lock_unkeep <product> -- end the keeper of this product's live-up.

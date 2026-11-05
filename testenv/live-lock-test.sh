@@ -473,10 +473,13 @@ lock_gone "a keeper lets go after KNOBAS_LIVE_KEEPER_MAX"
 # only while its command line names `live up <product>` and it started no
 # later than the lock's epoch; any other holder is a dead keeper, whose lock
 # goes and nothing is signalled.
-down_with() { # down_with <name> <target> -- `live down confluence` against a planted lock
-  ln -sfn "$2" "$KNOBAS_LIVE_LOCK"
+down_only() { # down_only <name> -- `live down confluence` from another worktree
   LT_LIB=$here/live-lib.sh LT_TREE=$scratch/elsewhere/testenv \
     bash "$scratch/stand-in/live" down confluence >"$scratch/$1.out" 2>&1 && echo 0 || echo $?
+}
+down_with() { # down_with <name> <target> -- `live down confluence` against a planted lock
+  ln -sfn "$2" "$KNOBAS_LIVE_LOCK"
+  down_only "$1"
 }
 # down_spares <name> <pid> <what> -- live-down over a planted lock naming <pid>
 # signalled nothing and freed the lock.
@@ -514,6 +517,90 @@ lock_gone "a dead keeper's lock goes"
 [ $((SECONDS - from)) -lt 4 ] || fail "live-down does not wait on a dead keeper" "took $((SECONDS - from)) s"
 checks=$((checks + 1))
 : >"$STUB_RUNNING_FILE"
+
+# --- a read that dies is not an answer (#2483) --------------------------------
+
+# A `ps` that dies says nothing about the pid, so one such read neither makes a
+# real keeper look reused nor a reused pid look like the keeper. It is read
+# again, a bounded number of times; a pid that cannot be read is not signalled.
+# The stub dies with the status #2483 logged from the real failure (139) on the
+# calls STUB_PS_DIE lists ("all" for every call), and hands the rest to `ps`.
+real_ps=$(command -v ps)
+mkdir -p "$scratch/ps-stub"
+cat >"$scratch/ps-stub/ps" <<STUB
+#!/usr/bin/env bash
+n=\$((\$(cat "\$STUB_PS_CALLS" 2>/dev/null || echo 0) + 1))
+echo "\$n" >"\$STUB_PS_CALLS"
+case " \$STUB_PS_DIE " in *" \$n "* | *" all "*) exit 139 ;; esac
+exec "$real_ps" "\$@"
+STUB
+chmod +x "$scratch/ps-stub/ps"
+export STUB_PS_CALLS="$scratch/ps-calls"
+ps_dying() { # ps_dying <calls> <command...> -- run it under the stub, its count at 0
+  local die=$1
+  shift
+  : >"$STUB_PS_CALLS"
+  PATH="$scratch/ps-stub:$PATH" STUB_PS_DIE=$die "$@"
+}
+echo knobas-confluence >"$STUB_RUNNING_FILE"
+# The real keeper: its pid is read twice, for the command line and for the
+# start, and it is still the keeper whichever read died once.
+for die in 1 2; do
+  rc=$(liveup "dying$die" confluence)
+  check "live-up before read $die dies succeeds" "$rc" "0"
+  rc=$(ps_dying "$die" down_only "dying$die-down")
+  check "live-down whose read $die dies succeeds" "$rc" "0"
+  check "and it signalled the real keeper, which gave the lock back (read $die)" "$(cat "$scratch/dying$die-down.out")" "the JVM lock its live-up kept is free"
+  check_not "and did not take the keeper for a reused pid (read $die)" "$(cat "$scratch/dying$die-down.out")" "not its keeper"
+  lock_gone "live-down whose read $die dies gives the lock back"
+done
+# A reused pid is not the keeper either: dying reads do not let one through.
+rc=$(ps_dying 1 down_with dying-reused-cmd "$other $(($(date +%s) + 60)) live-up-confluence-kept $scratch/tree")
+down_spares dying-reused-cmd "$other" "process whose command-line read dies once"
+check "and it says that pid is not its keeper" "$(cat "$scratch/dying-reused-cmd.out")" "not its keeper"
+rc=$(ps_dying 2 down_with dying-reused-late "$later $(($(date +%s) - 120)) live-up-confluence-kept $scratch/tree")
+down_spares dying-reused-late "$later" "late-started process whose start read dies once"
+check "and it says that pid is not its keeper either" "$(cat "$scratch/dying-reused-late.out")" "not its keeper"
+# A read that never comes back: a pid nobody could read is never signalled, and
+# the reads stop.
+rc=$(ps_dying all down_with dying-always "$later $(date +%s) live-up-confluence-kept $scratch/tree")
+down_spares dying-always "$later" "process no read of which comes back"
+check "and it read that pid a bounded number of times" "$(cat "$STUB_PS_CALLS")" "3"
+# Nor is a pid whose command line reads as the keeper's while its start does not:
+# only the start could tell a reused one, so it is not signalled unread.
+rc=$(ps_dying "2 3 4" down_with dying-start "$later $(date +%s) live-up-confluence-kept $scratch/tree")
+down_spares dying-start "$later" "process named like a keeper whose start read never comes back"
+# `ps` saying no such process is an answer: it is not asked again.
+sh -c 'exit 0' &
+gone=$!
+wait "$gone" || true
+rc=$(ps_dying none down_with dying-gone "$gone $(date +%s) live-up-confluence-kept $scratch/tree")
+check "live-down over a pid ps says is gone succeeds" "$rc" "0"
+check "and it asked ps once" "$(cat "$STUB_PS_CALLS")" "1"
+: >"$STUB_RUNNING_FILE"
+
+# --- a locale prefix in a forked bash (#2483) ----------------------------------
+
+# `LC_ALL=C cmd` (or LANG) makes bash set its own locale for the command and
+# again after it. Homebrew's bash goes through libintl into CoreFoundation for
+# that, which crashes with SIGSEGV in a forked child (`$(...)`, `(...)`) once a
+# shell is in the state #2483 records: the command has run and printed, and the
+# child exits 139. `env LC_ALL=C cmd` leaves bash's locale alone; a pipeline's
+# element execs without coming back, so `... | LC_ALL=C sort` is safe. No stub
+# can put a shell into that state, so this reads the source.
+root=$(cd "$here/.." && pwd)
+checks=$((checks + 1))
+shell_scripts=$(while IFS= read -r f; do
+  if [ -f "$root/$f" ] && head -n 1 -- "$root/$f" | grep -qE '^#!.*\b(ba)?sh\b'; then echo "$f"; fi
+done < <(git -C "$root" ls-files -- testenv scripts))
+[ -n "$shell_scripts" ] || fail "the locale-prefix scan finds shell scripts" "none under $root"
+prefixed=$(while IFS= read -r f; do
+  grep -HnE '(^|[^[:alnum:]_])(LC_ALL|LANG)=[^[:space:]]*[[:space:]]+[^[:space:]]' "$root/$f" || true
+done <<<"$shell_scripts" |
+  grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' |
+  grep -vE '(^|[^|])\|[[:space:]]*(LC_ALL|LANG)=' |
+  grep -vE 'env (LC_ALL|LANG)=' || true)
+[ -z "$prefixed" ] || fail "no shell script runs a command under a bare locale prefix (use: env LC_ALL=C cmd)" "$prefixed"
 
 
 # --- one lock per product on a remote target ----------------------------------
