@@ -423,6 +423,229 @@ async fn an_author_a_source_has_deleted_does_not_count() {
     assert_eq!(answer_for(&response, &source), Some(FilterAnswer::NoValues));
 }
 
+/// More rows than the probe reads of a source before it stops to ask the whole
+/// source (`coverage::NEWEST_ROWS_SQL`'s 64).
+const PAST_THE_WALK: i64 = 70;
+
+/// `count` rows of one shape, all newer than anything [`seed_item`] writes, so
+/// they are what a walk down `item_source_updated_idx` meets first.
+async fn seed_newest_rows(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    author: Option<&str>,
+    count: i64,
+) {
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select $1 || ':newest-' || g, $2, 'newest ' || g
+           from generate_series(1, $3::bigint) g",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(count)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item
+           (entity_id, source_id, kind, title, body_text, author, item_updated_at,
+            synced_at, payload)
+         select $1 || ':newest-' || g, $1, $2, 'newest ' || g, 'newest ' || g, $3,
+                now() + make_interval(mins => g::int), now(), '{}'::jsonb
+           from generate_series(1, $4::bigint) g",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(author)
+    .bind(count)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// One source's rows, newest first, and what an `author:` query should say.
+struct Shape {
+    case: &'static str,
+    /// The query's kind scope, typed before the rest of it.
+    prefix: &'static str,
+    /// The rows the walk meets first: kind, author, how many.
+    newest: (&'static str, Option<&'static str>, i64),
+    /// One older row: kind, author. The only row that can change the verdict
+    /// when the newest rows did not.
+    older: Option<(&'static str, Option<&'static str>)>,
+    /// Withdraw the older row, so it vouches for nothing.
+    older_withdrawn: bool,
+    expected: Option<FilterAnswer>,
+}
+
+/// **The verdict never depends on how far back the row that decides it sits.**
+///
+/// The probe stops early on purpose, and every shape here is one where stopping
+/// early would be wrong: what decides the verdict is older than what a bounded
+/// read of the source sees first. `commit` is the kind the launcher always
+/// leaves out (`frames::ALWAYS_LEFT_OUT`). The expected values are written by
+/// hand from the module docs' rules, not read off either statement, and this
+/// table passed against the grouped aggregate alone before the walk existed.
+#[tokio::test]
+async fn the_verdict_does_not_depend_on_how_far_back_the_deciding_row_sits() {
+    use FilterAnswer::{Answered, NoValues};
+    const SOMEONE: Option<&str> = Some("mara.lindqvist");
+    let n = PAST_THE_WALK;
+    let shapes = [
+        Shape {
+            case: "left-out rows on top, an authored row beneath",
+            prefix: "",
+            newest: ("commit", SOMEONE, n),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: false,
+            expected: Some(Answered),
+        },
+        Shape {
+            case: "left-out rows on top, an unauthored row beneath",
+            prefix: "",
+            newest: ("commit", SOMEONE, n),
+            older: Some(("ticket", None)),
+            older_withdrawn: false,
+            expected: Some(NoValues),
+        },
+        Shape {
+            case: "nothing but left-out rows, which is no corpus at all",
+            prefix: "",
+            newest: ("commit", SOMEONE, n),
+            older: None,
+            older_withdrawn: false,
+            expected: None,
+        },
+        Shape {
+            case: "a few left-out rows and nothing else, read to the end",
+            prefix: "",
+            newest: ("commit", SOMEONE, 3),
+            older: None,
+            older_withdrawn: false,
+            expected: None,
+        },
+        Shape {
+            case: "unauthored rows on top, an authored row beneath",
+            prefix: "",
+            newest: ("ticket", None, n),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: false,
+            expected: Some(Answered),
+        },
+        Shape {
+            case: "exactly as many unauthored rows as a walk reads, an authored row beneath",
+            prefix: "",
+            newest: ("ticket", None, 64),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: false,
+            expected: Some(Answered),
+        },
+        Shape {
+            case: "one row fewer than a walk reads, an authored row beneath",
+            prefix: "",
+            newest: ("ticket", None, 63),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: false,
+            expected: Some(Answered),
+        },
+        Shape {
+            case: "blank authors on top, an authored row beneath",
+            prefix: "",
+            newest: ("ticket", Some(""), n),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: false,
+            expected: Some(Answered),
+        },
+        Shape {
+            case: "unauthored all the way down",
+            prefix: "",
+            newest: ("ticket", None, n),
+            older: None,
+            older_withdrawn: false,
+            expected: Some(NoValues),
+        },
+        Shape {
+            case: "a few unauthored rows, read to the end",
+            prefix: "",
+            newest: ("ticket", None, 3),
+            older: None,
+            older_withdrawn: false,
+            expected: Some(NoValues),
+        },
+        Shape {
+            case: "the only authored row is beneath the walk and withdrawn",
+            prefix: "",
+            newest: ("ticket", None, n),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: true,
+            expected: Some(NoValues),
+        },
+        Shape {
+            case: "the only row in the corpus is beneath the walk and withdrawn",
+            prefix: "",
+            newest: ("commit", SOMEONE, n),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: true,
+            expected: None,
+        },
+        Shape {
+            case: "another kind on top, an authored row of the scoped kind beneath",
+            prefix: "kind:ticket ",
+            newest: ("build", SOMEONE, n),
+            older: Some(("ticket", SOMEONE)),
+            older_withdrawn: false,
+            expected: Some(Answered),
+        },
+        Shape {
+            case: "another kind on top, an unauthored row of the scoped kind beneath",
+            prefix: "kind:ticket ",
+            newest: ("build", SOMEONE, n),
+            older: Some(("ticket", None)),
+            older_withdrawn: false,
+            expected: Some(NoValues),
+        },
+        Shape {
+            case: "authored rows of another kind only: they do not vouch for this scope",
+            prefix: "kind:ticket ",
+            newest: ("build", SOMEONE, n),
+            older: None,
+            older_withdrawn: false,
+            expected: None,
+        },
+    ];
+
+    let pool = pool().await;
+    let s = searcher(&pool);
+    for (index, shape) in shapes.iter().enumerate() {
+        let t = token("deep");
+        let source = format!("src{index}-{t}");
+        seed_source(&pool, &source, "teamcity", "Source", None).await;
+        let (kind, author, count) = shape.newest;
+        seed_newest_rows(&pool, &source, kind, author, count).await;
+        if let Some((kind, author)) = shape.older {
+            let older = format!("{source}:older");
+            seed_item(&pool, &older, kind, &source, &format!("{t} older"), author).await;
+            if shape.older_withdrawn {
+                sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+                    .bind(&older)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+        }
+        let raw = format!("{}{t} author:nobody.at.all source:{source}", shape.prefix);
+        let response = s.search(q(&raw)).await.unwrap();
+        assert_eq!(
+            answer_for(&response, &source),
+            shape.expected,
+            "{}: {:?}",
+            shape.case,
+            response.coverage
+        );
+    }
+}
+
 /// An author column that is present and blank is nobody.
 ///
 /// `Vocabulary::load` already drops a blank configured username for this

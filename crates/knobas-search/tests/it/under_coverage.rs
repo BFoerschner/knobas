@@ -259,6 +259,133 @@ async fn a_kind_scope_does_not_narrow_the_verdict() {
     assert_eq!(answers, vec![(gitea, FilterAnswer::NoValues)]);
 }
 
+/// Asking one source is a question about that source's rows and no other's.
+///
+/// The probe walks an index range, so the ids around a source's are what a
+/// range too wide would read. The talking source sits between two quiet ones,
+/// all on one adapter, and each quiet one has a row so it gets a verdict at all.
+#[tokio::test]
+async fn a_source_is_not_answered_for_by_the_ids_beside_it() {
+    let (pool, searcher) = searcher().await;
+    let t = token().to_lowercase();
+    let (before, talking, after) = (
+        format!("gitea-{t}-a"),
+        format!("gitea-{t}-b"),
+        format!("gitea-{t}-c"),
+    );
+    for source in [&before, &talking, &after] {
+        configure(&pool, source, "gitea").await;
+        let full = format!("o{t}/{source}");
+        item(
+            &pool,
+            source,
+            "repo",
+            &full,
+            serde_json::json!({ "full_name": full, "name": source }),
+        )
+        .await;
+    }
+    let full = format!("o{t}/{talking}");
+    item(
+        &pool,
+        &talking,
+        "pr",
+        &format!("pr-{t}"),
+        serde_json::json!({ "base": { "repo": { "full_name": full, "name": talking } } }),
+    )
+    .await;
+
+    let answers = under_answers(
+        &searcher,
+        &format!("under:{full} source:{before} source:{talking} source:{after}"),
+    )
+    .await;
+    assert_eq!(
+        answers,
+        vec![
+            (before, FilterAnswer::NoValues),
+            (talking, FilterAnswer::Answered),
+            (after, FilterAnswer::NoValues),
+        ]
+    );
+}
+
+/// A child row whose item the source has withdrawn names nothing, however many
+/// such rows the index range holds: the walk has to go past them all.
+#[tokio::test]
+async fn a_source_whose_child_rows_are_all_withdrawn_names_no_parent() {
+    let (pool, searcher) = searcher().await;
+    let t = token().to_lowercase();
+    let gitea = format!("gitea-{t}");
+    configure(&pool, &gitea, "gitea").await;
+    let full = format!("o{t}/payout-{t}");
+    let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
+    item(&pool, &gitea, "repo", &full, repo.clone()).await;
+    let pr = format!("pr-{t}");
+    item(
+        &pool,
+        &gitea,
+        "pr",
+        &pr,
+        serde_json::json!({ "base": { "repo": repo } }),
+    )
+    .await;
+    let answers = under_answers(&searcher, &format!("under:{full} source:{gitea}")).await;
+    assert_eq!(answers, vec![(gitea.clone(), FilterAnswer::Answered)]);
+
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(format!("{gitea}:{pr}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let answers = under_answers(&searcher, &format!("under:{full} source:{gitea}")).await;
+    assert_eq!(answers, vec![(gitea, FilterAnswer::NoValues)]);
+}
+
+/// Which sources `under:` lists is the corpus question, and its answer can sit
+/// beneath a run of rows the launcher leaves out. Commits are the common case:
+/// a Gitea's newest rows are usually commits, and they name a parent while the
+/// launcher draws none of them.
+#[tokio::test]
+async fn a_source_is_listed_by_a_kept_row_beneath_many_it_leaves_out() {
+    let (pool, searcher) = searcher().await;
+    let t = token().to_lowercase();
+    let (kept, only_commits) = (format!("gitea-kept-{t}"), format!("gitea-commits-{t}"));
+    let full = format!("o{t}/payout-{t}");
+    let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
+    for source in [&kept, &only_commits] {
+        configure(&pool, source, "gitea").await;
+        for n in 0..70 {
+            item(
+                &pool,
+                source,
+                "commit",
+                &format!("c-{n}"),
+                serde_json::json!({ "repository": repo }),
+            )
+            .await;
+        }
+    }
+    // Older than every commit above: the walk down the source's index meets it last.
+    item(&pool, &kept, "repo", &full, repo.clone()).await;
+    sqlx::query("update sync.item set item_updated_at = now() - interval '1 year' where entity_id = $1")
+        .bind(format!("{kept}:{full}"))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let answers = under_answers(
+        &searcher,
+        &format!("under:{full} source:{kept} source:{only_commits}"),
+    )
+    .await;
+    assert_eq!(
+        answers,
+        vec![(kept, FilterAnswer::Answered)],
+        "a source whose every row is left out put nothing in this corpus"
+    );
+}
+
 fn sorted(mut answers: Vec<(String, FilterAnswer)>) -> Vec<(String, FilterAnswer)> {
     answers.sort_by(|a, b| a.0.cmp(&b.0));
     answers
