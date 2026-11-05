@@ -327,7 +327,7 @@
   {:else}
     {@render said(thread.comments)}
     {#each talk.queuedOn(thread) as body, k (k)}
-      <div class="tf-said tf-queued"><p><b>You</b> <TfStateChip text="queued" tone="warn" /> {body}</p></div>
+      <div class="tf-said tf-queued"><p><b>You</b> <TfStateChip text="queued" tone="info" /> {body}</p></div>
     {/each}
     {#if talk.isReplying(thread)}
       <div class="tf-newc tf-reply">
@@ -413,7 +413,7 @@
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>
     {/if}
-    {#if chip}<span class="tf-chip">{chip}</span>{/if}
+    {#if chip}<TfStateChip text={chip} />{/if}
     {#if pipeline !== null && pipeline.on && pipeline.failed === null}
       <span class="tf-ran" class:tf-running={pipeline.running} title={pipeline.running ? "Running the pipeline on both sides" : "The diff of the pipeline's output on both sides"}
         >{pipeline.label}</span

@@ -521,16 +521,6 @@ test("a tab the page does not have is not what its nav entry comes back to", asy
   expect(seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Code")!.getAttribute("href")).toBe("#/code/prs");
 });
 
-test("an unknown tab of a pull request or a repository says so, under the section's title, and is not drawn as its first tab", async () => {
-  start({ nav: windowNav });
-  await at("#/pr/gh:pr-12/nope");
-  expect(seen(".tf-nohere")[0]?.textContent).toContain("This pull request has no such tab.");
-  expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Code");
-  expect(seen(".tf-nohere a")[0]?.getAttribute("href")).toBe("#/pr/gh%3Apr-12");
-  await at("#/repo/gh:repo-1/nope");
-  expect(seen(".tf-nohere")[0]?.textContent).toContain("This repository has no such tab.");
-});
-
 test("back to a page: the row that opened the detail has focus again, and the page's scroll is what it was", async () => {
   start({ nav: windowNav });
   await at("#/inbox");

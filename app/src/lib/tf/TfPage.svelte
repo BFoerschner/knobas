@@ -35,7 +35,7 @@
   import { forgetHidden, keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
   import type { TfPageContext, TfPageEntry } from "./page-entry";
   import { PAGES } from "./pages";
-  import { HEAD_NAME, SECTION_NAME, sectionOf, type TfRoute } from "./route";
+  import { SECTION_NAME, sectionOf, type TfRoute } from "./route";
   import TfNothingHere from "./TfNothingHere.svelte";
   import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfKeptPage from "./TfKeptPage.svelte";
@@ -68,20 +68,15 @@
   const page = $derived(found);
 
   /**
-   * What an address the page does not know says: the path to the kind, one sentence, and the way out. A pull request's
-   * or a repository's tab leads to that page; any other to its section. Its heading is the section's, as on a page that
-   * knows the address, so the block sits in one place.
+   * What an address the page does not know says: the path to the kind, one sentence, and the way out to its section. Its
+   * heading is the section's, as on a page that knows the address, so the block sits in one place. A pull request and a
+   * repository say it themselves, under their own header and tabs.
    */
   const unknown = $derived.by(() => {
     const section = sectionOf(route);
     if (section === null || section === "job" || section === "tickets") return null;
     const name = SECTION_NAME[section];
     const top = { name, href: `#/${section}` };
-    if (route.view === "full" && (route.head === "pr" || route.head === "repo") && route.rest[0]) {
-      const word = HEAD_NAME[route.head]!;
-      const href = `#/${route.head}/${encodeURIComponent(route.rest[0])}`;
-      return { name, parts: [top, { name: word, href }, { name: "Nothing here" }], message: `This ${word.toLowerCase()} has no such tab.`, href, action: word };
-    }
     return { name, parts: [top, { name: "Nothing here" }], message: `${name} has no such page.`, href: top.href, action: name };
   });
 

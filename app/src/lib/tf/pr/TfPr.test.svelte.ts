@@ -25,6 +25,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
+import { layers } from "../layers.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 
@@ -307,8 +308,8 @@ test("Overview: each check with its state, the one the mirror holds opening its 
   await draw([PR]);
   const checks = [...target.querySelectorAll(".tf-prchecks tr")];
   expect(checks.map(cells)).toEqual([
-    "Payout_IntegrationTests #1187 | failure, 41 passed, 1 failed",
-    "Payout_Lint #904 | success",
+    "Payout_IntegrationTests #1187 | Failed, 41 passed, 1 failed",
+    "Payout_Lint #904 | Passed",
   ]);
   expect(checks[0]!.querySelector(".tf-dot")!.classList.contains("tf-err")).toBe(true);
   expect(checks[0]!.querySelector("a")!.getAttribute("href")).toBe(`#/build/${encodeURIComponent(RUN)}`);
@@ -322,7 +323,7 @@ test("Ready to merge? reads prototype-6's three lines, approvals, checks and con
   const lines = [...target.querySelectorAll(".tf-prck")];
   expect(lines.map((line) => line.textContent?.replace(/\s+/g, " ").trim())).toEqual([
     "● Approvals: 1 of 2",
-    "✕ Checks: Payout_IntegrationTests #1187 failure",
+    "✕ Checks: Payout_IntegrationTests #1187 failed",
     "✓ No conflicts with main",
   ]);
   expect(lines.map((line) => line.className)).toEqual(["tf-prck tf-warn", "tf-prck tf-err", "tf-prck tf-ok"]);
@@ -375,15 +376,15 @@ test("the side rail: a failing required check is the first check, and readiness 
   if (view) unmount(view);
   view = null;
   await draw([PR, "conversation"], ports({ pr: railView() }));
-  expect(lines(".tf-prrail-checks .tf-prit")).toEqual(["ci/test Required failure", "lint failure", "ci/build Required success"]);
+  expect(lines(".tf-prrail-checks .tf-prit")).toEqual(["ci/test Required Failed", "lint Failed", "ci/build Required Passed"]);
   // The mirror holds ci/test's run: the check opens it.
   expect(target.querySelector(".tf-prrail-checks .tf-prit a")!.getAttribute("href")).toBe(`#/build/${encodeURIComponent(RUN)}`);
   expect(target.querySelector(".tf-prverdict")!.firstChild!.textContent!.trim()).toBe("Not yet: 2 of 3 met");
-  expect(text(".tf-prverdict .tf-prwhy")).toBe("required check ci/test failed");
+  expect(text(".tf-prverdict .tf-prwhy")).toBe("");
   expect(target.querySelector(".tf-prverdict")!.classList.contains("tf-err")).toBe(true);
   const required = [...target.querySelectorAll(".tf-prck")].find((line) => line.textContent?.includes("Required checks"))!;
   expect(required.className).toBe("tf-prck tf-err");
-  expect(required.querySelector(".tf-prwhy")!.textContent).toBe("ci/test failure");
+  expect(required.querySelector(".tf-prwhy")!.textContent).toBe("ci/test failed");
   expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "JO jonas Changes requested"]);
   // Ready to merge says there are none, so no panel says it again.
   expect(target.querySelector(".tf-prconflicts")).toBeNull();
@@ -405,7 +406,7 @@ test("the builds of the head the mirror holds link to their runs (#2278)", async
   ];
   await draw([PR], ports({ getEntity: async () => ({ ...detail("mara"), builds }) as EntityDetail }));
   const items = [...target.querySelectorAll(".tf-prbuilds .tf-prit")];
-  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Payout_Nightly #1187 failed", "Payout_Docker #904 success"]);
+  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Payout_Nightly #1187 Failed", "Payout_Docker #904 Passed"]);
   expect(items.map((item) => item.querySelector("a")!.getAttribute("href"))).toEqual([
     `#/build/${encodeURIComponent(RUN)}`,
     `#/build/${encodeURIComponent("teamcity:Payout_Docker#904")}`,
@@ -436,7 +437,7 @@ test("Edit sends only what changed, and the header says an edit is queued", asyn
   await settle();
   expect(writes).toEqual([{ EditPullRequest: { entity: PR, title: "SEPA retry with backoff", body: null, state: null } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-fhead .tf-sub")).toContain("edit queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Edit queued");
 });
 
 test("Close asks the source's sentence and queues the closed state", async () => {
@@ -447,7 +448,7 @@ test("Close asks the source's sentence and queues the closed state", async () =>
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Close pull request")!.click();
   await settle();
   expect(writes).toEqual([{ EditPullRequest: { entity: PR, title: null, body: null, state: "closed" } }]);
-  expect(text(".tf-fhead .tf-sub")).toContain("close queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Close queued");
 });
 
 /** #2289: a destructive confirm is filled red; any other confirm is the plain primary. */
@@ -508,7 +509,7 @@ test("a source action draws the dialog its source declares and queues SourceActi
   await settle();
   expect(writes).toEqual([{ SourceAction: { entity: PR, id: "stamp_release", fields: { channel: "stable", note: "for 2.0" } } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-fhead .tf-sub")).toContain("stamp release queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Stamp release queued");
 });
 
 test("a source action the source draws disabled says why and opens nothing", async () => {
@@ -590,7 +591,7 @@ test("a muted line in Overview is drawn as a line where the source put it, never
   await draw([PR], ports({ pr: withBlocks("overview", [facts!, checks!, mutedLine("Two checks are on Gitea only."), description!]) }));
   expect([...target.querySelectorAll(".tf-prchecks tr")].length).toBe(2);
   expect(text(".tf-prchecks + .tf-prline")).toBe("Two checks are on Gitea only.");
-  expect([...target.querySelectorAll(".tf-prck > span:last-child")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failure");
+  expect([...target.querySelectorAll(".tf-prck > span:last-child")][1]!.textContent?.trim()).toBe("Checks: Payout_IntegrationTests #1187 failed");
 });
 
 test("a muted line in Commits is drawn as a line, never as a commit; the list after it is the commits (#2065)", async () => {
@@ -685,7 +686,10 @@ test("line comments waiting turn Review… into Submit review (N pending), which
     "Request changesBlocks the merge until you approve",
   ]);
   expect(dialog.querySelector(".tf-pane-h")!.textContent).toBe("2 line comments go with it");
-  // Comment is picked first; Approve with a summary sends both comments.
+  // Nothing is picked first (the enabled rule); Approve with a summary sends both comments.
+  expect(dialog.querySelector<HTMLInputElement>(".tf-radio input:checked")).toBeNull();
+  expect(dialogButton("Submit review").disabled).toBe(true);
+  expect(text(".tf-dialog footer .tf-first")).toBe("Pick a verdict.");
   dialog.querySelector<HTMLInputElement>("input[value=approve]")!.click();
   flushSync();
   type(dialog.querySelector("textarea")!, "Looks right.");
@@ -707,7 +711,7 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   // The review took them: none waits, the toolbar is Review… again, the header says so.
   expect(pending.of(PR)).toEqual([]);
   expect(buttons().slice(0, 2)).toEqual(["Merge…", "Review…"]);
-  expect(text(".tf-fhead .tf-sub")).toContain("review queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Review queued");
 });
 
 test("#2276: Submit review from Overview reads the diff's head first and sends no comment written on an earlier head", async () => {
@@ -748,10 +752,11 @@ test("Request changes waits for its words; Comment waits for a line comment", as
   flushSync();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(dialog.querySelector<HTMLInputElement>("input[value=comment]")!.disabled).toBe(true);
-  expect(dialog.querySelector<HTMLInputElement>("input[value=approve]")!.checked).toBe(true);
+  expect(dialog.querySelector<HTMLInputElement>("input[value=approve]")!.checked).toBe(false);
   dialog.querySelector<HTMLInputElement>("input[value=request_changes]")!.click();
   flushSync();
   expect(dialogButton("Submit review").disabled).toBe(true);
+  expect(text(".tf-dialog footer .tf-first")).toBe("Request changes needs a summary.");
   type(dialog.querySelector("textarea")!, "Bound the jitter.");
   expect(dialogButton("Submit review").disabled).toBe(false);
   dialogButton("Submit review").click();
@@ -876,7 +881,7 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
   const dialog = document.querySelector(".tf-dialog")!;
   expect([...dialog.querySelectorAll(".tf-prm-ready > span")].map((s) => s.textContent?.trim())).toEqual([
     "Approvals: 1 of 2",
-    "Checks: Payout_IntegrationTests #1187 failure",
+    "Checks: Payout_IntegrationTests #1187 failed",
     "No conflicts with main",
   ]);
   expect([...dialog.querySelectorAll(".tf-radio label")].map((l) => l.textContent?.trim())).toEqual([
@@ -886,7 +891,7 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
   ]);
   expect(text(".tf-dialog .tf-ck")).toBe("Delete feature/PAY-231-sepa-retry after merging");
   expect(dialog.querySelector<HTMLInputElement>(".tf-ck input")!.checked).toBe(true);
-  expect(text(".tf-dialog .tf-prm-note")).toBe("After the merge, PAY-231 moves to In Review (the merge follower already does this).");
+  expect(text(".tf-dialog .tf-prm-note")).toBe("After the merge, PAY-231 moves to In Review.");
   // The message shows only under Squash, prefilled as the source writes it.
   expect(dialog.querySelector("input[aria-label='Squash commit message']")).toBeNull();
   dialog.querySelector<HTMLInputElement>("input[value=squash]")!.click();
@@ -902,7 +907,7 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
     { MergePullRequest: { entity: PR, style: "squash", delete_branch: false, message: "SEPA retry with backoff (#142)" } },
   ]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-fhead .tf-sub")).toContain("merge queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Merge queued");
 });
 
 test("a merge commit sends no message, and a pull request linked to no ticket draws no In Review line", async () => {
@@ -1014,7 +1019,7 @@ const chips = () => [...target.querySelectorAll(".tf-fhead .tf-sub .tf-chip")].m
 test("a landed close drops its chip and the holds it drove; the source reopening it later does not bring the chip back", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
   await queueClose();
-  expect(chips()).toEqual(["Open", "close queued"]);
+  expect(chips()).toEqual(["Open", "Close queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
   expect(chips()).toEqual(["Closed"]);
@@ -1030,7 +1035,7 @@ test("a close the read still shows open keeps its chip and its holds", async () 
   await queueClose();
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
-  expect(chips()).toEqual(["Open", "close queued"]);
+  expect(chips()).toEqual(["Open", "Close queued"]);
   expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
 });
 
@@ -1045,10 +1050,10 @@ test("a landed merge drops its chip; an edit the queue has not sent keeps its ch
   dialogButton("Save changes").click();
   await settle();
   await queueMerge();
-  expect(chips()).toEqual(["Open", "edit queued", "merge queued"]);
+  expect(chips()).toEqual(["Open", "Edit queued", "Merge queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT], "merged") }));
-  expect(chips()).toEqual(["Merged", "edit queued"]);
+  expect(chips()).toEqual(["Merged", "Edit queued"]);
 });
 
 test("a comment's mark goes once the conversation holds its words", async () => {
@@ -1174,11 +1179,11 @@ test("a merge, a close and a reopen each say queued, then sent, and go on the re
     const { sync, follower, sent, io } = lifecycle(() => read);
     await draw([PR], io, follower);
     await queue();
-    expect(chips().slice(1)).toEqual([`${verb} queued`]);
+    expect(chips().slice(1)).toEqual([`${verb.charAt(0).toUpperCase()}${verb.slice(1)} queued`]);
     sent(80);
-    expect(chips().slice(1)).toEqual([`${verb} sent`]);
+    expect(chips().slice(1)).toEqual([`${verb.charAt(0).toUpperCase()}${verb.slice(1)} sent`]);
     await sync.ended("gitea"); // the source still says what it said: the echo stays
-    expect(chips().slice(1)).toEqual([`${verb} sent`]);
+    expect(chips().slice(1)).toEqual([`${verb.charAt(0).toUpperCase()}${verb.slice(1)} sent`]);
     read = to;
     await sync.refreshed(PR, 80);
     expect(chips().slice(1)).toEqual([]);
@@ -1200,11 +1205,11 @@ test("an edit says queued, then sent, and goes on the first live read asked once
   flushSync();
   dialogButton("Save changes").click();
   await settle();
-  expect(chips()).toEqual(["Open", "edit queued"]);
+  expect(chips()).toEqual(["Open", "Edit queued"]);
   await sync.ended("gitea"); // read while the edit is still open: not yet shown
-  expect(chips()).toEqual(["Open", "edit queued"]);
+  expect(chips()).toEqual(["Open", "Edit queued"]);
   sent(80);
-  expect(chips()).toEqual(["Open", "edit sent"]);
+  expect(chips()).toEqual(["Open", "Edit sent"]);
   await sync.ended("gitea");
   expect(chips()).toEqual(["Open"]);
 });
@@ -1217,7 +1222,7 @@ test("a review goes on the re-read of the refresh that followed it, even before 
   flushSync();
   dialogButton("Submit review").click();
   await settle();
-  expect(chips()).toEqual(["Open", "review queued"]);
+  expect(chips()).toEqual(["Open", "Review queued"]);
   await sync.refreshed(PR, 80);
   expect(chips()).toEqual(["Open"]);
 });
@@ -1231,9 +1236,9 @@ test("a source action says queued, then sent, and goes on the re-read once sent 
   flushSync();
   dialogButton("Stamp release").click();
   await settle();
-  expect(chips()).toEqual(["Open", "stamp release queued"]);
+  expect(chips()).toEqual(["Open", "Stamp release queued"]);
   sent(80);
-  expect(chips()).toEqual(["Open", "stamp release sent"]);
+  expect(chips()).toEqual(["Open", "Stamp release sent"]);
   await sync.refreshed(PR, 80);
   expect(chips()).toEqual(["Open"]);
 });
@@ -1392,4 +1397,26 @@ test("#2276: the reader's unsent review is a Draft in the Reviewers panel", asyn
   pending.add(PR, { path: "src/retry.rs", side: "new", line: 28, body: "Why 3?" });
   await draw([PR]);
   expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "MA you · 2 pending comments Draft"]);
+});
+
+test("an address with a tab the pull request does not have says so under its header and tabs, and lights none", async () => {
+  await draw([PR, "nope"]);
+  expect(text(".tf-fhead h1")).toContain("PR #142");
+  expect(text(".tf-nohere")).toContain("This pull request has no such tab.");
+  expect(target.querySelector(".tf-nohere a")!.getAttribute("href")).toBe("#/pr/" + encodeURIComponent(PR));
+  expect(target.querySelector(".tf-tabs a[aria-current]")).toBeNull();
+  expect(target.querySelector(".tf-cbody")).toBeNull();
+});
+
+test("#2303: Request… is an inline panel with a heading, which Esc closes before it leaves the page", async () => {
+  await draw([PR], ports({ author: "jonas", pr: prView([REQUEST, EDIT]) }));
+  expect(layers.open).toHaveLength(0);
+  button("Request…")!.click();
+  flushSync();
+  expect(text(".tf-prpick .tf-prpick-h")).toBe("Ask for a review");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector(".tf-prpick")).toBeNull();
+  expect(layers.open).toHaveLength(0);
 });

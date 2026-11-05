@@ -189,6 +189,8 @@
   height: var(--control-h); padding: 0 11px; border: 1px solid var(--rule); border-radius: 4px;
   background: var(--sheet); font-weight: 500; cursor: pointer; white-space: nowrap; text-decoration: none;
 }
+/* Weight 500 wherever it stands: `.tf button { font: inherit }` outweighs `.tf-btn`, so a `<button>` took its parent's weight (700 in a section's heading) while an `<a>` beside it kept 500. */
+.tf .tf-btn { font-weight: 500; }
 .tf-btn:hover { border-color: var(--ink-2); }
 /* An empty state's words are `--ink-2`, and its one action should not inherit that and read as disabled. */
 .tf-empty .tf-btn { color: var(--ink); }

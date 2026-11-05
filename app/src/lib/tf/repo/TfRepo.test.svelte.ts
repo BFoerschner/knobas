@@ -288,10 +288,12 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe(
     "Payments, Rust, last push today 12:30. Cloned at /Users/mara/src/payout-service, main, 1 ahead, 1 changed.",
   );
-  expect([...target.querySelectorAll(".tf-crumbs a.tf-crumb, .tf-crumbs strong")].map(text)).toEqual([
+  expect([...target.querySelectorAll(".tf-crumbs > a:not(.tf-esc), .tf-crumbs strong")].map(text)).toEqual([
     "Code",
     "tidewater/payout-service",
   ]);
+  // A repository's name is a code value in the crumb too.
+  expect(target.querySelector(".tf-crumbs strong .tf-mono")).not.toBeNull();
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   // Two groups (#2257): the repository at a ref, then work in flight, split by a rule.
   expect(tabs.map(text)).toEqual(["Files", "Commits", "Branches 2", "Compare", "Pull requests 1", "Local changes 1"]);
@@ -1150,4 +1152,25 @@ test("the compare page's diff expands context read whole at the shas the source 
   await settle();
   expect(asked).toEqual(expect.arrayContaining([`file@${HEAD}:src/retry.rs`, `file@${FORK}:src/retry.rs`]));
   expect(text(target.querySelector(".tf-cbody .tf-diff"))).toMatch(/22 line 2/);
+});
+
+test("an address with a tab the repository does not have says so under its header and tabs, and lights none", async () => {
+  await draw([REPO, "nope"]);
+  expect(text(target.querySelector(".tf-fhead h1"))).toBe("tidewater/payout-service");
+  expect(text(target.querySelector(".tf-nohere"))).toContain("This repository has no such tab.");
+  expect(target.querySelector(".tf-nohere a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}`);
+  expect(target.querySelector(".tf-tabs a[aria-current]")).toBeNull();
+  expect(target.querySelector(".tf-cbody")).toBeNull();
+});
+
+test("Compare's header does not offer New pull request again: the form below is it", async () => {
+  await draw([REPO, "compare"]);
+  expect([...target.querySelectorAll(".tf-fhead .tf-acts .tf-btn")].map(text)).not.toContain("New pull request");
+});
+
+test("Pull requests draws Code's row: the title over its author, the state, and when it last moved", async () => {
+  await draw([REPO, "prs"]);
+  const row = target.querySelector(".tf-rprs tbody tr")!;
+  expect(row.closest("table")!.classList.contains("tf-cprs")).toBe(true);
+  expect(row.querySelectorAll("td")).toHaveLength(5);
 });

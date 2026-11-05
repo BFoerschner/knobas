@@ -21,6 +21,14 @@ test("Esc's step takes the same answer as the breadcrumb's hint", () => {
   expect(escStep({ ...state, fromTicketRow: true })).toEqual({ do: "go", hash: TICKET.hash, opened: true });
 });
 
+test("an inline panel closes before Esc leaves the page, after a field has let go and under any dialog", () => {
+  const route = parseTfHash("#/pr/gh:pr-12");
+  const state = { layers: [{ kind: "panel" as const }], field: null, route, opener: TICKET };
+  expect(escStep(state)).toEqual({ do: "close", index: 0 });
+  expect(escStep({ ...state, field: { filter: false, text: "" } })).toEqual({ do: "blur" });
+  expect(escStep({ ...state, layers: [{ kind: "panel" as const }, { kind: "dialog" as const }] })).toEqual({ do: "close", index: 1 });
+});
+
 test("a hint names what Esc lands on: a section's deeper address by the name the page gave itself", () => {
   expect(openerName(parseTfHash("#/builds/teamcity:Payout_Lint"), "Payout_Lint")).toBe("Payout_Lint");
   expect(openerName(parseTfHash("#/docs/space/ENG"), "Engineering")).toBe("Engineering");

@@ -83,7 +83,8 @@
   }
 </script>
 
-<TfDialog title="New branch in {repoName}" {onclose}>
+<TfDialog {onclose}>
+  {#snippet title()}New branch in <span class="tf-mono">{repoName}</span>{/snippet}
   {#snippet body()}
     <form
       class="tf-formgrid"
@@ -96,17 +97,17 @@
       <label for="tf-nb-name">Name</label>
       <input id="tf-nb-name" class="tf-mono" type="text" autocomplete="off" spellcheck="false" bind:value={name} />
       <label for="tf-nb-from">From</label>
-      <select id="tf-nb-from" bind:value={start}>
+      <select id="tf-nb-from" class="tf-mono" bind:value={start}>
         {#if from !== null}<option value={from.value}>{from.label}</option>{/if}
         {#each branches as branch (branch)}<option value={branch}>{branch}</option>{/each}
       </select>
       {#if job !== null}
-        <span>Link to</span>
-        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> {job} <span class="tf-dim">(in knobas)</span></label>
+        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link it to <span class="tf-mono">{job}</span> in knobas</label>
       {/if}
     </form>
   {/snippet}
   {#snippet footer()}
+    {#if name.trim() === ""}<span class="tf-dim tf-small tf-first">Name the branch.</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-newbranch" disabled={!ready}>Create branch</button>
   {/snippet}

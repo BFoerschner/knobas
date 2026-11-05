@@ -5,14 +5,12 @@
  */
 import { definePage } from "../page-entry";
 import type { TfRoute } from "../route";
-import { knowsRepoTab } from "./repo";
 import TfRepo from "./TfRepo.svelte";
 
 type RepoRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "repo" };
 
 export const page = definePage({
   matches: (route): route is RepoRoute => route.view === "full" && route.section === "code" && route.head === "repo",
-  knows: (route) => knowsRepoTab(route.rest),
   component: TfRepo,
   // One page per repository; its tabs and paths are that page drawn again (#2247).
   address: (route) => route.rest[0] ?? "",

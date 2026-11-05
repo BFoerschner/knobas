@@ -105,7 +105,8 @@
   }
 </script>
 
-<TfDialog title="Commit {path}" {onclose} className="tf-cf-dialog">
+<TfDialog {onclose} className="tf-cf-dialog">
+  {#snippet title()}Commit <span class="tf-mono">{path}</span>{/snippet}
   {#snippet body()}
     <TfDiffView files={[diff]} list={false} />
     <div class="tf-formgrid">

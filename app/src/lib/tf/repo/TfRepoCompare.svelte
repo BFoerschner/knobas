@@ -14,7 +14,9 @@
     request* queues `CreatePullRequest` in the repository and lands on its
     pull requests.
   - **A pull request already open** from the branch is the source's overview's
-    row: the page says so and offers *Open PR #N* instead.
+    row: *Into* and *From* stay, so another branch can be picked, and one line
+    with *Open PR #N* stands where the rest of the form would.
+  - **One branch**: nothing to compare, so one empty state with *New branch…*.
   - **What it changes**: the diff from *Into* to *From* (#2271), the
     repository's `compare:<into>...<from>` section, drawn by the one diff
     component (`TfDiffView`): picking another *Into* reads it against that
@@ -35,6 +37,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import TfKey from "../TfKey.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
   import { rangeContext } from "../diff/context";
@@ -64,6 +67,8 @@
     base: named = null,
     defaultBranch,
     refreshed = 0,
+    branchRefused = null,
+    onNewBranch = () => {},
   }: {
     ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
@@ -77,8 +82,14 @@
     defaultBranch: string | null;
     /** The page's refreshes (#2135): each reads the branch's standing and diff again over what the page drew. */
     refreshed?: number;
+    /** Why the source draws *New branch…* disabled, where it does. */
+    branchRefused?: string | null;
+    /** Opens *New branch…*, which is what a repository of one branch can do here. */
+    onNewBranch?: () => void;
   } = $props();
 
+  /** One branch or none, and the address names no other: there is nothing to compare. */
+  const lone = $derived(branches.length <= 1 && (head === null || branches.some((option) => option.name === head)));
   const listed = $derived(branches.find((option) => option.name === head) ?? null);
   /** The branch's entity: a refresh's new listing of the same branch reads nothing again on its own. */
   const listedId = $derived(listed?.entityId ?? null);
@@ -111,8 +122,8 @@
   let link = $state(true);
   let busy = $state(false);
 
-  /** The diff read: from *Into* to the branch, once the mirror holds the branch. */
-  const section = $derived(listedId === null || head === null || base === "" ? null : compareSection(base, head));
+  /** The diff read: from *Into* to the branch, once the mirror holds the branch and they are two branches. */
+  const section = $derived(listedId === null || head === null || base === "" || base === head ? null : compareSection(base, head));
   /**
    * What *Open as diff* and *Open in…* name (Spec 5 of the review of spec #2234): the two commits the source settled
    * the drawn compare between, so the diff page can read it at a checkout that holds both (ADR-0036; a branch name is
@@ -234,6 +245,9 @@
   /** Why the source draws the pull request disabled (#2030): its words, on the button. */
   const refused = $derived(standing?.prBlocked ?? null);
   const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);
+  /** What the primary waits for, in words beside it (design system, the enabled rule). */
+  const needs = $derived(refused ?? (base === head ? "Pick two different branches." : title.trim() === "" ? "Give it a title." : null));
+  const commits = $derived(standing?.commits ?? []);
 
   async function create() {
     if (!ready || head === null) return;
@@ -251,9 +265,26 @@
   }
 </script>
 
+{#if lone}
+  <div class="tf-empty">
+    {#if branches.length === 0}
+      <p>This repository has no branches yet, so there is nothing to compare.</p>
+    {:else}
+      <p>This repository has one branch, <TfKey value={branches[0]!.name} />, so there is nothing to compare.</p>
+      <button
+        type="button"
+        class="tf-btn tf-sm"
+        aria-disabled={branchRefused !== null ? "true" : undefined}
+        title={branchRefused ?? undefined}
+        onclick={() => {
+          if (branchRefused === null) onNewBranch();
+        }}>New branch…</button>
+    {/if}
+  </div>
+{:else}
 <div class="tf-compare">
   <div>
-    <h2 class="tf-cgroup-h">New pull request</h2>
+    <h2 class="tf-cgroup-h">{standing?.pr ? "Compare" : "New pull request"}</h2>
     <form
       class="tf-panel tf-cform"
       onsubmit={(event) => {
@@ -263,39 +294,43 @@
     >
       <div class="tf-formgrid">
         <label for="tf-cmp-into">Into</label>
-        <select id="tf-cmp-into" bind:value={base}>
+        <select id="tf-cmp-into" class="tf-cbranch" bind:value={base}>
           {#each branches as option (option.name)}<option value={option.name}>{option.name}</option>{/each}
         </select>
         <label for="tf-cmp-from">From</label>
         <select
           id="tf-cmp-from"
+          class="tf-cbranch"
           value={head ?? ""}
           onchange={(event) => (location.hash = compareHash(repoId, (event.currentTarget as HTMLSelectElement).value, base === into ? null : base))}
         >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
-        <label for="tf-cmp-title">Title</label>
-        <input id="tf-cmp-title" type="text" autocomplete="off" bind:value={title} />
-        <label for="tf-cmp-body" class="tf-ctop">Description</label>
-        <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
-        {#if ticket !== null}
-          <span></span><label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to {ticket.key} in knobas</label>
+        {#if !standing?.pr}
+          <label for="tf-cmp-title">Title</label>
+          <input id="tf-cmp-title" type="text" autocomplete="off" bind:value={title} />
+          <label for="tf-cmp-body">Description</label>
+          <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
+          {#if ticket !== null}
+            <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to <TfKey value={ticket.key} /> in knobas</label>
+          {/if}
+          <span class="tf-fwide tf-dim tf-small">Reviewers are asked on {sourceName(source)} after it opens.</span>
         {/if}
-        <span></span><span class="tf-dim tf-small">Reviewers are asked on {sourceName(source)} after it opens.</span>
       </div>
       <div class="tf-cgo">
         {#if standing?.pr}
-          <span class="tf-chip tf-info">PR {standing.pr.number ?? ""} is already open from this branch</span>
+          <span class="tf-cexists">PR {standing.pr.number ?? ""} is already open from this branch.</span>
           {#if standing.pr.entityId !== null}
-            <a class="tf-btn" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
+            <a class="tf-btn tf-sm" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
           {/if}
         {:else}
           <button
             type="submit"
-            class="tf-btn tf-primary"
+            class="tf-btn tf-sm tf-primary"
             disabled={!ready && refused === null}
             aria-disabled={refused !== null ? "true" : undefined}
             title={refused ?? undefined}>Create pull request</button>
+          {#if needs !== null}<span class="tf-dim tf-small">{needs}</span>{/if}
         {/if}
         {#if changed !== null}
           <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {base}</span>
@@ -313,7 +348,9 @@
         >
       {/if}
     </h2>
-    {#if listed === null || listed.entityId === null}
+    {#if base === head}
+      <div class="tf-empty">Into and From are the same branch, so there is nothing to compare.</div>
+    {:else if listed === null || listed.entityId === null}
       <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
     {:else}
       <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
@@ -333,11 +370,16 @@
   <aside class="tf-side">
     <div class="tf-panel">
       <header><h3>Commits</h3></header>
-      <div class="tf-rows">
-        {#each standing?.commits ?? [] as commit, n (n)}
-          <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}>{commit.title}</span></div>
-        {/each}
-      </div>
+      {#if commits.length > 0}
+        <div class="tf-rows">
+          {#each commits as commit, n (n)}
+            <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}>{commit.title}</span></div>
+          {/each}
+        </div>
+      {:else if standing !== null}
+        <p class="tf-prnote tf-cnone">Nothing that {defaultBranch ?? "the default branch"} lacks.</p>
+      {/if}
     </div>
   </aside>
 </div>
+{/if}

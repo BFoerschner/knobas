@@ -122,7 +122,11 @@ test("the address reads the repository's compare between its two ends and draws 
   expect(ports.entityView).toHaveBeenCalledWith(REPO, `compare:${BASE}^...${HEAD}`);
   expect(headers(target)).toEqual(["docs/backoff.md", "src/sepa/retry.rs", "tests/sepa_retry.rs"]);
   expect(target.querySelector("[data-testid=diff-range]")!.textContent).toBe("97cb5a8667^ … 1262a5b610");
-  expect(target.querySelector("h2 a")!.textContent).toBe("tidewater/payout-service");
+  // The page's gutter and canonical header, and the crumb names the repository in mono.
+  expect(target.querySelector(".tf-fhead h1")!.textContent).toBe("97cb5a8667^ … 1262a5b610");
+  expect(target.querySelector(".tf-cbody")).not.toBeNull();
+  expect([...target.querySelectorAll(".tf-crumbs > a, .tf-crumbs strong")].map((crumb) => crumb.textContent)).toEqual(["Code", "tidewater/payout-service", "Diff"]);
+  expect(target.querySelector(".tf-crumbs a.tf-mono")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}`);
 });
 
 test("a diff that names no range says its context does not expand, rather than offering nothing silently", async () => {

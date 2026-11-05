@@ -152,7 +152,7 @@ test("the tab counts are the sections' own: conversation, files changed, commits
 test("Ready to merge? reads prototype-6's three lines from the declared Approvals, the checks and Conflicts (#994)", () => {
   expect(readyLines(VIEW)).toEqual([
     { text: "Approvals: 1 of 2", tone: "warn" },
-    { text: "Checks: Payout_IntegrationTests #1187 failure, Payout_Build #1188 pending", tone: "err" },
+    { text: "Checks: Payout_IntegrationTests #1187 failed, Payout_Build #1188 pending", tone: "err" },
     { text: "No conflicts with main", tone: "ok" },
   ]);
 });
@@ -326,14 +326,18 @@ test("the rail's checks stand where the source's required check says: a required
 test("Ready to merge? reads the required checks from the source, saying which ones stand in the way", () => {
   expect(readyLines(RAIL(null))).toEqual([
     { text: "Approvals: 2 of 2", tone: "ok" },
-    { text: "Required checks: 1 of 3 pass", tone: "err", why: "ci/test failure, deploy not reported" },
+    { text: "Required checks: 1 of 3 pass", tone: "err", why: "ci/test failed, deploy not reported" },
     { text: "No conflicts with main", tone: "ok" },
   ]);
 });
 
 test("readiness: not ready while a line is unmet or Merge is refused, ready only when both are clear", () => {
   const blocked = action("merge_pull_request", "Merge…", { disabled: "required check ci/test failed" });
-  expect(readiness(RAIL(blocked)).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: "required check ci/test failed" });
+  // The row says what the source says, so the box does not repeat it.
+  expect(readiness(RAIL(blocked)).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: null });
+  // A reason no row gives stays in the box, and one a row gives does not.
+  const twoReasons = action("merge_pull_request", "Merge…", { disabled: "required check ci/test failed; the head is behind main" });
+  expect(readiness(RAIL(twoReasons)).verdict).toEqual({ text: "Not yet: 2 of 3 met", tone: "err", why: "The head is behind main" });
   const passing = RAIL(blocked).sections[0]!;
   const allMet: SourceView = {
     actions: [action("merge_pull_request", "Merge…")],
@@ -371,7 +375,7 @@ test("readiness: not ready while a line is unmet or Merge is refused, ready only
   expect(readiness(passed).verdict).toEqual({ text: "Ready: 3 of 3 met", tone: "ok", why: null });
   // Every line met, Merge still refused (a head behind a protected base): not ready, saying why.
   const behind: SourceView = { ...allMet, actions: [action("merge_pull_request", "Merge…", { disabled: "the head is behind main" })] };
-  expect(readiness(behind).verdict).toEqual({ text: "Not yet: 2 of 2 met", tone: "warn", why: "the head is behind main" });
+  expect(readiness(behind).verdict).toEqual({ text: "Can't merge from here", tone: "warn", why: "The head is behind main" });
   // No Merge offered (merged, closed): no verdict, the lines alone.
   expect(readiness(RAIL(null)).verdict).toBeNull();
   expect(readiness(RAIL(null)).lines).toHaveLength(3);

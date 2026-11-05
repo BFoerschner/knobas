@@ -166,19 +166,23 @@ async function settle() {
 const squash = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
 const list = () => [...target.querySelectorAll(".tf-flist button")].map(squash);
 const cards = () => [...target.querySelectorAll<HTMLElement>(".tf-diff")];
+/** A file's card: the diffs follow the tree's order, so `docs/` comes first. */
+const card = (path: string) => cards().find((one) => one.dataset["file"]?.endsWith(path));
+const RETRY_CARD = () => card("retry.rs");
+const NOTE_CARD = () => card("backoff.md");
 
 test("the Files section is read when the tab opens; the list names each file with its counts", async () => {
   await draw();
   expect(asked).toEqual(["files"]);
   // The tree (#2268): directories by name, each file with its badge.
   expect(list()).toEqual(["Abackoff.md+1 −0", "Mretry.rs+2 −1"]);
-  expect(cards().map((card) => squash(card.querySelector(".tf-fh")))).toEqual([
-    "M src/sepa/retry.rs +2 −1 Viewed",
+  expect(cards().map((one) => squash(one.querySelector(".tf-fh")))).toEqual([
     // An added Markdown file draws rendered from its hunk (#2279): the mode switch sits before Viewed.
     "A docs/backoff.md +1 −0 RenderedLines Viewed",
+    "M src/sepa/retry.rs +2 −1 Viewed",
   ]);
   // One hunk after another: a ⋯ row between them.
-  expect(cards()[0]!.querySelectorAll(".tf-hunk")).toHaveLength(1);
+  expect(RETRY_CARD()!.querySelectorAll(".tf-hunk")).toHaveLength(1);
 });
 
 test("the filter narrows the list and the diffs; nothing matching says so", async () => {
@@ -192,29 +196,32 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
   filter.value = "nothing";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect(squash(target.querySelector(".tf-flist"))).toBe("No files match. Clear the filter");
+  expect(target.querySelector(".tf-flist")).toBeNull();
+  expect(squash(target.querySelector(".tf-flist-none"))).toBe("No files match. Clear the filter");
+  // The one way out, drawn as every list draws it.
+  expect(target.querySelector(".tf-flist-none button")!.classList.contains("tf-sm")).toBe(true);
 });
 
 test("Viewed collapses a file and ticks it in the list, through the command; unticked, it opens again", async () => {
   viewed = ["docs/backoff.md"];
   await draw();
   expect(list()).toEqual(["Abackoff.md+1 −0 ✓", "Mretry.rs+2 −1"]);
-  expect(cards()[1]!.classList.contains("tf-viewed")).toBe(true);
-  expect(cards()[1]!.querySelectorAll(".tf-ln")).toHaveLength(0);
-  const box = cards()[0]!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!;
+  expect(NOTE_CARD()!.classList.contains("tf-viewed")).toBe(true);
+  expect(NOTE_CARD()!.querySelectorAll(".tf-ln")).toHaveLength(0);
+  const box = RETRY_CARD()!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!;
   box.click();
   await settle();
   expect(viewed).toEqual(["docs/backoff.md", "src/sepa/retry.rs"]);
-  expect(cards()[0]!.querySelectorAll(".tf-ln")).toHaveLength(0);
-  cards()[0]!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!.click();
+  expect(RETRY_CARD()!.querySelectorAll(".tf-ln")).toHaveLength(0);
+  RETRY_CARD()!.querySelector<HTMLInputElement>(".tf-fh input[type=checkbox]")!.click();
   await settle();
   expect(viewed).toEqual(["docs/backoff.md"]);
-  expect(cards()[0]!.querySelectorAll(".tf-ln").length).toBeGreaterThan(0);
+  expect(RETRY_CARD()!.querySelectorAll(".tf-ln").length).toBeGreaterThan(0);
 });
 
 test("a thread sits under its line; an outdated one is kept apart at the end of its file", async () => {
   await draw();
-  const retry = cards()[0]!;
+  const retry = RETRY_CARD()!;
   const thread = retry.querySelector(".tf-thread")!;
   expect(squash(thread.previousElementSibling)).toBe("21+ let jitter = rng.gen_range(-JITTER..JITTER); +");
   // The author line and the Markdown body are two blocks since #2261, so no colon joins them.
@@ -244,7 +251,7 @@ test("an outdated thread is drawn at the commit it was written on, its hunk as i
   block.range = range;
   block.gone = [{ path: "src/sepa/legacy.rs", thread: { ...outdated, line: 3, hunk: { header: "@@ -0,0 +1,3 @@", lines: [{ kind: "add", old: null, new: 3, text: "loop {}" }] } } }];
   await draw(answer);
-  const apart = cards()[0]!.querySelector("details.tf-outdated")!;
+  const apart = RETRY_CARD()!.querySelector("details.tf-outdated")!;
   expect(squash(apart)).toBe("1 outdated line 8at 7be0e4c 7− const TRIES: u32 = 3;8+ const TRIES: u32 = 10;priya Ten attempts is a lot.");
   const link = apart.querySelector<HTMLAnchorElement>(".tf-was-at a")!;
   expect(link.getAttribute("href")).toBe(`#/diff/gitea%3Atidewater%2Fpayout-service/${at}%5E/${at}`);
@@ -256,7 +263,7 @@ test("an outdated thread is drawn at the commit it was written on, its hunk as i
 
 test("+ on a removed line opens a box on its old side; Add to review keeps it pending under the line", async () => {
   await draw();
-  const removed = [...cards()[0]!.querySelectorAll(".tf-ln")].find((ln) => ln.classList.contains("tf-del"))!;
+  const removed = [...RETRY_CARD()!.querySelectorAll(".tf-ln")].find((ln) => ln.classList.contains("tf-del"))!;
   const plus = removed.querySelector<HTMLButtonElement>(".tf-addc")!;
   expect(plus.title).toBe("Comment on old line 2");
   plus.click();
@@ -401,7 +408,7 @@ test("context expands between hunks, read whole at the head in the range's repos
   await settle();
   expect(asked).toContain(`${REPO} file@${HEAD}:${RETRY.path}`);
   // The hidden lines, old and new numbers beside each: old 4 is new 5, old 19 new 20.
-  expect(squash(target.querySelector(".tf-diff"))).toMatch(/45 line 5 .*1920 line 20 21\+/);
+  expect(squash(RETRY_CARD())).toMatch(/45 line 5 .*1920 line 20 21\+/);
 });
 
 /** The files at a head: each file's blob, and the commentable diff's head, as Gitea's *Files* section answers. */
@@ -444,7 +451,7 @@ test("#2277: Reply… queues a reply on the thread's line, drawn queued until th
     RETRY.threads[1]!,
   ];
   await draw(() => at("c90d11", { retry: "1111111", note: "2222222" }, thread()), true);
-  const card = cards()[0]!;
+  const card = RETRY_CARD()!;
   [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Reply…")!.click();
   flushSync();
   const box = card.querySelector<HTMLTextAreaElement>(".tf-thread textarea")!;
@@ -469,12 +476,12 @@ test("#2277: Reply… queues a reply on the thread's line, drawn queued until th
   for (const hear of refreshed) hear({ payload: { entity_id: PR, write_id: 1 } });
   await settle();
   expect(asked).toEqual(["files", "files"]);
-  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? knobas Bounded to ±10 % now. Reply… Resolve");
+  expect(squash(RETRY_CARD()!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? knobas Bounded to ±10 % now. Reply… Resolve");
 });
 
 test("#2277: Resolve queues the resolve and collapses the thread; a resolved thread reads collapsed, and Forgejo's offers none", async () => {
   await draw(at("c90d11", { retry: "1111111", note: "2222222" }), true);
-  const card = cards()[0]!;
+  const card = RETRY_CARD()!;
   [...card.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Resolve")!.click();
   await settle();
   expect(sent).toEqual([{ ResolveThread: { entity: PR, thread: "4088", resolved: true } }]);
@@ -486,11 +493,11 @@ test("#2277: Resolve queues the resolve and collapses the thread; a resolved thr
   // Read again with the source's state: resolved by mara, collapsed with no write of ours.
   const resolved = [{ ...RETRY.threads[0]!, resolved_by: "mara" }, RETRY.threads[1]!];
   await draw(at("c90d11", { retry: "1111111", note: "2222222" }, resolved), true);
-  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("Resolved by mara · 1 comment Show Unresolve");
+  expect(squash(RETRY_CARD()!.querySelector(".tf-thread"))).toBe("Resolved by mara · 1 comment Show Unresolve");
   unmount(view!);
   view = null;
 
   // A source that cannot resolve (Forgejo) offers a reply and no resolve.
   await draw(at("c90d11", { retry: "1111111", note: "2222222" }, RETRY.threads, false), true);
-  expect(squash(cards()[0]!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? Reply…");
+  expect(squash(RETRY_CARD()!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? Reply…");
 });

@@ -140,14 +140,14 @@ test("the layout chosen is kept across a restart and drawn by every diff", () =>
   expect(commit.querySelectorAll(".tf-srow")).toHaveLength(0);
 });
 
-test("a narrow window shows unified though split is chosen, and says why", () => {
+test("too little room shows unified though split is chosen, and says why", () => {
   const storage = memoryStorage();
   storage.setItem(LAYOUT_KEY, "split");
   draw({ files: [RETRY], layout: createDiffLayout(() => storage), narrow: { current: true } });
   expect(pressed()).toEqual(["Split"]);
   expect(target.querySelectorAll(".tf-srow")).toHaveLength(0);
   expect(target.querySelectorAll(".tf-ln")).toHaveLength(4);
-  expect(squash(target.querySelector(".tf-dtool-why"))).toBe("Unified while the window is too narrow for split.");
+  expect(squash(target.querySelector(".tf-dtool-why"))).toBe("Unified: there is too little room here for split.");
 });
 
 test("a line takes a comment only where the caller passes a review", () => {
@@ -350,7 +350,65 @@ test("the filter narrows the tree and the diff together", () => {
   input.dispatchEvent(new Event("input"));
   flushSync();
   expect(treeRows()).toEqual(["docs", "M retry.md +1 −1", "src", "M retry.rs +1 −1"]);
-  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["src/retry.rs", "docs/retry.md"]);
+  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["docs/retry.md", "src/retry.rs"]);
+});
+
+test("the diffs are drawn in the rail's order, so j walks the rail down", () => {
+  draw({ files: [file("tests/z.rs"), file("src/b.rs"), file("docs/a.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
+  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
+  const titles = [...target.querySelectorAll(".tf-flist button")].map((row) => row.getAttribute("title"));
+  expect(titles).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
+});
+
+test("a file picked in the rail opens if it was collapsed, and the bar over the rail names it and folds", () => {
+  const viewed = { paths: ["src/b.rs"], set: () => {} };
+  draw({ files: [file("src/a.rs"), file("src/b.rs")], layout: createDiffLayout(() => null), viewed });
+  expect(cardOf("src/b.rs").classList.contains("tf-closed")).toBe(true);
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(target.querySelector(".tf-dgrid")!.classList.contains("tf-rail-shut")).toBe(false);
+  target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/b.rs']")!.click();
+  flushSync();
+  expect(cardOf("src/b.rs").classList.contains("tf-closed")).toBe(false);
+  expect(target.querySelector(".tf-flist [aria-current=true]")!.getAttribute("title")).toBe("src/b.rs");
+  expect(squash(bar)).toBe("File: b.rs");
+  expect(target.querySelector(".tf-dgrid")!.classList.contains("tf-rail-shut")).toBe(true);
+});
+
+test("a pick holds the pill while the page stands where the pick put it, the reader's scroll lets go, and the scroll's end marks the last file", () => {
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  draw({ files: [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")], layout: createDiffLayout(() => null) }, page);
+  const metrics = (name: string, value: () => number) => Object.defineProperty(page, name, { configurable: true, get: value });
+  let top = 900;
+  metrics("scrollTop", () => top);
+  metrics("scrollHeight", () => 1500);
+  metrics("clientHeight", () => 600);
+  const pill = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+  const scrolled = (to: number) => {
+    top = to;
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+  };
+  // At the scroll's end, whichever head has reached the top, the last file is the one marked.
+  scrolled(900);
+  expect(pill()).toBe("src/c.rs");
+  // A pick stands against the scroll event it causes itself, there being no room to move.
+  target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/a.rs']")!.click();
+  flushSync();
+  scrolled(900);
+  expect(pill()).toBe("src/a.rs");
+  // `j` holds its file the same way.
+  key("j");
+  flushSync();
+  scrolled(900);
+  expect(pill()).toBe("src/b.rs");
+  // The reader scrolling lets go.
+  scrolled(700);
+  scrolled(900);
+  expect(pill()).toBe("src/c.rs");
 });
 
 test("each key does what it says, and none fires while typing in a comment", () => {
@@ -360,15 +418,13 @@ test("each key does what it says, and none fires while typing in a comment", () 
   const pending = createPendingComments(() => null);
   draw({ files: [TWO_HUNKS, file("src/b.rs"), file("src/c.rs")], layout, viewed, review: { entity: "pr", pending } });
   const current = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+  // The rail's order: by name.
   expect(key("j")).toBe(true);
+  expect(current()).toBe("src/b.rs");
+  key("j");
+  key("j");
   expect(current()).toBe("src/two.rs");
   key("j");
-  key("j");
-  expect(current()).toBe("src/c.rs");
-  key("j");
-  expect(current()).toBe("src/c.rs");
-  key("k");
-  key("k");
   expect(current()).toBe("src/two.rs");
 
   // n/p: the hunks of the file j/k is on.
@@ -391,16 +447,16 @@ test("each key does what it says, and none fires while typing in a comment", () 
   key("v");
   expect(viewed.paths).toEqual(["src/two.rs"]);
   expect(cardOf("src/two.rs").querySelectorAll(".tf-ln")).toHaveLength(0);
-  key("j");
-  expect(current()).toBe("src/b.rs");
+  key("k");
+  expect(current()).toBe("src/c.rs");
 
   // c: the comment box on the file's first changed line, focused; typing there is typing.
   expect(key("c")).toBe(true);
   const box = target.querySelector<HTMLTextAreaElement>(".tf-newc textarea")!;
-  expect(box.getAttribute("aria-label")).toBe("Comment on old line 2 of src/b.rs");
+  expect(box.getAttribute("aria-label")).toBe("Comment on old line 2 of src/c.rs");
   expect(document.activeElement).toBe(box);
   for (const name of ["j", "k", "n", "p", "v", "c", "s"]) expect(key(name, box), name).toBe(false);
-  expect(current()).toBe("src/b.rs");
+  expect(current()).toBe("src/c.rs");
   expect(viewed.paths).toEqual(["src/two.rs"]);
   expect(layout.chosen).toBe("unified");
 

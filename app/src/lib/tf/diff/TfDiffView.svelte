@@ -6,12 +6,16 @@
   (#842) is its base; the layout is `mockups/code-area/diff.html`.
 
   - **Toolbar**: Unified / Split, one choice app-wide (`diff-layout`); a
-    window too narrow for split shows unified and says so. Where *Viewed* is
-    offered, how many files are viewed.
+    column with too little room for split shows unified and says so. Where
+    *Viewed* is offered, how many files are viewed.
   - **File tree** (`list`, #2268): files under their directories with a
     badge (added, deleted, renamed with similarity, mode, binary) and
     `+N −N`, a filter that narrows the tree and the diffs together, a click
-    that scrolls to the file.
+    that scrolls to the file and opens it if it is collapsed. The diffs are
+    drawn in the tree's order, so `j` walks the rail down. The pill follows the
+    scroll; a pick holds it until the reader scrolls, and the scroll's end marks
+    the last file. Where the diff has too little width for it, the tree folds
+    behind one bar (`TfRailBar`), and a pick folds it again.
   - **Files** (`TfDiffCard`): each collapses; lock files, generated files and
     viewed ones start collapsed. Lines are windowed and a file over 1,500
     changed lines waits for *Load diff* (#2269); changed words are marked and
@@ -49,7 +53,7 @@
   import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { lineName } from "../../detail/view/pending-comments.svelte";
-  import { onMount, untrack } from "svelte";
+  import { flushSync, onMount, untrack } from "svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { inTextField } from "../../shell/keys";
   import { ago } from "../../shell/time";
@@ -74,7 +78,8 @@
     type SideText,
     type WholeTexts,
   } from "./diff";
-  import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
+  import { diffLayout, SPLIT_ROOM, type DiffLayoutChoice } from "./diff-layout.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
   import type { DiffTalk } from "./talk";
   import TfDiffCard from "./TfDiffCard.svelte";
   import { ipcCommands, type CommandPort } from "../../render/command";
@@ -100,7 +105,7 @@
     defaults = rendererDefaults,
     commands = ipcCommands,
     layout = diffLayout,
-    narrow = windowNarrow(),
+    narrow = { current: false },
     openAt = null,
     repository = null,
     pipelines = defaultPipelines,
@@ -124,6 +129,7 @@
     /** Runs a command renderer's rendered diff: the IPC, a fake in tests. */
     commands?: CommandPort;
     layout?: DiffLayoutChoice;
+    /** Says there is too little room for split, for a test: nothing is laid out there to measure. */
     narrow?: { readonly current: boolean };
     /** *Open in…* in each file's header (#2274): the repository (or branch) and the commit or branch the files are read at. */
     openAt?: OpenAt | null;
@@ -137,8 +143,26 @@
 
   let filter = $state("");
   const shown = $derived(files.filter((file) => matchesPath(keyOf(file), filter)));
-  const drawn = $derived(list ? shown : files);
-  const split = $derived(shownLayout(layout.chosen, narrow.current) === "split");
+  const tree = $derived(list ? treeOf(shown) : []);
+  /** The rail's order, so a file's place in the list is its place on the page. */
+  const drawn = $derived(list ? tree.flatMap((row) => (row.kind === "file" ? [row.file] : [])) : files);
+  /** The width the diffs have, once measured. */
+  let room = $state(Number.POSITIVE_INFINITY);
+  const tight = $derived(narrow.current || room < SPLIT_ROOM);
+  const split = $derived(shownLayout(layout.chosen, tight) === "split");
+  const uid = $props.id();
+  /** Whether the file list is unfolded under its bar, where it has one. */
+  let railOpen = $state(false);
+
+  /** Reads the column's width; a hidden page has none to read, so it keeps the last. */
+  function measure(node: HTMLElement) {
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(([entry]) => {
+      if (entry !== undefined && entry.contentRect.width > 0) room = entry.contentRect.width;
+    });
+    watch.observe(node);
+    return () => watch.disconnect();
+  }
   const isViewed = (path: string) => viewed?.paths.includes(path) ?? false;
 
   /** Each file's whole texts, once expanded context read them (by `keyOf`), and the read in flight. */
@@ -469,19 +493,46 @@
   const cards: Record<string, Card | undefined> = $state({});
   /** The file `j`/`k` is on. */
   let current = $state<string | null>(null);
-  const tree = $derived(list ? treeOf(shown) : []);
+  /** The page's scroller, and where it stood when a press chose the file: the choice stands until the reader scrolls. */
+  let scroller: Element | null = null;
+  let heldAt: number | null = null;
+  const hold = () => (heldAt = scroller?.scrollTop ?? null);
+  /** A difference this small is the layout settling, not the reader scrolling. */
+  const SCROLLED = 2;
+  const nameOf = (key: string) => key.slice(key.lastIndexOf("/") + 1);
 
   function go(key: string) {
     current = key;
     cards[key]?.scrollTo();
+    hold();
   }
 
-  /** The file rail follows the scroll: the file whose head has reached the top of the scroller is the one you are in. */
+  /** A file picked in the list: it opens if it was collapsed, and the list folds again, before the page moves to it. */
+  function pick(file: DrawnFile) {
+    const key = keyOf(file);
+    railOpen = false;
+    if (isClosed(file)) folds = { ...folds, [key]: false };
+    flushSync();
+    go(key);
+  }
+
+  /**
+   * The file rail follows the scroll: the file whose head has reached the top of the scroller is the one you are in,
+   * and at the scroll's end the last, whose head may never reach the top.
+   */
   function spy(host: HTMLElement) {
-    const scroller = host.closest(".tf-main, .tf-bmain");
-    if (scroller === null) return;
+    const found = host.closest(".tf-main, .tf-bmain");
+    scroller = found;
+    if (found === null) return;
     const read = () => {
-      const top = scroller.getBoundingClientRect().top + 8;
+      if (heldAt !== null && Math.abs(found.scrollTop - heldAt) < SCROLLED) return;
+      heldAt = null;
+      const last = drawn.at(-1);
+      if (last !== undefined && found.scrollHeight > found.clientHeight && found.scrollTop + found.clientHeight >= found.scrollHeight - SCROLLED) {
+        current = keyOf(last);
+        return;
+      }
+      const top = found.getBoundingClientRect().top + 8;
       let at: string | null = null;
       for (const file of drawn) {
         const key = keyOf(file);
@@ -494,8 +545,8 @@
       current = at ?? (first === undefined ? null : keyOf(first));
     };
     read();
-    scroller.addEventListener("scroll", read, { passive: true });
-    return () => scroller.removeEventListener("scroll", read);
+    found.addEventListener("scroll", read, { passive: true });
+    return () => found.removeEventListener("scroll", read);
   }
 
   function onkey(event: KeyboardEvent) {
@@ -516,6 +567,7 @@
       case "p":
         current = keyOf(here);
         cards[current]?.nextHunk(event.key === "n" ? 1 : -1);
+        hold();
         break;
       case "v":
         if (!viewed) return;
@@ -525,6 +577,7 @@
       case "c":
         current = keyOf(here);
         if (!cards[current]?.comment()) return;
+        hold();
         break;
       case "s":
         layout.set(layout.chosen === "split" ? "unified" : "split");
@@ -568,6 +621,7 @@
   <div class="tf-thread tf-pending"><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {body}</p></div>
 {/snippet}
 
+<div class="tf-dview">
 <div class="tf-dtool">
   <div class="tf-seg" role="group" aria-label="Layout">
     <button type="button" aria-pressed={layout.chosen === "unified"} onclick={() => layout.set("unified")}>Unified</button>
@@ -587,8 +641,8 @@
       >
     </div>
   {/if}
-  {#if layout.chosen === "split" && narrow.current}
-    <span class="tf-dim tf-dtool-why">Unified while the window is too narrow for split.</span>
+  {#if layout.chosen === "split" && tight}
+    <span class="tf-dim tf-dtool-why">Unified: there is too little room here for split.</span>
   {/if}
   {#if viewed && files.length > 0}
     {@const count = files.filter((file) => isViewed(file.path)).length}
@@ -600,13 +654,20 @@
     This diff is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines: it is drawn up to there, and the source's own page has the rest.
   </p>
 {/if}
-<div class:tf-dgrid={list}>
+<div class:tf-dgrid={list} class:tf-rail-shut={list && !railOpen}>
   {#if list}
-    <div class="tf-dnav">
+    <TfRailBar label="File" value={current === null ? "None" : nameOf(current)} open={railOpen} controls="{uid}-files" onpress={() => (railOpen = !railOpen)} />
+    <div class="tf-dnav tf-rail" id="{uid}-files">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
         <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" />
       </label>
+      {#if tree.length === 0}
+        <div class="tf-empty tf-flist-none">
+          <p>No files match.</p>
+          <button type="button" class="tf-btn tf-sm" onclick={() => (filter = "")}>Clear the filter</button>
+        </div>
+      {:else}
       <nav class="tf-flist" aria-label="Changed files">
         {#each tree as row (row.kind === "dir" ? `dir\n${row.path}` : keyOf(row.file))}
           {#if row.kind === "dir"}
@@ -622,16 +683,15 @@
               class:tf-d1={row.depth === 1}
               aria-current={current === keyOf(file) ? "true" : undefined}
               title={keyOf(file)}
-              onclick={() => go(keyOf(file))}
+              onclick={() => pick(file)}
               ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
                 >{#if file.change !== "binary"}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button
             >
           {/if}
-        {:else}
-          <span class="tf-dim tf-flist-none">No files match. <button type="button" class="tf-linkish" onclick={() => (filter = "")}>Clear the filter</button></span>
         {/each}
       </nav>
+      {/if}
       <p class="tf-dkeys tf-dim">
         <span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span>{#if viewed}<span><kbd>v</kbd> viewed</span>{/if}{#if review}<span
             ><kbd>c</kbd> comment</span
@@ -639,7 +699,7 @@
       </p>
     </div>
   {/if}
-  <div class="tf-dfiles" {@attach spy}>
+  <div class="tf-dfiles" {@attach spy} {@attach measure}>
     {#each drawn as file (keyOf(file))}
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
@@ -705,4 +765,5 @@
       </details>
     {/if}
   </div>
+</div>
 </div>

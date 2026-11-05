@@ -19,6 +19,8 @@
   } = $props();
 
   const step = backStep();
+  /** A repository's name is a code value `isKey` cannot tell from words, so the place it leads to says so. */
+  const code = $derived(isKey(name) || (back.hash?.startsWith("#/repo/") === true && name.includes("/")));
 
   function press(event: MouseEvent) {
     if (back.hash === undefined || step === null) return;
@@ -29,7 +31,7 @@
 </script>
 
 <!-- A key is told from the words by its face, so the underline stops at the words. -->
-{#snippet words()}{#if isKey(name)}<span class="tf-esc-t">Back to</span> <span class="tf-mono tf-key">{name}</span>{:else}<span class="tf-esc-t">Back to {name}</span>{/if}{/snippet}
+{#snippet words()}{#if code}<span class="tf-esc-t">Back to</span> <span class="tf-mono tf-key">{name}</span>{:else}<span class="tf-esc-t">Back to {name}</span>{/if}{/snippet}
 {#if back.hash === undefined}
   <span class="tf-esc">{@render words()} <kbd>Esc</kbd></span>
 {:else}

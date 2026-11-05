@@ -6,10 +6,11 @@
  * 2. a drawer is open           → close it;
  * 3. a filter field has text    → clear it, focus stays;
  * 4. a text field has focus     → blur it;
- * 5. a top page                 → nothing;
- * 6. an opener is known         → go to the opener;
- * 7. a structural parent exists → go to it;
- * 8. otherwise                  → nothing.
+ * 5. an inline panel is open    → close it;
+ * 6. a top page                 → nothing;
+ * 7. an opener is known         → go to the opener;
+ * 8. a structural parent exists → go to it;
+ * 9. otherwise                  → nothing.
  *
  * The ticket page has no tabs (#2399), so it has no rung of its own: an old
  * `/map` or `/conversation` address is the page, and `Esc` leaves it.
@@ -33,7 +34,7 @@
  * where they are. `Esc` never reads "the job you were last in" (#2228); a
  * key that sometimes does nothing is what makes the others safe to press.
  *
- * Rungs 5 to 8 are {@link escTarget}, which the breadcrumb's *Back to <name>*
+ * Rungs 6 to 9 are {@link escTarget}, which the breadcrumb's *Back to <name>*
  * reads too, so the hint and the key cannot disagree. No page answers `Esc` for
  * itself on those rungs: the asset tree's `←` walks up its columns, and its `Esc`
  * follows the bar like any page's, whatever has focus.
@@ -49,8 +50,8 @@ import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, type TfRoute
 
 /** What `Esc` can see when it is pressed. */
 export interface EscState {
-  /** Open dialogs and drawers, oldest first. */
-  layers: readonly { kind: "dialog" | "drawer" }[];
+  /** Open dialogs, drawers and inline panels, oldest first. */
+  layers: readonly { kind: "dialog" | "drawer" | "panel" }[];
   /** The focused text field, or `null` when focus is not in one. */
   field: { filter: boolean; text: string } | null;
   route: TfRoute;
@@ -77,7 +78,7 @@ export interface EscTarget {
   name: string;
 }
 
-/** An {@link EscTarget}, and whether it is the entry's opener (rung 6) rather than a structural parent. */
+/** An {@link EscTarget}, and whether it is the entry's opener (rung 7) rather than a structural parent. */
 export type EscTargetOf = EscTarget & { opened: boolean };
 
 export function escStep(state: EscState): EscStep {
@@ -89,12 +90,14 @@ export function escStep(state: EscState): EscStep {
     if (state.field.filter && state.field.text !== "") return { do: "clear-filter" };
     return { do: "blur" };
   }
+  const panel = state.layers.map((layer) => layer.kind).lastIndexOf("panel");
+  if (panel !== -1) return { do: "close", index: panel };
   const target = escTarget(state.route, state.opener, state.fromTicketRow, state.parent);
   return target === null ? { do: "nothing" } : { do: "go", hash: target.hash, opened: target.opened };
 }
 
 /**
- * Rungs 5 to 8: where `Esc` goes from `route` once nothing is open, or `null`
+ * Rungs 6 to 9: where `Esc` goes from `route` once nothing is open, or `null`
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  * A section's top page does nothing, unless a ticket card's row opened it
  * narrowed to that ticket (`fromTicketRow`, spec #2401): then it goes back.

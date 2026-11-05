@@ -139,6 +139,7 @@
     changedPaths,
     checkoutSentence,
     headLine,
+    knowsRepoTab,
     litTab,
     readAllRows,
     mirrorDefault,
@@ -163,14 +164,14 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
-  import TfBackHint from "../TfBackHint.svelte";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { provideTabRereads } from "./refreshed.svelte";
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
-  import { namePage, parentPage } from "../page-name.svelte";
+  import { parentPage } from "../page-name.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -480,6 +481,8 @@
   const changed = $derived(changedPaths(local));
   const sentence = $derived(checkoutSentence(checkout));
   const tab = $derived<RepoTabId>(litTab(route.tab));
+  /** The address names a tab the page has; one it does not have is said under the tabs, not drawn as Files. */
+  const tabKnown = $derived(knowsRepoTab(rest));
 
   /** The tab bodies held for the visit (#2248). */
   let tabs = $state(NO_TABS);
@@ -527,10 +530,19 @@
     chosen[repoId] = { name, entityId: option?.entityId ?? null };
   }
 
+  /** A repository holding one branch has nothing to propose from. */
+  const oneBranch = $derived(branches !== null && branches.length === 1);
+
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
 
-  // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
-  namePage(() => (route.commit !== null && repoId !== null ? "Commit" : (repo?.title ?? null)));
+  // Its last part is what *Back to <name>* calls this page once it is left (spec #2227).
+  const crumbs = $derived.by((): Crumb[] => {
+    const code = { name: "Code", href: "#/code" };
+    if (route.commit !== null && repoId !== null) {
+      return [code, repo === null ? { name: "Repository", href: repoHash(repoId) } : { name: repo.title, href: repoHash(repoId), code: true }, { name: "Commit" }];
+    }
+    return [code, repo === null ? { name: "Repository" } : { name: repo.title, code: true }];
+  });
   // A commit sits under its repository, by the title its crumb gives it.
   parentPage(() => (route.commit !== null && repoId !== null && repo !== null ? { hash: repoHash(repoId), name: repo.title } : null));
 
@@ -539,18 +551,7 @@
 </script>
 
 <div class="tf-full">
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
-    {#if route.commit !== null && repoId !== null}
-      <a class="tf-crumb" href={repoHash(repoId)}>{repo?.title ?? "Repository"}</a><span class="tf-sep">›</span>
-      <strong>Commit</strong>
-    {:else}
-      <strong>{repo?.title ?? "Repository"}</strong>
-    {/if}
-    {#if back !== null}
-      <TfBackHint {back} />
-    {/if}
-  </nav>
+  <TfCrumbs parts={crumbs} {back} />
 
   {#if repoId === null || failed !== null}
     {#if failed !== null && !missing}
@@ -559,7 +560,7 @@
       <TfNothingHere message="knobas does not hold this repository. It may not have synced yet." href="#/code" action="All repositories" />
     {/if}
   {:else}
-    <div class="tf-repohead"><header class="tf-fhead tf-repohead-in">
+    <header class="tf-fhead tf-repohead">
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
@@ -573,7 +574,12 @@
       </div>
       <!-- #2238's order, as the mockup (#2252) draws it: the primary, the others, Open in, Refresh last. -->
       <div class="tf-acts">
-        {#if proposed !== null}
+        <!-- Compare is this form, with a primary of its own, so its header does not offer it again. -->
+        {#if tab === "compare"}
+          <!-- Nothing to propose here. -->
+        {:else if oneBranch}
+          <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
+        {:else if proposed !== null}
           <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}
         <label class="tf-bsel"
@@ -599,18 +605,21 @@
         <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" variant="ghost" />
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
-    </header></div>
+    </header>
     {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
     <nav class="tf-tabs" aria-label="Repository">
       {#each REPO_TABS as entry, n (entry.id)}
         {@const count = countOf(entry.id)}
         {#if n > 0 && REPO_TABS[n - 1]!.group !== entry.group}<span class="tf-tabgrp" aria-hidden="true"></span>{/if}
-        <a href={tabHref(held, repoId, entry.id)} aria-current={tab === entry.id ? "page" : undefined}
+        <a href={tabHref(held, repoId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn}>{count.n}</span
             >{/if}</a
         >
       {/each}
     </nav>
+    {#if !tabKnown}
+      <TfNothingHere message="This repository has no such tab." href={repoHash(repoId)} action="Files" />
+    {:else}
     <div class="tf-cbody">
       {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
@@ -657,17 +666,20 @@
                   base={placeOf(one).base}
                   defaultBranch={defaultBranch?.name ?? null}
                   {refreshed}
+                  {branchRefused}
+                  onNewBranch={() => (newBranch = { from: null })}
                 />
               {:else if one === "commits"}
                 <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
               {:else if one === "prs"}
-                <TfRepoPrs {ports} {repoId} rows={prs} {job} />
+                <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} />
               {/if}
             </TfRepoTab>
           {/if}
         {/each}
       {/if}
     </div>
+    {/if}
   {/if}
 </div>
 

@@ -92,6 +92,9 @@
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
   import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
+  import { layers } from "../layers.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { stateWord } from "../state-word";
   import type { EscTarget } from "../escape";
   import { initials } from "../tickets/tickets";
   import {
@@ -101,6 +104,7 @@
     conflictsOf,
     conversationParts,
     headerOf,
+    knowsPrTab,
     overviewParts,
     prHash,
     railChecks,
@@ -114,7 +118,7 @@
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
-  import TfBackHint from "../TfBackHint.svelte";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
@@ -125,7 +129,7 @@
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
-  import { namePage, parentPage } from "../page-name.svelte";
+  import { parentPage } from "../page-name.svelte";
 
   let {
     ready,
@@ -164,6 +168,8 @@
   const route = $derived(readPrRoute(rest));
   const prId = $derived(route.prId);
   const tab = $derived<PrTab>(route.tab);
+  /** The address names a tab the page has; one it does not have is said under the tabs, not drawn as Overview. */
+  const tabKnown = $derived(knowsPrTab(rest));
 
   let detail = $state<EntityDetail | null>(null);
   let failed = $state<string | null>(null);
@@ -358,8 +364,12 @@
   const commitList = $derived(commitParts(view ?? null));
   const actions = $derived(view?.actions ?? []);
   const name = $derived(number === null ? "PR" : `PR ${number}`);
-  // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
-  namePage(() => name);
+  // Its last part is what *Back to <name>* calls this page once it is left (spec #2227).
+  const crumbs = $derived<Crumb[]>([
+    { name: "Code", href: "#/code" },
+    ...(repo !== null ? [{ name: repo.title, href: repoHash(repo.entity_id), code: true }] : detail?.row.path ? [{ name: detail.row.path, code: true }] : []),
+    { name: prId === null || failed !== null ? "Pull request" : name },
+  ]);
   // A pull request sits under its repository, as its crumb has it.
   parentPage(() => (repo === null ? null : { hash: repoHash(repo.entity_id), name: repo.title }));
 
@@ -441,6 +451,20 @@
     return field.kind.options.filter((option) => !asked.has(option.value));
   });
   let picking = $state(false);
+  let requestFace = $state<HTMLButtonElement | null>(null);
+  let pickList = $state<HTMLDivElement | null>(null);
+  const pageShown = pageVisible();
+  // `Esc` closes the list before it leaves the page. A page keep-alive holds hidden answers to no press.
+  $effect(() => {
+    if (!picking || !pageShown()) return;
+    queueMicrotask(() => pickList?.querySelector("button")?.focus());
+    return untrack(() => layers.add({ kind: "panel", close: closePick }));
+  });
+
+  function closePick() {
+    picking = false;
+    requestFace?.focus();
+  }
   /** The rail's reviewers: the read's, then those asked here that it does not name yet. */
   const railReviewers = $derived.by(() => {
     const read = reviewers.map((reviewer) => ({ ...reviewer, note: null as string | null }));
@@ -454,7 +478,7 @@
   async function requestReview(who: string) {
     const id = prId;
     if (id === null || request === null || request.disabled !== null) return;
-    picking = false;
+    closePick();
     try {
       const write = await ports.submitWrite({ RequestReviewers: { entity: id, reviewers: [who] } });
       echoWrite(id, REQUESTED, who, { write, many: true, following: { name: "Review request" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
@@ -601,16 +625,7 @@
 {/snippet}
 
 <div class="tf-full">
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
-    {#if repo !== null}
-      <a class="tf-crumb" href={repoHash(repo.entity_id)}>{repo.title}</a><span class="tf-sep">›</span>
-    {:else if detail?.row.path}
-      <span class="tf-crumb">{detail.row.path}</span><span class="tf-sep">›</span>
-    {/if}
-    <strong>{prId === null || failed !== null ? "Pull request" : name}</strong>
-    {#if back !== null}<TfBackHint {back} />{/if}
-  </nav>
+  <TfCrumbs parts={crumbs} {back} />
 
   {#if prId === null || failed !== null}
     {#if failed !== null && !missing}
@@ -624,7 +639,7 @@
         <h1>{name} {title}</h1>
         <div class="tf-sub">
           {#if header.state !== null}<TfStateChip text={header.state.text} tone={header.state.tone ?? 'muted'} />{/if}
-          {#each chips as chip (chip)}{" "}<span class="tf-chip tf-warn">{chip}</span>{/each}
+          {#each chips as chip (chip)}{" "}<TfStateChip text={chip} tone="info" />{/each}
           {#if header.head !== null}
             {" "}<span class="tf-mono">{header.head}</span>{#if header.base !== null}{" "}into <span class="tf-mono">{header.base}</span>{/if}{#if header.author !== null},{/if}
           {/if}
@@ -676,11 +691,14 @@
     <nav class="tf-tabs" aria-label="Pull request">
       {#each PR_TABS as entry (entry.id)}
         {@const count = counts[entry.id]}
-        <a href={prHash(prId, entry.id)} aria-current={tab === entry.id ? "page" : undefined}
+        <a href={prHash(prId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null && count > 0}{" "}<span class="tf-count">{count}</span>{/if}</a
         >
       {/each}
     </nav>
+    {#if !tabKnown}
+      <TfNothingHere message="This pull request has no such tab." href={prHash(prId)} action="Overview" />
+    {:else}
     <div class="tf-cbody" class:tf-pr={tab !== "diff"}>
       {#if tab === "diff"}
         <TfPrFiles
@@ -718,7 +736,7 @@
                           ><span class="tf-dot tf-{row.tone ?? 'muted'}"></span>
                           {#if run !== null}<a href={run}>{row.title}</a>{:else}{row.title}{/if}{#if rail.some((check) => check.row === row && check.required)}{" "}<span class="tf-prreq">Required</span>{/if}</td
                         >
-                        <td>{[row.chip, row.meta].filter((bit) => bit !== null && bit !== "").join(", ")}</td>
+                        <td>{[row.chip === null ? null : stateWord(row.chip), row.meta].filter((bit) => bit !== null && bit !== "").join(", ")}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -838,6 +856,7 @@
                     <button
                       type="button"
                       class="tf-btn tf-sm tf-ghost"
+                      bind:this={requestFace}
                       aria-expanded={picking}
                       aria-disabled={request.disabled !== null ? "true" : undefined}
                       title={request.disabled ?? undefined}
@@ -849,7 +868,8 @@
                 {/if}</header
               >
               {#if picking && request !== null}
-                <div class="tf-prpick" role="group" aria-label="Ask for a review">
+                <div class="tf-prpick" role="group" aria-labelledby="tf-prpick-h" bind:this={pickList}>
+                  <p class="tf-prpick-h" id="tf-prpick-h">Ask for a review</p>
                   {#each askable as option (option.value)}
                     <button type="button" onclick={() => void requestReview(option.value)}
                       ><span class="tf-av" aria-hidden="true">{initials(option.label)}</span> {option.label}</button
@@ -891,7 +911,7 @@
                       <span class="tf-dot tf-{check.row.tone ?? 'muted'}"></span>
                       <span class="tf-prgrow" title={check.row.title}>{#if run !== null}<a href={run}>{check.row.title}</a>{:else}{check.row.title}{/if}</span>
                       {#if check.required}<span class="tf-prreq">Required</span>{/if}
-                      <span class="tf-dim">{check.row.chip ?? ""}</span>
+                      <span class="tf-dim">{stateWord(check.row.chip ?? "")}</span>
                     </div>
                   {/each}
                 </div>
@@ -905,7 +925,7 @@
                     <div class="tf-prit">
                       <span class="tf-dot tf-{build.state?.tone ?? 'muted'}"></span>
                       <span class="tf-prgrow" title={build.title}><a href={itemHash(build)}>{build.title}</a></span>
-                      {#if build.state !== null}<span class="tf-dim">{build.state.text}</span>{/if}
+                      {#if build.state !== null}<span class="tf-dim">{stateWord(build.state.text)}</span>{/if}
                     </div>
                   {/each}
                 </div>
@@ -937,6 +957,7 @@
         </aside>
       {/if}
     </div>
+    {/if}
   {/if}
 </div>
 

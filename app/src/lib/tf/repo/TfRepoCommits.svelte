@@ -64,6 +64,8 @@
   let failed = $state<string | null>(null);
   /** The commits whose declared author is mine. */
   let mine = $state<ReadonlySet<string>>(new Set());
+  /** How many commits the branch has, where the source counts them: it may hold only the latest of them. */
+  let counted = $state<number | null>(null);
 
   $effect(() => {
     const where = at;
@@ -93,6 +95,7 @@
         const read = viewRows(view?.sections[0]);
         reading = false;
         rows = read;
+        counted = view?.sections[0]?.count == null ? null : Number(view.sections[0].count);
         mine = new Set();
         const ids = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
         if (ids.length === 0) return;
@@ -162,7 +165,7 @@
 </script>
 
 <div class="tf-rbar tf-rpickbar">
-  <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows?.length ?? null} />
+  <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows === null ? null : Math.max(rows.length, counted ?? 0)} />
   <button
     type="button"
     class="tf-btn tf-sm"
@@ -172,7 +175,9 @@
     onclick={diffSelected}>Diff selected{count > 0 ? ` (${count})` : ""}</button>
 </div>
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
-{#if shown.length === 0}
+{#if rows !== null && rows.length === 0}
+  <div class="tf-empty"><p>{branch !== null && branch !== defaultBranch ? `${branch} has no commits ${defaultBranch ?? "its base"} lacks.` : "This branch has no commits yet."}</p></div>
+{:else if shown.length === 0}
   <TfNoMatch noun="commits" {filter} />
 {:else}
   <table class="tf-tbl tf-rcommits">
@@ -199,10 +204,10 @@
           <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={filter.text} /></td>
           <td class="tf-dim tf-nowrap"><Marked text={row.meta ?? ""} typed={filter.text} /></td>
           <td class="tf-ropen"
-            >{#if shaOfCommit(row.entity_id) !== null}<TfOpenObject
+            >{#if shaOfCommit(row.entity_id) !== null}<span class="tf-rowend"><span class="tf-rowacts"><TfOpenObject
                 entityId={repoId}
                 object={{ kind: "commit", sha: shaOfCommit(row.entity_id)! }}
-              />{/if}</td
+              /></span></span>{/if}</td
           >
         </tr>
       {/each}

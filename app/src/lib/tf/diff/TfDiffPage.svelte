@@ -3,10 +3,11 @@
   the diff between any two commits of a repository, as its own kept page
   (`page.ts`): linked, gone back to, and still drawn when shown again.
 
-  - **The header**: the repository's name (its mirror row, linking its
-    *Commits*), then `base … head` as written in the address, short shas
-    shortened, and *Open in…* on the range (#2274); each file's header has
-    its own, at its line.
+  - **The crumb** names the repository (its mirror row), which is what `Esc`
+    goes to where nothing opened the page.
+  - **The header**: `base … head` as written in the address, short shas
+    shortened, the repository's *Commits* under it, and *Open in…* on the
+    range (#2274); each file's header has its own, at its line.
   - **The diff**: `entity_range_diff` (#2272, ADR-0036): local read-only
     git when the repository's checkout holds both commits, else the
     repository's section `compare:<base>...<head>` (`address.ts`), drawn by
@@ -66,6 +67,9 @@
   import { ipcErrorMessage } from "../../ipc";
   import { caretOf, isSha, shortEnd } from "./sha";
   import type { DiffFile, DiffRange, DiffReadAt } from "../../ipc/entity";
+  import type { EscTarget } from "../escape";
+  import { namePage, parentPage } from "../page-name.svelte";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfWaiting from "../TfWaiting.svelte";
   import { repoHash } from "../repo/repo";
   import { waitPhase } from "../waiting";
@@ -81,6 +85,7 @@
     head,
     ready = true,
     visible = true,
+    back = null,
     ports = BRIDGE,
   }: {
     repoId: string;
@@ -88,6 +93,8 @@
     head: string;
     ready?: boolean;
     visible?: boolean;
+    /** Where `Esc` goes, which the breadcrumb's hint names. */
+    back?: EscTarget | null;
     ports?: DiffPagePorts;
   } = $props();
 
@@ -107,6 +114,14 @@
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
 
   const section = $derived(compareSection(base, head));
+  const crumbs = $derived<Crumb[]>([
+    { name: "Code", href: "#/code" },
+    title === null ? { name: "Repository", href: repoHash(repoId) } : { name: title, href: repoHash(repoId), code: true },
+    { name: "Diff" },
+  ]);
+  namePage(() => "Diff");
+  // A diff sits under its repository, as its crumb has it.
+  parentPage(() => (title === null ? null : { hash: repoHash(repoId), name: title }));
 
   $effect(() => {
     if (!ready) return;
@@ -175,12 +190,16 @@
   const byName = $derived(!isSha(caretOf(base)[0]) || !isSha(head));
 </script>
 
-<div class="tf-diffpage">
-  <h2 class="tf-cgroup-h">
-    <a href={repoHash(repoId, "commits")}>{title ?? repoId}</a>
-    <span class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</span>
-    <span class="tf-trail"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} /></span>
-  </h2>
+<div class="tf-full tf-diffpage">
+  <TfCrumbs parts={crumbs} {back} />
+  <header class="tf-fhead">
+    <div>
+      <h1 class="tf-mono" data-testid="diff-range">{shown(base)} … {shown(head)}</h1>
+      <div class="tf-sub">In <a class="tf-mono" href={repoHash(repoId, "commits")}>{title ?? repoId}</a></div>
+    </div>
+    <div class="tf-acts"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} size="md" /></div>
+  </header>
+  <div class="tf-cbody">
   {#if readAt !== null}
     <div class="tf-diffws">
       <label class="tf-ck">
@@ -213,4 +232,5 @@
       {/key}
     {/if}
   </TfWaiting>
+  </div>
 </div>

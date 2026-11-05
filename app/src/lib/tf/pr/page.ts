@@ -5,14 +5,12 @@
  */
 import { definePage } from "../page-entry";
 import type { TfRoute } from "../route";
-import { PR_TABS } from "./pr";
 import TfPr from "./TfPr.svelte";
 
 type PrPageRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "pr" };
 
 export const page = definePage({
   matches: (route): route is PrPageRoute => route.view === "full" && route.section === "code" && route.head === "pr",
-  knows: (route) => route.rest[1] === undefined || PR_TABS.some((tab) => tab.id === route.rest[1]),
   component: TfPr,
   // One page per pull request; its tabs are that page drawn again (#2247).
   address: (route) => route.rest[0] ?? "",

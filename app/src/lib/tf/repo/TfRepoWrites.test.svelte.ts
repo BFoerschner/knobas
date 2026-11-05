@@ -348,9 +348,9 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   expect(rows).toEqual([
     ["main Default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", ""],
     ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 Open", "mara", "c90d11e4a7 · 3 hours ago", "Delete…"],
-    ["spike/sepa-instant", "2 ahead, 9 behind", "none", "mara", "9a1b2c3d4e · 9 days ago", "Open PR Delete…"],
+    ["spike/sepa-instant", "2 ahead, 9 behind", "none", "mara", "9a1b2c3d4e · 9 days ago", "New pull request Delete…"],
     ["chore/bump-tokio", "Merged", "none", "jonas", "77aa00bb11 · 5 days ago", "Delete…"],
-    ["release/1.9", "1 ahead, 0 behind", "none", "", "1111111111 · 20 days ago", "Open PR Delete…"],
+    ["release/1.9", "1 ahead, 0 behind", "none", "", "1111111111 · 20 days ago", "New pull request Delete…"],
   ]);
   expect([...target.querySelectorAll(".tf-rbranches th")].map(text)).toEqual([
     "Branch",
@@ -361,7 +361,7 @@ test("Branches lists main as default, then each branch with ahead and behind or 
     "",
   ]);
   expect(rowOf("feature/").querySelector("a[href^='#/pr/']")!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
-  expect(button("Open PR", rowOf("spike/"))!.getAttribute("href")).toBe(
+  expect(button("New pull request", rowOf("spike/"))!.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/compare/spike%2Fsepa-instant",
   );
   // The source's reason, drawn on the button it disables.
@@ -410,7 +410,7 @@ test("Delete… on a branch with unmerged commits warns what is lost, the open P
   await settle();
   expect(writes).toEqual([{ DeleteBranch: { entity: FEATURE } }]);
   expect(dialog()).toBeNull();
-  expect(text(rowOf("feature/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
+  expect(text(rowOf("feature/").querySelector(".tf-chip.tf-info"))).toBe("Delete queued");
   expect(button("Delete…", rowOf("feature/"))).toBeUndefined();
   expect(toasts.items.at(-1)!.text).toBe("Queued: delete branch feature/PAY-231-sepa-retry.");
 });
@@ -482,8 +482,7 @@ test("New branch… offers Link to <job>, ticked, and asks for the branch to be 
   button("New branch…", target)!.click();
   flushSync();
   const box = dialog()!.querySelector<HTMLInputElement>("input[type=checkbox]")!;
-  expect(text(box.closest("label"))).toBe("PAY-231 (in knobas)");
-  expect(text(box.closest("label")!.previousElementSibling)).toBe("Link to");
+  expect(text(box.closest("label"))).toBe("Link it to PAY-231 in knobas");
   expect(box.checked).toBe(true);
   button("Create branch", dialog()!)!.click();
   await settle();
@@ -508,7 +507,7 @@ test("New branch… unticked links nothing, and with no job offers no link", asy
   button("New branch…", target)!.click();
   flushSync();
   expect(dialog()!.querySelector("input[type=checkbox]")).toBeNull();
-  expect(text(dialog())).not.toContain("Link to");
+  expect(text(dialog())).not.toContain("Link it to");
 });
 
 test("New branch… with a job the mirror does not hold queues nothing and says why", async () => {
@@ -596,9 +595,14 @@ test("the compare page offers Open PR #N where a pull request is already open fr
   await draw(COMPARE("feature/PAY-231-sepa-retry"), "PAY-231");
   // Compare is its own tab since #2257 (the mockup's ruling on #2252).
   expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toBe("Compare");
-  expect(text(target.querySelector(".tf-compare .tf-chip.tf-info"))).toBe("PR #142 is already open from this branch");
+  expect(text(target.querySelector(".tf-compare .tf-cexists"))).toBe("PR #142 is already open from this branch.");
   expect(button("Open PR #142", target)!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
+  expect(button("Open PR #142", target)!.classList.contains("tf-sm")).toBe(true);
   expect(button("Create pull request", target)).toBeUndefined();
+  // Nothing to submit, so nothing to fill in: only Into and From stay, to pick another branch.
+  expect(target.querySelector("#tf-cmp-title")).toBeNull();
+  expect(target.querySelector("#tf-cmp-body")).toBeNull();
+  expect(target.querySelectorAll(".tf-compare select")).toHaveLength(2);
 });
 
 test("the compare page proposes Into and From, the change and its commits, and queues CreatePullRequest", async () => {
@@ -795,7 +799,7 @@ test("Edit turns the file into an editor that says the commit goes to Gitea and 
 
   await draw([REPO, "edit", "README.md"]);
   expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toBe("Files");
-  expect(text(target.querySelector(".tf-fileview header"))).toBe("README.md editing on main Cancel Commit change…");
+  expect(text(target.querySelector(".tf-fileview header"))).toBe("README.md Editing on main Cancel Commit change…");
   expect(button("Cancel", target)!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/files/README.md");
   expect(text(target.querySelector(".tf-fileview .tf-banner.tf-info"))).toBe(
     "The edit is committed to main on Gitea. Your local checkout is never written to.",
@@ -1067,11 +1071,11 @@ test("a branch deleted goes once the listing's re-read the refresh event asks no
   flushSync();
   button("Delete branch", dialog()!)!.click();
   await settle();
-  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("Delete queued");
   // The refresh says it landed before the listing is read again.
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago"), vrow(CHORE, "chore/bump-tokio", null, "77aa00bb11 · 5 days ago")];
   await events.refreshed(CHORE, 1);
-  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete sent");
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("Delete sent");
   listing = [vrow(MAIN, "main", "default", "5d77e1a2c3 · 1 day ago"), vrow(FEATURE, "feature/PAY-231-sepa-retry", null, "c90d11e4a7 · 3 hours ago")];
   await events.ended("gitea");
   expect(branchNames()).toEqual(["main Default", "feature/PAY-231-sepa-retry"]);
@@ -1107,7 +1111,7 @@ test("a branch made, a branch deleted and a file commit the queue refuses each d
   button("Delete branch", dialog()!)!.click();
   await settle();
   expect(branchNames()).toContain("fix/refused Queued");
-  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("delete queued");
+  expect(text(rowOf("chore/").querySelector(".tf-chip.tf-info"))).toBe("Delete queued");
 
   queue.hear(1, { id: 1, state: "refused", detail: "403 Forbidden" });
   queue.hear(2, { id: 2, state: "refused", detail: "403 Forbidden" });

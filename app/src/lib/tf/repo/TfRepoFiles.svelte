@@ -450,6 +450,22 @@
    */
   const fromDefault = $derived(file === null || editing ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
   const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? fromDefault?.pipeline.steps ?? null));
+  /** The panel the reader opened on this file, which `Esc` closes before it leaves the page. */
+  const pipeOpened = $derived(file !== null && !editing && pipes.has(file.path) ? file.path : null);
+  let pipeFace = $state<HTMLButtonElement | null>(null);
+  $effect(() => {
+    const at = pipeOpened;
+    if (at === null || !shownPage()) return;
+    return untrack(() =>
+      layers.add({
+        kind: "panel",
+        close: () => {
+          pipes.delete(at);
+          queueMicrotask(() => pipeFace?.focus());
+        },
+      }),
+    );
+  });
   const shownDefault = $derived(
     file !== null && fromDefault !== null && !pipes.has(file.path) ? { name: fromDefault.pipeline.name, pattern: fromDefault.pattern } : null,
   );
@@ -1012,7 +1028,7 @@
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (inTextField(event.target) || inTextField(document.activeElement)) return;
       // A dialog or the launcher over the page keeps its keys and its focus.
-      if (layers.open.length > 0 || goField === null) return;
+      if (layers.open.some((layer) => layer.kind !== "panel") || goField === null) return;
       event.preventDefault();
       goField.focus();
     };
@@ -1125,7 +1141,7 @@
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
-        <span class="tf-chip tf-warn">editing on {branch}</span>
+        <span class="tf-chip tf-warn">Editing on <span class="tf-mono">{branch}</span></span>
         <span class="tf-trail">
           <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, file.path)}>Cancel</a>
           <button type="button" class="tf-btn tf-sm tf-primary" onclick={openCommit}>Commit change…</button>
@@ -1168,7 +1184,7 @@
           {/if}
           {#if steps === null && ports.piped !== undefined && suggested === null}
             {@const at = file.path}
-            <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>Pipeline</button>
+            <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, [])}>Pipeline</button>
           {/if}
           <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
           <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />

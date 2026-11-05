@@ -32,13 +32,8 @@
 .tf-bsel select:focus-visible { outline: none; }
 .tf-bsel:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tf-bsel:has(select:disabled) { opacity: .55; }
-/* A repository's title never breaks inside its name; the actions stack under it before the two collide. */
-.tf-repohead { container: repohead / inline-size; }
+/* A repository's title never breaks inside its name. */
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@container repohead (max-width: 1040px) {
-  .tf-repohead-in { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
-  .tf-repohead-in > .tf-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-left: 0; }
-}
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-repo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
 /* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */
@@ -119,7 +114,7 @@
 .tf-diff :is(.tf-thread, .tf-newc) { letter-spacing: .006em; word-spacing: .06em; } .tf-hl-fn { color: var(--hl-fn); } .tf-hl-ty { color: var(--hl-ty); }
 /* Find in file (#2299), as Find in log. */
 .tf-findbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--rule-2); }
-.tf-findbar .tf-fsearch { max-width: 320px; }
+.tf-findbar .tf-fsearch { max-width: 300px; }
 .tf-findbar .tf-lqn { font-size: var(--t-xs); white-space: nowrap; }
 .tf-code mark { background: var(--mark); color: inherit; }
 .tf-code mark.tf-curm { outline: 2px solid var(--ink); }
@@ -159,26 +154,32 @@
 .tf-rcommits td.tf-ropen { width: 1%; padding-top: 0; padding-bottom: 0; text-align: right; white-space: nowrap; }
 /* A commit picked for *Diff selected* (#2271). */
 .tf-rcommits tr.tf-picked td { background: var(--info-bg); }
-.tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; padding-right: 22px; }
+.tf-rbar.tf-rpickbar { display: flex; align-items: center; gap: 12px; }
+/* The filter bar keeps the page's right edge; a button past it takes the edge for itself, and a hidden one takes nothing. */
+.tf-rpickbar > .tf-btn { flex: none; margin-right: 22px; }
 .tf-rpickbar .tf-fbar { flex: 1; }
-.tf-diffpage .tf-cgroup-h a { color: inherit; }
 /* *Ignore whitespace* (#2272): offered on a diff read at the checkout, disabled with its reason otherwise. */
 .tf-diffws { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
 .tf-diffws .tf-cnote { margin: 0; }
-.tf-rprs td:first-child { width: 70px; }
 /*
   The one diff component (#2266, `diff/TfDiffView.svelte`; `mockups/code-area/diff.css`): every diff, file by file.
   Unified: old number, new number, sign and code, the comment cell. Split: each side its number, sign and code.
 */
+/* The room a diff has decides how it lays out, not the window: Compare has less than a pull request at one width. */
+.tf-dview { container: dview / inline-size; min-width: 0; }
 .tf-dtool { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; margin-bottom: 12px; font-size: var(--t-sm); }
 .tf-dtool-why { font-size: var(--t-xs); }
 .tf-dtool-prog { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-diff { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: clip; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-diff + .tf-diff { margin-top: 12px; }
 /* The file's head stays in view through a long diff. */
-.tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; gap: 10px; align-items: center; position: sticky; top: 0; z-index: 2; }
+.tf-diff .tf-fh { padding: 8px 12px; background: var(--sheet-2); border-bottom: 1px solid var(--rule); font-weight: 600; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; position: sticky; top: 0; z-index: 2; }
+.tf-diff .tf-fh > .tf-mono { min-width: 0; overflow-wrap: anywhere; }
+/* The drawer's `.tf-dbody` shares this name: a file's lines want its sideways scroll and none of its padding. */
+.tf-diff .tf-dbody { padding: 0; }
 .tf-diff .tf-ln { display: grid; grid-template-columns: 46px 46px 1fr auto; white-space: pre; position: relative; }
-.tf-diff.tf-split .tf-ln { grid-template-columns: 46px minmax(0, 1fr) auto; overflow: hidden; }
+/* Half a row has no room to scroll in, and cutting a line hides code, so a long line wraps. */
+.tf-diff.tf-split .tf-ln { grid-template-columns: 46px minmax(0, 1fr) auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-diff .tf-no { color: var(--ink-2); text-align: right; padding-right: 8px; user-select: none; }
 .tf-diff .tf-add { background: var(--ok-bg); }
 .tf-diff .tf-del { background: var(--err-bg); }
@@ -221,6 +222,13 @@
 .tf-add-n { color: var(--ok); font-weight: 600; }
 .tf-del-n { color: var(--err); font-weight: 600; }
 .tf-dgrid { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 18px; align-items: start; }
+.tf-dgrid > .tf-railbar { display: none; padding: 0; background: none; border: 0; }
+@container dview (max-width: 860px) {
+  .tf-dgrid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .tf-dgrid > .tf-railbar { display: flex; }
+  .tf-dgrid.tf-rail-shut > .tf-rail { display: none; }
+  .tf-flist { position: static; }
+}
 /* As tall as the diffs beside it, so the file list has room to stick in (#2091). */
 .tf-dnav { align-self: stretch; }
 .tf-dnav .tf-minif { max-width: none; margin-bottom: 8px; }
@@ -241,13 +249,15 @@
   --ok: var(--on-ink-ok); --warn: var(--on-ink-warn); --err: var(--on-ink-err); --info: var(--on-ink-info); --muted: var(--on-ink-muted);
 }
 .tf-flist button[aria-current="true"] :is(.tf-add-n, .tf-del-n) { color: inherit; }
+/* A tag's tint is for the sheet, and on the pill it fails: there the tone is the word's own colour, on no tint. */
+.tf-flist button[aria-current="true"] .tf-bd { background: none; }
+.tf-flist button[aria-current="true"] .tf-bd:not(.tf-bd-A, .tf-bd-D, .tf-bd-M, .tf-bd-R) { color: inherit; }
 .tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
 .tf-flist .tf-viewed { color: var(--muted); }
 .tf-state { flex: none; font: 400 var(--t-2xs) var(--sans); color: var(--ink-2); white-space: nowrap; }
 .tf-fh .tf-state { margin-left: -2px; font-size: var(--t-xs); }
 .tf-flist button[aria-current="true"] .tf-state { color: inherit; }
-.tf-flist-none { padding: 8px; font-family: var(--sans); }
-.tf-flist-none .tf-linkish { font-family: var(--sans); }
+.tf-flist-none { padding: 16px 8px; }
 .tf-diff .tf-fh-acts { font-family: var(--sans); }
 .tf-ftree .tf-state, .tf-flist .tf-state { font-family: var(--sans); }
 .tf-diff .tf-fh-open { margin-left: auto; font: 400 var(--t-sm) var(--sans); }
@@ -361,8 +371,6 @@
 .tf-thread .tf-reply { margin: 6px 0 0; }
 .tf-said.tf-queued { opacity: 0.8; }
 @media (max-width: 900px) {
-  .tf-dgrid { grid-template-columns: minmax(0, 1fr); }
-  .tf-flist { position: static; }
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
   .tf-ftreebox { position: static; max-height: none; }
 }

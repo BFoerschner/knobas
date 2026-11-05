@@ -59,10 +59,10 @@
   const uid = $props.id();
   const drafts = $derived(pending.of(prId));
   const choices = $derived(reviewChoices(actions, drafts.length, base));
-  // The first sendable verdict, once, when the dialog opens: prototype-6 checks *Comment*.
-  let verdict = $state<Verdict | null>(
-    (() => reviewChoices(actions, pending.of(prId).length, base).find((choice) => choice.action !== null)?.verdict ?? null)(),
-  );
+  // Nothing is preselected (design system, the enabled rule): a press must not approve by default. The one verdict a
+  // reader has (one's own pull request takes only a comment) is no choice to make.
+  const offered = untrack(() => reviewChoices(actions, pending.of(prId).length, base));
+  let verdict = $state<Verdict | null>(offered.length === 1 && offered[0]!.action !== null ? offered[0]!.verdict : null);
   // The review's words are kept with its comments until it is sent (#2276), so a restart keeps them too.
   let summary = $state(untrack(() => pending.body(prId)));
   let busy = $state(false);
@@ -80,6 +80,9 @@
 
   const chosen = $derived(choices.find((choice) => choice.verdict === verdict) ?? null);
   const missing = $derived(chosen?.action ? missingFields(chosen.action, { body: summary }) : ["verdict"]);
+  const summaryRequired = $derived(chosen?.action?.fields.some((field) => field.name === "body" && field.required) ?? false);
+  /** What the primary waits for, in words beside it. */
+  const needs = $derived(missing.length === 0 ? null : chosen?.action ? `${chosen.label} needs a summary.` : "Pick a verdict.");
 
   async function send() {
     if (busy || !chosen?.action || missing.length > 0) return;
@@ -119,19 +122,15 @@
         void send();
       }}
     >
-      <textarea
-        rows="3"
-        bind:value={summary}
-        oninput={() => pending.setBody(prId, summary)}
-        aria-label="Summary"
-        placeholder={chosen?.action?.fields.some((field) => field.name === "body" && field.required) ? "Summary" : "Summary (optional)"}
-      ></textarea>
+      <label for="tf-prr-{uid}-summary">{summaryRequired ? "Summary" : "Summary (optional)"}</label>
+      <textarea id="tf-prr-{uid}-summary" rows="3" bind:value={summary} oninput={() => pending.setBody(prId, summary)}></textarea>
+      <span>Verdict</span>
       <fieldset class="tf-radio">
         <legend class="tf-sr">Verdict</legend>
         {#each choices as choice (choice.verdict)}
           <label title={choice.why ?? undefined}
             ><input type="radio" name="tf-prr-{uid}-verdict" value={choice.verdict} disabled={choice.action === null} bind:group={verdict} />
-            <span>{choice.label}<small>{choice.meaning}</small></span></label
+            <span>{choice.label}<small>{choice.why ?? choice.meaning}</small></span></label
           >
         {/each}
       </fieldset>
@@ -144,6 +143,7 @@
     </form>
   {/snippet}
   {#snippet footer()}
+    {#if needs !== null}<span class="tf-dim tf-small tf-first">{needs}</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-prr-{uid}" disabled={busy || missing.length > 0}>Submit review</button>
   {/snippet}

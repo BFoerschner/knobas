@@ -445,7 +445,7 @@
       <!-- Focusable, so the reason in its title reaches the keyboard too. -->
       <button
         type="button"
-        class="tf-btn"
+        class="tf-btn tf-primary"
         aria-disabled="true"
         title={job === null ? "Open a job to propose its branch" : `${job} has no branch yet`}>New pull request</button
       >

@@ -12,6 +12,7 @@
  * it wrote them.
  */
 import type { SourceView, Tone, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../ipc/entity";
+import { stateWord } from "../state-word";
 
 /** The page's tabs, in prototype-6's order; *Files changed* is #842's. */
 export const PR_TABS = [
@@ -36,6 +37,11 @@ export interface PrRoute {
 export function readPrRoute(rest: readonly string[]): PrRoute {
   const tab = rest[1] ?? "";
   return { prId: rest[0] || null, tab: (TABS.has(tab) ? tab : "overview") as PrTab };
+}
+
+/** Whether what follows `pr` in the address is a tab the page has. */
+export function knowsPrTab(rest: readonly string[]): boolean {
+  return rest[1] === undefined || TABS.has(rest[1]);
 }
 
 /** The address of the page, or of one of its tabs; Overview is the bare address. */
@@ -164,6 +170,11 @@ function opening(text: string): string {
 
 const LOUDNESS: Tone[] = ["err", "warn", "info", "muted", "ok"];
 
+/** A check in a sentence: its name, then its state as the chips word it, *failed* whatever the source wrote. */
+function checkWords(row: ViewRow): string {
+  return `${row.title} ${stateWord(row.chip ?? "").toLowerCase()}`.trim();
+}
+
 /**
  * The checks as one line: *all checks passing* when every one is ok, else
  * each that is not, by its name and state, toned by the loudest. A list the
@@ -175,7 +186,7 @@ export function checksLine(rows: readonly ViewRow[]): ReadyLine | null {
   const open = rows.filter((row) => row.tone !== "ok");
   if (open.length === 0) return { text: "Checks: all checks passing", tone: "ok" };
   const tone = LOUDNESS.find((candidate) => open.some((row) => (row.tone ?? "muted") === candidate)) ?? "muted";
-  return { text: `Checks: ${open.map((row) => `${row.title} ${row.chip ?? ""}`.trim()).join(", ")}`, tone };
+  return { text: `Checks: ${open.map(checkWords).join(", ")}`, tone };
 }
 
 /**
@@ -219,7 +230,7 @@ export function readyLines(view: SourceView | null): ReadyLine[] {
 function requiredLine(view: SourceView | null, value: string, tone: Tone): ReadyLine {
   const open = railChecks(view).filter((check) => check.required && check.standing !== "ok");
   const line: ReadyLine = { text: `Required checks: ${value}`, tone };
-  if (open.length > 0) line.why = open.map((check) => `${check.row.title} ${check.row.chip ?? ""}`.trim()).join(", ");
+  if (open.length > 0) line.why = open.map((check) => checkWords(check.row)).join(", ");
   return line;
 }
 
@@ -282,7 +293,8 @@ export interface ReadyVerdict {
  * the source offers *Merge…*, a verdict over them. Ready only where every
  * line is met and the source does not refuse the merge: *Merge…*'s reason is
  * the source's one decision (`land.rs`), so a line the page cannot draw (a
- * head behind a protected base) still holds the verdict back, saying why.
+ * head behind a protected base, a token that may not merge) still holds the
+ * verdict back, saying why. The verdict's box says only what no row says.
  */
 export function readiness(view: SourceView | null): { verdict: ReadyVerdict | null; lines: ReadyLine[] } {
   const lines = readyLines(view);
@@ -290,9 +302,23 @@ export function readiness(view: SourceView | null): { verdict: ReadyVerdict | nu
   if (merge === null || lines.length === 0) return { verdict: null, lines };
   const met = lines.filter((line) => line.tone === "ok").length;
   const counted = `${met} of ${lines.length} met`;
-  if (met === lines.length && merge.disabled === null) return { verdict: { text: `Ready: ${counted}`, tone: "ok", why: null }, lines };
+  if (met === lines.length) {
+    if (merge.disabled === null) return { verdict: { text: `Ready: ${counted}`, tone: "ok", why: null }, lines };
+    return { verdict: { text: "Can't merge from here", tone: "warn", why: opening(merge.disabled) }, lines };
+  }
   const tone: Tone = lines.some((line) => line.tone === "err") ? "err" : "warn";
-  return { verdict: { text: `Not yet: ${counted}`, tone, why: merge.disabled }, lines };
+  return { verdict: { text: `Not yet: ${counted}`, tone, why: unsaid(merge, lines) }, lines };
+}
+
+/** What each of the rows speaks for, in the words of the source's reasons. */
+const ROW_WORDS = ["approval", "check", "conflict"];
+
+/** The source's reasons no unmet row already gives, or `null`: the box and the rows do not say one thing twice. */
+function unsaid(merge: ViewAction, lines: readonly ReadyLine[]): string | null {
+  const open = lines.filter((line) => line.tone !== "ok").map((line) => line.text.toLowerCase());
+  const said = (reason: string) => ROW_WORDS.some((word) => reason.toLowerCase().includes(word) && open.some((text) => text.includes(word)));
+  const left = mergeReasons(merge).filter((reason) => !said(reason));
+  return left.length === 0 ? null : opening(left.join("; "));
 }
 
 /** One reviewer in the side rail and where their review stands. */

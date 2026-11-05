@@ -3,7 +3,7 @@
   `renderRepo(...,'branches')`: the filter (text, *Mine*, *No PR*, *Merged*),
   then the default branch marked *default* and every other branch with ahead
   and behind it (or *merged*), its open pull request, who committed its tip
-  (*By*) and when; *Open PR* and *Delete…* where the source offers them.
+  (*By*) and when; *New pull request* and *Delete…* where the source offers them.
 
   *By* and *Mine* are the tip's declared author (`code_facts`, #986), never
   the listing's line.
@@ -23,6 +23,7 @@
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
+  import TfKey from "../TfKey.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CodeFacts, ViewRow } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
@@ -242,8 +243,8 @@
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
         <tr>
-          <td class="tf-mono"
-            ><Marked text={row.name} typed={filter.text} />{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<span class="tf-chip tf-info">delete {gone}</span>{/if}</td
+          <td
+            ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
           <td
             >{#if standing?.merged}<TfStateChip text="merged" tone="ok" />{:else}{against(standing)}{/if}</td
@@ -257,7 +258,7 @@
           <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
           <td class="tf-nowrap tf-racts"
             ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
-                  >Open PR</a
+                  >New pull request</a
                 >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"
@@ -281,7 +282,8 @@
 {#if deleting !== null && deleting.standing !== null}
   {@const standing = deleting.standing}
   {@const row = deleting}
-  <TfDialog title="Delete {row.name}?" onclose={() => (deleting = null)} className="tf-rdel">
+  <TfDialog onclose={() => (deleting = null)} className="tf-rdel">
+    {#snippet title()}Delete <TfKey value={row.name} />?{/snippet}
     {#snippet body()}
       {#if standing.merged}
         <p>Every commit on this branch is in {defaultName}. Nothing is lost.</p>

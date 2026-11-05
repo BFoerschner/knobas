@@ -1,12 +1,16 @@
 /* ---------- Branches, compare and edit (#839, #840, #845, R-8.6, R-8.8, R-8.11) ---------- */
 .tf-rbranches td:first-child { width: 34%; }
 .tf-rbranches .tf-racts { text-align: right; }
+.tf-rbranches td:first-child .tf-mono { font-size: var(--t-sm); }
 .tf-rbranches-note { margin: 8px 0 0; }
 /* A banner inside a dialog's body: a rounded block, not a strip across a panel. */
 .tf-dialog .tf-dbanner { border: 0; border-radius: 4px; }
 .tf-compare { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-compare .tf-cform { padding: 14px; }
-.tf-compare .tf-ctop { align-self: start; padding-top: 6px; }
+/* A branch's name is a code value, in the select as anywhere. */
+.tf-compare select.tf-cbranch { font-family: var(--mono); font-variant-ligatures: none; }
+.tf-compare .tf-cexists { font-size: var(--t-sm); }
+.tf-compare .tf-cnone { padding-top: 10px; }
 .tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .tf .tf-compare .tf-cchanges { margin-top: 18px; }
 .tf-compare .tf-side { display: flex; flex-direction: column; gap: 14px; }
