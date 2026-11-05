@@ -25,8 +25,8 @@
 
 use sqlx::PgPool;
 
-use crate::query::{EffectiveFilters, Parsed};
 use crate::SearchError;
+use crate::query::{EffectiveFilters, Parsed};
 
 /// Every `(name, kind)` a parent answers to, as a table expression -- the one
 /// place the parent arms are put together, read by [`crate::sql::parent_positions`] and by

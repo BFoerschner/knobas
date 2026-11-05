@@ -170,7 +170,11 @@ async fn the_bounded_read_admits_exactly_what_the_launchers_statement_admits() {
         ("only a commit names it", &commits_only, false),
         ("a withdrawn pull request names it", &withdrawn, false),
         ("a pull request in a disabled source names it", &off, false),
-        ("a row synced by Gitea in a source configured as Jira", &mismatch, false),
+        (
+            "a row synced by Gitea in a source configured as Jira",
+            &mismatch,
+            false,
+        ),
         ("an asset is called so", &host, true),
         ("an asset with a route beneath is called so", &routed, true),
         ("an asset with nothing beneath is called so", &bare, true),
@@ -178,7 +182,10 @@ async fn the_bounded_read_admits_exactly_what_the_launchers_statement_admits() {
         // Upper case: compared lower-cased on both sides, as `under:` is.
         ("the kept name, upper-cased", &kept.to_uppercase(), true),
     ];
-    let names: Vec<String> = shapes.iter().map(|(_, name, _)| (*name).to_owned()).collect();
+    let names: Vec<String> = shapes
+        .iter()
+        .map(|(_, name, _)| (*name).to_owned())
+        .collect();
 
     for hidden in [
         &["commit"][..],
@@ -223,11 +230,23 @@ async fn the_bounded_read_admits_exactly_what_the_launchers_statement_admits() {
                 .admitting
         }
     };
-    assert!(under(&[]).await.contains(&2), "commits kept: the commit is admitted");
-    assert!(!under(&["commit", "pr"]).await.contains(&1), "pull requests hidden");
+    assert!(
+        under(&[]).await.contains(&2),
+        "commits kept: the commit is admitted"
+    );
+    assert!(
+        !under(&["commit", "pr"]).await.contains(&1),
+        "pull requests hidden"
+    );
     let assets_hidden = under(&["commit", "asset"]).await;
-    assert!(assets_hidden.contains(&7), "the route beneath the hidden asset");
-    assert!(assets_hidden.contains(&6), "the route beneath the hidden host's child");
+    assert!(
+        assets_hidden.contains(&7),
+        "the route beneath the hidden asset"
+    );
+    assert!(
+        assets_hidden.contains(&6),
+        "the route beneath the hidden host's child"
+    );
     assert!(!assets_hidden.contains(&8), "the bare hidden asset");
     assert!(!under(&["commit", "asset", "route"]).await.contains(&7));
 }
