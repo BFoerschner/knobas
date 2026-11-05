@@ -295,8 +295,9 @@ export function previewable(entry: ArtifactEntry): boolean {
 
 /** How the viewer draws a file it reads whole (`artifact_bytes`, #2417), by its extension; `null` for any other file. */
 export function drawnWhole(entry: ArtifactEntry): "image" | "pdf" | null {
-  if (entry.folder) return null;
-  const extension = entry.name.slice(entry.name.lastIndexOf(".") + 1).toLowerCase();
+  const dot = entry.name.lastIndexOf(".");
+  if (entry.folder || dot <= 0) return null;
+  const extension = entry.name.slice(dot + 1).toLowerCase();
   if (/^(png|jpe?g|gif|webp)$/.test(extension)) return "image";
   return extension === "pdf" ? "pdf" : null;
 }

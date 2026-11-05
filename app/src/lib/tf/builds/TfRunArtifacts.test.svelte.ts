@@ -228,6 +228,19 @@ test("a PDF artifact opens in the PDF component, and a file of no other kind is 
   expect(drawn.bytes).toEqual(["report.pdf"]);
 });
 
+test("a file named only like an extension is no image or PDF: it stays a text head", async () => {
+  for (const name of ["png", "PDF", ".png", ".pdf"]) {
+    const drawn = draw({ "": [file(name, 2_048)] });
+    await settle();
+    nameButton(name).click();
+    await settle();
+    expect(drawn.bytes, name).toEqual([]);
+    expect(drawn.previewed, name).toEqual([name]);
+    unmount(page!);
+    page = null;
+  }
+});
+
 test("an artifact over the cap says so without a read, offers no Try again, and keeps Download", async () => {
   const drawn = draw({ "": [file("big.png", CAP + 1), file("edge.png", CAP)] });
   await settle();
