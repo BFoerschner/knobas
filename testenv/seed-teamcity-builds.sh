@@ -178,6 +178,14 @@ expect() {  # expect <what> <status>...
   die "$_what: HTTP $REST_STATUS: $(printf '%s' "$REST_BODY" | head -c 400)"
 }
 
+# A 200 that is not a JSON object says nothing about what was asked. Where the
+# answer decides a delete it must not read as "not there": jq fails on it, so a
+# `jq -e` under `if !` or an empty `$(jq ...)` would take it for one (#2480).
+expect_object() {  # expect_object <what>
+  printf '%s' "$REST_BODY" | jq -e 'type == "object"' >/dev/null 2>&1 \
+    || die "$1: HTTP $REST_STATUS, but the body is not a JSON object: $(printf '%s' "$REST_BODY" | head -c 400)"
+}
+
 # --------------------------------------------------------------------------
 # The derivation table (tc_state.rs), in shell.
 project_of() { printf '%s' "${1%%_*}"; }               # Payout_Build -> Payout
@@ -264,6 +272,19 @@ SEEDED_ARTIFACT=sepa-report.txt
 # The same file again inside a folder, so the run page's artifact tree has a
 # folder to open and to download as a zip (#856).
 SEEDED_FOLDER=reports
+# Two binary files beside it (#2480), so a live suite reads non-text bytes from
+# a real server: real files, so the suite compares against what was published.
+# The agent has no checkout of testenv, so the step carries them as base64.
+SEEDED_BINARY_DIR=teamcity-artifacts
+SEEDED_BINARIES='sepa-chart.png sepa-statement.pdf'
+seeded_folder_files() {  # what the folder holds, one name a line
+  printf '%s\n' "$SEEDED_ARTIFACT"
+  for _f in $SEEDED_BINARIES; do printf '%s\n' "$_f"; done
+}
+seeded_root_files() {  # what the build's root holds: the same files, and the folder
+  seeded_folder_files
+  printf '%s\n' "$SEEDED_FOLDER"
+}
 fixture_log() {  # fixture_log <build type id> -> the fixture's log, blank lines dropped
   jqf ".builds[] | select(.cfg==\"$1\") | .log" | sed '/^$/d'
 }
@@ -302,12 +323,23 @@ EOF
       printf '%s\n' "KNOBAS_FIXTURE_LOG" \
                     "cat > $SEEDED_ARTIFACT <<'KNOBAS_FIXTURE_LOG'"
       fixture_log Payout_IntegrationTests
-      printf '%s\n' "KNOBAS_FIXTURE_LOG" "cat <<'KNOBAS_SERVICE_MESSAGES'"
+      printf '%s\n' "KNOBAS_FIXTURE_LOG"
+      # `fold` because macOS's base64 does not wrap and GNU's does: the same
+      # script from either, or the seed would rewrite the step on each machine.
+      for _f in $SEEDED_BINARIES; do
+        [ -r "$SEEDED_BINARY_DIR/$_f" ] || die "$SEEDED_BINARY_DIR/$_f not found"
+        printf '%s\n' "base64 -d > $_f <<'KNOBAS_FIXTURE_BYTES'"
+        base64 < "$SEEDED_BINARY_DIR/$_f" | tr -d '\n' | fold -w 76
+        printf '\n%s\n' "KNOBAS_FIXTURE_BYTES"
+      done
+      printf '%s\n' "cat <<'KNOBAS_SERVICE_MESSAGES'"
       _test=$(tc_escape "$(failed_test_name Payout_IntegrationTests)")
       _why=$(tc_escape "$(failed_test_details Payout_IntegrationTests)")
-      printf '%s\n' "##teamcity[publishArtifacts '$SEEDED_ARTIFACT']" \
-                    "##teamcity[publishArtifacts '$SEEDED_ARTIFACT => $SEEDED_FOLDER']" \
-                    "##teamcity[testStarted name='$_test']" \
+      for _f in $(seeded_folder_files); do
+        printf '%s\n' "##teamcity[publishArtifacts '$_f']" \
+                      "##teamcity[publishArtifacts '$_f => $SEEDED_FOLDER']"
+      done
+      printf '%s\n' "##teamcity[testStarted name='$_test']" \
                     "##teamcity[testFailed name='$_test' message='$_why']" \
                     "##teamcity[testFinished name='$_test']" \
                     "KNOBAS_SERVICE_MESSAGES" "exit 1"
@@ -422,7 +454,10 @@ ensure_build_type() {  # ensure_build_type <id>
     if [ "$_id" = "Payout_Build" ]; then
       add_running_steps
     else
-      add_step "$_id" "$_name" "$(step_script "$_id")"
+      # Assigned first: a `die` in a substitution among the arguments would not
+      # stop the seed, and the step would go in cut short.
+      _script=$(step_script "$_id")
+      add_step "$_id" "$_name" "$_script"
       say "added the step to $_id"
     fi
   elif [ "$_id" != "Payout_Build" ]; then
@@ -457,8 +492,11 @@ ensure_build_type() {  # ensure_build_type <id>
 ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
   rest GET "/app/rest/builds/id:$1?fields=testOccurrences(failed),revisions(revision(vcs-root-instance(properties(property(name,value)))))"
   expect "read build id $1" 200
+  expect_object "read build id $1"
   _why=''
-  case "$(printf '%s' "$REST_BODY" | jq -r '[.revisions.revision[]?."vcs-root-instance".properties.property[]? | select(.name=="url") | .value][0] // ""')" in
+  _url=$(printf '%s' "$REST_BODY" | jq -r '[.revisions.revision[]?."vcs-root-instance".properties.property[]? | select(.name=="url") | .value][0] // ""')
+  [ -n "$_url" ] || die "build id $1 names no VCS root URL, so nothing says an older seed ran it; deleting nothing: $(printf '%s' "$REST_BODY" | head -c 400)"
+  case "$_url" in
     "$GITEA_INTERNAL_URL"/*) ;;
     *) _why="it ran from another VCS root URL" ;;
   esac
@@ -466,12 +504,22 @@ ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
     _why="it reports no failed test"
   fi
   if [ -z "$_why" ] && [ "$2" = "FAILURE" ]; then
-    # #856: the failed build publishes the artifact folder too.
+    # #856, #2480: the failed build publishes the folder and the binary files.
+    # Only what is missing counts: the delete is one-way, and a build that also
+    # holds a file a later seed added is no reason for this seed to run it again.
+    # No artifact at all is no older seed's build (each published the report since
+    # #665) but a failed read or the server's clean-up: a person decides that one.
     rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
     expect "list the artifacts of build id $1" 200
-    if ! printf '%s' "$REST_BODY" | jq -e --arg f "$SEEDED_FOLDER" '[.file[]?.name] | index($f)' >/dev/null; then
-      _why="it publishes no $SEEDED_FOLDER/ folder"
-    fi
+    expect_object "list the artifacts of build id $1"
+    [ "$(printf '%s' "$REST_BODY" | jq '[.file[]?] | length')" -gt 0 ] \
+      || die "build id $1 lists no artifacts, which no seed's failed build does; deleting nothing. If they are really gone, delete the build by hand and seed again: $(printf '%s' "$REST_BODY" | head -c 400)"
+    for _f in $(seeded_root_files); do
+      if ! printf '%s' "$REST_BODY" | jq -e --arg f "$_f" '[.file[]?.name] | index($f)' >/dev/null; then
+        _why="it publishes no $_f"
+        break
+      fi
+    done
   fi
   [ -z "$_why" ] && return 0
   rest DELETE "/app/rest/builds/id:$1"
@@ -643,9 +691,14 @@ assert_reports() {  # assert_reports <build id> <build type id>
     || die "build id $1 reports failed tests $(printf '%s' "$REST_BODY" | jq -c '[.testOccurrence[]?.name]'), wanted [\"$_want\"]"
   rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
   expect "list the artifacts of build id $1" 200
-  _want=$(printf '%s\n' "$SEEDED_ARTIFACT" "$SEEDED_FOLDER" | sort | paste -sd, -)
+  _want=$(seeded_root_files | LC_ALL=C sort | paste -sd, -)
   [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | sort | join(",")')" = "$_want" ] \
-    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted the file and the folder: $_want"
+    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted the files and the folder: $_want"
+  rest GET "/app/rest/builds/id:$1/artifacts/children/$SEEDED_FOLDER?fields=file(name)"
+  expect "list the $SEEDED_FOLDER folder of build id $1" 200
+  _want=$(seeded_folder_files | LC_ALL=C sort | paste -sd, -)
+  [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | sort | join(",")')" = "$_want" ] \
+    || die "build id $1 holds $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]') in $SEEDED_FOLDER, wanted: $_want"
 }
 
 # --------------------------------------------------------------------------
@@ -727,20 +780,42 @@ ensure_change_witness() {
   if [ -n "$_rec" ]; then
     _sha=$(printf '%s' "$_rec" | jq -r .sha)
     _b=$(printf '%s' "$_rec" | jq -r .before_id); _a=$(printf '%s' "$_rec" | jq -r .after_id)
+    # The pair goes only on an answer that says it is not good: a 404, another
+    # agent, another head. A read that failed says nothing, and stops the seed
+    # rather than delete both builds (#2480).
     gitea GET "/repos/$GITEA_ORG/$CHANGE_REPO/branches/$_branch"
+    case "$GITEA_STATUS" in
+      200|404) ;;
+      *) die "read $CHANGE_BRANCH of $CHANGE_REPO: HTTP $GITEA_STATUS: $GITEA_BODY" ;;
+    esac
     _head=$(printf '%s' "$GITEA_BODY" | jq -r '.commit.id // empty' 2>/dev/null || true)
+    [ "$GITEA_STATUS" = "404" ] || [ -n "$_head" ] \
+      || die "read $CHANGE_BRANCH of $CHANGE_REPO: HTTP 200 with no commit: $GITEA_BODY"
     rest GET "/app/rest/builds/id:$_b?fields=state"
+    expect "read build id $_b of the change witness" 200 404
     _bs=$REST_STATUS
     # Both builds ran on the fixture's one agent (#1560): a pair that ran on
     # an agent another worktree's compose registered is made again.
     _ag=1
     for _x in "$_b" "$_a"; do
       rest GET "/app/rest/builds/id:$_x?fields=agent(name)"
-      [ "$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty' 2>/dev/null)" = "knobas-agent" ] || _ag=0
+      expect "read the agent of build id $_x" 200 404
+      if [ "$REST_STATUS" = "404" ]; then _ag=0; continue; fi
+      expect_object "read the agent of build id $_x"
+      _agent=$(printf '%s' "$REST_BODY" | jq -r '.agent.name // empty')
+      [ -n "$_agent" ] || die "build id $_x of the change witness names no agent; deleting nothing: $(printf '%s' "$REST_BODY" | head -c 400)"
+      [ "$_agent" = "knobas-agent" ] || _ag=0
     done
-    rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
-    if [ "$_ag" = 1 ] && [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$REST_STATUS" = "200" ] \
-       && [ "$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')" = "$_sha" ]; then
+    _listed=''
+    if [ "$_ag" = 1 ]; then
+      rest GET "/app/rest/changes?locator=build:(id:$_a)&fields=change(version)"
+      expect "read the changes of build id $_a" 200
+      expect_object "read the changes of build id $_a"
+      printf '%s' "$REST_BODY" | jq -e 'has("change")' >/dev/null \
+        || die "build id $_a answers no change list; deleting nothing: $(printf '%s' "$REST_BODY" | head -c 400)"
+      _listed=$(printf '%s' "$REST_BODY" | jq -r '[.change[]?.version] | join(",")')
+    fi
+    if [ "$_ag" = 1 ] && [ "$_head" = "$_sha" ] && [ "$_bs" = "200" ] && [ "$_listed" = "$_sha" ]; then
       say "the change witness is there: build id $_a on $CHANGE_BRANCH lists $_sha (after build id $_b)"
       CHANGES_JSON=$_rec
       return 0
