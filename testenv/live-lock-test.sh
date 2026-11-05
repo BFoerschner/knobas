@@ -566,6 +566,10 @@ check "and it says that pid is not its keeper either" "$(cat "$scratch/dying-reu
 rc=$(ps_dying all down_with dying-always "$later $(date +%s) live-up-confluence-kept $scratch/tree")
 down_spares dying-always "$later" "process no read of which comes back"
 check "and it read that pid a bounded number of times" "$(cat "$STUB_PS_CALLS")" "3"
+# Nor is a pid whose command line reads as the keeper's while its start does not:
+# only the start could tell a reused one, so it is not signalled unread.
+rc=$(ps_dying "2 3 4" down_with dying-start "$later $(date +%s) live-up-confluence-kept $scratch/tree")
+down_spares dying-start "$later" "process named like a keeper whose start read never comes back"
 # `ps` saying no such process is an answer: it is not asked again.
 sh -c 'exit 0' &
 gone=$!
