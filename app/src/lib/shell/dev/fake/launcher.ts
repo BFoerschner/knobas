@@ -358,7 +358,7 @@ function wordSearch(raw: string, titles: boolean): SearchResponse | null {
 /**
  * What the engine answers for a query the launcher leaves empty (#2488), so
  * the token saying why can be looked at under `?fake-ipc`. `kind:<a left-out
- * kind>` and the one fixture name only commits sit beneath; the rule itself is
+ * kind>` and one made-up name only commits sit beneath; the rule itself is
  * witnessed over a real PostgreSQL in `knobas-search`'s `launcher_kinds`.
  */
 function leftOutAnswer(raw: string): SearchResponse | null {

@@ -1,4 +1,5 @@
-//! Which `under:` values name a parent at all (ADR-0018, #595).
+//! Which `under:` values name a parent at all (ADR-0018, #595), and which
+//! typed tokens explain an empty answer by what the launcher left out (#2488).
 //!
 //! The grammar cannot say: a parent lives in its children's records -- the
 //! repo a commit sits in is in the commit -- and need not be mirrored itself.

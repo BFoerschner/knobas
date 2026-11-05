@@ -16,7 +16,7 @@ use std::sync::LazyLock;
 use chrono::{DateTime, Utc};
 use knobas_core::payload::StateChip;
 use knobas_core::tone::Tone;
-use knobas_search::{SearchFilters, SearchQuery, SearchResponse, Searcher};
+use knobas_search::{FilterAnswer, SearchFilters, SearchQuery, SearchResponse, Searcher};
 use tokio::sync::Mutex;
 
 static SERIAL: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -703,8 +703,10 @@ async fn lone_commit(pool: &sqlx::PgPool, t: &str, name: &str) {
     .await;
 }
 
-/// #2488: the name is known, so no greyed-out token says why the answer is
-/// empty, and the coverage has nothing to say either.
+/// #2488: the name is known, so it is no unknown token, and the coverage cannot
+/// say why the answer is empty: the source holding the commit has no row if it
+/// holds only commits and `Answered` if it holds more, never `NoValues`. The
+/// left-out token is what says why.
 #[tokio::test]
 async fn under_a_name_only_left_out_kinds_declare_says_so() {
     let pool = pool().await;
@@ -726,6 +728,12 @@ async fn under_a_name_only_left_out_kinds_declare_says_so() {
             "{raw}"
         );
         assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
+        let holder_says_no_values = answer
+            .coverage
+            .iter()
+            .flat_map(|c| &c.sources)
+            .any(|s| s.source_id == "gitea" && s.answer == FilterAnswer::NoValues);
+        assert!(!holder_says_no_values, "{raw}: {:?}", answer.coverage);
     }
 }
 
@@ -793,6 +801,7 @@ async fn a_kind_the_launcher_leaves_out_says_so_in_the_spelling_typed() {
         assert_eq!(answer.total, 0, "{raw}");
         assert_eq!(answer.interpreted.left_out_tokens, want, "{raw}");
         assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
+        assert!(answer.coverage.is_empty(), "{raw}: {:?}", answer.coverage);
     }
 
     // An answer that holds something has nothing to explain.
