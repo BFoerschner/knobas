@@ -720,7 +720,11 @@ async fn under_a_name_only_left_out_kinds_declare_says_so() {
     ] {
         let answer = search(&pool, &raw, false).await;
         assert_eq!(answer.total, 0, "{raw}");
-        assert_eq!(answer.interpreted.left_out_tokens, [token.as_str()], "{raw}");
+        assert_eq!(
+            answer.interpreted.left_out_tokens,
+            [token.as_str()],
+            "{raw}"
+        );
         assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
     }
 }
