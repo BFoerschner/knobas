@@ -212,7 +212,7 @@ A control this section doesn't name is added by amending this section, the `#/co
 
 The design width is 1440 × 900. Every view works from 1100 px. There are two breakpoints, 1240 px (preview panes close and side rails narrow) and 900 px (columns stack). A page whose own width decides something, such as a table shedding columns or a header shortening a label, uses a container query instead. The prototype's other breakpoints at 1000 and 1250 px belong to the retired global map and don't carry over.
 
-The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
+The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on.
 
 The status bar names at most two healthy sources; past that they are one line that says how many synced and how many need a look, then the oldest age, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, at 1150 px and below it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
 
@@ -239,7 +239,7 @@ There are no entrance animations on views or sections. With `prefers-reduced-mot
 
 Focus is always visible: a 2 px outline in `--focus`, offset 2 px. Inside a box that clips (the nav, a tab strip, a segmented control, a rail, a card's lists) it is offset -2 px, or the box would cut its sides. `--card-ink` replaces it on card surfaces (see Contrast).
 
-A rail's selected row is an inset ink pill on every page (Tickets, Settings, Builds, Docs, Proposed links), with its tones re-declared for the ink (`--on-ink-*`). A list row that says why it asks for you (Docs' *For you*) does not repeat it.
+A rail's selected row is an inset ink pill on every page (Tickets, Settings, Builds, Docs), with its tones re-declared for the ink (`--on-ink-*`). A list row that says why it asks for you (Docs' *For you*) does not repeat it.
 
 ## Words
 

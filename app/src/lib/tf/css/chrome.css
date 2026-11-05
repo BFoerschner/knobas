@@ -73,7 +73,7 @@
 }
 
 /* Inside a box that clips, a ring outside the element loses its sides: it draws inside. */
-:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-ql, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc) :focus-visible { outline-offset: -2px; }
+:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc) :focus-visible { outline-offset: -2px; }
 
 .tf-status {
   display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: var(--t-xs); color: var(--ink-2);
