@@ -8,6 +8,7 @@
 import { counted } from "../counted";
 import { keyOf } from "../job/job";
 import type {
+  LinkSetDraft,
   LinkSetHint,
   LinkSetMemberKind,
   LinkSetMemberRow,
@@ -42,6 +43,12 @@ const KIND_ONE: Record<LinkSetMemberKind, string> = {
   monitor: "monitor",
 };
 
+/** A member's kind as a row's own word: *Repository*, *Page*. */
+export function kindOne(kind: LinkSetMemberKind): string {
+  const word = KIND_ONE[kind];
+  return word.charAt(0).toUpperCase() + word.slice(1);
+}
+
 /** The rule kinds as the *Applies to* dropdown names them (prototype-6's `ruleRow`). */
 export const RULE_KINDS: readonly { kind: LinkSetRuleKind; label: string }[] = [
   { kind: "epic", label: "Every ticket under epic" },
@@ -75,12 +82,36 @@ export function onePerKey<Row extends { entity_id: string; mine: boolean }>(rows
   return [...seen.values()];
 }
 
-/** A rule's label in parts, its ticket key apart: a key is mono wherever it appears. */
-export function ruleWords(rule: LinkSetRuleRow): { text: string; key: boolean }[] {
-  return ruleLabel(rule)
+/** A sentence in parts, its ticket keys apart: a key is mono wherever it appears. */
+export function keyWords(sentence: string): { text: string; key: boolean }[] {
+  return sentence
     .split(/([A-Z][A-Z0-9]+-\d+)/)
     .filter((text) => text !== "")
     .map((text) => ({ text, key: /^[A-Z][A-Z0-9]+-\d+$/.test(text) }));
+}
+
+/** A rule's label in parts, its ticket key apart. */
+export function ruleWords(rule: LinkSetRuleRow): { text: string; key: boolean }[] {
+  return keyWords(ruleLabel(rule));
+}
+
+/** One thing the editor removed at once, enough to put it back where it stood. */
+export type Removed =
+  | { list: "members"; at: number; item: LinkSetDraft["members"][number] }
+  | { list: "patterns"; at: number; item: LinkSetDraft["patterns"][number] }
+  | { list: "rules"; at: number; item: LinkSetDraft["rules"][number] };
+
+/** *Undo*: each removed thing back at its place, newest first, unless the set holds it again already. */
+export function putBack(draft: LinkSetDraft, removed: readonly Removed[]): void {
+  for (const gone of [...removed].reverse()) {
+    if (gone.list === "members") {
+      if (!draft.members.some((held) => held.entity_id === gone.item.entity_id)) draft.members.splice(gone.at, 0, gone.item);
+    } else if (gone.list === "patterns") {
+      if (!draft.patterns.some((held) => held.kind === gone.item.kind && held.query === gone.item.query)) draft.patterns.splice(gone.at, 0, gone.item);
+    } else if (!draft.rules.some((held) => held.kind === gone.item.kind && held.value === gone.item.value)) {
+      draft.rules.splice(gone.at, 0, gone.item);
+    }
+  }
 }
 
 export function ruleLabel(rule: LinkSetRuleRow): string {

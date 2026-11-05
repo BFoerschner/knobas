@@ -1,10 +1,12 @@
 <!--
   Link sets (#866, R-7.6): `#/sets`, prototype-6's `renderSets()`. The intro,
   *New link set*, the filter bar (text over names and members, *Applies by*
-  chips), R-7.3's sub-task switch, and the table: each set's name and
-  description, what is in it per kind, one line per rule, and the tickets it
-  shows on now with how many are yours. A row opens the set's editor,
-  `#/sets/<id>` (`TfSetEditor.svelte`), which this page draws in its place.
+  chips), the table: each set's name and description, what is in it per kind,
+  one line per rule, and the tickets it shows on now with how many are yours,
+  then R-7.3's sub-task switch, which is about every ticket and not about these
+  rows, so it stands below them. A row opens the set's editor, `#/sets/<id>`
+  (`TfSetEditor.svelte`), which this page draws in its place. With no sets the
+  empty block holds the one *New link set*, and there is nothing to filter.
 
   Over `link_sets`, `save_link_set` (*New link set*, the hint's *Add to …*),
   `link_set_hints` (#870, R-7.10's card), `parent_links` and
@@ -26,7 +28,8 @@
   import { draftOf } from "./apply";
   import { firstHint, notNow } from "./hints.svelte";
   import { defaultPorts, type SetPorts } from "./ports";
-  import { APPLIES_BY, contentLines, hintTickets, ruleWords, visibleSets } from "./sets";
+  import { APPLIES_BY, contentLines, hintTickets, keyWords, ruleWords, visibleSets } from "./sets";
+  import TfKey from "../TfKey.svelte";
   import TfSetEditor from "./TfSetEditor.svelte";
 
   let {
@@ -161,28 +164,21 @@
         is copied onto tickets and nothing is written to Jira.
       </div>
     </div>
-    <div class="tf-acts">
-      <button type="button" class="tf-btn tf-primary" disabled={creating} onclick={() => void newSet()}>New link set</button>
-    </div>
-  </header>
-  <FilterBar {config} {filter} shown={sets === null ? null : rows.length} total={sets?.length ?? null} />
-  <div class="tf-cbody tf-sets">
-    {#if inherit !== null}
-      <label class="tf-toggle">
-        <input type="checkbox" checked={inherit} onchange={(event) => void switchInherit(event.currentTarget.checked)} />
-        <span
-          ><b>Sub-tasks show their parent ticket’s connections</b><span class="tf-dim tf-toggle-sub"
-            >A sub-task shows what is linked on its parent, marked as coming from it. Works for every parent, no set
-            needed.</span
-          ></span
-        >
-      </label>
+    {#if sets !== null && sets.length > 0}
+      <div class="tf-acts">
+        <button type="button" class="tf-btn tf-primary" disabled={creating} onclick={() => void newSet()}>New link set</button>
+      </div>
     {/if}
+  </header>
+  {#if sets === null || sets.length > 0}
+    <FilterBar {config} {filter} shown={sets === null ? null : rows.length} total={sets?.length ?? null} />
+  {/if}
+  <div class="tf-cbody tf-sets">
     {#if hint !== null}
       {@const offer = hint}
       <div class="tf-hint-card">
         <span
-          >You linked <b>{offer.title}</b> by hand to {hintTickets(offer)}. Add it to <b>{offer.set_name}</b>?</span
+          >You linked <b>{offer.title}</b> by hand to {#each keyWords(hintTickets(offer)) as word, w (w)}{#if word.key}<TfKey value={word.text} />{:else}{word.text}{/if}{/each}. Add it to <b>{offer.set_name}</b>?</span
         >
         <span class="tf-trail">
           <button type="button" class="tf-btn tf-sm" disabled={adding} onclick={() => void addHinted(offer)}
@@ -212,7 +208,7 @@
                 >
                 <td>{#if set.members.length + set.patterns.length > 0}{contentLines(set).join(", ")}{:else}<span class="tf-dim">nothing yet</span>{/if}</td>
                 <td>
-                  {#each set.rules as rule, at (at)}<span class="tf-sets-rule">{#each ruleWords(rule) as word, w (w)}{#if word.key}<span class="tf-mono">{word.text}</span>{:else}{word.text}{/if}{/each}</span>{:else}<span class="tf-dim"
+                  {#each set.rules as rule, at (at)}<span class="tf-sets-rule">{#each ruleWords(rule) as word, w (w)}{#if word.key}<TfKey value={word.text} />{:else}{word.text}{/if}{/each}</span>{:else}<span class="tf-dim"
                       >nothing yet</span
                     >{/each}
                 </td>
@@ -229,6 +225,17 @@
       {:else}
         <TfNoMatch noun="link sets" {filter} />
       {/if}
+    {/if}
+    {#if inherit !== null}
+      <label class="tf-toggle">
+        <input type="checkbox" checked={inherit} onchange={(event) => void switchInherit(event.currentTarget.checked)} />
+        <span
+          ><b>Sub-tasks show their parent ticket’s connections</b><span class="tf-dim tf-toggle-sub"
+            >A sub-task shows what is linked on its parent, marked as coming from it. Works for every parent, no set
+            needed.</span
+          ></span
+        >
+      </label>
     {/if}
   </div>
 {/if}

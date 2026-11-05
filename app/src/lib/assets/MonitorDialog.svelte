@@ -133,9 +133,8 @@
 
 <TfDialog closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
   {#snippet body()}
-    <div class="fields">
-      <div class="fld">
-        <label class="l" for="{fieldId}-name">Name</label>
+    <div class="tf-formgrid form">
+        <label for="{fieldId}-name">Name (needed)</label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -146,14 +145,11 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-        <p class="hint">
-          What it is called in Uptime Kuma — and what attaches it here. The next poll
+        <span class="hint">
+          What it is called in Uptime Kuma, and what attaches it here. The next poll
           finds a monitor of this name and draws the <em>monitored-by</em> link.
-        </p>
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-url">URL to check</label>
+        </span>
+        <label for="{fieldId}-url">URL to check (needed)</label>
         <input
           class="inp"
           id="{fieldId}-url"
@@ -163,15 +159,13 @@
           bind:value={url}
           onkeydown={onfieldkeydown}
         />
-        <p class="hint">
+        <span class="hint">
           An HTTP check, once a minute. Uptime Kuma reaches it from where <em>it</em> runs,
           which is not always where you are.
-        </p>
-      </div>
+        </span>
 
       {#if targets.length > 1}
-        <div class="fld">
-          <label class="l" for="{fieldId}-src">Create it in</label>
+          <label for="{fieldId}-src">Create it in</label>
           <select
             class="inp"
             id="{fieldId}-src"
@@ -183,7 +177,6 @@
               <option value={row.source_id}>{row.display_name}</option>
             {/each}
           </select>
-        </div>
       {:else if target}
         <p class="in">In <span class="nm">{target.display_name}</span></p>
       {/if}
@@ -195,6 +188,7 @@
   {/snippet}
 
   {#snippet footer()}
+    {#if name.trim() === "" || url.trim() === ""}<span class="tf-dim tf-picked">{name.trim() === "" ? "Name it first." : "Say what to check."}</span>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={!ready} onclick={() => void submit()}>
       {writing ? "Queueing…" : "Create"}
@@ -203,49 +197,23 @@
 </TfDialog>
 
 <style>
-  .fields {
-    display: grid;
-    gap: 12px;
+  /* *URL to check (needed)* on one line: a dialog of long names widens the token (design system, Forms). */
+  .form {
+    --tf-label: 172px;
   }
 
-  /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
-  .fld {
-    display: grid;
-    grid-template-columns: var(--tf-label) minmax(0, 1fr);
-    column-gap: 12px;
-    align-items: center;
-  }
-
-  .fld > :global(*):not(.l) {
-    grid-column: 2;
-  }
-
-  .fld :global(input.inp),
-  .fld :global(select.inp) {
-    height: var(--control-h);
-  }
-
-  .fld > :global(.tf-btn) {
-    justify-self: start;
-  }
-
-  .fld .l {
-    font-size: var(--t-sm);
-    color: var(--ink-2);
-  }
-
-  /* `.inp` and `.fail` are `unported.css`' and the buttons are `.tf-btn`
-     (`chrome.css`) -- redeclaring any of them here is how two dialogs come to
-     look different. */
+  /* A note on the field above it, in the field's column. `.inp` and `.fail` are `unported.css`' and the buttons are
+     `.tf-btn` (`chrome.css`): redeclaring any of them here is how two dialogs come to look different. */
   .hint {
-    margin-top: 6px;
-    font-size: var(--t-2xs);
-    color: var(--muted);
+    grid-column: 2;
+    margin-top: -2px;
+    font-size: var(--t-xs);
+    color: var(--ink-2);
   }
 
   .in {
     margin: 0;
-    font-size: var(--t-xs);
+    font-size: var(--t-sm);
     color: var(--muted);
   }
 

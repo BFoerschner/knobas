@@ -6,3 +6,6 @@
 /* A ticket card's Assets row: what the ticket reaches, under the bar. */
 .tf-at-reach { flex: none; margin: 0; padding: 6px 22px; border-bottom: 1px solid var(--rule); font-size: var(--t-sm); color: var(--ink-2); }
 .tf-at-reach a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 900px) {
+  .tf-at-reach { padding-inline: 16px; }
+}

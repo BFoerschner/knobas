@@ -300,6 +300,21 @@ export function kindTag(monogram: string): string {
   return monogram.charAt(0).toUpperCase() + monogram.slice(1).toLowerCase();
 }
 
+/**
+ * A *Depends on this* row's path, without the part the pane already says: the
+ * steps it shares with the selected asset's own path, which every row near it
+ * would repeat. `null` when nothing is left to say. A row with nothing in common
+ * keeps its whole path, because that is the news.
+ */
+export function pathBelow(detail: AssetDetail, path: string | null): string | null {
+  if (path === null) return null;
+  const here = heldByPath(detail);
+  const steps = path.split(" / ");
+  let shared = 0;
+  while (shared < steps.length && steps[shared] === here[shared]) shared += 1;
+  return shared === steps.length ? null : steps.slice(shared).join(" / ");
+}
+
 /** The press did nothing here. */
 const NOWHERE: Step = { go: "nowhere" };
 

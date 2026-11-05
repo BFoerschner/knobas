@@ -2,11 +2,11 @@
   *Apply a link set…* (#869, R-7.8), from the job's *Also on this job* bar and
   the Connections drawer: prototype-6's `openApplySet`. Every set, a filter
   over name and description, and what each holds; a set that already applies
-  to the ticket says so and can't be picked. One set is picked, the first one
-  the filter leaves that can apply until another is, and the footer's primary
-  applies it, so `Enter` in the filter applies the top match (#2289). *Apply*
-  hands the set back: the job saves it with a by-hand rule and toasts the count
-  with *Undo*.
+  to the ticket says so and can't be picked. Nothing is picked on arrival, so a
+  press can't apply an alphabetical accident, and a line beside the primary says
+  so. Typing picks the first set the filter leaves until another is picked, so
+  `Enter` in the filter still applies the top match (#2289). *Apply* hands the
+  set back: the job saves it with a by-hand rule and toasts the count with *Undo*.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -16,6 +16,7 @@
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { contentLines } from "../sets/sets";
+  import TfKey from "../TfKey.svelte";
 
   let {
     jobKey,
@@ -57,10 +58,18 @@
 
   const uid = $props.id();
   let pickedId = $state<string | null>(null);
-  /** The set the primary applies: the one picked while the filter shows it, else the first shown that can apply. */
+  /** The set the primary applies: the one picked while the filter shows it, else, once something is typed, the first shown that can apply. */
   const chosen = $derived(
-    shown.find((set) => set.id === pickedId && !applied.has(set.id)) ?? shown.find((set) => !applied.has(set.id)) ?? null,
+    shown.find((set) => set.id === pickedId && !applied.has(set.id)) ??
+      (typed.trim() === "" ? null : shown.find((set) => !applied.has(set.id))) ??
+      null,
   );
+  /** What the primary waits for, in words beside it (design system, Disabled). */
+  const missing = $derived.by(() => {
+    if (chosen !== null || sets === null || sets.length === 0) return null;
+    if (shown.length === 0) return null;
+    return shown.every((set) => applied.has(set.id)) ? "These already apply." : "Pick a link set.";
+  });
 
   function apply(event: SubmitEvent) {
     event.preventDefault();
@@ -68,7 +77,8 @@
   }
 </script>
 
-<TfDialog title="Apply a link set to {jobKey}" {onclose} {layers}>
+<TfDialog {onclose} {layers}>
+  {#snippet title()}Apply a link set to <TfKey value={jobKey} />{/snippet}
   {#snippet body()}
     <form id="tf-aps-{uid}" class="tf-dform" onsubmit={apply}></form>
     <label class="tf-fsearch tf-wide"
@@ -103,12 +113,13 @@
       {/each}
     </div>
     <p class="tf-dim tf-small">
-      Applying by hand affects only {jobKey}. To cover every ticket under an epic, add a rule in the set instead.
+      Applying by hand affects only <TfKey value={jobKey} />. To cover every ticket under an epic, add a rule in the set instead.
     </p>
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
     <a class="tf-btn tf-first" href="#/sets" onclick={onclose}>Manage link sets</a>
+    {#if missing !== null}<span class="tf-dim tf-picked">{missing}</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-aps-{uid}" disabled={chosen === null}
       >{chosen === null ? "Apply" : `Apply ${chosen.name}`}</button

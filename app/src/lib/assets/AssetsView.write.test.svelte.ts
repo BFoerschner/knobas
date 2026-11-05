@@ -583,7 +583,7 @@ function marked(): (string | null)[] {
  * have confirmed nothing.
  */
 function reachable(): ParentNode {
-  return target.querySelector('[role="dialog"]') ?? target;
+  return [...target.querySelectorAll('[role="dialog"]')].at(-1) ?? target;
 }
 
 /** The first reachable button whose visible text, name or title is `label`. */
@@ -624,7 +624,7 @@ function field(label: string): HTMLInputElement | HTMLSelectElement {
   );
   if (named !== null) return named;
   const tag = [...where.querySelectorAll("label")].find(
-    (candidate) => (candidate.textContent ?? "").trim() === label,
+    (candidate) => (candidate.textContent ?? "").replace("(needed)", "").trim() === label,
   );
   const found =
     tag === undefined
@@ -843,38 +843,43 @@ test("moving an asset redraws the columns at its new path", async () => {
 });
 
 /**
- * **A move that would make a cycle is refused in the dialog, in the command's
- * own words, and nothing moves.**
- *
- * Criterion 3's second half. The picker deliberately does **not** hide the
- * asset's own subtree: hiding it would be a second copy of
- * `assets::cycle_through` in the frontend, and the refusal is the only place
- * the loop is explained. A two-hop loop is used — the site under the container
- * it transitively holds — so the one-step case cannot be what makes this pass.
+ * **The asset's own row cannot be walked into**, so nothing under it can be
+ * chosen, and no move from the picker can make a loop (F-502, which overrules
+ * #429's "the picker does not hide the subtree"). The row stays, marked.
+ */
+test("the asset's own row is drawn and cannot be walked into", async () => {
+  render("#/asset/asset:vm-db-01", estate(seed()));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01"));
+
+  click("Move…");
+  await waitFor(() => expect(text()).toContain("this asset"));
+  const own = [...reachable().querySelectorAll<HTMLButtonElement>("button.opt")].find((row) => (row.textContent ?? "").includes("this asset"))!;
+  expect(own.disabled).toBe(true);
+  expect(own.title).toBe("vm-db-01 can't move inside itself");
+  expect(text()).toContain("Open the place it should go.");
+});
+
+/**
+ * **A move the backend still refuses says so in the dialog, in the command's
+ * own words, and nothing moves.** The estate can change under an open picker,
+ * so the sentence is still reachable: `assets::cycle_through` stays the rule.
  */
 test("a cycle is refused with the message the command gives, and nothing moves", async () => {
   const store = estate(seed());
   render("#/asset/asset:hel1", store);
   await waitFor(() => expect(text()).toContain("hel1"));
+  const elsewhere = { ...store.rows.find((row) => row.id === "asset:hel1")!, id: "asset:bare", name: "bare", parent_id: null };
+  store.rows.push(elsewhere);
 
   click("Move…");
-  await walkInto("hel1");
-  await walkInto("vm-db-01");
-  // Two hops down, not one: `postgres` is `hel1`'s *grand*child, so what
-  // refuses this is the walk up the whole held-by chain rather than the
-  // one-step case `asset_no_self_parent_chk` closes in the database. The
-  // offender the sentence names is `vm-db-01`, which is neither end of the
-  // move -- a refusal that named an end would have survived this.
-  await walkInto("postgres");
-  click("Move into postgres");
+  await walkInto("bare");
+  // Under the open picker, `bare` comes to sit inside `postgres`, two hops below `hel1`.
+  store.rows.find((row) => row.id === "asset:bare")!.parent_id = "asset:postgres";
+  click("Move into bare");
 
-  await waitFor(() =>
-    expect(text()).toContain(
-      'moving "hel1" under "postgres" would make a cycle: "vm-db-01" is already held by "hel1"',
-    ),
-  );
+  await waitFor(() => expect(text()).toContain('would make a cycle: "vm-db-01" is already held by "hel1"'));
   // The dialog stays open on the refusal, and the estate is untouched.
-  expect(text()).toContain("Move into postgres");
+  expect(text()).toContain("Move into bare");
   expect(store.rows.find((row) => row.id === "asset:hel1")?.parent_id).toBeNull();
 });
 
@@ -897,7 +902,7 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
   expect(store.rows).toHaveLength(4);
 
   click("Delete…");
-  click("Delete");
+  click("Delete asset");
 
   await waitFor(() =>
     expect(nav.route).toEqual({
@@ -931,7 +936,7 @@ test("the delete confirm counts the routes landing on the asset and says nothing
 
   click("Delete…");
   const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
-  expect(ask).toBe("Delete postgres? 2 routes landing on it will land on nothing. Links to it stay, marked deleted.");
+  expect(ask).toBe("2 routes landing on it will land on nothing. Links to it stay, marked deleted.");
   expect(ask).not.toMatch(/history/i);
 });
 
@@ -941,7 +946,7 @@ test("with no route landing on it, the delete confirm has no routes clause", asy
 
   click("Delete…");
   const ask = (reachable() as Element).querySelector(".ask")!.textContent!.replace(/\s+/g, " ").trim();
-  expect(ask).toBe("Delete postgres? Links to it stay, marked deleted.");
+  expect(ask).toBe("Links to it stay, marked deleted.");
 });
 
 /**
@@ -958,7 +963,7 @@ test("deleting a branch is refused by name and nothing is removed", async () => 
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01"));
 
   click("Delete…");
-  click("Delete");
+  click("Delete asset");
 
   await waitFor(() =>
     expect(text()).toContain('"vm-db-01" still holds 1 asset(s) -- move or delete them first'),
@@ -1002,8 +1007,8 @@ test("a type table that will not load is said out loud, not left as a dead plus"
 test.each([
   ["New asset in vm-db-01", "Create"],
   ["Move…", "Already here"],
-  ["Delete…", "Delete"],
-  ["Add a route…", "Expose"],
+  ["Delete…", "Delete asset"],
+  ["Add a route…", "Add route"],
 ])("%s opens a dialog on the layer stack, and its close shuts it (#1527)", async (opener, inside) => {
   const store = estate(seed());
   render("#/asset/asset:vm-db-01", store);
@@ -1042,9 +1047,9 @@ function drawnAs(control: Element): string {
 test.each([
   ["New asset in vm-db-01", ["Cancel: ghost", "Create: primary"]],
   ["Move…", ["Cancel: ghost", "Already here: primary"]],
-  ["Delete…", ["Cancel: ghost", "Delete: confirm, red"]],
-  ["Add a route…", ["Cancel: ghost", "Expose: primary"]],
-  ["Edit…", ["Delete: far left, red", "Cancel: ghost", "Save: primary"]],
+  ["Delete…", ["Cancel: ghost", "Delete asset: confirm, red"]],
+  ["Add a route…", ["Cancel: ghost", "Add route: primary"]],
+  ["Edit…", ["Delete route…: far left, red", "Cancel: ghost", "Save: primary"]],
 ])("%s opens a dialog with the canonical footer", async (opener, footer) => {
   const store = estate(seed(), [
     {
@@ -1210,7 +1215,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
   await waitFor(() => expect(text()).toContain("Exposes No routes."));
 
   click("Add a route…");
-  expect(text()).toContain("On vm-db-01");
+  expect(text()).toContain("Add a route to vm-db-01");
   type("Name", "Postgres UI");
   type("URL or endpoint", "https://pg.hel1.example/");
   choose("Visibility", "public");
@@ -1220,7 +1225,7 @@ test("a route is exposed from the pane and lands where the picker was walked", a
   // which is the difference from the move picker's rows.
   await waitFor(() => button("Land on postgres"));
   click("Land on postgres");
-  click("Expose");
+  click("Add route");
 
   await waitFor(() => expect(text()).toContain("Postgres UI"));
   const written = store.routes[0];
@@ -1264,7 +1269,7 @@ test("a route with no scheme is refused in place and nothing is written", async 
   click("Add a route…");
   type("Name", "Postgres UI");
   type("URL or endpoint", "pg.hel1.example");
-  click("Expose");
+  click("Add route");
 
   await waitFor(() => expect(text()).toContain("carries no scheme"));
   expect(store.routes).toHaveLength(0);
@@ -1315,7 +1320,8 @@ test("a route is edited and then deleted from the pane", async () => {
   });
 
   click("Edit…");
-  click("Delete");
+  click("Delete route…");
+  click("Delete route");
   await waitFor(() => expect(text()).toContain("Exposes No routes."));
   expect(store.routes).toHaveLength(0);
   // Back at the asset that exposed it, not at an address that is now gone.
@@ -1478,4 +1484,56 @@ test("a route's own history is drawn when its address names it", async () => {
   click("Save");
   await waitFor(() => expect(text()).toContain("target: postgres → nothing"));
   expect(text()).not.toContain("asset:postgres");
+});
+
+/** An inline editor takes focus, has a Cancel, and closes first on `Esc` wherever focus is (F-513, the return contract). */
+test("Rename takes focus with the name selected, has a Cancel, and is on the layer stack", async () => {
+  render("#/asset/asset:postgres", estate(seed()));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+
+  click("Rename");
+  flushSync();
+  const input = field("Name") as HTMLInputElement;
+  expect(document.activeElement).toBe(input);
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, "postgres".length]);
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  click("Cancel");
+  flushSync();
+  expect(target.querySelector("input[aria-label='Name']")).toBeNull();
+  expect(layers.open).toEqual([]);
+
+  click("Rename");
+  flushSync();
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector("input[aria-label='Name']"), "the shell's Esc closes it first").toBeNull();
+});
+
+test("Add a property takes focus and says what Add waits for", async () => {
+  render("#/asset/asset:postgres", estate(seed()));
+  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+
+  click("Add a property");
+  flushSync();
+  expect(document.activeElement).toBe(field("New property key"));
+  expect(text()).toContain("Needs a key and a value.");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  click("Cancel");
+  flushSync();
+  expect(target.querySelector(".add")).toBeNull();
+  expect(layers.open).toEqual([]);
+});
+
+test("a route's Delete asks first, in a dialog of its own", async () => {
+  const store = estate(seed(), [
+    { id: "route:pg", asset_id: "asset:vm-db-01", target_id: "asset:postgres", name: "Postgres UI", url: "https://pg.hel1.example/", visibility: "internal", properties: {} },
+  ]);
+  render("#/asset/asset:vm-db-01", store);
+  await waitFor(() => expect(text()).toContain("Postgres UI"));
+
+  click("Edit…");
+  expect(text()).toContain("Edit route Postgres UI");
+  click("Delete route…");
+  expect(text()).toContain("Delete route Postgres UI?");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog", "dialog"]);
 });

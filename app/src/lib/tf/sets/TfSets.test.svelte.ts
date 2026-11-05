@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LinkSetDetail, LinkSetDraft, LinkSetHint, LinkSetRow, LinkSetRule, RuleTicket } from "../../ipc/entity";
+import { layers } from "../layers.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import type { Candidate, SetPorts } from "./ports";
 import TfSets from "./TfSets.svelte";
@@ -287,6 +288,46 @@ test("a rule is added once its value is chosen, and Remove drops a member as one
   expect(saved.at(-1)?.members.map((member) => member.entity_id)).not.toContain("gitea:tidewater/psp-client");
 });
 
+test("a Remove acts at once with Undo on its toast, and removals in a row are one toast that puts back all of them", async () => {
+  await draw(["payout-stack"]);
+  const before = saved.length;
+  target.querySelector<HTMLButtonElement>("button[aria-label='Remove tidewater/psp-client']")!.click();
+  await settle();
+  const first = toasts.items.at(-1)!;
+  expect(first.text).toBe("Removed tidewater/psp-client from Payout stack");
+  expect(first.action?.label).toBe("Undo");
+  [...target.querySelectorAll<HTMLElement>(".tf-rule")].at(0)!.querySelector<HTMLButtonElement>(".tf-x")!.click();
+  await settle();
+  const undoing = toasts.items.filter((toast) => toast.action?.label === "Undo");
+  expect(undoing.map((toast) => toast.text)).toEqual(["Removed 2 from Payout stack"]);
+  expect(saved.at(-1)?.rules).toEqual([{ kind: "manual", value: "jira:PAY-228" }]);
+  undoing[0]!.action!.run();
+  await settle();
+  expect(saved).toHaveLength(before + 3);
+  expect(saved.at(-1)?.members.map((member) => member.entity_id)).toContain("gitea:tidewater/psp-client");
+  expect(saved.at(-1)?.members[1]?.entity_id, "back where it stood").toBe("gitea:tidewater/psp-client");
+  expect(saved.at(-1)?.rules).toEqual([
+    { kind: "epic", value: "jira:PAY-200" },
+    { kind: "manual", value: "jira:PAY-228" },
+  ]);
+});
+
+test("a rule waiting for its value says so, Add a rule says why it waits, and Esc puts the rule away", async () => {
+  await draw(["payout-stack"]);
+  button("Add a rule").click();
+  await settle();
+  expect(button("Add a rule").disabled).toBe(true);
+  expect(button("Add a rule").title).toBe("Choose what the rule above applies to first");
+  expect(text(".tf-rule-n").at(-1)).toBe("Choose what it applies to.");
+  expect([...target.querySelectorAll(".tf-rule")].at(-1)!.querySelector(".tf-x")?.textContent).toBe("Cancel");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  layers.open[0]!.close();
+  await settle();
+  expect(layers.open).toEqual([]);
+  expect(button("Add a rule").disabled).toBe(false);
+  expect(target.querySelectorAll(".tf-rule")).toHaveLength(2);
+});
+
 test("a change made while a save is in flight is saved after it, not dropped", async () => {
   await draw(["payout-stack"]);
   target.querySelector<HTMLButtonElement>("button[aria-label='Remove tidewater/psp-client']")!.click();
@@ -372,6 +413,8 @@ test("the list's empty states say what fills them, offer the action, and a faile
   const empty = target.querySelector(".tf-sets .tf-empty")!;
   expect(empty.textContent).toContain("No link sets yet.");
   expect(empty.querySelector(".tf-btn.tf-primary")?.textContent).toBe("New link set");
+  expect([...target.querySelectorAll(".tf-btn.tf-primary")].length, "one New link set, in the empty block").toBe(1);
+  expect(target.querySelector(".tf-fbar"), "nothing to filter").toBeNull();
   unmount(view!);
   view = null;
   target.replaceChildren();

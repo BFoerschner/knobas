@@ -1,13 +1,19 @@
 /* ---------- link sets (#866): prototype-6's `renderSets` and `renderSet` ---------- */
-.tf-sets-intro { max-width: 76ch; }
+.tf-sets-intro { max-width: 112ch; }
 .tf-cbody.tf-sets { display: flex; flex-direction: column; gap: 12px; }
 .tf-sets .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-sets-tbl td { vertical-align: top; }
 /* A row's title is the name you scan the list by (Type). The row opens it, so it has no underline until pointed at (Layout). */
 .tf-cbody .tf-sets-tbl a.tf-set-name { font-weight: 500; }
-/* One rule a line, a wrapped line hanging under its start, so two rules never read as four. */
-.tf-sets-rule { display: block; padding-left: 12px; text-indent: -12px; }
+/* One rule a line, and air between rules rather than an indent: a hanging line read as a second item. */
+.tf-sets-rule { display: block; }
+.tf-sets-rule + .tf-sets-rule { margin-top: 4px; }
 .tf-sets-tbl .tf-sets-now { white-space: nowrap; }
+/* The columns are fixed, so a long description can't take Applies to's room: the rules are what wrap badly. */
+.tf-sets-tbl { table-layout: fixed; }
+.tf-sets-tbl th:nth-child(1) { width: 30%; }
+.tf-sets-tbl th:nth-child(2) { width: 22%; }
+.tf-sets-tbl th:nth-child(4) { width: 124px; }
 .tf-toggle { display: flex; gap: 12px; align-items: center; padding: 12px 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font-size: var(--t-sm); }
 .tf-toggle input { width: 18px; height: 18px; accent-color: var(--ink); }
 .tf-toggle b { font-weight: 600; }
@@ -23,8 +29,8 @@
 .tf-set-desc { width: fit-content; max-width: 100%; min-width: 24ch; }
 .tf-cbody.tf-set { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-set-panels, .tf-set .tf-side { display: flex; flex-direction: column; gap: 14px; }
-.tf-members { padding-bottom: 4px; }
 .tf-member { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 4px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-member:first-child { border-top: 0; }
 .tf-member:hover { background: var(--sheet-2); }
 /* The row itself does not open, so its name is a link with its underline (Layout). */
 .tf-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
@@ -55,22 +61,34 @@
 .tf-picks label .tf-dim, .tf-picks .tf-pickrow > .tf-dim { margin-left: auto; font-size: var(--t-xs); }
 .tf-picks label.tf-in, .tf-picks .tf-pickrow.tf-in { color: var(--ink-2); }
 .tf-picks label.tf-in:hover, .tf-picks .tf-pickrow.tf-in:hover { background: none; }
+/* A match inside a row that can't be picked still reads on the mark. */
+.tf-picks .tf-in mark { color: var(--ink); }
 /* *Apply a link set…* (#869): a set's name over what it holds. */
 .tf-pickrow .tf-pick-sub { display: block; font-size: var(--t-xs); }
 .tf-picks-more { padding: 6px 10px; margin: 0; }
 .tf-set-savename { width: 100%; }
+/* The dialogs' radios are drawn, not the platform's, whose unselected one sinks into a dark sheet. */
+:is(.tf-radio, .tf-picks) input[type="radio"] { appearance: none; flex: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1.5px solid var(--ink-2); border-radius: 50%; background: var(--field); align-self: center; }
+.tf-radio input[type="radio"] { align-self: flex-start; margin-top: 3px; }
+:is(.tf-radio, .tf-picks) input[type="radio"]:checked { border-color: var(--ink); background: var(--ink); box-shadow: inset 0 0 0 2.5px var(--field); }
+:is(.tf-radio, .tf-picks) input[type="radio"]:disabled { border-color: var(--rule); }
 /* A file's name takes what is left and is cut, never pushed sideways; its size keeps a fixed column. */
 .tf-picks { overflow-x: hidden; }
 .tf-bak-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-picks .tf-pickrow > .tf-bak-size { flex: none; width: 72px; text-align: right; white-space: nowrap; }
 .tf-picks.tf-hidden-empty { display: none; }
+/* What the primary waits for, or how many are picked: beside the footer's buttons, and beside *Cancel* when an extra action holds the far left. */
 .tf-picked { margin-right: auto; align-self: center; }
+.tf-first + .tf-picked { margin-right: 0; }
+/* The shared `.tf-roll` follows a heading inside its box; here the heading is above the box. */
+.tf-set .tf-roll { padding-top: 10px; }
 .tf-stays { margin: 0; font-size: var(--t-xs); }
 .tf-member-line { font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The summary sits on the line a member's name sits on: a row's first line is 28 px whatever it holds. */
 .tf-pattern { align-items: flex-start; }
 .tf-pattern a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.tf-pattern details { min-width: 0; padding-top: 4px; }
-.tf-pattern summary { cursor: pointer; list-style: none; }
+.tf-pattern details { min-width: 0; }
+.tf-pattern summary { cursor: pointer; list-style: none; min-height: 28px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 4px; }
 .tf-pattern summary::-webkit-details-marker { display: none; }
 .tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-pattern ul { margin: 6px 0 2px; padding-left: 18px; font-size: var(--t-xs); color: var(--ink-2); }

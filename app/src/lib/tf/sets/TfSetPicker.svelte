@@ -102,7 +102,7 @@
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    <span class="tf-dim tf-picked">{picked.length} picked</span>
+    <span class="tf-dim tf-picked">{picked.length === 0 ? "Tick what to add." : `${picked.length} picked`}</span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={picked.length === 0} onclick={add}>Add</button>
   {/snippet}

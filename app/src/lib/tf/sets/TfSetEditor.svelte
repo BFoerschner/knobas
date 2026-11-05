@@ -9,15 +9,19 @@
     pages *Add a pattern…* (`TfSetPattern.svelte`, #868).
   - *Applies to*: one row per rule with a kind dropdown, a value dropdown, a
     live ticket count (`preview_link_set_rule`) and *Remove*, plus *Add a
-    rule*.
+    rule*. A rule waiting for its value says so and closes first on `Esc`.
   - *Shows on N tickets now*: how many are yours, and the keys as links to
     their jobs (yours in yellow), the first 40 then "and N more".
 
   Every change saves the whole set (`save_link_set`) and draws what the save
   answered, as prototype-6 has no Save button: a set is live, and every job it
-  applies to reads the change on its next read.
+  applies to reads the change on its next read. A *Remove* acts at once, so it
+  toasts with *Undo*, and removals in a row collapse into one toast (the
+  removal rule).
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import type {
     LinkSetDetail,
@@ -27,8 +31,9 @@
     LinkSetRuleKind,
     LinkSetRuleRow,
   } from "../../ipc/entity";
-  import { push } from "../../shell/toasts.svelte";
+  import { dismiss, push, toasts } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
+  import { layers } from "../layers.svelte";
   import { entityAddress } from "../address";
   import type { EscTarget } from "../escape";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -39,7 +44,7 @@
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
-  import { itemsOf, KIND_LABEL, MEMBER_KINDS, onePerKey, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
+  import { itemsOf, KIND_LABEL, MEMBER_KINDS, onePerKey, PATTERN_KINDS, putBack, RULE_KINDS, SHOWN_KEYS, type Removed } from "./sets";
   import { toneClass } from "../tone";
   import TfSetPattern from "./TfSetPattern.svelte";
   import TfSetPicker from "./TfSetPicker.svelte";
@@ -75,6 +80,8 @@
   let patterning = $state<LinkSetMemberKind | null>(null);
   /** The saves asked for so far, in order (see `save`). */
   let saves: Promise<void> = Promise.resolve();
+  /** What the toast on screen can put back, and that toast, so another *Remove* joins it. */
+  let undoable: { toast: number; removed: Removed[] } | null = null;
 
   $effect(() => {
     void attempt;
@@ -124,7 +131,7 @@
    * Saves run one after another, each over what the one before answered, so
    * a change made while a save is in flight is kept, not dropped.
    */
-  function save(change: (draft: LinkSetDraft) => void, toast?: string): Promise<void> {
+  function save(change: (draft: LinkSetDraft) => void, toast?: string, saved?: () => void): Promise<void> {
     const target = set?.id;
     saves = saves.then(async () => {
       if (!set || set.id !== target) return;
@@ -133,6 +140,7 @@
       try {
         set = await ports.saveLinkSet(draft);
         if (toast) push({ text: toast });
+        saved?.();
       } catch (error) {
         push({ text: ipcErrorMessage(error), tone: "err" });
       }
@@ -251,10 +259,63 @@
     pending = { at: set?.rules.length ?? 0, kind: "epic" };
   }
 
+  /** A rule waiting for its value is an inline editor: `Esc` puts it away first, wherever focus is. */
+  $effect(() => {
+    if (pending === null) return;
+    return untrack(() => layers.add({ kind: "dialog", close: () => (pending = null) }));
+  });
+
+  /**
+   * Take one thing out of the set, at once, with *Undo* on the toast. A second
+   * removal while that toast shows replaces it: one toast, and its *Undo* puts
+   * back all of them.
+   */
+  function removeOne(gone: Removed, named: string, change: (draft: LinkSetDraft) => void) {
+    void save(change, undefined, () => {
+      const live = undoable !== null && toasts.items.some((toast) => toast.id === undoable!.toast) ? undoable : null;
+      if (live !== null) dismiss(live.toast);
+      const removed = [...(live?.removed ?? []), gone];
+      const text = `Removed ${removed.length === 1 ? named : removed.length} from ${set?.name ?? "the set"}`;
+      const toast = push({
+        text,
+        action: {
+          label: "Undo",
+          run: () => {
+            undoable = null;
+            void save((draft) => putBack(draft, removed));
+          },
+        },
+      });
+      undoable = { toast, removed };
+    });
+  }
+
+  function dropMember(at: number, named: string) {
+    const item = set?.members[at];
+    if (!item) return;
+    const { kind, entity_id } = item;
+    removeOne({ list: "members", at, item: { kind, entity_id } }, named, (draft) => {
+      draft.members = draft.members.filter((held) => held.entity_id !== entity_id);
+    });
+  }
+
+  function dropPattern(at: number) {
+    const item = set?.patterns[at];
+    if (!item) return;
+    const { kind, query } = item;
+    removeOne({ list: "patterns", at, item: { kind, query } }, "a pattern", (draft) => {
+      draft.patterns = draft.patterns.filter((held) => !(held.kind === kind && held.query === query));
+    });
+  }
+
   function dropRule(at: number) {
     if (pending?.at === at) pending = null;
-    if (at >= (set?.rules.length ?? 0)) return;
-    void save((draft) => draft.rules.splice(at, 1));
+    const item = set?.rules[at];
+    if (!item) return;
+    const { kind, value } = item;
+    removeOne({ list: "rules", at, item: { kind, value } }, "a rule", (draft) => {
+      draft.rules = draft.rules.filter((held) => !(held.kind === kind && held.value === value));
+    });
   }
 
   /** The rows *Applies to* draws: the stored rules, one re-kinded or added waiting for its value. */
@@ -345,7 +406,7 @@
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"
                   aria-label="Remove the pattern {pattern.query}"
-                  onclick={() => void save((draft) => draft.patterns.splice(pattern.at, 1))}>Remove</button
+                  onclick={() => dropPattern(pattern.at)}>Remove</button
                 >
               </div>
             {/each}
@@ -359,7 +420,7 @@
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"
                   aria-label="Remove {member.title ?? member.entity_id}"
-                  onclick={() => void save((draft) => (draft.members = draft.members.filter((held) => held.entity_id !== member.entity_id)))}
+                  onclick={() => dropMember(set?.members.findIndex((held) => held.entity_id === member.entity_id) ?? -1, member.title ?? keyOf(member.entity_id))}
                   >Remove</button
                 >
               </div>
@@ -383,15 +444,22 @@
               {#each options(rule.kind, rule.value) as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
             </select>
             <div class="tf-rule-foot">
-              {#if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
-              <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => dropRule(rule.at)}>Remove</button>
+              {#if rule.waiting}<span class="tf-dim tf-rule-n">Choose what it applies to.</span>
+              {:else if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
+              <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => dropRule(rule.at)}>{rule.at >= set.rules.length ? "Cancel" : "Remove"}</button>
             </div>
           </div>
         {:else}
           <div class="tf-rule tf-rule-none tf-dim">No rule yet. The set shows nowhere until it has one.</div>
         {/each}
         <div class="tf-rule-add">
-          <button type="button" class="tf-btn tf-sm" disabled={pending !== null} onclick={addRule}>Add a rule</button>
+          <button
+            type="button"
+            class="tf-btn tf-sm"
+            disabled={pending !== null}
+            title={pending !== null ? "Choose what the rule above applies to first" : undefined}
+            onclick={addRule}>Add a rule</button
+          >
         </div>
       </div>
       <div class="tf-panel">

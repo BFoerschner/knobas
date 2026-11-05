@@ -36,6 +36,7 @@ import {
   walk,
   wiresFor,
   workBadge,
+  pathBelow,
 } from "./tree";
 
 function row(id: string, name: string, hasChildren = false): AssetRow {
@@ -734,4 +735,15 @@ test("a route in both of the pane's lists draws two wires with two keys", () => 
     "exposes:route:self",
     "via:route:self",
   ]);
+});
+
+test("a Depends on this row's path drops the steps it shares with the selected asset's own", () => {
+  const row = (name: string) => ({ name }) as AssetDetail["asset"];
+  const detail = { asset: row("gitea"), held_by: [row("estate"), row("engine")] } as AssetDetail;
+  expect(pathBelow(detail, "estate / engine")).toBeNull();
+  expect(pathBelow(detail, "estate / engine / gitea")).toBeNull();
+  expect(pathBelow(detail, "estate / engine / teamcity")).toBe("teamcity");
+  expect(pathBelow(detail, "estate / engine / gitea / db")).toBe("db");
+  expect(pathBelow(detail, "elsewhere / box")).toBe("elsewhere / box");
+  expect(pathBelow(detail, null)).toBeNull();
 });

@@ -185,5 +185,5 @@ export function propertyEdit(key: string, value: PropertyValue | null): Property
 export function deleteConfirm(detail: AssetDetail): string {
   const lands = detail.reachable_via.filter((route) => route.target_id === detail.asset.id).length;
   const routes = lands > 0 ? ` ${lands} route${lands > 1 ? "s" : ""} landing on it will land on nothing.` : "";
-  return `Delete ${detail.asset.name}?${routes} Links to it stay, marked deleted.`;
+  return `${routes.trimStart()}${routes ? " " : ""}Links to it stay, marked deleted.`;
 }

@@ -12,17 +12,14 @@
   and *Move into …* puts the asset there, which makes the top of the estate an
   ordinary destination (walk back to *Estate*) rather than a special button.
 
-  ## The picker does not hide the moves the backend refuses
+  ## The asset's own row cannot be walked into
 
-  A reader can walk into the asset's own subtree and press *Move into …*, and
-  `move_asset` refuses it with the sentence it has for exactly this — naming
-  both ends **and the asset that closes the loop**. Two reasons that is right
-  rather than lazy:
-
-  * Hiding those rows means walking the ancestors in the frontend, which is a
-    second copy of `assets::cycle_through` — and the copy that goes stale.
-  * The refusal is the only place the loop is *explained*. A row that quietly
-    was not there teaches a reader nothing about why.
+  It stays in the list, marked *this asset*, and it is not a button that does
+  anything: walking into it is the only way to reach its subtree, so one
+  disabled row closes every move that would make a loop, with no walk over the
+  ancestors here. `assets::cycle_through` stays the rule. If the estate changes
+  under an open picker, `move_asset` refuses in its own words and the sentence
+  lands in the dialog.
 -->
 <script lang="ts">
   import { kindTag } from "./tree";
@@ -152,14 +149,21 @@
                 there is, and a picker that only opened branches could not do
                 it. The chevron still says which rows have a level under them.
               -->
-              <button class="opt" title="Open {row.name}" onclick={() => into(row)}>
-                <span class="mg">{kindTag(row.monogram)}</span>
-                <span class="nm">{row.name}</span>
-                {#if row.id === asset.id}<span class="faint">this asset</span>{/if}
-                {#if row.has_children}
-                  <span class="chev" aria-hidden="true">›</span>
-                {/if}
-              </button>
+              {#if row.id === asset.id}
+                <button class="opt" disabled title="{row.name} can't move inside itself">
+                  <span class="mg">{kindTag(row.monogram)}</span>
+                  <span class="nm">{row.name}</span>
+                  <span class="faint">this asset</span>
+                </button>
+              {:else}
+                <button class="opt" title="Open {row.name}" onclick={() => into(row)}>
+                  <span class="mg">{kindTag(row.monogram)}</span>
+                  <span class="nm">{row.name}</span>
+                  {#if row.has_children}
+                    <span class="chev" aria-hidden="true">›</span>
+                  {/if}
+                </button>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -175,6 +179,7 @@
   {/snippet}
 
   {#snippet footer()}
+    {#if alreadyHere}<span class="tf-dim tf-picked">Open the place it should go.</span>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={writing || alreadyHere} title={alreadyHere ? `${asset.name} is already here` : undefined} onclick={() => void submit()}>
       {writing ? "Moving…" : alreadyHere ? "Already here" : `Move into ${here}`}
@@ -230,8 +235,18 @@
     font-size: var(--t-sm);
   }
 
-  .opt:hover {
+  .opt:hover:not(:disabled) {
     background: var(--raised);
+  }
+
+  .opt:disabled {
+    color: var(--ink-2);
+    cursor: not-allowed;
+  }
+
+  .opt .faint {
+    flex: none;
+    font-size: var(--t-xs);
   }
 
   .opt .nm {

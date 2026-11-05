@@ -96,9 +96,8 @@
   {onclose}
 >
   {#snippet body()}
-    <div class="fields">
-      <div class="fld">
-        <label class="l" for="{fieldId}-name">Name</label>
+    <div class="tf-formgrid">
+        <label for="{fieldId}-name">Name (needed)</label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -109,10 +108,7 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-type">Type</label>
+        <label for="{fieldId}-type">Type</label>
         <select
           class="inp"
           id="{fieldId}-type"
@@ -142,9 +138,8 @@
           {/if}
         </select>
         {#if usual}
-          <p class="hint">{usual}</p>
+          <span class="hint">{usual}</span>
         {/if}
-      </div>
 
       {#if failure}
         <p class="fail" role="alert">{failure}</p>
@@ -153,6 +148,7 @@
   {/snippet}
 
   {#snippet footer()}
+    {#if name.trim() === ""}<span class="tf-dim tf-picked">Name it first.</span>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"
@@ -165,40 +161,11 @@
 </TfDialog>
 
 <style>
-  .fields {
-    display: grid;
-    gap: 12px;
-  }
-
-  /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
-  .fld {
-    display: grid;
-    grid-template-columns: var(--tf-label) minmax(0, 1fr);
-    column-gap: 12px;
-    align-items: center;
-  }
-
-  .fld > :global(*):not(.l) {
-    grid-column: 2;
-  }
-
-  .fld :global(input.inp),
-  .fld :global(select.inp) {
-    height: var(--control-h);
-  }
-
-  .fld > :global(.tf-btn) {
-    justify-self: start;
-  }
-
-  .fld .l {
-    font-size: var(--t-sm);
-    color: var(--ink-2);
-  }
-
+  /* A note on the field above it, in the field's column. */
   .hint {
-    margin-top: 6px;
-    font-size: var(--t-2xs);
-    color: var(--muted);
+    grid-column: 2;
+    margin-top: -2px;
+    font-size: var(--t-xs);
+    color: var(--ink-2);
   }
 </style>

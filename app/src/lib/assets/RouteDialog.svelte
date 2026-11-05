@@ -1,5 +1,5 @@
 <!--
-  *New route* / *Edit route* — the pane's route editor (issue #432, spec #427
+  *Add a route* / *Edit route* — the pane's route editor (issue #432, spec #427
   stories 12, 13 and 14).
 
   One dialog for both, because they ask for the same four things and a second
@@ -143,6 +143,8 @@
   let loaded = $state(false);
   let failure = $state<string | null>(null);
   let writing = $state(false);
+  /** Whether *Delete route…*'s confirmation is open over this dialog. */
+  let confirming = $state(false);
 
   const columnRead = latestRead<AssetRow[]>();
 
@@ -271,6 +273,7 @@
 
   async function drop() {
     if (writing || route === null) return;
+    confirming = false;
     writing = true;
     failure = null;
     try {
@@ -284,11 +287,10 @@
   }
 </script>
 
-<TfDialog closeButton title={editing ? "Edit route" : "New route"} subtitle={`On ${asset.name}`} {onclose}>
+<TfDialog closeButton title={route === null ? `Add a route to ${asset.name}` : `Edit route ${route.name}`} subtitle={route === null ? null : `On ${asset.name}`} {onclose}>
   {#snippet body()}
-    <div class="fields">
-      <div class="fld">
-        <label class="l" for="{fieldId}-name">Name</label>
+    <div class="tf-formgrid form">
+        <label for="{fieldId}-name">Name (needed)</label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -299,10 +301,7 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-url">URL or endpoint</label>
+        <label for="{fieldId}-url">URL or endpoint (needed)</label>
         <input
           class="inp"
           id="{fieldId}-url"
@@ -321,29 +320,25 @@
           the markup and lands on `<`, which is no reserved host. The rule is
           worth keeping either way, and it costs three characters here.
         -->
-        <p class="hint">Any scheme — <code>https</code>, <code>postgres</code>, <code>ssh</code>; a bare host is refused.</p>
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-vis">Visibility</label>
+        <span class="hint">Any scheme: <code>https</code>, <code>postgres</code>, <code>ssh</code>. A bare host is refused.</span>
+        <label for="{fieldId}-vis">Visibility</label>
         <select class="inp" id="{fieldId}-vis" bind:value={visibility} onkeydown={onfieldkeydown}>
           <option value="internal">Internal</option>
           <option value="public">Public</option>
         </select>
-      </div>
 
-      <div class="fld">
-        <span class="l">Lands on</span>
+      <span>Lands on</span>
+      <div class="tf-fwide wide">
         <p class="lands">
           {#if target}
             <span class="nm">{target.name}</span>
             <button class="link" onclick={() => (target = null)}>Clear</button>
           {:else}
-            <span class="faint">Nothing — an endpoint knobas has no asset for</span>
+            <span class="faint">Nothing: an endpoint knobas has no asset for</span>
           {/if}
         </p>
 
-        <p class="crumb mono">
+        <p class="crumb">
           <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
             Estate
           </button>
@@ -384,10 +379,10 @@
         </div>
       </div>
 
-      <div class="fld">
-        <span class="l">Properties</span>
+      <span>Properties</span>
+      <div class="tf-fwide wide">
         <p class="hint">
-          A route declares no keys, so these are yours — the certificate expiry among
+          A route declares no keys, so these are yours, the certificate expiry among
           them. Emptying a value clears the property.
         </p>
         {#each properties as property, index (index)}
@@ -419,6 +414,7 @@
             <button
               class="tf-btn tf-sm"
               title="Remove {property.key || 'this property'}"
+              aria-label="Remove {property.key || 'this property'}"
               onclick={() => properties.splice(index, 1)}
             >
               ×
@@ -441,55 +437,56 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => void drop()}>Delete</button>
+      <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => (confirming = true)}>Delete route…</button>
     {/if}
+    {#if name.trim() === "" || url.trim() === ""}<span class="tf-dim tf-picked">{name.trim() === "" ? (url.trim() === "" ? "Name it, and say where it answers." : "Name it first.") : "Say where it answers."}</span>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"
       disabled={writing || name.trim() === "" || url.trim() === ""}
       onclick={() => void submit()}
     >
-      {writing ? "Saving…" : editing ? "Save" : "Expose"}
+      {writing ? "Saving…" : editing ? "Save" : "Add route"}
     </button>
   {/snippet}
 </TfDialog>
 
+{#if confirming && route !== null}
+  <TfDialog title="Delete route {route.name}?" onclose={() => (confirming = false)}>
+    {#snippet body()}
+      <p class="ask">{asset.name} stops exposing it. Links to it stay, marked deleted.</p>
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (confirming = false)}>Cancel</button>
+      <button class="tf-btn tf-primary tf-danger" onclick={() => void drop()}>Delete route</button>
+    {/snippet}
+  </TfDialog>
+{/if}
+
 <style>
-  .fields {
-    display: grid;
-    gap: 12px;
+  /* *URL or endpoint (needed)* on one line: a dialog of long names widens the token (design system, Forms). */
+  .form {
+    --tf-label: 172px;
   }
 
-  /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
-  .fld {
-    display: grid;
-    grid-template-columns: var(--tf-label) minmax(0, 1fr);
-    column-gap: 12px;
-    align-items: center;
-  }
-
-  .fld > :global(*):not(.l) {
+  /* A note on the field above it, in the field's column. */
+  .tf-formgrid > .hint {
     grid-column: 2;
-  }
-
-  .fld :global(input.inp),
-  .fld :global(select.inp) {
-    height: var(--control-h);
-  }
-
-  .fld > :global(.tf-btn) {
-    justify-self: start;
-  }
-
-  .fld .l {
-    font-size: var(--t-sm);
-    color: var(--ink-2);
+    margin-top: -2px;
   }
 
   .hint {
-    margin-top: 6px;
-    font-size: var(--t-2xs);
-    color: var(--muted);
+    font-size: var(--t-xs);
+    color: var(--ink-2);
+  }
+
+  .wide .hint {
+    margin: 0 0 6px;
+  }
+
+  .ask {
+    margin: 0;
+    font-size: var(--t-md);
   }
 
   .prow {
@@ -504,7 +501,7 @@
     align-items: baseline;
     gap: 8px;
     margin: 0 0 6px;
-    font-size: var(--t-xs);
+    font-size: var(--t-sm);
   }
 
   .lands .nm {
@@ -517,7 +514,7 @@
     align-items: baseline;
     gap: 4px;
     margin: 0 0 6px;
-    font-size: var(--t-2xs);
+    font-size: var(--t-xs);
     color: var(--muted);
   }
 
@@ -532,7 +529,7 @@
     max-height: 200px;
     overflow: auto;
     border: 1px solid var(--hair);
-    border-radius: 2px;
+    border-radius: 4px;
   }
 
   .opts {
@@ -550,7 +547,7 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: var(--t-xs);
+    font-size: var(--t-sm);
   }
 
   .opt:hover {
@@ -584,7 +581,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: var(--t-xs);
+    font-size: var(--t-sm);
     color: var(--muted);
   }
 </style>
