@@ -461,25 +461,30 @@ async fn a_seeded_build_the_mirror_attributes_to_the_reader_is_on_that_days_dige
     state.scheduler.shutdown().await;
 }
 
-/// **`under:` a configuration, by its id and by its name, finds it and its
-/// builds through the search the app runs** (#644).
+/// **`under:` a configuration, by its id and by its name, answers with its
+/// pipeline through the search the app runs, and each of its builds names it as
+/// parent** (#644, spec #2419 story 16).
 ///
 /// The configurations are the fixture's: `work.json`'s build `cfg`s, each named
 /// by `seed-teamcity-builds.sh`'s rule -- the id is the `cfg` byte for byte, the
 /// name is what follows its first `_`, with `_` as a space. A name with a space
 /// is typed quoted, as the query box writes it (#601).
 ///
+/// The launcher answers a configuration as kind `pipeline` and leaves a run out
+/// (#2422), so the search's answer is the pipeline alone, and a build leaving it
+/// is what this test holds to. The builds are then held where the launcher
+/// cannot show them: the parents the `sync.item_parent` trigger stored off the
+/// server's real records.
+///
 /// Which builds sit in a configuration is read off `buildTypeId`, the field the
 /// server sends at the build's root -- not the `buildType` object the
 /// descriptor declares the parent at -- so a declaration that missed would
-/// leave this set full and the search's empty. The set is every mirrored build
-/// of that configuration, plus the configuration itself, which answers to its
-/// own name and id as a parent. Each fixture build the seed recorded in
-/// `seed-state.json` is checked to be in its configuration's set, so an empty
-/// mirror cannot pass. Read-only, like the digest test above.
+/// leave this set full and the stored parents empty. Each fixture build the seed
+/// recorded in `seed-state.json` is checked to be in its configuration's set, so
+/// an empty mirror cannot pass. Read-only, like the digest test above.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
-async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name() {
+async fn under_each_seeded_configuration_answers_its_pipeline_and_its_builds_name_it_as_parent() {
     let env = env();
     let account = env.account().await;
     let state = app(&env, &account).await;
@@ -528,15 +533,20 @@ async fn under_each_seeded_configuration_finds_it_and_its_builds_by_id_and_name(
                 "fixture build {number} ({build}) of {id} is mirrored: {of_config:?}"
             );
         }
-        let mut expected = BTreeMap::from([(
-            "build_config".to_owned(),
+        let expected = BTreeMap::from([(
+            "pipeline".to_owned(),
             BTreeSet::from([format!("{TEAMCITY}:buildType:{id}")]),
         )]);
-        if !of_config.is_empty() {
-            expected.insert("build".to_owned(), of_config);
-        }
 
-        live_under::each_exactly(&state.pool, TEAMCITY, &[id.clone(), name], &expected).await;
+        let names = [id.clone(), name];
+        live_under::each_exactly(&state.pool, TEAMCITY, &names, &expected).await;
+        for parent in &names {
+            assert_eq!(
+                live_under::children_named(&state.pool, TEAMCITY, "build", parent).await,
+                of_config,
+                "the builds that name {parent} as parent are the ones the server filed under {id}"
+            );
+        }
     }
     state.scheduler.shutdown().await;
 }

@@ -203,6 +203,38 @@ pub async fn each_exactly(
     }
 }
 
+/// The mirrored items of `kind` whose own record names `parent` as their parent,
+/// as the `sync.item_parent` trigger stored it: ignoring case, as `under:` reads
+/// it, and only the `child` arm, so a parent answering to its own name is not
+/// its own child.
+///
+/// For the kinds the launcher leaves out (a run, a commit: spec #2419, story
+/// 16), which [`search`] cannot show: the resolution still decides what sits
+/// where for every other reader of `sync.item_parent`, and a server's real
+/// records must still reach it. The expected set stays the suite's, from outside
+/// the declared parent path.
+pub async fn children_named(
+    pool: &sqlx::PgPool,
+    source: &str,
+    kind: &str,
+    parent: &str,
+) -> BTreeSet<String> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "select distinct i.entity_id
+           from sync.live_item i
+           join sync.item_parent p on p.entity_id = i.entity_id
+          where i.source_id = $1 and i.kind = $2
+            and p.arm = 'child' and lower(p.name) = lower($3)",
+    )
+    .bind(source)
+    .bind(kind)
+    .bind(parent)
+    .fetch_all(pool)
+    .await
+    .expect("the stored parents are readable");
+    rows.into_iter().map(|(id,)| id).collect()
+}
+
 /// `fixtures/tidewater/work.json`, the corpus every seed is derived from.
 pub fn fixture() -> serde_json::Value {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/tidewater/work.json");
