@@ -26,11 +26,21 @@
 //     `back:<name>` / `forward:<name>` press mouse button 3 / 4 there (#693's navigation).
 //       These four go through Input.dispatchMouseEvent, so the page sees real pointer events;
 //       click: stays a DOM click.
+//     `see:<text>` waits as click does for the page's visible text to hold <text>, and a miss
+//       exits 1 naming the step. What a route alone cannot say: an address with nothing behind
+//       it still draws a page, which a capture takes as readily as any other.
 //     `wait:<ms>` pauses, for a debounce or an animation.
 //     `scroll:<px>` scrolls the page's largest scrolling element by <px> (negative goes up);
 //       `scroll:testid=<id>` scrolls that element into view.
 //   SHOT_FULL=1 grows the viewport to the tallest scrolling element's content before the
 //   capture (at most 8000 px), so a long page is one image.
+//   SHOT_SCALE=2 captures that many device pixels per CSS pixel (1 to 3, default 1).
+//   SHOT_NOW=2026-08-22T15:05:00Z makes the same page draw the same picture on any machine,
+//   any day: `new Date()` and `Date.now()` answer that instant, the timezone is UTC, the locale
+//   en-GB, motion is reduced, the caret is hidden, and text is drawn with no hinting and no LCD fringes. The fixture
+//   mixes fixed dates with ones it counts back from the clock, so an unpinned run draws new
+//   pixels every day. scripts/readme-shots.sh runs under it.
+//   A file named *.webp is written as WebP at quality 75, about a third of the PNG's size.
 //   The waits (#1957) poll for the state they need and run out only on a guard sized
 //   past a loaded machine's, each named in its failure: SHOT_START_WAIT_S (default 120,
 //   whole seconds) for Chrome's DevTools endpoint to offer a page, the first route to
@@ -63,6 +73,33 @@ const guard = (name, fallback) => {
 };
 const START_WAIT_S = guard("SHOT_START_WAIT_S", 120);
 const STEP_WAIT_S = guard("SHOT_STEP_WAIT_S", 60);
+const scale = process.env.SHOT_SCALE || "1";
+if (!/^[123]$/.test(scale)) {
+  console.error(`shot: SHOT_SCALE must be 1, 2 or 3, got '${scale}'`);
+  process.exit(2);
+}
+const pinnedAt = process.env.SHOT_NOW ? Date.parse(process.env.SHOT_NOW) : null;
+if (Number.isNaN(pinnedAt)) {
+  console.error(`shot: SHOT_NOW must be a date Date.parse reads, got '${process.env.SHOT_NOW}'`);
+  process.exit(2);
+}
+// Runs before any script of the page, on every document: the page's `Date`, stopped at
+// the pinned instant. Given arguments it is the real one; timers and `performance.now`
+// keep running, so the app's own waits still end. The caret goes too: it blinks on a
+// timer no clock stops, so half a second's difference in a capture showed it or not.
+const pinnedClock = (at) => `(() => {
+  const Real = Date;
+  globalThis.Date = new Proxy(Real, {
+    construct: (target, args, newTarget) => Reflect.construct(target, args.length ? args : [${at}], newTarget),
+    apply: () => new Real(${at}).toString(),
+    get: (target, key) => (key === "now" ? () => ${at} : Reflect.get(target, key)),
+  });
+  addEventListener("DOMContentLoaded", () => {
+    const style = document.createElement("style");
+    style.textContent = "* { caret-color: transparent !important; }";
+    document.head.append(style);
+  });
+})();`;
 // `promise`'s value, or `fallback` once `ms` pass with it unsettled.
 const bounded = (ms, promise, fallback = null) => {
   let timer;
@@ -138,6 +175,7 @@ const keyPress = (combo) => {
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
 if (theme === "dark") flags.push("--blink-settings=preferredColorScheme=0");
 if (theme === "light") flags.push("--blink-settings=preferredColorScheme=1");
+if (pinnedAt !== null) flags.push("--force-color-profile=srgb", "--font-render-hinting=none", "--disable-lcd-text");
 const chromePath = findChrome();
 if (!chromePath) {
   console.error("shot: no Chrome found (the macOS app, or google-chrome or chromium on PATH); set SHOT_CHROME");
@@ -219,8 +257,15 @@ try {
     const a = await send("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
     return a.result?.result?.value;
   };
-  await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+  await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: Number(scale), mobile: false });
   await send("Runtime.enable");
+  if (pinnedAt !== null) {
+    await send("Page.enable");
+    await send("Page.addScriptToEvaluateOnNewDocument", { source: pinnedClock(pinnedAt) });
+    await send("Emulation.setTimezoneOverride", { timezoneId: "UTC" });
+    await send("Emulation.setLocaleOverride", { locale: "en-GB" });
+    await send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  }
   const base = `http://localhost:${port}/?fake-ipc${extra}`;
   // A statement that sets `el` to the element a click or pointer step names, or
   // leaves it undefined. `pointer` keeps only elements with a box (a pointer
@@ -362,6 +407,9 @@ try {
       } else if (verb === "select" && arg.slice(arg.startsWith("testid=") ? 7 : 0).includes("=")) {
         const hit = await poll(STEP_WAIT_S, () => evaluate(selectJs(arg)));
         if (!hit) done(1, `shot: step '${step}' found no such select and option on #/${path}${stepGuard}`);
+      } else if (verb === "see") {
+        const hit = await poll(STEP_WAIT_S, () => evaluate(`document.body.innerText.includes(${JSON.stringify(arg)})`));
+        if (!hit) done(1, `shot: step '${step}' found no such text on #/${path}${stepGuard}`);
       } else if (verb === "type") {
         await send("Input.insertText", { text: arg });
       } else if (verb === "key") {
@@ -374,7 +422,7 @@ try {
       } else if (verb === "scroll" && (/^-?\d+$/.test(arg) || arg.startsWith("testid="))) {
         if (!(await evaluate(scrollJs(arg)))) done(1, `shot: step '${step}' found nothing to scroll on #/${path}`);
       } else {
-        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
+        done(1, `shot: unknown step '${step}' (known: click:<name>, hover:<name>, dblclick:<name>, back:<name>, forward:<name>, focus:<name>, type:<text>, key:<combo>, select:<name>=<option>, see:<text>, wait:<ms>, scroll:<px>, scroll:testid=<id>)`);
       }
       await sleep(500);
     }
@@ -387,11 +435,11 @@ try {
       const overflow = await evaluate(`(${scrollers})().reduce((most, x) => Math.max(most, x.scrollHeight - x.clientHeight), 0)`);
       if (!(overflow > 0) || grown >= 8000) break;
       grown = Math.min(8000, grown + overflow);
-      await send("Emulation.setDeviceMetricsOverride", { width, height: grown, deviceScaleFactor: 1, mobile: false });
+      await send("Emulation.setDeviceMetricsOverride", { width, height: grown, deviceScaleFactor: Number(scale), mobile: false });
       await sleep(800);
     }
   }
-  const { result } = await send("Page.captureScreenshot", { format: "png" });
+  const { result } = await send("Page.captureScreenshot", file.endsWith(".webp") ? { format: "webp", quality: 75 } : { format: "png" });
   writeFileSync(file, Buffer.from(result.data, "base64"));
   for (const text of consoleErrors) console.error(`shot: console.error ${text}`);
   for (const text of uncaught) console.error(`shot: uncaught ${text}`);

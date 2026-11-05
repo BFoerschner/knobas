@@ -600,6 +600,21 @@ function syncRole(args: Record<string, unknown>): { source_id: string; run_id: n
   return runs;
 }
 
+/**
+ * Reads `?fake-sources-healthy` before the bridge is installed: no source needs
+ * the reader. The README's screenshots (`docs/screenshots/shots.txt`) ask for it,
+ * because the refusing TeamCity and the missing Kuma token draw in err tone at
+ * the foot of every page, which a shot of the credential flow wants and a picture
+ * of Builds does not.
+ */
+export function seed(params: URLSearchParams): void {
+  if (!params.has("fake-sources-healthy")) return;
+  for (const source of FIXTURE_SOURCES) {
+    source.health = { ...source.health, state: "ok", detail: null, secret_expires_at: null };
+    if (source.last_run) source.last_run = { ...source.last_run, outcome: "ok", error: null };
+  }
+}
+
 /** This feature's commands. */
 export function handlers(): Handlers {
   return {

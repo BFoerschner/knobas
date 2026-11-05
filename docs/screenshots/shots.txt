@@ -1,0 +1,28 @@
+# The README's screenshots. One line per picture: its name, then the route and
+# steps to reach it, in the words of scripts/shot-steps.mjs. Each line becomes
+# <name>-dark.webp and <name>-light.webp beside this file, and the README shows
+# both through a <picture>.
+#
+#   just readme-shots          shoot them all, here, on this machine, to look at
+#   release.yml                shoots them from the tag and commits them to main
+#
+# Every line ends on `see:` and words from the fixture that only that page shows,
+# because an address with nothing behind it still draws a page and a capture would
+# take it. Fixture words, not the page's own title or help text, so rewording the
+# interface does not fail a release.
+#
+# scripts/readme-shots.sh refuses a line the README does not show, a picture the
+# README asks for that no line makes, and a line with no `see:`. A step that finds
+# nothing fails the run and names the step. docs/development.md has the rest.
+job           #/job/mock%3APAY-231 + see:Finance keeps chasing failed SEPA payouts
+launcher      #/tickets + key:Meta+k + type:payout + wait:900 + see:Idempotency key on the payout endpoint
+inbox         #/inbox + see:Payout CSV export
+tickets       #/tickets + see:Document the manual-review SLA
+pull-request  #/pr/mock%3Apayout-service%23142/diff + wait:1500 + see:src/sepa/retry.rs
+file          #/repo/mock%3Atidewater%2Fpayout-service/files/docs/flow.d2 + wait:2000 + see:flow.d2
+build         #/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3APayout_IntegrationTests-1187 + see:gives_up_after_max_attempts
+docs          #/docs + see:The SEPA batch goes to the PSP
+monitors      #/monitors + see:knobas-confluence
+time          #/time + see:Standup and planning
+standup       #/time/standup + see:Legacy payout reconciliation
+sources       #/settings/sources + see:git.tidewater.example
