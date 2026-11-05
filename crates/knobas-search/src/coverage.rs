@@ -102,12 +102,12 @@
 //! costs more than a millisecond over the grouped read alone.
 //!
 //! That table cannot see a source under its own left-out rows, since the benchmark
-//! cycles five kinds through every source. On its own measure, with a Gitea of
-//! 20,000 commits over 430 rows it keeps added to the mirror, that source took the
-//! grouped read on every `under:` keystroke: 40 ms at p50 once analyzed and 259
-//! never analyzed, against 1.8 and 2.3 through the look at each kind (#2503). A
-//! source another source crowds out of every kind it holds still goes to the grouped
-//! read, so a look that finds nothing costs less than a millisecond over that read.
+//! cycles five kinds through every source. Add a Gitea of 20,000 commits over 430
+//! rows it keeps, and that source took the grouped read on every `under:` keystroke:
+//! 25 to 44 ms at p50 once analyzed and 155 to 160 never analyzed, against about 1
+//! through the look at each kind (#2503). A source another source crowds out of every
+//! kind it holds still goes to the grouped read, and the look that found nothing adds
+//! about 0.1 ms to it.
 //!
 //! `sync.item` is cheaper than `sync.live_item` for that read and is **not** used:
 //! half of the statement's cost is the tombstone join, and dropping it would let an
@@ -154,7 +154,7 @@ use crate::vocab::{SourceVocab, Vocabulary};
 /// `sync.live_item`, the limit waits for 64 live rows and reads past every
 /// withdrawn row to find them: 70 ms on every keystroke for a source of 33,333
 /// withdrawn rows and 183 ms for 100,000, against about 50 ms for the whole
-/// grouped read. Such a source now stops at 64 and goes to that read.
+/// grouped read. Such a source now stops at 64 and goes on.
 /// `read_every_row` counts the same rows, so it is true only when the source ran
 /// out.
 ///
@@ -317,7 +317,8 @@ select i.source_id                            as source_id,
 ///   the far end is what the source wrote last, which is usually live. It is a
 ///   bounded look, so it costs next to nothing when wrong, and it only ever says
 ///   yes: a live row anywhere is a live row. The head's read stays behind it, as
-///   the proof for a source with none. Its cost is unchanged, plus the look.
+///   the proof for a source with none. Its cost is unchanged, plus the look, which
+///   is 0.5 ms for a source whose far end is the withdrawn run.
 /// * **Why 256, not the walk's 64.** Equal keys share posting lists of about 220
 ///   rows, a sixth of a page, and a backward scan reads each one from its low end
 ///   (`_bt_readpage`). So the live rows at the very end of the range can sit behind
