@@ -8,16 +8,16 @@ knobas is a personal work cockpit. It is a desktop app that syncs Jira, Confluen
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/job-dark.webp">
-  <img alt="The ticket page for PAY-231, Retry failed SEPA payouts, chosen as the job. A yellow card on the left lists its epic, people, logged time and a table of sub-tasks, code, builds, docs, monitors and assets, each with its worst state, and a Stop and log button. On the right are the description, attachments and conversation. A timer in the top bar reads 0:34:00." src="docs/screenshots/job-light.webp">
+  <img alt="The ticket page for PAY-231, Retry failed SEPA payouts, chosen as the job. A yellow card on the left lists its epic, people, logged time and a table of what surrounds the ticket, each row with its worst state, and a Stop and log button. On the right are the description, attachments and conversation. A timer in the top bar reads 0:34:00." src="docs/screenshots/job-light.webp">
 </picture>
 
 <sub>Every picture on this page is the app's real interface on made-up data, from a fictional company called Tidewater. Each release redraws them. These are from <!-- shots-version -->main<!-- /shots-version -->.</sub>
 
 ## The ticket you are on is the home page
 
-Choose a ticket and it becomes your job, and its card turns yellow. The card counts what surrounds the ticket, sub-tasks, code, builds, docs, monitors and assets, and each row shows its worst state, so a failing build is visible before you open anything. The description, attachments and whole conversation sit beside it. The timer runs from the foot of the card, and from the top bar on every other page.
+Choose a ticket and it becomes your job, and its card turns yellow. The card counts what surrounds the ticket, sub-tasks, code, builds, docs and monitors, and each row shows its worst state, so a failing build is visible before you open anything. The description, attachments and whole conversation sit beside it. The timer runs from the foot of the card, and from the top bar on every other page.
 
-A link set fills in what a ticket does not name itself. Name the repositories, pipelines, pages, assets and monitors once, and they show on every ticket under an epic or in a project, with nothing copied onto the tickets or written to Jira.
+A link set fills in what a ticket does not name itself. Name the repositories, pipelines, pages and monitors once, and they show on every ticket under an epic or in a project, with nothing copied onto the tickets or written to Jira.
 
 ## One box searches everything
 
@@ -80,13 +80,13 @@ Docs draws Confluence pages in the app, with their embeds, includes, task lists,
   <img alt="The Docs page showing a page called SEPA payout retry design: a tree of the Engineering space on the left, the page in a serif typeface in the middle with an info panel that names ticket PAY-231 and its status, a YAML code block, and an On this page outline on the right." src="docs/screenshots/docs-light.webp">
 </picture>
 
-## Monitors attached to what they watch
+## Every check and its last 24 hours
 
-Uptime Kuma's checks sit in one table, each tied to the asset it watches, with a 24-hour bar in half-hour segments. knobas samples them itself, because Kuma prunes raw heartbeats after about a day. Acknowledge an alert or pause a check from its row, and see which assets nothing watches yet. The assets live in a tree you build by hand or import from a Docker host or Hetzner Cloud.
+Uptime Kuma's checks sit in one table, each with a 24-hour bar in half-hour segments. knobas samples them itself, because Kuma prunes raw heartbeats after about a day. Acknowledge an alert or pause a check from its row.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/monitors-dark.webp">
-  <img alt="The Monitors table: six checks with their state, such as down, slow, pending and up, a 24-hour bar, response time, 30-day uptime and the asset each watches, with Ack, Pause and Hide on each row. A second tab reads Assets nothing watches." src="docs/screenshots/monitors-light.webp">
+  <img alt="The Monitors table: six checks with their state, such as down, slow, pending and up, a 24-hour bar, response time and 30-day uptime, with Ack, Pause and Hide on each row." src="docs/screenshots/monitors-light.webp">
 </picture>
 
 ## Time that becomes worklogs
