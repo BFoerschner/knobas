@@ -2677,7 +2677,7 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
     assert_eq!(
         titles,
         [
-            "reports",
+            "reports/",
             "sepa-chart.png",
             "sepa-report.txt",
             "sepa-statement.pdf"
