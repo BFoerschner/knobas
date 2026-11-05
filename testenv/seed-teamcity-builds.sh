@@ -264,6 +264,19 @@ SEEDED_ARTIFACT=sepa-report.txt
 # The same file again inside a folder, so the run page's artifact tree has a
 # folder to open and to download as a zip (#856).
 SEEDED_FOLDER=reports
+# Two binary files beside it (#2480), so a live suite reads non-text bytes from
+# a real server: real files, so the suite compares against what was published.
+# The agent has no checkout of testenv, so the step carries them as base64.
+SEEDED_BINARY_DIR=teamcity-artifacts
+SEEDED_BINARIES='sepa-chart.png sepa-statement.pdf'
+seeded_folder_files() {  # what the folder holds, one name a line
+  printf '%s\n' "$SEEDED_ARTIFACT"
+  for _f in $SEEDED_BINARIES; do printf '%s\n' "$_f"; done
+}
+seeded_root_files() {  # what the build's root holds: the same files, and the folder
+  seeded_folder_files
+  printf '%s\n' "$SEEDED_FOLDER"
+}
 fixture_log() {  # fixture_log <build type id> -> the fixture's log, blank lines dropped
   jqf ".builds[] | select(.cfg==\"$1\") | .log" | sed '/^$/d'
 }
@@ -302,12 +315,23 @@ EOF
       printf '%s\n' "KNOBAS_FIXTURE_LOG" \
                     "cat > $SEEDED_ARTIFACT <<'KNOBAS_FIXTURE_LOG'"
       fixture_log Payout_IntegrationTests
-      printf '%s\n' "KNOBAS_FIXTURE_LOG" "cat <<'KNOBAS_SERVICE_MESSAGES'"
+      printf '%s\n' "KNOBAS_FIXTURE_LOG"
+      # `fold` because macOS's base64 does not wrap and GNU's does: the same
+      # script from either, or the seed would rewrite the step on each machine.
+      for _f in $SEEDED_BINARIES; do
+        [ -r "$SEEDED_BINARY_DIR/$_f" ] || die "$SEEDED_BINARY_DIR/$_f not found"
+        printf '%s\n' "base64 -d > $_f <<'KNOBAS_FIXTURE_BYTES'"
+        base64 < "$SEEDED_BINARY_DIR/$_f" | tr -d '\n' | fold -w 76
+        printf '\n%s\n' "KNOBAS_FIXTURE_BYTES"
+      done
+      printf '%s\n' "cat <<'KNOBAS_SERVICE_MESSAGES'"
       _test=$(tc_escape "$(failed_test_name Payout_IntegrationTests)")
       _why=$(tc_escape "$(failed_test_details Payout_IntegrationTests)")
-      printf '%s\n' "##teamcity[publishArtifacts '$SEEDED_ARTIFACT']" \
-                    "##teamcity[publishArtifacts '$SEEDED_ARTIFACT => $SEEDED_FOLDER']" \
-                    "##teamcity[testStarted name='$_test']" \
+      for _f in $(seeded_folder_files); do
+        printf '%s\n' "##teamcity[publishArtifacts '$_f']" \
+                      "##teamcity[publishArtifacts '$_f => $SEEDED_FOLDER']"
+      done
+      printf '%s\n' "##teamcity[testStarted name='$_test']" \
                     "##teamcity[testFailed name='$_test' message='$_why']" \
                     "##teamcity[testFinished name='$_test']" \
                     "KNOBAS_SERVICE_MESSAGES" "exit 1"
@@ -466,12 +490,17 @@ ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
     _why="it reports no failed test"
   fi
   if [ -z "$_why" ] && [ "$2" = "FAILURE" ]; then
-    # #856: the failed build publishes the artifact folder too.
+    # #856, #2480: the failed build publishes the folder and the binary files.
+    # Only what is missing counts: the delete is one-way, and a build that also
+    # holds a file a later seed added is no reason for this seed to run it again.
     rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
     expect "list the artifacts of build id $1" 200
-    if ! printf '%s' "$REST_BODY" | jq -e --arg f "$SEEDED_FOLDER" '[.file[]?.name] | index($f)' >/dev/null; then
-      _why="it publishes no $SEEDED_FOLDER/ folder"
-    fi
+    for _f in $(seeded_root_files); do
+      if ! printf '%s' "$REST_BODY" | jq -e --arg f "$_f" '[.file[]?.name] | index($f)' >/dev/null; then
+        _why="it publishes no $_f"
+        break
+      fi
+    done
   fi
   [ -z "$_why" ] && return 0
   rest DELETE "/app/rest/builds/id:$1"
@@ -643,9 +672,14 @@ assert_reports() {  # assert_reports <build id> <build type id>
     || die "build id $1 reports failed tests $(printf '%s' "$REST_BODY" | jq -c '[.testOccurrence[]?.name]'), wanted [\"$_want\"]"
   rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
   expect "list the artifacts of build id $1" 200
-  _want=$(printf '%s\n' "$SEEDED_ARTIFACT" "$SEEDED_FOLDER" | sort | paste -sd, -)
+  _want=$(seeded_root_files | LC_ALL=C sort | paste -sd, -)
   [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | sort | join(",")')" = "$_want" ] \
-    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted the file and the folder: $_want"
+    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted the files and the folder: $_want"
+  rest GET "/app/rest/builds/id:$1/artifacts/children/$SEEDED_FOLDER?fields=file(name)"
+  expect "list the $SEEDED_FOLDER folder of build id $1" 200
+  _want=$(seeded_folder_files | LC_ALL=C sort | paste -sd, -)
+  [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | sort | join(",")')" = "$_want" ] \
+    || die "build id $1 holds $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]') in $SEEDED_FOLDER, wanted: $_want"
 }
 
 # --------------------------------------------------------------------------

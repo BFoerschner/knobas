@@ -944,7 +944,7 @@ the adapter's tests and the project census already expect:
 | Fixture `cfg` | Project (id = name) | Build configuration name | Build | Outcome |
 |---|---|---|---|---|
 | `Ledger_Deploy_Staging` | `Ledger` | `Deploy Staging` | `412` on `main` | SUCCESS |
-| `Payout_IntegrationTests` | `Payout` | `IntegrationTests` | `1187` on `feature/PAY-231-sepa-retry` | FAILURE, the fixture's `log` in the build log, its failed test reported as one, the log again as the artifact `sepa-report.txt` |
+| `Payout_IntegrationTests` | `Payout` | `IntegrationTests` | `1187` on `feature/PAY-231-sepa-retry` | FAILURE, the fixture's `log` in the build log, its failed test reported as one, the log again as the artifact `sepa-report.txt`, and the binary artifacts `sepa-chart.png` and `sepa-statement.pdf` |
 | `Payout_Build` | `Payout` | `Build` | `1188` on `feature/PAY-231-sepa-retry`, `--running` only | running, held at step 3/5 `cargo test` |
 
 No configuration has a description: the fixture gives none, and the seed
@@ -991,6 +991,15 @@ that reports no failed test is deleted and run again under the same number
 (its id changes; `seed-state.json` records the new one). TeamCity lists no
 change for 1187, because it is its configuration's first build; its build
 view's *Revision* row is what leads to its commit (#683).
+
+**Binary artifacts, for the file viewer (#2480).** The step also carries
+`testenv/teamcity-artifacts/sepa-chart.png` and `sepa-statement.pdf` as base64,
+decodes them and publishes them beside the report and again in `reports/`, so
+`live_teamcity_seeded.rs` compares `artifact_bytes` with the committed files. A
+finished 1187 that lacks a file is deleted and run again as above, so a server
+gains them on the next `./seed --teamcity` and its 1187 takes a new, higher id
+(once: a later seed finds the files and leaves it). The agent has no checkout of
+`testenv`, which is why the bytes travel in the step's script.
 
 **A build that lists a change (#683).** TeamCity lists a change only for a
 commit it has never seen on any branch, and never for a configuration's first

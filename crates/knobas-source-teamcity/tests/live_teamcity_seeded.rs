@@ -167,6 +167,12 @@ const QUICK_CONFIGURATION: &str = "Ledger_Deploy_Staging";
 /// the class the default filter hides.
 const FEATURE_BRANCH: &str = "fix/PAY-228-partial-refund-drift";
 
+/// The files `testenv/seed-teamcity-builds.sh` encodes into
+/// `Payout_IntegrationTests`' step, which the build decodes and publishes
+/// (#2480): the bytes the seed sent, not a copy of what the server answered.
+const SEEDED_PNG: &[u8] = include_bytes!("../../../testenv/teamcity-artifacts/sepa-chart.png");
+const SEEDED_PDF: &[u8] = include_bytes!("../../../testenv/teamcity-artifacts/sepa-statement.pdf");
+
 /// The `teamcity` block of `testenv/seed-state.json`: what the seed actually
 /// got from the server.
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -2600,8 +2606,9 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
             ("changes", Some(0), false),
             ("tests", Some(1), true),
             ("log", None, true),
-            // The file, and the folder holding it again (#856).
-            ("artifacts", Some(2), false),
+            // The report, the folder holding every file again (#856), and the
+            // chart and the statement (#2480).
+            ("artifacts", Some(4), false),
             // #852 seeded a fourth, `env.LOG_LEVEL`.
             ("parameters", Some(4), false),
         ]
@@ -2665,7 +2672,18 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
     let Block::Entities { rows, .. } = &artifacts[0] else {
         panic!("{artifacts:#?}");
     };
-    assert_eq!(rows.len(), 2, "{artifacts:#?}");
+    let mut titles: Vec<_> = rows.iter().map(|r| r.title.as_str()).collect();
+    titles.sort_unstable();
+    assert_eq!(
+        titles,
+        [
+            "reports",
+            "sepa-chart.png",
+            "sepa-report.txt",
+            "sepa-statement.pdf"
+        ],
+        "{artifacts:#?}"
+    );
     let file = rows
         .iter()
         .find(|r| r.title == "sepa-report.txt")
@@ -4453,14 +4471,31 @@ async fn a_seeded_runs_log_tests_and_artifacts_read_whole() {
         .find(|e| e.folder)
         .expect("the seed publishes a folder");
     assert_eq!(folder.path, "reports");
+    let mut paths: Vec<_> = root.iter().map(|e| e.path.as_str()).collect();
+    paths.sort_unstable();
+    assert_eq!(
+        paths,
+        [
+            "reports",
+            "sepa-chart.png",
+            "sepa-report.txt",
+            "sepa-statement.pdf"
+        ]
+    );
     let inside = source
         .run_artifacts(&run, &folder.path)
         .await
         .unwrap()
         .unwrap();
+    let mut paths: Vec<_> = inside.iter().map(|e| e.path.as_str()).collect();
+    paths.sort_unstable();
     assert_eq!(
-        inside.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
-        ["reports/sepa-report.txt"]
+        paths,
+        [
+            "reports/sepa-chart.png",
+            "reports/sepa-report.txt",
+            "reports/sepa-statement.pdf"
+        ]
     );
     let preview = source
         .artifact_preview(&run, "reports/sepa-report.txt")
@@ -4499,6 +4534,34 @@ async fn a_seeded_runs_log_tests_and_artifacts_read_whole() {
         ),
         "over the cap is refused, never cut"
     );
+
+    // -- the viewer's byte read of binary files (#2480): what the seed encoded
+    // into the build's step, against what the server answers. Neither file is
+    // UTF-8 and both hold NULs, so a read that went through text cannot match.
+    for (name, published) in [
+        ("sepa-chart.png", SEEDED_PNG),
+        ("sepa-statement.pdf", SEEDED_PDF),
+    ] {
+        assert!(
+            std::str::from_utf8(published).is_err() && published.contains(&0),
+            "{name} is the binary witness this reads as"
+        );
+        for path in [name.to_owned(), format!("reports/{name}")] {
+            let answer = source
+                .artifact_bytes(&run, &path, knobas_source::view::ATTACHMENT_CAP)
+                .await
+                .unwrap_or_else(|e| panic!("{path} reads: {e:?}"));
+            let Some(knobas_source::view::FileBytes::Read(bytes)) = answer else {
+                panic!("{path} is published and under the cap: {answer:?}");
+            };
+            assert!(
+                bytes.as_slice() == published,
+                "{path}: {} bytes answered, {} published",
+                bytes.len(),
+                published.len()
+            );
+        }
+    }
 
     let mut file = Kept::default();
     assert!(
