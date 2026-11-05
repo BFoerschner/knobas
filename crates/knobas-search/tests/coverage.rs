@@ -687,6 +687,65 @@ async fn withdrawn_rows_on_top_of_a_source_vouch_for_nothing_and_hide_nothing() 
     }
 }
 
+/// **A kept row decides the verdict however many newer rows of its kind other
+/// sources hold.** A source under its own left-out rows is looked for among each
+/// kind's newest rows, and another source can hold all of those. That has to send
+/// the source on, and not read as the source having nothing of that kind. What the
+/// look does see vouches only for what it is: a withdrawn row for nothing, and an
+/// unauthored one for the corpus and not for an author.
+#[tokio::test]
+async fn a_kept_row_behind_another_sources_rows_of_its_kind_still_decides() {
+    use FilterAnswer::{Answered, NoValues};
+    const SOMEONE: Option<&str> = Some("mara.lindqvist");
+    // (case, the source's own kept rows as (author, withdrawn), the verdict)
+    type Kept = &'static [(Option<&'static str>, bool)];
+    let cases: [(&str, Kept, Option<FilterAnswer>); 5] = [
+        ("an authored row", &[(SOMEONE, false)], Some(Answered)),
+        ("an unauthored row", &[(None, false)], Some(NoValues)),
+        ("a withdrawn row and nothing else", &[(SOMEONE, true)], None),
+        (
+            "an unauthored row, and an authored one withdrawn",
+            &[(None, false), (SOMEONE, true)],
+            Some(NoValues),
+        ),
+        (
+            "an unauthored row, and an authored one beside it",
+            &[(None, false), (SOMEONE, false)],
+            Some(Answered),
+        ),
+    ];
+    let pool = pool().await;
+    let s = searcher(&pool);
+    for (case, kept, expected) in cases {
+        let t = token("crowded");
+        let (source, other) = (format!("src-{t}"), format!("other-{t}"));
+        seed_source(&pool, &source, "teamcity", "Source", None).await;
+        seed_source(&pool, &other, "teamcity", "Other", None).await;
+        seed_newest_rows(&pool, &source, "commit", SOMEONE, PAST_THE_WALK).await;
+        // Newer than the source's own tickets, and more than a look at the kind reads.
+        seed_newest_rows(&pool, &other, "ticket", SOMEONE, PAST_THE_WALK).await;
+        for (index, (author, withdrawn)) in kept.iter().enumerate() {
+            let id = format!("{source}:kept-{index}");
+            seed_item(&pool, &id, "ticket", &source, &format!("{t} kept"), *author).await;
+            if *withdrawn {
+                sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+                    .bind(&id)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+        }
+        let raw = format!("{t} author:nobody.at.all source:{source}");
+        let response = s.search(q(&raw)).await.unwrap();
+        assert_eq!(
+            answer_for(&response, &source),
+            expected,
+            "{case}: {:?}",
+            response.coverage
+        );
+    }
+}
+
 /// An author column that is present and blank is nobody.
 ///
 /// `Vocabulary::load` already drops a blank configured username for this
