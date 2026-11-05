@@ -113,7 +113,7 @@ They are on `:root` in `tokens.css`. A button takes a fixed `height` from its si
 
 - **Default** (`.tf-btn`): page headers (`.tf-acts`), dialog footers and the top bar.
 - **Small** (`.tf-btn.tf-sm`): everything inside a page body. Rows, section headings, panel toolbars, tab strips, side rails, segmented-control buttons and pill toggles.
-- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the link review's *Link them* / *Not related* / *Decide later*, the ticket preview's go button, the ticket page card's foot). No other button is large.
+- **Large** (`.tf-btn.tf-lg`): only the one decision a screen exists for (the specimen's *Link them* / *Not related* / *Decide later*, the ticket preview's go button, the ticket page card's foot). No other button is large.
 
 Three sizes is the complete set. A rule outside `chrome.css` doesn't set a button's height, padding, font size or radius.
 
@@ -219,10 +219,9 @@ Motion answers something the person did, and there's very little of it.
 - A running build or timer pulses its dot (1.4 s, opacity to 35 %). That's the only motion nobody started.
 - The Connections drawer slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
-- A dependency tile you navigated to flashes a focus-coloured ring once (1.6 s), so you can find it in the graph.
 - Row actions fade in on hover and on focus within the row.
 
-There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops, and the dependency flash becomes a static 2 px ring.
+There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.
 
 Focus is always visible: a 2 px outline in `--focus`, offset 2 px. `--card-ink` replaces it on card surfaces (see Contrast).
 
@@ -239,6 +238,6 @@ These are engineering constraints the prototype doesn't have. Each UI ticket tha
 - **Two UIs live side by side until slice 5.** The new shell runs beside the rooms UI behind a setting. Their tokens collide by name (`--ok`, `--muted`, `--sans`, `--mono` exist in both with different values). The new tokens are set on the new shell's root element, not on `:root`, and that element sets its own `background: var(--paper)` and fills the window. The rooms UI's `app.css` stays untouched. When slice 5 removes the rooms UI, the tokens move to `:root` and `app.css` goes.
 - **The new stylesheet is its own file.** It doesn't append to `app.css`, whose header asks later milestones to append. That rule was for extending the Signal design, and this one replaces it.
 - **Theme.** Today's app is dark only. The new shell follows the OS, and the theme toggle and *Settings → Appearance* (R-13a.8) override it through `data-theme` on the shell root, with the same three-way selector the prototype uses (OS dark unless `data-theme="light"`, or forced `data-theme="dark"`).
-- **Not a source.** Prototype-6 still contains the retired global map (`renderMap`, `renderGlobalMap` and its `.ma-*`, `.gm-*`, `.mn`, `.minsp` selectors). Dependencies is drawn from a ticket under its own nav entry (D11/D12; the job's Map tab went with spec #2396). Don't port those selectors.
+- **Not a source.** Prototype-6 still contains the retired global map (`renderMap`, `renderGlobalMap` and its `.ma-*`, `.gm-*`, `.mn`, `.minsp` selectors). Dependencies replaced it (D11/D12) and left the app on 2026-11-05. Don't port those selectors.
 
 The conventions the first shell tickets settled (class prefix, fixtures, mounting, addresses) are in [ticket-first-shell-conventions](2026-10-15-ticket-first-shell-conventions.md).
