@@ -1098,6 +1098,7 @@ const CASES: Case[] = [
           sourceName: "TeamCity",
           ports: {
             artifacts: () => deferred([{ path: "logs", name: "logs", size: null, folder: true, children: 1 }]),
+            bytes: () => Promise.resolve(null),
             preview: () => deferred(null),
             download: () => deferred(null),
           },

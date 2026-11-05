@@ -1,12 +1,14 @@
 /**
  * `?fake-ipc`'s run page reads (#854, #855, #856): `run_log`, `run_tests`,
- * `test_history`, `run_artifacts`, `artifact_preview` and
+ * `test_history`, `run_artifacts`, `artifact_preview`, `artifact_bytes` and
  * `download_run_file`, over prototype-6's `logOf`, `stepsOf`, `testsOf`,
  * `artifactsOf` and `artifactText` for the fixture runs `fake/builds.ts`
  * draws.
  */
 import type { ArtifactEntry, LogLine, LogStep, RunTest, TestOutcome } from "../../../ipc/entity";
 import type { Handlers } from "../fake-tauri";
+import { SPEC_PDF } from "../../../render/pdf-fixture";
+import { picture } from "./attachments";
 import { fixtureRun } from "./builds";
 
 const REPOS = ["payout-service", "ledger-core", "psp-client", "fx-rates", "batch-runner", "notify-hub", "api-gateway"];
@@ -135,7 +137,7 @@ function artifactsOf(config: string, st: string): { d: string; f: [string, numbe
     return [
       { d: "test-report", f: [["junit.xml", 14_541], ["index.html", 90_112]] },
       { d: "logs", f: [["psp-sandbox.log", 31_744], ["integration.log", 217_088]] },
-      { d: "coverage", f: [["lcov.info", 1_153_434]] },
+      { d: "coverage", f: [["lcov.info", 1_153_434], ["coverage-map.png", 48_211], ["coverage-report.pdf", 182_044], ["coverage-full.png", 6_501_171]] },
     ];
   if (/Build|Docker|Release/.test(config))
     return [{ d: "", f: [["payout-service-1.9.0-rc1-x86_64.tar.gz", 6_501_171], ["payout-service", 19_293_798], ["sbom.cdx.json", 245_760], ["SHA256SUMS", 1_024]] }];
@@ -248,6 +250,13 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
       const path = String(args["path"] ?? "");
       const text = artifactText(run.config, run.no, run.st, path.split("/").at(-1) ?? path);
       return { text, truncated: false };
+    },
+    artifact_bytes: (args) => {
+      runOf(args);
+      const path = String(args["path"] ?? "");
+      if (path.endsWith(".pdf")) return { mime: "application/pdf", data: btoa(String.fromCharCode(...SPEC_PDF())) };
+      const src = picture(path.length);
+      return { mime: "image/bmp", data: src.slice(src.indexOf(",") + 1) };
     },
     download_run_file: (args) => {
       const run = runOf(args);

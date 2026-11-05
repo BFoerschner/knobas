@@ -82,7 +82,7 @@ export const FIXTURE_SOURCES: SourceSummary[] = [
     roles: [
       {
         role: "ci",
-        reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "download", "run_chain"],
+        reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "artifact_bytes", "download", "run_chain"],
       },
     ],
     health: {
@@ -299,7 +299,7 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 20,
     // The role it claims, as the real adapter does (#1193).
-    roles: [{ role: "ci", reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "download", "run_chain"] }],
+    roles: [{ role: "ci", reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "artifact_bytes", "download", "run_chain"] }],
     write_ops: [],
     // The Builds frame (#851): the pipeline page's header names a pipeline in
     // the word the descriptor gives the kind it declares the frame on.

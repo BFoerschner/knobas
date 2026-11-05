@@ -6,6 +6,7 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import {
+  artifactBytes,
   artifactPreview,
   downloadRunFile,
   entityView,
@@ -28,6 +29,7 @@ import {
 import type {
   ArtifactEntry,
   ArtifactPreview,
+  AttachmentBytes,
   DownloadTarget,
   EntityDetail,
   LinkEntry,
@@ -175,6 +177,8 @@ export interface RunPorts extends PipelinePorts {
   artifacts: (runId: string, path: string) => Promise<ArtifactEntry[] | null>;
   /** The head of one text artifact (`artifact_preview`, #856). */
   preview: (runId: string, path: string) => Promise<ArtifactPreview | null>;
+  /** One artifact whole, for the viewer's image or PDF (`artifact_bytes`, #2417). */
+  bytes: (runId: string, path: string) => Promise<AttachmentBytes | null>;
   /** Stream one into the downloads folder; the saved path (`download_run_file`, D8). */
   download: (runId: string, target: DownloadTarget) => Promise<string | null>;
   /** The projects a ticket can go in, for *Create ticket* (`list_projects`, #1451). */
@@ -193,6 +197,7 @@ export const RUN_BRIDGE: RunPorts = {
   history: (runId, testId) => testHistory(runId, testId),
   artifacts: (runId, path) => runArtifacts(runId, path === "" ? null : path),
   preview: (runId, path) => artifactPreview(runId, path),
+  bytes: (runId, path) => artifactBytes(runId, path),
   download: (runId, target) => downloadRunFile(runId, target),
   projects: () => listProjects(),
   links: (runId) => getEntity(runId).then((detail) => detail.links),

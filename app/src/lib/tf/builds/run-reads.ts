@@ -293,6 +293,14 @@ export function previewable(entry: ArtifactEntry): boolean {
   return dot <= 0 || TEXT_EXTENSIONS.has(entry.name.slice(dot + 1).toLowerCase());
 }
 
+/** How the viewer draws a file it reads whole (`artifact_bytes`, #2417), by its extension; `null` for any other file. */
+export function drawnWhole(entry: ArtifactEntry): "image" | "pdf" | null {
+  if (entry.folder) return null;
+  const extension = entry.name.slice(entry.name.lastIndexOf(".") + 1).toLowerCase();
+  if (/^(png|jpe?g|gif|webp)$/.test(extension)) return "image";
+  return extension === "pdf" ? "pdf" : null;
+}
+
 /** The toast after a download: "Saved junit.xml to ~/Downloads". */
 export function savedText(path: string): string {
   const name = path.split(/[\\/]/).at(-1) ?? path;

@@ -6,20 +6,24 @@
     folder* (a zip). The top-level folders start open; a deeper one is read
     when it is opened.
   - A file shows its size and *Download*; its name opens it in the app's
-    file viewer (`TfFileViewer`, #2415): the head of a text file
-    (`artifact_preview`), else *No preview*, with *Download* on its title line.
+    file viewer (`TfFileViewer`, #2415): an image or a PDF read whole
+    (`artifact_bytes`, #2417), up to the attachments' 5 MiB cap; the head of a
+    text file (`artifact_preview`); else *No preview*. *Download* stays on its
+    title line whichever it is.
   - *Download all as zip*. Every download streams through knobas with the
     stored credential into the downloads folder (`download_run_file`).
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { ArtifactEntry, ArtifactPreview, DownloadTarget } from "../../ipc/entity";
+  import { missingWords } from "../job/attachment-image";
+  import { dataBytes, PREVIEW_CAP } from "../job/attachment-previews.svelte";
   import { attachmentKind } from "../job/attachments";
   import TfFileViewer, { type ViewerContent } from "../render/TfFileViewer.svelte";
   import type { RunPorts } from "./pipeline-ports";
-  import { downloadAndSay, filesText, previewable, sizeText } from "./run-reads";
+  import { downloadAndSay, drawnWhole, filesText, previewable, sizeText } from "./run-reads";
 
   let {
     runId,
@@ -30,7 +34,7 @@
     runId: string;
     /** The source's configured name, for whose sign-in a download uses. */
     sourceName: string;
-    ports: Pick<RunPorts, "artifacts" | "preview" | "download">;
+    ports: Pick<RunPorts, "artifacts" | "preview" | "bytes" | "download">;
     /** Bumped when the page reads the run again (#1450): the folders read are read again, open ones kept open. */
     rereads?: number;
   } = $props();
@@ -43,7 +47,9 @@
   type Folder = ArtifactEntry[] | "reading" | { failed: string };
   let folders = $state<Record<string, Folder>>({});
   let open = $state<Record<string, boolean>>({});
-  let preview = $state<{ entry: ArtifactEntry; answer: ArtifactPreview | "reading" | { failed: string } } | null>(null);
+  /** What a read of the open file came to: a text head, a whole file to draw, over the cap, or why not. */
+  type Answer = ArtifactPreview | { drawn: "image" | "pdf"; src: string } | "reading" | "too-large" | { failed: string };
+  let preview = $state<{ entry: ArtifactEntry; answer: Answer } | null>(null);
   let token = 0;
 
   function readFolder(path: string) {
@@ -105,21 +111,35 @@
 
   const download = (target: DownloadTarget, what: string) => downloadAndSay(ports.download, runId, target, what);
 
-  /** Open one file in the viewer: a text file's head is read, any other file has no preview. */
+  const NO_PREVIEW: Answer = { text: null, truncated: false };
+
+  /** The source's own cap, for a file the listing gave no size. */
+  const overCap = (cause: unknown) => isIpcError(cause) && cause.code === "invalid" && /\bpreviews an artifact up to\b/.test(cause.message);
+
+  /** Open one file in the viewer: an image or PDF is read whole unless it is over the cap, a text file's head is read, any other file has no preview. */
   function showPreview(entry: ArtifactEntry) {
-    if (!previewable(entry)) {
-      preview = { entry, answer: { text: null, truncated: false } };
+    const drawn = drawnWhole(entry);
+    if (drawn !== null && entry.size !== null && entry.size > PREVIEW_CAP) {
+      preview = { entry, answer: "too-large" };
+      return;
+    }
+    if (drawn === null && !previewable(entry)) {
+      preview = { entry, answer: NO_PREVIEW };
       return;
     }
     preview = { entry, answer: "reading" };
     const mine = token;
     const path = entry.path;
-    ports.preview(runId, path).then(
+    const read: Promise<Answer> =
+      drawn === null
+        ? ports.preview(runId, path).then((head) => head ?? NO_PREVIEW)
+        : ports.bytes(runId, path).then((bytes) => (bytes === null ? NO_PREVIEW : { drawn, src: `data:${bytes.mime};base64,${bytes.data}` }));
+    read.then(
       (answer) => {
-        if (mine === token && preview?.entry.path === path) preview = { entry, answer: answer ?? { text: null, truncated: false } };
+        if (mine === token && preview?.entry.path === path) preview = { entry, answer };
       },
       (cause: unknown) => {
-        if (mine === token && preview?.entry.path === path) preview = { entry, answer: { failed: ipcErrorMessage(cause) } };
+        if (mine === token && preview?.entry.path === path) preview = { entry, answer: overCap(cause) ? "too-large" : { failed: ipcErrorMessage(cause) } };
       },
     );
   }
@@ -128,7 +148,13 @@
   function viewerContent(open: NonNullable<typeof preview>): ViewerContent {
     const answer = open.answer;
     if (answer === "reading") return { kind: "reading" };
+    if (answer === "too-large") return { kind: "missing", why: missingWords(open.entry.name, sourceName, { state: "too-large" }), retry: null };
     if ("failed" in answer) return { kind: "missing", why: `${open.entry.name} could not be read: ${answer.failed}`, retry: () => showPreview(open.entry) };
+    if ("src" in answer) {
+      if (answer.drawn === "image") return { kind: "image", src: answer.src };
+      const bytes = dataBytes(answer.src);
+      return { kind: "pdf", read: () => Promise.resolve(bytes), size: bytes.length };
+    }
     if (answer.text === null) return { kind: "none" };
     return { kind: "text", text: answer.text, truncated: answer.truncated };
   }

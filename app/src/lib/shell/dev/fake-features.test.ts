@@ -610,6 +610,8 @@ test("builds: a fixture run answers its log, tests, a test's history, artifacts,
   expect(root.map((e) => e.path)).toEqual(["test-report", "logs", "coverage"]);
   expect((h["run_artifacts"]!({ runId, path: "logs" }) as { path: string }[]).map((e) => e.path)).toEqual(["logs/psp-sandbox.log", "logs/integration.log"]);
   expect((h["artifact_preview"]!({ runId, path: "test-report/junit.xml" }) as { text: string }).text).toContain("<testsuites");
+  expect((h["artifact_bytes"]!({ runId, path: "coverage/coverage-map.png" }) as { mime: string }).mime).toBe("image/bmp");
+  expect((h["artifact_bytes"]!({ runId, path: "coverage/coverage-report.pdf" }) as { mime: string }).mime).toBe("application/pdf");
   expect(h["download_run_file"]!({ runId, target: { kind: "folder", path: "logs" } })).toBe("/Users/mara/Downloads/logs.zip");
   expect(() => h["run_tests"]!({ runId: "teamcity:build:Nope-1" })).toThrow();
 });
