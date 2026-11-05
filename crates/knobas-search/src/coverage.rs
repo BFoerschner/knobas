@@ -63,7 +63,7 @@
 //!
 //! 1. **[`NEWEST_ROWS_SQL`], one bounded walk per source.** Each source's newest
 //!    64 rows, withdrawn or not. Almost every source settles there, which is
-//!    about 0.8 ms for the four of the benchmark, whatever the mirror holds.
+//!    about 1 ms for the four of the benchmark, whatever the mirror holds.
 //! 2. **[`AUTHOR_COVERAGE_SQL`], one grouped read over the sources the walk could
 //!    not settle.** Skipped when there are none.
 //! 3. **[`UNDER_COVERAGE_SQL`], for `under:` alone.** An index range per source.
@@ -77,24 +77,24 @@
 //! scan between them, whatever their number.
 //!
 //! Measured on the 100,000-row fixture with a third of it unauthored, through the
-//! plan cache, on a shared machine at load 6 to 8, p50 ms:
+//! plan cache, in one run on a shared machine at load about 10, p50 ms:
 //!
 //! | query | grouped read alone | one `limit 1` per source | walk, then grouped |
 //! |---|---:|---:|---:|
-//! | `under:`, no kind scope | 32 | 0.1 | **0.5** |
-//! | `author:`, no kind scope | 32 | 17 | **23** |
-//! | `author:` and `kind:ticket` | 34 | 19 | **6** |
-//! | a kind one source has | 12 | 47 | **3** |
-//! | a kind nothing has | 0.2 | 73 | **0.7** |
-//! | every kind left out | 16 | 74 | **16** |
+//! | `under:`, no kind scope | 40 | 0.2 | **1.0** |
+//! | `author:`, no kind scope | 40 | 28 | **26** |
+//! | `author:` and `kind:ticket` | 36 | 27 | **6.5** |
+//! | a kind one source has | 14 | 60 | **4.3** |
+//! | a kind nothing has | 0.4 | 77 | **1.1** |
+//! | every kind left out | 23 | 95 | **18** |
 //!
 //! The third column is why this is not simply a `limit 1`. It reads each source
 //! down its index to the first row in scope, which costs next to nothing when that
 //! row is near, but a kind scope a source cannot meet walks all of it. `asset:
-//! under:x` went from 0.2 ms to 73 ms, because a generic plan cannot use the kind
+//! under:x` went from 0.4 ms to 77 ms, because a generic plan cannot use the kind
 //! index behind `cardinality($2) = 0 or kind = any($2)`. So the walk has a budget,
 //! and the grouped read stays as what a source falls back to. No row of the table
-//! costs more than half a millisecond over the grouped read alone.
+//! costs more than a millisecond over the grouped read alone.
 //!
 //! `sync.item` is cheaper than `sync.live_item` for that read and is **not** used:
 //! half of the statement's cost is the tombstone join, and dropping it would let an
@@ -145,8 +145,8 @@ use crate::vocab::{SourceVocab, Vocabulary};
 /// `read_every_row` counts the same rows, so it is true only when the source ran
 /// out.
 ///
-/// **Why 64.** It costs about 4 µs a row, through the item and the entity, so
-/// about 0.8 ms for the benchmark's three sources with rows. A walk four times
+/// **Why 64.** It costs about 5 µs a row, through the item and the entity, so
+/// about 1 ms for the benchmark's three sources with rows. A walk four times
 /// the length costs 1 ms more over 100,000 items and took a top-N sort of the
 /// table at 3,000. The length only moves how often the grouped read is asked: a
 /// walk that runs out only sends its source there.
@@ -345,6 +345,11 @@ fn merge(probes: &mut Vec<SourceProbe>, read: Vec<SourceProbe>) {
     }
 }
 
+/// The sources with a corpus here, the only ones a verdict can be about.
+fn sources_of(probes: &[SourceProbe]) -> Vec<&str> {
+    probes.iter().map(|p| p.source_id.as_str()).collect()
+}
+
 /// The coverage for one query, one entry per reported dimension it filtered
 /// on, or nothing to report.
 ///
@@ -357,7 +362,9 @@ fn merge(probes: &mut Vec<SourceProbe>, read: Vec<SourceProbe>) {
 /// dimensions, so it is asked once. Whether a source can answer `under:` is
 /// measured on what it synced (Björn's ruling on #642, replacing #595's "read
 /// off the declaration"): [`UNDER_COVERAGE_SQL`], asked only for a query that
-/// filtered by parent.
+/// filtered by parent and only about the sources with a corpus, since no other
+/// gets a verdict. A source swept whole keeps its child rows, and asked about, it
+/// would read every one of them to find none live: 123 ms for 46,668.
 ///
 /// # Errors
 ///
@@ -387,12 +394,11 @@ pub(crate) async fn report(
         .await?;
     let (mut probes, unsettled) = settle(walks, by_author);
     if !unsettled.is_empty() {
-        let in_corpus: Vec<&str> = probes.iter().map(|p| p.source_id.as_str()).collect();
         let read: Vec<SourceProbe> = sqlx::query_as(AUTHOR_COVERAGE_SQL)
             .bind(&unsettled)
             .bind(&kinds)
             .bind(&filters.hidden_kinds)
-            .bind(&in_corpus)
+            .bind(sources_of(&probes))
             .fetch_all(pool)
             .await?;
         merge(&mut probes, read);
@@ -409,9 +415,16 @@ pub(crate) async fn report(
     }
     if by_under {
         let naming: Vec<String> = sqlx::query_scalar(UNDER_COVERAGE_SQL)
-            .bind(&ids)
+            .bind(sources_of(&probes))
             .fetch_all(pool)
             .await?;
+        // As `merge`'s is for `$4`, the gate's witness of the bind: no answer changes
+        // without it, and neither would a lock, since the statement reads what
+        // `under:` itself reads.
+        debug_assert!(
+            naming.iter().all(|id| sources_of(&probes).contains(&id.as_str())),
+            "the probe was asked about a source with no corpus: {naming:?}"
+        );
         report.push(coverage_of(
             &scoped,
             &probes,
