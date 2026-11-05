@@ -397,21 +397,21 @@ impl Searcher {
             return Ok(empty(interpreted, started));
         }
 
-        let corpora = corpus::searched(self.corpora(), filters.titles);
-        let built = sql::search_sql(
-            &corpora,
-            text,
-            parsed.prefix_last_term,
-            &filters,
-            PER_GROUP,
-            query.limit,
-        );
         // An `under:` scoped to names with nothing admitted beneath any of
         // them answers with nothing, and the statement is not asked: to say
         // nothing, it reads the whole mirror once per corpus (#2495).
         let rows: Vec<RawHit> = if filters.filters_by_under() && known_under.admits_nothing() {
             Vec::new()
         } else {
+            let corpora = corpus::searched(self.corpora(), filters.titles);
+            let built = sql::search_sql(
+                &corpora,
+                text,
+                parsed.prefix_last_term,
+                &filters,
+                PER_GROUP,
+                query.limit,
+            );
             sql::query_as_with(built).fetch_all(&self.pool).await?
         };
         if rows.is_empty() {
