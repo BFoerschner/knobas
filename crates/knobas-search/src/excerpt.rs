@@ -52,11 +52,14 @@ pub fn excerpts(
         return Vec::new();
     }
     let mut out = Vec::new();
-    let keep = |place: Option<String>, segments: Option<Vec<Segment>>, out: &mut Vec<Excerpt>| {
+    // The marking is passed unmade, so a full list marks no more of the text.
+    let keep = |place: Option<String>,
+                segments: &dyn Fn() -> Option<Vec<Segment>>,
+                out: &mut Vec<Excerpt>| {
         if out.len() >= MAX {
             return;
         }
-        let Some(segments) = segments else {
+        let Some(segments) = segments() else {
             return;
         };
         if out
@@ -70,8 +73,11 @@ pub fn excerpts(
     if let Some(first) = first_line {
         for (offset, line) in text.lines().enumerate() {
             let number = first.saturating_add(i64::try_from(offset).unwrap_or(i64::MAX));
-            let segments = marked(line.trim(), &stems);
-            keep(Some(format!("line {number}")), segments, &mut out);
+            keep(
+                Some(format!("line {number}")),
+                &|| marked(line.trim(), &stems),
+                &mut out,
+            );
         }
         return out;
     }
@@ -81,12 +87,12 @@ pub fn excerpts(
             Part::Section(heading) => {
                 keep(
                     Some("Heading".to_owned()),
-                    marked(heading, &stems),
+                    &|| marked(heading, &stems),
                     &mut out,
                 );
             }
             // The line reads as its own place, so it names none.
-            Part::Comment(by) => keep(None, author_line(by, &stems), &mut out),
+            Part::Comment(by) => keep(None, &|| author_line(by, &stems), &mut out),
         }
         let place = match &run.part {
             Part::Lead => None,
@@ -104,7 +110,7 @@ pub fn excerpts(
             _ => run.text,
         };
         for sentence in sentences(&body) {
-            keep(place.clone(), marked(&sentence, &stems), &mut out);
+            keep(place.clone(), &|| marked(&sentence, &stems), &mut out);
         }
     }
     out

@@ -176,8 +176,9 @@ type Hit = SearchResponse["groups"][number]["hits"][number];
  * Everything's excerpts (#2431) as the fixture makes them: each line (a run
  * log's, numbered from `firstLine`) or sentence of `text` that holds a word,
  * the words marked, a page's `\u001e` section and `\u001f` comment marks as
- * places, and quoted themselves when they hold a word. **A substring match, fixture-only**: the engine's are
- * `knobas_search::excerpt`'s, witnessed over PostgreSQL.
+ * places, and quoted themselves when they hold a word. **A substring match,
+ * fixture-only**: the engine's are `knobas_search::excerpt`'s, witnessed over
+ * PostgreSQL.
  */
 function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
   const out: Hit["excerpts"] = [];
