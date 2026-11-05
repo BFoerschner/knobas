@@ -646,6 +646,47 @@ async fn the_verdict_does_not_depend_on_how_far_back_the_deciding_row_sits() {
     }
 }
 
+/// **A withdrawn row spends the walk and vouches for nothing.** The walk counts
+/// rows of `sync.item`, so withdrawn rows on top can end it having seen nothing.
+/// That has to send the source on, and not read as the source having run out.
+#[tokio::test]
+async fn withdrawn_rows_on_top_of_a_source_vouch_for_nothing_and_hide_nothing() {
+    use FilterAnswer::{Answered, NoValues};
+    const SOMEONE: Option<&str> = Some("mara.lindqvist");
+    let n = PAST_THE_WALK;
+    let cases = [
+        ("an authored row beneath", n, Some(SOMEONE), Some(Answered)),
+        ("an unauthored row beneath", n, Some(None), Some(NoValues)),
+        ("nothing beneath", n, None, None),
+        ("a few, read to the end, nothing beneath", 3, None, None),
+    ];
+    let pool = pool().await;
+    let s = searcher(&pool);
+    for (case, count, older, expected) in cases {
+        let t = token("withdrawn");
+        let source = format!("src-{t}");
+        seed_source(&pool, &source, "teamcity", "Source", None).await;
+        seed_newest_rows(&pool, &source, "ticket", SOMEONE, count).await;
+        sqlx::query("update knobas.entity set deleted_at = now() where id like $1")
+            .bind(format!("{source}:newest-%"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        if let Some(author) = older {
+            let id = format!("{source}:older");
+            seed_item(&pool, &id, "ticket", &source, &format!("{t} older"), author).await;
+        }
+        let raw = format!("{t} author:nobody.at.all source:{source}");
+        let response = s.search(q(&raw)).await.unwrap();
+        assert_eq!(
+            answer_for(&response, &source),
+            expected,
+            "{case}: {:?}",
+            response.coverage
+        );
+    }
+}
+
 /// An author column that is present and blank is nobody.
 ///
 /// `Vocabulary::load` already drops a blank configured username for this

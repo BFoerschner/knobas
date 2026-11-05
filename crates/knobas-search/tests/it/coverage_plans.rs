@@ -12,8 +12,9 @@
 //! So the plans are read in every state that moved them: `sync.item_parent`
 //! never analyzed, as a fresh sync leaves it, analyzed, and analyzed at the
 //! density a real corpus has, through custom plans and a generic one. A few
-//! thousand rows are enough: the choice comes from proportions, and the
-//! benchmark's plans were the same at 3,000 items as at 100,000.
+//! thousand rows are enough: the old statements fell into both traps at 3,000
+//! items, a `Seq Scan on item_parent` once analyzed and a `Seq Scan on item` at
+//! density, as they did at 100,000.
 
 use knobas_search::Searcher;
 use knobas_search::testing::{self, PlanCache, newest_rows_plan, under_coverage_plan};
@@ -49,6 +50,13 @@ async fn corpus_with_parents() -> sqlx::PgPool {
     .await
     .unwrap();
     testing::prepare(&pool).await.unwrap();
+    let (child_rows,): (i64,) = sqlx::query_as(
+        "select count(*) from sync.item_parent where arm = 'child' and source_id = 'gitea'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(child_rows > 0, "no Gitea row names a parent: the fixture moved");
     pool
 }
 
@@ -66,22 +74,26 @@ async fn more_child_rows(pool: &sqlx::PgPool, per_item: i64) {
     .unwrap();
 }
 
-/// On the index, whichever way it is read: over a few hundred child rows the
-/// planner can take a bitmap of it, whose range is as empty for a quiet source.
-fn assert_stays_on(plan: &str, index: &str, table: &str, state: &str) {
+/// On the index, whichever way it is read, and with no table read whole. Over a
+/// few hundred child rows the planner can take a bitmap of the index, whose range
+/// is as empty for a quiet source.
+fn assert_stays_on(plan: &str, index: &str, state: &str) {
     assert!(plan.contains(index), "{state}: not on {index}:\n{plan}");
-    assert!(
-        !plan.contains(&format!("Seq Scan on {table}")) && !plan.contains("Seq Scan on item "),
-        "{state}: a scan, which a source with nothing in range reads whole:\n{plan}"
-    );
+    for table in ["item_parent", "item ", "entity"] {
+        assert!(
+            !plan.contains(&format!("Seq Scan on {table}")),
+            "{state}: a scan of {table}, which a source with nothing in range reads whole:\n{plan}"
+        );
+    }
 }
 
-/// How many rows the walk's `Limit` passed up over all its loops.
-fn rows_out_of_the_limit(plan: &str) -> f64 {
+/// How many rows came off the index over all the loops. This is what the walk
+/// read, where a `Limit` above a filter would say only what got through it.
+fn rows_read_from(index: &str, plan: &str) -> f64 {
     let line = plan
         .lines()
-        .find(|line| line.contains("Limit (actual"))
-        .unwrap_or_else(|| panic!("no Limit in:\n{plan}"));
+        .find(|line| line.contains(index))
+        .unwrap_or_else(|| panic!("no {index} in:\n{plan}"));
     let figure = |name: &str| -> f64 {
         line.split(name)
             .nth(1)
@@ -111,10 +123,21 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
         "analyzed",
         "two rows an item",
         "ten rows an item",
+        "a source withdrawn whole",
     ] {
         match state {
             "two rows an item" => more_child_rows(&pool, 6).await,
             "ten rows an item" => more_child_rows(&pool, 24).await,
+            "a source withdrawn whole" => {
+                sqlx::query(
+                    "update knobas.entity set deleted_at = now()
+                      where id in (select entity_id from sync.item where source_id = 'jira')",
+                )
+                .execute(&pool)
+                .await
+                .unwrap();
+                testing::prepare(&pool).await.unwrap();
+            }
             _ => {}
         }
         if state != "never analyzed" {
@@ -123,13 +146,16 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
                 .await
                 .unwrap();
         }
+        // Thousands of child rows under one source: a bitmap would read them all
+        // and sort them to give the first, so only the index's own order will do.
+        let dense = state.ends_with("an item");
         for cache in [PlanCache::Custom, PlanCache::Generic] {
             let plan = under_coverage_plan(&pool, &ids, cache).await.unwrap();
-            assert_stays_on(
-                &plan,
-                "item_parent_child_idx",
-                "item_parent",
-                &format!("under:, {state}, {cache:?}"),
+            let at = format!("under:, {state}, {cache:?}");
+            assert_stays_on(&plan, "item_parent_child_idx", &at);
+            assert!(
+                !dense || !plan.contains("Bitmap Heap Scan on item_parent"),
+                "{at}: reads the source's whole range:\n{plan}"
             );
             for kinds in [
                 vec![],
@@ -140,10 +166,13 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
                     .await
                     .unwrap();
                 let at = format!("the walk, {kinds:?}, {state}, {cache:?}");
-                assert_stays_on(&plan, "item_source_updated_idx", "item ", &at);
+                assert_stays_on(&plan, "item_source_updated_idx", &at);
                 // Three of the sources hold rows, and the fourth is quiet.
-                let read = rows_out_of_the_limit(&plan);
-                assert!(read <= 3.0 * 64.0, "{at}: read {read} rows:\n{plan}");
+                let read = rows_read_from("item_source_updated_idx", &plan);
+                assert!(
+                    read > 0.0 && read <= 3.0 * 64.0,
+                    "{at}: read {read} rows:\n{plan}"
+                );
             }
         }
     }

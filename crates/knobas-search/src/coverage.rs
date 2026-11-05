@@ -59,11 +59,11 @@
 //!
 //! Nothing for an ordinary keystroke: all of it is asked only for a query that
 //! filtered by author or by parent. A query that did pays up to three reads, and
-//! the first two exist so that the second is usually not asked.
+//! the first exists so that the second is usually not asked.
 //!
 //! 1. **[`NEWEST_ROWS_SQL`], one bounded walk per source.** Each source's newest
-//!    64 live rows. Almost every source settles there, which is about 0.5 ms for
-//!    the four of the benchmark, whatever the mirror holds.
+//!    64 rows, withdrawn or not. Almost every source settles there, which is
+//!    about 0.8 ms for the four of the benchmark, whatever the mirror holds.
 //! 2. **[`AUTHOR_COVERAGE_SQL`], one grouped read over the sources the walk could
 //!    not settle.** Skipped when there are none.
 //! 3. **[`UNDER_COVERAGE_SQL`], for `under:` alone.** An index range per source.
@@ -136,11 +136,20 @@ use crate::vocab::{SourceVocab, Vocabulary};
 /// has to read everything before a sort gives its first row, so no estimate makes
 /// that look cheap (#2500, and `tests/it/coverage_plans.rs`).
 ///
-/// **Why 64.** It costs about 1 µs a row, through the entity and the source
-/// config, so about 0.5 ms for the benchmark's four sources. A walk four times
-/// the length costs 1 ms over 100,000 items and took a top-N sort of the table at
-/// 3,000. The length only moves how often the grouped read is asked: a walk that
-/// runs out only sends its source there.
+/// **The `limit` is on `sync.item`, and liveness joins after it.** So a withdrawn
+/// row spends the walk's budget and vouches for nothing. Counted on
+/// `sync.live_item`, the limit waits for 64 live rows and reads past every
+/// withdrawn row to find them: 70 ms on every keystroke for a source of 33,333
+/// withdrawn rows and 183 ms for 100,000, against about 50 ms for the whole
+/// grouped read. Such a source now stops at 64 and goes to that read.
+/// `read_every_row` counts the same rows, so it is true only when the source ran
+/// out.
+///
+/// **Why 64.** It costs about 4 µs a row, through the item and the entity, so
+/// about 0.8 ms for the benchmark's three sources with rows. A walk four times
+/// the length costs 1 ms more over 100,000 items and took a top-N sort of the
+/// table at 3,000. The length only moves how often the grouped read is asked: a
+/// walk that runs out only sends its source there.
 pub(crate) const NEWEST_ROWS_SQL: &str = r"
 select s.id as source_id,
        walk.in_scope,
@@ -148,17 +157,20 @@ select s.id as source_id,
        walk.read_every_row
   from unnest($1::text[]) s(id)
  cross join lateral (
-   select count(*) filter (where (cardinality($2::text[]) = 0 or newest.kind = any($2))
+   select count(*) filter (where live.entity_id is not null
+                             and (cardinality($2::text[]) = 0 or newest.kind = any($2))
                              and newest.kind <> all($3::text[])) > 0 as in_scope,
-          count(*) filter (where (cardinality($2::text[]) = 0 or newest.kind = any($2))
+          count(*) filter (where live.entity_id is not null
+                             and (cardinality($2::text[]) = 0 or newest.kind = any($2))
                              and newest.kind <> all($3::text[])
                              and nullif(newest.author, '') is not null) > 0 as authored,
           count(*) < 64 as read_every_row
-     from (select i.kind, i.author
-             from sync.live_item i
+     from (select i.entity_id, i.kind, i.author
+             from sync.item i
             where i.source_id = s.id
             order by i.item_updated_at desc nulls last
             limit 64) newest
+     left join sync.live_item live on live.entity_id = newest.entity_id
  ) walk
 ";
 
