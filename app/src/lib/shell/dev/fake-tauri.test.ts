@@ -115,6 +115,24 @@ test("accepting or dismissing removes the row from the next read and drops the c
   );
 });
 
+/** #2491: the word is only in a page link's line, which draws in the pane as its own place. */
+test("a page found only by a link's line quotes that line", () => {
+  const answer = demoHandlers()["search"]!({ query: { raw: "clearing", titles: false } }) as SearchResponse;
+  const hit = answer.groups.flatMap((group) => group.hits).find((one) => one.entity_id === "confluence:sepa");
+  expect(hit?.excerpts).toEqual([
+    {
+      place: null,
+      segments: [
+        { text: "Links to ", hit: false },
+        { text: "Clearing", hit: true },
+        { text: " calendar", hit: false },
+        { text: " in ", hit: false },
+        { text: "OPS", hit: false },
+      ],
+    },
+  ]);
+});
+
 /**
  * #2455: a word in a ticket's comment names that comment, and the detail panel
  * shows the words without the mark, as `body_text_shown!` does.

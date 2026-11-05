@@ -175,13 +175,31 @@ type Hit = SearchResponse["groups"][number]["hits"][number];
 /**
  * Everything's excerpts (#2431) as the fixture makes them: each line (a run
  * log's, numbered from `firstLine`) or sentence of `text` that holds a word,
- * the words marked, a page's `\u001e` section and `\u001f` comment marks as
+ * the words marked, a page's `\u001e` section, `\u001f` comment and
+ * `\u001d` link marks as
  * places, and quoted themselves when they hold a word. **A substring match,
  * fixture-only**: the engine's are `knobas_search::excerpt`'s, witnessed over
  * PostgreSQL.
  */
 function fixtureExcerpts(title: string, text: string, words: string[], firstLine: number | null = null): Hit["excerpts"] {
   const out: Hit["excerpts"] = [];
+  const marks = (piece: string) => {
+    const lower = piece.toLowerCase();
+    const segments: Hit["snippet"] = [];
+    let at = 0;
+    while (at < piece.length) {
+      const next = words
+        .map((word) => [lower.indexOf(word, at), word.length] as const)
+        .filter(([found]) => found >= 0)
+        .sort((a, b) => a[0] - b[0])[0];
+      if (!next) break;
+      if (next[0] > at) segments.push({ text: piece.slice(at, next[0]), hit: false });
+      segments.push({ text: piece.slice(next[0], next[0] + next[1]), hit: true });
+      at = next[0] + next[1];
+    }
+    if (at < piece.length) segments.push({ text: piece.slice(at), hit: false });
+    return segments;
+  };
   const quoteMark = (at: string | null, lead: string, name: string) => {
     const lower = name.toLowerCase();
     const word = words.find((candidate) => lower.includes(candidate));
@@ -195,6 +213,7 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
       out.push({ place: at, segments });
     }
   };
+  const links: [string, string][] = [];
   let place: string | null = null;
   const lines = text.startsWith(title) ? text.slice(title.length).split("\n") : text.split("\n");
   lines.forEach((line, index) => {
@@ -206,27 +225,28 @@ function fixtureExcerpts(title: string, text: string, words: string[], firstLine
       quoteMark(null, "Comment by ", line.slice(1).trim());
       return void (place = `Comment by ${line.slice(1).trim()}`);
     }
-    if (line.startsWith("\u001d")) return;
+    if (line.startsWith("\u001d")) {
+      const [space = "", title = ""] = line.replaceAll("\u001d", "\n").trim().split("\n");
+      return void links.push([space, title]);
+    }
     const pieces = firstLine === null ? line.split(/(?<=[.!?])\s+/) : [line];
     for (const piece of pieces) {
       const lower = piece.toLowerCase();
       if (out.length >= 8 || !words.some((word) => lower.includes(word))) continue;
-      const segments: Hit["snippet"] = [];
-      let at = 0;
-      while (at < piece.length) {
-        const next = words
-          .map((word) => [lower.indexOf(word, at), word.length] as const)
-          .filter(([found]) => found >= 0)
-          .sort((a, b) => a[0] - b[0])[0];
-        if (!next) break;
-        if (next[0] > at) segments.push({ text: piece.slice(at, next[0]), hit: false });
-        segments.push({ text: piece.slice(next[0], next[0] + next[1]), hit: true });
-        at = next[0] + next[1];
-      }
-      if (at < piece.length) segments.push({ text: piece.slice(at), hit: false });
-      out.push({ place: firstLine === null ? place : `line ${firstLine + index}`, segments });
+      out.push({ place: firstLine === null ? place : `line ${firstLine + index}`, segments: marks(piece) });
     }
   });
+  // A link's line, once no other place shows the word (#2491).
+  const quoted = out.flatMap((excerpt) => excerpt.segments.filter((one) => one.hit).map((one) => one.text.toLowerCase()));
+  const unquoted = words.filter((word) => !quoted.includes(word));
+  for (const [space, title] of links) {
+    const lower = `${title} ${space}`.toLowerCase();
+    if (out.length >= 8 || !unquoted.some((word) => lower.includes(word))) continue;
+    out.push({
+      place: null,
+      segments: [{ text: "Links to ", hit: false }, ...marks(title), { text: " in ", hit: false }, ...marks(space)],
+    });
+  }
   return out;
 }
 

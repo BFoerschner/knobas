@@ -299,14 +299,15 @@ export const CORPUS: {
   // The page shares enough of PAY-231's vocabulary to clear `similar_text`'s
   // floor of five stems, so the `similarity` proposal below is one the real
   // detector would make of this pair rather than a badge painted on for QA.
-  row("confluence:sepa", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
+  // Its link line is what #2491's excerpt quotes: no drawn word says "clearing".
+  linkingTo("OPS", "Clearing calendar", row("confluence:sepa", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
     source: "confluence",
     space: "ENG",
     id: "ENG-SEPA",
     section: "Payments",
     description:
       "How the payout scheduler retries failed SEPA payouts: the retry window, the 409 on a replayed payout, and the mandate id as the idempotency key.",
-  }),
+  })),
   // The §3a case: no adapter declares this kind, and it still has to work.
   row("mock:INC-1", "incident", "Payout queue backed up for 40 minutes", "2026-08-22T08:05:00Z", "priya", {
     id: "INC-1",
@@ -386,6 +387,12 @@ function commentParts(payload: Record<string, unknown>): string[] {
 }
 
 /** One corpus entry, with the fields every row shares filled in. */
+/** `entry` with a page link's line closing its `body_text`, as a docs source
+ * writes it (`knobas_source::docs::indexed::link_line`). */
+function linkingTo<Row extends { body_text: string }>(space: string, title: string, entry: Row): Row {
+  return { ...entry, body_text: `${entry.body_text}\n\n\u001d${space}\u001d${title}\u001d` };
+}
+
 function row(
   entity_id: string,
   kind: string,

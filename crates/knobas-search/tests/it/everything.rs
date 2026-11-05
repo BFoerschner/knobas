@@ -318,6 +318,35 @@ async fn a_hit_by_a_comments_author_quotes_the_author_line() {
     );
 }
 
+/// #2491: the word is only in a page link's line. The body draws the link as
+/// other words, so without the line the row would quote nothing.
+#[tokio::test]
+async fn a_hit_by_a_page_links_title_quotes_the_link() {
+    let pool = pool().await;
+    searcher(&pool).await;
+    let t = token();
+    let id = item(
+        &pool,
+        "confluence",
+        "page",
+        &format!("{t}-link"),
+        "Payout runbook",
+        &format!(
+            "Payout runbook\n\nSee the limits doc.\n\n{}",
+            knobas_source::docs::indexed::link_line("ENG", &format!("{t} budget"))
+        ),
+        serde_json::json!({}),
+        Utc::now(),
+    )
+    .await;
+
+    let response = search(&pool, &t, false).await;
+    assert_eq!(
+        read(&the_hit(&response, &id).excerpts),
+        vec![(None, format!("Links to {t} budget in ENG"), vec![t.clone()])]
+    );
+}
+
 /// The stem the excerpts' rule misses (#2481, `excerpt.rs`'s module doc): the
 /// index stems `<t>xies` and `<t>xy` alike and finds the row, the reader's rule
 /// looks for `<t>xi`, and the hit quotes nothing. Why the preview's sentence
