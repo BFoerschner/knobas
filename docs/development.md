@@ -174,15 +174,14 @@ edit the line and the README's section with it. One that does not fails the next
 release's `readme` job, with the installers already uploaded. Fix the line, run
 `just readme-shots` and commit the pictures.
 
-The diagrams in the README's *How it works* are `docs/diagrams/*.d2`, laid out by
+The diagrams in `docs/how-it-works.md` are `docs/diagrams/*.d2`, laid out by
 TALA, which ships inside d2 since v0.9.0 with no plugin and no key. They follow the
 reader's theme, so `just readme-diagrams` renders each to `<name>-light.svg` and
 `<name>-dark.svg`. Nothing runs it for you: edit the source and render when the code
 a diagram shows changes, and look at the result, because TALA can move a whole
 layout after a small edit. It refuses a d2 without TALA rather than lay them out
 with another engine. They were last checked against the code at `e3938462`.
-`suggestion-pass-*.svg` is the older hand-written kind and the README no longer
-shows it.
+`suggestion-pass-*.svg` is the older hand-written kind, and nothing shows it now.
 
 ## Profiles
 

@@ -282,7 +282,7 @@ shot slot out +routes:
 readme-shots slot="90": deps
     scripts/readme-shots.sh {{slot}}
 
-# Every diagram in the README, from `docs/diagrams/*.d2`, laid out by TALA, in both
+# Every diagram in docs/how-it-works.md, from `docs/diagrams/*.d2`, laid out by TALA, in both
 # themes. Needs d2 v0.9.0 or newer, which bundles TALA, and no key. Refuses an older
 # d2 rather than laying them out with another engine (docs/development.md,
 # *README screenshots*).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The README's diagrams: every docs/diagrams/*.d2, laid out by TALA, as
+# The diagrams in docs/how-it-works.md: every docs/diagrams/*.d2, laid out by TALA, as
 # <name>-light.svg and <name>-dark.svg beside it (`just readme-diagrams`).
 #
 # TALA ships inside d2 since v0.9.0, with no plugin and no key. A d2 without it is
