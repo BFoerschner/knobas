@@ -327,10 +327,19 @@ fn settle(walks: Vec<NewestRows>, by_author: bool) -> (Vec<SourceProbe>, Vec<Str
 
 /// The grouped read's rows over what the walk already said: a source it names
 /// takes its answer, and a source it does not name keeps the walk's.
+///
+/// The assertion is the gate's only witness that [`report`] binds `$4`. An unbound
+/// `$4` changes no answer, only the cost, 43 ms against 23. No lock can show it
+/// either, because both read the same relations. But without it a known source
+/// with no authored row comes back as a row saying so, and that row is what `$4`
+/// exists to keep out of the join.
 fn merge(probes: &mut Vec<SourceProbe>, read: Vec<SourceProbe>) {
     for row in read {
         match probes.iter_mut().find(|p| p.source_id == row.source_id) {
-            Some(known) => known.authored = row.authored,
+            Some(known) => {
+                debug_assert!(row.authored, "$4 let {row:?} past the scan");
+                known.authored = row.authored;
+            }
             None => probes.push(row),
         }
     }
