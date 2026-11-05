@@ -392,15 +392,17 @@ test("the side rail says when the pull request conflicts with its base (#2278)",
 
 test("the builds of the head the mirror holds link to their runs (#2278)", async () => {
   const builds = [
-    row(RUN, "build", "Payout_IntegrationTests #1187", { source_id: "teamcity", state: { text: "failed", tone: "err" } }),
+    row(RUN, "build", "Payout_Nightly #1187", { source_id: "teamcity", state: { text: "failed", tone: "err" } }),
+    row("teamcity:Payout_Docker#904", "build", "Payout_Docker #904", { source_id: "teamcity", state: { text: "success", tone: "ok" } }),
+    // A check already names this one: the rail and the Overview have it, so a third list does not.
     row("teamcity:Payout_Lint#904", "build", "Payout_Lint #904", { source_id: "teamcity", state: { text: "success", tone: "ok" } }),
   ];
   await draw([PR], ports({ getEntity: async () => ({ ...detail("mara"), builds }) as EntityDetail }));
   const items = [...target.querySelectorAll(".tf-prbuilds .tf-prit")];
-  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Payout_IntegrationTests #1187 failed", "Payout_Lint #904 success"]);
+  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual(["Payout_Nightly #1187 failed", "Payout_Docker #904 success"]);
   expect(items.map((item) => item.querySelector("a")!.getAttribute("href"))).toEqual([
     `#/build/${encodeURIComponent(RUN)}`,
-    `#/build/${encodeURIComponent("teamcity:Payout_Lint#904")}`,
+    `#/build/${encodeURIComponent("teamcity:Payout_Docker#904")}`,
   ]);
   if (view) unmount(view);
   view = null;

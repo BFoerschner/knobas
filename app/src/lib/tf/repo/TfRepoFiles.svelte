@@ -1085,7 +1085,7 @@
           <p class="tf-gonote">The source lists no whole tree: searched the directories opened so far.</p>
         {/if}
         {#if goFound.length === 0 && !everyReading}
-          <p class="tf-gonote">No file matches “{goTyped.trim()}”.</p>
+          <p class="tf-gonote">No file matches “{goTyped.trim()}”. <button type="button" class="tf-linkish" onclick={() => (goTyped = "")}>Clear</button></p>
         {/if}
         {#if searched?.truncated}
           <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {searched.paths.length.toLocaleString("en-US")} files.</p>

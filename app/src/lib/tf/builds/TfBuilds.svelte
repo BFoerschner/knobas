@@ -324,7 +324,7 @@
     title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
     {@attach win.row(key)}
   >
-    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}>{pipeline.name}</span>
+    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)} title={pipeline.name}>{pipeline.name}</span>
     <span class="tf-pi-when">{latestTime(pipeline)}</span>
     <span
       class="tf-strip"

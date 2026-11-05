@@ -192,7 +192,7 @@ test("the filter narrows the list and the diffs; nothing matching says so", asyn
   filter.value = "nothing";
   filter.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect(squash(target.querySelector(".tf-flist"))).toBe("No file matches.");
+  expect(squash(target.querySelector(".tf-flist"))).toBe("No files match. Clear the filter");
 });
 
 test("Viewed collapses a file and ticks it in the list, through the command; unticked, it opens again", async () => {

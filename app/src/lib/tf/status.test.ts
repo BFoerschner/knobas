@@ -90,7 +90,7 @@ test("two healthy sources are named; past that they are one line that keeps the 
   const early = healthy("ok", "2026-08-22T13:32:00Z");
   expect(healthyRollup([late, early], NOW)).toBeNull();
   expect(healthyRollup([late, early, healthy("ok", "2026-08-22T14:00:00Z")], NOW)).toEqual({
-    text: "3 sources synced",
+    text: "3 synced",
     rest: "oldest 1 h ago",
     tone: "ok",
   });
@@ -99,7 +99,7 @@ test("two healthy sources are named; past that they are one line that keeps the 
 test("the rollup says what is not synced, and its dot takes the worst of what it counts", () => {
   const synced = healthy("ok", "2026-08-22T14:28:00Z");
   expect(healthyRollup([synced, healthy("info"), healthy("muted")], NOW)).toEqual({
-    text: "1 source synced 4 min ago",
+    text: "1 synced 4 min ago",
     rest: "1 syncing, 1 not synced yet",
     tone: "info",
   });
@@ -118,7 +118,7 @@ test("the rollup says what is not synced, and its dot takes the worst of what it
 test("what wants the reader stays with the count; only the age may drop out of sight", () => {
   const synced = healthy("ok", "2026-08-22T14:28:00Z");
   expect(healthyRollup([synced, synced, healthy("warn", "2026-08-22T14:28:00Z")], NOW)).toEqual({
-    text: "2 sources synced, 1 needs a look",
+    text: "2 synced, 1 needs a look",
     rest: "oldest 4 min ago",
     tone: "warn",
   });

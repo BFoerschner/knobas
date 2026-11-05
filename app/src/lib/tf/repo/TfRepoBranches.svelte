@@ -27,6 +27,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
@@ -229,7 +230,7 @@
 </div>
 <TfWaiting phase={waitPhase({ drawn: listed !== null, reading, failed: failed !== null })} error={failed} columns={6}>
 {#if shown.length === 0}
-  <div class="tf-empty">No branches match.</div>
+  <TfNoMatch noun="branches" {filter} />
 {:else}
   <table class="tf-tbl tf-rbranches">
     <thead>

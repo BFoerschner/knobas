@@ -58,7 +58,7 @@
   {#if index.has(node.entity_id) || queued.length > 0}
     <details open={starts || open.has(node.entity_id)} ontoggle={(event) => toggled(node.entity_id, event.currentTarget.open, starts)}>
       <summary class:tf-cur={node.entity_id === current}
-        ><a class="tf-sl" href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
+        ><a class="tf-sl" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}
           >{node.title}</a
         ></summary
       >
@@ -72,6 +72,6 @@
       </div>
     </details>
   {:else}
-    <a href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}>{node.title}</a>
+    <a title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}>{node.title}</a>
   {/if}
 {/each}

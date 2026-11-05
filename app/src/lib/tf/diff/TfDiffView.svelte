@@ -604,7 +604,7 @@
             >
           {/if}
         {:else}
-          <span class="tf-dim tf-flist-none">No file matches.</span>
+          <span class="tf-dim tf-flist-none">No files match. <button type="button" class="tf-linkish" onclick={() => (filter = "")}>Clear the filter</button></span>
         {/each}
       </nav>
       <p class="tf-dkeys tf-dim">

@@ -14,6 +14,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { RunTest, RunTests, TestOutcome } from "../../ipc/entity";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -173,7 +174,8 @@
         </div>
       {/if}
     {:else}
-      <div class="tf-empty"><p>{tests.length === 0 ? "This run reported no tests." : "No test matches."}</p></div>
+      {#if tests.length === 0}<div class="tf-empty"><p>This run reported no tests.</p></div>
+      {:else}<TfNoMatch noun="tests" {filter} />{/if}
     {/each}
   </div>
   {#if read.truncated}

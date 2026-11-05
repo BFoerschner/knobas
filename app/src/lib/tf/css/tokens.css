@@ -9,6 +9,8 @@
   --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
   /* What rings the selected yellow card on a dark board, where `--card-ink` melts into the page. */
   --sel-halo: transparent;
+  /* The tones on an ink row (a selected rail row): ink is dark in light and pale in dark, so each theme borrows the other's. */
+  --on-ink-ok: #6FCF97; --on-ink-warn: #E5B04D; --on-ink-err: #FF8A80; --on-ink-info: #8AA6FF; --on-ink-muted: #94A0AC;
   --sans: "Archivo Variable", system-ui, sans-serif;
   --serif: "Source Serif 4 Variable", Georgia, serif;
   --mono: "JetBrains Mono", ui-monospace, monospace;
@@ -33,6 +35,7 @@
     --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
     --sel-halo: var(--ink);
+    --on-ink-ok: #1F7444; --on-ink-warn: #8A5600; --on-ink-err: #B0262A; --on-ink-info: #2F55D4; --on-ink-muted: #5F6975;
     --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
     color-scheme: dark;
   }
@@ -46,6 +49,7 @@
   --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
   --sel-halo: var(--ink);
+  --on-ink-ok: #1F7444; --on-ink-warn: #8A5600; --on-ink-err: #B0262A; --on-ink-info: #2F55D4; --on-ink-muted: #5F6975;
   --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
   color-scheme: dark;
 }
@@ -55,7 +59,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
 /* Archivo's word space is narrow: at 11 to 15 px words run together, so the interface opens it a little. */
-body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; }
+body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; accent-color: var(--ink); }
 /* Code keeps its columns, and the reading face its own fit. */
 :is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
 /* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. */
@@ -85,13 +89,15 @@ a { color: var(--info); text-decoration: none; }
 .tf *, .tf *::before, .tf *::after { box-sizing: border-box; }
 .tf button, .tf select, .tf input, .tf textarea { font: inherit; color: inherit; }
 .tf a { color: inherit; }
-.tf h1, .tf h2, .tf h3, .tf p { margin: 0; }
+/* No `.tf p { margin: 0 }` here: `* { margin: 0 }` above already does it, and that rule's weight beat every
+   one-class margin on a heading or paragraph, so `.tf-md > * + *` and the like never applied. */
 
 /* Focus is always visible: 2px --focus, and --card-ink on a yellow card, where --focus is 1.22:1 in dark. */
 .tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
 .tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
 
-.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; }
+/* A step under its context, whole pixels: 14 to 13, 13 to 12, 12 to 11, so it stays on the type scale. */
+.tf .tf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: .9em; font-size: round(.93em, 1px); }
 .tf .tf-dim { color: var(--ink-2); }
 .tf .tf-num { font-variant-numeric: tabular-nums; }
 

@@ -70,7 +70,7 @@
 .tf-fhead .tf-acts, .tf-stg-h .tf-acts { margin-left: auto; display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 
 /* ---------- tabs ---------- */
-.tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+.tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; overflow-y: hidden; }
 
 /* ---------- forms in a dialog ---------- */
 .tf-dform { display: contents; }

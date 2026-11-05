@@ -20,8 +20,9 @@
    (`knobas.ticket.side`), a double click fits it so nothing on the card wraps. The handle shows as the card's edge
    darkening under the pointer. Below 900px the columns stack and the handle is gone. */
 .tf-tkhandle { position: absolute; top: 0; bottom: 0; right: 0; width: 6px; cursor: col-resize; z-index: 2; }
-.tf-tkhandle:hover, .tf-tkhandle:focus-visible, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); outline: 0; }
-.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard .tf-tkhandle:focus-visible, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf-tkhandle:hover, .tf-tkdragging .tf-tkhandle { background: rgba(0,0,0,.14); }
+.tf-sheetcard .tf-tkhandle:hover, .tf-sheetcard.tf-tkdragging .tf-tkhandle { background: var(--rule); }
+.tf .tf-tkhandle:focus-visible { outline-offset: -2px; border-radius: 0; }
 .tf-ticketcard.tf-tkdragging, .tf-ticketcard.tf-tkdragging * { cursor: col-resize; user-select: none; }
 @media (max-width: 900px) {
   .tf-ticketpage { height: auto; }
@@ -86,7 +87,8 @@
 /* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
    one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
    two action rows under it take the same shape with the name and the chevron alone. A list of places, not buttons. */
-.tf-tktable { display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
+/* `flex: none`: on a short window the card scrolls, where a list that shrinks would just clip its rows. */
+.tf-tktable { flex: none; display: flex; flex-direction: column; border: 1px solid rgba(0,0,0,.2); border-radius: 6px; background: rgba(255,255,255,.26); overflow: hidden; }
 .tf-tktable > a, .tf-tktable > button {
   display: grid; grid-template-columns: 62px 2.2ch minmax(0, 1fr) 8px; gap: 10px; align-items: center;
   padding: 7px 10px; border: 0; border-top: 1px solid rgba(0,0,0,.12); background: none; font: inherit; font-size: var(--t-sm);
@@ -243,6 +245,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
 .tf-step.tf-st-failed .tf-num { border-color: var(--err); color: var(--err); }
 .tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tf-step input[readonly] { background: none; border-color: transparent; padding-left: 0; font-family: var(--sans); }
 .tf-step input, .tf-step select {
   font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--field); color: var(--ink);
   padding: 4px 8px; border-radius: 4px; width: 100%; max-width: 400px;

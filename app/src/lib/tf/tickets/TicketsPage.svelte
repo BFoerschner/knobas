@@ -611,7 +611,7 @@
         {#each group.views as row (row.id)}
           <div class="tf-vw-row">
             <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
-              ><span class="tf-vw-name"><Marked text={row.name} typed={find} /></span
+              ><span class="tf-vw-name" title={row.name}><Marked text={row.name} typed={find} /></span
               >{#if row.saved_view_source?.new}<span class="tf-vw-new">new</span>{/if}{#if row.count !== null && row.count > 0}{" "}<span
                   class="tf-count">{row.count}</span
                 >{/if}</a

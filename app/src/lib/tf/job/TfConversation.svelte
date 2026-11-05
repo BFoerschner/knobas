@@ -165,7 +165,7 @@
     <textarea bind:this={box} bind:value={draft} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}"></textarea>
     <div class="tf-acts">
       {#if refused !== null}<span class="tf-dim tf-small">{refused}</span>{/if}
-      <button type="button" class="tf-btn tf-primary" {...refusedAttrs(refused)} disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
+      <button type="button" class="tf-btn tf-sm tf-primary" {...refusedAttrs(refused)} disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>
     </div>
   </div>
 </div>

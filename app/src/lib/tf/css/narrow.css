@@ -44,7 +44,7 @@
 }
 
 /* The status bar's healthy line goes once it can't hold its first words beside a failure. */
-@media (max-width: 1080px) {
+@media (max-width: 1150px) {
   .tf-status:has(.tf-bad) > .tf-healthy { display: none; }
 }
 

@@ -28,6 +28,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { ViewRow } from "../../ipc/entity";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
@@ -169,7 +170,7 @@
 </div>
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading, failed: failed !== null })} error={failed}>
 {#if shown.length === 0}
-  <div class="tf-empty">No commits match.</div>
+  <TfNoMatch noun="commits" {filter} />
 {:else}
   <table class="tf-tbl tf-rcommits">
     <tbody>

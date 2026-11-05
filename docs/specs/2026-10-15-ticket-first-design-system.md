@@ -213,7 +213,7 @@ The design width is 1440 × 900. Every view works from 1100 px. There are two br
 
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
 
-The status bar names at most two healthy sources; past that they are one line that says how many synced and how many need a look, then the oldest age, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, at 1080 px and below it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
+The status bar names at most two healthy sources; past that they are one line that says how many synced and how many need a look, then the oldest age, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, at 1150 px and below it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
 
 From 1240 px down the Tickets preview is closed, so one click on a card or row opens the ticket's page. Above that, one click fills the preview and a double click opens the page.
 
@@ -234,7 +234,9 @@ Motion answers something the person did, and there's very little of it.
 
 There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.
 
-Focus is always visible: a 2 px outline in `--focus`, offset 2 px. `--card-ink` replaces it on card surfaces (see Contrast).
+Focus is always visible: a 2 px outline in `--focus`, offset 2 px. Inside a box that clips (the nav, a tab strip, a segmented control, a rail, a card's lists) it is offset -2 px, or the box would cut its sides. `--card-ink` replaces it on card surfaces (see Contrast).
+
+A rail's selected row is an inset ink pill on every page (Tickets, Settings, Builds, Docs, Proposed links), with its tones re-declared for the ink (`--on-ink-*`). A list row that says why it asks for you (Docs' *For you*) does not repeat it.
 
 ## Words
 

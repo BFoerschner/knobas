@@ -67,6 +67,9 @@
 .tf-iconbtn svg { width: 16px; height: 16px; }
 
 /* ---------- status bar ---------- */
+/* Inside a box that clips, a ring outside the element loses its sides: it draws inside. */
+:is(.tf-nav, .tf-tabs, .tf-wtabs, .tf-seg, .tf-pl-list, .tf-dl-body, .tf-ql, .tf-tktable, .tf-vlist, .tf-stg-srcs, .tf-stg-nav, .tf-toc) :focus-visible { outline-offset: -2px; }
+
 .tf-status {
   display: flex; gap: 16px; align-items: center; padding: 6px 14px; font-size: var(--t-xs); color: var(--ink-2);
   background: var(--sheet); border-top: 1px solid var(--rule); overflow: hidden; white-space: nowrap;
@@ -104,7 +107,10 @@
 .tf-status .tf-queued .tf-need { color: var(--warn); }
 
 /* ---------- main, full views, breadcrumb ---------- */
-.tf-main { overflow: auto; min-height: 0; min-width: 0; }
+/* The gutter stays when a short page has no scrollbar, so a right-aligned action never jumps between pages. */
+.tf-main { overflow: auto; min-height: 0; min-width: 0; scrollbar-gutter: stable; }
+/* A page that scrolls in panes of its own never scrolls here, so it keeps the width. */
+.tf-main:has(.tf-kept:not([hidden]) :is(.tf-tickets, .tf-bv, .tf-rd, .tf-rv, .tf-ws)) { scrollbar-gutter: auto; }
 /* A page keep-alive holds (#2247): the shown one lays out as if the wrapper were not there, a hidden one is not drawn. */
 .tf-kept { display: contents; }
 .tf-kept[hidden] { display: none; }
@@ -119,7 +125,7 @@
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
 /* Row one is the title and the actions (Controls, *Header*). The rest of the title block runs the full width under
    them, so a long subline is never squeezed into what the buttons leave. */
-.tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(min-content, 1fr) auto; gap: 0 20px; align-items: start; }
+.tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(min-content, 1fr) auto; gap: 0 12px; align-items: start; }
 .tf-fhead > div:first-child:not(.tf-board-title):has(> h1) { display: contents; }
 .tf-fhead > div:first-child:not(.tf-board-title):has(> h1) > :not(h1) { grid-column: 1 / -1; }
 .tf-fhead > .tf-acts { grid-column: 2; grid-row: 1; justify-content: flex-end; }
@@ -179,6 +185,7 @@
   border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
   margin-bottom: -1px; white-space: nowrap; text-decoration: none;
 }
+:is(.tf-tabs, .tf-wtabs) a:hover { color: var(--ink); border-bottom-color: var(--rule); }
 :is(.tf-tabs, .tf-wtabs) a:is([aria-current="page"], [aria-selected="true"]) {
   color: var(--ink); border-bottom-color: var(--ink); font-weight: 600;
 }
@@ -190,6 +197,7 @@
   height: calc(var(--control-h-sm) - 2px); padding: 0 10px; font-size: var(--t-sm);
   border: 0; background: var(--sheet); cursor: pointer; color: var(--ink-2);
 }
+.tf-seg button:not([aria-pressed="true"]):hover { background: var(--sheet-2); color: var(--ink); }
 .tf-seg button[aria-pressed="true"] { background: var(--ink); color: var(--sheet); }
 .tf-fchips { display: inline-flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-fchips button {

@@ -6,17 +6,17 @@
   font: 500 var(--t-sm) var(--sans); height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px;
   background: var(--field); color: var(--ink); width: 100%;
 }
-.tf-dl-body { overflow: auto; flex: 1; padding: 6px 0 12px; }
+.tf-dl-body { overflow: auto; flex: 1; padding: 6px 8px 12px; }
 .tf-dl-note { padding: 12px 14px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-doc .tf-dl-note { padding: 0; font-family: var(--sans); font-size: var(--t-md); }
 .tf-rd-tree a {
-  display: block; padding: 4px 12px; text-decoration: none; font-size: var(--t-sm);
+  display: block; padding: 4px 8px; border-radius: 4px; text-decoration: none; font-size: var(--t-sm);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree a:hover { background: var(--sheet-2); }
 .tf-rd-tree a[aria-current="true"] { background: var(--ink); color: var(--sheet); }
 .tf-rd-tree details > summary {
-  list-style: none; cursor: pointer; padding: 4px 12px; font-size: var(--t-sm);
+  list-style: none; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: var(--t-sm);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree details > summary::-webkit-details-marker { display: none; }
@@ -39,7 +39,9 @@
 /* The breadcrumb row: below 900px the Pages button that opens the tree drawer starts it (#2084). */
 .tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
 .tf-rd-pages svg { width: 15px; height: 15px; }
-.tf-rd-crumb { font-size: var(--t-sm); color: var(--ink); min-width: 0; }
+.tf-rd-crumb { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: var(--t-sm); color: var(--ink); min-width: 0; }
+/* The path starts on the title's edge. */
+.tf-crumbs.tf-rd-crumbrow { padding-left: clamp(16px, 3vw, 48px); padding-right: clamp(16px, 3vw, 48px); }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 /* *Back to <name>* beside `Esc`, at the row's end as on every breadcrumb (spec #2227). */
 .tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; }
@@ -130,7 +132,10 @@
 .tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
 .tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 3px; border-radius: 3px; }
-.tf-ment.tf-me { background: var(--card); color: var(--card-ink); }
+.tf-ment.tf-me { background: var(--mark); color: var(--ink); }
+/* A callout and the comments are Archivo in the serif page: they take the interface's spacing back. */
+.tf-doc :is(.tf-callout, .tf-cmts) :is(p, li, h2, h3) { letter-spacing: .006em; word-spacing: .06em; }
+.tf-cmts { font-size: var(--t-md); }
 .tf-doc a.tf-pgl, .tf-doc .tf-doc-link {
   color: var(--info); text-decoration: underline; text-underline-offset: 2px;
 }
@@ -165,11 +170,17 @@
 .tf-dl-hit .tf-sn { font-family: var(--serif); font-size: var(--t-sm); line-height: 1.45; }
 .tf-dl-hit .tf-sn b { font-family: var(--sans); font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-dl-for { padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
-.tf-dl-for h4 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 6px 12px 2px; }
+.tf-dl-for h4 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 6px 8px 2px; }
+/* The tree marks the page you are on; this list says why it asks for you, in plain ink. */
+.tf-rd-tree .tf-dl-for a[aria-current="true"] { background: var(--sheet-2); color: var(--ink); }
 .tf-rd-tree .tf-dl-for a { white-space: normal; }
 .tf-dl-for .tf-why { display: block; font-size: var(--t-2xs); color: var(--warn); font-weight: 600; }
 .tf-rd-tree a[aria-current="true"] .tf-why { color: inherit; }
-.tf-rd-meta button.tf-chip { border: 0; background: var(--muted-bg); color: var(--muted); font-family: inherit; cursor: pointer; }
+/* A tag sits on paper, where `--muted-bg` vanishes in light: a sheet with a rule shows in both themes. */
+.tf-rd-meta button.tf-chip { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); font-family: inherit; cursor: pointer; }
+.tf-rd-meta button.tf-chip:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-dl-head .tf-seg button { white-space: nowrap; }
+@media (max-width: 1240px) { .tf-dl-head .tf-jobk { display: none; } }
 /* 38px high: the sticky outline sits that far down while it is open (.tf-rd-outline, #2081). */
 .tf-findbar {
   position: sticky; top: 0; z-index: 3; display: flex; gap: 8px; align-items: center; background: var(--sheet-2);

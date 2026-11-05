@@ -328,6 +328,8 @@
   const rail = $derived(railChecks(view ?? null));
   const conflicts = $derived(conflictsOf(view ?? null));
   const builds = $derived(detail?.builds ?? []);
+  /** The head's builds that no check names: one that is both is already on the page, twice over. */
+  const buildsBeyondChecks = $derived(builds.filter((build) => !rail.some((check) => check.row.title === build.title)));
   const number = $derived(prId === null ? null : prNumber(prId));
   const title = $derived(detail?.row.title ?? "");
   const conversation = $derived(conversationParts(view ?? null));
@@ -731,7 +733,7 @@
                   <div class="tf-acts">
                     <button
                       type="button"
-                      class="tf-btn tf-sm"
+                      class="tf-btn tf-sm tf-primary"
                       disabled={comment.disabled === null && (draft.trim() === "" || sending)}
                       {...refusedAttrs(comment.disabled)}
                       onclick={() => void send()}>Comment</button
@@ -841,7 +843,7 @@
                     {@const run = runOf(check.row)}
                     <div class="tf-prit">
                       <span class="tf-dot tf-{check.row.tone ?? 'muted'}"></span>
-                      <span class="tf-prgrow">{#if run !== null}<a href={run}>{check.row.title}</a>{:else}{check.row.title}{/if}</span>
+                      <span class="tf-prgrow" title={check.row.title}>{#if run !== null}<a href={run}>{check.row.title}</a>{:else}{check.row.title}{/if}</span>
                       {#if check.required}<span class="tf-prreq">Required</span>{/if}
                       <span class="tf-dim">{check.row.chip ?? ""}</span>
                     </div>
@@ -849,14 +851,14 @@
                 </div>
               </div>
             {/if}
-            {#if builds.length > 0}
+            {#if buildsBeyondChecks.length > 0}
               <div class="tf-panel tf-prbuilds">
                 <header><h3>Builds of the head</h3><span class="tf-dim">from the mirror</span></header>
                 <div class="tf-prlist">
-                  {#each builds as build (build.entity_id)}
+                  {#each buildsBeyondChecks as build (build.entity_id)}
                     <div class="tf-prit">
                       <span class="tf-dot tf-{build.state?.tone ?? 'muted'}"></span>
-                      <span class="tf-prgrow"><a href={itemHash(build)}>{build.title}</a></span>
+                      <span class="tf-prgrow" title={build.title}><a href={itemHash(build)}>{build.title}</a></span>
                       {#if build.state !== null}<span class="tf-dim">{build.state.text}</span>{/if}
                     </div>
                   {/each}

@@ -81,7 +81,7 @@
 .tf-lastc > a.tf-mono:hover { color: var(--ink); text-decoration: underline; }
 .tf-lastc-msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .tf-lastc > .tf-dim { white-space: nowrap; }
-.tf-lastc > .tf-av { font-size: 10px; margin: 0; background: var(--info-bg); color: var(--info); border-color: transparent; }
+.tf-lastc > .tf-av { font-size: var(--t-2xs); margin: 0; background: var(--info-bg); color: var(--info); border-color: transparent; }
 .tf-lastc-by { font-weight: 600; white-space: nowrap; }
 .tf-lastc.tf-skel .tf-skel-bar:first-child { width: 80px; }
 .tf-lastc.tf-skel .tf-skel-bar:last-child { width: 45%; }
@@ -105,7 +105,11 @@
 .tf-code .tf-l.tf-at { background: var(--warn-bg); }
 /* Highlighting (#2254): a token's kind is a class, its colour a token, so a theme switch recolours it. */
 .tf-hl-kw { color: var(--hl-kw); } .tf-hl-str { color: var(--hl-str); } .tf-hl-num { color: var(--hl-num); }
-.tf-hl-com { color: var(--hl-com); font-style: italic; } .tf-hl-fn { color: var(--hl-fn); } .tf-hl-ty { color: var(--hl-ty); }
+.tf-hl-com { color: var(--hl-com); font-style: italic; }
+/* On a diff's tints `--muted` falls under 4.5:1. */
+.tf-diff .tf-hl-com { color: var(--ink-2); }
+/* A comment in a diff is words, so it takes the interface's spacing back from the code around it. */
+.tf-diff :is(.tf-thread, .tf-newc) { letter-spacing: .006em; word-spacing: .06em; } .tf-hl-fn { color: var(--hl-fn); } .tf-hl-ty { color: var(--hl-ty); }
 /* Find in file (#2299), as Find in log. */
 .tf-findbar { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--rule-2); }
 .tf-findbar .tf-fsearch { max-width: 320px; }
@@ -218,7 +222,7 @@
 .tf-flist button:first-of-type { border-top: 0; }
 .tf-flist button:hover { background: var(--sheet-2); }
 .tf-flist .tf-n { margin-left: auto; font-family: var(--sans); white-space: nowrap; }
-.tf-flist .tf-viewed { opacity: 0.5; }
+.tf-flist .tf-viewed { color: var(--muted); }
 .tf-flist-none { padding: 8px; }
 .tf-diff .tf-fh-open { margin-left: auto; font: 400 var(--t-sm) var(--sans); }
 .tf-diff .tf-fh-viewed + .tf-fh-open { margin-left: 0; }

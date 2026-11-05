@@ -79,7 +79,7 @@ export function sourceReadings(
 
 /**
  * The healthy readings as one line, past the two the bar has room to name:
- * *5 sources synced, oldest 4 min ago, 1 syncing*. The oldest sync is the one
+ * *5 synced, oldest 4 min ago, 1 syncing*. The oldest sync is the one
  * age worth keeping, because it says whether anything has gone stale. `text`
  * is the part that has to fit and `rest` what may drop out of sight. `null`
  * for two or fewer, which the bar names one by one.
@@ -92,7 +92,7 @@ export function healthyRollup(healthy: readonly SourceReading[], now: Date = new
   const looks = having("warn").length;
   // What must stay: how many synced, and anything that wants the reader. The rest may drop out of sight.
   const first = [
-    ...(synced.length === 1 ? [`1 source synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} sources synced`] : []),
+    ...(synced.length === 1 ? [`1 synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} synced`] : []),
     ...(looks > 0 ? [`${looks} need${looks === 1 ? "s" : ""} a look`] : []),
   ];
   const second = [

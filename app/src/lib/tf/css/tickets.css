@@ -135,7 +135,8 @@
 }
 @media (max-width: 900px) {
   .tf-tickets { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; height: auto; }
-  .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); }
+  /* Stacked, the rail is capped as Builds' is, or the board starts a screen and a half down. */
+  .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 38vh; }
   .tf-fbar, .tf-board-head, .tf-lane, .tf-list { padding-left: 16px; padding-right: 16px; }
 }
 

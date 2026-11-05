@@ -701,7 +701,8 @@
       </table>
     {/each}
     {#if all !== null && all.length > 0}
-      <div class="tf-older" bind:this={sentinel}>
+      <!-- `hidden`, not gone: the sentinel keeps reading older runs while a filter has emptied the page. -->
+      <div class="tf-older" hidden={kept.length === 0} bind:this={sentinel}>
         {#if olderFailed !== null}
           <p class="tf-dim">Older runs could not be read: {olderFailed}</p>
           <button type="button" class="tf-btn tf-sm" onclick={() => ((olderFailed = null), void more())}>Try again</button>

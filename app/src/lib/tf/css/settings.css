@@ -6,6 +6,8 @@
 .tf-stg-nav a[aria-current="page"] { background: var(--ink); color: var(--sheet); }
 .tf-stg-nav .tf-dot { margin-left: auto; }
 .tf-stg-body { padding: 16px 28px 48px; max-width: 860px; min-width: 0; }
+/* A page whose board needs the room, or its state chips read "SUCC…". */
+.tf-stg-body:has(.tf-sc-board) { max-width: 1180px; }
 .tf-stg-h { margin-bottom: 16px; }
 .tf-stg-h h1 {
   font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
@@ -103,6 +105,7 @@
 .tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: var(--t-md); }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
+.tf-select { height: var(--control-h-sm); padding: 0 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
 /* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */
 .tf-stg-pick { --link: var(--info); }
@@ -130,6 +133,6 @@
 }
 .tf-sc-chip { max-width: 100%; cursor: grab; gap: 4px; }
 .tf-sc-word { cursor: grab; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.tf-sc-from { font-weight: 400; opacity: .75; }
+.tf-sc-from { font-weight: 400; color: var(--ink-2); }
 .tf-sc-reset { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
 .tf-sc-line code { font-size: .95em; }
