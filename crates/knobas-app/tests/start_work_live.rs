@@ -1193,16 +1193,16 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
 /// not read off the mirror, and not off `repository` or `base.repo`, where the
 /// descriptor declares the parent -- so a declaration that missed, or an
 /// adapter that filed an item under the wrong repository, leaves this set full
-/// and the search or the stored parents wrong. Each fixture branch, pull request and commit of the
-/// repository is checked to be in it (the last two by the index and sha
+/// and the search or the stored parents wrong. Each fixture branch, pull
+/// request and commit of the repository is checked to be in it (the last two by
+/// the index and sha
 /// `seed-state.json` says Gitea and git assigned), so an empty server cannot
 /// pass. Read-only at Gitea: it syncs into a database of its own, with its own
 /// source configured here; the round trip above owns the litter, and runs
 /// before this one.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
-async fn under_each_seeded_repository_finds_it_its_branches_and_pulls_and_its_commits_name_it_as_parent()
- {
+async fn under_each_seeded_repository_finds_its_branches_and_pulls_and_its_commits_name_it() {
     let env = env();
     let fixture = live_under::fixture();
     let seeded = live_under::seed_state("KNOBAS_GITEA_SEED_STATE");
