@@ -1,7 +1,8 @@
 <!--
   The reader's *More ▾* (#2082, R-10.10): in the header's actions before "Open in" (#2286),
   holding what a reader reaches for less: *Link to…*, *Copy link* and *Export as Markdown*. Without them the
-  header's actions run to a second line in the reading column.
+  header's actions run to a second line in the reading column. The view's *Sync now* joins them where the header has no
+  room for it (`readerFit`): the same button, which is why it comes as the frame's snippet.
 
   The ticket view menu's pattern (`tickets/ViewMenu.svelte`), copied, not
   shared: it opens under its button with focus on the first item; `Esc`, a
@@ -10,18 +11,21 @@
 -->
 <script lang="ts">
   import { menuKeys } from "../menu-keys";
-  import { tick } from "svelte";
+  import { tick, type Snippet } from "svelte";
 
   let {
     onlink,
     oncopy,
     onexport,
+    sync,
   }: {
     /** *Link to…*, where this reader can link. */
     onlink?: (() => void) | undefined;
     oncopy: () => void;
     /** *Export as Markdown*, for a page that can be read here. */
     onexport?: (() => void) | undefined;
+    /** The view's *Sync now*, where the header has no room for it. */
+    sync?: Snippet | undefined;
   } = $props();
 
   let open = $state(false);
@@ -56,6 +60,11 @@
     return () => window.removeEventListener("mousedown", away);
   });
 
+  /** The frame's button is an item here: the arrow keys reach it, as they do the others. */
+  function asItem(slot: HTMLElement) {
+    slot.querySelector("button")?.setAttribute("role", "menuitem");
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.key !== "Escape") return;
     event.preventDefault();
@@ -73,6 +82,10 @@
       {#if onlink}<button type="button" role="menuitem" onclick={() => pick(onlink)}>Link to…</button>{/if}
       <button type="button" role="menuitem" onclick={() => pick(oncopy)}>Copy link</button>
       {#if onexport}<button type="button" role="menuitem" onclick={() => pick(onexport)}>Export as Markdown</button>{/if}
+      {#if sync}
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <span class="tf-rd-moresync" role="none" {@attach asItem} onclick={close}>{@render sync()}</span>
+      {/if}
     </div>
   {/if}
 </span>

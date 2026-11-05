@@ -91,7 +91,7 @@
   }
 </script>
 
-<TfDialog title="Link {jobKey} to…" {onclose} {layers}>
+<TfDialog title="Link {jobKey}" {onclose} {layers}>
   {#snippet body()}
     {#if target}
       <div class="tf-picked">

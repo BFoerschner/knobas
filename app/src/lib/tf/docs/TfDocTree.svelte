@@ -73,6 +73,6 @@
       </div>
     </details>
   {:else}
-    <a title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}>{node.title}</a>
+    <a class="tf-dl-leaf" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}>{node.title}</a>
   {/if}
 {/each}

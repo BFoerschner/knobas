@@ -10,6 +10,8 @@
 <script lang="ts">
   import type { DocPage, DocSpace } from "../../ipc/entity";
   import { entityAddress } from "../address";
+  import { stateWord } from "../state-word";
+  import TfKey from "../TfKey.svelte";
   import { backlinkGroups, linkedFromHeading, pageHash } from "./docs";
 
   let { page, spaces }: { page: DocPage; spaces: readonly DocSpace[] } = $props();
@@ -23,8 +25,8 @@
     <ul>
       {#each page.work as work (work.entity_id)}
         <li>
-          <a href={entityAddress("ticket", work.entity_id)}><span class="tf-mono">{work.key}</span> {work.title}</a
-          >{#if work.status}<span class="tf-s">{work.status}</span>{/if}
+          <a href={entityAddress("ticket", work.entity_id)}><TfKey value={work.key} /> {work.title}</a
+          >{#if work.status}<span class="tf-s">{stateWord(work.status)}</span>{/if}
         </li>
       {/each}
     </ul>
@@ -36,7 +38,7 @@
     {#each groups as group (group.key)}
       <details>
         <summary
-          >{#if group.key === null}Other pages{:else}<b>{group.key}</b>{#if group.name}{` ${group.name}`}{/if}{/if}<span
+          >{#if group.key === null}Other pages{:else}<b>{group.name ?? group.key}</b>{/if}<span
             class="tf-count">{group.links.length}</span
           ></summary
         >

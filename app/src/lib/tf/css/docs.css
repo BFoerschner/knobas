@@ -24,7 +24,9 @@
 .tf-rd-tree details > summary.tf-cur { background: var(--fill); color: var(--sheet); }
 .tf-rd-tree details > summary.tf-cur::before { color: inherit; }
 .tf-rd-tree summary a.tf-sl { display: inline; padding: 0; color: inherit; background: none; }
-.tf-rd-tree .tf-fold-in { padding-left: 16px; }
+/* A page with nothing under it keeps the chevron's column, so a level's titles start on one edge: 14 px is the chevron's 6 + its margins. */
+.tf-rd-tree a.tf-dl-leaf { padding-left: 22px; }
+.tf-rd-tree .tf-fold-in { padding-left: 12px; }
 /* A page queued under its parent (#1424): muted, with no link, until the tree holds it. */
 .tf-rd-tree .tf-dl-queued { display: block; padding: 3px 8px; color: var(--muted); font-style: italic; }
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
@@ -35,20 +37,20 @@
 }
 /* The page: nothing in it is capped in width (#2081). */
 .tf-rd-page { min-width: 0; }
-/* The breadcrumb row: below 900px the Pages button that opens the tree drawer starts it (#2084). */
+/* The breadcrumb row. Its left end is the title's, its right end every page's. */
 .tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
 .tf-rd-pages svg { width: 15px; height: 15px; }
 .tf-rd-crumb { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: var(--t-sm); color: var(--ink); min-width: 0; }
-/* The path starts on the title's edge. */
-.tf-crumbs.tf-rd-crumbrow { padding-left: clamp(16px, 3vw, 48px); padding-right: clamp(16px, 3vw, 48px); }
+/* The path starts on the title's edge. *Back to* ends where it does on every page. */
+.tf-crumbs.tf-rd-crumbrow { padding-left: clamp(16px, 3vw, 48px); }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 /* *Back to <name>* beside `Esc`, at the row's end as on every breadcrumb (spec #2227). */
 .tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; }
-@media (max-width: 900px) { .tf-crumbs.tf-rd-crumbrow { padding-left: 16px; padding-right: 16px; } }
+@media (max-width: 900px) { .tf-crumbs.tf-rd-crumbrow { padding-left: 16px; } }
 /* A space's row keeps its count: the name gives up its end first. */
-.tf-spc { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.tf-spc { display: flex; align-items: center; min-width: 0; }
 .tf-spc-n { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-spc .tf-count { flex: none; }
+.tf-spc .tf-count { flex: none; margin-left: 6px; }
 .tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
@@ -57,6 +59,10 @@
    inside the sheet's own padding. The meta line under it closes the head with the rule. */
 .tf-fhead.tf-rd-head { display: flex; gap: 12px 20px; align-items: flex-start; padding: 0; margin: 8px 0 10px; flex-wrap: wrap; }
 .tf-fhead.tf-rd-head > .tf-acts { justify-content: flex-start; margin-left: 0; }
+/* Where *Link to <job>* stood once the page is on the job: nothing to press, as tall as the buttons beside it. */
+.tf-rd-on { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control-h); padding-right: 6px; color: var(--ink-2); white-space: nowrap; }
+.tf-rd-on .tf-key { color: var(--ink); }
+.tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .tf-fhead.tf-rd-head::after { content: none; }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
@@ -65,6 +71,7 @@
 .tf-rd-more { position: relative; display: inline-flex; }
 .tf-rd-more .tf-menu { left: auto; right: 0; }
 .tf-rd-more .tf-menu button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
+.tf-rd-moresync { display: contents; }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
 .tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }
 .tf-doc h2 .tf-tools {
@@ -138,7 +145,7 @@
 .tf-ment { font-family: var(--sans); font-size: var(--t-sm); font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
 .tf-ment.tf-me { background: var(--mark); color: var(--ink); }
 /* A callout, the comments, a table and what the page belongs to are Archivo in the serif page: they take the interface's spacing back. */
-.tf-doc :is(.tf-callout, .tf-cmts) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(p, li, dd, dt) { letter-spacing: .006em; word-spacing: .06em; }
+.tf-doc :is(.tf-callout, .tf-cmts, td, th) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(h3, p, li, dd, dt), .tf-doc > .tf-dl-note, .tf-doc h2 .tf-tools { letter-spacing: .006em; word-spacing: .06em; }
 /* A match on the row you are on keeps the normal mark's pair, in both themes. */
 .tf-rd-tree a[aria-current="true"] mark { background: var(--mark); color: var(--ink); }
 .tf-cmts { font-size: var(--t-md); }
@@ -147,7 +154,8 @@
 }
 .tf-doc .tf-doc-link { border: 0; background: none; padding: 0; font: inherit; cursor: pointer; }
 .tf-cmts { border-top: 1px solid var(--rule); margin-top: 44px; padding-top: 18px; font-family: var(--sans); }
-.tf-cmts h2 { font-family: var(--sans); font-size: var(--t-xl); margin: 0 0 12px; }
+/* The heading step (design system, Heading steps): Comments, Work it belongs to, Linked from and On this page are one level. */
+.tf-cmts h2 { font-family: var(--sans); font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; line-height: 1.3; margin: 0 0 12px; }
 .tf-cmts .tf-msg { margin-bottom: 10px; font-size: var(--t-md); line-height: 1.5; }
 .tf-cmts .tf-av { width: 28px; height: 28px; }
 .tf-cmts .tf-who { color: var(--ink-2); font-size: var(--t-sm); }
@@ -172,10 +180,12 @@
 }
 .tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--fill); color: var(--sheet); }
 .tf-rd-tree a.tf-dl-hit[aria-current="true"] :is(.tf-pth, .tf-n, .tf-sn b) { color: inherit; }
+/* A hit's title and snippet are the reading face, which keeps its own spacing; the label before a snippet is the interface's. */
+.tf-dl-hit :is(.tf-t, .tf-sn) { letter-spacing: normal; word-spacing: normal; }
 .tf-dl-hit .tf-t { font-family: var(--serif); font-size: var(--t-lg); font-weight: 600; line-height: 1.3; }
 .tf-dl-hit .tf-pth, .tf-dl-hit .tf-n { font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-dl-hit .tf-sn { font-family: var(--serif); font-size: var(--t-sm); line-height: 1.45; }
-.tf-dl-hit .tf-sn b { font-family: var(--sans); font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-dl-hit .tf-sn b { font-family: var(--sans); font-size: var(--t-2xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
 .tf-dl-for { padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
 .tf-dl-for h4 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 6px 8px 2px; }
 
@@ -212,7 +222,7 @@
 }
 /* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
 .tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; max-height: calc(100vh - 134px); }
-.tf .tf-rd-outline h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 8px; }
+.tf .tf-rd-outline h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
   color: var(--ink-2); font-size: var(--t-md);
@@ -223,19 +233,20 @@
   font-size: var(--t-2xs); font-weight: 700; color: var(--ink); background: var(--mark); border-radius: 8px;
   padding: 0 5px; margin-left: 4px;
 }
-/* Below 1240px the outline is a fold between the meta line and the first section, closed (#2081). */
+/* Where the header's actions would not fit beside it, the outline is a fold between the meta line and the first section, closed (#2081). */
 .tf-rd-fold { margin: 16px 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); font-family: var(--sans); }
 .tf-rd-fold > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px;
-  font-size: var(--t-sm); font-weight: 600;
+  font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88;
 }
+.tf-rd-fold > summary :is(.tf-count, .tf-hits) { font-variation-settings: normal; }
 .tf-rd-fold > summary::-webkit-details-marker { display: none; }
 .tf-rd-fold > summary .tf-hits { margin-left: 0; }
 .tf-rd-fold .tf-toc { padding: 0 12px 10px; }
 /* The page foot (#2080): Work it belongs to, then Linked from, one closed fold per space. */
 .tf-rd-foot { margin-top: 32px; font-family: var(--sans); font-size: var(--t-sm); line-height: 1.5; color: var(--ink-2); }
 .tf-rd-foot + .tf-rd-foot { margin-top: 22px; }
-.tf .tf-rd-foot h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.tf .tf-rd-foot h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--ink); margin: 0 0 6px; }
 .tf-doc .tf-rd-foot ul { margin: 0; padding-left: 18px; line-height: 1.7; }
 .tf-doc .tf-rd-foot li { margin: 0; }
 .tf-rd-foot li::marker { color: var(--ink-2); }
@@ -261,7 +272,9 @@
 .tf-sec-edit .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; margin-top: 8px; align-items: center; }
 .tf-sec-edit .tf-acts .tf-dim { font-size: var(--t-xs); margin-right: auto; }
 .tf-cmts .tf-compose { margin-top: 12px; }
-.tf-np-text {
+/* The line beside the footer that says what is missing (the enabled rule). */
+.tf-np-why { margin-right: auto; align-self: center; }
+.tf-formgrid .tf-np-text {
   width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
   background: var(--field); color: var(--ink); resize: vertical;
 }
@@ -269,33 +282,52 @@
    lists sit. Page titles keep the reading face, as a search hit's do. */
 .tf-dh { max-width: 980px; margin: 0 auto; container: dhome / inline-size; }
 .tf-dh-body { display: flex; flex-direction: column; gap: 16px; padding: 0 22px 32px; }
-.tf-dh-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
+/* A row of panels ends on one line: the panels stretch and their boxes fill them. */
+.tf-dh-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.tf-dh .tf-panel > :not(header) { flex: 1 1 auto; }
 @container dhome (min-width: 680px) { .tf-dh-two:has(> :nth-child(2)) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .tf-dh .tf-panel > header { padding-bottom: 8px; }
+.tf-dh .tf-panel > header .tf-dh-also { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-dh .tf-panel > header .tf-count { margin-left: auto; }
+.tf-dh .tf-panel > header .tf-dh-also + .tf-count { margin-left: 0; }
 .tf-dh-rows { display: flex; flex-direction: column; overflow: hidden; border-radius: 0 0 6px 6px; }
 .tf-dh-row { display: block; padding: 8px 12px; border-top: 1px solid var(--rule-2); text-decoration: none; }
+.tf-dh-row:first-child { border-top: 0; }
 .tf-dh-row:hover { background: var(--sheet-2); }
 .tf-dh-rows :focus-visible { outline-offset: -2px; }
 .tf-dh-t { display: block; font-family: var(--serif); font-size: var(--t-lg); font-weight: 600; line-height: 1.3; letter-spacing: normal; word-spacing: normal; overflow-wrap: anywhere; }
 .tf-dh-row .tf-why { display: block; margin-top: 2px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-dh-rowt { padding: 6px 12px; }
 .tf-dh-rowt .tf-dh-t { font-size: var(--t-md); font-weight: 400; }
-.tf .tf-dh-none { padding: 2px 12px 12px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf .tf-dh-none { padding: 9px 12px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf .tf-dh-rest { border-top: 1px solid var(--rule-2); font-size: var(--t-xs); }
+/* The one *Sync now* of an empty home, under its sentence (chrome.css starts a Sync now on its column's edge). */
+.tf-dh .tf-empty .tf-syncnow { align-self: center; }
+/* A search's empty answer, above the home's lists. */
+.tf-dh-answer { padding: 18px 22px 22px; }
+.tf-dh-answer b { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+/* The crumb bar above the home's and a space's centred column: its path starts on the column's edge, its hint ends where every page's does. */
+.tf-dh-crumb .tf-crumbs { padding-left: max(22px, calc((100cqw - 980px) / 2 + 22px)); }
+@media (max-width: 900px) { .tf-dh-crumb .tf-crumbs { padding-left: 16px; } }
 .tf-dh-h { margin: 8px 0 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
-.tf-dh-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; align-items: start; }
-/* The tile's one link: its title, underlined and inked as it is pointed at. */
-.tf-dh-space h3 a { color: inherit; text-decoration: none; }
-.tf-dh-space h3 a:hover { text-decoration: underline; text-underline-offset: 2px; }
-.tf-dh-space h3 { min-width: 0; overflow-wrap: anywhere; }
+.tf-dh-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+/* The tile's one link is its head row: its name, its count and the chevron a ticket card's rows have. */
+.tf-dh-spacelink { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; border-radius: 3px; }
+.tf-dh-spacelink:hover h3 { text-decoration: underline; text-underline-offset: 2px; }
+.tf-dh-spacelink h3 { min-width: 0; overflow-wrap: anywhere; }
+.tf-dh-spacelink .tf-count { margin-left: auto; }
+.tf-dh-spacelink .tf-chev { color: var(--ink-2); font-size: var(--t-lg); line-height: 1; }
+.tf-dh-spacelink:hover .tf-chev { color: var(--ink); }
+/* A page that holds others, in a space's list: heavier, with more room above it, so forty rows read as groups. */
+.tf-dh-rows .tf-dh-holds { padding-top: 14px; }
+.tf-dh-rows .tf-dh-holds:first-child { padding-top: 6px; }
+.tf-dh-rowt.tf-dh-holds .tf-dh-t { font-weight: 600; }
 .tf-dh-d1 { padding-left: 28px; } .tf-dh-d2 { padding-left: 44px; } .tf-dh-d3 { padding-left: 60px; } .tf-dh-d4 { padding-left: 76px; }
 .tf-dh-wait { padding: 8px 22px; }
 .tf-fhead .tf-rd-pages svg { width: 15px; height: 15px; }
 @media (max-width: 900px) { .tf-dh-body { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }
-/* The band `READER_NARROW` (docs/docs.ts) names: the component folds the outline in it (#2081). */
-@media (max-width: 1369px) {
-  .tf-rd-sheet { grid-template-columns: minmax(0, 1fr); }
-}
+/* The outline folded (`readerFit`, docs/docs.ts): the sheet's own width decides, not the window's (#2081). */
+.tf-rd-sheet.tf-rd-solo { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1240px) {
   .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
 }

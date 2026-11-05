@@ -3,7 +3,7 @@
  * address opens, what the tree holds, the header's words and the anchors.
  *
  * One screen draws the Docs addresses: `#/docs` is the Docs home (Björn,
- * 2026-11-05), `#/docs/space/<key>` that space's first page, and
+ * 2026-11-05), `#/docs/space/<key>` that space's own page, and
  * `#/page/<id>[/<section>]` the page itself. A key two sources hold is
  * addressed `#/docs/space/<source>:<key>` (#1455), as a ticket key two sources
  * hold is `#/job/<source>:<key>` (#1476).
@@ -62,8 +62,8 @@ export function placeOf(rest: string[]): DocsPlace {
 
 /**
  * The Docs area searching for `words` (#2425): what the launcher's *Search
- * Docs for …* row opens. The page under the hits is the one read last, else
- * the first space's first page.
+ * Docs for …* row opens. The hits are in the rail, and the main column stays on
+ * the home until one is opened, so "no page matches" never sits beside an article.
  */
 export function docsSearchHash(words: string): string {
   return `#/docs/search/${encodeURIComponent(words)}`;
@@ -81,23 +81,19 @@ export function firstPage(space: DocSpace): DocNode | undefined {
 }
 
 /**
- * The page an address opens, or `null` when it opens none: the Docs home opens
- * no page, and a space the tree does not hold has none. A space named with its
- * source is matched through {@link spaceId}; a bare key opens
- * the first space holding it, and so does a segment whose `:` belongs to the
- * key rather than naming a source.
+ * The page an address opens, or `null` when it opens none. Only a page's own
+ * address opens one: the home, a space's page and a search open none, so none
+ * of them records a visit.
  */
-export function pageToOpen(place: DocsPlace, tree: DocsTree): string | null {
-  if (place.kind === "home") return null;
-  if (place.kind === "page") return place.id;
-  // A space has a page of its own, which lists what it holds and opens none of them.
-  if (place.kind === "space") return null;
-  if (tree.last_read !== null) return tree.last_read;
-  const first = tree.spaces[0];
-  return first ? (firstPage(first)?.entity_id ?? null) : null;
+export function pageToOpen(place: DocsPlace): string | null {
+  return place.kind === "page" ? place.id : null;
 }
 
-/** The space a `#/docs/space/<key>` address names, or `undefined` when the tree holds none. */
+/**
+ * The space a `#/docs/space/<key>` address names, or `undefined` when the tree holds none. A space named with its
+ * source is matched through {@link spaceId}; a bare key opens the first space holding it, and so does a segment whose
+ * `:` belongs to the key rather than naming a source.
+ */
 export function spaceAt(place: DocsPlace, tree: DocsTree): DocSpace | undefined {
   if (place.kind !== "space") return undefined;
   const { source, key } = place;
@@ -153,7 +149,7 @@ export function spaceHash(spaces: readonly SpaceRef[], space: SpaceRef): string 
   return `#/docs/space/${encodeURIComponent(shared ? `${space.source_id}:${space.key}` : space.key)}`;
 }
 
-/** The picker's words for a space: *ENG Engineering (12)*. */
+/** The picker's words for a space: *Engineering (12)*. */
 export function spaceLabel(space: DocSpace): string {
   return `${space.name ?? space.key} (${space.pages.length})`;
 }
@@ -547,12 +543,25 @@ export function sectionsOf(blocks: DocBlock[]): Section[] {
 }
 
 /**
- * The windows the reader folds its outline above the page in (#2081, R-10.9):
- * narrower than 1370px, the width the header's actions, with a job chosen, stop
- * fitting one row beside an open outline. `css/docs.css` writes the same query for the same
- * band, and `tf-css.test.ts` holds the two together.
+ * What the outline takes from the reader's page beside it: its column and the gap before it (`.tf-rd-sheet` in
+ * `css/docs.css`; `tf-css.test.ts` holds the two together).
  */
-export const READER_NARROW = "(max-width: 1369px)";
+export const OUTLINE_ROOM = 268 + 56;
+
+/** The narrowest reading column the outline stays beside, whatever the header's actions need. */
+export const READING_MIN = 660;
+
+/**
+ * What the reader's own width makes of its header (#2081, F-406), asked of what fits and not of the window: `room` is
+ * the sheet's inner width, `row` the width of the header's actions in one row, the view's *Sync now* among them, and
+ * `sync` what *Sync now* takes of that row, 0 where it has none.
+ *
+ * The outline folds above the page once the row would stop fitting beside it. Only when the row does not fit with the
+ * outline folded either does *Sync now* move into *More*, so no button ever wraps alone.
+ */
+export function readerFit(room: number, row: number, sync: number): { outlineFolds: boolean; syncInMore: boolean } {
+  return { outlineFolds: room - OUTLINE_ROOM < Math.max(row, READING_MIN), syncInMore: sync > 0 && room < row };
+}
 
 /**
  * The windows the reader's tree is a drawer over the page in (#2084, R-10.9):
@@ -579,9 +588,23 @@ export function scopeName(space: DocSpace | undefined): string {
   return space === undefined ? "all spaces" : (space.name ?? space.key);
 }
 
-/** The hits' header line: *5 pages in all spaces, 1 ms*. */
-export function hitsLine(total: number, scope: string, ms: number): string {
-  return `${total} page${total === 1 ? "" : "s"} in ${scope}, ${Math.max(1, ms)} ms`;
+/** The hits' header line: *5 pages in all spaces*. */
+export function hitsLine(total: number, scope: string): string {
+  return `${total} page${total === 1 ? "" : "s"} in ${scope}`;
+}
+
+/** Where a hit sits, its space by name as the crumb has it where the search spans spaces: *Engineering › Payments*. */
+export function hitWhere(hit: Pick<DocHit, "space" | "path">, spanning: boolean): string {
+  const where = hit.path ?? "top level";
+  return spanning && hit.space ? `${hit.space.name ?? hit.space.key} › ${where}` : where;
+}
+
+/** `text` as runs, each ticket key in it marked, so a sentence can set its keys in mono (design system, Type). */
+export function keyRuns(text: string): { text: string; key: boolean }[] {
+  return text
+    .split(/\b([A-Z][A-Z0-9_]*-\d+)\b/)
+    .map((run, at) => ({ text: run, key: at % 2 === 1 }))
+    .filter((run) => run.text !== "");
 }
 
 /** What a snippet opens with: its section, or *Comment by Priya*. */
@@ -622,7 +645,7 @@ export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">): stri
 // *This job* (#863, R-2.8): the job's pages, grouped by the reason it reaches them.
 // ---------------------------------------------------------------------------
 
-/** One page of the job: its title and where it sits, *OPS › Runbooks*. */
+/** One page of the job: its title and where it sits, *Operations › Runbooks*. */
 export interface JobPage {
   entity_id: string;
   title: string;
@@ -654,7 +677,7 @@ export function reachedPages(reach: readonly Reached[], tree: DocsTree): Set<str
   return new Set(tree.spaces.flatMap((s) => s.pages.filter((p) => ids.has(p.entity_id)).map((p) => p.entity_id)));
 }
 
-/** A page's place: its space's key, then its ancestors' titles from the top. */
+/** A page's place as the crumb has it: its space's name, then its ancestors' titles from the top. */
 function whereOf(space: DocSpace, page: DocNode): string {
   const byId = new Map(space.pages.map((p) => [p.entity_id, p]));
   const path: string[] = [];
@@ -666,7 +689,7 @@ function whereOf(space: DocSpace, page: DocNode): string {
     path.unshift(node.title);
     up = node.parent;
   }
-  return [space.key, ...path].join(" › ");
+  return [space.name ?? space.key, ...path].join(" › ");
 }
 
 /**

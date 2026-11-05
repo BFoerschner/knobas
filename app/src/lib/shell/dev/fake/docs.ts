@@ -65,6 +65,7 @@ import type {
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS, fakeRoleScope } from "./corpus";
+import { linkedTickets } from "./entity";
 import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
 
@@ -653,6 +654,23 @@ function work(blocks: DocBlock[]): DocPage["work"] {
   return out;
 }
 
+/** A page as a link's end, so `create_link` takes every page the tree holds, as the real mirror does. */
+export function docPageEnd(id: string): { kind: string; title: string; deleted_at: string | null } | null {
+  const held = PAGES.find((p) => p.id === id);
+  return held ? { kind: "page", title: held.title, deleted_at: null } : null;
+}
+
+/** The chips' tickets and the tickets `create_link` holds on the page, each linked one saying so, as the real read does. */
+function withLinks(chips: DocPage["work"], page: string): DocPage["work"] {
+  const out = [...chips];
+  for (const ticket of linkedTickets(page)) {
+    const known = out.find((w) => w.entity_id === ticket.entity_id);
+    if (known) known.linked = true;
+    else out.push({ ...ticket, linked: true });
+  }
+  return out;
+}
+
 /** The pages whose prototype body links to `title`. */
 function backlinks(title: string): DocPage["backlinks"] {
   return PAGES.filter((p) => {
@@ -719,7 +737,7 @@ function page(args: Record<string, unknown>, bulk: FakePage[] = [], long = 0): D
         : []),
     ],
     backlinks: backlinks(found.title),
-    work: work(body.blocks.map(block)),
+    work: withLinks(work(body.blocks.map(block)), found.id),
     writes: ["comment", "update_page", "create_page"],
     run_embeds: !EMBEDS_OFF.has("confluence"),
   };
@@ -783,7 +801,9 @@ function search(args: Record<string, unknown>, bulk: FakePage[]): DocsHits | nul
     }
     const sentence = best?.sentence ?? parts.find((x) => x.text.trim() !== "")?.text ?? "";
     const segments: { text: string; hit: boolean }[] = [];
-    for (const piece of sentence.slice(0, 150).split(new RegExp(`(${stems.map((s) => `${s}[\\p{L}\\p{N}]*`).join("|") || "$^"})`, "iu"))) {
+    // As the real read's `cut`: an ellipsis where the sentence was cut.
+    const shown = sentence.length > 150 ? `${sentence.slice(0, 150)}…` : sentence;
+    for (const piece of shown.split(new RegExp(`(${stems.map((s) => `${s}[\\p{L}\\p{N}]*`).join("|") || "$^"})`, "iu"))) {
       if (piece === "") continue;
       segments.push({ text: piece, hit: stems.some((s) => piece.toLowerCase().startsWith(s)) });
     }

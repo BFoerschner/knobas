@@ -47,11 +47,10 @@ test("the three addresses read as the home, a space, and a page with its section
   expect(placeOf(["confluence:3", "2"])).toEqual({ kind: "page", id: "confluence:3", section: 2 });
 });
 
-test("#/docs/search/<words> carries a search, and opens the page read last under its hits (#2425)", () => {
+test("#/docs/search/<words> carries a search and opens no page, so the home stays until a hit is opened (#2425, F-404)", () => {
   expect(placeOf(["search", "sepa retry"])).toEqual({ kind: "search", words: "sepa retry" });
   expect(placeOf(["search"])).toEqual({ kind: "home" });
-  expect(pageToOpen({ kind: "search", words: "sepa" }, TREE)).toBe("confluence:5");
-  expect(pageToOpen({ kind: "search", words: "sepa" }, { ...TREE, last_read: null })).toBe("confluence:9");
+  expect(pageToOpen({ kind: "search", words: "sepa" })).toBeNull();
 });
 
 test("a search's address round-trips through the router whatever the words hold (#2425)", () => {
@@ -64,13 +63,13 @@ test("a search's address round-trips through the router whatever the words hold 
 });
 
 test("#/docs is the home: it opens no page, whatever was read last", () => {
-  expect(pageToOpen({ kind: "home" }, TREE)).toBeNull();
-  expect(pageToOpen({ kind: "home" }, { ...TREE, last_read: null })).toBeNull();
+  expect(pageToOpen({ kind: "home" })).toBeNull();
 });
 
 test("Continue reading is the page read last and where it sits, while the tree holds it", () => {
   expect(continueReading(TREE)?.entity_id).toBe("confluence:5");
-  expect(continueReading(TREE)?.where.startsWith(spaceOfPage(TREE, "confluence:5")!.key)).toBe(true);
+  const held = spaceOfPage(TREE, "confluence:5")!;
+  expect(continueReading(TREE)?.where.startsWith(held.name ?? held.key)).toBe(true);
   expect(continueReading({ ...TREE, last_read: null })).toBeNull();
   expect(continueReading({ ...TREE, last_read: "confluence:gone" })).toBeNull();
 });
@@ -82,7 +81,7 @@ test("a space's top pages are the ones with no parent", () => {
 });
 
 test("a space's address names the space, and opens no page: the space has a page of its own", () => {
-  expect(pageToOpen(placeOf(["space", "ENG"]), TREE)).toBeNull();
+  expect(pageToOpen(placeOf(["space", "ENG"]))).toBeNull();
   expect(spaceAt(placeOf(["space", "ENG"]), TREE)?.key).toBe("ENG");
   expect(spaceAt(placeOf(["space", "NOPE"]), TREE)).toBeUndefined();
 });
@@ -189,6 +188,11 @@ import {
   forYouWhy,
   hitLine,
   hitsLine,
+  hitWhere,
+  keyRuns,
+  OUTLINE_ROOM,
+  READING_MIN,
+  readerFit,
   markText,
   refusalReason,
   sectionMatches,
@@ -246,8 +250,11 @@ test("a collapsible's title and words count in its section's matches, as the fin
 });
 
 test("the hit's words: the header line, the snippet's place and the last line", () => {
-  expect(hitsLine(5, "all spaces", 0)).toBe("5 pages in all spaces, 1 ms");
-  expect(hitsLine(1, "Engineering", 3)).toBe("1 page in Engineering, 3 ms");
+  expect(hitsLine(5, "all spaces")).toBe("5 pages in all spaces");
+  expect(hitsLine(1, "Engineering")).toBe("1 page in Engineering");
+  expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: "Payments" }, true)).toBe("Engineering › Payments");
+  expect(hitWhere({ space: { key: "ENG", name: null }, path: null }, true)).toBe("ENG › top level");
+  expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: "Payments" }, false)).toBe("Payments");
   expect(snippetLabel({ section: "Backoff policy", comment_by: null, segments: [] })).toBe("Backoff policy:");
   expect(snippetLabel({ section: null, comment_by: "Priya Nair", segments: [] })).toBe("Comment by Priya:");
   expect(snippetLabel({ section: null, comment_by: null, segments: [] })).toBeNull();
@@ -272,4 +279,30 @@ test("For you says who asked, and a refused section says why", () => {
   expect(refusalReason("table", "Confluence")).toBe(
     "This section has a table, code or a macro. knobas edits text-only sections; edit this one in Confluence.",
   );
+});
+
+test("the reader's width decides its header: the outline folds first, and Sync now moves only when the row still would not fit (F-406)", () => {
+  const row = 700;
+  const sync = 92;
+  // Beside the outline with room to spare.
+  expect(readerFit(row + OUTLINE_ROOM, row, sync)).toEqual({ outlineFolds: false, syncInMore: false });
+  // One pixel short of that, and the outline folds; the row itself still fits.
+  expect(readerFit(row + OUTLINE_ROOM - 1, row, sync)).toEqual({ outlineFolds: true, syncInMore: false });
+  expect(readerFit(row, row, sync)).toEqual({ outlineFolds: true, syncInMore: false });
+  // Not even folded: Sync now moves, so no button wraps alone.
+  expect(readerFit(row - 1, row, sync)).toEqual({ outlineFolds: true, syncInMore: true });
+  // A header with no Sync now has nothing to move.
+  expect(readerFit(row - 1, row, 0)).toEqual({ outlineFolds: true, syncInMore: false });
+  // A short row still leaves the page a reading column.
+  expect(readerFit(READING_MIN + OUTLINE_ROOM - 1, 300, 0).outlineFolds).toBe(true);
+  expect(readerFit(READING_MIN + OUTLINE_ROOM, 300, 0).outlineFolds).toBe(false);
+});
+
+test("a sentence's ticket keys are told from its words", () => {
+  expect(keyRuns("Linked to PAY-231")).toEqual([
+    { text: "Linked to ", key: false },
+    { text: "PAY-231", key: true },
+  ]);
+  expect(keyRuns("Via Payout worker")).toEqual([{ text: "Via Payout worker", key: false }]);
+  expect(keyRuns("Parent PAY-230, Engineering").map((run) => run.key)).toEqual([false, true, false]);
 });

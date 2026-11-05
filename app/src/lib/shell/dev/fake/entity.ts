@@ -7,7 +7,9 @@ import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { CORPUS, bodyShown, fakeEpicEntry, mirrorRow } from "./corpus";
+import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
+import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
 import { pullView } from "./views/pulls";
@@ -140,7 +142,7 @@ function linkEnd(id: string): { kind: string; title: string; deleted_at: string 
   const entity = CORPUS.find((candidate) => candidate.entity_id === id);
   if (entity) return entity;
   const asset = FIXTURE_ESTATE.find((candidate) => candidate.id === id);
-  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : null;
+  return asset ? { kind: "asset", title: asset.name, deleted_at: null } : docPageEnd(id);
 }
 
 /** One link's far end from `id`, resolved against the corpus and the estate. */
@@ -149,6 +151,15 @@ function entryFor(id: string, link: LinkRow): LinkEntry | null {
   const other = linkEnd(otherId);
   if (!other) return null;
   return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at } };
+}
+
+/** The tickets linked to `id`, for a page's *Work it belongs to*. */
+export function linkedTickets(id: string): { entity_id: string; key: string; title: string; status: string | null }[] {
+  return linksOf(id).flatMap(({ other }) =>
+    other.kind === "ticket"
+      ? [{ entity_id: other.entity_id, key: keyOf(other.entity_id), title: other.title, status: null }]
+      : [],
+  );
 }
 
 /** The confirmed links on an entity, newest first, from either end. */

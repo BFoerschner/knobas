@@ -13,7 +13,7 @@ import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
-import { READER_DRAWER, READER_NARROW, SEARCH_PAUSE_MS } from "./docs";
+import { READER_DRAWER, SEARCH_PAUSE_MS } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -765,6 +765,15 @@ function search(words: string): void {
 /** The search's words as Docs draws them over the hits, or `null` while none is on. */
 const searched = () => target.querySelector(".tf-dl-q b")?.textContent ?? null;
 
+/** A search still on over an open page: a search's address opens none, so the reader has opened a hit (F-404). */
+async function searchOnPage(words: string, rest = ["confluence:2"]): Promise<void> {
+  search(words);
+  await settle();
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  shown!.rest = rest;
+  await settle();
+}
+
 const button = (label: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
 
 test("Docs draws no search field and leaves / to the shell, which opens the launcher on #d (#2425)", async () => {
@@ -785,15 +794,14 @@ test("the words in the address search every space and list the hits; the picker 
   expect(searched()).toBe("ledger");
   // Every space's hits name their space.
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
-  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("2 pages in all spaces, 3 ms");
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("2 pages in all spaces");
   const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
-  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["OPS › Ops home", "OPS › top level"]);
+  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["Operations › Ops home", "Operations › top level"]);
   expect(hits[0]!.querySelector(".tf-sn")?.textContent).toBe("Ledger: The ledger");
   expect(hits[0]!.querySelector(".tf-sn mark")?.textContent).toBe("ledger");
   expect(hits[1]!.querySelector(".tf-sn b")?.textContent).toBe("Comment by Priya:");
   expect(hits[0]!.querySelector(".tf-n")?.textContent).toBe("2 matches, Tomasz, 2026-07-02");
   expect(hits[1]!.querySelector(".tf-n")?.textContent).toBe("1 match, you, 2026-07-02");
-  expect(hits[0]!.getAttribute("aria-current")).toBe("true");
   expect(target.querySelector("nav[aria-label='Docs'] details")).toBeNull();
 
   const picker = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
@@ -841,20 +849,95 @@ test("an answer to an older keystroke than the last is dropped", async () => {
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(1);
 });
 
-test("no hit explains the AND rule; Clear brings the tree back and leaves the search's address for the page's (#2425)", async () => {
-  await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => ({ ...HITS, total: 0, hits: [] })) }));
+test("a search from the home keeps the home and opens no page, and no hit says so there; Clear leaves for the home (#2425, F-404)", async () => {
+  const io = await draw([], ports({ docsSearch: vi.fn(async () => ({ ...HITS, total: 0, hits: [] })) }));
   search("zzz");
   await settle();
-  expect(target.querySelector(".tf-dl-body")?.textContent).toContain(
-    "No page matches. Every word has to appear in the page or its comments.",
-  );
+  expect(io.docsPage).not.toHaveBeenCalled();
+  expect(io.visitEntity).not.toHaveBeenCalled();
+  expect(target.querySelector(".tf-rd-page")).toBeNull();
+  expect(target.querySelector(".tf-dh .tf-fhead h1")?.textContent).toBe("Docs");
+  expect(target.querySelector(".tf-dh-answer")?.textContent).toContain("No page matches zzz. Every word has to appear in the page or its comments.");
+  // The rail keeps its count and does not say the sentence twice.
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("0 pages in all spaces");
+  expect(target.querySelector(".tf-dl-body")?.textContent).not.toContain("No page matches");
   location.hash = "#/docs/search/zzz";
+  button("Clear search")!.click();
+  await settle();
+  expect(searched()).toBeNull();
+  expect(target.querySelector("nav[aria-label='Docs'] details")).not.toBeNull();
+  expect(location.hash).toBe("#/docs");
+  location.hash = "";
+});
+
+test("beside an open page the rail itself explains no hit; Clear brings the tree back and stays on the page (#2425)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => ({ ...HITS, total: 0, hits: [] })) }));
+  // A label chip searches without leaving the page.
+  target.querySelector<HTMLButtonElement>(".tf-rd-meta button.tf-chip")!.click();
+  await settle();
+  expect(target.querySelector(".tf-rd-page")).not.toBeNull();
+  expect(target.querySelector(".tf-dh-answer")).toBeNull();
+  expect(target.querySelector(".tf-dl-body")?.textContent).toContain("No page matches. Every word has to appear in the page or its comments.");
+  location.hash = "#/page/confluence%3A2";
   button("Clear")!.click();
   await settle();
   expect(searched()).toBeNull();
   expect(target.querySelector("nav[aria-label='Docs'] details")).not.toBeNull();
   expect(location.hash).toBe("#/page/confluence%3A2");
   location.hash = "";
+});
+
+test("the Space picker goes to the space's own page and opens no page; All spaces from there goes home (F-401)", async () => {
+  const io = await draw(["space", "OPS"]);
+  expect(io.docsPage).not.toHaveBeenCalled();
+  const picker = () => target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  expect(picker().value).toBe("confluence/OPS");
+  picker().value = "*";
+  picker().dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(location.hash).toBe("#/docs");
+
+  shown!.rest = ["confluence:2"];
+  await settle();
+  picker().value = "confluence/OPS";
+  picker().dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(location.hash).toBe("#/docs/space/OPS");
+  location.hash = "";
+});
+
+test("an address that names nothing leaves the picker on All spaces and draws the one nothing-here state (F-018)", async () => {
+  await draw(["space", "NOPE"]);
+  expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
+  expect(target.querySelector(".tf-crumbs")?.textContent).toContain("Space");
+  expect(target.querySelector(".tf-nohere")?.textContent).toContain("knobas does not hold this space.");
+  expect(target.querySelector(".tf-nohere a")?.getAttribute("href")).toBe("#/docs");
+  expect(target.querySelector(".tf-rd-main .tf-fhead")).toBeNull();
+});
+
+test("leaving a search's address for anything but a hit ends the search; a hit keeps it", async () => {
+  await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
+  search("ledger");
+  await settle();
+  shown!.rest = ["confluence:2"];
+  await settle();
+  expect(searched(), "Esc back to the page it was opened from").toBeNull();
+  expect(target.querySelector("a.tf-dl-hit")).toBeNull();
+
+  await searchOnPage("ledger");
+  expect(searched(), "opening a hit").toBe("ledger");
+  location.hash = "";
+});
+
+test("the home ends a search, so Esc from a search's address changes what is on screen", async () => {
+  await draw([], ports({ docsSearch: vi.fn(async () => HITS) }));
+  search("ledger");
+  await settle();
+  expect(searched()).toBe("ledger");
+  shown!.rest = [];
+  await settle();
+  expect(searched()).toBeNull();
+  expect(target.querySelector("a.tf-dl-hit")).toBeNull();
 });
 
 test("a hit opens with every match marked and the find bar, and the search stays on (#2425)", async () => {
@@ -931,7 +1014,7 @@ let resize: (width: number) => void = () => {};
 let media: MockInstance<typeof window.matchMedia> | null = null;
 function windowWidth(width: number): void {
   const heard = new Set<(event: Event) => void>();
-  const bands = new Map([READER_NARROW, READER_DRAWER].map((q) => [q, Number(/max-width: (\d+)px/.exec(q)![1])]));
+  const bands = new Map([READER_DRAWER].map((q) => [q, Number(/max-width: (\d+)px/.exec(q)![1])]));
   media = vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
     const list = {
       media: query,
@@ -954,6 +1037,44 @@ afterEach(() => {
   media = null;
 });
 
+/**
+ * What the reader measures for its header (`readerFit`), which jsdom lays out as nothing: the sheet's inner width, and
+ * 100 px for each of the header's actions. `sheetResize` moves the width and tells every observer.
+ */
+let sheetRoom = 0;
+const observers = new Set<() => void>();
+function sheetWidth(width: number): void {
+  sheetRoom = width;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(private readonly heard: () => void) {}
+      observe() {
+        observers.add(this.heard);
+      }
+      unobserve() {}
+      disconnect() {
+        observers.delete(this.heard);
+      }
+    },
+  );
+  vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) {
+    return this.classList.contains("tf-rd-sheet") ? sheetRoom : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+    return this.parentElement?.classList.contains("tf-acts") ? 100 : 0;
+  });
+}
+function sheetResize(width: number): void {
+  sheetRoom = width;
+  for (const heard of observers) heard();
+}
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  observers.clear();
+});
+
 const margin = () => target.querySelector("aside[aria-label='On this page']");
 const fold = () => target.querySelector<HTMLDetailsElement>("details.tf-rd-fold");
 const outlineOf = (root: Element) =>
@@ -964,12 +1085,13 @@ async function findOnPage(word: string): Promise<void> {
   search(word);
   await settle();
   target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")[1]!.click();
+  shown!.rest = ["confluence:2"];
   await settle();
   expect(target.querySelector(".tf-findbar input")).not.toBeNull();
 }
 
-test("a wide window puts the outline in the page's right column, with match counts while finding (#2081)", async () => {
-  windowWidth(1400);
+test("a wide sheet puts the outline in the page's right column, with match counts while finding (#2081)", async () => {
+  sheetWidth(1100);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
   const aside = margin()!;
   // The page's own column, inside what scrolls, beside the page's content.
@@ -989,8 +1111,8 @@ test("a wide window puts the outline in the page's right column, with match coun
   location.hash = "";
 });
 
-test("a narrow window folds the outline between the meta line and the first section, closed, counting sections and matches (#2081)", async () => {
-  windowWidth(1100);
+test("a narrow sheet folds the outline between the meta line and the first section, closed, counting sections and matches (#2081)", async () => {
+  sheetWidth(800);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
   expect(margin()).toBeNull();
   const f = fold()!;
@@ -1020,14 +1142,14 @@ test("a narrow window folds the outline between the meta line and the first sect
   location.hash = "";
 });
 
-test("the outline moves between the margin and the fold as the window crosses 1370px, and the fold opens closed on every page (#2081)", async () => {
-  windowWidth(1400);
+test("the outline moves between the margin and the fold as the sheet's width crosses what fits, and the fold opens closed on every page (#2081)", async () => {
+  sheetWidth(1100);
   const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? { ...OUTLINED, entity_id: id, title: "Ops home" } : OUTLINED));
   const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
   view = mount(TfDocs, { target, props });
   await settle();
   expect(margin()).not.toBeNull();
-  resize(1100);
+  sheetResize(800);
   await settle();
   expect(margin()).toBeNull();
   fold()!.open = true;
@@ -1035,7 +1157,7 @@ test("the outline moves between the margin and the fold as the window crosses 13
   await settle();
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
   expect(fold()!.open).toBe(false);
-  resize(1400);
+  sheetResize(1100);
   await settle();
   expect(fold()).toBeNull();
   expect(margin()).not.toBeNull();
@@ -1232,12 +1354,12 @@ test("the page foot: Work it belongs to, then Linked from by space, after the bo
   expect(page.querySelector(".tf-macro")!.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   const job = work.parentElement!.querySelector<HTMLAnchorElement>("li a")!;
   expect(job.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
-  expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo Do");
+  expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo do");
 
   expect(groups()).toEqual([
-    { summary: "ENG Engineering1", open: false, pages: [["Payout design", "#/page/confluence%3A5"]] },
+    { summary: "Engineering1", open: false, pages: [["Payout design", "#/page/confluence%3A5"]] },
     {
-      summary: "OPS Operations2",
+      summary: "Operations2",
       open: false,
       pages: [
         ["Alerting", "#/page/confluence%3A12"],
@@ -1257,7 +1379,7 @@ test("the page foot leaves out what is empty: no work, no backlinks, no Other pa
 
   await drawPage({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key !== null) });
   expect(linkedHeading()?.textContent).toBe("Linked from 4 pages");
-  expect(groups().map((g) => g.summary)).toEqual(["ENG Engineering1", "OPS Operations2", "TEAM1"]);
+  expect(groups().map((g) => g.summary)).toEqual(["Engineering1", "Operations2", "TEAM1"]);
 });
 
 test("Linked from says 50+ when the backend's 50 arrive, and the count below that (#2080)", async () => {
@@ -1265,7 +1387,7 @@ test("Linked from says 50+ when the backend's 50 arrive, and the count below tha
     Array.from({ length: n }, (_, i) => ({ entity_id: `confluence:${100 + i}`, title: `Page ${100 + i}`, space_key: "OPS" }));
   await drawPage({ ...PAGE, backlinks: many(50) });
   expect(linkedHeading()?.textContent).toBe("Linked from 50+ pages");
-  expect(groups().map((g) => g.summary)).toEqual(["OPS Operations50"]);
+  expect(groups().map((g) => g.summary)).toEqual(["Operations50"]);
 
   await drawPage({ ...PAGE, backlinks: many(49) });
   expect(linkedHeading()?.textContent).toBe("Linked from 49 pages");
@@ -1292,8 +1414,7 @@ test("the meta line names who created the page: version 1's entry, else the edit
     "Created by you, 2026-01-02",
     "version 31",
     "1 min read",
-    "ops",
-    "on-call",
+    "opson-call",
   ]);
   await drawPage({ ...PAGE, version: 1 });
   expect(meta()).toContain("Created by Tomasz, 2026-07-02");
@@ -1346,13 +1467,43 @@ test("a comment goes through the queue; copy link and the actions a source does 
   target.innerHTML = "";
   await draw(["confluence:2"]);
   expect(button("Comment")).toBeUndefined();
-  expect(button("New page here")).toBeUndefined();
+  expect(button("New page here…")).toBeUndefined();
   expect(button("Edit section")).toBeUndefined();
+});
+
+test("Esc closes an open section editor first, and focus goes back to its Edit section (the return contract)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("Edit section")!.click();
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!;
+  const heard = vi.fn();
+  window.addEventListener("keydown", heard);
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  window.removeEventListener("keydown", heard);
+  await settle();
+  expect(heard, "the shell's Esc never hears it").not.toHaveBeenCalled();
+  expect(target.querySelector("textarea[aria-label='Section text']")).toBeNull();
+  expect(document.activeElement?.textContent).toBe("Edit section");
+});
+
+test("New page marks its title as needed in words, and says beside the footer what is missing until there is one (the enabled rule)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("New page here…")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  expect(dialog.textContent).toContain("Title (needed)");
+  expect(dialog.querySelector(".tf-np-why")?.textContent).toBe("Give the page a title.");
+  const create = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!;
+  expect(create.disabled).toBe(true);
+  fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, "Rotas");
+  await settle();
+  expect(dialog.querySelector(".tf-np-why")).toBeNull();
+  expect(create.disabled).toBe(false);
 });
 
 test("New page asks for the space, the parent and the title, and queues the plain text", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here")!.click();
+  button("New page here…")!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")?.value).toBe("confluence/OPS");
@@ -1391,8 +1542,8 @@ test("the writes the page's credential cannot make are drawn disabled saying why
   const drawn = (label: string) => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === label);
   const refused: [string, string, number][] = [
     ["Comment", "comment", 1],
-    ["New page", "create_page", 1],
-    ["New page here", "create_page", 1],
+    ["New page…", "create_page", 1],
+    ["New page here…", "create_page", 1],
     ["Edit section", "update_page", 1],
   ];
   for (const [label, op, count] of refused) {
@@ -1426,7 +1577,7 @@ test("the page's writes stay enabled where the source refuses nothing, or cannot
       }),
     }),
   );
-  for (const label of ["Comment", "New page", "New page here", "Edit section"]) {
+  for (const label of ["Comment", "New page…", "New page here…", "Edit section"]) {
     const b = button(label)!;
     expect(b.getAttribute("aria-disabled"), label).toBeNull();
     expect(b.title, label).toBe("");
@@ -1444,7 +1595,7 @@ test("New page refuses a parent the credential cannot add pages under, saying wh
       ),
     }),
   );
-  button("New page here")!.click();
+  button("New page here…")!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
@@ -1471,6 +1622,7 @@ test("the tree's New page on another space than the open page's is not refused b
     ["confluence:9"],
     ports({
       docsPage: vi.fn(async () => ({ ...RICH, entity_id: "confluence:9", space: { key: "ENG", name: "Engineering" }, ancestors: [] })),
+      docsSearch: vi.fn(async () => HITS),
       refusedWrites: vi.fn(async (asks: WriteAsk[]) =>
         asks.filter((ask) => ask.entity === "confluence:9").map((ask) => ({ ...ask, reason })),
       ),
@@ -1478,6 +1630,8 @@ test("the tree's New page on another space than the open page's is not refused b
   );
   const tree = () => target.querySelector<HTMLButtonElement>(".tf-dl-foot button")!;
   expect(tree().title, "on the page's own space the answer holds").toBe(reason);
+  // Only a search keeps the picker from leaving: the rail then shows another space than the page's.
+  await searchOnPage("ledger", ["confluence:9"]);
   const space = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
   space.value = "confluence/OPS";
   space.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1550,7 +1704,12 @@ test("For you, narrowed to a space, leaves out another source's pages with the s
   select.value = "notes/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
+  // The two sources share the key, so the picker's address names the source.
+  expect(location.hash).toBe("#/docs/space/notes%3AOPS");
+  shown!.rest = ["space", "notes:OPS"];
+  await settle();
   expect(titles()).toEqual(["Notes rotaMara mentioned you"]);
+  location.hash = "";
 });
 
 // ---- *This job* (#863, R-2.5, R-2.8) ----
@@ -1600,10 +1759,10 @@ test("This job is off by default; on, it lists the job's pages by reason and hid
   const groups = [...target.querySelectorAll(".tf-dl-body .tf-dl-for")];
   expect(groups.map((g) => g.querySelector("h4")?.textContent)).toEqual(["Linked to PAY-231", "Parent PAY-230"]);
   expect([...groups[0]!.querySelectorAll("a")].map((a) => [a.getAttribute("href"), a.textContent])).toEqual([
-    ["#/page/confluence%3A2", "On-call handbookOPS › Ops home"],
+    ["#/page/confluence%3A2", "On-call handbookOperations › Ops home"],
   ]);
   expect(groups[0]!.querySelector("a")?.getAttribute("aria-current")).toBe("true");
-  expect(groups[1]!.querySelector("a")?.textContent).toBe("Eng homeENG");
+  expect(groups[1]!.querySelector("a")?.textContent).toBe("Eng homeEngineering");
 });
 
 test("with This job on, the search reads every space and keeps the job's pages, with Search all pages", async () => {
@@ -1613,9 +1772,9 @@ test("with This job on, the search reads every space and keeps the job's pages, 
   search("ledger");
   await settle();
   expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
-  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("1 page in PAY-231's pages, 3 ms. Search all pages");
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("1 page in PAY-231's pages. Search all pages");
   const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
-  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["OPS › Ops home"]);
+  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["Operations › Ops home"]);
 
   button("Search all pages")!.click();
   await settle();
@@ -1659,7 +1818,7 @@ test("New page with Link it to <job> for a job the mirror lacks is refused, and 
   const links = linkPorts();
   links.listSources = vi.fn(async () => [] as never);
   const io = await drawJob(["confluence:2"], links, ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here")!.click();
+  button("New page here…")!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
@@ -1701,7 +1860,7 @@ const actions = () => [...(headActs()?.querySelectorAll("button") ?? [])].map((b
 
 test("the actions read Link to <job> from a job, New page here, More, then Open in; no Comment (#2082, #2286)", async () => {
   await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
-  expect(actions()).toEqual(["Link to PAY-231", "New page here", "More", "Open in Confluence"]);
+  expect(actions()).toEqual(["Link to PAY-231", "New page here…", "More", "Open in Confluence"]);
 
   if (view) unmount(view);
   target.innerHTML = "";
@@ -1710,7 +1869,7 @@ test("the actions read Link to <job> from a job, New page here, More, then Open 
     props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), linkPorts: linkPorts() as never },
   });
   await settle();
-  expect(actions()).toEqual(["New page here", "More", "Open in Confluence"]);
+  expect(actions()).toEqual(["New page here…", "More", "Open in Confluence"]);
   // The comment box at the foot is the way to comment.
   expect(button("Comment")?.closest(".tf-compose")).not.toBeNull();
 });
@@ -1743,7 +1902,7 @@ test("Sync now is last in the reader's header and no longer in the tree column (
   expect(target.querySelector(".tf-rd-tree .tf-syncnow")).toBeNull();
 });
 
-test("with no page to draw, Docs still draws its header with Sync now (#2286)", async () => {
+test("with nothing synced, the home's one Sync now is under its sentence, and its header has none (#2286, F-403)", async () => {
   view = mount(TfDocs, {
     target,
     props: { ready: true, rest: [], job: null, ports: ports({ docsTree: vi.fn(async (): Promise<DocsTree> => ({ ...TREE, spaces: [], last_read: null })) }), sync: syncSnippet },
@@ -1752,8 +1911,47 @@ test("with no page to draw, Docs still draws its header with Sync now (#2286)", 
   expect(target.querySelector(".tf-rd-main .tf-empty")?.textContent).toContain("none is set up yet");
   const head = target.querySelector(".tf-rd-main .tf-fhead")!;
   expect(head.querySelector("h1")?.textContent).toBe("Docs");
-  expect([...head.querySelectorAll(".tf-acts > *")]).toEqual(syncNow());
-  expect(syncNow()).toHaveLength(1);
+  expect(head.querySelector(".tf-syncnow")).toBeNull();
+  expect(target.querySelector("nav[aria-label='Docs'] .tf-dl-note")?.textContent).toBe("No wiki source is set up yet.");
+});
+
+test("where the row does not fit even with the outline folded, Sync now moves into More and Refresh keeps its name; room brings it back (F-406)", async () => {
+  sheetWidth(1100);
+  view = mount(TfDocs, {
+    target,
+    props: {
+      ready: true,
+      rest: ["confluence:2"],
+      job: null,
+      ports: ports({ docsPage: vi.fn(async () => RICH), getEntity: vi.fn(async () => pageDetail()), refresh: refreshProbe().ports }),
+      sync: syncSnippet,
+    },
+  });
+  await settle();
+  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
+  // New page here, More, Open in, Refresh and Sync now, at 100 px each with no gap in jsdom.
+  sheetResize(499);
+  await settle();
+  expect(headActs()!.querySelector(".tf-syncnow")).toBeNull();
+  expect(refreshButton()?.textContent?.replace(/\s+/g, " ").trim()).toBe("Refresh page");
+  button("More")!.click();
+  await settle();
+  const item = target.querySelector<HTMLElement>(".tf-rd-more .tf-menu .tf-syncnow")!;
+  expect(item.getAttribute("role")).toBe("menuitem");
+  item.click();
+  await settle();
+  expect(target.querySelector(".tf-rd-more .tf-menu")).toBeNull();
+  sheetResize(500);
+  await settle();
+  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
+});
+
+test("a page already linked to the job says so where Link to <job> was, and pressing Link to <job> gets there (F-405)", async () => {
+  const onJob = { ...RICH, work: [{ entity_id: "mock:PAY-231", key: "PAY-231", title: "T", status: null, linked: true }] };
+  await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => onJob) }));
+  expect(button("Link to PAY-231")).toBeUndefined();
+  expect(target.querySelector(".tf-rd-on")?.textContent?.trim()).toBe("On PAY-231");
+  expect(target.querySelector(".tf-rd-on .tf-key")?.textContent).toBe("PAY-231");
 });
 
 test("More opens a menu holding Copy link and Export as Markdown, closing on Esc, a pick or a click outside (#2082)", async () => {
@@ -1863,7 +2061,7 @@ async function sendComment(words: string) {
 }
 
 async function createPage(title: string, words: string) {
-  button("New page here")!.click();
+  button("New page here…")!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, title);
@@ -2115,8 +2313,7 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
   const sync = syncEvents();
   const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), listen: sync.listen });
   await draw(["confluence:2"], io);
-  search("ledger");
-  await settle();
+  await searchOnPage("ledger");
   // A space picked after the search started narrows it, and the re-read keeps the pick.
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
   select.value = "confluence/OPS";
@@ -2132,7 +2329,8 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
 
   await sync.ended();
   expect(io.docsTree).toHaveBeenCalledTimes(2);
-  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  // The opening read, the one on coming back to the page from the search's address, and this one.
+  expect(io.docsPage).toHaveBeenCalledTimes(3);
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
   expect(searched()).toBe("ledger");
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
@@ -2140,7 +2338,7 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
   // A re-read is not a visit: the page was opened once.
-  expect(io.visitEntity).toHaveBeenCalledTimes(1);
+  expect(io.visitEntity).toHaveBeenCalledTimes(2);
 });
 
 test("a sync run's re-read of the open page keeps the find bar on the match the reader stepped to (#2072)", async () => {
@@ -2150,6 +2348,7 @@ test("a sync run's re-read of the open page keeps the find bar on the match the 
   search("ledger");
   await settle();
   target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  shown!.rest = ["confluence:2"];
   await settle();
   const bar = () => target.querySelector(".tf-findbar")!;
   expect(bar().textContent).toContain("1 of 2");
@@ -2372,8 +2571,7 @@ test("the refresh event's re-read keeps the picked space, the search, an open se
   const io = ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => HITS), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 44 })), listen: sync.listen });
   await draw(["confluence:2"], io);
   await sendComment("Done.");
-  search("ledger");
-  await settle();
+  await searchOnPage("ledger");
   // A space picked after the search started narrows it, and the re-read keeps the pick.
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
   select.value = "confluence/OPS";
@@ -2388,14 +2586,15 @@ test("the refresh event's re-read keeps the picked space, the search, an open se
 
   await sync.refreshed("confluence:2", 44);
   expect(io.docsTree).toHaveBeenCalledTimes(2);
-  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  // The opening read, the one on coming back to the page from the search's address, and this one.
+  expect(io.docsPage).toHaveBeenCalledTimes(3);
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
   expect(searched()).toBe("ledger");
   expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
   expect(vi.mocked(io.docsSearch).mock.calls.length).toBe(searches);
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
-  expect(io.visitEntity).toHaveBeenCalledTimes(1);
+  expect(io.visitEntity).toHaveBeenCalledTimes(2);
 });
 
 // ---- Refresh on a Docs page (#2136) ----
@@ -2422,8 +2621,7 @@ test("Refresh ends the header actions, reads the page from its source, then the 
   expect(getEntity).toHaveBeenCalledWith("confluence:2");
   expect(actions().at(-1)).toBe("Refresh");
 
-  search("ledger");
-  await settle();
+  await searchOnPage("ledger");
   // A space picked after the search started narrows it, and the re-read keeps the pick.
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
   select.value = "confluence/OPS";
@@ -2440,8 +2638,9 @@ test("Refresh ends the header actions, reads the page from its source, then the 
   await settle();
   expect(r.refreshed).toEqual(["confluence:2"]);
   expect(io.docsTree).toHaveBeenCalledTimes(2);
-  expect(io.docsPage).toHaveBeenCalledTimes(2);
-  expect(getEntity).toHaveBeenCalledTimes(2);
+  // The opening read, the one on coming back to the page from the search's address, and this one.
+  expect(io.docsPage).toHaveBeenCalledTimes(3);
+  expect(getEntity).toHaveBeenCalledTimes(3);
   expect(refreshButton()?.textContent).toBe("Refresh");
   expect(target.querySelector("h1")?.textContent).toBe(RICH.title);
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("confluence/OPS");
@@ -2450,7 +2649,7 @@ test("Refresh ends the header actions, reads the page from its source, then the 
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")?.value).toBe("Half typed");
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
   // A refresh is not a visit.
-  expect(io.visitEntity).toHaveBeenCalledTimes(1);
+  expect(io.visitEntity).toHaveBeenCalledTimes(2);
 });
 
 test("the page is drawn while a refresh is out, and the button says Refreshing… (#2136)", async () => {

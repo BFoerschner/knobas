@@ -18,6 +18,7 @@
   or refused save opens the editor with it.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import type { DocBlock, DocSection } from "../../ipc/entity";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -106,6 +107,15 @@
   function focus(node: HTMLTextAreaElement) {
     node.focus();
   }
+
+  /** An inline editor closes first on `Esc` (the return contract), and focus goes back to what opened it. */
+  function oneditkey(event: KeyboardEvent, number: number) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    editing = null;
+    void tick().then(() => document.getElementById(`s-${number}`)?.querySelector<HTMLElement>(".tf-tools button")?.focus());
+  }
 </script>
 
 {#each sectionsOf(blocks) as section (section.number)}
@@ -131,7 +141,7 @@
       </h2>
       {#if editing === section.number}
         <div class="tf-sec-edit">
-          <textarea bind:value={draft} aria-label="Section text" use:focus></textarea>
+          <textarea bind:value={draft} aria-label="Section text" use:focus onkeydown={(event) => oneditkey(event, section.number)}></textarea>
           <div class="tf-acts">
             <span class="tf-dim">Text, lists and panels. Saved to {sourceName} through the write queue.</span>
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>

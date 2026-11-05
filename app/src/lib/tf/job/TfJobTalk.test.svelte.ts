@@ -546,7 +546,7 @@ test("Link to… opens a dialog over the drawer that says the link stays in knob
   [...target.querySelectorAll<HTMLButtonElement>(".tf-dacts button")].find((b) => squash(b) === "Link to…")!.click();
   flushSync();
   const dialog = target.querySelector("[role='dialog']")!;
-  expect(squash(dialog.querySelector("h2"))).toBe("Link PAY-231 to…");
+  expect(squash(dialog.querySelector("h2"))).toBe("Link PAY-231");
   expect(squash(dialog)).toContain("Links stay in knobas and are never written to a source.");
   expect(layers.open.map((layer) => layer.kind)).toEqual(["drawer", "dialog"]);
   // `Esc` closes the dialog first and leaves the drawer open.

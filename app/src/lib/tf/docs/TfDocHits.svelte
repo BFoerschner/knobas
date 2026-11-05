@@ -3,8 +3,9 @@
   line, then each page with its title in the reading face, its space (when
   searching all) and path, the snippet with its section or commenter, and
   the match count, editor and time. The open page's hit has the bar. With no
-  hit, the AND rule, and *Search all spaces* in one space. Kept to the job's
-  pages (#863), the header line offers *Search all pages* instead.
+  hit, the AND rule, and *Search all spaces* in one space, unless the main column
+  says so itself (`answered`). Kept to the job's pages (#863), the header line
+  offers *Search all pages* instead.
 
   Every string is source text; the matches are the backend's segments.
 -->
@@ -12,7 +13,7 @@
   import type { DocsHits } from "../../ipc/entity";
   import TfMarked from "./TfMarked.svelte";
   import { clockLabel } from "../../time/format";
-  import { hitLine, hitsLine, pageHash, snippetLabel, stem } from "./docs";
+  import { hitLine, hitsLine, hitWhere, pageHash, snippetLabel, stem } from "./docs";
 
   let {
     found,
@@ -20,6 +21,7 @@
     scope,
     kept,
     me,
+    answered = false,
     onall,
     onpick,
   }: {
@@ -33,6 +35,8 @@
      */
     kept: "space" | "job" | null;
     me: string[];
+    /** The main column says no page matches, so the rail does not say it again. */
+    answered?: boolean;
     /** Widen the search: to every space, or from the job's pages to all pages. */
     onall: () => void;
     /** A hit is opened: the reader keeps the query. */
@@ -42,8 +46,8 @@
   const stems = $derived(found.needles.map(stem));
 </script>
 
-<div class="tf-dl-meta">
-  {hitsLine(found.total, scope, found.took_ms)}{#if kept === "space"}. <button type="button" class="tf-linkish" onclick={onall}
+<div class="tf-dl-meta" title="The search took {Math.max(1, found.took_ms)} ms">
+  {hitsLine(found.total, scope)}{#if kept === "space"}. <button type="button" class="tf-linkish" onclick={onall}
       >Search all spaces</button>{:else if kept === "job"}. <button type="button" class="tf-linkish" onclick={onall}
       >Search all pages</button>{/if}
 </div>
@@ -58,7 +62,7 @@
     <span class="tf-t"
       ><TfMarked text={hit.title} {stems} /></span
     >
-    <span class="tf-pth">{kept !== "space" && hit.space ? `${hit.space.key} › ` : ""}{hit.path ?? "top level"}</span>
+    <span class="tf-pth">{hitWhere(hit, kept !== "space")}</span>
     <span class="tf-sn"
       >{#if label}<b>{label}</b>{" "}{/if}{#each hit.snippet.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark
           >{:else}{seg.text}{/if}{/each}</span
@@ -66,8 +70,10 @@
     <span class="tf-n">{hitLine(hit, me, (iso) => clockLabel(iso))}</span>
   </a>
 {:else}
-  <p class="tf-dl-note">
-    No page matches. Every word has to appear in the page or its comments.{#if kept === "space"}
-      <button type="button" class="tf-linkish" onclick={onall}>Search all spaces</button>{/if}
-  </p>
+  {#if !answered}
+    <p class="tf-dl-note">
+      No page matches. Every word has to appear in the page or its comments.{#if kept === "space"}
+        <button type="button" class="tf-linkish" onclick={onall}>Search all spaces</button>{/if}
+    </p>
+  {/if}
 {/each}

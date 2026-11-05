@@ -164,6 +164,10 @@
 /* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */
 .tf-syncnow { align-self: flex-start; }
 
+/* The view's *Sync now* where a reader's header has no room for it: an item of *More*, not a button. */
+.tf-rd-more .tf-menu button.tf-syncnow { display: flex; width: 100%; height: auto; min-height: 0; justify-content: flex-start; border: 0; background: none; box-shadow: none; padding: 6px 10px; border-radius: 4px; font-weight: 400; }
+.tf-rd-more .tf-menu button.tf-syncnow:hover { background: var(--sheet-2); }
+
 /* A fold's mark: one drawn chevron, so it is the same size and weight in every list. */
 :is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts) > summary::before, .tf-rd-linked summary::before, .tf-rd-tree details > summary::before, .tf-logv details > summary::before, .tf-arow > .tf-fold::before {
   content: ""; display: inline-block; flex: none; width: 6px; height: 6px; margin: 0 6px 1px 2px; color: var(--ink-2);

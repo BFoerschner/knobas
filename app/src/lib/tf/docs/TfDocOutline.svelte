@@ -2,8 +2,8 @@
   The page's outline, *On this page* (#861, R-10.15 as amended by #2078): it
   follows the scrolling and counts the find bar's matches per section (#860).
 
-  On a wide window it is the page's right column, sticking while the page
-  scrolls (the margin). Below 1240px (`folded`) it is a fold between the
+  Where the sheet has the room it is the page's right column, sticking while the
+  page scrolls (the margin). Otherwise (`folded`, `readerFit`) it is a fold between the
   meta line and the first section, closed, its summary counting the
   sections and, while the find bar is open, the matches in them, a badge
   drawn only above zero (#2081).

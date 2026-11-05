@@ -9,12 +9,14 @@
 
   *Under* is asked `refused_writes` as it changes (#2053): a parent whose
   space the source's credential may not add pages to draws *Create page*
-  disabled with the reason.
+  disabled with the reason. With no title *Create page* is disabled, and the line beside it says so (design system,
+  the enabled rule).
 -->
 <script lang="ts">
   import type { DocsTree, NewPage } from "../../ipc/entity";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import type { Layers } from "../layers.svelte";
+  import TfKey from "../TfKey.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { firstPage, spaceId } from "./docs";
 
@@ -102,7 +104,7 @@
       <span>Space</span>
       <select aria-label="Space" bind:value={picked}>
         {#each tree.spaces as s (spaceId(s))}
-          <option value={spaceId(s)}>{s.key} {s.name ?? ""}</option>
+          <option value={spaceId(s)}>{s.name ?? s.key}</option>
         {/each}
       </select>
       <span>Under</span>
@@ -111,23 +113,24 @@
           <option value={p.entity_id}>{label(p.entity_id)}</option>
         {/each}
       </select>
-      <span>Title</span>
-      <input type="text" aria-label="Title" placeholder="Title" bind:value={title} />
+      <span>Title (needed)</span>
+      <input type="text" aria-label="Title" bind:value={title} />
       {#if job !== null}
-        <span></span>
-        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link it to {job}</label>
+        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> <span>Link it to <TfKey value={job} /></span></label>
       {/if}
+      <span>Text</span>
+      <textarea
+        class="tf-np-text"
+        rows="8"
+        aria-label="Page text"
+        placeholder="Write in plain text. ## starts a section, - starts a list."
+        bind:value={text}
+      ></textarea>
     </div>
-    <textarea
-      class="tf-np-text"
-      rows="8"
-      aria-label="Page text"
-      placeholder="Write in plain text. ## starts a section, - starts a list."
-      bind:value={text}
-    ></textarea>
     <p class="tf-dlg-note">Created in {sourceName} through the write queue. Tables and macros need {sourceName} for now.</p>
   {/snippet}
   {#snippet footer()}
+    {#if title.trim() === ""}<span class="tf-dlg-note tf-np-why">Give the page a title.</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       type="button"

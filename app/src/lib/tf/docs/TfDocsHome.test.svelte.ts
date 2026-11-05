@@ -2,7 +2,7 @@
  * The Docs home (Björn, 2026-11-05): what `#/docs` draws from the tree read,
  * and its first-read, failed and empty states.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DocsTree } from "../../ipc/entity";
@@ -93,9 +93,15 @@ test("each space is a tile: its one link is its name, which opens the space, and
   draw({ tree: TREE });
   const tiles = [...target.querySelectorAll(".tf-dh-space")];
   expect(tiles.map((tile) => tile.querySelector("h3")?.textContent)).toEqual(["Operations", "Engineering"]);
-  expect(tiles[0]!.querySelector("h3 a")?.getAttribute("href")).toBe("#/docs/space/OPS");
-  // Four of Engineering's five top pages.
+  const head = tiles[0]!.querySelector("header a")!;
+  expect(head.getAttribute("href")).toBe("#/docs/space/OPS");
+  // The head row is the link: the name, the whole count and a chevron.
+  expect(head.querySelector("h3")?.textContent).toBe("Operations");
+  expect(head.querySelector(".tf-count")?.textContent).toBe("2");
+  expect(head.querySelector(".tf-chev")).not.toBeNull();
+  // Four of Engineering's top pages, none of them one For you holds.
   expect(tiles[1]!.querySelectorAll(".tf-dh-row")).toHaveLength(4);
+  expect(tiles[1]!.textContent).not.toContain("Top 1");
   expect(tiles[1]!.querySelector("h3 .tf-dh-more")).toBeNull();
   expect(tiles[1]!.querySelectorAll("a[href^='#/docs/space']")).toHaveLength(1);
 });
@@ -112,8 +118,8 @@ test("the job's pages have a list of their own, first while This job is on", () 
   draw({ tree: TREE, job: "PAY-231", groups });
   const body = target.querySelector(".tf-dh-body")!;
   const job = section("Pages on PAY-231")!;
-  // The job is the heading, and a space goes by its name.
-  expect(job.textContent).toContain("Operations");
+  // The job is the heading, and only another reason is said.
+  expect(job.textContent).toContain("OPS");
   expect(job.textContent).not.toContain("Linked to PAY-231");
   expect(body.firstElementChild).not.toBe(job);
   void unmount(view!);
@@ -155,4 +161,54 @@ test("an empty tree with a wiki source says it has not synced", () => {
   const empty = target.querySelector(".tf-empty")!;
   expect(empty.textContent).toContain("No pages have synced yet");
   expect(empty.querySelector("a")).toBeNull();
+});
+
+test("a page is listed once: a tile skips what the panels hold and keeps its whole count, and says so when that is all of it", () => {
+  const tree: DocsTree = {
+    spaces: [{ source_id: "confluence", key: "S", name: "S", pages: [{ entity_id: "confluence:s1", title: "Only page", parent: null }] }],
+    last_read: "confluence:s1",
+    for_you: [],
+  };
+  draw({ tree });
+  const tile = target.querySelector(".tf-dh-space")!;
+  expect(tile.querySelectorAll(".tf-dh-row")).toHaveLength(0);
+  expect(tile.textContent).toContain("Its top pages are listed above.");
+  expect(tile.querySelector(".tf-count")?.textContent).toBe("1");
+  expect(tile.textContent).not.toContain("No pages yet");
+});
+
+test("the job's badge counts the job's pages whole, and says what another panel holds", () => {
+  const groups = [
+    {
+      reason: "Linked to PAY-231",
+      pages: [
+        { entity_id: "confluence:2", title: "On-call handbook", where: "Operations › Ops home" },
+        { entity_id: "confluence:e3", title: "Top 3", where: "Engineering" },
+      ],
+    },
+  ];
+  draw({ tree: TREE, job: "PAY-231", groups });
+  const job = section("Pages on PAY-231")!;
+  expect(job.querySelector(".tf-count")?.textContent).toBe("2");
+  expect(job.querySelector(".tf-dh-also")?.textContent).toBe("1 listed above");
+  expect([...job.querySelectorAll(".tf-dh-row .tf-dh-t")].map((row) => row.textContent)).toEqual(["Top 3"]);
+  expect(section("Continue reading")?.textContent).toContain("on this job");
+});
+
+test("an empty tree has one Sync now, under its sentence, and none in the header", () => {
+  sourceRoles.take([{ id: "confluence", display_name: "Confluence", roles: [{ role: WIKI }], role_misses: [], enabled: true }] as never);
+  const sync = createRawSnippet(() => ({ render: () => `<button type="button" class="tf-btn tf-syncnow">Sync now</button>` }));
+  view = mount(TfDocsHome, { target, props: { onretry: () => {}, tree: { spaces: [], last_read: null, for_you: [] }, sync } });
+  flushSync();
+  expect(target.querySelectorAll(".tf-syncnow")).toHaveLength(1);
+  expect(target.querySelector(".tf-empty .tf-syncnow")).not.toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-syncnow")).toBeNull();
+});
+
+test("a search's empty answer sits above the home's lists", () => {
+  const notice = createRawSnippet(() => ({ render: () => `<div class="tf-dh-answer">No page matches</div>` }));
+  view = mount(TfDocsHome, { target, props: { onretry: () => {}, tree: TREE, notice } });
+  flushSync();
+  const answer = target.querySelector(".tf-dh-answer")!;
+  expect(answer.nextElementSibling?.classList.contains("tf-dh-body")).toBe(true);
 });

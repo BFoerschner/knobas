@@ -10,7 +10,7 @@ import { brotliDecompressSync } from "node:zlib";
 
 import { expect, test } from "vitest";
 
-import { EMBED_FRAME_BORDER, READER_DRAWER, READER_NARROW } from "./docs/docs";
+import { EMBED_FRAME_BORDER, OUTLINE_ROOM, READER_DRAWER } from "./docs/docs";
 
 const APP = process.cwd();
 /**
@@ -337,12 +337,12 @@ test("the Docs reader: tree and page, the outline the page's sticky right column
   const outline = block(code, ".tf-rd-outline");
   expect(outline).toMatch(/position:\s*sticky/);
   expect(outline).toMatch(/top:\s*0/);
-  // The band the component reads through `matchMedia` is the stylesheet's own.
-  const at = code.indexOf(`@media ${READER_NARROW} {`);
-  expect(at, `no rule band for ${READER_NARROW}`).toBeGreaterThan(-1);
-  const band = code.slice(at, code.indexOf("\n}", at));
-  expect(band).toMatch(/\.tf-rd-sheet\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
-  // The tree narrows at the shell's own 1240px breakpoint, later than the outline folds.
+  // The outline folds by the sheet's own width (`readerFit`), and no window width in the stylesheet decides it.
+  expect(block(code, ".tf-rd-sheet")).toContain("column-gap: 56px");
+  expect(OUTLINE_ROOM).toBe(268 + 56);
+  expect(block(code, ".tf-rd-sheet.tf-rd-solo")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\)\s*;/);
+  expect(code).not.toMatch(/@media \(max-width: 13\d\dpx\) \{\s*\.tf-rd-sheet/);
+  // The tree narrows at the shell's own 1240px breakpoint.
   const rail = code.indexOf("@media (max-width: 1240px) {\n  .tf-rd {");
   expect(rail, "no 1240px band for the tree").toBeGreaterThan(-1);
   expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
