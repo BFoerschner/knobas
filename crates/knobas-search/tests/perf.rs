@@ -1342,7 +1342,7 @@ enum UnderAnswer {
 /// a query scoped to such names alone skips the statement, which would read
 /// the whole mirror to say nothing, and names them as left out
 /// (`under::left_out_tokens`, #2488). The three empty shapes are here to gate
-/// that path, `only commits beneath` at its costly end, a name 10,000 commits
+/// that path, `only commits beneath` at its costly end, a name 5,000 commits
 /// carry. A second, empty Gitea source is configured so the probe pays its
 /// worst case, two sources on one adapter (#642).
 #[tokio::test]

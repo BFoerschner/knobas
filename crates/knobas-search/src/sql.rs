@@ -1051,7 +1051,7 @@ pub struct ParentPositions {
 ///
 /// Both questions are `exists`, so the server stops at the first row that
 /// answers one, where the `in (select ...)` this replaced listed every row a
-/// name has first -- 32 ms for a name 10,000 commits carry -- and where the
+/// name has first -- 32 ms for a name 5,000 commits carry -- and where the
 /// launcher's statement, asked whether it admits a row, read the whole
 /// mirror to say nothing (#2495). The values are compared in SQL on both
 /// sides, as `PARENTS_SQL` is, so a value Rust and the server lower-case
