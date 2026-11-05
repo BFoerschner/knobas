@@ -77,25 +77,24 @@
 //! scan between them, whatever their number.
 //!
 //! Measured on the 100,000-row fixture with a third of it unauthored, through the
-//! plan cache, on a shared machine at load 8 to 9, p50 ms:
+//! plan cache, on a shared machine at load 6 to 8, p50 ms:
 //!
 //! | query | grouped read alone | one `limit 1` per source | walk, then grouped |
 //! |---|---:|---:|---:|
-//! | `under:`, no kind scope | 62 | 28 | **0.6** |
-//! | `author:`, no kind scope | 62 | 28 | **43** |
-//! | `author:` and `kind:ticket` | 40 | 28 | **17** |
-//! | a kind one source has | 17 | 67 | **3.4** |
-//! | a kind nothing has | 0.2 | 103 | **0.7** |
-//! | every kind left out | 20 | 99 | **19** |
+//! | `under:`, no kind scope | 32 | 0.1 | **0.5** |
+//! | `author:`, no kind scope | 32 | 17 | **23** |
+//! | `author:` and `kind:ticket` | 34 | 19 | **6** |
+//! | a kind one source has | 12 | 47 | **3** |
+//! | a kind nothing has | 0.2 | 73 | **0.7** |
+//! | every kind left out | 16 | 74 | **16** |
 //!
 //! The third column is why this is not simply a `limit 1`. It reads each source
-//! down its index to the first row in scope and costs next to nothing when that
-//! row is near, but a kind scope that a source cannot meet walks all of it: `asset:
-//! under:x` went from 0.2 ms to 103 ms, since a generic plan cannot use the kind
-//! index behind `cardinality($2) = 0 or kind = any($2)`. So the walk has a budget
-//! and the grouped read stays as what a source falls back to, which keeps the cost
-//! of any query at the last column's walk plus at most what the grouped read cost
-//! before.
+//! down its index to the first row in scope, which costs next to nothing when that
+//! row is near, but a kind scope a source cannot meet walks all of it. `asset:
+//! under:x` went from 0.2 ms to 73 ms, because a generic plan cannot use the kind
+//! index behind `cardinality($2) = 0 or kind = any($2)`. So the walk has a budget,
+//! and the grouped read stays as what a source falls back to. No row of the table
+//! costs more than half a millisecond over the grouped read alone.
 //!
 //! `sync.item` is cheaper than `sync.live_item` for that read and is **not** used:
 //! half of the statement's cost is the tombstone join, and dropping it would let an
@@ -187,7 +186,7 @@ select s.id as source_id,
 /// **`$4` is the sources already known to be in the corpus**, for which only an
 /// authored row can change anything. It is what makes the source this module
 /// exists for cheap: a TeamCity that names nobody passes no row out of the scan, so
-/// the join to the entities has nothing to do, 22 ms against 45 at the benchmark's
+/// the join to the entities has nothing to do, 23 ms against 43 at the benchmark's
 /// 100,000 items. A source it does not name passes every row in scope, since the
 /// corpus question is still open. A known source has a row here only if it is
 /// authored, so its `authored` is true whenever it appears, and [`report`] keeps
@@ -245,9 +244,10 @@ select i.source_id                            as source_id,
 ///   an equality the planner drops the sort, since a column equated to the
 ///   outer row is already in order, sees a table scan start as fast as an index
 ///   scan under `limit 1` because it expects a row soon, and takes it once it
-///   has statistics. A source with no child row then reads the table whole, and
-///   past one source's dominance it reads `sync.item` and every item's parents:
-///   784 ms at two rows an item, 1.4 s at ten (#2500). A range cannot be dropped
+///   has statistics. A source with no child row then reads the table whole, 16 ms
+///   per keystroke at two rows an item. Where one source holds nearly all the
+///   child rows the plan moves to `sync.item` and reads every item's parents,
+///   750 ms at two rows an item and 1.3 s at ten (#2500). A range cannot be dropped
 ///   from the sort, a scan has to read everything before a sort gives its first
 ///   row, and so no estimate makes the scan look fast.
 ///   `tests/it/coverage_plans.rs` holds the plan in every state that moved it.

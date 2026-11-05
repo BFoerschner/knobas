@@ -5,8 +5,9 @@
 //! table looks the same to those tests. Under `limit 1` the planner expects a
 //! row soon, so a scan can look cheap, and a source with no row in its scope
 //! reads all of it. On the benchmark's 100,000 items that was 4.6 ms for three
-//! quiet sources, and at two parent rows an item the plan moved to `sync.item`
-//! and read every item's parents: 784 ms on every `under:` keystroke.
+//! quiet sources, and at two parent rows an item, with one source holding them, the
+//! plan moved to `sync.item` and read every item's parents: 750 ms on every
+//! `under:` keystroke.
 //!
 //! So the plans are read in every state that moved them: `sync.item_parent`
 //! never analyzed, as a fresh sync leaves it, analyzed, and analyzed at the
