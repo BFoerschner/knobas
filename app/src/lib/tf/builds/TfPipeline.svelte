@@ -52,7 +52,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { runHash, runTone, shortTime } from "./builds";
+  import { runHash, runTone, shortTime, stateWord } from "./builds";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
@@ -657,14 +657,14 @@
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
-                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : run.state.text}</span>{/if}
+                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : stateWord(run.state.text)}</span>{/if}
               </td>
               <td class="tf-mono tf-run-br"
                 >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
                     class="tf-chip tf-jobchip-sm">{job}</span
                   >{/if}</td
               >
-              <td class="tf-dim tf-run-trig"><Marked text={triggerLabel(run)} typed={filter.text} /></td>
+              <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-run-tests"
                 >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{run.tests
                     .passed} passed{#if run.tests.ignored > 0}, {run.tests.ignored} ignored{/if}{/if}</td

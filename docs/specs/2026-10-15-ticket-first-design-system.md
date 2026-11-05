@@ -12,7 +12,7 @@ knobas is a work tool for one developer who has a dozen tools open behind it. Th
 
 Rules that follow from that:
 
-- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
+- **Yellow means the ticket you are on: its page card, its card and row on the Tickets board and list, and the running timer. Nothing else gets yellow. Selection is an outline.** On the board and list the chosen job's card and row are yellow whether or not they are selected; the selected card or row carries a two-pixel ink outline (`--card-ink` on the yellow, with a second ring in `--ink` in dark, where `--card-ink` melts into the page), and the selected card keeps the lift (spec #2396, #2398). Highlights use `--mark`, which is a paler yellow and only appears behind matched search text.
 - **The yellow card is a light surface in both themes.** Its dots and chips take the light tone values, so a failing build reads on it in dark too: dark's `--warn` is the card's own yellow and its `--err` is pink on it. Every yellow card (the ticket page's, the Tickets board's card and the list's row) re-declares the five tones and their tints at their light values (`job.css`), so the blocked chip and every dot follow without a rule of their own (spec #2396, #2400).
 - **The width axis does the shouting, not colour or size.** Big figures (the job key, counts, durations) use Archivo at width 62 and weight 800. Page titles use width 85. Body text stays at the normal width.
 - **Tones carry state, and only state.** `ok`, `warn`, `err`, `info` and `muted` belong to the shell. Adapters never choose a colour. A source says "failed" and the shell draws it.
@@ -213,7 +213,7 @@ The design width is 1440 × 900. Every view works from 1100 px. There are two br
 
 The top bar's nav keeps its width above 1240 px while the search box gives up its own, so no entry slides out of view. From 1240 px down the search is its icon and the nav tightens; Inbox and Monitors keep their counts because a count is a state to act on, and only Proposed links' waits.
 
-The status bar names at most two healthy sources; past that they are one line that keeps the oldest age, and its title and Settings › Sources keep every reading. When room runs out the healthy line goes first, then a failure's words. A failure's fix and the write queue never shrink.
+The status bar names at most two healthy sources; past that they are one line that keeps the oldest age and says how many need a look, and its title and Settings › Sources keep every reading. The line only takes the width the rest leave: its age drops out of sight before anything is cut, below 900 px it goes when a failure is showing, and a failure gives up words only when there is nothing else to give. A failure's fix and the write queue never shrink.
 
 A section's own page has no breadcrumb bar: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
 

@@ -1,7 +1,7 @@
 /* ---------- Tickets (#810): views, the ticket board or list, the preview ---------- */
 /* One row bounded by the page, never sized by its content: an `auto` row made any text
    change in the preview re-lay out the whole list table (perf audit after #2200). */
-.tf-tickets { display: grid; grid-template-columns: 240px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
+.tf-tickets { display: grid; grid-template-columns: 230px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .tf-views { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-vlist { overflow: auto; padding: 12px 10px 14px; flex: 1; }
 .tf-views h2 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 8px 4px; }
@@ -17,12 +17,17 @@
 .tf-board-head .tf-acts { align-items: center; }
 .tf-board-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .tf-lane { padding: 14px 22px; }
+/* One band fills the pane and scrolls inside itself, so the sideways scrollbar and the column heads stay on screen. */
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; padding-bottom: 14px; }
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3 { position: sticky; top: 0; z-index: 1; background: var(--paper); margin-bottom: 0; padding-bottom: 8px; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
 .tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 6px 0 8px; }
-.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(196px, 1fr); gap: 12px; align-items: start; overflow-x: auto; }
+/* 192 px: a card's first line fits, and at 1440 px the fifth column shows, so the board says there is more. */
+.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(192px, 1fr); gap: 12px; align-items: start; overflow-x: auto; }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
-.tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 6px; background: var(--sheet-2); border-radius: 6px; }
+.tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 5px; background: var(--sheet-2); border-radius: 6px; }
 .tf-nothing { font-size: var(--t-sm); padding: 6px; }
 .tf-more {
   border: 1px dashed var(--rule); background: none; border-radius: 4px; padding: 5px; cursor: pointer;
@@ -31,7 +36,7 @@
 .tf-more:hover { border-color: var(--ink-2); color: var(--ink); }
 .tf-tcard {
   display: block; width: 100%; text-align: left; background: var(--sheet); border: 1px solid var(--rule);
-  border-radius: 6px; padding: 8px 10px; cursor: pointer;
+  border-radius: 6px; padding: 8px 9px; cursor: pointer;
 }
 .tf-tcard:hover { border-color: var(--ink-2); }
 /* Yellow is the chosen job's card, selected or not (spec #2396, #2398). The selected card carries a two-pixel ink
@@ -39,11 +44,11 @@
    the focus ring never replaces it. */
 .tf-tcard.tf-card { border-color: var(--card-2); }
 .tf-tcard.tf-sel { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
-.tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), var(--shadow); }
+.tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), 0 0 0 4px var(--sel-halo), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
 /* A card's first line never wraps: the key holds its width, and what follows it gives up first. */
 .tf-thead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; flex: 0 1 auto; min-width: 7ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; flex: 0 1 auto; min-width: 7ch; max-width: 66%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-tkind { font-size: var(--t-xs); flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The source, when another source holds the same key (#1476): a line of its own, or it splits the first. */
 .tf-tsrc { display: block; font-size: var(--t-xs); margin-top: 1px; }
@@ -76,13 +81,19 @@
 /* The selected row's outline, two pixels inside each edge of the row: its cells draw it, as a row cannot. */
 .tf-row.tf-sel td { --tf-sel-ink: var(--ink); box-shadow: inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-row.tf-card.tf-sel td { --tf-sel-ink: var(--card-ink); }
+.tf-row.tf-card.tf-sel { outline: 2px solid var(--sel-halo); outline-offset: -1px; }
 .tf-row.tf-sel td:first-child { box-shadow: inset 2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 .tf-row.tf-sel td:last-child { box-shadow: inset -2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 /* A row's second line is words, even under a key: only a code value is mono. */
 .tf-tbl .tf-sub { display: block; font-family: var(--sans); font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
 /* A long key gives up its end, not the summary's room; its title has the whole of it. */
-.tf-tbl .tf-keycell { max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
-.tf-sigs .tf-signal { white-space: nowrap; }
+.tf-tbl .tf-keycell { max-width: 130px; overflow: hidden; text-overflow: ellipsis; }
+/* The summary is the column you read: it takes what the others leave. */
+.tf-tbl .tf-c-summary { width: 100%; min-width: 150px; }
+.tf-list { container-type: inline-size; }
+/* A narrow pane keeps the columns you scan by; the preview beside it has the priority and the assignee. */
+@container (max-width: 760px) { .tf-tbl :is(.tf-c-priority, .tf-c-assignee) { display: none; } }
+@container (max-width: 600px) { .tf-tbl .tf-c-signals { display: none; } }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }
 .tf-preview {
@@ -95,7 +106,8 @@
 .tf-preview p { color: var(--ink-2); }
 /* The description is what the pane is for: full ink, on the pane's own left edge. */
 .tf-preview p.tf-desc { white-space: pre-line; color: var(--ink); }
-.tf-preview .tf-desc .tf-md { padding: 0; font-size: var(--t-md); line-height: 1.5; }
+.tf-preview .tf-desc .tf-md { padding: 0; font-size: var(--t-md); line-height: 1.5; color: var(--ink); }
+.tf-preview .tf-desc .tf-md p { color: inherit; }
 .tf-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 14px; font-size: var(--t-sm); margin: 0; }
 .tf-facts dt { color: var(--ink-2); }
 .tf-facts dd { margin: 0; }
@@ -113,7 +125,7 @@
 .tf-go .tf-btn { justify-content: center; }
 .tf-go small { color: var(--ink-2); text-align: center; }
 @media (max-width: 1240px) {
-  .tf-tickets { grid-template-columns: 240px minmax(0, 1fr); }
+  .tf-tickets { grid-template-columns: 200px minmax(0, 1fr); }
   .tf-tickets .tf-preview { display: none; }
 }
 @media (max-width: 900px) {

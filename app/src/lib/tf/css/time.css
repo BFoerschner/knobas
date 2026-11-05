@@ -1,7 +1,7 @@
 /* ---------- time: the Day tab (#827) ----------
    The strip is SVG, so its geometry is attributes rather than inline style.
    Yellow (--card) is the running timer's block alone. */
-.tf-tm-wrap { padding: 16px 22px 40px; max-width: 1240px; }
+.tf-tm-wrap { padding: 16px 22px 40px; }
 .tf-tm-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
 .tf-tm-nav h2 { font-size: var(--t-xl); margin: 0 6px; font-weight: 700; }
 .tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -56,7 +56,8 @@
   overflow: hidden;
 }
 .tf-tm-row {
-  display: grid; grid-template-columns: 150px minmax(0, 1fr) 120px auto; gap: 12px; align-items: center;
+  /* Fixed, not `auto`: each row is its own grid, so an `auto` column put every row's chip somewhere else. */
+  display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px 300px; gap: 12px; align-items: center;
   padding: 10px 14px; border-bottom: 1px solid var(--rule-2); cursor: pointer;
 }
 .tf-tm-row:last-child { border-bottom: 0; }

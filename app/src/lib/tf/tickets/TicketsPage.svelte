@@ -137,7 +137,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -807,11 +807,11 @@
             <tr>
               {#each listColumns as [column, label] (column)}
                 {#if sortable(column)}
-                  <th aria-sort={showing.sort.column === column ? showing.sort.direction : undefined}
+                  <th class="tf-c-{column}" aria-sort={showing.sort.column === column ? showing.sort.direction : undefined}
                     ><button type="button" onclick={() => sortBy(column)}>{label}</button></th
                   >
                 {:else}
-                  <th>{label}</th>
+                  <th class="tf-c-{column}">{label}</th>
                 {/if}
               {/each}
             </tr>
@@ -836,10 +836,10 @@
                   {#if column === "key"}
                     {@const source = sourceOf(card)}
                     <td class="tf-mono tf-nowrap tf-keycell" title={card.key}
-                      ><Marked text={card.key} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
+                      ><Marked text={shortKey(card.key)} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
                     >
                   {:else if column === "summary"}
-                    <td
+                    <td class="tf-c-summary"
                       ><Marked text={card.title} {needles} />{#if card.path}<span class="tf-sub"
                           >{card.path}</span
                         >{/if}</td
@@ -847,11 +847,11 @@
                   {:else if column === "status"}
                     <td class="tf-nowrap">{columnName(card.status)}</td>
                   {:else if column === "priority"}
-                    <td>{sentenceCase(card.priority) ?? ""}</td>
+                    <td class="tf-c-priority">{sentenceCase(card.priority) ?? ""}</td>
                   {:else if column === "signals"}
-                    <td><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
+                    <td class="tf-c-signals"><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                   {:else if column === "assignee"}
-                    <td>{card.assignee ?? "Unassigned"}</td>
+                    <td class="tf-c-assignee">{card.assignee ?? "Unassigned"}</td>
                   {:else if column === "updated"}
                     <td class="tf-dim tf-nowrap">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}

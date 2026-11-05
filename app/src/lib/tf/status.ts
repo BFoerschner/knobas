@@ -70,29 +70,33 @@ export function sourceReadings(
       return { id: source.id, text: `${name} unreachable, synced ${ago(run.last_finished_at, now)}`, tone: "warn", syncedAt, fix: null };
     }
     const verb = index === 0 ? " synced" : "";
-    return { id: source.id, text: `${name}${verb} ${ago(run.last_finished_at, now)}`, tone: "ok", syncedAt, fix: null };
+    const synced = `${name}${verb} ${ago(run.last_finished_at, now)}`;
+    // A good credential that left part of the source out (#2374): amber here as on its Settings row, so the two agree.
+    if (state?.state === "ok" && state.detail) return { id: source.id, text: `${synced}, ${state.detail}`, tone: "warn", syncedAt, fix: null };
+    return { id: source.id, text: synced, tone: "ok", syncedAt, fix: null };
   });
 }
 
 /**
  * The healthy readings as one line, past the two the bar has room to name:
  * *5 sources synced, oldest 4 min ago, 1 syncing*. The oldest sync is the one
- * age worth keeping, because it says whether anything has gone stale. `null`
+ * age worth keeping, because it says whether anything has gone stale. `text`
+ * is the part that has to fit and `rest` what may drop out of sight. `null`
  * for two or fewer, which the bar names one by one.
  */
-export function healthyRollup(healthy: readonly SourceReading[], now: Date = new Date()): { text: string; tone: ReadingTone } | null {
+export function healthyRollup(healthy: readonly SourceReading[], now: Date = new Date()): { text: string; rest: string | null; tone: ReadingTone } | null {
   if (healthy.length <= 2) return null;
   const having = (tone: ReadingTone) => healthy.filter((reading) => reading.tone === tone);
   const synced = having("ok");
   const oldest = synced.map((reading) => reading.syncedAt).filter((at) => at !== null).sort()[0];
   const lines = [
-    synced.length === 1 ? `1 source synced ${ago(oldest, now)}` : synced.length > 1 ? `${synced.length} sources synced, oldest ${ago(oldest, now)}` : null,
-    having("info").length > 0 ? `${having("info").length} syncing` : null,
-    having("warn").length > 0 ? `${having("warn").length} unreachable` : null,
-    having("muted").length > 0 ? `${having("muted").length} not synced yet` : null,
+    ...(synced.length === 1 ? [`1 source synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} sources synced`, `oldest ${ago(oldest, now)}`] : []),
+    ...(having("info").length > 0 ? [`${having("info").length} syncing`] : []),
+    ...(having("warn").length > 0 ? [`${having("warn").length} need${having("warn").length === 1 ? "s" : ""} a look`] : []),
+    ...(having("muted").length > 0 ? [`${having("muted").length} not synced yet`] : []),
   ];
   const tone: ReadingTone = having("warn").length > 0 ? "warn" : having("info").length > 0 ? "info" : synced.length > 0 ? "ok" : "muted";
-  return { text: lines.filter((line) => line !== null).join(", "), tone };
+  return { text: lines[0]!, rest: lines.length > 1 ? lines.slice(1).join(", ") : null, tone };
 }
 
 /** *3 queued writes*, *1 queued write*, *No queued writes*. */

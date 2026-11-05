@@ -3,6 +3,8 @@ import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
+  sentenceCase,
+  shortKey,
   aroundLines,
   boardLanes,
   columnDone,
@@ -282,4 +284,16 @@ test("a key two sources hold is shared, and every ticket opens at its source's a
   expect(ticketAddress(mock)).toBe("#/ticket/mock%3APAY-231");
   // A key one source holds names its source too.
   expect(ticketAddress(card(7))).toBe("#/ticket/jira%3APAY-7");
+});
+
+test("a forge's long key keeps its repository and number; other keys stay whole", () => {
+  expect(shortKey("tidewater/payout-service/issues/143")).toBe("payout-service#143");
+  expect(shortKey("tidewater/ledger#12")).toBe("ledger#12");
+  expect(shortKey("PAY-231")).toBe("PAY-231");
+});
+
+test("a source's lower-case word reads as a label, and a written one stays as it is", () => {
+  expect(sentenceCase("closed")).toBe("Closed");
+  expect(sentenceCase("In Progress")).toBe("In Progress");
+  expect(sentenceCase(null)).toBeNull();
 });

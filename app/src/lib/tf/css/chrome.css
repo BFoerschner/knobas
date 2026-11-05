@@ -14,11 +14,10 @@
 .tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
 .tf-count {
   font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
-  background: var(--muted-bg); color: var(--ink-2); font-variant-numeric: tabular-nums;
+  /* `--rule` shows on paper, sheet and card in both themes, and `--ink-2` on it passes 4.5:1. */
+  background: var(--rule); color: var(--ink-2); font-variant-numeric: tabular-nums;
 }
 .tf-count.tf-err { background: var(--err-bg); color: var(--err); }
-/* On the page's paper `--muted-bg` is 1.01:1 in light, so a count there is a bare number in one theme and a pill in the other. */
-:is(.tf-tabs, .tf-wtabs, .tf-col h3, .tf-lane > h2) .tf-count:not(.tf-err):not(.tf-warn):not(.tf-info) { background: var(--rule); }
 .tf-spacer { flex: 1; }
 .tf-search {
   display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--field);
@@ -73,11 +72,13 @@
 .tf-status .tf-bad::before { background: var(--err); align-self: center; }
 /*
   Pinned (#1410): the queue always keeps its width. Past two healthy sources the run is one rollup line; the
-  run's title and Settings › Sources keep every reading. It gives up width first, then a failure's words,
-  and a failure's fix never shrinks, so the way out of a failure stays on screen.
+  run's title and Settings › Sources keep every reading. The run only takes what the rest leave, and its
+  second span wraps out of sight before it is cut, so it reads "5 sources synced" and not "5 sources synced, o…".
+  A failure gives up words only when the run has none left, and its fix never shrinks.
 */
 .tf-status > * { flex: none; }
-.tf-status > .tf-healthy { flex: 0 1000 auto; min-width: 0; display: flex; flex-wrap: wrap; column-gap: 16px; height: 1.45em; overflow: hidden; }
+.tf-status > .tf-healthy { flex: 1 1 0; max-width: max-content; min-width: 0; display: flex; flex-wrap: wrap; height: 1.45em; overflow: hidden; }
+.tf-status .tf-read + .tf-read { margin-left: 16px; }
 .tf-status > .tf-bad { display: inline-flex; align-items: baseline; flex: 0 1 auto; min-width: 0; }
 .tf-status .tf-bad-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .tf-status .tf-healthy > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
@@ -107,10 +108,12 @@
 .tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
 .tf-crumbs .tf-sep { color: var(--ink-2); }
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
-/* The title block gives up width first, so the actions stay on the title line (Controls, *Header*). */
-.tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px 20px; align-items: flex-start; }
-.tf-fhead > :first-child { flex: 1 1 0; min-width: 280px; }
-.tf-fhead > .tf-acts { flex: 0 1 auto; justify-content: flex-end; }
+/* Row one is the title and the actions (Controls, *Header*). The rest of the title block runs the full width under
+   them, so a long subline is never squeezed into what the buttons leave. */
+.tf-fhead { padding: 16px 22px 12px; display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 0 20px; align-items: start; }
+.tf-fhead > div:first-child:not(.tf-board-title):has(> h1) { display: contents; }
+.tf-fhead > div:first-child:not(.tf-board-title):has(> h1) > :not(h1) { grid-column: 1 / -1; }
+.tf-fhead > .tf-acts { grid-column: 2; grid-row: 1; justify-content: flex-end; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
@@ -118,6 +121,13 @@
 .tf-fhead .tf-sub { color: var(--ink-2); font-size: var(--t-sm); }
 /* A role view's *Sync now* (#2106): the last of its header's actions (#2238), at its own height, not stretched to the row. */
 .tf-syncnow { align-self: flex-start; }
+
+/* A fold's mark: one drawn chevron, so it is the same size and weight in every list. */
+:is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse) > summary::before, .tf-rd-linked summary::before, .tf-rd-tree details > summary::before {
+  content: ""; display: inline-block; flex: none; width: 6px; height: 6px; margin: 0 6px 1px 2px; color: var(--ink-2);
+  border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg);
+}
+:is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse)[open] > summary::before, .tf-rd-linked details[open] > summary::before, .tf-rd-tree details[open] > summary::before { transform: rotate(45deg); }
 
 /* An empty state: centred, says what would fill it, offers the action. */
 .tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }

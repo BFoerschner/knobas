@@ -42,7 +42,7 @@
   <a class="tf-sources" href="#/settings">Sources</a>
   {#if healthy.length > 0}
     <span class="tf-healthy" title={healthy.map((reading) => reading.text).join(" · ")}>
-      {#if rollup !== null}<span class={`tf-read tf-${rollup.tone}`}>{rollup.text}</span>
+      {#if rollup !== null}<span class={`tf-read tf-${rollup.tone}`}>{rollup.text}</span>{#if rollup.rest !== null}<span>, {rollup.rest}</span>{/if}
       {:else}{#each healthy as reading (reading.id)}<span class={`tf-read tf-${reading.tone}`}>{reading.text}</span>{/each}{/if}
     </span>
   {/if}

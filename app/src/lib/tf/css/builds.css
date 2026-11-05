@@ -2,7 +2,6 @@
 .tf-bhead { padding-bottom: 8px; }
 .tf-bhead .tf-sub { max-width: 80ch; }
 .tf-bhead .tf-sub a { color: inherit; }
-.tf-bhead .tf-sub .tf-mono { white-space: nowrap; }
 .tf-bstale { margin: 0 22px 10px; }
 .tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
 .tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
@@ -20,8 +19,13 @@
 .tf-legend i.tf-run-run { background: var(--info); }
 .tf-facts2 { display: flex; gap: 22px; font-size: var(--t-sm); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .tf-facts2 b { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+/* The runs' toolbar is the table's own head: on the table's edges, and no inset of its own. */
 .tf-runbar { padding: 8px 22px 0; }
-.tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 14px 0 6px; }
+.tf-runbar .tf-fbar { position: static; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; }
+.tf-runbar .tf-fsearch { flex-basis: 200px; }
+/* A day's heading belongs to the rows under it: the larger space is above. */
+.tf .tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 18px 0 6px; }
+.tf .tf-runs .tf-dayh:first-child { margin-top: 14px; }
 .tf-runs .tf-run-dur { width: 150px; }
 .tf-runs .tf-run-at { width: 110px; }
 .tf-runs .tf-run-acts { width: 150px; text-align: right; }
@@ -127,8 +131,6 @@
   padding: 6px 14px; display: flex; gap: 6px; align-items: center;
 }
 .tf-pl-fold > summary::-webkit-details-marker { display: none; }
-.tf-pl-fold > summary::before { content: "▸"; font-size: var(--t-2xs); width: 10px; }
-.tf-pl-fold[open] > summary::before { content: "▾"; }
 .tf-pl-fold > summary .tf-chip { font-size: var(--t-2xs); }
 /* The indent, 14px a level as prototype-6's `padding-left:14+depth*14`, as classes (no inline styles). */
 .tf-pl .tf-d1 { padding-left: 28px; } .tf-pl .tf-d2 { padding-left: 42px; } .tf-pl .tf-d3 { padding-left: 56px; }
@@ -147,6 +149,17 @@
 .tf-runs .tf-run-trig { width: 170px; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
+/* Past the rail's 1240 px the run table sheds what it can: the duration keeps its figure and drops its bar. */
+@media (max-width: 1240px) {
+  .tf-bv { grid-template-columns: 260px minmax(0, 1fr); }
+  .tf-runs .tf-run-no { width: 130px; }
+  .tf-runs .tf-run-trig { width: 92px; }
+  .tf-runs .tf-run-tests { width: 136px; }
+  .tf-runs .tf-run-dur { width: 70px; }
+  .tf-runs .tf-run-at { width: 92px; }
+  .tf-runs .tf-run-acts { width: 136px; }
+  .tf-durbar { display: none; }
+}
 @media (max-width: 900px) {
   .tf-bv { grid-template-columns: 1fr; height: auto; }
   .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }

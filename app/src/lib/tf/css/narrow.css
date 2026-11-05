@@ -7,8 +7,9 @@
   .tf-spacer { display: none; }
   .tf-timer-key { display: none; }
   .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
-  .tf-fhead { flex-wrap: wrap; }
-  .tf-fhead > .tf-acts { justify-content: flex-start; margin-left: 0; }
+  .tf-fhead { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .tf-fhead > .tf-acts { grid-column: 1; grid-row: auto; justify-content: flex-start; margin-left: 0; }
+  .tf-status:has(.tf-bad) > .tf-healthy { display: none; }
   .tf-tm-row { grid-template-columns: minmax(0, 1fr) auto; }
   .tf-tm-acts { grid-column: 1 / -1; justify-content: flex-start; }
   .tf-jobkey { font-size: var(--t-d2); }
@@ -33,6 +34,7 @@
   .tf-nav a { padding: 6px 6px; gap: 4px; }
   .tf-nav .tf-count { padding: 0 5px; }
   .tf-nav a[href="#/review"] .tf-count { display: none; }
+  .tf-tm-row { grid-template-columns: 120px minmax(0, 1fr) 100px 280px; }
 }
 @media (max-width: 1240px) {
   .tf-grid { grid-template-columns: minmax(0, 1fr); }

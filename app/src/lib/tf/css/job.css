@@ -210,6 +210,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 .tf-minif svg { width: 12px; height: 12px; flex: none; }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
+/* The ring is the wrapper's: a second one on the input would draw a ring inside a ring. */
+.tf .tf-minif input:focus-visible { outline: none; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
 /* Builds' stale-data warning, with its fix (R-4.7). */
 .tf-stale {

@@ -41,6 +41,15 @@ export function columnName(status: string | null): string {
 }
 
 /**
+ * A key as a card can hold it: a forge's `owner/repo/issues/143` or `owner/repo#143` is told apart by its repository
+ * and number, which an end-of-line ellipsis would cut. Every other key is short already.
+ */
+export function shortKey(key: string): string {
+  const issue = /^[^/\s]+\/([^/\s]+)\/issues\/(\d+)$/.exec(key) ?? /^[^/\s]+\/([^/\s#]+)#(\d+)$/.exec(key);
+  return issue === null ? key : `${issue[1]}#${issue[2]}`;
+}
+
+/**
  * A source's word as a label: Gitea says *closed* and *high* where Jira says *Done* and *High*, and the shell's
  * labels are sentence case. Only the first letter moves, so *In Progress* stays as its source wrote it.
  */

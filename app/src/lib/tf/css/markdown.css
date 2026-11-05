@@ -13,7 +13,7 @@
 .tf-md li + li { margin-top: 3px; }
 /* A task item's box, here and in a Docs page's task list (spec #2432): a picture of the state, never a control. */
 /* Markdown's item is running text beside a box: a flex row would make each inline run a column of its own and split `( AC04 is final)`. */
-.tf-md li.tf-task { list-style: none; margin-left: -20px; padding-left: 21px; position: relative; }
+.tf-md li.tf-task { list-style: none; margin-left: -24px; padding-left: 21px; position: relative; }
 .tf-doc li.tf-task { list-style: none; margin-left: -20px; display: flex; gap: 8px; align-items: baseline; }
 .tf-doc li.tf-task > div { min-width: 0; flex: 1; }
 .tf-md .tf-box, .tf-doc .tf-box { width: 13px; height: 13px; border: 1.5px solid var(--ink-2); border-radius: 3px; display: inline-grid; place-items: center; flex: none; transform: translateY(2px); font-size: 10px; line-height: 1; }

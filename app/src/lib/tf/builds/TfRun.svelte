@@ -55,7 +55,7 @@
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
-  import { pipelineHash, runTone } from "./builds";
+  import { pipelineHash, runTone, stateWord } from "./builds";
   import {
     chipTone,
     defaultBranch,
@@ -370,7 +370,7 @@
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
   function chipWord(r: RunRow): string {
-    return r.finished === null ? resultWord(r) : (r.state?.text ?? "");
+    return r.finished === null ? resultWord(r) : stateWord(r.state?.text ?? "");
   }
 
   // -- the writes ---------------------------------------------------------------

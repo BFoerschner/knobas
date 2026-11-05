@@ -7,6 +7,8 @@
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
   --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
+  /* What rings the selected yellow card on a dark board, where `--card-ink` melts into the page. */
+  --sel-halo: transparent;
   --sans: "Archivo Variable", system-ui, sans-serif;
   --serif: "Source Serif 4 Variable", Georgia, serif;
   --mono: "JetBrains Mono", ui-monospace, monospace;
@@ -30,6 +32,7 @@
     --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
     --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
     --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+    --sel-halo: var(--ink);
     --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
     color-scheme: dark;
   }
@@ -42,6 +45,7 @@
   --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
   --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+  --sel-halo: var(--ink);
   --hl-kw: #C79BF2; --hl-ty: #F0A274; --add-word: #2C6243; --del-word: #6E3333;
   color-scheme: dark;
 }
@@ -53,7 +57,9 @@ html, body { height: 100%; overflow: hidden; background: var(--paper); color: va
 /* Archivo's word space is narrow: at 11 to 15 px words run together, so the interface opens it a little. */
 body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; }
 /* Code keeps its columns, and the reading face its own fit. */
-:is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-doc, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input) { letter-spacing: normal; word-spacing: normal; }
+:is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
+/* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. */
+:is(span, a).tf-mono { white-space: nowrap; }
 /* A placeholder is text: `--muted` is the lightest grey that passes on every field fill (4.5:1). */
 ::placeholder { color: var(--muted); opacity: 1; }
 /* A browser resets a form control's spacing to `normal`, so a control has to ask for the interface's. */

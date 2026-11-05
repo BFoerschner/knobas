@@ -348,7 +348,7 @@
   });
   const prConfig = $derived<FilterConfig>({
     id: "code-prs",
-    placeholder: "Filter pull requests by title, repo, author or number",
+    placeholder: "Filter by title, repo, author or number",
     noun: "pull requests",
     one: "pull request",
     scopes,
@@ -491,7 +491,9 @@
             {@const fact = known.get(row.entity_id)}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach repoWin.row(row.entity_id)}>
               <td
-                ><a class="tf-mono" href={itemHash(row)}><Marked text={row.title} typed={repoFilter.text} /></a
+                ><a class="tf-mono" href={itemHash(row)}
+                  ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></span
+                  ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></a
                 >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
               >
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>

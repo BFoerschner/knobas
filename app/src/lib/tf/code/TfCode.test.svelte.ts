@@ -209,7 +209,7 @@ test("Pull requests are grouped in the attention read's order, then merged or cl
     ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "open", "", "2026-08-10"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter pull requests by title, repo, author or number",
+    "Filter by title, repo, author or number",
   );
   const attention = reads.find((filter) => filter.order === "attention");
   expect(attention?.kinds).toEqual(["pr"]);

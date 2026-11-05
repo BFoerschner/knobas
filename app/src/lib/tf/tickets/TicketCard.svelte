@@ -18,7 +18,7 @@
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
   import Signals from "./Signals.svelte";
-  import { commentsLine, epicLine, initials, sentenceCase } from "./tickets";
+  import { commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
 
   let {
     card,
@@ -64,7 +64,7 @@
   ondblclick={onopen}
 >
   <span class="tf-thead">
-    <span class="tf-k" title={card.key}><Marked text={card.key} {needles} /></span>
+    <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>
     {#if kind && shows("type")}<span class="tf-dim tf-tkind" title={kind}>{kind}</span>{/if}
   </span>
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}

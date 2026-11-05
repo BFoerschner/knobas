@@ -3,7 +3,7 @@
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
 .tf-dl-head select {
-  font: 600 var(--t-md) var(--sans); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px;
+  font: 500 var(--t-sm) var(--sans); height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px;
   background: var(--field); color: var(--ink); width: 100%;
 }
 .tf-dl-body { overflow: auto; flex: 1; padding: 6px 0 12px; }
@@ -20,8 +20,6 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree details > summary::-webkit-details-marker { display: none; }
-.tf-rd-tree details > summary::before { content: "▸ "; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-rd-tree details[open] > summary::before { content: "▾ "; }
 .tf-rd-tree details > summary:hover { background: var(--sheet-2); }
 .tf-rd-tree details > summary.tf-cur { background: var(--ink); color: var(--sheet); }
 .tf-rd-tree details > summary.tf-cur::before { color: inherit; }
@@ -51,7 +49,7 @@
 .tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
 /* The reader's header (#2286): the title and, on its line, `.tf-acts` (the canonical header's, in dialogs.css),
    inside the sheet's own padding. The meta line under it closes the head with the rule. */
-.tf-fhead.tf-rd-head { padding: 0; margin: 8px 0 10px; flex-wrap: wrap; }
+.tf-fhead.tf-rd-head { display: flex; gap: 12px 20px; align-items: flex-start; padding: 0; margin: 8px 0 10px; flex-wrap: wrap; }
 .tf-fhead.tf-rd-head > .tf-acts { justify-content: flex-start; margin-left: 0; }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
@@ -112,8 +110,6 @@
 .tf-collapse { margin: 0 0 18px; border: 1px solid var(--rule); border-radius: 6px; }
 .tf-collapse > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); padding: 0 12px; font-family: var(--sans); font-size: var(--t-lg); font-weight: 600; }
 .tf-collapse > summary::-webkit-details-marker { display: none; }
-.tf-collapse > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-collapse[open] > summary::before { content: "▾"; }
 .tf-collapse > div { padding: 4px 14px 0 30px; }
 .tf-collapse > div > :last-child { margin-bottom: 14px; }
 .tf-macro {
@@ -217,8 +213,6 @@
   font-size: var(--t-sm); font-weight: 600;
 }
 .tf-rd-fold > summary::-webkit-details-marker { display: none; }
-.tf-rd-fold > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-rd-fold[open] > summary::before { content: "▾"; }
 .tf-rd-fold > summary .tf-hits { margin-left: 0; }
 .tf-rd-fold .tf-toc { padding: 0 12px 10px; }
 /* The page foot (#2080): Work it belongs to, then Linked from, one closed fold per space. */
@@ -236,8 +230,6 @@
   border-radius: 3px; font-size: var(--t-xs);
 }
 .tf-rd-linked summary::-webkit-details-marker { display: none; }
-.tf-rd-linked summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-rd-linked details[open] > summary::before { content: "▾"; }
 .tf-rd-linked summary:hover { background: var(--sheet-2); }
 .tf-rd-linked summary b { color: var(--ink); font-weight: 600; }
 .tf-rd-linked details + details { margin-top: 2px; }

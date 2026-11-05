@@ -390,7 +390,7 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
-const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar"];
+const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
@@ -507,7 +507,7 @@ test("on the Tickets board and list, yellow is the chosen job's card and row, an
 
   // The outline is a ring, not `outline`, so the focus ring (`.tf :focus-visible`) never replaces it.
   expect(block(code, ".tf-tcard.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--ink\), var\(--shadow\);/);
-  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), var\(--shadow\);/);
+  expect(block(code, ".tf-tcard.tf-card.tf-sel")).toMatch(/box-shadow:\s*0 0 0 2px var\(--card-ink\), 0 0 0 4px var\(--sel-halo\), var\(--shadow\);/);
   expect(block(code, ".tf-tcard.tf-card")).not.toContain("box-shadow");
   // A row's outline is drawn inside its cells, two pixels on each edge of the row; on the yellow row, in its ink.
   expect(block(code, ".tf-row.tf-sel td")).toMatch(/--tf-sel-ink:\s*var\(--ink\);[^}]*box-shadow:\s*inset 0 2px 0 var\(--tf-sel-ink\), inset 0 -2px 0 var\(--tf-sel-ink\);/);

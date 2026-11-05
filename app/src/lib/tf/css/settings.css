@@ -47,7 +47,7 @@
   margin-top: 14px; overflow: hidden;
 }
 .tf-stg-src {
-  display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) 150px auto; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: auto minmax(0, 1fr) 76px minmax(0, 1.4fr) auto; gap: 12px; align-items: center;
   padding: 12px 14px; border-bottom: 1px solid var(--rule-2); text-decoration: none; color: var(--ink);
 }
 .tf-stg-src:last-child { border-bottom: 0; }

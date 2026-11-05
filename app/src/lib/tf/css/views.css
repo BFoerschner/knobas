@@ -1,11 +1,12 @@
 /* ---------- ticket views (#812): the views pane, its menus, and *New view* ---------- */
 .tf-vfind { padding: 12px 10px 6px; }
 .tf-vfind input {
-  width: 100%; border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 5px 8px; color: var(--ink);
+  width: 100%; height: var(--control-h-sm); border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 0 8px; color: var(--ink);
 }
 .tf-vfind + .tf-vlist { padding-top: 4px; }
 .tf-vw-row { position: relative; }
-.tf-views .tf-vw-row a { padding-right: 30px; }
+/* The row's `…` draws over its count on hover, so the name keeps the room and every count ends on one edge. */
+.tf-vw-row:is(:hover, :focus-within):has(.tf-vw-more) .tf-count { visibility: hidden; }
 .tf-vw-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-vw-row .tf-vw-menu { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); }
 .tf-vw-more {

@@ -654,7 +654,7 @@
     {#if entries.length > 0}
       <table class="tf-tbl tf-mon">
         <thead>
-          <tr><th>Monitor</th><th>State</th><th>Last 24 h</th><th>Response</th><th>30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
+          <tr><th>Monitor</th><th>State</th><th>Last 24 h</th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
         </thead>
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
