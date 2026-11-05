@@ -269,6 +269,64 @@ pub async fn prepare(pool: &PgPool) -> Result<(), SearchError> {
     Ok(())
 }
 
+/// How a statement reaches the planner: a statement sqlx prepares starts on
+/// custom plans, which see the values, and may settle on a generic one, which
+/// does not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlanCache {
+    Custom,
+    Generic,
+}
+
+impl PlanCache {
+    fn mode(self) -> &'static str {
+        match self {
+            Self::Custom => "force_custom_plan",
+            Self::Generic => "force_generic_plan",
+        }
+    }
+}
+
+/// The plan of the `under:` coverage probe over these sources.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+pub async fn under_coverage_plan(
+    pool: &PgPool,
+    ids: &[String],
+    cache: PlanCache,
+) -> Result<String, sqlx::Error> {
+    crate::sql::explain_prepared(
+        pool,
+        crate::coverage::UNDER_COVERAGE_SQL,
+        &[ids],
+        cache.mode(),
+    )
+    .await
+}
+
+/// The plan of the coverage probe's bounded walk over these sources.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+pub async fn newest_rows_plan(
+    pool: &PgPool,
+    ids: &[String],
+    kinds: &[String],
+    hidden: &[String],
+    cache: PlanCache,
+) -> Result<String, sqlx::Error> {
+    crate::sql::explain_prepared(
+        pool,
+        crate::coverage::NEWEST_ROWS_SQL,
+        &[ids, kinds, hidden],
+        cache.mode(),
+    )
+    .await
+}
+
 /// Register the three sources the corpus attributes rows to.
 ///
 /// Without these, `in:ji` resolves to nothing and `@me` has no identity, so two

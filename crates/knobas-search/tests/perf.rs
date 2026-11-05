@@ -1485,6 +1485,39 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
             worst = (name, timing.p90);
         }
     }
+    // #2500's row, so the budget sees the parent density a real corpus has: every
+    // kept row declares a parent, so two child rows an item, nearly all under one
+    // source, against the 13,334 above. Answered with `source_id = s.id`, the
+    // coverage probe read every item's parents here, 915 ms on every keystroke.
+    // Last, and cleared after, because it changes what later reads plan over.
+    let dense = sqlx::query(
+        "insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm, source_id)
+         select i.entity_id, 'gitea', 'dense-' || k || '-' || i.entity_id, 'repo', 'child', 'gitea'
+           from sync.item i cross join generate_series(1, 6) k
+          where i.source_id = 'gitea'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap()
+    .rows_affected();
+    sqlx::query("vacuum (analyze) sync.item_parent")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let name = "repo, dense parents";
+    let timing = timings(&searcher, "under:bench/repo-7", 10).await;
+    println!(
+        "{name:<20} {dense} more child rows  p50 {:>4} ms  p90 {:>4} ms  max {:>4} ms",
+        timing.p50, timing.p90, timing.max
+    );
+    if timing.p90 > worst.1 {
+        worst = (name, timing.p90);
+    }
+    sqlx::query("delete from sync.item_parent where name like 'dense-%'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
     println!("worst p90 under under: {} ms ({})", worst.1, worst.0);
     // After the loop, so one case over the budget does not hide the other
     // cases' figures or leave their shapes unchecked.

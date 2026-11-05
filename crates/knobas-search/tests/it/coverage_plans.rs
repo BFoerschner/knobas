@@ -1,0 +1,182 @@
+//! What the planner does with the coverage probes (#2497, #2500).
+//!
+//! The verdicts are pinned in `tests/coverage.rs` and `under_coverage.rs`. This
+//! pins the cost, without a clock: a probe that answers right and reads the
+//! table looks the same to those tests. Under `limit 1` the planner expects a
+//! row soon, so a scan can look cheap, and a source with no row in its scope
+//! reads all of it. On the benchmark's 100,000 items that was 4.6 ms for three
+//! quiet sources, and at two parent rows an item, with one source holding them, the
+//! plan moved to `sync.item` and read every item's parents: 750 ms on every
+//! `under:` keystroke.
+//!
+//! So the plans are read in every state that moved them: `sync.item_parent`
+//! never analyzed, as a fresh sync leaves it, analyzed, and analyzed at the
+//! density a real corpus has, through custom plans and a generic one. A few
+//! thousand rows are enough: the old statements fell into both traps at 3,000
+//! items, a `Seq Scan on item_parent` once analyzed and a `Seq Scan on item` at
+//! density, as they did at 100,000.
+
+use knobas_search::Searcher;
+use knobas_search::testing::{self, PlanCache, newest_rows_plan, under_coverage_plan};
+
+const ITEMS: i64 = 3_000;
+
+/// The benchmark's parents, in proportion: a Gitea source's commits and pull
+/// requests name a repository, and the other sources name nothing.
+async fn corpus_with_parents() -> sqlx::PgPool {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    testing::seed_sources(&pool).await.unwrap();
+    Searcher::declaring(pool.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap();
+    testing::seed_corpus(&pool, ITEMS).await.unwrap();
+    sqlx::query(
+        "update sync.item i
+            set payload = i.payload || jsonb_build_object('repository', jsonb_build_object(
+                  'name', 'repo-' || (i.payload->>'n')::int % 41,
+                  'full_name', 'bench/repo-' || (i.payload->>'n')::int % 41))
+          where i.source_id = 'gitea' and i.kind = 'commit'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    // A second Gitea with nothing synced: the source this is about.
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
+         values ('gitea-quiet', 'gitea', 'Quiet Gitea', 'http://x', 'Pat')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    testing::prepare(&pool).await.unwrap();
+    let (child_rows,): (i64,) = sqlx::query_as(
+        "select count(*) from sync.item_parent where arm = 'child' and source_id = 'gitea'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(
+        child_rows > 0,
+        "no Gitea row names a parent: the fixture moved"
+    );
+    pool
+}
+
+/// A child-arm row for every Gitea item, `per_item` of them each.
+async fn more_child_rows(pool: &sqlx::PgPool, per_item: i64) {
+    sqlx::query(
+        "insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm, source_id)
+         select i.entity_id, 'gitea', 'dense-' || k || '-' || i.entity_id, 'repo', 'child', 'gitea'
+           from sync.item i cross join generate_series(1, $1::bigint) k
+          where i.source_id = 'gitea'",
+    )
+    .bind(per_item)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// On the index, whichever way it is read, and with no table read whole. Over a
+/// few hundred child rows the planner can take a bitmap of the index, whose range
+/// is as empty for a quiet source.
+fn assert_stays_on(plan: &str, index: &str, state: &str) {
+    assert!(plan.contains(index), "{state}: not on {index}:\n{plan}");
+    for table in ["item_parent", "item ", "entity"] {
+        assert!(
+            !plan.contains(&format!("Seq Scan on {table}")),
+            "{state}: a scan of {table}, which a source with nothing in range reads whole:\n{plan}"
+        );
+    }
+}
+
+/// How many rows came off the index over all the loops. This is what the walk
+/// read, where a `Limit` above a filter would say only what got through it.
+fn rows_read_from(index: &str, plan: &str) -> f64 {
+    let line = plan
+        .lines()
+        .find(|line| line.contains(index))
+        .unwrap_or_else(|| panic!("no {index} in:\n{plan}"));
+    let figure = |name: &str| -> f64 {
+        line.split(name)
+            .nth(1)
+            .and_then(|rest| rest.split([' ', ')']).next())
+            .and_then(|n| n.parse().ok())
+            .unwrap_or_else(|| panic!("no {name} in {line}"))
+    };
+    figure("rows=") * figure("loops=")
+}
+
+/// One test and not two, because each step changes what the next one plans over.
+///
+/// A quiet source proves it names no parent from an empty range of the index,
+/// and the walk costs the same whatever a source holds and whatever the query
+/// asks: the source's newest rows and no more. The three kind scopes are the
+/// shapes whose custom plans differ, and a generic plan sees none of them.
+#[tokio::test]
+async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
+    let pool = corpus_with_parents().await;
+    let ids: Vec<String> = ["gitea", "gitea-quiet", "jira", "teamcity"]
+        .map(str::to_owned)
+        .to_vec();
+    let hidden = vec!["commit".to_owned()];
+
+    for state in [
+        "never analyzed",
+        "analyzed",
+        "two rows an item",
+        "ten rows an item",
+        "a source withdrawn whole",
+    ] {
+        match state {
+            "two rows an item" => more_child_rows(&pool, 6).await,
+            "ten rows an item" => more_child_rows(&pool, 24).await,
+            "a source withdrawn whole" => {
+                sqlx::query(
+                    "update knobas.entity set deleted_at = now()
+                      where id in (select entity_id from sync.item where source_id = 'jira')",
+                )
+                .execute(&pool)
+                .await
+                .unwrap();
+                testing::prepare(&pool).await.unwrap();
+            }
+            _ => {}
+        }
+        if state != "never analyzed" {
+            sqlx::query("analyze sync.item_parent")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        // Thousands of child rows under one source: a bitmap would read them all
+        // and sort them to give the first, so only the index's own order will do.
+        let dense = state.ends_with("an item");
+        for cache in [PlanCache::Custom, PlanCache::Generic] {
+            let plan = under_coverage_plan(&pool, &ids, cache).await.unwrap();
+            let at = format!("under:, {state}, {cache:?}");
+            assert_stays_on(&plan, "item_parent_child_idx", &at);
+            assert!(
+                !dense || !plan.contains("Bitmap Heap Scan on item_parent"),
+                "{at}: reads the source's whole range:\n{plan}"
+            );
+            for kinds in [
+                vec![],
+                vec!["ticket".to_owned()],
+                vec!["nothing".to_owned()],
+            ] {
+                let plan = newest_rows_plan(&pool, &ids, &kinds, &hidden, cache)
+                    .await
+                    .unwrap();
+                let at = format!("the walk, {kinds:?}, {state}, {cache:?}");
+                assert_stays_on(&plan, "item_source_updated_idx", &at);
+                // Three of the sources hold rows, and the fourth is quiet.
+                let read = rows_read_from("item_source_updated_idx", &plan);
+                assert!(
+                    read > 0.0 && read <= 3.0 * 64.0,
+                    "{at}: read {read} rows:\n{plan}"
+                );
+            }
+        }
+    }
+}
