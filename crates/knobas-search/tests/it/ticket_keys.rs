@@ -930,8 +930,9 @@ async fn a_word_inside_a_key_is_held_by_every_ticket_of_that_project() {
 
 /// The fixture cannot spell a word this file types (#2457): a key is matched
 /// by what it holds anywhere inside it, so a random `...JOB` once turned
-/// `sepa -job or job` into every ticket of the project. Every word this file
-/// types into the filter has a vowel, and no key has one.
+/// `sepa -job or job` into every ticket of the project. Every fixed word this
+/// file types into the filter has a vowel, and no key has one; a test that
+/// types a key types its own, which only its own rows hold.
 #[test]
 fn a_random_project_key_has_no_vowel() {
     for _ in 0..1000 {
