@@ -798,11 +798,19 @@ mod tests {
         );
         // A known source gains an author, and never loses one.
         assert_eq!(
-            take(vec![probe("known", false)], vec![probe("known", true)], true),
+            take(
+                vec![probe("known", false)],
+                vec![probe("known", true)],
+                true
+            ),
             (vec![probe("known", true)], open(&["unseen"]))
         );
         assert_eq!(
-            take(vec![probe("known", false)], vec![probe("known", false)], true),
+            take(
+                vec![probe("known", false)],
+                vec![probe("known", false)],
+                true
+            ),
             (vec![probe("known", false)], open(&["known", "unseen"]))
         );
     }

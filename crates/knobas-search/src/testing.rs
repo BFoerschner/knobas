@@ -362,8 +362,7 @@ pub async fn left_for_the_grouped_read(
     hidden: &[String],
     by_author: bool,
 ) -> Result<Vec<String>, SearchError> {
-    let (_, unsettled) =
-        crate::coverage::walk_sources(pool, ids, kinds, hidden, by_author).await?;
+    let (_, unsettled) = crate::coverage::walk_sources(pool, ids, kinds, hidden, by_author).await?;
     Ok(unsettled)
 }
 

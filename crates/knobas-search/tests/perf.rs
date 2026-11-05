@@ -1528,8 +1528,26 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     // keystroke, `under:` and `author:` alike.
     let under_its_commits = "gitea-under-its-commits";
     add_gitea(&pool, under_its_commits).await;
-    add_rows(&pool, under_its_commits, "commit", "c", 20_000, "-30 days", false).await;
-    add_rows(&pool, under_its_commits, "branch", "b", 300, "100 days", false).await;
+    add_rows(
+        &pool,
+        under_its_commits,
+        "commit",
+        "c",
+        20_000,
+        "-30 days",
+        false,
+    )
+    .await;
+    add_rows(
+        &pool,
+        under_its_commits,
+        "branch",
+        "b",
+        300,
+        "100 days",
+        false,
+    )
+    .await;
     add_rows(&pool, under_its_commits, "repo", "r", 30, "200 days", false).await;
     testing::prepare(&pool).await.unwrap();
     for (name, raw) in [

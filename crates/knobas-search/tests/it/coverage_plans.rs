@@ -69,15 +69,60 @@ async fn corpus_with_parents() -> sqlx::PgPool {
     .await
     .unwrap();
     a_gitea(&pool, UNDER_ITS_COMMITS).await;
-    rows_of(&pool, UNDER_ITS_COMMITS, "repo", "kept-repo", 3, "2 years", false).await;
-    rows_of(&pool, UNDER_ITS_COMMITS, "branch", "kept-branch", 20, "1 year", false).await;
-    rows_of(&pool, UNDER_ITS_COMMITS, "commit", "commit", 200, "-1 year", false).await;
+    rows_of(
+        &pool,
+        UNDER_ITS_COMMITS,
+        "repo",
+        "kept-repo",
+        3,
+        "2 years",
+        false,
+    )
+    .await;
+    rows_of(
+        &pool,
+        UNDER_ITS_COMMITS,
+        "branch",
+        "kept-branch",
+        20,
+        "1 year",
+        false,
+    )
+    .await;
+    rows_of(
+        &pool,
+        UNDER_ITS_COMMITS,
+        "commit",
+        "commit",
+        200,
+        "-1 year",
+        false,
+    )
+    .await;
     a_gitea(&pool, SWEPT).await;
-    rows_of(&pool, SWEPT, "commit", "gone", SWEPT_COMMITS, "3 years", true).await;
+    rows_of(
+        &pool,
+        SWEPT,
+        "commit",
+        "gone",
+        SWEPT_COMMITS,
+        "3 years",
+        true,
+    )
+    .await;
     rows_of(&pool, SWEPT, "branch", "live", 20, "1 year", false).await;
     a_gitea(&pool, SWEPT_LAST).await;
     rows_of(&pool, SWEPT_LAST, "branch", "live", 20, "1 year", false).await;
-    rows_of(&pool, SWEPT_LAST, "commit", "gone", SWEPT_COMMITS, "3 years", true).await;
+    rows_of(
+        &pool,
+        SWEPT_LAST,
+        "commit",
+        "gone",
+        SWEPT_COMMITS,
+        "3 years",
+        true,
+    )
+    .await;
     testing::prepare(&pool).await.unwrap();
     let (child_rows,): (i64,) = sqlx::query_as(
         "select count(*) from sync.item_parent where arm = 'child' and source_id = 'gitea'",
@@ -263,10 +308,9 @@ async fn a_probe_never_reads_a_table_to_prove_a_source_has_nothing() {
                 vec!["branch".to_owned()],
                 vec!["nothing".to_owned()],
             ] {
-                let plan =
-                    newest_of_each_kind_plan(&pool, &under_commits, &kinds, &hidden, cache)
-                        .await
-                        .unwrap();
+                let plan = newest_of_each_kind_plan(&pool, &under_commits, &kinds, &hidden, cache)
+                    .await
+                    .unwrap();
                 let at = format!("the look at each kind, {kinds:?}, {state}, {cache:?}");
                 assert_stays_on(&plan, "item_kind_updated_idx", &at);
                 // 64 rows for each of the seven kinds, and a row each to list them.
