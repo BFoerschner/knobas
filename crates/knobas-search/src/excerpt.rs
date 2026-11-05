@@ -140,7 +140,14 @@ fn quotes(excerpt: &Excerpt, stem: &[char]) -> bool {
         .segments
         .iter()
         .filter(|segment| segment.hit)
-        .any(|segment| segment.text.chars().map(lower).collect::<Vec<_>>().starts_with(stem))
+        .any(|segment| {
+            segment
+                .text
+                .chars()
+                .map(lower)
+                .collect::<Vec<_>>()
+                .starts_with(stem)
+        })
 }
 
 /// `Links to <title> in <space>` with the words marked in the title and the
