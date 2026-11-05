@@ -122,7 +122,9 @@
 .tf-sc-kind { margin-top: 18px; }
 .tf-sc-kind .tf-ext-h { margin-bottom: 8px; }
 .tf-sc-kind h3 { font-size: var(--t-md); margin: 0; font-weight: 700; }
-.tf-sc-board { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.tf-sc-board { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; }
+/* A note under a panel is apart from it. */
+.tf-sc-line { margin-top: 8px; }
 .tf-sc-col {
   display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-height: 72px; padding: 6px;
   border: 1px dashed var(--rule); border-radius: 4px; background: var(--sheet);

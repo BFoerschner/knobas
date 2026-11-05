@@ -476,13 +476,13 @@
           type="button"
           class="tf-btn"
           {...refusedAttrs(cannotRun)}
-          onclick={runAgain}>Run again with changes…</button
+          onclick={runAgain}>Run again<span class="tf-wide">{" "}with changes</span>…</button
         >
       {:else}
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
       {/if}
       {#if run.web_url !== null}
-        <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
+        <button type="button" class="tf-btn tf-ghost tf-shorten" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}>Open in<span class="tf-wide">{" "}{pipeline.source_name}</span></button>
       {/if}
       <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} />
     </div>

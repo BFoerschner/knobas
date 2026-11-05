@@ -129,7 +129,7 @@
                 >built in{BLURB[r.id] ? ` · ${BLURB[r.id]}` : ""}</span
               >{/if}</span
           >
-          {#if isDefault}{" "}<span class="tf-rsw-tag">DEFAULT FOR {opened.pattern ?? pattern}</span>{:else if command !== null}{" "}<span class="tf-rsw-tag">COMMAND</span>{/if}
+          {#if isDefault}{" "}<span class="tf-rsw-tag">Default for {opened.pattern ?? pattern}</span>{:else if command !== null}{" "}<span class="tf-rsw-tag">COMMAND</span>{/if}
         </button>
       {/each}
       <hr />

@@ -107,7 +107,11 @@
         <button type="button" class="tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">Unlink</button>
       </div>
     {:else}
-      <p class="tf-dnone">Nothing linked on the ticket itself.</p>
+      {#if text.trim() !== ""}
+        <p class="tf-dnone">No links match. <button type="button" class="tf-linkish" onclick={() => (text = "")}>Clear the filter</button></p>
+      {:else}
+        <p class="tf-dnone">Nothing linked on the ticket itself.</p>
+      {/if}
     {/each}
     {#each groups as group (group.key)}
       {@const rows = filterRows(group.rows, text)}

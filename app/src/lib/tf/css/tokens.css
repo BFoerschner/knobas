@@ -62,8 +62,11 @@ html, body { height: 100%; overflow: hidden; background: var(--paper); color: va
 body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; letter-spacing: .006em; word-spacing: .06em; accent-color: var(--ink); }
 /* Code keeps its columns, and the reading face its own fit. */
 :is(pre, code, kbd, .tf-mono, .tf-code, .tf-diff, .tf-logv, .tf-log, .tf-editor, .tf-item-log, .tf-sf-mono, .tf-pmono, .tf-k, .tf-p, .tf-pdir, .tf-flist, .tf-ftree, .tf-parg, .tf-combo input, .tf-step input, .tf-step select, .tf-dur input, .tf-jobk, .tf-tkkind, .tf-tm-b text, .tf-rd-title, .tf-doc :is(p, li, h1, h2, h3, h4, blockquote, td, th, dt, dd)) { letter-spacing: normal; word-spacing: normal; }
-/* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. */
+/* A key, branch or sha in a sentence is one word: it never breaks at its hyphen. It is told from the words by its
+   face, so it carries no underline until pointed at; a link made of words always does. */
 :is(span, a).tf-mono { white-space: nowrap; }
+.tf a.tf-mono { text-decoration: none; }
+.tf a.tf-mono:hover { text-decoration: underline; text-underline-offset: 2px; }
 /* A placeholder is text: `--muted` is the lightest grey that passes on every field fill (4.5:1). */
 ::placeholder { color: var(--muted); opacity: 1; }
 /* A browser resets a form control's spacing to `normal`, so a control has to ask for the interface's. */

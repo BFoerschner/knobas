@@ -7,7 +7,7 @@
 .tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
 /* Which source's ticket this is, when another source holds the same key (#1476). */
 .tf-jobcard .tf-jobsrc { font-size: var(--t-sm); margin: 6px 0 0; }
-.tf-jobcard .tf-jobsrc a { color: inherit; }
+.tf-jobcard .tf-jobsrc a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .tf-jobcard p { color: var(--card-ink-2); }
 .tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }
@@ -47,7 +47,7 @@
 .tf-ticketcard .tf-facts dt { color: var(--card-ink-2); }
 .tf-sheetcard .tf-facts dt { color: var(--ink-2); }
 .tf-ticketcard .tf-facts dd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.tf-ticketcard .tf-facts dd .tf-av { width: 20px; height: 20px; font-size: 9px; line-height: 1; }
+.tf-ticketcard .tf-facts dd .tf-av { width: 22px; height: 22px; line-height: 1; }
 .tf-ticketcard .tf-facts dd .tf-chip { font-size: var(--t-xs); line-height: 18px; padding: 0 7px; }
 .tf-ticketcard .tf-facts dd .tf-lab { line-height: 16px; }
 .tf-ticketcard .tf-facts .tf-av { background: rgba(0,0,0,.08); border-color: rgba(0,0,0,.2); color: var(--card-ink); }
@@ -110,13 +110,19 @@
 .tf-sheetcard .tf-tktable .tf-n, .tf-sheetcard .tf-tktable .tf-st, .tf-sheetcard .tf-tktable .tf-chev, .tf-sheetcard .tf-tknone { color: var(--ink-2); }
 .tf-sheetcard .tf-tktable .tf-st.tf-asks { color: var(--ink); }
 /* The one decision at the card's foot: the card's own ink, large. */
-.tf-ticketcard .tf-go { margin-top: auto; padding-top: 6px; }
+/* The one decision the card exists for stays on screen when a short window makes the card scroll. */
+.tf-ticketcard .tf-go { margin-top: auto; padding: 8px 0 18px; margin-bottom: -18px; position: sticky; bottom: -18px; background: var(--card); }
+.tf-sheetcard.tf-ticketcard .tf-go { background: var(--sheet); }
+/* On the yellow the scrollbar's thumb is the card's own, not a grey strip. */
+.tf-ticketcard.tf-card::-webkit-scrollbar-thumb { background: var(--card-2); }
 .tf-ticketcard .tf-go .tf-btn { background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+.tf-ticketcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--card-ink) 82%, var(--card)); background: var(--tf-hover); border-color: var(--tf-hover); }
 /* Two moods of one card: the yellow is for the ticket you are on (`tf-card`); a ticket you are reading sits on a sheet. */
 .tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
 .tf-sheetcard p { color: var(--ink-2); }
 .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
 .tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-sheetcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--ink) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 /* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the
    card at a reading width (Björn's call; the design system's left alignment stays everywhere else). */
 .tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
@@ -245,12 +251,14 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
 .tf-step.tf-st-failed .tf-num { border-color: var(--err); color: var(--err); }
 .tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-.tf-step input[readonly] { background: none; border-color: transparent; padding-left: 0; font-family: var(--sans); }
 .tf-step input, .tf-step select {
   font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--field); color: var(--ink);
   padding: 4px 8px; border-radius: 4px; width: 100%; max-width: 400px;
 }
-.tf-step select { max-width: 260px; }
+/* A step's select shows its choice whole, and a value you cannot edit reads as words. */
+.tf-step select { width: auto; max-width: 100%; }
+.tf-step input[readonly] { background: none; border-color: transparent; padding-left: 0; font-family: var(--sans); }
+.tf .tf-step input[aria-label="Open pull request"] { font-family: var(--sans); }
 .tf-step .tf-state { grid-row: 1 / span 2; grid-column: 3; font-size: var(--t-xs); }
 .tf-step .tf-swdetail { grid-column: 2; margin: 0; color: var(--ink-2); }
 /* The canonical footer (#2294): the note on the left, the primary on the right. */

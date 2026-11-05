@@ -53,6 +53,8 @@ export interface EscState {
   route: TfRoute;
   /** The page the current history entry was opened from, and its name, or `null` (`opener.ts`). */
   opener: EscTarget | null;
+  /** A ticket card's row opened this section's page, narrowed to that ticket (spec #2401). */
+  fromTicketRow?: boolean;
 }
 
 /** What one press does. */
@@ -82,16 +84,18 @@ export function escStep(state: EscState): EscStep {
     if (state.field.filter && state.field.text !== "") return { do: "clear-filter" };
     return { do: "blur" };
   }
-  const target = escTarget(state.route, state.opener);
+  const target = escTarget(state.route, state.opener, state.fromTicketRow);
   return target === null ? { do: "nothing" } : { do: "go", hash: target.hash, opened: target.opened };
 }
 
 /**
  * Rungs 5 to 8: where `Esc` goes from `route` once nothing is open, or `null`
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
+ * A section's top page does nothing, unless a ticket card's row opened it
+ * narrowed to that ticket (`fromTicketRow`, spec #2401): then it goes back.
  */
-export function escTarget(route: TfRoute, opener: EscTarget | null): EscTargetOf | null {
-  if (isTopPage(route)) return null;
+export function escTarget(route: TfRoute, opener: EscTarget | null, fromTicketRow = false): EscTargetOf | null {
+  if (isTopPage(route) && !(fromTicketRow && opener !== null)) return null;
   if (opener !== null) return { ...opener, opened: true };
   const parent = parentOf(route);
   return parent === null ? null : { hash: parent, name: placeName(parseTfHash(parent)), opened: false };

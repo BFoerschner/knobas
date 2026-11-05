@@ -970,7 +970,7 @@
           <div class="tf-dl-for">
             <h4>For you</h4>
             {#each forYou as item (item.entity_id)}
-              <a href={pageHash(item.entity_id)} aria-current={item.entity_id === current ? "true" : undefined}
+              <a href={pageHash(item.entity_id)}
                 >{item.title}<span class="tf-why">{forYouWhy(item)}</span></a
               >
             {/each}

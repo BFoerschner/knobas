@@ -380,7 +380,8 @@ test("the side rail: a failing required check is the first check, and readiness 
   expect(required.className).toBe("tf-prck tf-err");
   expect(required.querySelector(".tf-prwhy")!.textContent).toBe("ci/test failure");
   expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "JO jonas Changes requested"]);
-  expect(text(".tf-prconflicts")).toBe("Conflicts No conflicts with main.");
+  // Ready to merge says there are none, so no panel says it again.
+  expect(target.querySelector(".tf-prconflicts")).toBeNull();
 });
 
 test("the side rail says when the pull request conflicts with its base (#2278)", async () => {

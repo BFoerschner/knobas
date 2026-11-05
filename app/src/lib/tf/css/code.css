@@ -34,7 +34,6 @@
 .tf-bsel:has(select:disabled) { opacity: .55; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-rbar { margin-bottom: 12px; }
-.tf-rbar .tf-fbar { position: static; padding: 0; border: 0; background: none; }
 .tf-repo { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start; }
 /* The persistent tree (#2257, mockups/code-area `.tree`): a box that stays in view, its head fixed, its rows scrolling. */
 .tf-ftreebox {
@@ -47,9 +46,9 @@
 .tf-ftreebox > header .tf-gotofile { flex: 1; max-width: none; min-width: 0; height: var(--control-h-sm); }
 .tf-gotofile kbd { flex: none; }
 .tf-ftreebox > header .tf-iconbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.tf-ftree { overflow: auto; padding: 4px 0; font-size: var(--t-sm); }
+.tf-ftree { overflow: auto; padding: 4px 6px; font-size: var(--t-sm); }
 .tf-ftree a, .tf-ftree .tf-fdir, .tf-ftree .tf-fsub {
-  display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; text-align: left; padding: 0 10px; text-decoration: none;
+  display: flex; align-items: center; gap: 6px; width: 100%; height: 24px; text-align: left; padding: 0 6px; border-radius: 4px; text-decoration: none;
   font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; color: var(--ink);
 }
 .tf-ftree .tf-ficon { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--ink-2); stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
@@ -144,7 +143,9 @@
 .tf-diagram-scratch { position: fixed; left: -100000px; top: 0; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
 .tf-cgroup-h .tf-rc-who { font-weight: 400; }
 .tf-rcommits td.tf-rpick { width: 28px; padding-right: 0; }
-.tf-rcommits td:nth-child(2) { width: 110px; }
+/* The sha, in the repository's table and a pull request's: its own width, and the message takes the rest. */
+.tf-rcommits td.tf-mono { width: 110px; white-space: nowrap; }
+.tf-rcommits td.tf-nowrap { width: 1%; }
 .tf-rcommits td.tf-ropen { width: 1%; padding-top: 0; padding-bottom: 0; text-align: right; white-space: nowrap; }
 /* A commit picked for *Diff selected* (#2271). */
 .tf-rcommits tr.tf-picked td { background: var(--info-bg); }
@@ -179,6 +180,8 @@
 .tf-diff .tf-exp:hover { background: var(--sheet); }
 .tf-diff .tf-extra .tf-no { opacity: 0.7; }
 /* Word-level changes (#2267). */
+/* A token on a word highlight is ink: the syntax colours miss 4.5:1 on these tints. */
+.tf-diff .tf-wd [class*="tf-hl-"] { color: var(--ink); }
 .tf-diff .tf-add .tf-wd { background: var(--add-word); border-radius: 2px; }
 .tf-diff .tf-del .tf-wd { background: var(--del-word); border-radius: 2px; }
 /* Collapse, badges, and what a file draws in place of its lines (#2268, #2269). */
@@ -192,7 +195,7 @@
 .tf-fh-caret svg { width: 14px; height: 14px; }
 .tf-bd {
   display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 3px;
-  font: 700 10px var(--sans); flex: none; background: var(--muted-bg); color: var(--ink-2);
+  font: 700 var(--t-2xs) var(--sans); flex: none; background: var(--muted-bg); color: var(--ink-2);
 }
 .tf-bd-A { background: var(--ok-bg); color: var(--ok); }
 .tf-bd-D { background: var(--err-bg); color: var(--err); }

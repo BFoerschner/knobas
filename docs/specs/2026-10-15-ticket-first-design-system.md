@@ -217,7 +217,9 @@ The status bar names at most two healthy sources; past that they are one line th
 
 From 1240 px down the Tickets preview is closed, so one click on a card or row opens the ticket's page. Above that, one click fills the preview and a double click opens the page.
 
-A section's own page has no breadcrumb bar: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
+A section's own page has no breadcrumb bar, unless a ticket card's row opened it narrowed to that ticket, when the bar says *Back to PAY-231* and `Esc` goes there: the nav lights the section and the page's title names it, so a bar reading that name again adds nothing. A deeper page draws its path as before.
+
+A filter bar directly under a page's header is a full-width band. One inside a page's body, under its tabs, is a card on the body's edges. A key in mono carries no underline until pointed at; a link made of words always does.
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
 

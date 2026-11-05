@@ -289,7 +289,8 @@
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
    * the ladder's own rungs, so the hint names what the key does.
    */
-  const back = $derived(escTarget(route, here.opener));
+  const fromTicketRow = $derived(scopedTicket.section !== null && scopedTicket.section === sectionOf(route));
+  const back = $derived(escTarget(route, here.opener, fromTicketRow));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -520,6 +521,7 @@
             },
       route,
       opener: here.opener,
+      fromTicketRow,
     });
     if (step.do === "nothing") return;
     event.preventDefault();

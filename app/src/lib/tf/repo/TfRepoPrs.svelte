@@ -9,6 +9,7 @@
   import type { EntityRow } from "../../ipc/entity";
   import { prNumber, PR_STATES } from "../code/code";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
@@ -68,7 +69,7 @@
 <!-- The page reads the rows; a refresh replaces them in place, so only the first read waits here (#2246). -->
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading: false, failed: false })} columns={4}>
 {#if shown.length === 0}
-  <div class="tf-empty">No pull requests match.</div>
+  <TfNoMatch noun="pull requests" {filter} />
 {:else}
   <table class="tf-tbl tf-rprs">
     <tbody>

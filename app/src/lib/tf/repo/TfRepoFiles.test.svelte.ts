@@ -670,7 +670,7 @@ test("a .md file mapped to Source opens as source, and the switcher offers Markd
   expect(face()).toBe("Render as Source");
   expect(menuItems()).toEqual([
     "Markdown built in",
-    "*Source built in · highlighted DEFAULT FOR *.md",
+    "*Source built in · highlighted Default for *.md",
     "Use Markdown for *.md by default",
     "Renderers and defaults… Settings › Renderers",
   ]);
@@ -694,7 +694,7 @@ test("a pick in the switcher holds for that file; Make default writes the patter
   view = mount(TfRepoFiles, { target, props });
   await settle();
   expect(menuItems()).toEqual([
-    "*Markdown built in DEFAULT FOR *.md",
+    "*Markdown built in Default for *.md",
     "Source built in · highlighted",
     "Use Source for *.md by default",
     "Renderers and defaults… Settings › Renderers",
@@ -747,7 +747,7 @@ test("a file only Source takes still shows the switcher, with nothing to make de
   draw(openSource(MD_FILES).entityView, "src/retry.rs");
   await settle();
   expect(face()).toBe("Render as Source");
-  expect(menuItems()).toEqual(["*Source built in · highlighted DEFAULT FOR *.rs", "Renderers and defaults… Settings › Renderers"]);
+  expect(menuItems()).toEqual(["*Source built in · highlighted Default for *.rs", "Renderers and defaults… Settings › Renderers"]);
 });
 
 // -- Mermaid files (#2258) --------------------------------------------------------
@@ -775,7 +775,7 @@ test("a .mmd file is drawn as a diagram in a sandboxed frame, and Source shows i
   expect([frame.width, frame.height]).toEqual(["300", "120"]);
   expect(render.asked).toEqual(["flowchart LR\n  a --> b"]);
   expect(menuItems()).toEqual([
-    "*Mermaid built in · strict security DEFAULT FOR *.mmd",
+    "*Mermaid built in · strict security Default for *.mmd",
     "Source built in · highlighted",
     "Use Source for *.mmd by default",
     "Renderers and defaults… Settings › Renderers",
@@ -824,7 +824,7 @@ test("a .d2, a .dot and a .gv file are drawn by their engines in a sandboxed fra
     expect([path, frame.getAttribute("sandbox"), frame.title]).toEqual([path, "", `${engine} diagram`]);
     expect(render.asked).toEqual(["a -> b"]);
     expect(menuItems()).toEqual([
-      `*${engine} built in · ${blurb} DEFAULT FOR ${pattern}`,
+      `*${engine} built in · ${blurb} Default for ${pattern}`,
       "Source built in · highlighted",
       `Use Source for ${pattern} by default`,
       "Renderers and defaults… Settings › Renderers",

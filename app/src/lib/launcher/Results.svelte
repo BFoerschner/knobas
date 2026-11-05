@@ -13,7 +13,7 @@
   import Row from "./Row.svelte";
   import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
-  import type { LauncherRow } from "./rows";
+  import { ticketsFirst, type LauncherRow } from "./rows";
 
   let {
     response,
@@ -43,7 +43,7 @@
   const offsets = $derived.by(() => {
     const out: number[] = [];
     let at = 0;
-    for (const group of response.groups) {
+    for (const group of ticketsFirst(response)) {
       out.push(at);
       at += group.hits.length;
     }
@@ -89,7 +89,7 @@
 {/if}
 
 <!-- No count on a heading (#2421): the list is quiet, and the rows are what is read. -->
-{#each response.groups as group, g (group.kind)}
+{#each ticketsFirst(response) as group, g (group.kind)}
   <div class="tf-ln-h"><span class="tf-ln-lab">{group.plural}</span></div>
   {#each group.hits as hit, h (hit.entity_id)}
     {@const index = (offsets[g] ?? 0) + h}

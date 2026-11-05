@@ -3,13 +3,13 @@
 .tf-md > * + * { margin-top: 12px; }
 .tf-md > :first-child { margin-top: 0; }
 /* A file's headings sit under the page's own title, so they are a step below it. */
-.tf-md h1 { font-size: var(--t-2xl); font-weight: 700; font-variation-settings: "wdth" 85; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
-.tf-md h2 { font-size: var(--t-xl); font-weight: 700; font-variation-settings: "wdth" 88; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
-.tf-md h3 { font-size: var(--t-lg); font-weight: 700; margin-top: 20px; }
-.tf-md h4, .tf-md h5, .tf-md h6 { font-size: var(--t-md); font-weight: 700; margin-top: 16px; }
+.tf-md h1 { font-size: var(--t-xl); font-weight: 700; font-variation-settings: "wdth" 85; line-height: 1.2; padding-bottom: 8px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h2 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin-top: 26px; padding-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
+.tf-md h3 { font-size: var(--t-md); font-weight: 700; margin-top: 20px; }
+.tf-md h4, .tf-md h5, .tf-md h6 { font-size: var(--t-sm); font-weight: 700; margin-top: 16px; }
 .tf-md a { color: var(--info); text-decoration: underline; text-underline-offset: 2px; }
 .tf-md a.tf-ext::after { content: " ↗"; font-size: .8em; }
-.tf-md code { font: .88em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
+.tf-md code { font: .88em var(--mono); font-size: round(.88em, 1px); font-variant-ligatures: none; background: var(--sheet-2); border: 1px solid var(--rule-2); padding: 0 4px; border-radius: 3px; }
 .tf-md ul, .tf-md ol { padding-left: 24px; }
 .tf-md li + li { margin-top: 3px; }
 /* A task item's box, here and in a Docs page's task list (spec #2432): a picture of the state, never a control. */

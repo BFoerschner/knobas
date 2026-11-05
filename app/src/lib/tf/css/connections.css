@@ -9,7 +9,7 @@
 .tf-who { font-size: var(--t-sm); color: var(--ink-2); margin-bottom: 2px; display: flex; gap: 8px; align-items: center; }
 .tf-who b { color: var(--ink); font-weight: 600; }
 .tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
-.tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--card-2); }
+.tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--mark); }
 /* Yellow is the ticket you are on. A mention is a highlight, which is `--mark`. */
 .tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); font-family: var(--mono); font-variant-ligatures: none; }
 .tf-chip.tf-chip-mention { background: var(--mark); color: var(--ink); }
@@ -80,7 +80,5 @@
 
 /* ---------- the large decision row: the Controls specimen's (`TfControls.svelte`) ---------- */
 .tf-decide { display: flex; gap: var(--control-gap); align-items: center; flex-wrap: wrap; }
-.tf-decide .tf-yes { background: var(--ok); border-color: var(--ok); color: var(--sheet); font-weight: 600; }
 .tf-decide .tf-yes kbd { background: transparent; color: inherit; border-color: currentColor; }
-.tf-decide .tf-no { color: var(--err); border-color: var(--err); }
 .tf-decide .tf-hint { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }

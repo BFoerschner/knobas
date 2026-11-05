@@ -127,7 +127,7 @@ export function flatten(input: {
     case "results": {
       const response = input.response;
       if (!response) return [];
-      const hits = response.groups.flatMap((group) =>
+      const hits = ticketsFirst(response).flatMap((group) =>
         group.hits.map(
           (hit): LauncherRow => ({
             kind: "hit",
@@ -140,6 +140,16 @@ export function flatten(input: {
       return [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
     }
   }
+}
+
+/**
+ * What a query that looks like a key is after is a ticket: *PAY* or *PAY-23*
+ * lists the tickets first, ahead of the saved views that happen to hold the
+ * letters. Any other query keeps the engine's order.
+ */
+export function ticketsFirst(response: SearchResponse): SearchResponse["groups"] {
+  if (!/^[A-Z][A-Z0-9]*(-\d*)?$/i.test(response.interpreted.text.trim())) return response.groups;
+  return [...response.groups].sort((a, b) => Number(b.kind === "ticket") - Number(a.kind === "ticket"));
 }
 
 /**

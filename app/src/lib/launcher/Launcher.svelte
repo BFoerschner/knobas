@@ -1118,7 +1118,7 @@
       {#if sheet.onActions}<span><kbd>⌘B</kbd> bind a key</span>{/if}
       <span><kbd>Esc</kbd> back one step</span>
       <span><kbd>⌘D</kbd> {scope.titles ? "everything" : "titles only"}</span>
-      {#if session.canSave}
+      {#if session.canSave && session.rows.length > 0}
         <!--
           On a query and never on the board: an empty box is the board, and
           there is nothing there to save. `canSave` is the session's, so the

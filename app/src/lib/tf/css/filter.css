@@ -20,5 +20,8 @@
   max-width: 180px;
 }
 .tf-fsel select.tf-set { border-color: var(--ink); font-weight: 600; }
+/* A bar inside a page's body, under its tabs: a card on the body's own edges, the one look it has on every page.
+   A bar directly under a page's header is the full-width band above. */
+:is(.tf-rbar, .tf-runbody, .tf-runbar) .tf-fbar { position: static; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; }
 .tf-fcount { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 

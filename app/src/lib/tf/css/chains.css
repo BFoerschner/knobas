@@ -30,7 +30,7 @@
 .tf-logloose-end { padding-bottom: 4px; }
 .tf-logv summary { list-style: none; cursor: pointer; padding: 6px 12px; display: flex; gap: 10px; align-items: center; font-family: var(--sans); font-size: var(--t-sm); background: var(--sheet-2); }
 .tf-logv summary::-webkit-details-marker { display: none; }
-.tf-logv summary::before { content: "▸"; font-size: 10px; color: var(--ink-2); }
+.tf-logv summary::before { content: "▸"; font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-logv details[open] > summary::before { content: "▾"; }
 .tf-logv summary .tf-d { margin-left: auto; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-ll { display: grid; grid-template-columns: 52px 70px 1fr; white-space: pre; padding: 0 12px 0 0; }
@@ -79,5 +79,4 @@
 .tf-tdetail .tf-tacts { display: flex; gap: var(--control-gap); margin-top: 6px; align-items: center; }
 .tf-tdetail .tf-tacts .tf-dim { font-size: var(--t-sm); }
 /* prototype-6 draws the Tests bar flat inside the run page: static, no frame. */
-.tf-runbody > .tf-fbar { position: static; padding: 0; border: 0; background: none; }
 

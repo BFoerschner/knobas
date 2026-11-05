@@ -865,7 +865,8 @@
                 </div>
               </div>
             {/if}
-            {#if conflicts !== null}
+            <!-- With none, Ready to merge says so: a panel to say it again adds nothing. -->
+            {#if conflicts !== null && conflicts.conflicts}
               <div class="tf-panel tf-prconflicts">
                 <header><h3>Conflicts</h3></header>
                 <p class="tf-prnote" class:tf-prconflict={conflicts.conflicts}>

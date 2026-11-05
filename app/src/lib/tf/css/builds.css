@@ -2,6 +2,7 @@
 .tf-bhead { padding-bottom: 8px; }
 .tf-bhead .tf-sub { max-width: 80ch; }
 .tf-bhead .tf-sub a { color: inherit; }
+.tf-bhead h1 { white-space: nowrap; }
 .tf-bstale { margin: 0 22px 10px; }
 .tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
 .tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
@@ -21,7 +22,6 @@
 .tf-facts2 b { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
 /* The runs' toolbar is the table's own head: on the table's edges, and no inset of its own. */
 .tf-runbar { padding: 8px 22px 0; }
-.tf-runbar .tf-fbar { position: static; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 6px; }
 .tf-runbar .tf-fsearch { flex-basis: 240px; }
 .tf-runbar .tf-fsel select { max-width: 120px; }
 /* A day's heading belongs to the rows under it: the larger space is above. */
@@ -36,7 +36,8 @@
 .tf-progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
 .tf-chip.tf-jobchip-sm { background: var(--card); color: var(--card-ink); }
 .tf-older { padding: 12px 0; display: flex; gap: 8px; align-items: center; }
-.tf-bsettings { padding-top: 12px; }
+.tf-older[hidden] { display: none; }
+.tf-runs.tf-bsettings { padding-top: 16px; }
 .tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
 .tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
@@ -144,7 +145,7 @@
 .tf-pi-why { grid-column: 1 / span 2; font-size: var(--t-xs); color: var(--ink-2); margin-top: 2px; }
 .tf-pi[aria-current="true"] .tf-pi-why { color: inherit; }
 .tf-scope-note { font-size: var(--t-sm); color: var(--ink-2); padding: 8px 8px 0; margin: 0; }
-.tf-bmain { overflow: auto; min-width: 0; }
+.tf-bmain { overflow: auto; overflow-y: scroll; min-width: 0; }
 .tf-runs { padding: 0 22px 18px; container-type: inline-size; }
 .tf-runs .tf-run-no { width: 150px; }
 .tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }

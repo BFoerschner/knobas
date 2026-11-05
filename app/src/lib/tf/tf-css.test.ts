@@ -390,7 +390,7 @@ test("below 900px the Docs tree is a drawer over the page, on the component's ow
 });
 
 /** The one-row bars that stick: never taller than the window, so they need no bound of their own (#2091). */
-const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3"];
+const STICKY_BARS = [".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3", ".tf-ticketcard .tf-go"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
