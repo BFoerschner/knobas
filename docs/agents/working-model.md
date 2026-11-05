@@ -13,7 +13,15 @@ The orchestrator's reference: why the loop's numbers and rules are what they are
 
 ## Live runs
 
-ADR-0013: the real system is the witness, a mock certifies nothing. A PR touching an adapter crate, a `WriteOp`, the descriptor or the sync engine carries its live run's output in its body, naming the head it ran on. The merge-manager re-runs it only if something that suite exercises changed since that head (its fixes or the rebase touching the adapter crate, `knobas-source`, `knobas-sync`, `knobas-http`, the seed and `testenv/` scripts it uses, or the app code an app-level suite drives). A transcript whose head is not named is re-run.
+ADR-0013: the real system is the witness, a mock certifies nothing. A PR touching an adapter crate, a `WriteOp`, the descriptor or the sync engine carries its live run's output in its body, naming the head it ran on. The merge-manager re-runs it only if something that suite exercises changed since that head (its fixes or the rebase touching the adapter crate, `knobas-source`, `knobas-sync`, `knobas-http`, the seed and `testenv/` scripts it uses, the app code an app-level suite drives, or the search paths below). A transcript whose head is not named is re-run.
+
+**What the search answers** owes a live run too (#2485): #2448 changed it under the rule above, owed none, and left two live tests red until a later PR met one by chance. The trigger is a diff that changes code, not comments or `#[cfg(test)]` modules, in `crates/knobas-search/src/{lib,query,sql,corpus,under,coverage,group,frames,vocab}.rs`, in `searcher` or `search_inner` in `crates/knobas-app/src/commands/search.rs`, or in a migration that changes `sync.item_parent` or a relation `corpus.rs` reads. Such a PR carries `just gitea-live` and `just gitea-live forgejo`, which run Gitea's `under:` test through `Searcher::search` and queue on no JVM. It carries a JVM suite only for what that test cannot see:
+
+- `frames.rs`, or a changed line naming `pipeline`, `build_config` or `build`: `just teamcity-live-seeded`.
+- A changed line naming `ticket` or `epic`: `just jira-live`.
+- A changed line naming `page` or `ancestor`: `just confluence-live`.
+
+The other files in `crates/knobas-search/src/` (`excerpt`, `favourites`, `home`, `keys`, `saved`, `snippet`, `suggest`, `testing`, `types`) owe nothing: no live test reads them, and a changed type fails to compile under `just check`, which builds the ignored tests. A new live test that goes through the search joins this rule in its own PR; `grep -ln 'searcher(\|search_inner\|Searcher\|live_under::' crates/*/tests/*live*.rs` finds them.
 
 The recipes, kept current because a suite missing from this list is one nobody runs: `just gitea-live` (and `just gitea-live forgejo` once beside it), `just gitea-live-capped`, `just start-work-live`, `just teamcity-live`, `just teamcity-live-seeded`, `just jira-live`, `just confluence-live` (`just atlassian-live` runs both), `just kuma-live`, `just estate-live` (with `ESTATE_LIVE_HCLOUD_SERVERS=0`; a run at `=1` is Björn's, since no agent creates or deletes a server), and `just search-perf`. Every recipe refuses to start without its gate variables; "N passed" is read, not trusted.
 
