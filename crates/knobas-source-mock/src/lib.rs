@@ -984,8 +984,8 @@ fn items(source_id: &str) -> Vec<SyncItem> {
         let payload = page_payload(p);
         // ADR-0040: a built-in docs source writes a page's `body_text` with the
         // shared function, over the page's projection.
-        let content = doc_content(knobas_source::docs::PAGE_KIND, &payload)
-            .expect("a page has a projection");
+        let content =
+            doc_content(knobas_source::docs::PAGE_KIND, &payload).expect("a page has a projection");
         out.push(item(
             source_id,
             "page",
