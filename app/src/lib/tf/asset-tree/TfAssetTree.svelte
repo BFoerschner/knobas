@@ -8,15 +8,22 @@
   and `go`. This page hands it the address the shell already parsed, with the
   shared `parseHash`, and `go` writes `location.hash` as the rest of the shell
   does. The page draws its own breadcrumb, which names the asset it is on.
+
+  A ticket card's *Assets* row (`job/scoped.svelte.ts`) lands here at the ticket's
+  first asset: the line under the bar names all it reaches, each a way to it, and
+  the columns mark them and what holds them, while the reader stays in the tree.
 -->
 <script lang="ts">
   import AssetsView from "../../assets/AssetsView.svelte";
+  import { scopedTicket } from "../job/scoped.svelte";
+  import { ticketAssets } from "./ticket-assets.svelte";
   import type { AssetsNav } from "../../assets/tree";
   import { parseHash } from "../../shell/router";
   import type { EscTarget, EscTargetOf } from "../escape";
   import { parentPage } from "../page-name.svelte";
   import { HEAD_NAME } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
+  import TfKey from "../TfKey.svelte";
 
   let {
     head,
@@ -37,6 +44,9 @@
 
   const address = $derived(`#/${[head, ...rest].map(encodeURIComponent).join("/")}`);
 
+  /** What a card's *Assets* row is showing. */
+  const reached = ticketAssets(() => scopedTicket.assetsOf);
+
   const nav: AssetsNav = {
     get route() {
       return parseHash(address);
@@ -54,7 +64,13 @@
   {:else}
     <TfCrumbs parts={[{ name: "Asset tree", href: "#/assets" }, { name: named ?? HEAD_NAME[head] ?? "Asset" }]} {back} />
   {/if}
+  {#if reached.marks !== undefined && reached.list.length > 0}
+    <p class="tf-at-reach">
+      <TfKey value={reached.marks.key} /> reaches {reached.list.length} {reached.list.length === 1 ? "asset" : "assets"}:
+      {#each reached.list as asset, at (asset.id)}{at > 0 ? ", " : ""}<a href="#/asset/{encodeURIComponent(asset.id)}">{asset.name}</a>{/each}
+    </p>
+  {/if}
   <div class="tf-asset-tree">
-    <AssetsView {nav} onnamed={(name) => (named = name)} onholder={(held) => (holder = held)} />
+    <AssetsView {nav} marks={reached.marks} onnamed={(name) => (named = name)} onholder={(held) => (holder = held)} />
   </div>
 </div>

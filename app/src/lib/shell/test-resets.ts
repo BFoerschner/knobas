@@ -68,6 +68,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/card-width.svelte.ts#cardWidth": async () => (await import("../tf/job/card-width.svelte")).cardWidth.reset(),
   // A ticket a section view is narrowed to without choosing it (#2401): each test starts with none.
   "tf/job/scoped.svelte.ts#held": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
+  "tf/job/scoped.svelte.ts#before": async () => (await import("../tf/job/scoped.svelte")).scopedTicket.clear(),
   "tf/layers.svelte.ts#layers": async () => (await import("../tf/layers.svelte")).layers.reset(),
   "tf/page-refresh.svelte.ts#pageRefresh": async () => (await import("../tf/page-refresh.svelte")).pageRefresh.reset(),
   "tf/openin/apps.svelte.ts#apps": async () => (await import("../tf/openin/apps.svelte")).apps.reset(),

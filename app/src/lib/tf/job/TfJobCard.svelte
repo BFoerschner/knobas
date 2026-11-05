@@ -280,7 +280,7 @@
               class="tf-st"
               class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
               ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{row.state.text}</span
-            >{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
+            >{:else if row.note !== undefined}<span class="tf-st">{row.note}</span>{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
         >
       {/each}
     </div>

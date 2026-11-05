@@ -1253,7 +1253,7 @@
       </div>
     {:else if tree !== null && target === null}
       <!-- A space's address the tree holds nothing at: the rail still reads, and the home is the way out. -->
-      <TfNothingHere message="Nothing to read here. This space has no synced pages, or knobas does not hold it." href="#/docs" action="Docs home" />
+      <TfNothingHere message="knobas does not hold this space. It may not have synced yet." href="#/docs" action="Docs home" />
     {/if}
   </TfScroller>
 </div>

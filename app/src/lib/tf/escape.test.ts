@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { escStep, escTarget } from "./escape";
+import { escStep, escTarget, openerName } from "./escape";
 import { parseTfHash } from "./route";
 
 const TICKET = { hash: "#/ticket/mock%3APAY-231", name: "PAY-231" };
@@ -19,4 +19,26 @@ test("Esc's step takes the same answer as the breadcrumb's hint", () => {
   const state = { layers: [], field: null, route, opener: TICKET };
   expect(escStep(state)).toEqual({ do: "nothing" });
   expect(escStep({ ...state, fromTicketRow: true })).toEqual({ do: "go", hash: TICKET.hash, opened: true });
+});
+
+test("a hint names what Esc lands on: a section's deeper address by the name the page gave itself", () => {
+  expect(openerName(parseTfHash("#/builds/teamcity:Payout_Lint"), "Payout_Lint")).toBe("Payout_Lint");
+  expect(openerName(parseTfHash("#/docs/space/ENG"), "Engineering")).toBe("Engineering");
+  expect(openerName(parseTfHash("#/sets/payout-stack"), "Payout stack")).toBe("Payout stack");
+  // A page that has not named itself yet is called by the section.
+  expect(openerName(parseTfHash("#/sets/payout-stack"), null)).toBe("Link sets");
+  expect(openerName(parseTfHash("#/build/p/4811"), "#4811")).toBe("Run #4811");
+});
+
+test("the asset tree's bare root goes back to what opened the tree; with nothing, it stays", () => {
+  const root = parseTfHash("#/assets/tree");
+  expect(escTarget(root, TICKET)).toEqual({ ...TICKET, opened: true });
+  expect(escTarget(root, null)).toBeNull();
+});
+
+test("a marked monitor with no opener goes to Monitors, with one to what opened it", () => {
+  const marked = parseTfHash("#/monitors/at/kuma%3A3");
+  expect(escTarget(marked, null)).toEqual({ hash: "#/monitors", name: "Monitors", opened: false });
+  const inbox = { hash: "#/inbox", name: "Inbox" };
+  expect(escTarget(marked, inbox)).toEqual({ ...inbox, opened: true });
 });

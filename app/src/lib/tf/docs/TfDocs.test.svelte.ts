@@ -207,7 +207,7 @@ test("the rail shows every space on the home, and leaves For you to it", async (
 test("a space's address the tree does not hold says so, and leads home", async () => {
   await draw(["space", "NOPE"]);
   const empty = target.querySelector(".tf-rd-main .tf-empty")!;
-  expect(empty.textContent).toContain("Nothing to read here");
+  expect(empty.textContent).toContain("knobas does not hold this space.");
   expect(empty.querySelector("a")?.getAttribute("href")).toBe("#/docs");
 });
 

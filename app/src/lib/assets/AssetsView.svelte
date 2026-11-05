@@ -82,6 +82,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage, isIpcError, type SearchResponse } from "../ipc";
+  import TfKey from "../tf/TfKey.svelte";
   import TfNothingHere from "../tf/TfNothingHere.svelte";
   import {
     applyEstateImport as realApplyEstateImport,
@@ -257,7 +258,10 @@
     stripWidth,
     onnamed,
     onholder,
+    marks,
   }: {
+    /** A ticket's assets to mark in the columns, and what holds them (`TfAssetTree`). */
+    marks?: { assets: ReadonlySet<string>; holders: ReadonlySet<string>; key: string } | undefined;
     nav: AssetsNav;
     ports?: Partial<AssetPorts>;
     /**
@@ -1050,13 +1054,10 @@
   /**
    * One press of the keyboard on the Tree.
    *
-   * Two rules decide whether the press is the walk's, and they are different
-   * on purpose:
+   * Two rules decide whether the press is the walk's:
    *
-   * * `Esc` is answered from **anywhere in the view** — it is an unwind, and
-   *   a reader reading the pane means the same thing by it as one standing in
-   *   a column. The press the Tree has no step for is *not* consumed, and the
-   *   shell's ladder takes it back to the room (`shell/keys.ts`).
+   * * `Esc` is not the walk's: the shell's ladder answers it, where the crumb
+   *   bar's *Back to* says, whatever has focus (the return contract).
    * * the arrows and `Enter` are answered everywhere **except** the two
    *   places with keys of their own: the pane, which is full of buttons
    *   (*Held by*, *Holds*, a history) whose activation `Enter` would
@@ -1067,22 +1068,16 @@
   const KEEPS_ITS_OWN_KEYS = ".pane, .find";
 
   function onkeydown(event: KeyboardEvent): void {
-    if (event.key !== "Escape" && !WALK_KEYS.includes(event.key)) return;
+    if (!WALK_KEYS.includes(event.key)) return;
     const from = event.target;
-    const elsewhere = from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null;
-    if (event.key !== "Escape" && elsewhere) return;
+    if (from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null) return;
 
     const step = walk(event.key, path, columns);
-    if (step.go === "nowhere" && event.key === "Escape") return;
     event.preventDefault();
     event.stopPropagation();
     if (step.go === "asset") {
       wantFocus = true;
       nav.go(addressOf({ id: step.id }));
-    } else if (step.go === "top") {
-      // No focus to want: nothing is selected, and the flag would be spent on
-      // whatever the reader selected next.
-      nav.go(hashFor({ view: "assets", tab: "tree", assetId: null }));
     }
   }
 
@@ -1298,12 +1293,9 @@
    * `Esc` in an inline editor: put it away, and **consume the press**.
    *
    * Rung 1 of the `Esc` ladder, the rung `TfDialog`'s own handler occupies for a
-   * dialog. The view answers `Escape` from anywhere inside itself -- that is
-   * #430's walk, and it is deliberate, because a reader in the pane means the
-   * same thing by the key as one standing in a column. So an editor that
-   * closed and let the press through would cancel the edit *and* walk the
-   * selection out of the asset being edited, which is two unwinds for one
-   * keypress.
+   * dialog. An editor that closed and let the press through would cancel the edit
+   * *and* take the bar's step off the asset being edited, which is two unwinds for
+   * one keypress.
    */
   function cancelEditor(event: KeyboardEvent, close: () => void) {
     event.preventDefault();
@@ -1798,7 +1790,12 @@
                       onclick={() => select(row)}
                     >
                       <span class="mg" title={row.type_label}>{kindTag(row.monogram)}</span>
-                      <span class="nm">{row.name}</span>
+                      <span class="nm" title={marks === undefined ? undefined : row.name}>{row.name}</span>
+                      {#if marks?.assets.has(row.id)}
+                        <TfKey chip value={marks.key} class="tf-chip-job" />
+                      {:else if marks?.holders.has(row.id)}
+                        <span class="holds" title="Holds an asset {marks.key} reaches" aria-label="Holds an asset {marks.key} reaches"></span>
+                      {/if}
                       {#if work !== null}
                         <!--
                           Story 32's first badge: how much work is linked to
@@ -3149,6 +3146,16 @@
   .row.tip .mg {
     color: inherit;
     border-color: currentColor;
+  }
+
+  /* What holds a ticket's marked asset: enough to walk towards it. */
+  .row .holds {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.55;
   }
 
   .row .nm {

@@ -132,7 +132,8 @@ test("PAY-231's sections table: Sub-tasks first, then each section with its coun
   expect(rows[0]).toEqual(["Sub-tasks", "2", "2 open"]);
   expect(rows.find(([name]) => name === "Builds")?.[2]).toBe("1 failing");
   expect(rows.find(([name]) => name === "Monitors")?.[2]).toBe("1 down");
-  expect(rows.map(([name, n]) => `${name} ${n}`)).toEqual(["Sub-tasks 2", "Code 5", "Builds 7", "Docs 1", "Monitors 3", "Assets 5"]);
+  expect(rows.map(([name, n]) => `${name} ${n}`)).toEqual(["Sub-tasks 2", "Code 3", "Builds 7", "Docs 3", "Monitors 2", "Assets 5"]);
+  expect(rows.find(([name]) => name === "Code")?.[2], "the count's two kinds, by name").toBe("2 repos, 1 open PR");
   // A state that asks something of you is in full ink; the open sub-tasks are not.
   expect(sectionRow(card, "Builds").querySelector(".tf-st")?.classList.contains("tf-asks")).toBe(true);
   expect(sectionRow(card, "Sub-tasks").querySelector(".tf-st")?.classList.contains("tf-asks")).toBe(false);
@@ -218,10 +219,10 @@ test("pressing Sub-tasks lands on Tickets narrowed and named, with the same bar 
   await until(() => shown(".tf-board-title h1") === null, "Tickets stayed on screen");
 });
 
-test("OPS-77 reaches nothing and has no sub-tasks: Nothing connected yet.", async () => {
-  await openOn("#/ticket/mock%3AOPS-77", "Rotate the staging database credentials");
-  const card = await pageOf("OPS-77");
-  await until(() => card.textContent?.includes("Nothing connected yet.") ?? false, "OPS-77 never said Nothing connected yet.");
+test("PAY-216 reaches nothing and has no sub-tasks: Nothing connected yet.", async () => {
+  await openOn("#/ticket/mock%3APAY-216", "Clean up manual payout audit log");
+  const card = await pageOf("PAY-216");
+  await until(() => card.textContent?.includes("Nothing connected yet.") ?? false, "PAY-216 never said Nothing connected yet.");
   expect(card.querySelector(".tf-tksecs")).toBeNull();
 });
 

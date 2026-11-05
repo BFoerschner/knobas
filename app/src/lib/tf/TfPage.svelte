@@ -35,7 +35,7 @@
   import { forgetHidden, keptPages, hold, type Held, type KeptPagesSetting } from "./kept-pages.svelte";
   import type { TfPageContext, TfPageEntry } from "./page-entry";
   import { PAGES } from "./pages";
-  import { SECTION_NAME, sectionOf, type TfRoute } from "./route";
+  import { HEAD_NAME, SECTION_NAME, sectionOf, type TfRoute } from "./route";
   import TfNothingHere from "./TfNothingHere.svelte";
   import TfCrumbs, { shellCrumbs } from "./TfCrumbs.svelte";
   import TfKeptPage from "./TfKeptPage.svelte";
@@ -68,6 +68,24 @@
   const page = $derived(found);
 
   /**
+   * What an address the page does not know says: the path to the kind, one sentence, and the way out. A pull request's
+   * or a repository's tab leads to that page; any other to its section. Its heading is the section's, as on a page that
+   * knows the address, so the block sits in one place.
+   */
+  const unknown = $derived.by(() => {
+    const section = sectionOf(route);
+    if (section === null || section === "job" || section === "tickets") return null;
+    const name = SECTION_NAME[section];
+    const top = { name, href: `#/${section}` };
+    if (route.view === "full" && (route.head === "pr" || route.head === "repo") && route.rest[0]) {
+      const word = HEAD_NAME[route.head]!;
+      const href = `#/${route.head}/${encodeURIComponent(route.rest[0])}`;
+      return { name, parts: [top, { name: word, href }, { name: "Nothing here" }], message: `This ${word.toLowerCase()} has no such tab.`, href, action: word };
+    }
+    return { name, parts: [top, { name: "Nothing here" }], message: `${name} has no such page.`, href: top.href, action: name };
+  });
+
+  /**
    * The pages keep-alive holds (#2247, `kept-pages.svelte.ts`): the shown one
    * last. Plain, not state: the derived below is its only writer and reader,
    * and re-runs on the address, the page and *Pages kept open*, so lowering
@@ -94,12 +112,14 @@
   <TfKeptPage entry={one.value.entry} route={one.value.route} visible={one.visible} shows={one.shows} {ctx} />
 {/each}
 
-{#if page && unknownTab}
-  <!-- A section's own address with a tab it does not have: said here, not drawn as the section's first tab. -->
-  {@const section = sectionOf(route)!}
+{#if page && unknownTab && unknown}
+  <!-- An address with a tab the page does not have: said here, not drawn as the page's first tab. -->
   <div class="tf-full">
-    {#if ctx.back}<TfCrumbs parts={[{ name: SECTION_NAME[section], href: `#/${section}` }, { name: "Nothing here" }]} back={ctx.back} />{/if}
-    <TfNothingHere message="{SECTION_NAME[section]} has no page at this address." href={`#/${section}`} action={SECTION_NAME[section]} />
+    <TfCrumbs parts={unknown.parts} back={ctx.back} />
+    <header class="tf-fhead">
+      <div><h1>{unknown.name}</h1></div>
+    </header>
+    <TfNothingHere message={unknown.message} href={unknown.href} action={unknown.action} />
   </div>
 {:else if page}
   <!-- Drawn above. -->
@@ -134,6 +154,6 @@
   <!-- An unknown address, or a feature whose `page.ts` is missing. -->
   <div class="tf-full">
     {#if ctx.back}<TfCrumbs parts={[{ name: "Nothing here" }]} back={ctx.back} />{/if}
-    <TfNothingHere message="knobas has no page at this address." href="#/tickets" action="All tickets" />
+    <TfNothingHere message="knobas has no such page." href="#/tickets" action="All tickets" />
   </div>
 {/if}

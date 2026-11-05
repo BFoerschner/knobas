@@ -104,7 +104,10 @@ describe("where a row opens", () => {
       href: "#/build/tc%3APayout%231187",
     });
   });
-  test("an alert opens Monitors", () => {
+  test("an alert opens Monitors at its monitor's row, named by its key", () => {
+    expect(opener(item({ category: "alert", key: "alert:kuma:3", entity_id: "asset:gitea", kind: "asset" }))?.href).toBe("#/monitors/at/kuma%3A3");
+  });
+  test("an alert whose key names no monitor opens Monitors", () => {
     expect(opener(item({ category: "alert", entity_id: "asset:gitea", kind: "asset" }))).toEqual({
       label: "Open monitor",
       href: "#/monitors",

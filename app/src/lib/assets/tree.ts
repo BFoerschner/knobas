@@ -290,7 +290,7 @@ export function focusedColumn(path: ColumnPath): number {
  * takes it back to the room, and a Tree that swallowed every Escape would be
  * the one view a reader cannot leave with the keyboard.
  */
-export type Step = { go: "asset"; id: string } | { go: "top" } | { go: "nowhere" };
+export type Step = { go: "asset"; id: string } | { go: "nowhere" };
 
 /**
  * An asset's kind as a tag: two letters written like an element's symbol (*Si*, *Hv*, *Vm*, *Ce*, *Ct*), in sentence
@@ -356,15 +356,10 @@ export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step
     return { go: "asset", id: first.id };
   }
 
-  if (key === "ArrowLeft" || key === "Escape") {
-    if (focused > 0) {
-      const holder = selectionIn(path, focused - 1);
-      return holder === null ? NOWHERE : { go: "asset", id: holder };
-    }
-    // The rung the two keys do not share. `←` is a move between columns and
-    // there is no column left of the first; `Esc` is an unwind, and the step
-    // above a top-level asset is the estate with nothing selected.
-    return key === "Escape" && focused === 0 ? { go: "top" } : NOWHERE;
+  if (key === "ArrowLeft") {
+    if (focused <= 0) return NOWHERE;
+    const holder = selectionIn(path, focused - 1);
+    return holder === null ? NOWHERE : { go: "asset", id: holder };
   }
 
   return NOWHERE;

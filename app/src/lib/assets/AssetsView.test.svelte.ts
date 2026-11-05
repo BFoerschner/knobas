@@ -1006,37 +1006,25 @@ test("reduced motion is respected when the walk scrolls a row into view", async 
 });
 
 /**
- * **Escape unwinds one step per press, and the press it has no step for is
- * handed on.**
- *
- * The rung above the top of the estate is the bare tree; above that the Tree
- * has nothing to unwind, and the key belongs to the shell's ladder
- * (`shell/keys.ts` rung 3, *back to the room*). A view that consumed it
- * anyway would be the one surface a reader cannot leave with the keyboard —
- * so the last press is asserted **not** to be consumed.
+ * **`Esc` is the shell's, whatever has focus (the return contract).** The bar says
+ * where the key goes, so the Tree does not answer it: `←` walks up the columns.
  */
-test("escape unwinds the path one level at a time and then falls through", async () => {
+test("the view leaves Esc to the shell, and left arrow walks up the path", async () => {
   const { nav } = render("#/asset/asset:postgres");
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  expect(press("Escape").defaultPrevented).toBe(true);
+  const here = nav.route;
+  expect(press("Escape").defaultPrevented).toBe(false);
+  expect(nav.route).toEqual(here);
+
+  expect(press("ArrowLeft").defaultPrevented).toBe(true);
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: VM.id });
-  // Waited out between presses, and that is a statement about the view rather
-  // than about the test: the layout is derived from the pane's answer, so the
-  // rung a press lands on is the one the *drawn* path offers.
+  // Waited out between presses: the layout is derived from the pane's answer,
+  // so the rung a press lands on is the one the *drawn* path offers.
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", null]));
 
-  press("Escape");
+  press("ArrowLeft");
   expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: SITE.id });
-  await waitFor(() => expect(marked()).toEqual(["hel1", null]));
-
-  press("Escape");
-  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
-  await waitFor(() => expect(marked()).toEqual([null]));
-
-  const last = press("Escape");
-  expect(last.defaultPrevented).toBe(false);
-  expect(nav.route).toEqual({ view: "assets", tab: "tree", assetId: null });
 });
 
 /**
@@ -1541,7 +1529,7 @@ test("the pane lists the monitors watching the asset, with their state", async (
  * hands the nav `entityAddress`'s address, not a rooms `#/monitor/<id>`
  * that the shell would have to rewrite on arrival (#1092).
  */
-test("a monitor's name goes to the Monitors page, not a rooms address", async () => {
+test("a monitor's name goes to the Monitors page at its row, not a rooms address", async () => {
   const { nav } = render(`#/asset/${CONTAINER.id}`);
   await waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
   const goes: string[] = [];
@@ -1557,7 +1545,7 @@ test("a monitor's name goes to the Monitors page, not a rooms address", async ()
   expect(name).toBeDefined();
   name!.click();
 
-  await waitFor(() => expect(goes).toEqual(["#/monitors"]));
+  await waitFor(() => expect(goes[0]).toMatch(/^#\/monitors\/at\//));
 });
 
 /**

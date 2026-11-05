@@ -218,6 +218,30 @@ export function ticketHash(entityId: string, tab: string | null = null): string 
   return `#/ticket/${encodeURIComponent(entityId)}${tab === null ? "" : `/${tab}`}`;
 }
 
+/** The word in Monitors' address that opens it at one monitor: {@link monitorHash}. */
+export const MONITOR_AT = "at";
+
+/**
+ * Monitors opened at one monitor, its row marked: what a row or link that means
+ * that monitor opens (an inbox alert, a set's member). The page's own, like a tab.
+ */
+export function monitorHash(entityId: string): string {
+  return `#/monitors/${MONITOR_AT}/${encodeURIComponent(entityId)}`;
+}
+
+/**
+ * The section whose nav entry should come back to `route`, or `null`: a saved
+ * view on Tickets, and the tabs of Code, Monitors and Time. A deeper address (a
+ * set, a Docs space, a marked monitor) is a place, and the entry is the way to the
+ * section's own page. Builds keeps its pipeline itself (`lastPipeline`).
+ */
+export function sectionTabOf(route: TfRoute): Section | null {
+  if (route.view === "tickets") return "tickets";
+  if (route.view !== "full" || route.head !== route.section) return null;
+  if (route.section === "code" || route.section === "time") return route.section;
+  return route.section === "monitors" && route.rest[0] !== MONITOR_AT ? "monitors" : null;
+}
+
 /**
  * Whether `route` is a section's top page (spec #2227): the address its nav
  * entry or the Settings cog links to. Tickets with a saved view open
@@ -260,6 +284,8 @@ export function parentOf(route: TfRoute): string | null {
   }
   // A run sits under its pipeline. A bare run's address names none yet.
   if (route.head === "build" && route.rest[0] && route.rest[1]) return `#/builds/${encodeURIComponent(route.rest[0])}`;
+  // A monitor's mark sits on Monitors' own page: leaving it is the page with no mark.
+  if (route.head === "monitors" && route.rest[0] === MONITOR_AT) return sectionHash("monitors");
   // A section's own tabs, and a pipeline picked on Builds, are the section's page: its parent would be a sibling.
   if (TABBED_HEADS.has(route.head)) return null;
   // A source's page sits under Sources; every other section of Settings is a tab of it.

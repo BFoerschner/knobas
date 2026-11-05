@@ -259,7 +259,7 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
     case "asset":
       return `#/asset/${id}`;
     case "monitor":
-      return "#/monitors";
+      return `#/monitors/at/${id}`;
     case "jira_view":
       return `#/tickets/${jiraViewSlug(row.entity_id)}`;
     // A pipeline under the shell's word (#2422, the launcher's kind) or the

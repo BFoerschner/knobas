@@ -45,7 +45,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount, untrack, type Snippet } from "svelte";
+  import { onMount, tick, untrack, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { commandSteps, diffPipelines, namedPipelines, pagesKeptOpen, rendererDefaults, userRenderers } from "../ipc/app";
@@ -79,7 +79,9 @@
   import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
-  import { parseTfHash, sectionOf } from "./route";
+  import { PAGES } from "./pages";
+  import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
+  import { parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -198,6 +200,48 @@
     hash = next;
   }
 
+  // ---- the place the reader left (`return-place.ts`) ----
+  let mainEl = $state<HTMLElement>();
+  /** What was last pressed on a page: on the way out, the row that opened the next one. */
+  let pressed: Element | null = null;
+  /** Where each address was left, for the way back to it. */
+  const places = new Map<string, Place>();
+  const PLACES = 60;
+  /** The next address change is the way back: `Esc` or *Back to*. A step through history says so itself. */
+  let stepping = false;
+  /** The kept pages drawn so far: one shown for the first time starts at the top, not at the last page's scroll. */
+  const drawnPages = new WeakSet<Element>();
+  /** Ends the return under way when another address comes. */
+  let endReturn: (() => void) | null = null;
+
+  const shownKept = (): Element | null => mainEl?.querySelector(":scope > .tf-kept:not([hidden])") ?? null;
+
+  /** Note where `from` was left, before its page hides. */
+  function notePlace(from: string, to: string) {
+    const page = shownKept();
+    if (!mainEl || page === null) return;
+    places.delete(from);
+    places.set(from, capturePlace(mainEl, page, pressed, to));
+    if (places.size > PLACES) places.delete(places.keys().next().value!);
+    pressed = null;
+  }
+
+  /** Once `to` is drawn: back to its place on a return; a new place in a kept page, or a page never shown, at the top. */
+  function settlePlace(to: string, returning: boolean, opening: boolean, left: Element | null) {
+    endReturn?.();
+    endReturn = null;
+    void tick().then(() => {
+      const page = shownKept();
+      if (!mainEl || page === null || location.hash !== to) return;
+      const first = !drawnPages.has(page);
+      drawnPages.add(page);
+      const place = returning ? places.get(to) : undefined;
+      if (place !== undefined) endReturn = restorePlace(place, page);
+      else if (opening && page === left) resetScrolls(mainEl, page);
+      else if (opening && first) mainEl.scrollTop = 0;
+    });
+  }
+
   /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
   const shownPage = provideShownPageName();
   // A press on *Back to <name>* is the key's own step.
@@ -214,6 +258,12 @@
     const now = location.hash;
     const how = takeTold(now);
     const had = stampOf(history.state);
+    const left = shownKept();
+    if (how !== "replace") notePlace(hash, now);
+    // A stamped entry is one history stepped to, which is a return as `Esc` is. A tab switch is neither that nor a new place.
+    const returning = how !== "replace" && (stepping || had !== null);
+    const opening = how !== "replace" && !returning && !samePage(hash, now);
+    stepping = false;
     if (how !== "replace" && had !== null) {
       here = had;
     } else {
@@ -223,6 +273,31 @@
       history.replaceState(stamped(history.state, $state.snapshot(here)), "");
     }
     hash = now;
+    if (how !== "replace") settlePlace(now, returning, opening, left);
+  }
+
+  // ---- section memory: a nav entry returns to the section as you left it (design system, the return contract) ----
+  /** The address of each section's tab or saved view it was last on, outside a card row's narrowing. */
+  const sectionTabs = $state<Partial<Record<Section, string>>>({});
+  $effect(() => {
+    const section = sectionTabOf(route);
+    if (section === null || untrack(() => scopedTicket.section) === section) return;
+    // A tab the page does not have is said so, and is nothing to come back to.
+    if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
+    sectionTabs[section] = hash;
+  });
+  const navHref = (section: Exclude<Section, "job">) => sectionTabs[section] ?? sectionHash(section);
+
+  /**
+   * A press on a nav entry: the section as it was left, opened by nothing, so `Esc` never jumps from one section to
+   * another by way of a tab. It ends a card row's narrowing of that section as leaving it does.
+   */
+  function onnav(section: Exclude<Section, "job">, target: string) {
+    if (scopedTicket.section === section) scopedTicket.clear();
+    if (location.hash === target) {
+      here = { opener: null, prev: here.prev };
+      history.replaceState(stamped(history.state, $state.snapshot(here)), "");
+    } else goWithoutOpener(target);
   }
 
   /**
@@ -547,6 +622,7 @@
   function leave(hash: string, opened: boolean) {
     // Back on the Tickets that opened this ticket page, that ticket is selected again (spec #2227).
     if (opened && route.view === "ticket" && parseTfHash(hash).view === "tickets") selectTicket(route.id);
+    stepping = true;
     // The opener is the entry before: step back to it, so `⌘]` comes forward to this page again.
     if (opened && hash === here.prev) nav.back();
     else goWithoutOpener(hash);
@@ -598,8 +674,11 @@
     onsearch={() => onsearch(sectionFilter(route))}
     {ontimer}
     ontheme={() => theme.toggle(prefersDark())}
+    {navHref}
+    {onnav}
   />
-  <main class="tf-main" tabindex="-1">
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions: not a control, it notes what a press on a page was on -->
+  <main class="tf-main" tabindex="-1" bind:this={mainEl} onclickcapture={(event) => (pressed = event.target instanceof Element ? event.target : null)}>
     <TfPage
       {kept}
       stale={recoloured}

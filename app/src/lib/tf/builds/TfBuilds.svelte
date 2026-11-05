@@ -227,7 +227,9 @@
   /** A bare run address no pipeline was found for. */
   let lost = $state<string | null>(null);
   $effect(() => {
-    if (all === null || head !== "build" || rest.length !== 1 || selected !== null) return;
+    if (all === null || head !== "build" || rest.length !== 1) return;
+    // A run's address that names a pipeline and no run is the pipeline's page.
+    if (selected !== null) return replaceAddress(pipelineHash(selected.entity_id));
     const id = rest[0]!;
     const owner = all.find((p) => p.recent.some((r) => r.entity_id === id));
     if (owner !== undefined) {

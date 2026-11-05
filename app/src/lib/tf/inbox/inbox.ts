@@ -11,7 +11,7 @@
 import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
-import { MENTION_TAB, ticketHash } from "../route";
+import { MENTION_TAB, monitorHash, sectionHash, ticketHash } from "../route";
 
 /** The word each category reads as: the kind chips' and the second line's. */
 const KIND: Record<InboxCategory, string> = {
@@ -97,6 +97,9 @@ export function untilLabel(at: Date, now: Date): string {
   return `${name} ${clock(at)}`;
 }
 
+/** What an alert's key starts with: the rest is its monitor's entity id. */
+const ALERT_KEY = "alert:";
+
 /** The link a row opens with: its word and its address. */
 export interface Opener {
   label: string;
@@ -109,14 +112,18 @@ export interface Opener {
  * assigned to the reader opens its ticket page (spec #2227), to read before
  * taking it on; a mention on a ticket opens the ticket's `/mention` address,
  * which draws the same page brought to the newest comment that mentions the
- * reader (`TfConversation`'s `toMention`).
+ * reader (`TfConversation`'s `toMention`). An alert's key names its monitor
+ * (`alert:<monitor id>`), so *Open monitor* opens Monitors with that row marked.
  */
-export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id">): Opener | null {
+export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id"> & Partial<Pick<InboxItem, "key">>): Opener | null {
   // Both are about the source itself, whose page holds *Re-enter* (#1571).
   if (item.category === "credential_expiry" || item.category === "failed_sign_in") {
     return { label: "Open source", href: `#/settings/source/${encodeURIComponent(item.source_id)}` };
   }
-  if (item.category === "alert") return { label: "Open monitor", href: "#/monitors" };
+  if (item.category === "alert") {
+    const monitor = item.key?.startsWith(ALERT_KEY) ? item.key.slice(ALERT_KEY.length) : "";
+    return { label: "Open monitor", href: monitor === "" ? sectionHash("monitors") : monitorHash(monitor) };
+  }
   if (item.entity_id === null) return null;
   const kind = item.kind ?? "";
   const href = itemHash({ entity_id: item.entity_id, kind });

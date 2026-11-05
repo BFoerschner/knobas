@@ -354,19 +354,10 @@ test("left selects the asset that holds the selection", () => {
   expect(walk("ArrowLeft", columnPathFor(detail(HEL1, [])), LISTS)).toEqual({ go: "nowhere" });
 });
 
-/**
- * **Escape unwinds one step, and the step above the top of the estate is the
- * bare tree** — after which it does nothing at all here, and the shell's own
- * ladder takes the press back to the room.
- *
- * That last rung is the whole reason `nowhere` is a value rather than a
- * silence: the view consumes an Escape it answered and passes on one it did
- * not, and a walk that always claimed the key would make the Tree the one
- * view a reader cannot leave with the keyboard.
- */
-test("escape unwinds one step and then hands the key back", () => {
-  expect(walk("Escape", atVm(), LISTS)).toEqual({ go: "asset", id: HEL1.id });
-  expect(walk("Escape", columnPathFor(detail(HEL1, [])), LISTS)).toEqual({ go: "top" });
+/** `Esc` is no step of the walk: the shell's ladder answers it, where the crumb bar says. */
+test("escape is not the walk's", () => {
+  expect(walk("Escape", atVm(), LISTS)).toEqual({ go: "nowhere" });
+  expect(walk("Escape", columnPathFor(detail(HEL1, [])), LISTS)).toEqual({ go: "nowhere" });
   expect(walk("Escape", emptyPath(), LISTS)).toEqual({ go: "nowhere" });
 });
 

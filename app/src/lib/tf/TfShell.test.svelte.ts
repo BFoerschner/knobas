@@ -498,6 +498,59 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
+test("a nav entry returns to the tab the section was left on, opened by nothing, so Esc stays", async () => {
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  await at("#/inbox");
+  const code = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Code")!;
+  expect(code().getAttribute("href")).toBe("#/code/prs");
+  code().click();
+  await settle();
+  expect(location.hash).toBe("#/code/prs");
+  expect(escHint()).toBeNull();
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/code/prs");
+});
+
+test("a tab the page does not have is not what its nav entry comes back to", async () => {
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  await at("#/code/nope");
+  expect(seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Code")!.getAttribute("href")).toBe("#/code/prs");
+});
+
+test("an unknown tab of a pull request or a repository says so, under the section's title, and is not drawn as its first tab", async () => {
+  start({ nav: windowNav });
+  await at("#/pr/gh:pr-12/nope");
+  expect(seen(".tf-nohere")[0]?.textContent).toContain("This pull request has no such tab.");
+  expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Code");
+  expect(seen(".tf-nohere a")[0]?.getAttribute("href")).toBe("#/pr/gh%3Apr-12");
+  await at("#/repo/gh:repo-1/nope");
+  expect(seen(".tf-nohere")[0]?.textContent).toContain("This repository has no such tab.");
+});
+
+test("back to a page: the row that opened the detail has focus again, and the page's scroll is what it was", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const kept = target.querySelector<HTMLElement>(".tf-kept:not([hidden])")!;
+  const link = document.createElement("a");
+  link.setAttribute("href", "#/pr/gh:pr-12");
+  kept.appendChild(link);
+  main.scrollTop = 80;
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  await settle();
+  expect(location.hash).toBe("#/pr/gh:pr-12");
+  main.scrollTop = 0;
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/inbox");
+  await vi.waitFor(() => expect(document.activeElement).toBe(link));
+  expect(main.scrollTop).toBe(80);
+});
+
 test("a top page never navigates on Esc, even when it has an opener", async () => {
   start({ nav: windowNav });
   await at("#/build/pipe-1/run-4812");
@@ -542,7 +595,7 @@ test("an address the new shell has no place for names itself", async () => {
   expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
-  expect(seen(".tf-empty")[0]?.textContent).toContain("knobas has no page at this address.");
+  expect(seen(".tf-empty")[0]?.textContent).toContain("knobas has no such page.");
 });
 
 // #1085: a rooms-UI address lands where the new shell keeps that thing, in

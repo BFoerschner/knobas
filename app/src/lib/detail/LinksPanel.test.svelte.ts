@@ -137,13 +137,13 @@ test("clicking a row navigates to the other end's stable address", () => {
   screen.done();
 });
 
-test("a linked monitor opens the Monitors page, not a rooms address", () => {
+test("a linked monitor opens the Monitors page at its row, not a rooms address", () => {
   const screen = render([entry({ to: "kuma:7", kind: "monitor" })]);
 
   screen.buttons("Retry storm postmortem")[0]!.click();
   flushSync();
 
-  expect(screen.onopen).toHaveBeenCalledWith("#/monitors");
+  expect(screen.onopen).toHaveBeenCalledWith("#/monitors/at/kuma%3A7");
 
   screen.done();
 });

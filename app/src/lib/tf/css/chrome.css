@@ -115,6 +115,8 @@
 /* No scroller reserves room for its bar (design system, Layout). The page is as wide as the window with a bar or without
    one, so nothing inside it moves, and the bar takes the last 8 px of its right padding. A band ends at the bar only
    while there is something to scroll. */
+/* No scroll anchoring: a page mounted above the shown one would move this scroller, and WebKit has none to rely on. */
+.tf-main, .tf-scroller { overflow-anchor: none; }
 .tf-main { overflow: hidden auto; min-height: 0; min-width: 0; }
 /* The clip holds what passes under the bar, so it is no overflow to scroll to and nothing can slide the page sideways. */
 .tf-main > .tf-kept:not([hidden]) { display: block; height: 100%; overflow-x: clip; }

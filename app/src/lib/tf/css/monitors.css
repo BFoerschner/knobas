@@ -50,5 +50,9 @@
 .tf-mon-fold > summary::-webkit-details-marker { display: none; }
 .tf-mon-fold > summary .tf-dim { font-weight: 400; }
 .tf-mon .tf-mon-hid > td { color: var(--ink-2); }
+/* The monitor an alert or a link opened the roster at: the list's selected row. */
+.tf-mon .tf-mon-at > td { box-shadow: inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
+.tf-mon .tf-mon-at > td:first-child { box-shadow: inset 2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
+.tf-mon .tf-mon-at > td:last-child { box-shadow: inset -2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
 .tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
 .tf-mon-hidn { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }

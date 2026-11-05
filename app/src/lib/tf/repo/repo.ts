@@ -139,6 +139,11 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
   };
 }
 
+/** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
+export function knowsRepoTab(rest: readonly string[]): boolean {
+  return rest[1] === undefined || rest[1] === LINE || TABS.has(rest[1]);
+}
+
 /** The address of the repository page, a tab of it, or a place inside a tab. */
 export function repoHash(repoId: string, tab?: RepoTab, ...tail: string[]): string {
   const parts = [`#/repo/${encodeURIComponent(repoId)}`];

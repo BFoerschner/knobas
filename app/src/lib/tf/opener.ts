@@ -73,7 +73,8 @@ export function stamped(state: unknown, opened: Opened): object {
  * section, and a section's own deeper addresses (`#/code/repos`, a pipeline
  * picked on Builds, a saved view on Tickets) are one page, and so are the asset
  * tree and an asset in it. A commit under its repository is a page of its own,
- * as `parentOf` has it.
+ * as `parentOf` has it, and so are a link set and a Docs space under their
+ * section: each names itself, so *Back to* can name it.
  */
 export function pageOf(route: TfRoute): string {
   switch (route.view) {
@@ -88,6 +89,8 @@ export function pageOf(route: TfRoute): string {
     case "unknown":
       return route.hash;
     case "full": {
+      if (route.head === "sets" && route.rest[0]) return `sets/${route.rest[0]}`;
+      if (route.head === "docs" && route.rest[0] === "space") return `docs/space/${route.rest[1] ?? ""}`;
       if (route.head === route.section && route.head !== "assets") return route.head;
       // The tree and an asset in it are one page: a walk through its columns keeps how the tree was opened.
       if (route.head === "assets" || route.head === "asset") return "assets";

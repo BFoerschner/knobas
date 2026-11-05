@@ -94,7 +94,9 @@
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
+  import { MONITOR_AT } from "../route";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import type { RoleFrameProps } from "../page-entry";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -187,6 +189,8 @@
 
   const now = $derived(fixedNow ?? new Date());
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");
+  /** The monitor the address opens the roster at, marked: an inbox alert's, a set member's. */
+  const markedId = $derived(rest[0] === MONITOR_AT ? (rest[1] ?? null) : null);
 
   /**
    * The roster as read: the read narrows itself to the sources filling the
@@ -415,7 +419,10 @@
           index,
         ),
   );
-  const rows = $derived(kept.shown);
+  /** The marked monitor, whatever the filter and the fold say: the reader came for it. */
+  const markedRow = $derived(markedId === null ? null : (roster?.find((row) => row.entity_id === markedId) ?? null));
+  const rows = $derived(markedRow !== null && !kept.shown.includes(markedRow) ? [markedRow, ...kept.shown] : kept.shown);
+  const hiddenRows = $derived(markedRow === null ? kept.hidden : kept.hidden.filter((row) => row !== markedRow));
   const foldOpen = $derived(hiddenFoldOpen(hiddenFold.open, kept));
   /** The roster's own size, for the count: a hidden monitor is counted apart. */
   const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
@@ -472,11 +479,25 @@
    */
   const entries = $derived<Entry[]>([
     ...withFailures(rows),
-    ...(kept.hidden.length > 0 ? [{ row: null, failed: null }] : []),
-    ...(kept.hidden.length > 0 && foldOpen ? withFailures(kept.hidden) : []),
+    ...(hiddenRows.length > 0 ? [{ row: null, failed: null }] : []),
+    ...(hiddenRows.length > 0 && foldOpen ? withFailures(hiddenRows) : []),
   ]);
   /** Thousands of monitors draw only those near the viewport (#2210); a row is 42 px. */
   const win = new Windowed({ count: () => entries.length, key: (i) => entryKey(entries[i]!), estimate: 42 });
+
+  /** A mark comes into view once, as the address names it; a later read of the roster leaves the reader where they are. */
+  let broughtIn: string | null = null;
+  $effect(() => {
+    const id = markedId;
+    if (id === null) {
+      broughtIn = null;
+      return;
+    }
+    if (broughtIn === id || markedRow === null) return;
+    broughtIn = id;
+    win.reveal(untrack(() => entries).findIndex((entry) => entry.row?.entity_id === id && entry.failed === null));
+    void tick().then(() => document.querySelector(".tf-kept:not([hidden]) .tf-mon-at")?.scrollIntoView?.({ block: "center" }));
+  });
 
   function entryKey(entry: Entry): string {
     if (entry.row === null) return FOLD_KEY;
@@ -640,7 +661,9 @@
   {#if failed !== null}
     <p class="tf-ifail">Could not read the monitors: {failed}</p>
   {/if}
-  {#if tab === "unmonitored"}
+  {#if markedId !== null && roster !== null && markedRow === null}
+    <TfNothingHere message="knobas does not hold this monitor. It may not have synced yet." href="#/monitors" action="All monitors" />
+  {:else if tab === "unmonitored"}
     {#if unwatched !== null && unwatched.length > 0 && shownUnwatched.length === 0}
       <TfNoMatch noun="assets" filter={unwatchedFilter} />
     {:else if unwatched !== null && unwatched.length > 0}
@@ -705,7 +728,7 @@
               {@const down = tone === "err" && !row.tombstoned}
               {@const toggled = echoOn(row.entity_id, TOGGLE)}
               {@const refresher = refreshers.get(row.entity_id)}
-              <tr class:tf-mon-hid={row.hidden} {@attach win.row(entryKey(entry))}>
+              <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
                 <td><span class="tf-chip" title={chip.label} class:tf-ok={tone === "ok"} class:tf-warn={tone === "warn"} class:tf-err={tone === "err"} class:tf-info={tone === "info"}>{chip.label}</span></td>
                 <td>

@@ -34,7 +34,9 @@
  * key that sometimes does nothing is what makes the others safe to press.
  *
  * Rungs 5 to 8 are {@link escTarget}, which the breadcrumb's *Back to <name>*
- * reads too, so the hint and the key cannot disagree.
+ * reads too, so the hint and the key cannot disagree. No page answers `Esc` for
+ * itself on those rungs: the asset tree's `←` walks up its columns, and its `Esc`
+ * follows the bar like any page's, whatever has focus.
  *
  * Pure: the shell describes what is open and acts on the answer. Every dialog
  * registers on the layer stack (`TfDialog`, the one dialog shell, #1527), so
@@ -96,11 +98,12 @@ export function escStep(state: EscState): EscStep {
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  * A section's top page does nothing, unless a ticket card's row opened it
  * narrowed to that ticket (`fromTicketRow`, spec #2401): then it goes back.
- * Settings is the other: a place you visit from somewhere, by its cog, and return
- * from, on every one of its sections alike.
+ * Settings and the asset tree are the others: places with no nav entry, visited
+ * from somewhere and returned from, Settings on every one of its sections alike,
+ * and the tree on its bare root as on an asset in it.
  */
 export function escTarget(route: TfRoute, opener: EscTarget | null, fromTicketRow = false, parent: EscTarget | null = null): EscTargetOf | null {
-  const visited = route.view === "full" && route.section === "settings";
+  const visited = route.view === "full" && (route.section === "settings" || route.section === "assets");
   if (isTopPage(route) && !(opener !== null && (fromTicketRow || visited))) return null;
   if (opener !== null) return { ...opener, opened: true };
   if (parent !== null) return { ...parent, opened: false };
@@ -109,15 +112,16 @@ export function escTarget(route: TfRoute, opener: EscTarget | null, fromTicketRo
 }
 
 /**
- * What the breadcrumb calls an opener (#2229): a section's name for a
- * section's own page and Tickets; the key a ticket page or home's job page
- * named itself (*Back to PAY-231*), else *Job* for home; otherwise the
- * name the page gave itself (`own`, `page-name.svelte.ts`) when it was left,
- * a bare number under its kind's {@link HEAD_NAME} (*Back to Run #4811*),
- * else what {@link HEAD_NAME} calls the address, else the section's name.
+ * What the breadcrumb calls an opener (#2229): the name the page gave itself
+ * (`own`, `page-name.svelte.ts`) when it was left, so a section's deeper address
+ * is called what `Esc` lands on (*Back to Payout_Lint*, *Back to Engineering*,
+ * *Back to Payout stack*), a bare number under its kind's {@link HEAD_NAME}
+ * (*Back to Run #4811*); the key a ticket page or home's job page named itself
+ * (*Back to PAY-231*), else *Job* for home; else what {@link HEAD_NAME} calls the
+ * address, else the section's name.
  */
 export function openerName(route: TfRoute, own: string | null): string {
-  if (route.view === "full" && route.head !== route.section && own !== null && own !== "") {
+  if (route.view === "full" && own !== null && own !== "") {
     const kind = HEAD_NAME[route.head];
     return kind !== undefined && own.startsWith("#") ? `${kind} ${own}` : own;
   }

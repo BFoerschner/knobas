@@ -14,6 +14,8 @@
   import type { Badges } from "./badges.svelte";
   import { NAV, SECTION_NAME, sectionHash, type Section } from "./route";
 
+  type NavSection = Exclude<Section, "job">;
+
   let {
     current,
     inbox,
@@ -23,6 +25,8 @@
     onsearch,
     ontimer,
     ontheme,
+    navHref = sectionHash,
+    onnav,
   }: {
     /** The section the address lights, or `null`. */
     current: Section | null;
@@ -35,7 +39,17 @@
     /** Stop the timer into the worklog draft, or start one: the shell's verb. */
     ontimer: (() => void) | undefined;
     ontheme: () => void;
+    /** Where a nav entry goes: the section as it was left; its own page when left out. */
+    navHref?: (section: NavSection) => string;
+    /** A plain press on a nav entry, which the shell makes; a plain link when left out. */
+    onnav?: (section: NavSection, href: string) => void;
   } = $props();
+
+  function press(event: MouseEvent, section: NavSection) {
+    if (onnav === undefined || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    onnav(section, navHref(section));
+  }
 
   /** A badge's number and tone, or `null` where none is drawn. */
   function badge(section: Section): { n: number; err: boolean } | null {
@@ -71,7 +85,7 @@
   <nav class="tf-nav" aria-label="Main" {@attach keepCurrentInView}>
     {#each NAV as section (section)}
       {@const count = badge(section)}
-      <a href={sectionHash(section)} aria-current={section === current ? "page" : undefined}>
+      <a href={navHref(section)} aria-current={section === current ? "page" : undefined} onclick={(event) => press(event, section)}>
         {SECTION_NAME[section]}
         {#if count}
           <span class="tf-count {count.err ? 'tf-err' : ''}">{count.n}</span>
