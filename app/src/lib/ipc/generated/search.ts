@@ -19,9 +19,11 @@ export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | 
 export type Excerpt = { 
 /**
  * Where in the row it sits, as the reader finds it there: a page's
- * section heading, `Comment by <name>`, a run log's `line <n>`. `None`
- * for text the index keeps no place for: a page's lead, a ticket's,
- * pull request's or note's text.
+ * section heading, `Heading` for that heading's own words,
+ * `Comment by <name>`, a run log's `line <n>`. `None` for text the index
+ * keeps no place for (a page's lead, a ticket's, pull request's or note's
+ * text) and for a comment's author line, whose text says
+ * `Comment by <name>` itself (#2481).
  */
 place: string | null, 
 /**
@@ -502,10 +504,11 @@ export type SearchHit = { rank: number, snippet: Array<Segment>,
  * (#2431): what the launcher's preview draws under *Everything*, so the
  * preview is this list and no second read. Empty under *Titles*, for a
  * browse, and for a row with nothing to quote: a hit by its title, its
- * key or a stem the excerpts' rule misses. Read from the index: a page's
- * section and comment marks, the heading and the author among the text,
- * (`knobas_source::docs::indexed`), a pipeline's stored latest run log
- * (migration `0067`), a ticket's, pull request's or note's text.
+ * key, a property, a page link's line or a stem the excerpts' rule
+ * misses. Read from the index: a page's section and comment marks
+ * (`knobas_source::docs::indexed`), which quote a heading or an author
+ * that holds the words, a pipeline's stored latest run log (migration
+ * `0067`), a ticket's, pull request's or note's text.
  */
 excerpts: Array<Excerpt>, entity_id: string, kind: string, source_id: string, title: string, 
 /**
