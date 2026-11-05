@@ -800,3 +800,51 @@ async fn a_kind_the_launcher_leaves_out_says_so_in_the_spelling_typed() {
     assert_eq!(found.total, 1);
     assert!(found.interpreted.left_out_tokens.is_empty());
 }
+
+/// #2488: a known name with something kept beneath it, whichever way the name
+/// is known, is an ordinary empty when the word misses: a chip here would
+/// blame the filter for what the word did.
+#[tokio::test]
+async fn a_word_that_misses_beneath_a_kept_row_or_an_asset_draws_no_token() {
+    let pool = pool().await;
+    let t = token();
+
+    let repo = format!("kept-{t}");
+    let full = format!("o{t}/{repo}");
+    item(
+        &pool,
+        "gitea",
+        "pr",
+        &format!("{full}#1"),
+        &format!("Change {t}"),
+        serde_json::json!({ "base": { "repo": { "full_name": full, "name": repo } } }),
+        Utc::now(),
+    )
+    .await;
+
+    let asset = format!("host-{t}");
+    let id = format!("asset:{t}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset',$2)")
+        .bind(&id)
+        .bind(&asset)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("insert into knobas.asset (id, type_id, name, path_text) values ($1,'vm',$2,'')")
+        .bind(&id)
+        .bind(&asset)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    for name in [&repo, &asset] {
+        let found = search(&pool, &format!("under:{name}"), false).await;
+        assert!(found.total > 0, "{name} answers");
+
+        let raw = format!("under:{name} nothing{t}");
+        let answer = search(&pool, &raw, false).await;
+        assert_eq!(answer.total, 0, "{raw}");
+        assert!(answer.interpreted.left_out_tokens.is_empty(), "{raw}");
+        assert!(answer.interpreted.unknown_tokens.is_empty(), "{raw}");
+    }
+}

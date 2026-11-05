@@ -66,7 +66,8 @@ macro_rules! parent_names {
 pub(crate) use parent_names;
 
 /// Report every `under:` value no parent answers to as an unknown token, in
-/// the spelling the reader typed it.
+/// the spelling the reader typed it, and hand back the values one does answer
+/// to, for [`left_out_tokens`].
 ///
 /// The value stays in the filter: `under:a under:typo` still scopes to `a`,
 /// and `under:typo` alone answers with nothing -- which is true -- while the
@@ -75,40 +76,47 @@ pub(crate) use parent_names;
 /// # Errors
 ///
 /// [`SearchError::Db`] if the lookup fails.
-pub(crate) async fn report_unknown(pool: &PgPool, parsed: &mut Parsed) -> Result<(), SearchError> {
+pub(crate) async fn report_unknown(
+    pool: &PgPool,
+    parsed: &mut Parsed,
+) -> Result<Vec<(String, String)>, SearchError> {
     if parsed.under.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let values: Vec<String> = parsed
         .under
         .iter()
         .map(|(_, value)| value.clone())
         .collect();
-    let known = crate::sql::known_parent_positions(pool, &values).await?;
-    let unknown: Vec<String> = parsed
+    let positions = crate::sql::known_parent_positions(pool, &values).await?;
+    let (known, unknown): (Vec<_>, Vec<_>) = parsed
         .under
         .iter()
+        .cloned()
         .zip(1_i64..)
-        .filter(|(_, position)| !known.contains(position))
-        .map(|((token, _), _)| token.clone())
-        .collect();
-    for token in unknown {
+        .partition(|(_, position)| positions.contains(position));
+    for ((token, _), _) in unknown {
         parsed.unknown(&token);
     }
-    Ok(())
+    Ok(known.into_iter().map(|(under, _)| under).collect())
 }
 
 /// The typed tokens that explain an empty launcher answer by what it leaves
 /// out (#2488, [`crate::frames`]), in the spelling typed: each `kind:` naming
-/// a left-out kind, then each `under:` value with left-out rows beneath it and
-/// nothing else.
+/// a left-out kind, then each name in `known_under` the launcher's own
+/// statement admits no row beneath.
 ///
 /// Read only after an empty answer, so an answer that holds rows pays nothing.
-/// Each value is asked of the launcher's own statement twice, with nothing
-/// beside it, so what `under:` admits and what this says cannot drift: the
-/// words and the `source:` and `kind:` scope are not asked, as
-/// [`report_unknown`] does not ask them, because a word matching nothing
-/// beneath the name is not what the launcher left out.
+/// The launcher's statement runs once more per value in `known_under`, one at
+/// a time, and a query's length bounds how many there are. A name no parent
+/// answers to is not in it, which is what a name still being typed is at every
+/// keystroke, so typing one pays nothing here. A known name beneath which the
+/// statement admits nothing has only left-out rows there, since the known name
+/// came from a live row. The statement is asked with nothing beside the name,
+/// so what `under:` admits and what this says cannot drift: the words and the
+/// `source:` and `kind:` scope are not asked, as [`report_unknown`] does not
+/// ask them, because a word matching nothing beneath the name is not what the
+/// launcher left out.
 ///
 /// # Errors
 ///
@@ -117,6 +125,7 @@ pub(crate) async fn left_out_tokens(
     pool: &PgPool,
     corpora: &[&Corpus],
     parsed: &Parsed,
+    known_under: &[(String, String)],
     filters: &EffectiveFilters,
 ) -> Result<Vec<String>, SearchError> {
     let mut tokens: Vec<String> = parsed
@@ -125,23 +134,14 @@ pub(crate) async fn left_out_tokens(
         .filter(|(_, kind)| filters.hidden_kinds.contains(kind))
         .map(|(token, _)| token.clone())
         .collect();
-    for (token, value) in &parsed.under {
-        let beneath = EffectiveFilters {
+    for (token, value) in known_under {
+        let answered = EffectiveFilters {
             under: vec![value.clone()],
             declarations: filters.declarations.clone(),
+            hidden_kinds: filters.hidden_kinds.clone(),
             ..EffectiveFilters::default()
         };
-        let answered = EffectiveFilters {
-            hidden_kinds: filters.hidden_kinds.clone(),
-            ..beneath.clone()
-        };
-        let left_out = EffectiveFilters {
-            kinds: filters.hidden_kinds.clone(),
-            ..beneath
-        };
-        if !admits_a_row(pool, corpora, &answered).await?
-            && admits_a_row(pool, corpora, &left_out).await?
-        {
+        if !admits_a_row(pool, corpora, &answered).await? {
             tokens.push(token.clone());
         }
     }
