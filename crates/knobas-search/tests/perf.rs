@@ -1550,6 +1550,9 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
     .await;
     add_rows(&pool, under_its_commits, "repo", "r", 30, "200 days", false).await;
     testing::prepare(&pool).await.unwrap();
+    // So the first sample does not write out what the lines above left dirty, as the
+    // author probe's fixture does for the same reason (`tests/coverage.rs`).
+    sqlx::query("checkpoint").execute(&pool).await.unwrap();
     for (name, raw) in [
         ("under its commits", "under:bench/repo-7"),
         ("author, its commits", "@mara.lindqvist payout"),
@@ -1601,6 +1604,7 @@ async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
         ahead,
         "no run of withdrawn child rows ahead: the fixture moved"
     );
+    sqlx::query("checkpoint").execute(&pool).await.unwrap();
     let name = "withdrawn ahead";
     let timing = timings(&searcher, "under:bench/repo-7", 10).await;
     println!(
