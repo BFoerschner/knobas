@@ -9,15 +9,17 @@
 //! spell them (`knobas_source::docs::indexed`), a log's lines -- and keeps
 //! each sentence or line that holds a typed word, the words flagged. A
 //! section's heading and a comment's author are indexed too and sit only in
-//! their marks, so a mark that holds a word is quoted as well (#2481).
+//! their marks, so a mark that holds a word is quoted as well (#2481). So is a
+//! page link's line, once no other place shows the word (#2491): the usual
+//! link draws its title, and the sentence around it has quoted it already.
 //!
 //! Words are matched as the Docs search marks them (`knobas_app::docs`'s
 //! `stem`, prototype-6): lowercased, a word over four letters without one
 //! `ing`, `es`, `ed` or `s` at its end, at the start of a word, the mark
 //! running to the word's end. It is a reader's marking, not the index's
 //! stemming: a row Postgres matched through a stem this rule misses has no
-//! excerpt. So has a row matched by its title, its key or a page link's line,
-//! and the preview says only that there is no passage to quote (#2481).
+//! excerpt. So has a row matched by its title or its key, and the preview says
+//! only that there is no passage to quote (#2481).
 
 use knobas_source::docs::indexed::{self, Part};
 
@@ -81,7 +83,8 @@ pub fn excerpts(
         }
         return out;
     }
-    for run in indexed::read(text).runs {
+    let read = indexed::read(text);
+    for run in read.runs {
         match &run.part {
             Part::Lead => {}
             Part::Section(heading) => {
@@ -113,7 +116,56 @@ pub fn excerpts(
             keep(place.clone(), &|| marked(&sentence, &stems), &mut out);
         }
     }
+    // Taken before the first link, so one link's line never silences another:
+    // each names a different page.
+    let unquoted: Vec<Vec<char>> = stems
+        .iter()
+        .filter(|stem| !out.iter().any(|excerpt| quotes(excerpt, stem)))
+        .cloned()
+        .collect();
+    for (space, title) in &read.links {
+        // The line reads as its own place, so it names none.
+        keep(
+            None,
+            &|| link_line(space, title, &stems, &unquoted),
+            &mut out,
+        );
+    }
     out
+}
+
+/// Whether `excerpt` marks a word `stem` starts.
+fn quotes(excerpt: &Excerpt, stem: &[char]) -> bool {
+    excerpt
+        .segments
+        .iter()
+        .filter(|segment| segment.hit)
+        .any(|segment| segment.text.chars().map(lower).collect::<Vec<_>>().starts_with(stem))
+}
+
+/// `Links to <title> in <space>` with the words marked in the title and the
+/// space alone; `None` when neither holds a word of `unquoted`. `in <space>`
+/// is left out where the line names no space. The rest is this module's
+/// wording, which no row is indexed by. Both come from the link line: what the
+/// link draws on the page is in the sentence around it, and may differ.
+fn link_line(
+    space: &str,
+    title: &str,
+    stems: &[Vec<char>],
+    unquoted: &[Vec<char>],
+) -> Option<Vec<Segment>> {
+    marked(title, unquoted).or_else(|| marked(space, unquoted))?;
+    let plain = |text: &str| Segment {
+        text: text.to_owned(),
+        hit: false,
+    };
+    let mut segments = vec![plain("Links to ")];
+    segments.extend(marked(title, stems).unwrap_or_else(|| vec![plain(title)]));
+    if !space.is_empty() {
+        segments.push(plain(" in "));
+        segments.extend(marked(space, stems).unwrap_or_else(|| vec![plain(space)]));
+    }
+    Some(segments)
 }
 
 /// `Comment by <name>` with the words marked in the name alone; `None` when
@@ -345,6 +397,121 @@ mod tests {
             flat(&out),
             vec![(Some("Heading"), "[Backoff] policy".to_owned())]
         );
+    }
+
+    /// #2491: `fts` indexes a page link's line, so a page found by the linked
+    /// page's title alone has to quote it. The link draws other words here.
+    #[test]
+    fn a_link_whose_title_holds_the_word_is_quoted_with_the_word_marked() {
+        let out = excerpts(
+            "T",
+            "T\nSee the limits doc.\n\n\u{1d}ENG\u{1d}Retry budget\u{1d}",
+            None,
+            &needles(&["retry"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![(None, "Links to [Retry] budget in ENG".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_link_whose_space_holds_the_word_is_quoted_with_the_space_marked() {
+        let out = excerpts(
+            "T",
+            "T\nSee the limits doc.\n\n\u{1d}ENG\u{1d}Retry budget\u{1d}",
+            None,
+            &needles(&["eng"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![(None, "Links to Retry budget in [ENG]".to_owned())]
+        );
+    }
+
+    /// A source that names no space writes an empty one (`search_text`).
+    #[test]
+    fn a_link_with_no_space_names_none() {
+        let out = excerpts(
+            "T",
+            "T\n\n\u{1d}\u{1d}Retry budget\u{1d}",
+            None,
+            &needles(&["retry"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![(None, "Links to [Retry] budget".to_owned())]
+        );
+    }
+
+    /// `Links to` and `in` are this module's wording, which no row is indexed
+    /// by.
+    #[test]
+    fn the_words_links_to_and_in_are_never_a_match() {
+        let text = "T\n\n\u{1d}ENG\u{1d}Retry budget\u{1d}";
+        for word in ["links", "to", "in"] {
+            assert!(excerpts("T", text, None, &needles(&[word])).is_empty());
+        }
+    }
+
+    /// The usual link draws its title, so the sentence that holds it already
+    /// shows the word, and the line would say it twice.
+    #[test]
+    fn a_link_whose_word_is_already_quoted_adds_no_line() {
+        let out = excerpts(
+            "T",
+            "T\nSee Retry budget.\n\n\u{1d}ENG\u{1d}Retry budget\u{1d}",
+            None,
+            &needles(&["retry"]),
+        );
+        assert_eq!(flat(&out), vec![(None, "See [Retry] budget.".to_owned())]);
+    }
+
+    /// A word quoted nowhere else earns the line, and the line marks every
+    /// word it holds.
+    #[test]
+    fn a_link_holding_a_word_no_other_place_quotes_is_quoted_with_all_its_words_marked() {
+        let out = excerpts(
+            "T",
+            "T\nThe retry stays.\n\n\u{1d}ENG\u{1d}Retry budget\u{1d}",
+            None,
+            &needles(&["retry", "budget"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![
+                (None, "The [retry] stays.".to_owned()),
+                (None, "Links to [Retry] [budget] in ENG".to_owned()),
+            ]
+        );
+    }
+
+    /// One link's line is not what makes another's redundant: each names a
+    /// different page.
+    #[test]
+    fn two_links_holding_the_word_are_both_quoted() {
+        let out = excerpts(
+            "T",
+            "T\n\n\u{1d}ENG\u{1d}Retry budget\u{1d}\n\u{1d}OPS\u{1d}Retry policy\u{1d}",
+            None,
+            &needles(&["retry"]),
+        );
+        assert_eq!(
+            flat(&out),
+            vec![
+                (None, "Links to [Retry] budget in ENG".to_owned()),
+                (None, "Links to [Retry] policy in OPS".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_full_list_quotes_no_link() {
+        let sentences: String = (0..=MAX).map(|i| format!("Retry {i}.\n")).collect();
+        let text = format!("T\n{sentences}\n\u{1d}ENG\u{1d}Budget\u{1d}");
+        let out = excerpts("T", &text, None, &needles(&["retry", "budget"]));
+        assert_eq!(out.len(), MAX);
+        assert!(flat(&out).iter().all(|(_, line)| line.contains("[Retry]")));
     }
 
     #[test]
