@@ -1,12 +1,12 @@
 # Dependencies and Proposed links leave the app, their backend stays, 2026-11-05
 
-Björn's ruling, given on 2026-11-05 when he asked for this PR. It is his, not an agent's, and it binds as such.
+Björn ruled this on 2026-11-05, in the request for this PR. It binds as Björn's ruling, not an agent's.
 
 ## The ruling
 
 **The pages go.** Dependencies (`#/deps`, `#/deps/job/<key>`, the retired `#/map`) and Proposed links (`#/review`, `#/review/<link id>`) have no page, no nav entry and no row in the launcher's `>` menu. Those addresses now draw *Nothing lives at …*. The folders `app/src/lib/tf/deps/` and `app/src/lib/tf/review/` are deleted, with their styles.
 
-**What only opened them goes too.** The top bar's proposals badge, the Connections drawer's *N proposed* box and the *proposed link, judge it* chip on a pull request's Commits tab all led to the Proposed links page, so they are gone along with the reads behind them. A link accepted from a proposal keeps showing its reason in the links panel, because by then it is a link.
+**What only opened them goes too, as a consequence.** Björn named the pages, not these. The top bar's proposals badge, the Connections drawer's *N proposed* box and the *proposed link, judge it* chip on a pull request's Commits tab all led to the Proposed links page, so they are gone along with the reads behind them. A link accepted from a proposal keeps showing its reason in the links panel, because by then it is a link.
 
 **The backend stays, unchanged.** No crate, migration, IPC command or generated mirror changes. The wrappers in `app/src/lib/ipc/` and the `?fake-ipc` handlers stay as well. The suggestion pass still runs when a sync ends, so proposals keep collecting with nothing drawing them, and Dependencies' tables keep their rows. Link sets' picker still calls the `dependencies` read (`tf/sets/ports.ts`).
 
@@ -14,7 +14,7 @@ The asset tree is neither of the two pages and stays. Where it lives now is an a
 
 ## Why
 
-Björn: "I want to concentrate on the core of knobas and what it does well." He may want both back, which is why the backend is kept.
+Björn: "I want to concentrate on the core of knobas and what it does well." Björn may want both back, which is why the backend stays.
 
 ## Left as it was
 
