@@ -115,9 +115,9 @@
 //!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
-//! from `seed-state.json` -- a stray issue deleted, a stray comment deleted, a
-//! label removed, a status moved back through the workflow -- which is the
-//! union of what either suite writes. Every test that asserts an exact set
+//! from `seed-state.json` -- a stray issue deleted, a stray comment or
+//! attachment deleted, a label removed, a status moved back through the
+//! workflow -- which is the union of what can be left. Every test that asserts an exact set
 //! calls it before taking its baseline. Recovery from a dirty environment is
 //! "run the suite again".
 //!
@@ -530,8 +530,9 @@ impl Seeded {
     ///
     /// Scoped by `seed-state.json` and by nothing a run remembers, which is the
     /// only way to reach the leftovers of a run that is gone -- the same rule
-    /// the seeded TeamCity suite's clearing works under. Four things can be
-    /// wrong, and it is the union of what either suite writes:
+    /// the seeded TeamCity suite's clearing works under. Five things can be
+    /// wrong: the union of what either suite writes, and an attachment, which
+    /// neither does:
     ///
     /// * an issue the seed did not create -- the ticket `knobas-app`'s suite
     ///   files through the write queue -- is **deleted**;
@@ -540,6 +541,11 @@ impl Seeded {
     /// * a comment whose id the seed did not record is **deleted**, so
     ///   [`each_issue_carries_its_comments_and_worklogs_as_seeded`]'s exact id
     ///   list means something;
+    /// * an attachment whose id the seed did not record is **deleted** (#2471:
+    ///   something uploaded one to OPS-77 from outside this repository, and
+    ///   [`the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_them`]'s
+    ///   exact list went red). Left alone by a `seed-state.json` that records no
+    ///   attachments, which cannot say which are strays;
     /// * an issue in a status other than the one the seed put it in is moved
     ///   back through the workflow, so
     ///   [`a_full_sync_mirrors_every_seeded_issue_across_both_projects`]'s
@@ -555,7 +561,9 @@ impl Seeded {
     /// Not "sweep": `CONTEXT.md` spends that word on the engine pass that
     /// tombstones what a full sync no longer emitted.
     async fn clear_leftovers(&self) {
-        let rows = self.jql("ORDER BY key ASC", "status,labels,comment").await;
+        let rows = self
+            .jql("ORDER BY key ASC", "status,labels,comment,attachment")
+            .await;
         let mut cleared: Vec<String> = Vec::new();
         for row in &rows {
             let key = row["key"].as_str().expect("an issue has a key").to_owned();
@@ -614,6 +622,31 @@ impl Seeded {
                     "deleting the leftover comment {id} on {key}: {status} {body}"
                 );
                 cleared.push(format!("deleted comment {id} on {key}"));
+            }
+
+            if let Some(recorded) = &self.seed.attachments {
+                for id in row["fields"]["attachment"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|a| a["id"].as_str())
+                    .filter(|id| {
+                        recorded.issue != key || !recorded.files.iter().any(|f| f.id == *id)
+                    })
+                {
+                    let (status, body) = self
+                        .request(
+                            reqwest::Method::DELETE,
+                            &format!("rest/api/2/attachment/{id}"),
+                            None,
+                        )
+                        .await;
+                    assert!(
+                        status == 204 || status == 404,
+                        "deleting the leftover attachment {id} on {key}: {status} {body}"
+                    );
+                    cleared.push(format!("deleted attachment {id} on {key}"));
+                }
             }
 
             let status_now = row["fields"]["status"]["name"].as_str().unwrap_or_default();
@@ -838,7 +871,20 @@ fn updated_to(cursor: &str) -> chrono::DateTime<chrono::Utc> {
     raw.parse().unwrap_or_else(|e| panic!("{raw:?}: {e}"))
 }
 
-/// Wait until the wall clock has moved into a **later second** than `stamp`.
+/// Wait until **Jira's clock** is early in a **later second** than `stamp`.
+///
+/// **Jira's clock, because `stamp` is Jira's.** This used to compare with the
+/// test machine's clock, and measured over the tunnel to the remote target
+/// (#2472) Jira's ran about 60 ms behind it. So the edit after this wait landed
+/// in the last milliseconds of Jira's *previous* second, every time: an edit
+/// meant for a later second could share `stamp`'s, and
+/// [`two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink`]'s
+/// second change, some 100 ms on, always crossed the boundary its first had just
+/// missed. `serverInfo` reports the time to the millisecond without writing
+/// anything.
+///
+/// **Early in the second** so that what follows has most of it to land in. It
+/// costs at most a little over a second.
 ///
 /// **What this used to be for, and no longer is.** Jira stamps `updated` to the
 /// second, and the adapter's cursor used to recognise a re-delivered issue by
@@ -860,12 +906,36 @@ fn updated_to(cursor: &str) -> chrono::DateTime<chrono::Utc> {
 /// edit moved `updated` *forward* (`witnessed > baseline`) is comparing values
 /// `/search` renders to the second, and two edits inside one second render
 /// equal. That is a fact about the timestamp, not about the cursor, and waiting
-/// for the second to turn is what makes such an assertion meaningful. It costs
-/// at most a second.
-async fn after_the_second_of(stamp: chrono::DateTime<chrono::Utc>) {
-    while chrono::Utc::now().timestamp() <= stamp.timestamp() {
-        tokio::time::sleep(Duration::from_millis(50)).await;
+/// for the second to turn is what makes such an assertion meaningful.
+async fn after_the_second_of(seeded: &Seeded, stamp: chrono::DateTime<chrono::Utc>) {
+    /// Milliseconds into Jira's second: past the turn by more than the estimate
+    /// below can be off by, and polled finely enough not to step over.
+    const EARLY: std::ops::Range<u32> = 50..200;
+
+    let sent = chrono::Utc::now();
+    let (status, body) = seeded.get("rest/api/2/serverInfo").await;
+    let received = chrono::Utc::now();
+    assert_eq!(status, 200, "reading Jira's clock: {body}");
+    let server = jira_time(
+        body["serverTime"]
+            .as_str()
+            .unwrap_or_else(|| panic!("serverInfo has no serverTime: {body}")),
+    );
+    let ahead = server - (sent + (received - sent) / 2);
+    loop {
+        let now = chrono::Utc::now() + ahead;
+        if now.timestamp() > stamp.timestamp() && EARLY.contains(&now.timestamp_subsec_millis()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
+}
+
+/// A timestamp as Jira's REST API writes it, to the millisecond.
+fn jira_time(raw: &str) -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.3f%z")
+        .unwrap_or_else(|e| panic!("{raw:?}: {e}"))
+        .with_timezone(&chrono::Utc)
 }
 
 /// A port nothing listens on: bound to learn the number, then dropped.
@@ -1363,7 +1433,7 @@ async fn an_incremental_run_after_one_edit_returns_that_issue_and_moves_the_wate
     // baseline's stamp is the same version of the issue as far as the cursor
     // is concerned, which is a documented adapter limitation and not the thing
     // under test here.
-    after_the_second_of(baseline).await;
+    after_the_second_of(&seeded, baseline).await;
     guard.label(&seeded, EDITED).await;
 
     // Jira's search reads an index the write path updates asynchronously, so
@@ -2651,7 +2721,7 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
     // The same second-boundary wait the label test needs: an edit inside the
     // second the baseline recorded is, to the cursor, the same version of the
     // issue. See `after_the_second_of`.
-    after_the_second_of(baseline).await;
+    after_the_second_of(&seeded, baseline).await;
     guard.take(&seeded, BORROWED).await;
 
     // Polled rather than assumed, for the reason #325 records and #289's live
@@ -2729,12 +2799,19 @@ async fn a_reassignment_through_the_assignee_endpoint_reaches_the_next_increment
 /// asserted the shared second outright, which meant a slow index failed the
 /// suite with no bug present.
 ///
-/// So each attempt resets the issue, tries again, and **only the collision is
-/// retried**. Once one is achieved the delivery assertion is made once and is
-/// not retried at all: a reassignment that did not arrive is a failure, never
-/// something to poll past. Exhausting the attempts is also a failure -- it
-/// means this environment cannot produce the shape the criterion is about --
-/// and it reports every gap it measured so the reason is on the log.
+/// So each attempt starts early in one of Jira's seconds (#2472, see
+/// [`after_the_second_of`]), resets the issue, tries again, and **only the
+/// collision is retried**. Once one is achieved the delivery assertion is made
+/// once and is not retried at all: a reassignment that did not arrive is a
+/// failure, never something to poll past.
+///
+/// # When the attempts run out
+///
+/// That says nothing about the adapter either way: the target did not produce
+/// the shape, so the criterion went **not witnessed**. It is still red, and
+/// says "NOT WITNESSABLE" with every gap it measured, because this is the one
+/// test that witnesses #345 against a real server, and a green line would let
+/// that witness go dark with nobody looking.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_sink() {
@@ -2765,7 +2842,7 @@ async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_si
         let baseline = item(&items, BORROWED)
             .updated_at
             .expect("a real Jira always sets updated");
-        after_the_second_of(baseline).await;
+        after_the_second_of(&seeded, baseline).await;
 
         // Change one: a label, through the generic issue PUT.
         labelled.set(&seeded, BORROWED, true).await;
@@ -2821,11 +2898,12 @@ async fn two_changes_inside_one_second_with_a_run_between_them_both_reach_the_si
 
     let Some((between, _)) = collided else {
         panic!(
-            "{ATTEMPTS} attempts and the reassignment never landed in the second the \
-             previous run recorded, so this run cannot witness the collision #345 is \
-             about. Gaps in ms: {gaps:?}. Each gap is one wait on Jira's asynchronous \
-             search index plus a sync and a PUT, so a machine this slow is one where the \
-             assertion below would pass for the wrong reason."
+            "NOT WITNESSABLE on this target, not a verdict on the adapter: {ATTEMPTS} attempts \
+             and the reassignment never landed in the second the previous run recorded, so \
+             this run cannot witness the collision #345 is about. Gaps in ms from the start \
+             of that second: {gaps:?}. Each holds where in the second the label landed, one \
+             wait on Jira's asynchronous search index, a sync and a PUT, so a target this \
+             slow is one where the assertion below would pass for the wrong reason."
         )
     };
 
@@ -2863,12 +2941,11 @@ async fn stamp_of(seeded: &Seeded, key: &str) -> chrono::DateTime<chrono::Utc> {
         .get(&format!("rest/api/2/issue/{key}?fields=updated"))
         .await;
     assert_eq!(status, 200, "reading {key}'s updated: {body}");
-    let raw = body["fields"]["updated"]
-        .as_str()
-        .unwrap_or_else(|| panic!("{key} has no updated: {body}"));
-    chrono::DateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S%.3f%z")
-        .unwrap_or_else(|e| panic!("{raw:?}: {e}"))
-        .with_timezone(&chrono::Utc)
+    jira_time(
+        body["fields"]["updated"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key} has no updated: {body}")),
+    )
 }
 
 /// **An untouched source stays quiet, poll after poll after poll** (battery
@@ -3810,7 +3887,8 @@ async fn an_edit_moves_an_issue_in_the_updated_order_and_nowhere_in_the_created_
     let by_updated = order(seeded.jql("ORDER BY updated ASC", "key").await);
     let edited = by_updated[0].clone();
     // Later than every stamp, so the edit lands at the end and nowhere else.
-    after_the_second_of(stamp_of(&seeded, &by_updated[by_updated.len() - 1]).await).await;
+    let latest = stamp_of(&seeded, &by_updated[by_updated.len() - 1]).await;
+    after_the_second_of(&seeded, latest).await;
     guard.label(&seeded, &edited).await;
 
     // The index is updated asynchronously: poll for the edit to show.
@@ -4859,6 +4937,7 @@ const SEEDED_PDF: &str = "runbook-draft.pdf";
 async fn the_seeded_attachments_are_listed_read_and_downloaded_as_jira_serves_them() {
     use knobas_source::view::{ATTACHMENT_CAP, FileBytes};
     let seeded = seeded();
+    seeded.clear_leftovers().await;
     let attachments = seeded.seed.attachments();
     let entity = format!("jira:{}", attachments.issue);
     let (png, png_url, png_id) = seeded_file(&seeded, SEEDED_PNG);
