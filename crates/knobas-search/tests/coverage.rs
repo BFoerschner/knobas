@@ -735,8 +735,8 @@ async fn a_source_whose_authored_items_did_not_match_still_answered() {
 /// The probe is cheap exactly when it finds what it is looking for. So the
 /// fixture measures both:
 ///
-/// * **`answered`** -- a source whose corpus carries authors. The `exists`
-///   stops at the first row, and the reading is a fixed small cost whatever the
+/// * **`answered`** -- a source whose corpus carries authors. A walk of its
+///   newest rows settles it, and the reading is a fixed small cost whatever the
 ///   corpus size.
 /// * **`no_values`** -- the case #141 exists for. There is no row to stop at,
 ///   so proving the absence reads that source's rows. This is the expensive

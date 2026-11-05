@@ -57,47 +57,60 @@
 //!
 //! # What it costs, measured
 //!
-//! One statement, and only for a query that actually filtered by author -- an
-//! ordinary keystroke pays nothing. (An `under:` query pays a second, indexed
-//! one for its own verdict, `UNDER_COVERAGE_SQL`, #642.)
+//! Nothing for an ordinary keystroke: all of it is asked only for a query that
+//! filtered by author or by parent. A query that did pays up to three reads, and
+//! the first two exist so that the second is usually not asked.
 //!
-//! **There is no index that can answer this and the shape was chosen on
-//! measurements, not on taste.** "Does this source have an authored row" has no
-//! index behind it (`item_source_updated_idx` is `(source_id, item_updated_at)`
-//! and carries no author), so proving an *absence* reads that source's rows
-//! however it is written. Measured on the 100,000-row fixture with a third of
-//! it unauthored, `explain (analyze)` on four formulations:
+//! 1. **[`NEWEST_ROWS_SQL`], one bounded walk per source.** Each source's newest
+//!    64 live rows. Almost every source settles there, which is about 0.5 ms for
+//!    the four of the benchmark, whatever the mirror holds.
+//! 2. **[`AUTHOR_COVERAGE_SQL`], one grouped read over the sources the walk could
+//!    not settle.** Skipped when there are none.
+//! 3. **[`UNDER_COVERAGE_SQL`], for `under:` alone.** An index range per source.
 //!
-//! | formulation | execution |
-//! |---|---|
-//! | correlated `exists` per source over `unnest` | 28.6 ms |
-//! | one grouped aggregate over `sync.live_item` | **30.0 ms** |
-//! | one grouped aggregate over `sync.item` | 13.7 ms |
-//! | a single `exists`, scalar bind, one source | 16.7 ms |
+//! **Proving an absence reads that source's rows however it is written.** "Does
+//! this source have an authored row" has no index behind it
+//! (`item_source_updated_idx` is `(source_id, item_updated_at)` and carries no
+//! author), and neither does "does it have a row the launcher keeps", since
+//! left-out kinds are a list to exclude. That is why there are two reads. One row
+//! is the answer for most sources and the walk finds it, and the rest cost one
+//! scan between them, whatever their number.
 //!
-//! The correlated form is not chosen even though it measured slightly faster,
-//! because its cost is *per source*: it plans two sub-scans each, and PostgreSQL
-//! will not use the source index for them (a source holding a third of the
-//! mirror is cheaper to scan than to look up 33,000 times, and it stops at the
-//! first row it finds -- which for the source being reported on never comes). A
-//! sixth configured source would double it. The grouped aggregate is **one
-//! parallel scan whatever the source count**, which is the property worth
-//! having.
+//! Measured on the 100,000-row fixture with a third of it unauthored, through the
+//! plan cache, on a shared machine at load 8 to 9, p50 ms:
 //!
-//! `sync.item` is the cheap one and is **not** used: half of that statement's
-//! cost is the tombstone join, and dropping it would let an authored item a
-//! source has since withdrawn vouch for a capability the live corpus no longer
-//! has -- reinstating this issue's own silence in the one case where it matters
-//! most, a source that has *stopped* naming people. The 16 ms buys correctness.
+//! | query | grouped read alone | one `limit 1` per source | walk, then grouped |
+//! |---|---:|---:|---:|
+//! | `under:`, no kind scope | 62 | 28 | **0.6** |
+//! | `author:`, no kind scope | 62 | 28 | **43** |
+//! | `author:` and `kind:ticket` | 40 | 28 | **17** |
+//! | a kind one source has | 17 | 67 | **3.4** |
+//! | a kind nothing has | 0.2 | 103 | **0.7** |
+//! | every kind left out | 20 | 99 | **19** |
+//!
+//! The third column is why this is not simply a `limit 1`. It reads each source
+//! down its index to the first row in scope and costs next to nothing when that
+//! row is near, but a kind scope that a source cannot meet walks all of it: `asset:
+//! under:x` went from 0.2 ms to 103 ms, since a generic plan cannot use the kind
+//! index behind `cardinality($2) = 0 or kind = any($2)`. So the walk has a budget
+//! and the grouped read stays as what a source falls back to, which keeps the cost
+//! of any query at the last column's walk plus at most what the grouped read cost
+//! before.
+//!
+//! `sync.item` is cheaper than `sync.live_item` for that read and is **not** used:
+//! half of the statement's cost is the tombstone join, and dropping it would let an
+//! authored item a source has since withdrawn vouch for a capability the live corpus
+//! no longer has -- reinstating this issue's own silence in the one case where it
+//! matters most, a source that has *stopped* naming people.
 //!
 //! The end-to-end reading is
-//! `tests/coverage.rs::the_author_probe_stays_inside_the_launchers_budget`:
-//! **47 ms** for the whole keystroke over the exit criterion's 100,000-row
-//! corpus with a third of it a source that names nobody, against 28 ms for the
-//! same query unfiltered. It is `#[ignore]`d and therefore **not an automatic
+//! `tests/coverage.rs::the_author_probe_stays_inside_the_launchers_budget`, the whole
+//! keystroke over the exit criterion's 100,000-row corpus with a third of it a
+//! source that names nobody. It is `#[ignore]`d and therefore **not an automatic
 //! gate** -- seeding 100,000 rows costs tens of seconds and a timing on a shared
-//! runner is a coin flip, which is `tests/perf.rs`'s reasoning and the same
-//! trade. It is a measurement anyone can re-run, not a promise CI keeps.
+//! runner is a coin flip, which is `tests/perf.rs`'s reasoning and the same trade. It
+//! is a measurement anyone can re-run, not a promise CI keeps. What the gate does
+//! hold is the plans, with no clock: `tests/it/coverage_plans.rs`.
 
 use sqlx::PgPool;
 
@@ -106,7 +119,53 @@ use crate::query::EffectiveFilters;
 use crate::types::{FilterAnswer, FilterCoverage, FilterDimension, SourceAnswer};
 use crate::vocab::{SourceVocab, Vocabulary};
 
-/// One row per named source that put **anything** into this query's corpus.
+/// A look at each named source's newest rows: one row per source, quiet ones too.
+///
+/// * `in_scope`: one of them is in this query's corpus.
+/// * `authored`: one of those carries an author.
+/// * `read_every_row`: the source ran out before the walk did, so what the walk
+///   did not see is nothing and its answers are final.
+///
+/// [`settle`] says what follows from those. `$2` and `$3` are
+/// [`AUTHOR_COVERAGE_SQL`]'s, with its reasons.
+///
+/// **The `order by` is what makes this bounded.** The rows are counted, so their
+/// order changes no answer. It is the order `item_source_updated_idx` keeps,
+/// `(source_id, item_updated_at desc nulls last)`, and it stops the planner
+/// taking a table scan for this: under a `limit` a scan looks as if it would find
+/// its rows soon, and for a source with no rows it reads the whole table. A scan
+/// has to read everything before a sort gives its first row, so no estimate makes
+/// that look cheap (#2500, and `tests/it/coverage_plans.rs`).
+///
+/// **Why 64.** It costs about 1 µs a row, through the entity and the source
+/// config, so about 0.5 ms for the benchmark's four sources. A walk four times
+/// the length costs 1 ms over 100,000 items and took a top-N sort of the table at
+/// 3,000. The length only moves how often the grouped read is asked: a walk that
+/// runs out only sends its source there.
+pub(crate) const NEWEST_ROWS_SQL: &str = r"
+select s.id as source_id,
+       walk.in_scope,
+       walk.authored,
+       walk.read_every_row
+  from unnest($1::text[]) s(id)
+ cross join lateral (
+   select count(*) filter (where (cardinality($2::text[]) = 0 or newest.kind = any($2))
+                             and newest.kind <> all($3::text[])) > 0 as in_scope,
+          count(*) filter (where (cardinality($2::text[]) = 0 or newest.kind = any($2))
+                             and newest.kind <> all($3::text[])
+                             and nullif(newest.author, '') is not null) > 0 as authored,
+          count(*) < 64 as read_every_row
+     from (select i.kind, i.author
+             from sync.live_item i
+            where i.source_id = s.id
+            order by i.item_updated_at desc nulls last
+            limit 64) newest
+ ) walk
+";
+
+/// One row per named source that put **anything** into this query's corpus. Asked
+/// only for the sources [`NEWEST_ROWS_SQL`] could not settle, because it reads all
+/// their rows.
 ///
 /// A source with nothing in scope contributes no row, and [`coverage_of`] leaves
 /// it out of the report entirely: the grouping saying "there was nothing here to
@@ -151,7 +210,8 @@ select i.source_id                            as source_id,
 ///   returns the parent itself, so `kind:repo under:payout` shows the repo,
 ///   and Gitea answers it because its commits name repos -- a kind-scoped test
 ///   would call it unable to while it showed the repo. The kind scope still
-///   decides *who is listed*, through [`AUTHOR_COVERAGE_SQL`]'s rows.
+///   decides *who is listed*, through [`NEWEST_ROWS_SQL`] and
+///   [`AUTHOR_COVERAGE_SQL`].
 /// * **Existence**, as for `author:` (the module docs): one row answers. So a
 ///   source whose adapter declares a parent but whose corpus names none -- a
 ///   Jira project where no ticket is in an epic -- gets
@@ -167,23 +227,31 @@ select i.source_id                            as source_id,
 ///   that reads every child-arm row, every item and every entity to answer
 ///   four sources: 61 ms over 100,000 items, on every `under:` keystroke
 ///   (#2495). A `limit` inside a lateral subquery cannot be pulled up.
-/// * **What a source with no child row costs depends on the statistics.**
-///   Without them it answers from an empty range of `item_parent_child_idx`,
-///   `(source_id, adapter_kind) where arm = 'child'`. With them the planner
-///   expects a row soon and may scan `sync.item_parent` instead, which that
-///   source reads whole: one table and no join, about 1.5 ms at 26,668 rows,
-///   4.8 ms for the benchmark's three such sources, and it grows with the table
-///   (#2500). An `order by` on the index's columns does not steer it: each is
-///   equated to the outer row, so the planner drops the sort.
-const UNDER_COVERAGE_SQL: &str = r"
+/// * **A range and an `order by`, not `ip.source_id = s.id`.** They read as one
+///   equality, and the database's collation is deterministic, so they match
+///   exactly the rows it would. They are what keeps the probe on
+///   `item_parent_child_idx`, `(source_id, adapter_kind) where arm = 'child'`,
+///   where a source with no child row answers from an empty range. Written as
+///   an equality the planner drops the sort, since a column equated to the
+///   outer row is already in order, sees a table scan start as fast as an index
+///   scan under `limit 1` because it expects a row soon, and takes it once it
+///   has statistics. A source with no child row then reads the table whole, and
+///   past one source's dominance it reads `sync.item` and every item's parents:
+///   784 ms at two rows an item, 1.4 s at ten (#2500). A range cannot be dropped
+///   from the sort, a scan has to read everything before a sort gives its first
+///   row, and so no estimate makes the scan look fast.
+///   `tests/it/coverage_plans.rs` holds the plan in every state that moved it.
+pub(crate) const UNDER_COVERAGE_SQL: &str = r"
 select s.id
   from knobas.source_config s
  cross join lateral (select 1
                        from sync.item_parent ip
                        join sync.live_item i on i.entity_id = ip.entity_id
                       where ip.arm = 'child'
-                        and ip.source_id = s.id
+                        and ip.source_id >= s.id
+                        and ip.source_id <= s.id
                         and ip.adapter_kind = s.kind
+                      order by ip.source_id
                       limit 1) named
  where s.id = any($1)
 ";
@@ -192,8 +260,43 @@ select s.id
 #[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
 struct SourceProbe {
     source_id: String,
-    /// Whether any of them carries a non-empty author.
+    /// Whether any of them carries a non-empty author. Only read for a query
+    /// that filtered by author, and only final for one.
     authored: bool,
+}
+
+/// One source's row of [`NEWEST_ROWS_SQL`].
+#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
+struct NewestRows {
+    source_id: String,
+    in_scope: bool,
+    authored: bool,
+    read_every_row: bool,
+}
+
+/// What a walk settled: the probes it can answer for, and the sources whose
+/// verdict lies past where it stopped.
+///
+/// A source is settled by what the query needs of it. One row in scope answers
+/// the corpus question, so `under:` needs nothing else and an `author:` query
+/// needs one authored row too. A walk that read every row is final either way,
+/// and a source with no row in scope then has no probe at all, which is how
+/// [`coverage_of`] knows to leave it out.
+fn settle(walks: Vec<NewestRows>, by_author: bool) -> (Vec<SourceProbe>, Vec<String>) {
+    let mut probes = Vec::new();
+    let mut unsettled = Vec::new();
+    for walk in walks {
+        let answered = walk.in_scope && (walk.authored || !by_author);
+        if !answered && !walk.read_every_row {
+            unsettled.push(walk.source_id);
+        } else if walk.in_scope {
+            probes.push(SourceProbe {
+                source_id: walk.source_id,
+                authored: walk.authored,
+            });
+        }
+    }
+    (probes, unsettled)
 }
 
 /// The coverage for one query, one entry per reported dimension it filtered
@@ -229,12 +332,23 @@ pub(crate) async fn report(
     }
 
     let ids: Vec<String> = scoped.iter().map(|source| source.id.clone()).collect();
-    let probes: Vec<SourceProbe> = sqlx::query_as(AUTHOR_COVERAGE_SQL)
+    let kinds = filters.kind_scope();
+    let walks: Vec<NewestRows> = sqlx::query_as(NEWEST_ROWS_SQL)
         .bind(&ids)
-        .bind(filters.kind_scope())
+        .bind(&kinds)
         .bind(&filters.hidden_kinds)
         .fetch_all(pool)
         .await?;
+    let (mut probes, unsettled) = settle(walks, by_author);
+    if !unsettled.is_empty() {
+        let read: Vec<SourceProbe> = sqlx::query_as(AUTHOR_COVERAGE_SQL)
+            .bind(&unsettled)
+            .bind(&kinds)
+            .bind(&filters.hidden_kinds)
+            .fetch_all(pool)
+            .await?;
+        probes.extend(read);
+    }
 
     let mut report = Vec::new();
     if by_author {
@@ -390,6 +504,41 @@ mod tests {
 
         // A source nobody configured is not invented into the report.
         assert!(in_scope(&vocab, &filters(false, &["jonas"], &["nope"])).is_empty());
+    }
+
+    /// Every way a walk can come back, written out: which sources get a probe,
+    /// and which have to be asked again because the answer may lie past the walk.
+    #[test]
+    fn a_walk_settles_a_source_only_when_it_saw_what_the_query_needs() {
+        fn walk(in_scope: bool, authored: bool, read_every_row: bool) -> NewestRows {
+            NewestRows {
+                source_id: "s".to_owned(),
+                in_scope,
+                authored,
+                read_every_row,
+            }
+        }
+        let unsettled = || (vec![], vec!["s".to_owned()]);
+        let no_verdict = || (vec![], vec![]);
+        let verdict = |authored| (vec![probe("s", authored)], vec![]);
+
+        // An author query needs an authored row, or the whole source.
+        assert_eq!(settle(vec![walk(true, true, false)], true), verdict(true));
+        assert_eq!(settle(vec![walk(true, true, true)], true), verdict(true));
+        assert_eq!(settle(vec![walk(true, false, false)], true), unsettled());
+        assert_eq!(settle(vec![walk(true, false, true)], true), verdict(false));
+        assert_eq!(settle(vec![walk(false, false, false)], true), unsettled());
+        assert_eq!(settle(vec![walk(false, false, true)], true), no_verdict());
+
+        // `under:` alone needs one row in scope: authors are not its question.
+        assert_eq!(settle(vec![walk(true, true, false)], false), verdict(true));
+        assert_eq!(
+            settle(vec![walk(true, false, false)], false),
+            verdict(false)
+        );
+        assert_eq!(settle(vec![walk(true, false, true)], false), verdict(false));
+        assert_eq!(settle(vec![walk(false, false, false)], false), unsettled());
+        assert_eq!(settle(vec![walk(false, false, true)], false), no_verdict());
     }
 
     /// Both verdicts, in the scope's order -- and the sources with nothing in

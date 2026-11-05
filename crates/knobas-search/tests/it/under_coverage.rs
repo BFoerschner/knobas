@@ -368,11 +368,13 @@ async fn a_source_is_listed_by_a_kept_row_beneath_many_it_leaves_out() {
     }
     // Older than every commit above: the walk down the source's index meets it last.
     item(&pool, &kept, "repo", &full, repo.clone()).await;
-    sqlx::query("update sync.item set item_updated_at = now() - interval '1 year' where entity_id = $1")
-        .bind(format!("{kept}:{full}"))
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "update sync.item set item_updated_at = now() - interval '1 year' where entity_id = $1",
+    )
+    .bind(format!("{kept}:{full}"))
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let answers = under_answers(
         &searcher,

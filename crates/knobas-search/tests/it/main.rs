@@ -12,6 +12,7 @@ mod ancestor_path;
 mod bare_name;
 mod cased_identity;
 mod corpus_seam;
+mod coverage_plans;
 mod declaring;
 mod everything;
 mod help_card;

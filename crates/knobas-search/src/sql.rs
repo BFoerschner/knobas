@@ -1172,6 +1172,58 @@ pub async fn explain(pool: &sqlx::PgPool, built: SearchSql) -> Result<String, sq
         .join("\n"))
 }
 
+/// The plan a statement runs under when it comes through the plan cache.
+///
+/// [`explain`] binds its values, and the planner folds a bound value like a
+/// constant, so it can only ever show a custom plan. A statement sqlx has run
+/// five times may switch to a generic one, which sees none of the values, so a
+/// test of what the planner chooses has to look at both. `prepare` and `explain
+/// execute` are the way to reach it, and they take their arguments as text:
+/// `args` is SQL, and this is test support that is handed literals.
+///
+/// Here for the reason [`explain`] is: `AssertSqlSafe` is confined to this
+/// module.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the statement cannot be planned.
+#[cfg(any(test, feature = "test-util"))]
+pub async fn explain_prepared(
+    pool: &sqlx::PgPool,
+    statement: &str,
+    types: &str,
+    args: &str,
+    plan_cache_mode: &str,
+) -> Result<String, sqlx::Error> {
+    let mut connection = pool.acquire().await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "set plan_cache_mode = {plan_cache_mode}"
+    )))
+    .execute(&mut *connection)
+    .await?;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "prepare explained ({types}) as {statement}"
+    )))
+    .execute(&mut *connection)
+    .await?;
+    let plan = sqlx::query_as::<Postgres, (String,)>(sqlx::AssertSqlSafe(format!(
+        "explain (analyze, buffers, costs off) execute explained({args})"
+    )))
+    .fetch_all(&mut *connection)
+    .await?;
+    sqlx::query("deallocate explained")
+        .execute(&mut *connection)
+        .await?;
+    sqlx::query("reset plan_cache_mode")
+        .execute(&mut *connection)
+        .await?;
+    Ok(plan
+        .into_iter()
+        .map(|(line,)| line)
+        .collect::<Vec<_>>()
+        .join("\n"))
+}
+
 /// The largest `updated:` window the statement may ask Postgres for.
 ///
 /// `now() - make_interval(days => $n)` has to land inside `timestamptz`, which
