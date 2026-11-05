@@ -422,7 +422,9 @@ pub(crate) async fn report(
         // without it, and neither would a lock, since the statement reads what
         // `under:` itself reads.
         debug_assert!(
-            naming.iter().all(|id| sources_of(&probes).contains(&id.as_str())),
+            naming
+                .iter()
+                .all(|id| sources_of(&probes).contains(&id.as_str())),
             "the probe was asked about a source with no corpus: {naming:?}"
         );
         report.push(coverage_of(

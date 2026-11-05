@@ -56,7 +56,10 @@ async fn corpus_with_parents() -> sqlx::PgPool {
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert!(child_rows > 0, "no Gitea row names a parent: the fixture moved");
+    assert!(
+        child_rows > 0,
+        "no Gitea row names a parent: the fixture moved"
+    );
     pool
 }
 
