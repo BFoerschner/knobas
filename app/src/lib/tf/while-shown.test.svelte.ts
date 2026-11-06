@@ -97,3 +97,30 @@ test("the shell's scroller and a scroller inside go back to where they were when
   expect(tree.scrollTop).toBe(120);
   main.remove();
 });
+
+test("keepScroll sets a page back only at the address it was left at; another address starts at the top (F-454, F-067)", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const reading = scroller(document.createElement("article"));
+  anchor.append(reading);
+  main.append(anchor);
+  document.body.append(main);
+  let address = "#/page/sepa";
+  run(() => keepScroll(() => anchor, () => page.shown, () => address));
+
+  main.scrollTop = 40;
+  reading.scrollTop = 600;
+  show(false);
+  show(true);
+  expect(reading.scrollTop, "the same address keeps its place").toBe(600);
+  expect(main.scrollTop).toBe(40);
+
+  show(false);
+  address = "#/page/psp";
+  main.scrollTop = 300;
+  show(true);
+  expect(reading.scrollTop, "a page nobody was reading opens at its top").toBe(0);
+  expect(main.scrollTop).toBe(0);
+  main.remove();
+});

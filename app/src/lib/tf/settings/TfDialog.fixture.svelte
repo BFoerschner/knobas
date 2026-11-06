@@ -31,7 +31,7 @@
     primary = "plain",
   }: {
     onclose: () => void;
-    content?: "button" | "input" | "select" | "radios" | "rows" | "none";
+    content?: "button" | "input" | "select" | "arrive" | "radios" | "rows" | "none";
     layers?: Layers;
     closeButton?: boolean;
     className?: string;
@@ -65,6 +65,10 @@
       <button class="tf-btn tf-sm">Test connection</button>
       <select aria-label="Kind"><option>One</option></select>
       <input type="text" aria-label="Name" />
+    {:else if content === "arrive"}
+      <select aria-label="Kind"><option>One</option></select>
+      <input type="text" aria-label="Title" data-arrive />
+      <input type="text" aria-label="Note" />
     {:else if content === "radios"}
       <form onsubmit={(event) => { event.preventDefault(); onsubmit(); }}>
         <button class="tf-btn tf-sm" type="button">Test connection</button>

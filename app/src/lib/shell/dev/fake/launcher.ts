@@ -450,7 +450,7 @@ export function handlers(): Handlers {
         ...["Story", "Bug", "Task"].map((value) => ({ key: "issuetype", value, detail: "" })),
         ...["High", "Medium", "Low"].map((value) => ({ key: "priority", value, detail: "" })),
         { key: "assignee", value: "@me", detail: "you" },
-        { key: "assignee", value: "jonas.becker", detail: "" },
+        { key: "assignee", value: "jonas", detail: "" },
         { key: "label", value: "sepa", detail: "" },
         { key: "sprint", value: "current", detail: "the active sprint" },
         { key: "assigned", value: "today", detail: "assigned to you, changed in the last day" },

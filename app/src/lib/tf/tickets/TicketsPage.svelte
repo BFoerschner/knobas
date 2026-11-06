@@ -379,6 +379,7 @@
   /** What the server read from the typed text, marked on the cards (#1903). */
   const needles = $derived(readNeedles(filter.text));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
+  let assigneeNames = $state.raw<ReadonlyMap<string, string>>(new Map());
 
   /** At most this many chips a group; past it a field has too many values for chips. */
   const CHIPS_AT_MOST = 6;
@@ -387,7 +388,7 @@
     const values = (key: string): FilterOption[] =>
       (suggested?.fields ?? [])
         .filter((field) => field.key === key)
-        .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : field.value }));
+        .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : (key === "assignee" ? assigneeNames.get(field.value) : undefined) ?? field.value }));
     return {
       id: filterId,
       placeholder: "Filter tickets",
@@ -512,6 +513,11 @@
   // ---- what is drawn, and the selection ----
   /** The board's columns as read, before the view's own gather them. */
   const boardColumns = $derived(reader.board?.columns ?? []);
+  // The name the cards give each assignee, so *Assignee* says what the rows say (F-161). Kept as a filter narrows the cards.
+  $effect(() => {
+    const found = reader.bands.flatMap(({ drawn }) => drawn.flatMap((column) => column.cards)).filter((card) => card.assignee_name != null && assigneeNames.get(card.assignee ?? "") !== card.assignee_name);
+    if (found.length > 0) assigneeNames = new Map([...untrack(() => assigneeNames), ...found.map((card): [string, string] => [card.assignee ?? "", card.assignee_name ?? ""])]);
+  });
   /** The list's rows: every card read, in the header's order; each card says its own status (#1423). */
   const rows = $derived(
     sortRows(

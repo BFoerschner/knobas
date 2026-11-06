@@ -500,6 +500,19 @@ test("the list draws the same tickets newest first, the selected row outlined", 
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
 });
 
+test("*Assignee* draws the name the cards give someone, and an account no card names as it is (F-161)", async () => {
+  const h = harness();
+  const asked = h.ports.suggestions;
+  h.ports.suggestions = (...args) =>
+    asked(...args).then((answer) => ({
+      ...answer,
+      fields: [...answer.fields, { key: "assignee", value: "mara.lindqvist", detail: "" }, { key: "assignee", value: "someone.else", detail: "" }],
+    }));
+  await open(h);
+  const select = [...target.querySelectorAll<HTMLSelectElement>(".tf-fsel select")].find((one) => [...one.options].some((option) => option.value === "@me"))!;
+  expect([...select.options].map((one) => one.textContent)).toEqual(["Any", "Me", "Mara Lindqvist", "someone.else"]);
+});
+
 test("the list calls an assignee by first name, with the whole name in its title (F-144)", async () => {
   await open(harness());
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')]

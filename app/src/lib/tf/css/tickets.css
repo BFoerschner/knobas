@@ -34,8 +34,10 @@
 /* A lane's head stays in reach while the lanes scroll sideways together. */
 .tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
 /* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go
-   on, and the eye runs down a status. At 1440 px with the preview the fourth column shows in part, so the board says there is more. */
+   on, and the eye runs down a status. It goes by the window and not the board, so opening the preview reflows no card. At 1500 px
+   or less four columns fit beside the preview, with a sliver of a fifth, so the board says there is more (F-160). */
 .tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: 232px; gap: 8px; align-items: start; overflow-x: auto; }
+@media (max-width: 1500px) { .tf-cols { grid-auto-columns: 195px; } }
 .tf-lanes-more { align-self: flex-start; position: sticky; left: 22px; margin: 0 22px 14px; }
 /* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. The body is as
    wide as the lanes, so the heads have room to stay put at the scroller's left. */

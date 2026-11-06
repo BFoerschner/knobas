@@ -97,7 +97,7 @@
           {#each projects as row (`${row.source_id}|${row.key}`)}<option value={row.key}>{projectLabel(row)}</option>{/each}
         </select>
         <label for="tf-pat-typed-{uid}">Name matches</label>
-        <input id="tf-pat-typed-{uid}" type="text" aria-label="Name matches" form="tf-pat-{uid}" bind:value={typed} placeholder="e.g. Payout_*" />
+        <input id="tf-pat-typed-{uid}" type="text" aria-label="Name matches" form="tf-pat-{uid}" data-arrive bind:value={typed} placeholder="e.g. Payout_*" />
       {:else}
         <label for="tf-pat-project-{uid}">Space</label>
         <select id="tf-pat-project-{uid}" aria-label="Space" bind:value={project}>

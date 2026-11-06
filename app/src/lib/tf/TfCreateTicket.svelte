@@ -10,6 +10,9 @@
   asked about every project drawn) stays pickable, and picked draws *Create
   ticket* disabled with the reason above it: another project may take it.
 
+  It arrives on *Title* (F-453), so typing doesn't move the project. A failed run words the title for you and only the
+  project is missing, so that one arrives on *Project*, with the reason on the line beside *Create ticket*.
+
   A surface that names a `draftKey` keeps what was changed through `Esc` and ×, as *New page* does (F-647). *Cancel* is the
   explicit discard, and filing ends the draft too.
 -->
@@ -104,6 +107,7 @@
           id="tf-ct-title-{uid}"
           type="text"
           aria-label="Ticket title"
+          data-arrive={editing.project !== null || editing.title.trim() === "" ? "" : undefined}
           value={editing.title}
           oninput={(event) => (editing.title = event.currentTarget.value)}
         />

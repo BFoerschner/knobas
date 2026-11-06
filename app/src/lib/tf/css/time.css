@@ -108,6 +108,7 @@
   .tf-tm-group { grid-template-columns: minmax(0, 1fr); }
 }
 .tf-tm-group small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
+.tf-tm-groupheld :is(span, small) { color: var(--muted); }
 .tf .tf-tm-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 0 0; max-width: 80ch; }
 .tf .tf-tm-foot a { text-decoration: underline; }
 .tf-tm-empty { padding: 22px; color: var(--ink-2); text-align: center; }

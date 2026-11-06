@@ -188,6 +188,21 @@ test("the first field is the first of any kind, a select or a textarea too, ahea
   target.remove();
 });
 
+test("a field marked data-arrive takes focus ahead of a select above it, and shift-Tab still reaches the select (F-453)", () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "arrive" } });
+  flushSync();
+
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Title");
+  const fields = [...target.querySelectorAll<HTMLElement>(".tf-body :is(select, input)")];
+  expect(fields.indexOf(document.activeElement as HTMLElement), "the select stays above it in the tab order").toBeGreaterThan(0);
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
 test("with no field, a radio takes focus ahead of a button, and Enter on it presses the primary, once (the key table, F-240)", () => {
   const behind = opener();
   const onsubmit = vi.fn();

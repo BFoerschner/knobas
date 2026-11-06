@@ -151,6 +151,23 @@ test("it shows the key, the ticket, the duration and the intervals it came from"
   expect(target.textContent).toContain("from 2 blocks");
 });
 
+test("Enter in From or Minutes presses Log, and with nothing to log it sends nothing (F-363)", async () => {
+  const { sent } = render({ stopped: false });
+  const from = target.querySelector<HTMLInputElement>("#tf-log-from")!;
+  const minutes = target.querySelector<HTMLInputElement>("#tf-log-minutes")!;
+  minutes.value = "";
+  minutes.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  minutes.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await Promise.resolve();
+  expect(sent).toHaveLength(0);
+  minutes.value = "30";
+  minutes.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  from.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await waitFor(() => expect(sent).toHaveLength(1));
+});
+
 test("each candidate is a ticked box with its time and source", async () => {
   render();
   await waitFor(() => expect(target.textContent).toContain("10:02, Gitea"));

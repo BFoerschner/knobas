@@ -581,6 +581,26 @@ test("(n) a dialog's primary disabled for more than a send needs `why`; a send i
   expect(rulesFor("lib/x/Y.svelte", '<button class="tf-btn tf-primary" disabled={!ready}>Add</button>')).toEqual([]);
 });
 
+/** The dialogs that arrive on a select, and why: picking it is what each is opened for. Any other marks its field `data-arrive`. */
+const ARRIVES_ON_A_SELECT: Record<string, string> = {
+  "lib/assets/ImportDialog.svelte": "*Import from* decides which fields follow, so it is the first question",
+  "lib/tf/builds/TfRunDialog.svelte": "*Start* chooses what the rest of the form holds",
+};
+
+test("a dialog that starts on a select marks the field it is for, or is listed as choosing to (F-453)", () => {
+  const onSelect = files(ROOT).flatMap((file) => {
+    if (!file.endsWith(".svelte")) return [];
+    const blocks = readFileSync(join(ROOT, file), "utf8").match(/<TfDialog\b[\s\S]*?<\/TfDialog>/g) ?? [];
+    return blocks.some((block) => {
+      const first = [...block.matchAll(/<(select|textarea|input)\b([\s\S]*?)\/?>/g)].find((field) => !/type="(checkbox|radio|hidden)"/.test(field[2]!));
+      return first?.[1] === "select" && !block.includes("data-arrive");
+    })
+      ? [file]
+      : [];
+  });
+  expect(onSelect.sort()).toEqual(Object.keys(ARRIVES_ON_A_SELECT).sort());
+});
+
 test("(a) a control sized outside the controls stylesheet fails, and the same rule in it passes", () => {
   for (const css of [
     ".tf-pr-head .tf-btn { padding: 2px 8px; }",

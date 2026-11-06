@@ -14,7 +14,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { EntityRow } from "../../ipc/entity";
 import type { SearchHit, SearchQuery, SearchResponse } from "../../ipc/search";
-import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget } from "../../ipc/time";
+import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget, Week } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
 import { until } from "../../shell/test-wait";
 import { createLayers } from "../layers.svelte";
@@ -110,6 +110,7 @@ function render(
     plainPx?: number;
     refuseDelete?: boolean;
     refusedWrites?: RefusedWritesPort;
+    week?: unknown;
   } = {},
 ) {
   const offers = over.offers ?? OFFERS;
@@ -145,6 +146,7 @@ function render(
         },
         launcherHome: () => Promise.resolve({ recent: RECENT, favourites: [], stale_sources: [] } as never),
         ...(over.refusedWrites ? { refusedWrites: over.refusedWrites } : {}),
+        weekTimesheet: () => (over.week === undefined ? Promise.reject(new Error("no week here")) : Promise.resolve(over.week as Week)),
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
@@ -672,7 +674,7 @@ test("Dismiss hides the offer at once and sends when the toast's Undo has had it
   }
 });
 
-test("a mouse's Dismiss leaves the row's words at its height until the pointer leaves it, and a key's closes at once (F-138, F-064)", async () => {
+test("a mouse's Dismiss leaves the row's words at its height until the pointer leaves the list, and a key's closes at once (F-138, F-064, F-159)", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     render();
@@ -824,6 +826,48 @@ test("a day with nothing on it says so, and a day before today offers the day af
   expect(squash(target.textContent)).toContain("Nothing tracked on this day.");
   expect(target.querySelector('a[aria-label="Day after"]')!.getAttribute("href")).toBe("#/time/2026-08-21");
   expect(squash(target.querySelector('a[href="#/time"]')?.textContent)).toBe("Today");
+});
+
+test("a past day with no blocks says what Week counts for it, so the two pages agree (F-361)", async () => {
+  render({ blocks: [], open: [], day: "2026-08-20", week: { days: ["2026-08-17", "2026-08-18", "2026-08-19", "2026-08-20"], rows: [{ target: null, title: null, cells: [{}, {}, {}, { tracked_seconds: 13_320 }] }], past_horizon: [] } });
+  await settle();
+  expect(squash(target.textContent)).toContain("No blocks kept for this day. Week counts 3h 42m.");
+  expect(squash(target.textContent)).not.toContain("Nothing tracked");
+});
+
+test("rows dismissed down a run each hold, its group stands where it stood, and a held row's group draws no action (F-159)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const job = { kind: "entity", entity_id: "jira:PAY-231" } as const;
+    const three = [
+      block(21, at(9), at(9, 20), { kind: "passive", target: job }),
+      block(22, at(9, 20), at(9, 25), { kind: "passive", target: job }),
+      block(23, at(9, 25), at(9, 47), { kind: "passive", target: job }),
+    ];
+    render({ blocks: three, open: [], offers: { 21: null, 22: null, 23: null } });
+    await settle();
+    const list = target.querySelector<HTMLElement>(".tf-tm-list")!;
+    list.getBoundingClientRect = () => new DOMRect(0, 0, 900, 600);
+    const shape = () => [...list.children].map((one) => (one.classList.contains("tf-tm-group") ? "group" : one.classList.contains("tf-tm-rowheld") ? "held" : "row"));
+    const dismiss = () => button(target.querySelector('.tf-tm-row[data-state="offered"]')!, "Dismiss").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    expect(shape()).toEqual(["group", "row", "row", "row"]);
+
+    dismiss();
+    await settle();
+    expect(shape(), "the group stays above the row that left").toEqual(["group", "held", "row", "row"]);
+    expect(squash(list.querySelector(".tf-tm-group")?.textContent)).toContain("2 offered rows go to");
+
+    dismiss();
+    await settle();
+    expect(shape(), "with one row left it still keeps its room").toEqual(["group", "held", "held", "row"]);
+    expect(list.querySelector(".tf-tm-group button"), "and adds nothing").toBeNull();
+
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+    await settle();
+    expect(shape()).toEqual(["row"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("past the horizon, what knobas saw is absent rather than zero, and the blocks you tracked stay", async () => {

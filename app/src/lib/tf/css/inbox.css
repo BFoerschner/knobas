@@ -17,7 +17,7 @@
 .tf-ib .tf-what a { color: inherit; text-decoration: none; }
 .tf-ib:has(.tf-what a) { cursor: pointer; }
 .tf-ib:not(:has(.tf-acts :hover, .tf-ctx a:hover, .tf-isnooze:hover)):hover .tf-what a { text-decoration: underline; text-underline-offset: 2px; }
-/* The row a mouse press took away keeps its room and its words, dimmed and with no controls, until the pointer leaves it (F-138, F-064). */
+/* A row a mouse press took away keeps its room and its words, dimmed and with no controls, until the pointer leaves the list (F-138, F-064, F-159). */
 .tf-ib.tf-ib-held { min-height: var(--tf-row-held); cursor: default; }
 .tf-ib.tf-ib-held:hover { background: none; }
 .tf-ib.tf-ib-held :is(time, .tf-what, .tf-ctx) { color: var(--muted); }
@@ -52,15 +52,20 @@
 .tf-ifail { color: var(--err); font-size: var(--t-sm); }
 @media (max-width: 900px) {
   .tf-ibody { padding-left: 16px; padding-right: 16px; }
-  .tf-ib { grid-template-columns: minmax(0, 1fr); }
-  .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx { grid-row: auto; grid-column: 1; }
-  /* Stacked, the time and the actions keep the titles' edge: a failure's dot still hangs in the gutter. */
-  .tf-ib time, .tf-ib .tf-acts { margin-left: 14px; }
-  /* Stacked, all of a row's actions stand together on one line at its foot, showing, so the eye has one place to look (F-146). */
-  .tf-ib .tf-acts { justify-content: flex-start; order: 3; margin-top: 6px; }
+  .tf-ib { grid-template-columns: minmax(0, 1fr) auto; }
+  /* Stacked, the time keeps the titles' edge: a failure's dot still hangs in the gutter. */
+  .tf-ib time { grid-row: 1; grid-column: 1; margin-left: 14px; }
+  .tf-ib .tf-what, .tf-ib .tf-ctx { grid-column: 1 / -1; }
+  /* Stacked, all of a row's actions stand together at the right of the time's line, showing, so the eye has one place to look and a row stays short (F-146, F-069). */
+  .tf-ib .tf-acts { grid-row: 1; grid-column: 2; }
   .tf-ib .tf-acts.tf-rowend { position: static; }
   .tf-ib .tf-rowacts { opacity: 1; pointer-events: auto; }
-  /* Its action line has gone and its height stays, so its words keep the lines they had. */
+  /* Its actions have gone and its height stays, so its words keep the lines they had. */
   .tf-ib.tf-ib-held { align-content: start; }
+  .tf-ib.tf-ib-held time { min-height: var(--control-h-sm); display: flex; align-items: center; }
+}
+/* With no room beside the time, they take a line of their own at the row's foot. */
+@media (max-width: 520px) {
+  .tf-ib .tf-acts { grid-row: auto; grid-column: 1 / -1; justify-content: flex-start; order: 3; margin: 6px 0 0 14px; }
 }
 

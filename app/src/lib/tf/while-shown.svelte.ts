@@ -46,9 +46,14 @@ export function everyWhileShown(shown: () => boolean, ms: number, run: () => voi
  * inside a `display: none` subtree loses its own scroll, so each is noted as
  * the page or tab is hidden (before the DOM changes) and set back once it is
  * shown again (after it is drawn).
+ *
+ * `address` says what the page holds. Shown at another address than it was left at, it holds something the reader has not
+ * read, so everything noted goes to the top instead (F-454, F-067). A return by `Esc` or ⌘[ then sets its own place, and a
+ * page's own landing (*Continue reading*, a section) comes after this.
  */
-export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => boolean): void {
+export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => boolean, address: () => string = () => ""): void {
   let saved: [Element, number, number][] | null = null;
+  let leftAt = "";
   $effect.pre(() => {
     if (!shown()) return;
     // Runs as `shown` turns false, before the hide is drawn.
@@ -62,13 +67,15 @@ export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => b
         if (el.scrollTop !== 0 || el.scrollLeft !== 0) scrolled.push([el, el.scrollTop, el.scrollLeft]);
       }
       saved = scrolled;
+      leftAt = untrack(address);
     };
   });
   $effect(() => {
     if (!shown() || saved === null) return;
+    const same = untrack(address) === leftAt;
     for (const [el, top, left] of saved) {
-      el.scrollTop = top;
-      el.scrollLeft = left;
+      el.scrollTop = same ? top : 0;
+      el.scrollLeft = same ? left : 0;
     }
     saved = null;
   });

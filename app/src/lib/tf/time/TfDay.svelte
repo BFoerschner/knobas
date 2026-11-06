@@ -26,7 +26,7 @@
   import { everyWhileShown } from "../while-shown.svelte";
   import { keyOf, minutesLabel } from "../../time/format";
 
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
@@ -35,6 +35,7 @@
     dayBlocks as realDayBlocks,
     deleteBlock as realDeleteBlock,
     dismissBlock as realDismissBlock,
+    weekTimesheet as realWeekTimesheet,
     updateBlock as realUpdateBlock,
     type TimerTarget,
   } from "../../ipc/time";
@@ -43,13 +44,15 @@
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push, undoable } from "../../shell/toasts.svelte";
   import { forgetSent, holdBlock, isHeld } from "./held-blocks.svelte";
-  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
+  import { heldByPointer, heldHeight, holdUnderPointer, withHolds } from "../row-hold";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
+  import { mondayOf, weekWindows } from "../../time/week";
   import { atClock, clockOf } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { dayFigures, dayRows, fitLabel, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
+  import { weekView } from "./week-view";
   import { readDay, type DayRecord } from "./day-read";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
@@ -60,6 +63,8 @@
     createBlock: typeof realCreateBlock;
     deleteBlock: typeof realDeleteBlock;
     dismissBlock: typeof realDismissBlock;
+    /** What Week counts for a day with no blocks kept (F-361). */
+    weekTimesheet: typeof realWeekTimesheet;
     /** The block dialog's ticket picker searches with the launcher's reads (#1429). */
     search: SessionPorts["search"];
     launcherHome: SessionPorts["launcherHome"];
@@ -116,6 +121,7 @@
     createBlock: realCreateBlock,
     deleteBlock: realDeleteBlock,
     dismissBlock: realDismissBlock,
+    weekTimesheet: realWeekTimesheet,
     search: (query) => realSearch(query),
     launcherHome: () => realLauncherHome(),
     ...ports,
@@ -189,7 +195,6 @@
   );
   $effect(() => askInto(JSON.parse(logAsks) as WriteAsk[], io.refusedWrites, (answer) => (refused = answer)));
   /** Each run of offered rows to one ticket, by its first row's key (#1108). */
-  const runAt = $derived(new Map(offerRuns(rows).map((run) => [run.rows[0]!.key, run])));
   /**
    * Past the observation horizon what was in front of you is absent, not zero
    * (`CONTEXT.md`), so the two figures made from it say so.
@@ -436,17 +441,54 @@
     );
   }
 
-  /** The row a mouse press on *Dismiss* took away, still holding its place under the pointer (F-138). */
-  let holding = $state.raw<{ id: number; row: DayRow; at: number; height: number } | null>(null);
-  /** Where its empty row stands. An *Undo* brings the row itself back, and that is drawn instead. */
-  const holdAt = $derived(holding !== null && isHeld(holding.id) ? holding.at : null);
+  /** A row of the list, or one a press took away, which `height` says. */
+  type Drawn = { row: DayRow; height: number | null };
+  /** The rows mouse presses on *Dismiss* took away, still holding their places until the pointer leaves the list (F-138, F-159). */
+  let holding = $state.raw<readonly { id: number; at: number; entry: Drawn }[]>([]);
+  /** Those still away. An *Undo* or a refused write brings the row itself back, and that is drawn instead. */
+  const standing = $derived(holding.filter((hold) => !rows.some((row) => row.block?.block.id === hold.id)));
+  const drawn = $derived(withHolds<Drawn>(rows.map((row) => ({ row, height: null })), standing));
+  const anyHeld = $derived(standing.length > 0);
+  /**
+   * The rows that go to one ticket, over what is drawn, so a group stands where it stood while rows hold and dismissing one moves
+   * no other (F-159). `live` is what it can still add, which a row that left is no part of: `null` once fewer than two are left.
+   */
+  const runAt = $derived(
+    new Map(
+      offerRuns(drawn.map((one) => one.row)).map((whole) => {
+        const left = whole.rows.filter((row) => !standing.some((hold) => hold.entry.row.key === row.key));
+        return [whole.rows[0]!.key, { whole, live: offerRuns(left)[0] ?? null }];
+      }),
+    ),
+  );
   $effect(() => {
-    if (holdAt === null) return;
-    return holdUnderPointer(() => document.querySelector(".tf-tm-rowheld"), () => (holding = null));
+    if (!anyHeld) {
+      holding = [];
+      return;
+    }
+    return holdUnderPointer(() => document.querySelector(".tf-tm-list"), () => (holding = []));
   });
 
   /** Nothing to draw: not while the last row a press took away still holds its place, or what stands under the pointer would move. */
-  const nothing = $derived(rows.length === 0 && holdAt === null);
+  const nothing = $derived(rows.length === 0 && !anyHeld);
+
+  /** What Week counts for a past day that has no blocks left, so the two pages say the same thing about it (F-361). A read that fails leaves the plain line. */
+  let weekCounts = $state.raw<{ day: string; minutes: number } | null>(null);
+  $effect(() => {
+    if (!nothing || key === today) return;
+    const on = key;
+    let live = true;
+    void io.weekTimesheet(weekWindows(mondayOf(on))).then(
+      (week) => {
+        if (live) weekCounts = { day: on, minutes: weekView(week, null, untrack(() => clock)).dayTotals[week.days.indexOf(on)] ?? 0 };
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  const weekSays = $derived(weekCounts !== null && weekCounts.day === key && weekCounts.minutes > 0 ? minutesLabel(weekCounts.minutes) : null);
 
   /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
   function dismiss(row: DayRow, event: MouseEvent) {
@@ -454,7 +496,7 @@
     if (block === null) return;
     const id = block.block.id;
     const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-tm-row")?.getBoundingClientRect() : undefined;
-    if (box !== undefined) holding = { id, row, at: rows.indexOf(row), height: box.height };
+    if (box !== undefined) holding = [...standing, { id, at: drawn.findIndex((one) => one.row.key === row.key), entry: { row, height: box.height } }];
     holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id), reread, UNDO_MS);
   }
 
@@ -521,6 +563,8 @@
     <div class="tf-tm-empty">
       {#if key === today}
         <p>Nothing tracked yet today. ⌘T starts the timer on whatever is in front of you, and every stretch it runs lands here.</p>
+      {:else if weekSays !== null}
+        <p>No blocks kept for this day. Week counts {weekSays}.</p>
       {:else}
         <p>Nothing tracked on this day. Add a block for time you spent on it.</p>
       {/if}
@@ -592,28 +636,25 @@
     </div>
 
     <div class="tf-tm-list">
-      {#snippet heldRow()}
-        <!-- Its words stay, dimmed, for as long as the pointer rests on it (F-064). Nothing in them can be pressed. -->
+      {#snippet heldRow(row: DayRow, height: number)}
+        {@const target = row.target}
+        <!-- Its words stay, dimmed, until the pointer leaves the list (F-064, F-159). Nothing in them can be pressed. -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="tf-tm-row tf-tm-rowheld" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}>
-          {#if holding !== null}
-            {@const row = holding.row}
-            {@const target = row.target}
-            <span class="tf-tm-when">{span(row)}<b>{durationOf(row)}</b></span>
-            <span class="tf-tm-what">
-              knobas saw
-              {#if target !== null && target.kind === "entity"}<span class="tf-mono">{targetReading(target)}</span> {titleOf(row)}{:else if target !== null}{target.label} (label){/if}
-              {#if target !== null}<small>{targetReading(target)} was in front of you.</small>{/if}
-            </span>
-            <span class="tf-tm-state"><TfStateChip text="offered" /></span>
-            <span class="tf-tm-acts"></span>
-          {/if}
+        <div class="tf-tm-row tf-tm-rowheld" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(height)}>
+          <span class="tf-tm-when">{span(row)}<b>{durationOf(row)}</b></span>
+          <span class="tf-tm-what">
+            knobas saw
+            {#if target !== null && target.kind === "entity"}<span class="tf-mono">{targetReading(target)}</span> {titleOf(row)}{:else if target !== null}{target.label} (label){/if}
+            {#if target !== null}<small>{targetReading(target)} was in front of you.</small>{/if}
+          </span>
+          <span class="tf-tm-state"><TfStateChip text="offered" /></span>
+          <span class="tf-tm-acts"></span>
         </div>
       {/snippet}
-      {#each rows as row, index (row.key)}
-        {#if holdAt === index}{@render heldRow()}{/if}
-        {@const run = runAt.get(row.key)}
-        {#if run}
+      {#each drawn as { row, height } (row.key)}
+        {@const group = runAt.get(row.key)}
+        {#if group !== undefined && group.live !== null}
+          {@const run = group.live}
           <div class="tf-tm-group">
             <span>
               {run.rows.length} offered rows go to <span class="tf-mono">{keyOf(run.entityId)}</span>,
@@ -622,7 +663,17 @@
             </span>
             <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to <TfKey value={keyOf(run.entityId)} /></button>
           </div>
+        {:else if group !== undefined}
+          <!-- Its rows have left, and it keeps its room until they close. -->
+          <div class="tf-tm-group tf-tm-groupheld" aria-hidden="true">
+            <span>
+              Offered rows go to <span class="tf-mono">{keyOf(group.whole.entityId)}</span>,
+              {clockReading(group.whole.from, key)} to {clockReading(group.whole.to, key)}.
+              <small>Each is its own ticket or linked to it. One action adds them all.</small>
+            </span>
+          </div>
         {/if}
+        {#if height !== null}{@render heldRow(row, height)}{:else}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <!-- A row click selects; the strip's blocks are the keyboard's way to the same. -->
         <div
@@ -726,8 +777,8 @@
             {/if}
           </span>
         </div>
+        {/if}
       {/each}
-      {#if holdAt !== null && holdAt >= rows.length}{@render heldRow()}{/if}
     </div>
   {/if}
 

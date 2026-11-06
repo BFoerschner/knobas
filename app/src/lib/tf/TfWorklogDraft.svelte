@@ -23,7 +23,8 @@
   **A comment the reader edited outlives the dialog** (the key table, `drafts`): for its ticket
   and day, through `Esc`, the ×, *Cancel, keep running* and *Stop, log later*, each of which
   leaves the time to be logged later. *Log* ends it, and so do *Stop, don't log* and a
-  plain *Cancel*, which are the explicit discards. ⌘Enter is `TfDialog`'s, and presses *Log*.
+  plain *Cancel*, which are the explicit discards. ⌘Enter is `TfDialog`'s, and presses *Log*. `Enter` in *From* or *Minutes*
+  presses it too, because taking the offered time is the common case (F-363).
 
   A worklog the ticket's source's credential cannot make (`refused_writes`,
   #2052) draws *Log* disabled with the reason, and stops no clock for it.
@@ -175,6 +176,13 @@
       );
   }
 
+  /** `Enter` in a single field takes what it holds. A modified one is `TfDialog`'s. */
+  function logOnEnter(event: KeyboardEvent) {
+    if (event.key !== "Enter" || event.isComposing || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (form.seconds > 0) send();
+  }
+
   onMount(() => {
     const { from, to } = dayBounds(draft.day);
     void ports
@@ -206,10 +214,10 @@
   {#snippet body()}
       <div class="tf-formgrid">
         <label for="tf-log-from">From</label>
-        <div class="tf-dur"><input id="tf-log-from" type="time" aria-label="From" bind:value={form.began} /></div>
+        <div class="tf-dur"><input id="tf-log-from" type="time" aria-label="From" onkeydown={logOnEnter} bind:value={form.began} /></div>
         <label for="tf-log-minutes">Minutes</label>
         <div class="tf-dur">
-          <input id="tf-log-minutes" type="number" min="1" step="1" aria-label="Minutes" bind:value={form.minutes} />
+          <input id="tf-log-minutes" type="number" min="1" step="1" aria-label="Minutes" onkeydown={logOnEnter} bind:value={form.minutes} />
           <b>{form.reading}</b>
         </div>
         <p class="tf-dim tf-note">{intervals}</p>

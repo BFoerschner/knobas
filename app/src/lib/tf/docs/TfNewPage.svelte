@@ -138,7 +138,7 @@
         {/each}
       </select>
       <span>Title <small class="tf-req">required</small></span>
-      <input type="text" aria-label="Title" bind:value={title} />
+      <input type="text" aria-label="Title" data-arrive bind:value={title} />
       {#if job !== null}
         <label class="tf-ck"><input type="checkbox" bind:checked={link} /> <span>Link it to <TfKey value={job} /></span></label>
       {/if}
