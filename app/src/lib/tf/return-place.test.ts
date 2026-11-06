@@ -56,6 +56,32 @@ test("a row redrawn while away is found by the address it opened", () => {
   expect(document.activeElement?.id).toBe("new");
 });
 
+test("among links to the same address, a redrawn page gives focus to the one that was pressed, not the crumb before it", () => {
+  const { main, page } = draw(`<a id="crumb" href="#/tickets">Tickets</a><a id="row" href="#/tickets">Sub-tasks 2</a>`);
+  const place = capturePlace(main, page, page.querySelector("#row"), "#/tickets");
+  page.innerHTML = `<a id="crumb2" href="#/tickets">Tickets</a><a id="row2" href="#/tickets">Sub-tasks 2</a>`;
+  restorePlace(place, page)();
+  expect(document.activeElement?.id).toBe("row2");
+});
+
+test("a button with no address, redrawn while away, is found by its words and its place among its like", () => {
+  const { main, page } = draw(`<button id="a">inherited from estate</button><button id="b">inherited from estate</button>`);
+  const place = capturePlace(main, page, page.querySelector("#b"), "#/asset/estate");
+  page.innerHTML = `<button id="c">inherited from estate</button><button id="d">inherited from estate</button>`;
+  restorePlace(place, page)();
+  expect(document.activeElement?.id).toBe("d");
+});
+
+test("an element a list reused for another row is not what was pressed", () => {
+  const { main, page } = draw(`<button id="reused">knobas-gitea</button><button id="moved">Holds</button>`);
+  const reused = page.querySelector("#reused")!;
+  const place = capturePlace(main, page, reused, "#/asset/gitea");
+  reused.textContent = "knobas-jira";
+  page.querySelector("#moved")!.textContent = "knobas-gitea";
+  restorePlace(place, page)();
+  expect(document.activeElement?.id).toBe("moved");
+});
+
 test("a ticket's card takes focus by its entity, whichever control opened it", () => {
   const { main, page } = draw(`<article data-entity="mock:PAY-231" tabindex="0" id="card"></article><a id="open" href="#/ticket/mock%3APAY-231">Open</a>`);
   const place = capturePlace(main, page, page.querySelector("#open"), "#/ticket/mock%3APAY-231");

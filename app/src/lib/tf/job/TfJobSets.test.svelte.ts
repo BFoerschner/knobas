@@ -3,6 +3,7 @@
  * R-7.9), mounted with stand-ins for every read and write. What the backend
  * does with a saved set is `crates/knobas-app/tests/it/link_sets_ipc.rs`'s.
  */
+import { takeTold } from "../opener";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -261,6 +262,19 @@ test("Apply a link set… picks nothing on arrival, and its primary waits with a
   pick("Payout stack");
   expect(footer().at(-1)?.[0]).toBe("Apply Payout stack");
   expect(dialog().querySelector("footer .tf-dwhy")).toBeNull();
+});
+
+test("Manage link sets opens the sets' page to come back from, and the dialog and the drawer go with the move (F-520)", async () => {
+  open();
+  await settle();
+  button(drawerOpen(), "Apply a link set…").click();
+  await settle();
+  dialog().querySelector<HTMLAnchorElement>("footer a")!.click();
+  expect(takeTold(location.hash), "the shell stamps it as a visit").toBe("visit");
+  expect(location.hash).toBe("#/sets");
+  await settle();
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  expect(document.querySelector("[aria-label='Connections']"), "the drawer floats outside the page, so its page hiding would leave it").toBeNull();
 });
 
 /** #2289: typing is how the top match gets picked, so `Enter` in the filter still applies it. */

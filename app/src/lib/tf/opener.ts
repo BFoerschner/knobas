@@ -9,7 +9,7 @@
  * button from another page gets that page as its opener. These get none:
  *
  * - an address set through {@link goWithoutOpener}: the ⌘K launcher, the
- *   capture window, a notification's click (a deep link), an `Esc` step;
+ *   capture window, a notification's click (a deep link), a nav entry;
  * - the window's first address (startup), and a rooms address the shell
  *   replaces (the shell stamps those itself).
  *
@@ -20,27 +20,104 @@
  * the same entry and keeps its stamp. A page that replaces its address must
  * use it: a bare `location.replace` would read as a new entry opened from the
  * address it replaced.
+ *
+ * **The opener is a chain, not one link.** A stamp holds what its opener's own
+ * stamp said ({@link Opener}'s `from`). An `Esc` step that can't step back in
+ * history (a tab switch came between, so the opener is not the entry before)
+ * goes through {@link goBackTo}, and the new entry takes that stamp, so the same
+ * trip ends with the same *Back to <name>* whichever tabs it went through.
+ *
+ * **A card row's narrowing goes with the entries** ({@link Trip}), so stepping to
+ * an entry by `Esc`, *Back to* or `⌘[` and `⌘]` narrows the section as that entry
+ * was, and a nav entry or the launcher ends it. Two presses stamp explicitly,
+ * because the address alone can't say what they mean: {@link goAcross}, a jump to
+ * another place on one page, and {@link goVisiting}, a top page opened from
+ * somewhere to come back from.
  */
+import type { Trip } from "./job/scoped.svelte";
 import { parseTfHash, type TfRoute } from "./route";
 
+export type { Trip };
+
+/** How an entry came to be, without the entry before it: what a page's next entry can inherit. */
+export interface Came {
+  /** The page it was opened from, or `null`. */
+  opener: Opener | null;
+  /** The card row's narrowing this entry is part of, or `null`. */
+  trip: Trip | null;
+  /** A top page opened to be returned from, so its `Esc` follows the opener ({@link goVisiting}). */
+  visit: boolean;
+}
+
 /** What an entry's history state says about how it was opened. */
-export interface Opened {
-  /** The address it was opened from, and what the breadcrumb calls that page, or `null`. */
-  opener: { hash: string; name: string } | null;
+export interface Opened extends Came {
   /** The address of the entry before it when it was made, so `Esc` can step back instead of pushing. */
   prev: string | null;
+}
+
+/** A page something was opened from: its address, what the breadcrumb calls it, and how it came to be. */
+export interface Opener {
+  hash: string;
+  name: string;
+  from: Came;
+}
+
+/** An entry opened by nothing, as the window's first address is. */
+export const NOT_OPENED: Came = { opener: null, trip: null, visit: false };
+
+/** How long a chain a stamp keeps. History state is copied on every write, and nobody presses `Esc` further than this. */
+const CHAIN = 24;
+
+function trimmed(opener: Opener | null, left: number): Opener | null {
+  if (opener === null || left === 0) return null;
+  return { ...opener, from: { ...opener.from, opener: trimmed(opener.from.opener, left - 1) } };
+}
+
+/** The page at `hash`, called `name`, as the opener of what it opens next. */
+export function openerOf(hash: string, name: string, came: Came): Opener {
+  return { hash, name, from: { opener: trimmed(came.opener, CHAIN - 1), trip: came.trip, visit: came.visit } };
 }
 
 /** The key the stamp sits under in `history.state`, beside whatever else is there. */
 const KEY = "knobasOpened";
 
-/** The next address change the shell is told about, when it is not an in-app link's. */
-let told: { hash: string; how: "unopened" | "replace" } | null = null;
+/** How an address change was made, when it is not a plain in-app link's. */
+export type Told = "unopened" | "replace" | "back" | "across" | "visit";
 
-/** Go to `hash` as a new entry with no opener: the launcher, a deep link, an `Esc` step. */
-export function goWithoutOpener(hash: string): void {
+/** The next address change the shell is told about. */
+let told: { hash: string; how: Told } | null = null;
+
+function goTold(hash: string, how: Told): void {
   location.hash = hash;
-  told = { hash: location.hash, how: "unopened" };
+  told = { hash: location.hash, how };
+}
+
+/** Go to `hash` as a new entry with no opener: the launcher, a deep link, a nav entry, an `Esc` step to a parent. */
+export function goWithoutOpener(hash: string): void {
+  goTold(hash, "unopened");
+}
+
+/** `Esc`'s step to the opener when it is not the entry before: a new entry, stamped as the opener's own was. */
+export function goBackTo(hash: string): void {
+  goTold(hash, "back");
+}
+
+/**
+ * A jump to another place on this page, which is an opening though the address
+ * is the same page's: a link from one asset to another across the tree, as a walk
+ * through its columns is not. `Esc` comes back to where the reader was reading.
+ */
+export function goAcross(hash: string): void {
+  goTold(hash, "across");
+}
+
+/**
+ * Open a section's top page to come back from. A top page's `Esc` does nothing,
+ * since a nav entry brought the reader there. Pressed from a ticket's dialog
+ * (*Manage link sets*), it says where it came from, as a card's row does.
+ */
+export function goVisiting(hash: string): void {
+  goTold(hash, "visit");
 }
 
 /** Put `hash` in place of the address the reader is on: the same entry, its opener kept. */
@@ -50,7 +127,7 @@ export function replaceAddress(hash: string): void {
 }
 
 /** How the address change to `hash` was made, if it was told; forgotten once asked. */
-export function takeTold(hash: string): "unopened" | "replace" | null {
+export function takeTold(hash: string): Told | null {
   const was = told;
   told = null;
   return was !== null && was.hash === hash ? was.how : null;

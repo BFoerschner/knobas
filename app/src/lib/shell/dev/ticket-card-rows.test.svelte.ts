@@ -162,9 +162,10 @@ test("leaving Builds forgets the row's ticket: back from the nav, with no job ch
   sectionRow(card, "Builds").click();
   const thisJob = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-kept:not([hidden]) button")].find((b) => squash(b).startsWith("This job"));
   await until(() => location.hash === "#/builds" && thisJob() !== undefined, "Builds never offered This job");
-  location.hash = "#/inbox";
+  // The nav's own presses: a link inside the trip keeps the row's ticket for the way back (F-034).
+  target.querySelector<HTMLAnchorElement>(".tf-nav a[href^='#/inbox']")!.click();
   await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.includes("Inbox") === true, "Inbox never opened");
-  location.hash = "#/builds";
+  target.querySelector<HTMLAnchorElement>(".tf-nav a[href^='#/builds']")!.click();
   await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.includes("Builds") === true, "Builds never opened again");
   await new Promise((resolve) => setTimeout(resolve, 50));
   expect(thisJob()).toBeUndefined();

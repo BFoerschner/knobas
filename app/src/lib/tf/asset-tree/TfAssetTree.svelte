@@ -20,6 +20,7 @@
   import type { AssetsNav } from "../../assets/tree";
   import { parseHash } from "../../shell/router";
   import type { EscTarget, EscTargetOf } from "../escape";
+  import { goAcross } from "../opener";
   import { parentPage } from "../page-name.svelte";
   import { HEAD_NAME } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
@@ -54,6 +55,7 @@
     go: (hash) => {
       location.hash = hash;
     },
+    jump: goAcross,
   };
 </script>
 

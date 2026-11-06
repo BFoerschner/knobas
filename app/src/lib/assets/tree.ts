@@ -33,7 +33,10 @@ import { hashFor, type Route } from "../shell/router";
  */
 export interface AssetsNav {
   readonly route: Route;
+  /** A walk: the columns' own moves, which keep how the tree was opened. */
   go(hash: string): void;
+  /** A jump from the asset being read to another place, which `Esc` comes back from (`opener.ts`); a walk where it is left out. */
+  jump?(hash: string): void;
 }
 
 /** The top of the estate: the column whose parent is nobody. */

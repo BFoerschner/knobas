@@ -17,7 +17,9 @@ import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
-import { goWithoutOpener, replaceAddress } from "./opener";
+import { sessionFilter } from "./filter/filter-state.svelte";
+import { scopedTicket } from "./job/scoped.svelte";
+import { goAcross, goVisiting, goWithoutOpener, replaceAddress } from "./opener";
 import { NAV, SECTION_NAME } from "./route";
 import { chosenJob } from "./job/chosen.svelte";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
@@ -109,6 +111,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  scopedTicket.clear();
   refreshed.length = 0;
   if (shell) unmount(shell);
   shell = null;
@@ -496,6 +499,147 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
+});
+
+// ---- the way back is a chain, and a card row's narrowing goes with it (F-005, F-034, F-520, F-522) ----
+
+const TICKET = "#/ticket/jira%3APAY-231";
+const ENTITY = "jira:PAY-231";
+
+test("a card row's trip through a repository's tab ends where it began: the bar and This job on the section, then the ticket", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  await at("#/repo/gh:repo-1");
+  await at("#/repo/gh:repo-1/branches");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/code");
+  expect(escHint(), "the opener's own opener came back with it").toBe("Back to PAY-231 Esc");
+  expect(scopedTicket.section).toBe("code");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+  expect(scopedTicket.section, "on the ticket the trip is over").toBeNull();
+});
+
+test("a detail in another section keeps the row's narrowing, so the way back finds the list as it was", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("monitors", ENTITY);
+  await at("#/monitors");
+  await at("#/asset/asset%3Aa");
+  expect(scopedTicket.section, "the detail is part of the trip").toBe("monitors");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/monitors");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(sessionFilter("monitors").scope).toBe("job");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("⌘[ and ⌘] put a trip's narrowing back as each entry had it, and its bar with it", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("builds", ENTITY);
+  await at("#/builds");
+  press("[", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe(TICKET);
+  expect(scopedTicket.section).toBeNull();
+  press("]", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  expect(scopedTicket.section).toBe("builds");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+});
+
+test("a nav entry or the launcher ends a trip, wherever it had got to, and stepping back to the trip brings it again", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  await at("#/repo/gh:repo-1");
+  seen<HTMLAnchorElement>(`nav a[href="#/builds"]`)[0]!.click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  expect(scopedTicket.section, "a nav entry starts a new trip").toBeNull();
+  expect(sessionFilter("code-repos").scope).not.toBe("job");
+  press("[", { metaKey: true });
+  await settle();
+  expect(scopedTicket.section).toBe("code");
+  await reached("#/monitors");
+  expect(scopedTicket.section, "the launcher does too").toBeNull();
+});
+
+test("Sub-tasks: a sub-task and back keeps the narrowing; a saved view ends it", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.openSubtasks(ENTITY);
+  await at("#/tickets");
+  await at("#/ticket/jira%3APAY-300");
+  expect(scopedTicket.subtasksOf).toBe(ENTITY);
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/tickets");
+  expect(scopedTicket.subtasksOf).toBe(ENTITY);
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  await at("#/tickets/view-1");
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("narrowing ended in place leaves the entry saying so: a detail and back does not narrow it again", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.openSubtasks(ENTITY);
+  await at("#/tickets");
+  // *All tickets* on the list's rail.
+  scopedTicket.clear();
+  await settle();
+  await at("#/ticket/jira%3APAY-300");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/tickets");
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("a top page opened to come back from says where it came from, and a set opened from it returns through it", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  goVisiting("#/sets");
+  await settle();
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  await at("#/sets/set-1");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/sets");
+  expect(escHint(), "the set's Esc put the visit back").toBe("Back to PAY-231 Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+});
+
+test("a jump across the tree is an opening, a walk is not: Esc comes back to the asset being read, then to what opened the tree", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  await at("#/asset/asset%3Aa");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  goAcross("#/asset/asset%3Ab");
+  await settle();
+  expect(escHint(), "the jump's opener is the asset it left").toMatch(/^Back to (?!PAY-231)/);
+  // A walk through the columns from there keeps it, and the way back is not the entry before.
+  await at("#/asset/asset%3Ac");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/asset/asset%3Aa");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
 });
 
 test("a nav entry returns to the tab the section was left on, opened by nothing, so Esc stays", async () => {
@@ -1520,6 +1664,7 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent an
   const crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
+  expect(document.title, "the window's title follows the name the page read, after the address moved (F-015)").toBe("Survey · knobas");
   expect(escHint()).toBeNull();
   expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Quay crane 4 inspection");
 

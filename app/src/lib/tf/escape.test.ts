@@ -18,7 +18,7 @@ test("Esc's step takes the same answer as the breadcrumb's hint", () => {
   const route = parseTfHash("#/monitors");
   const state = { layers: [], field: null, route, opener: TICKET };
   expect(escStep(state)).toEqual({ do: "nothing" });
-  expect(escStep({ ...state, fromTicketRow: true })).toEqual({ do: "go", hash: TICKET.hash, opened: true });
+  expect(escStep({ ...state, visiting: true })).toEqual({ do: "go", hash: TICKET.hash, opened: true });
 });
 
 test("an inline panel closes before Esc leaves the page, after a field has let go and under any dialog", () => {

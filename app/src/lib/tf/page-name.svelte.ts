@@ -50,9 +50,9 @@ export interface ShownPageName {
   readonly parent: PageParent | null;
 }
 
-/** A kept page's own: only the parent is reactive, because the shell's hint draws from it. */
+/** A kept page's own. Both are reactive: the shell's hint draws from the parent, and the window's title from the name. */
 class Own implements Named {
-  name: string | null = null;
+  name = $state.raw<string | null>(null);
   parent = $state.raw<PageParent | null>(null);
   by: object | null = null;
 }

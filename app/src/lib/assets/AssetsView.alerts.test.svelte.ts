@@ -263,6 +263,17 @@ test("clicking a row opens the asset it is about", async () => {
  * The strip follows the store without a remount, which is what makes it live:
  * an alert closed by a sync run leaves through the store's own re-read.
  */
+test("an alert's row is a jump, which Esc comes back from, not a walk through the columns (F-522)", async () => {
+  const alerts = alertsHolding([alert()]);
+  await alerts.refresh();
+  const nav = render(alerts);
+  const jumps: string[] = [];
+  nav.jump = (hash) => jumps.push(hash);
+  target.querySelector<HTMLButtonElement>(".alerts .go")!.click();
+  flushSync();
+  expect(jumps).toEqual(["#/asset/asset:postgres"]);
+});
+
 test("the strip follows the store as alerts open and close", async () => {
   let open: OpenAlert[] = [];
   const alerts = createAlerts({

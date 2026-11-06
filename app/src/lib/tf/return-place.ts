@@ -30,6 +30,8 @@ export interface Place {
   pressed: Element | null;
   /** The address it opened: what finds the row again if its element was redrawn. */
   to: string;
+  /** What the pressed control said, and which of its like it was: what finds a control with no address of its own. */
+  said: { text: string; nth: number } | null;
 }
 
 /** How long a return keeps setting the scroll while the page redraws, in ms. */
@@ -39,6 +41,7 @@ const STAYED = 12;
 /** A return lasts at least this long, in ms: a page shown again reads again, and may draw its rows anew. */
 const AT_LEAST = 500;
 
+const FOCUSABLE = "a[href], button:not([disabled]), [tabindex]";
 const classesOf = (el: Element): string => [...el.classList].map((name) => `.${name}`).join("");
 
 /** The page's scrollers: its page scroller and its inner ones even at 0, and anything else that has moved. */
@@ -55,7 +58,18 @@ export function capturePlace(main: Element, page: Element, pressed: Element | nu
     const like = classes === "" || el === main ? [] : [...page.querySelectorAll(classes)];
     return { el, classes, nth: Math.max(0, like.indexOf(el)), top: el.scrollTop, left: el.scrollLeft };
   });
-  return { scrolls, pressed: pressed !== null && page.contains(pressed) ? pressed : null, to };
+  const held = pressed !== null && page.contains(pressed) ? pressed : null;
+  return { scrolls, pressed: held, to, said: saidBy(held, page) };
+}
+
+const textOf = (el: Element): string => el.textContent.replace(/\s+/g, " ").trim();
+
+/** What the control around `pressed` says, among those in `page` saying the same. */
+function saidBy(pressed: Element | null, page: Element): Place["said"] {
+  const near = pressed?.closest(FOCUSABLE) ?? null;
+  if (near === null) return null;
+  const text = textOf(near);
+  return text === "" ? null : { text, nth: Math.max(0, [...page.querySelectorAll(FOCUSABLE)].filter((el) => textOf(el) === text).indexOf(near)) };
 }
 
 /** The scroller as it is now: the same element, or the one that took its place. */
@@ -80,7 +94,6 @@ function setScrolls(place: Place, page: Element): boolean {
   return all;
 }
 
-const FOCUSABLE = "a[href], button:not([disabled]), [tabindex]";
 const ROW = "tr, li, [data-entity]";
 
 /** The ticket an address names, which a board's card or a list's row carries as `data-entity`. */
@@ -115,9 +128,22 @@ function focusTarget(place: Place, page: Element): HTMLElement | null {
     const card = [...page.querySelectorAll<HTMLElement>("[data-entity]")].find((el) => el.dataset["entity"] === ticket);
     if (card !== undefined) return card;
   }
-  const pressed = place.pressed !== null && place.pressed.isConnected ? inRow(place.pressed, place.to) : null;
+  const pressed = place.pressed !== null && place.pressed.isConnected && !reworded(place) ? inRow(place.pressed, place.to) : null;
   if (pressed !== null) return pressed;
-  return [...page.querySelectorAll<HTMLElement>("a[href]")].find((link) => link.getAttribute("href") === place.to) ?? null;
+  // Redrawn: the same words among the links to where it opened, else any link there, else the same words anywhere.
+  const links = [...page.querySelectorAll<HTMLElement>("a[href]")].filter((link) => link.getAttribute("href") === place.to);
+  const said = place.said;
+  if (said === null) return links[0] ?? null;
+  const own = links.find((link) => textOf(link) === said.text) ?? links[0];
+  if (own !== undefined) return own;
+  const alike = [...page.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => textOf(el) === said.text);
+  return alike[said.nth] ?? alike[0] ?? null;
+}
+
+/** Whether the pressed element now says something else: a list reused it for another row. */
+function reworded(place: Place): boolean {
+  const near = place.pressed?.closest(FOCUSABLE) ?? null;
+  return near !== null && place.said !== null && textOf(near) !== place.said.text;
 }
 
 /** Whether focus is free to take: on nothing, on the page scroller a press in empty space left it on, or left behind on a page now hidden. A dialog or a field the reader went to is not. */
@@ -156,7 +182,8 @@ export function restorePlace(place: Place, page: Element): () => void {
     const set = setScrolls(place, page);
     stayed = set ? stayed + 1 : 0;
     // Tried on each frame while focus is free: a row just shown may not take it yet, and a redraw may take it away.
-    if (focusIsFree(main)) {
+    // A pane may reuse what took it for something else once its read lands, which is not what was pressed.
+    if (focusIsFree(main) || (focused !== null && document.activeElement === focused && place.said !== null && textOf(focused) !== place.said.text)) {
       focused = focusTarget(place, page);
       focused?.focus({ preventScroll: true });
     }

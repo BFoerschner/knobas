@@ -14,6 +14,7 @@
   import { matchesAll } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
+  import { goVisiting } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
   import { contentLines } from "../sets/sets";
   import TfKey from "../TfKey.svelte";
@@ -74,6 +75,13 @@
     return shown.every((set) => applied.has(set.id)) ? "These already apply." : "Pick a link set.";
   });
 
+  /** The sets' page says where it came from, so `Esc` and *Back to* come back here. */
+  function manage(event: MouseEvent) {
+    event.preventDefault();
+    goVisiting("#/sets");
+    onclose();
+  }
+
   function apply(event: SubmitEvent) {
     event.preventDefault();
     if (chosen !== null) onapply(chosen);
@@ -121,7 +129,7 @@
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    <a class="tf-btn tf-first" href="#/sets" onclick={onclose}>Manage link sets</a>
+    <a class="tf-btn tf-first" href="#/sets" onclick={manage}>Manage link sets</a>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-aps-{uid}" disabled={chosen === null}
       >{chosen === null ? "Apply" : `Apply ${chosen.name}`}</button

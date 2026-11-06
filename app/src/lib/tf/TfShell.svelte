@@ -76,7 +76,7 @@
   import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
-  import { goWithoutOpener, samePage, stamped, stampOf, takeTold, type Opened } from "./opener";
+  import { goBackTo, goWithoutOpener, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { PAGES } from "./pages";
@@ -189,13 +189,13 @@
    * it was opened from, which `Esc` returns to, and the entry before it. The
    * window's first address was opened by nothing.
    */
-  let here = $state<Opened>({ opener: null, prev: null });
-  history.replaceState(stamped(history.state, { opener: null, prev: null }), "");
+  let here = $state.raw<Opened>({ ...NOT_OPENED, prev: null });
+  history.replaceState(stamped(history.state, { ...NOT_OPENED, prev: null }), "");
 
   /** Put `next` in place of the address the reader is on, without a step back to it; a rooms address opened nothing. */
   function replaceHash(next: string) {
-    here = { opener: null, prev: here.prev };
-    history.replaceState(stamped(history.state, $state.snapshot(here)), "", next);
+    here = { ...NOT_OPENED, prev: here.prev };
+    history.replaceState(stamped(history.state, here), "", next);
     // The state itself, not a `hashchange`: on the first pass the listener (an `onMount`) is not there yet.
     hash = next;
   }
@@ -244,7 +244,7 @@
 
   /** The name the shown page gives itself (`page-name.svelte.ts`), read as it is left. */
   const shownPage = provideShownPageName();
-  // The window's name follows the page (F-015); `document.title` was always *knobas*.
+  // The window's name follows the page, and the page's name as it is read (F-015).
   $effect(() => {
     document.title = windowTitle(route, shownPage.name);
   });
@@ -254,9 +254,8 @@
   /**
    * The address moved (#2229). An entry already stamped is one history
    * stepped to, or one replaced in place: it keeps its stamp. A new entry is
-   * stamped here, before the page it left is gone: opened by nothing when it
-   * was told so (`goWithoutOpener`), the page's own opener on a tab switch,
-   * otherwise the page it left.
+   * stamped here, before the page it left is gone ({@link stampFor}). Either way
+   * the card row's narrowing is what the entry says.
    */
   function arrive() {
     const now = location.hash;
@@ -274,13 +273,32 @@
     if (how !== "replace" && had !== null) {
       here = had;
     } else {
-      if (how === "unopened") here = { opener: null, prev: hash };
-      else if (how === null && samePage(hash, now)) here = { opener: here.opener, prev: hash };
-      else if (how === null) here = { opener: { hash, name: openerName(route, shownPage.name) }, prev: hash };
-      history.replaceState(stamped(history.state, $state.snapshot(here)), "");
+      if (how !== "replace") here = stampFor(how, now);
+      history.replaceState(stamped(history.state, here), "");
     }
+    if (how !== "replace") scopedTicket.hold(here.trip);
     hash = now;
     if (how !== "replace") settlePlace(now, returning, opening, left);
+  }
+
+  /**
+   * How a new entry at `now` came to be: opened by nothing when it was told so; the stamp its opener had on an `Esc`
+   * step that couldn't step back; the page's own opener on a tab switch; otherwise the page it left. A press keeps
+   * what a card row narrowed, or takes what the row just narrowed, since a row says so before its address moves.
+   */
+  function stampFor(how: Exclude<Told, "replace"> | null, now: string): Opened {
+    if (how === "unopened") return { ...NOT_OPENED, prev: hash };
+    if (how === "back") return { ...(here.opener?.from ?? NOT_OPENED), prev: hash };
+    const trip = tripAt(now);
+    if (how === null && samePage(hash, now)) return { opener: here.opener, trip, visit: here.visit, prev: hash };
+    return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip, visit: how === "visit", prev: hash };
+  }
+
+  /** What a press to `now` keeps narrowed: Sub-tasks is the bare list's, so a saved view ends it, as *All tickets* does. */
+  function tripAt(now: string): Trip | null {
+    const to = parseTfHash(now);
+    const trip = scopedTicket.trip;
+    return trip?.section === "tickets" && to.view === "tickets" && to.rest.length > 0 ? null : trip;
   }
 
   // ---- section memory: a nav entry returns to the section as you left it (design system, the return contract) ----
@@ -297,13 +315,13 @@
 
   /**
    * A press on a nav entry: the section as it was left, opened by nothing, so `Esc` never jumps from one section to
-   * another by way of a tab. It ends a card row's narrowing of that section as leaving it does.
+   * another by way of a tab. It ends a card row's narrowing, wherever that was: a nav entry starts a new trip.
    */
-  function onnav(section: Exclude<Section, "job">, target: string) {
-    if (scopedTicket.section === section) scopedTicket.clear();
+  function onnav(_section: Exclude<Section, "job">, target: string) {
     if (location.hash === target) {
-      here = { opener: null, prev: here.prev };
-      history.replaceState(stamped(history.state, $state.snapshot(here)), "");
+      here = { ...NOT_OPENED, prev: here.prev };
+      history.replaceState(stamped(history.state, here), "");
+      scopedTicket.clear();
     } else goWithoutOpener(target);
   }
 
@@ -360,28 +378,22 @@
   /**
    * A ticket a card's sections row opened its section on (#2401,
    * `job/scoped.svelte.ts`) is that section's pages' *This job* while it is
-   * on screen (`TfKeptPage`); leaving the section forgets it.
+   * on screen (`TfKeptPage`). Each history entry says whether it is part of that
+   * trip (`arrive`). A page can end it in place (*All tickets*), and then the
+   * entry stops saying so.
    */
-  let shownSection: ReturnType<typeof sectionOf> = null;
   $effect(() => {
-    const section = sectionOf(route);
-    if (shownSection !== null && section !== shownSection && shownSection === scopedTicket.section) untrack(() => scopedTicket.clear());
-    shownSection = section;
-  });
-  // Tickets and a ticket's page light one section: the sub-tasks narrowing goes when the bare list is left.
-  let onBareTickets = false;
-  $effect(() => {
-    const bare = route.view === "tickets" && route.rest.length === 0;
-    if (onBareTickets && !bare && untrack(() => scopedTicket.section) === "tickets") untrack(() => scopedTicket.clear());
-    onBareTickets = bare;
+    if (scopedTicket.section !== null || untrack(() => here.trip) === null) return;
+    here = { ...here, trip: null };
+    history.replaceState(stamped(history.state, here), "");
   });
 
   /**
    * Where `Esc` goes once nothing is open, for the breadcrumb's hint (#2228):
    * the ladder's own rungs, so the hint names what the key does.
    */
-  const fromTicketRow = $derived(scopedTicket.section !== null && scopedTicket.section === sectionOf(route) && route.view !== "ticket" && route.view !== "job");
-  const back = $derived(escTarget(route, here.opener, fromTicketRow, shownPage.parent));
+  const visiting = $derived(here.visit || (scopedTicket.section !== null && scopedTicket.section === sectionOf(route) && route.view !== "ticket" && route.view !== "job"));
+  const back = $derived(escTarget(route, here.opener, visiting, shownPage.parent));
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
   const timedTicket = $derived.by(() => {
@@ -612,7 +624,7 @@
             },
       route,
       opener: here.opener,
-      fromTicketRow,
+      visiting,
       parent: shownPage.parent,
     });
     if (step.do === "nothing") return;
@@ -632,6 +644,7 @@
     stepping = true;
     // The opener is the entry before: step back to it, so `⌘]` comes forward to this page again.
     if (opened && hash === here.prev) nav.back();
+    else if (opened) goBackTo(hash);
     else goWithoutOpener(hash);
   }
 

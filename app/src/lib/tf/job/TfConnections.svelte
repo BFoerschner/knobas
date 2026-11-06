@@ -73,7 +73,11 @@
     const restoreTo = document.activeElement;
     const off = untrack(() => layers.add({ kind: "drawer", close: () => onclose() }));
     field?.focus();
+    // It draws in the shell's host, so its page hiding would leave it over the next one: a move closes it, as a menu.
+    const moved = () => onclose();
+    window.addEventListener("hashchange", moved);
     return () => {
+      window.removeEventListener("hashchange", moved);
       untrack(off);
       if (restoreTo instanceof HTMLElement && document.contains(restoreTo)) restoreTo.focus();
     };

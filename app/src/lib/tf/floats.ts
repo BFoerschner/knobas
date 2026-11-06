@@ -5,10 +5,12 @@
  * `inFloatHost` is an attachment: `{@attach inFloatHost}` moves the element into the host, which `TfShell` draws
  * inside `.tf`, so the tokens and Svelte's delegated events still hold. A component drawn with no shell (a test, the
  * specimen) keeps it where it stands. The element has to be its component's one root node, because Svelte removes a
- * run of root nodes by walking their siblings.
+ * run of root nodes by walking their siblings. Svelte also leaves a nested block's nodes to whatever holds them, and
+ * the host doesn't hold them for it: when a whole page goes, what floated from it goes here.
  */
-export function inFloatHost(node: HTMLElement): void {
+export function inFloatHost(node: HTMLElement): () => void {
   document.querySelector(".tf-floats")?.append(node);
+  return () => node.remove();
 }
 
 interface Box {

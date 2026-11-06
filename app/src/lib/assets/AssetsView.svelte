@@ -670,6 +670,11 @@
     nav.go(addressOf(row));
   }
 
+  /** A press that leaves the asset being read for another: `Esc` comes back to this one, where a walk climbs its holders. */
+  function jump(hash: string) {
+    (nav.jump ?? nav.go)(hash);
+  }
+
   // -- the walk (story 29) --------------------------------------------------
 
   /**
@@ -1161,7 +1166,7 @@
   function reveal(match: Match): void {
     clearQuery();
     wantFocus = true;
-    nav.go(addressOf({ id: match.id }));
+    jump(addressOf({ id: match.id }));
   }
 
   /** The box's own keys — the launcher's, on a shorter list. */
@@ -1572,7 +1577,7 @@
    * happen is a click leading back to the asset the reader is looking at.
    */
   function goToSource(hash: string | null) {
-    if (hash !== null) nav.go(hash);
+    if (hash !== null) jump(hash);
   }
 
   /**
@@ -1702,7 +1707,7 @@
                 <button
                   class="go"
                   onclick={() =>
-                    nav.go(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
+                    jump(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
                 >
                   <span class="mn">{alert.monitor_name}</span>
                   <span class="nm">{watched.name}</span>
@@ -2216,7 +2221,7 @@
             <ul class="lst">
               {#each detail.held_by as held (held.id)}
                 <li>
-                  <button class="link" onclick={() => select(held)}>{held.name}</button>
+                  <button class="link" onclick={() => jump(addressOf(held))}>{held.name}</button>
                 </li>
               {/each}
             </ul>
@@ -2231,7 +2236,7 @@
             <ul class="lst" {@attach holdsWindow.list}>
               {#each holdsWindow.slice(detail.holds) as held (held.id)}
                 <li {@attach holdsWindow.row(held.id)}>
-                  <button class="link" onclick={() => select(held)}>{held.name}</button>
+                  <button class="link" onclick={() => jump(addressOf(held))}>{held.name}</button>
                   <span class="faint">{held.type_label}</span>
                 </li>
               {/each}
@@ -2561,7 +2566,7 @@
           <LinksPanel
             entityId={detail.asset.id}
             links={detail.links}
-            onopen={(hash) => nav.go(hash)}
+            onopen={jump}
             onunlink={(entry) => void removeLink(entry)}
             onlink={() => {
               linking = true;
