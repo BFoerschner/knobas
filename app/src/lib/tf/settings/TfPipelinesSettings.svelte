@@ -88,6 +88,9 @@
     savingStep = true;
     if (await storeSteps(list)) {
       push({ text: `${editingStep === "new" ? "Added" : "Saved"} ${stepForm.name.trim()}` });
+      // Asked for from a pipeline's *Add step*: the step it was making goes into that pipeline.
+      const made = stepCommands.list.at(-1);
+      if (editingStep === "new" && editingPipe !== null && made !== undefined) pipeForm.steps = [...pipeForm.steps, { step: "command", id: made.id }];
       editingStep = null;
     }
     savingStep = false;
@@ -180,39 +183,6 @@
   {#if stepRefusal !== null && editingStep === null}<p class="tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
 </div>
 
-{#if editingStep !== null}
-  <TfDialog title={editingStep === "new" ? "Add a command step" : `Edit ${stepCommands.list[editingStep]?.name ?? ""}`} why={stepWhy} onclose={() => (editingStep = null)}>
-    {#snippet body()}
-      <form
-        class="tf-formgrid tf-sf-grid"
-        id="tf-pst-form"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void saveStep();
-        }}
-      >
-        <label for="tf-pst-name">Step name <small class="tf-req">required</small></label>
-        <input id="tf-pst-name" aria-label="Step name" autocomplete="off" required bind:value={stepForm.name} placeholder="Decode protobuf" />
-        <label for="tf-pst-cmd">Step command <small class="tf-req">required</small></label>
-        <div class="tf-sf-c">
-          <input id="tf-pst-cmd" aria-label="Step command" class="tf-mono" autocomplete="off" spellcheck="false" required bind:value={stepForm.command} placeholder="protoc --decode_raw" />
-          <small class="tf-sf-help">Quotes group words. No shell: <span class="tf-mono">|</span> and <span class="tf-mono">$VAR</span> are plain text.</small>
-        </div>
-        <label for="tf-pst-time">Step timeout</label>
-        <div class="tf-sf-c">
-          <div class="tf-rnd-secs"><input id="tf-pst-time" class="tf-rnd-secn" type="number" min="1" max="120" bind:value={stepForm.timeout} /><span>seconds</span></div>
-          <small class="tf-sf-help">1 to 120; the command is stopped after it.</small>
-        </div>
-      </form>
-      {#if stepRefusal !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
-    {/snippet}
-    {#snippet footer()}
-      <button class="tf-btn tf-ghost" onclick={() => (editingStep = null)}>Cancel</button>
-      <button class="tf-btn tf-primary" type="submit" form="tf-pst-form" disabled={stepWhy !== null || savingStep}>{editingStep === "new" ? "Add step" : "Save step"}</button>
-    {/snippet}
-  </TfDialog>
-{/if}
-
 <div class="tf-stg-sec">
   <h2>Pipelines</h2>
   <p class="tf-stg-p">
@@ -265,6 +235,7 @@
         path={sampleName(opened)}
         shownAs="Renderer"
         commands={stepCommands.list}
+        onaddcommand={() => editStep("new")}
         onchange={(next) => (pipeForm.steps = next)}
         onreset={() => editPipe(opened)}
       />
@@ -273,6 +244,40 @@
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (editingPipe = null)}>Cancel</button>
       <button class="tf-btn tf-primary" type="submit" form="tf-ppl-form" disabled={pipeWhy !== null || savingPipe}>{opened === "new" ? "Add pipeline" : "Save pipeline"}</button>
+    {/snippet}
+  </TfDialog>
+{/if}
+
+<!-- After the pipeline's dialog, which *Add step*'s *Add a command step…* opens this one over. -->
+{#if editingStep !== null}
+  <TfDialog title={editingStep === "new" ? "Add a command step" : `Edit ${stepCommands.list[editingStep]?.name ?? ""}`} why={stepWhy} onclose={() => (editingStep = null)}>
+    {#snippet body()}
+      <form
+        class="tf-formgrid tf-sf-grid"
+        id="tf-pst-form"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void saveStep();
+        }}
+      >
+        <label for="tf-pst-name">Step name <small class="tf-req">required</small></label>
+        <input id="tf-pst-name" aria-label="Step name" autocomplete="off" required bind:value={stepForm.name} placeholder="Decode protobuf" />
+        <label for="tf-pst-cmd">Step command <small class="tf-req">required</small></label>
+        <div class="tf-sf-c">
+          <input id="tf-pst-cmd" aria-label="Step command" class="tf-mono" autocomplete="off" spellcheck="false" required bind:value={stepForm.command} placeholder="protoc --decode_raw" />
+          <small class="tf-sf-help">Quotes group words. No shell: <span class="tf-mono">|</span> and <span class="tf-mono">$VAR</span> are plain text.</small>
+        </div>
+        <label for="tf-pst-time">Step timeout</label>
+        <div class="tf-sf-c">
+          <div class="tf-rnd-secs"><input id="tf-pst-time" class="tf-rnd-secn" type="number" min="1" max="120" bind:value={stepForm.timeout} /><span>seconds</span></div>
+          <small class="tf-sf-help">1 to 120; the command is stopped after it.</small>
+        </div>
+      </form>
+      {#if stepRefusal !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (editingStep = null)}>Cancel</button>
+      <button class="tf-btn tf-primary" type="submit" form="tf-pst-form" disabled={stepWhy !== null || savingStep}>{editingStep === "new" ? "Add step" : "Save step"}</button>
     {/snippet}
   </TfDialog>
 {/if}

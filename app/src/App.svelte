@@ -139,7 +139,7 @@
     timeRevision += 1;
     const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
     // A worklog carries no source to name (`Worklog` has its entity only), so no sign-in sentence.
-    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null);
+    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null, { write: logged.write_queue_id === null ? null : { id: logged.write_queue_id } });
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
   }
 

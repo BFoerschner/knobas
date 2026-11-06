@@ -260,8 +260,8 @@
     const words = title.trim();
     try {
       const linkTo = ticket !== null && link ? ticket.id : undefined;
-      await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
-      toastQueued(`open PR ${words}`, source);
+      const write = await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
+      toastQueued(`open PR ${words}`, source, { write });
       location.hash = repoHash(repoId, "prs");
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });

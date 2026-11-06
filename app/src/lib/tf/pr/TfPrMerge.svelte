@@ -85,7 +85,7 @@
     busy = true;
     try {
       const write = await submitWrite(payload);
-      toastQueued(`merge ${name}`, source);
+      toastQueued(`merge ${name}`, source, { write });
       onqueued(write);
       onclose();
     } catch (cause) {

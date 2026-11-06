@@ -91,7 +91,7 @@
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
-  import { toastQueued, toastSent, type WriteSource } from "../../shell/queued-toast";
+  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -420,14 +420,6 @@
   }
 
   /** *Try again* in the failed line: that line goes while it asks, so focus lands on what stands in its place after. */
-  async function refreshAgain(): Promise<void> {
-    if (detail === null) return;
-    await refresh.refresh(detail, reread);
-    await tick();
-    if (document.activeElement !== document.body) return;
-    (article?.querySelector<HTMLElement>(".tf-refresh-failed button") ?? article?.querySelector<HTMLElement>(".tf-refresh"))?.focus();
-  }
-
   /**
    * A refresh's re-read: the tree, the open page and its row, each over what
    * Docs drew (#2072's quiet reads), so the picked space, the search, an open
@@ -1030,10 +1022,9 @@
       const name = heading ? inlineWords(heading.text) : "";
       const id = p.entity_id;
       const kind = sectionKind(section);
-      const sent = toastWrite(`edit section “${name}” of ${p.title}`, sourceOf(p), write);
+      toastQueued(`edit section “${name}” of ${p.title}`, sourceOf(p), { write });
       echoWrite(id, kind, text, {
         write,
-        onsent: sent,
         base: String(p.version),
         surface: DOCS,
         source: p.source_id,
@@ -1053,14 +1044,6 @@
     }
   }
 
-  /** The toast for a Docs write just queued, and what turns it into *Sent* once the write went, as the row's word does. */
-  function toastWrite(what: string, source: WriteSource | null, write: { state?: string }): () => void {
-    const toast = toastQueued(what, source);
-    const sent = () => toastSent(toast, what);
-    if (write.state === "sent") sent();
-    return sent;
-  }
-
   async function sendComment(p: DocPage): Promise<void> {
     if (comment.trim() === "" || commenting || refusal("comment") !== null) return;
     commenting = true;
@@ -1068,10 +1051,9 @@
       const body = comment;
       const id = p.entity_id;
       const write = await io.submitWrite({ Comment: { entity: id, body } });
-      const sent = toastWrite(`comment on ${p.title}`, sourceOf(p), write);
+      toastQueued(`comment on ${p.title}`, sourceOf(p), { write });
       echoWrite(id, "comment", body, {
         write,
-        onsent: sent,
         many: true,
         surface: DOCS,
         source: p.source_id,
@@ -1104,10 +1086,9 @@
       }
       const write = await io.docsCreatePage(next, ticket);
       const title = next.title.trim();
-      const sent = toastWrite(`create page ${title}`, under ? sourceOf(under) : null, write);
+      toastQueued(`create page ${title}`, under ? sourceOf(under) : null, { write });
       echoWrite(next.parent, "page", title, {
         write,
-        onsent: sent,
         many: true,
         surface: DOCS,
         ...(under ? { source: under.source_id } : {}),
@@ -1394,7 +1375,7 @@
               </span>
             {/if}
           </div>
-          {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} onretry={() => void refreshAgain()} />{/if}
+          {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
           {#if outlineFolds}
             {#key p.entity_id}
               <TfDocOutline page={p} {stems} active={marked} folded onpick={pickSection} />

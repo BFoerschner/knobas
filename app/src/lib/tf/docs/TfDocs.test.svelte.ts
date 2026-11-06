@@ -2664,7 +2664,7 @@ test("a sync run's re-read that fails before Docs drew anything shows the error 
 
 // ---- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2102) ----
 
-test("a comment on its way counts in the heading, and its toast says Sent when its row does (F-428)", async () => {
+test("a comment on its way counts in the heading, and its toast says what was queued (F-428; Sent in place is `queued-toast.test.ts`)", async () => {
   toasts.items = [];
   const { follower, sent } = heldFollower();
   const io = ports({ docsPage: vi.fn(async () => RICH), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 44 })) });
@@ -2677,8 +2677,6 @@ test("a comment on its way counts in the heading, and its toast says Sent when i
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
   sent(44);
   expect(queuedComments()).toEqual(["MA You Sent Done."]);
-  expect(toasts.items.at(-1)?.text).toBe(`Sent: comment on ${RICH.title}.`);
-  expect(toasts.items.at(-1)?.action).toBeUndefined();
   toasts.items = [];
 });
 

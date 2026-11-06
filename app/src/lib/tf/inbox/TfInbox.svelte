@@ -47,7 +47,7 @@
   } from "../../ipc/entity";
   import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
   import { ACTION_FORMS } from "../../inbox/actions";
-  import { inbox as sharedInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox, type InboxRefusal } from "../../inbox/inbox.svelte";
+  import { inbox as sharedInbox, leftTheInbox, pickedMorning, snoozePresets, tomorrowValue, type Inbox, type InboxRefusal } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
@@ -228,7 +228,7 @@
       toastQueued(`${form.label.toLowerCase()} ${entry.item.title}`, {
         id: entry.item.source_id,
         display_name: source?.display_name ?? "",
-      });
+      }, { write });
       following.push(followWrite(write, { name: form.label }));
       void inbox.refresh();
     } catch (error) {
@@ -245,7 +245,7 @@
   function saysFailure(what: string, verb: string, again: () => void) {
     return ({ reason, gone }: InboxRefusal) => {
       toasted = reason;
-      if (gone) push({ text: `${what} has already left the inbox. It was resolved at its source.` });
+      if (gone) push({ text: leftTheInbox(what) });
       else push({ text: `Could not ${verb} ${what}: ${reason}`, tone: "err", action: { label: "Try again", run: again } });
     };
   }
@@ -267,6 +267,7 @@
   }));
 
   function ack(entry: InboxEntry) {
+    keepPlace(entry);
     ackToast(entry);
     void inbox.ack(entry.item.key, saysFailure(named(entry.item), "ack", () => ack(entry)));
   }

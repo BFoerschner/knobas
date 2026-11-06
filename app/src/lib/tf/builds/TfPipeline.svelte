@@ -380,7 +380,7 @@
     try {
       const write = await ports.submitWrite(payload);
       echoRun(pipeline, write, runBranch(payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
+      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline), { write });
       return true;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -526,7 +526,7 @@
         source: pipeline.source_id,
       });
       editing = null;
-      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline));
+      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline), { write });
     } catch (cause) {
       push({ text: `Could not queue the change: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -580,7 +580,7 @@
     <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
   </div>
 </header>
-{#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+{#if detail !== null}<TfDetailBanners {detail} {refresh} reread={refreshRead} />{/if}
 
 {#if stale !== null}
   <div class="tf-stale tf-bstale">

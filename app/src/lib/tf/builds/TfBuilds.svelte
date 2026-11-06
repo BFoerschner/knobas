@@ -376,7 +376,7 @@
 {/snippet}
 
 <div class="tf-bv" class:tf-rail-shut={!railOpen}>
-  <TfRailBar label="Pipeline" value={selected?.name ?? "All"} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} />
+  <TfRailBar label="Pipeline" value={selected?.name ?? "All"} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <nav
     id="tf-pipelines-rail"

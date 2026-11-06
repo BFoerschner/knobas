@@ -719,7 +719,7 @@
 {/if}
 <div class:tf-dgrid={list} class:tf-rail-shut={list && !railOpen}>
   {#if list}
-    <TfRailBar label="File" value={current === null ? "None" : nameOf(current)} open={railOpen} controls="{uid}-files" onpress={() => (railOpen = !railOpen)} />
+    <TfRailBar label="File" value={current === null ? "None" : nameOf(current)} open={railOpen} controls="{uid}-files" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
     <div class="tf-dnav tf-rail" id="{uid}-files">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>

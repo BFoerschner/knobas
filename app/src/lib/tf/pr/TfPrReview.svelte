@@ -102,7 +102,7 @@
     try {
       const write = await submitWrite(payload);
       pending.settle(prId, sent, summary);
-      toastQueued(`submit review on ${name}`, source);
+      toastQueued(`submit review on ${name}`, source, { write });
       onqueued(write);
       onclose();
     } catch (cause) {

@@ -416,7 +416,7 @@
     try {
       const write = await ports.submitWrite(request.payload);
       echoRun(pipeline, write, runBranch(request.payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
+      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline), { write });
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
       return;
@@ -520,7 +520,7 @@
       <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} noun="run" />
     </div>
   </header>
-  {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+  {#if detail !== null}<TfDetailBanners {detail} {refresh} reread={rereadRun} />{/if}
 
   {#if segments.length > 0}
     <div class="tf-stepsbar" {@attach measureBar}>

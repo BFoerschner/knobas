@@ -1237,7 +1237,7 @@ test("a run whose refresh failed keeps its page and says why under the header", 
   await settle();
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway. Refresh to try again.");
+  expect(target.querySelector(".tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 502 Bad Gateway. Try again");
   expect(target.querySelector("h1")?.textContent).toContain("#1187");
   expect(target.querySelector(".tf-bhead + .tf-refresh-failed, .tf-bhead ~ .tf-refresh-failed")).not.toBeNull();
 });

@@ -3,6 +3,7 @@
  * filter and chips, the selected pipeline's runs on the right, and the
  * source's word in one header line only.
  */
+import { layers as sharedLayers } from "../layers.svelte";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
@@ -112,6 +113,22 @@ function draw(rest: string[], head = "builds", asked: string[] = [], extra: Part
 
 const rows = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-pl-rows .tf-pi")];
 const names = () => rows().map((row) => row.querySelector(".tf-pi-nm")?.textContent);
+
+test("an open Pipeline fold is a panel: Esc folds it first, and focus returns to its bar (F-619)", async () => {
+  draw([]);
+  await settle();
+  const before = sharedLayers.open.length;
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  expect(sharedLayers.open).toHaveLength(before + 1);
+  sharedLayers.open.at(-1)!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(bar);
+  expect(sharedLayers.open).toHaveLength(before);
+});
 
 test("each pipeline is a row: its name, err when its latest run failed, a strip of the last twelve runs, its path on hover", async () => {
   draw([]);

@@ -74,7 +74,7 @@
       }
       const write = await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
       echoWrite(repoId, MADE, branch, { write, many: true, following: { name: `Branch ${branch}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
-      toastQueued(`create branch ${branch} in ${repoName}`, source);
+      toastQueued(`create branch ${branch} in ${repoName}`, source, { write });
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the branch: ${ipcErrorMessage(cause)}`, tone: "err" });

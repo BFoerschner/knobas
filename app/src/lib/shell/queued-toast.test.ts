@@ -8,9 +8,11 @@ import { beforeEach, expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { createHealth } from "./health.svelte";
-import { toastQueued, toastSent, toastStarted } from "./queued-toast";
+import type { Hear, WriteFollower } from "./follow-write";
+import type { QueuedWrite } from "../ipc/sources";
+import { toastQueued, toastStarted } from "./queued-toast";
 import { toasts } from "./toasts.svelte";
-import { writeQueuePanel } from "./write-queue.svelte";
+import { noteWithdrawn, reset as resetQueue, writeQueuePanel } from "./write-queue.svelte";
 
 const TEAMCITY = { id: "teamcity", display_name: "TeamCity" };
 
@@ -29,18 +31,75 @@ beforeEach(() => {
   writeQueuePanel.open = false;
 });
 
-test("a queued toast says Sent in place once its write went, and offers no queue that no longer holds it", () => {
-  const id = toastQueued("comment on Payout design", TEAMCITY, storeWith(null));
-  toastSent(id, "comment on Payout design");
+/** A follower the test speaks for: `hear(row)` is the queue's next read of the write. */
+function heardFollower(): { follower: WriteFollower; hear: Hear; follows: () => number } {
+  let heard: Hear = () => {};
+  let open = 0;
+  return {
+    follower: {
+      follow: (_id, hear) => {
+        heard = hear;
+        open += 1;
+        return () => {
+          open -= 1;
+          heard = () => {};
+        };
+      },
+    },
+    hear: (row) => heard(row),
+    follows: () => open,
+  };
+}
+
+const HELD = { id: 7, state: "held", held_snapshot: null, detail: "changed at the source" } as unknown as QueuedWrite;
+
+test("a queued toast says Sent in place once its write left the queue, and offers no queue that no longer holds it", () => {
+  const { follower, hear, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  expect(toasts.items.at(-1)!.text).toBe("Queued: comment on Payout design.");
+  expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
+  hear(undefined);
   expect(toasts.items).toHaveLength(1);
   expect(toasts.items[0]!.text).toBe("Sent: comment on Payout design.");
   expect(toasts.items[0]!.action).toBeUndefined();
-  toastSent(id + 1, "nothing");
-  expect(toasts.items).toHaveLength(1);
+  expect(follows()).toBe(0);
+});
+
+test("a write already sent as it answers says Sent at once, with nothing to follow", () => {
+  const { follower, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7, state: "sent" }, follower });
+  expect(toasts.items.at(-1)!.text).toBe("Sent: comment on Payout design.");
+  expect(follows()).toBe(0);
+});
+
+test("a write withdrawn in the queue takes its toast with it, because nothing was sent", () => {
+  resetQueue();
+  const { follower, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  noteWithdrawn(7);
+  expect(toasts.items).toHaveLength(0);
+  expect(follows()).toBe(0);
+});
+
+test("a held write keeps saying Queued and offering the queue, which is where it is", () => {
+  const { follower, hear, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  hear(HELD);
+  expect(toasts.items.at(-1)!.text).toBe("Queued: comment on Payout design.");
+  expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
+  expect(follows()).toBe(0);
+});
+
+test("a toast that has gone stops following its write", () => {
+  const { follower, hear, follows } = heardFollower();
+  toastQueued("comment on Payout design", TEAMCITY, { store: storeWith(null), write: { id: 7 }, follower });
+  toasts.items.length = 0;
+  hear({ ...HELD, state: "pending" } as QueuedWrite);
+  expect(follows()).toBe(0);
 });
 
 test("a healthy source's write says what was queued, and Show queue opens the queue", () => {
-  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, storeWith("ok"));
+  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, { store: storeWith("ok") });
   const toast = toasts.items.at(-1)!;
   expect(toast.text).toBe("Queued: re-run Payout_IntegrationTests #1187.");
   expect(toast.action?.label).toBe("Show queue");
@@ -49,14 +108,14 @@ test("a healthy source's write says what was queued, and Show queue opens the qu
 });
 
 test("a rejected credential says the write waits for the sign-in", () => {
-  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, storeWith("unauthorized"));
+  toastQueued("re-run Payout_IntegrationTests #1187", TEAMCITY, { store: storeWith("unauthorized") });
   expect(toasts.items.at(-1)!.text).toBe(
     "Queued: re-run Payout_IntegrationTests #1187. TeamCity sign-in is failing, so it waits there.",
   );
 });
 
 test("no stored secret is a failing sign-in too", () => {
-  toastQueued("set env on Payout_IntegrationTests", TEAMCITY, storeWith("missing_secret"));
+  toastQueued("set env on Payout_IntegrationTests", TEAMCITY, { store: storeWith("missing_secret") });
   expect(toasts.items.at(-1)!.text).toBe(
     "Queued: set env on Payout_IntegrationTests. TeamCity sign-in is failing, so it waits there.",
   );
@@ -64,19 +123,19 @@ test("no stored secret is a failing sign-in too", () => {
 
 test("an unreachable server, an untested credential, or no reading at all names no sign-in", () => {
   for (const state of ["unreachable", "unknown", null] as const) {
-    toastQueued("PAY-231 to Done", TEAMCITY, storeWith(state));
+    toastQueued("PAY-231 to Done", TEAMCITY, { store: storeWith(state) });
     expect(toasts.items.at(-1)!.text).toBe("Queued: PAY-231 to Done.");
   }
 });
 
 test("a write whose source the page does not know says what was queued and nothing more", () => {
-  toastQueued("comment on PAY-231", null, storeWith("unauthorized"));
+  toastQueued("comment on PAY-231", null, { store: storeWith("unauthorized") });
   expect(toasts.items.at(-1)!.text).toBe("Queued: comment on PAY-231.");
 });
 
 test("no toast promises the next sync", () => {
   for (const state of ["ok", "unknown", "unauthorized", "missing_secret", "unreachable", null] as const) {
-    toastQueued("merge PR #142", TEAMCITY, storeWith(state));
+    toastQueued("merge PR #142", TEAMCITY, { store: storeWith(state) });
   }
   expect(toasts.items.every((toast) => !toast.text.includes("next sync"))).toBe(true);
 });

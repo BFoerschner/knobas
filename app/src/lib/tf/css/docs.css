@@ -68,8 +68,6 @@
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
 /* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136), set apart from what follows like the page's other blocks. */
 .tf-rd-page > .tf-banner { margin: 10px 0 12px; border-bottom: 0; border-radius: 4px; }
-/* Its button is a button, not more of the failure: it does not take the line's red. */
-.tf-refresh-failed .tf-btn { flex: none; margin-left: auto; color: var(--ink); }
 .tf-rd-more { display: inline-flex; }
 .tf-menu.tf-rd-m button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
 .tf-rd-moresync { display: contents; }

@@ -334,6 +334,20 @@ function type(input: HTMLInputElement, char: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+test("an open View fold is a panel: Esc folds it first, and focus returns to its bar (F-619)", async () => {
+  await open(harness());
+  const before = layers.open.length;
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  layers.open.at(-1)!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(bar);
+  expect(layers.open).toHaveLength(before);
+});
+
 test("every synced ticket on the board: a column per status, eight cards then Show N more, Done three", async () => {
   const h = harness();
   await open(h);

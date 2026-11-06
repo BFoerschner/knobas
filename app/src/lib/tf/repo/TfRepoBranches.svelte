@@ -211,7 +211,7 @@
     try {
       const write = await ports.submitWrite({ DeleteBranch: { entity: row.entityId } });
       echoWrite(repoId, DELETED, row.name, { write, many: true, following: { name: `Delete of ${row.name}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
-      toastQueued(`delete branch ${row.name}`, source);
+      toastQueued(`delete branch ${row.name}`, source, { write });
       deleting = null;
     } catch (cause) {
       push({ text: `Could not queue the delete: ${ipcErrorMessage(cause)}`, tone: "err" });

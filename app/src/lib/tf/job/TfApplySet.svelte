@@ -30,6 +30,7 @@
     layers,
     onapply,
     onclose,
+    onmanage,
   }: {
     jobKey: string;
     /** The ids of the sets that apply to the ticket now. */
@@ -38,6 +39,8 @@
     layers: Layers;
     onapply: (set: LinkSetRow) => void;
     onclose: () => void;
+    /** *Manage link sets* pressed: the page is about to be left, to come back to. */
+    onmanage?: (() => void) | undefined;
   } = $props();
 
   let sets = $state<LinkSetRow[] | null>(null);
@@ -82,6 +85,7 @@
   /** The sets' page says where it came from, so `Esc` and *Back to* come back here. */
   function manage(event: MouseEvent) {
     event.preventDefault();
+    onmanage?.();
     goVisiting("#/sets");
     onclose();
   }

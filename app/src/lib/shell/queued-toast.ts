@@ -16,8 +16,10 @@
  */
 import type { SourceSummary } from "../ipc/sources";
 import { health, signInFails, type Health } from "./health.svelte";
-import { amend, push } from "./toasts.svelte";
-import { openWriteQueue } from "./write-queue.svelte";
+import type { QueuedWrite } from "../ipc/sources";
+import { willNotGo, writeFollower, type WriteFollower } from "./follow-write";
+import { amend, dismiss, push, toasts } from "./toasts.svelte";
+import { onWithdrawn, openWriteQueue } from "./write-queue.svelte";
 
 /** The source a write goes to: its id, to read its credential, and its name, to say it. */
 export type WriteSource = Pick<SourceSummary, "id" | "display_name">;
@@ -37,25 +39,63 @@ function withSignIn(text: string, failing: string | null): string {
   return failing === null ? text : `${text} ${failing} sign-in is failing, so it waits there.`;
 }
 
+/** What a queued toast follows, and the stores behind it. Every one but a test's takes the shell's. */
+export interface QueuedToastHow {
+  /** `submit_write`'s answer: the toast says *Sent* in place once this write has gone. */
+  write?: (Pick<QueuedWrite, "id"> & Partial<Pick<QueuedWrite, "state">>) | null | undefined;
+  follower?: WriteFollower | undefined;
+  store?: Pick<Health, "get"> | undefined;
+}
+
 /**
  * Raise the toast for a write just queued to `source`, in the button's words
  * (`what`, without a closing full stop). `null` or `undefined` for a page
  * that cannot name the source (a detail read before it carried one): the
  * toast then says what was queued and nothing about sign-in. Returns the toast's id.
+ *
+ * Given the write, the toast follows it. A write goes within a second, so a toast left on *Queued* with *Show queue*
+ * offered a queue that no longer held it. Withdrawn in the queue the toast goes, because nothing was sent. Held or
+ * refused it stays as it is, because the write is still in the queue it offers and the page's own follow says why.
  */
-export function toastQueued(what: string, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): number {
-  const failing = failingName(source, store);
-  return push({
+export function toastQueued(what: string, source: WriteSource | null | undefined, how: QueuedToastHow = {}): number {
+  const failing = failingName(source, how.store ?? health);
+  const id = push({
     text: queuedText(what, failing),
     action: { label: "Show queue", run: openWriteQueue },
   });
+  const write = how.write;
+  if (write === null || write === undefined) return id;
+  if (write.state === "sent") {
+    toastSent(id, what);
+    return id;
+  }
+  let stopFollow: () => void = () => {};
+  let stopWithdrawn: () => void = () => {};
+  let over = false;
+  const finish = () => {
+    over = true;
+    stopFollow();
+    stopWithdrawn();
+  };
+  stopWithdrawn = onWithdrawn(write.id, () => {
+    finish();
+    dismiss(id);
+  });
+  stopFollow = (how.follower ?? writeFollower()).follow(write.id, (row) => {
+    if (over) return;
+    // Its toast has gone, so there is nothing left to say it on.
+    if (!toasts.items.some((toast) => toast.id === id)) return finish();
+    if (row === undefined) {
+      finish();
+      toastSent(id, what);
+    } else if (willNotGo(row)) finish();
+  });
+  if (over) stopFollow();
+  return id;
 }
 
-/**
- * The write toast {@link toastQueued} raised has gone: it says so where it stands, and the queue it offered no longer
- * holds it. Docs' rows move from *Queued* to *Sent* within a second, so a toast left on *Queued* read as a contradiction.
- */
-export function toastSent(id: number, what: string): void {
+/** The write a toast from {@link toastQueued} named has gone: it says so where it stands, and offers no queue. */
+function toastSent(id: number, what: string): void {
   amend(id, { text: `Sent: ${what}.` });
 }
 

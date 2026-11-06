@@ -38,6 +38,7 @@
     savePattern = "",
     savedName = "",
     onsave,
+    onaddcommand,
     layers = sharedLayers,
   }: {
     steps: PipeStep[];
@@ -67,6 +68,8 @@
     savedName?: string;
     /** Saves the steps as `name`, the default for `pattern`; no button without it. */
     onsave?: ((name: string, pattern: string) => Promise<void>) | undefined;
+    /** Starts a new command step where the bar stands. Without it, *Add a command step…* goes to Settings › Renderers, where they are made. */
+    onaddcommand?: (() => void) | undefined;
     layers?: Layers | undefined;
   } = $props();
 
@@ -252,9 +255,13 @@
               ><span>{command.name}</span><span class="tf-rsw-kb tf-pmono">{command.command}</span></button
             >
           {/each}
-          <a role="menuitem" href="#/settings/renderers" onclick={() => (adding = false)}
-            ><span>Add a command step…</span><span class="tf-rsw-kb">Settings › Renderers</span></a
-          >
+          {#if onaddcommand !== undefined}
+            <button type="button" role="menuitem" onclick={() => ((adding = false), onaddcommand?.())}><span>Add a command step…</span></button>
+          {:else}
+            <a role="menuitem" href="#/settings/renderers" onclick={() => (adding = false)}
+              ><span>Add a command step…</span><span class="tf-rsw-kb">Settings › Renderers</span></a
+            >
+          {/if}
       </TfMenu>
     </span>
   </div>

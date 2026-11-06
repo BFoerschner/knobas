@@ -77,7 +77,7 @@
     busy = true;
     try {
       const write = await submitWrite(payload);
-      toastQueued(what, source);
+      toastQueued(what, source, { write });
       onqueued?.(write);
       onclose();
     } catch (cause) {

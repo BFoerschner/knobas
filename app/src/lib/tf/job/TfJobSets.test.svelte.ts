@@ -3,6 +3,7 @@
  * R-7.9), mounted with stand-ins for every read and write. What the backend
  * does with a saved set is `crates/knobas-app/tests/it/link_sets_ipc.rs`'s.
  */
+import { pageContext } from "../kept-pages.svelte";
 import { takeTold } from "../opener";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -262,6 +263,45 @@ test("Apply a link set… picks nothing on arrival, and its primary waits with a
   pick("Payout stack");
   expect(footer().at(-1)?.[0]).toBe("Apply Payout stack");
   expect(dialog().querySelector("footer .tf-dwhy")).toBeNull();
+});
+
+test("back from Manage link sets, the page opens the drawer again, once, with focus in its filter", async () => {
+  const shown = $state({ now: true });
+  job = mount(TfJob, {
+    target,
+    context: pageContext(() => shown.now),
+    props: {
+      segment: "PAY-231",
+      timer: { current: null, elapsed: null },
+      layers: createLayers(),
+      ontimer: () => {},
+      onstarttimer: () => {},
+      ports: ports([]),
+      sets,
+      today: () => new Date(2026, 9, 15, 14, 0),
+    },
+  });
+  await settle();
+  button(drawerOpen(), "Apply a link set…").click();
+  await settle();
+  dialog().querySelector<HTMLAnchorElement>("footer a")!.click();
+  shown.now = false;
+  await settle();
+  const drawer = () => document.querySelector<HTMLElement>("[aria-label='Connections']");
+  expect(drawer()).toBeNull();
+  shown.now = true;
+  await settle();
+  expect(drawer()).not.toBeNull();
+  expect(document.activeElement).toBe(drawer()!.querySelector("[data-filter]"));
+  drawer()!.querySelector<HTMLButtonElement>(".tf-dclose")!.click();
+  await settle();
+  shown.now = false;
+  await settle();
+  shown.now = true;
+  await settle();
+  expect(drawer(), "only the trip that left from it").toBeNull();
+  location.hash = "";
+  await settle();
 });
 
 test("Manage link sets opens the sets' page to come back from, and the dialog and the drawer go with the move (F-520)", async () => {

@@ -148,6 +148,8 @@
   let linking = $state(false);
   /** *Apply a link set…* and *Save as a link set…* open (#869). */
   let applyingSet = $state(false);
+  /** *Manage link sets* left from the drawer: coming back to this page opens it again, where the reader was. */
+  let drawerOnReturn = false;
   let savingSet = $state(false);
 
   // ---- the job's reads are the reader's (#1320) ----
@@ -238,6 +240,13 @@
   // timer start, a refresh) does not take the choice back from a ticket
   // chosen since.
   const resolvedId = $derived(detail?.row.entity_id ?? null);
+  $effect(() => {
+    if (!pageShown() || !drawerOnReturn) return;
+    drawerOnReturn = false;
+    // What the drawer gives focus back to: the row that opens it, as if pressed again.
+    document.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-tkacts button")?.focus({ preventScroll: true });
+    drawer = true;
+  });
   $effect(() => {
     if (!choose || !pageShown() || resolvedId === null) return;
     const id = resolvedId;
@@ -449,7 +458,7 @@
         },
         follower,
       });
-      toastQueued(`comment on ${key}`, source);
+      toastQueued(`comment on ${key}`, source, { write });
       return true;
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -610,7 +619,7 @@
             <h1>{detail.row.title}</h1>
             <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} />
           </header>
-          <TfDetailBanners {detail} failed={refresh.failed} />
+          <TfDetailBanners {detail} {refresh} reread={rereadJob} />
           {#if failure !== null}
             <p class="tf-dim">Could not read what this ticket reaches: {failure}</p>
           {/if}
@@ -689,6 +698,7 @@
       read={sets.linkSets}
       {layers}
       onapply={(set) => void applySet(set)}
+      onmanage={() => (drawerOnReturn = true)}
       onclose={() => (applyingSet = false)}
     />
   {/if}

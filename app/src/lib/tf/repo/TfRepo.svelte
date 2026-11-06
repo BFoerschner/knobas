@@ -609,7 +609,7 @@
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
-    {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+    {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
     <nav class="tf-tabs" aria-label="Repository">
       {#each REPO_TABS as entry, n (entry.id)}
         {@const count = countOf(entry.id)}

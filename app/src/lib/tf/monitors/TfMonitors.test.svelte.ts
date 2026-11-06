@@ -251,7 +251,7 @@ test("Ack is on a down monitor only, acks it by the monitor, and reads Acked", a
   await settle();
   expect(acks).toEqual(["kuma:2"]);
   expect(button(down!, "Acked")?.getAttribute("aria-pressed")).toBe("true");
-  expect(toasts.items.map((t) => t.text)).toContain("Acked in knobas. The alert stays open until the monitor recovers.");
+  expect(toasts.items.map((t) => t.text)).toContain("Acked. The alert stays open until the monitor recovers.");
 });
 
 const alertOf = (monitor_id: string, acked_at: string | null): OpenAlert =>
@@ -295,7 +295,7 @@ test("Undo on the ack's toast takes it back, and so does pressing Acked", async 
   const down = rows()[0]!;
   button(down, "Ack")!.click();
   await settle();
-  const toast = toasts.items.find((t) => t.text.startsWith("Acked in knobas"))!;
+  const toast = toasts.items.find((t) => t.text.startsWith("Acked"))!;
   expect(toast.action?.label).toBe("Undo");
   toast.action!.run();
   await settle();
@@ -905,7 +905,7 @@ test("an alert that closed under the row says so in words, not as a failure, and
   button(rows()[0]!, "Ack")!.click();
   await settle();
   const said = toasts.items.at(-1)!;
-  expect(said.text).toMatch(/has already recovered, so its alert has closed\.$/);
+  expect(said.text).toMatch(/has already left the inbox\. It was resolved at its source\.$/);
   expect(said.tone).toBeUndefined();
   expect(reads).toBeGreaterThan(before);
 });
@@ -914,10 +914,10 @@ test("taking an ack back takes its toast's Undo with it", async () => {
   await draw([]);
   button(rows()[0]!, "Ack")!.click();
   await settle();
-  expect(toasts.items.some((t) => t.text.startsWith("Acked in knobas"))).toBe(true);
+  expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(true);
   button(rows()[0]!, "Acked")!.click();
   await settle();
-  expect(toasts.items.some((t) => t.text.startsWith("Acked in knobas"))).toBe(false);
+  expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(false);
 });
 
 test("the page shown again reads the sources again, so a token entered in Settings takes the band away", async () => {

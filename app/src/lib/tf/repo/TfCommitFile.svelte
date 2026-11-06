@@ -92,7 +92,7 @@
       const write = await ports.submitWrite({
         CommitFile: { repo: repoId, branch, new_branch: onto, path, content: after, message: message.trim(), base_sha: baseSha },
       });
-      toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`, source);
+      toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`, source, { write });
       onclose();
       if (onto === null) {
         echoWrite(repoId, commitKind(branch, path), message.trim(), {

@@ -132,6 +132,7 @@
   import { listSources, syncStatus } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
   import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
+  import { leftTheInbox } from "../../inbox/inbox.svelte";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
   import { dismiss, push } from "../../shell/toasts.svelte";
@@ -581,7 +582,7 @@
     try {
       const alert = await ports.ackAlert(row.entity_id);
       acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
-      ackToasts.set(row.entity_id, push({ text: "Acked in knobas. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row) } }));
+      ackToasts.set(row.entity_id, push({ text: "Acked. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row) } }));
     } catch (error) {
       refusedAck(row, error);
     } finally {
@@ -616,7 +617,7 @@
     if (isIpcError(error) && error.code === "not_found") {
       delete acked[row.entity_id];
       dropAckToast(row);
-      push({ text: `${row.name} has already recovered, so its alert has closed.` });
+      push({ text: leftTheInbox(row.name) });
       revision += 1;
       return;
     }
@@ -658,7 +659,7 @@
     pressing[row.entity_id] = true;
     try {
       const write = await ports.submitWrite(form.build(row.entity_id));
-      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? "" });
+      toastQueued(`${form.label.toLowerCase()} ${row.name}`, { id: row.source_id, display_name: sourceNames[row.source_id] ?? "" }, { write });
       echoWrite(row.entity_id, TOGGLE, form.label.toLowerCase(), {
         write,
         following: { name: `${form.label} ${row.name}` },
@@ -701,7 +702,7 @@
   function created(what: { name: string; write: QueuedWrite; source: WriteSource }) {
     const subject = creating;
     creating = null;
-    toastQueued(`create monitor for ${subject?.name ?? what.name}`, what.source);
+    toastQueued(`create monitor for ${subject?.name ?? what.name}`, what.source, { write: what.write });
     // Drawn at once, and followed by the effect above as the read will name it.
     // The re-read starts after the row was queued, and drops any read before it.
     markOnItsWay((_, row) => row.id === subject?.id, what.write);

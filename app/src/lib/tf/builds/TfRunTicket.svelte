@@ -167,7 +167,7 @@
         echoWrite(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower(), surface: RUN_TICKET, source });
       }
       const summary = sources.find((s) => s.id === source);
-      toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source });
+      toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source }, { write });
     } catch (cause) {
       push({ text: `Could not queue the ticket: ${ipcErrorMessage(cause)}`, tone: "err" });
     }

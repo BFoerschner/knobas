@@ -42,6 +42,11 @@ import { coalesce } from "../shell/coalesce";
 import { keyOf } from "../time/format";
 
 /** The IPC this store needs, injectable so a test needs no Tauri bridge. */
+/** An alert or item that was resolved at its source before a press reached it. The Inbox, Monitors and the launcher say the same. */
+export function leftTheInbox(name: string): string {
+  return `${name} has already left the inbox. It was resolved at its source.`;
+}
+
 export interface InboxPorts {
   inboxItems: (shelf: InboxShelf) => Promise<InboxEntry[]>;
   inboxCount: () => Promise<number>;

@@ -245,7 +245,7 @@
         </div>
       {/if}
     </header>
-    <TfDetailBanners {detail} failed={refresh.failed} />
+    <TfDetailBanners {detail} {refresh} {reread} />
     <div class="tf-item-body">
       {#if view === undefined}
         <!-- The view has not answered yet. -->

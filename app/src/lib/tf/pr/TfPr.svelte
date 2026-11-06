@@ -507,7 +507,7 @@
     try {
       const write = await ports.submitWrite({ RequestReviewers: { entity: id, reviewers: [who] } });
       echoWrite(id, REQUESTED, who, { write, many: true, following: { name: "Review request" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
-      toastQueued(`review request to ${who} on ${name}`, detail?.source ?? null);
+      toastQueued(`review request to ${who} on ${name}`, detail?.source ?? null, { write });
     } catch (cause) {
       push({ text: `Could not ask ${who} for a review: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -623,7 +623,7 @@
         },
         follower,
       });
-      toastQueued(`comment on ${name}`, source);
+      toastQueued(`comment on ${name}`, source, { write });
       draft = "";
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -732,7 +732,7 @@
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
-    {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+    {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
     <nav class="tf-tabs" aria-label="Pull request">
       {#each PR_TABS as entry (entry.id)}
         {@const count = counts[entry.id]}

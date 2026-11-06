@@ -9,6 +9,7 @@
  * panel when a key is let go. The host's getters are read when they are used,
  * so a prop that changes is seen.
  */
+import { leftTheInbox } from "../inbox/inbox.svelte";
 import { tick } from "svelte";
 
 import { ipcErrorMessage, isIpcError } from "../ipc";
@@ -486,7 +487,7 @@ export class SheetMode {
 
   /** What a write's refusal says: an alert that left at its source in words, anything else as the backend put it. */
   #refusal(cause: unknown, name?: string): { text: string; tone?: "err" } {
-    if (name !== undefined && isIpcError(cause) && cause.code === "not_found") return { text: `${name} has already left the inbox. It was resolved at its source.` };
+    if (name !== undefined && isIpcError(cause) && cause.code === "not_found") return { text: leftTheInbox(name) };
     return { text: ipcErrorMessage(cause), tone: "err" };
   }
 

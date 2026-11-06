@@ -1083,7 +1083,7 @@ test("a failed refresh on the job says why at the top of the reading column and 
   calls.read.length = 0;
   pressRefreshKey();
   await settle();
-  expect(jobBanners()).toEqual(["Couldn't refresh: connection refused. Refresh to try again."]);
+  expect(jobBanners()).toEqual(["Couldn't refresh: connection refused. Try again"]);
   expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
   expect(calls.read).toEqual([]);
   expect(refreshButton()).toBeNull();

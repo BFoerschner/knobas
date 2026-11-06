@@ -1297,7 +1297,7 @@ test("a pull request whose refresh failed keeps its page and says why", async ()
   await draw([PR], ports({ refresh: probe.ports }));
   target.querySelector<HTMLButtonElement>(".tf-fhead .tf-refresh")!.click();
   await settle();
-  expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway. Refresh to try again.");
+  expect(text(".tf-refresh-failed")).toBe("Couldn't refresh: 502 Bad Gateway. Try again");
   expect(text("h1")).toContain("SEPA retry with exponential backoff");
   expect(target.querySelector(".tf-cbody")?.textContent).not.toBe("");
 });

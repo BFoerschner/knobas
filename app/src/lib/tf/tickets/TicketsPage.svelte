@@ -644,7 +644,7 @@
 <div class="tf-tickets" class:tf-rail-shut={!railOpen}>
   <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
   {#if subtasksOf === null}
-    <TfRailBar label="View" value={view?.name ?? "All tickets"} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} />
+    <TfRailBar label="View" value={view?.name ?? "All tickets"} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
   {/if}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <nav

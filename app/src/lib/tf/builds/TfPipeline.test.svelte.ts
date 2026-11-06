@@ -1260,7 +1260,7 @@ test("a pipeline whose refresh failed keeps its runs and says why under the head
   await settle();
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-bhead ~ .tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 401 from TeamCity. Refresh to try again.");
+  expect(target.querySelector(".tf-bhead ~ .tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 401 from TeamCity. Try again");
   expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
 });
 
