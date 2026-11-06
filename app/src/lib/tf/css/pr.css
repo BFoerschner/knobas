@@ -47,6 +47,8 @@
 .tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
 
 /* ---------- Files changed, Submit review, Merge… (#842, #843, R-8.15, R-8.17-R-8.19) ---------- */
+/* A label in the meta line breaks between labels, never inside one. */
+.tf-fhead .tf-sub .tf-lab { white-space: nowrap; }
 /* What this session queued and the review waiting to go, at the tab row's right end (F-206, F-254): the row's height is the tabs', so nothing here moves anything. */
 .tf-tabs .tf-prchips { display: flex; align-items: center; gap: 6px; flex: none; align-self: center; margin-left: auto; padding-left: 16px; }
 /* *Submit review… (N pending)*: prototype-6's warn-edged button. */

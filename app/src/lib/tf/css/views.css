@@ -52,5 +52,5 @@
 .tf-vw-srcline code { font: var(--t-xs) var(--mono); color: var(--ink); background: var(--sheet-2); padding: 0 4px; border-radius: 3px; font-variant-ligatures: none; }
 .tf-vw-srcline a { color: var(--ink); }
 .tf-vw-srcline.tf-vw-warn { color: var(--warn); }
-.tf-lab { font-size: var(--t-xs); font-weight: 400; padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); white-space: nowrap; }
+.tf-lab { font-size: var(--t-xs); font-weight: 400; padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
 .tf-vw-store { font-size: var(--t-xs); align-self: center; }
