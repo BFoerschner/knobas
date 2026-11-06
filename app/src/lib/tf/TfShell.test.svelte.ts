@@ -1866,12 +1866,13 @@ test("Docs draws its Sync now last in its header (#2286)", async () => {
   expect(syncButton()?.parentElement?.lastElementChild).toBe(syncButton());
 });
 
-test("Code's Sync now is a default-size header button, last after New pull request (#2238, #2295)", async () => {
+test("Code's Sync now is a default-size header button, last in the header (#2238, #2295)", async () => {
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
   await at("#/code");
   const acts = seen(".tf-fhead .tf-acts").find((el) => el.contains(syncButton()));
   const names = [...(acts?.children ?? [])].map((el) => el.textContent?.trim());
-  expect(names).toEqual(["New pull request", "Sync now"]);
+  // No job here, so no *New pull request* either (F-252): each repository and branch row offers one.
+  expect(names).toEqual(["Sync now"]);
   expect(syncButton()!.classList.contains("tf-btn")).toBe(true);
   expect(syncButton()!.classList.contains("tf-sm"), "a header button is default size").toBe(false);
 });

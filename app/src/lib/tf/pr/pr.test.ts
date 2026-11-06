@@ -9,6 +9,7 @@ import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
 import { stampLabel } from "../../time/format";
 import {
   checkReading,
+  acting,
   checksLine,
   conversationOf,
   headerOf,
@@ -405,4 +406,13 @@ test("a check that counts its tests reads as Builds says it, failed first, and t
   expect(checkReading(row("pending", "step 3 of 5 · 6 min ago"))).toBe("Pending, step 3 of 5 · 6 min ago");
   expect(checkReading(row("success", null))).toBe("Passed");
   expect(checkReading(row(null, "7 min ago"))).toBe("7 min ago");
+});
+
+test("a write's chip says the act in -ing, then what it acts on (F-236)", () => {
+  expect(acting("Add label backport")).toBe("Adding label backport");
+  expect(acting("stamp release")).toBe("Stamping release");
+  expect(acting("Rebase")).toBe("Rebasing");
+  expect(acting("Pin")).toBe("Pinning");
+  expect(acting("Request")).toBe("Requesting");
+  expect(acting("Agree")).toBe("Agreeing");
 });

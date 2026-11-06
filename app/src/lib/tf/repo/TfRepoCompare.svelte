@@ -285,7 +285,17 @@
       if (!free || titleField === null || titleField.getClientRects().length === 0 || !untrack(() => shown)) return;
       titleField.focus({ preventScroll: true });
       titleField.select();
+      titleGivenAt = performance.now();
     });
+  }
+  /**
+   * *New pull request* by key lands here with *Title* focused, so the second `Enter` of a double press would send the form. A
+   * pull request is not undone by a toast, so an `Enter` this soon after the app gave it focus, or one held down, is not taken as sending it.
+   */
+  const ARRIVING_MS = 800;
+  let titleGivenAt = -ARRIVING_MS;
+  function holdArrivingEnter(event: KeyboardEvent) {
+    if (event.key === "Enter" && event.target === titleField && (event.repeat || performance.now() - titleGivenAt < ARRIVING_MS)) event.preventDefault();
   }
   // On arriving at the form, and again if a ticket's words replace the proposal below.
   $effect(() => {
@@ -300,7 +310,8 @@
       const linkTo = ticket !== null && link ? ticket.id : undefined;
       const write = await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
       const prs = repoHash(repoId, "prs");
-      toastQueued(`open PR ${words}`, source, { write, where: { label: "Show pull requests", run: () => (location.hash = prs) } });
+      // The press lands on the tab that shows it, so the toast has nowhere to offer.
+      toastQueued(`open PR ${words}`, source, { write });
       // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
       echoWrite(repoId, MADE_PR, words, { write, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
       busy = false;
@@ -334,6 +345,7 @@
     <h2 class="tf-cgroup-h">{standing?.pr ? "Compare" : "New pull request"}</h2>
     <form
       class="tf-panel tf-cform"
+      onkeydown={holdArrivingEnter}
       onsubmit={(event) => {
         event.preventDefault();
         void create();

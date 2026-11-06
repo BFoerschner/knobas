@@ -445,15 +445,8 @@
       <a class="tf-btn tf-primary" href={itemHash(jobPr.row)}>Open PR {jobPr.number ?? ""}</a>
     {:else if compare !== null}
       <a class="tf-btn tf-primary" href={compare}>New pull request</a>
-    {:else}
-      <!-- Focusable, so the reason in its title reaches the keyboard too. -->
-      <button
-        type="button"
-        class="tf-btn tf-primary"
-        aria-disabled="true"
-        title={job === null ? "Open a job to propose its branch" : `${job} has no branch yet`}>New pull request</button
-      >
     {/if}
+    <!-- With no job's branch to propose there is no button: each repository and branch row offers its own (F-252). -->
     <!-- *Sync now* last in the header (#2238 header order). -->
     {@render sync?.()}
   </div>

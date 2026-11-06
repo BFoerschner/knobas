@@ -317,6 +317,45 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(text(acts.at(-1)!)).toBe("Refresh");
 });
 
+// F-243: the header's primary never lands on a form saying one is already open.
+const WITH_PR = () => section("overview", [{ type: "entities", title: null, rows: [vrow("gitea:tidewater/payout-service#142", "SEPA retry")] }]);
+
+test("New pull request starts on a branch with nothing open, past one that has (F-243)", async () => {
+  const base = ports();
+  const other = "gitea:tidewater/payout-service@refs/heads/spike/y";
+  await draw(
+    [REPO],
+    ports({
+      entityView: async (id, sectionId) => {
+        if (id === REPO && sectionId === "branches") return section("branches", [{ type: "entities", title: null, rows: [vrow(MAIN, "main", "default"), vrow(FEATURE, "feature/PAY-231-sepa-retry"), vrow(other, "spike/y")] }]);
+        if (id === FEATURE && sectionId === null) return WITH_PR();
+        if (id === other && sectionId === null) return { ...section("overview", []), actions: [{ write_op: "create_pull_request", disabled: null } as ViewAction] };
+        return base.entityView(id, sectionId);
+      },
+    }),
+  );
+  const primary = target.querySelector(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("New pull request");
+  expect(primary.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
+});
+
+test("a branch picked with a pull request open from it makes the primary Open PR #N, as Code's does (F-243)", async () => {
+  const base = ports();
+  await draw(
+    [REPO],
+    ports({
+      entityView: async (id, sectionId) => (id === FEATURE && sectionId === null ? WITH_PR() : base.entityView(id, sectionId)),
+    }),
+  );
+  const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
+  select.value = "feature/PAY-231-sepa-retry";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  const primary = target.querySelector(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("Open PR #142");
+  expect(primary.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
+});
+
 test("the compare page lights its own tab, Compare, and Pull requests stays dark (#2257)", async () => {
   await draw([REPO, "compare", "feature", "PAY-231-sepa-retry"]);
   const lit = [...target.querySelectorAll(".tf-tabs a[aria-current='page']")].map(text);
@@ -1072,7 +1111,7 @@ test("New branch… is the source's refused_writes answer, asked with the commit
       { entity: REPO, op: "commit_file" },
     ],
   ]);
-  expect(viewReads.filter(([, sectionId]) => sectionId === null)).toEqual([]);
+  expect(viewReads.filter(([id, sectionId]) => id === REPO && sectionId === null)).toEqual([]);
 });
 
 test("a toolbar the app could not ask about is asked again on a refresh and when the page is shown again (#2306)", async () => {

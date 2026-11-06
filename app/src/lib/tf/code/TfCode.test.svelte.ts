@@ -252,7 +252,7 @@ test("the primary opens the job's open pull request, not a compare page that onl
   expect(primary.getAttribute("href")).toMatch(/^#\/pr\//);
 });
 
-test("New pull request opens the compare page for the job's branch; with no job it cannot", async () => {
+test("New pull request opens the compare page for the job's branch; with no job there is no button, as each row offers one (F-252)", async () => {
   const base = ports();
   await draw([], "PAY-231", {
     ...base,
@@ -270,8 +270,7 @@ test("New pull request opens the compare page for the job's branch; with no job 
   view = null;
 
   await draw([], null);
-  const button = [...target.querySelectorAll("button")].find((b) => text(b) === "New pull request");
-  expect(button?.getAttribute("aria-disabled")).toBe("true");
+  expect([...target.querySelectorAll(".tf-fhead a, .tf-fhead button")].map(text)).not.toContain("New pull request");
   expect(target.querySelector(".tf-chip-job")).toBeNull();
 });
 

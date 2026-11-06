@@ -139,8 +139,10 @@
     changedPaths,
     checkoutSentence,
     headLine,
+    branchStanding,
     knowsRepoTab,
     litTab,
+    MADE_PR,
     readAllRows,
     mirrorDefault,
     readRepoRoute,
@@ -150,6 +152,7 @@
     repoRefusals,
     REPO_TABS,
     type BranchOption,
+    type BranchStanding,
     type RepoTab,
     type RepoTabId,
   } from "./repo";
@@ -172,6 +175,8 @@
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
   import { parentPage } from "../page-name.svelte";
+  import { itemHash } from "../job/job";
+  import { echoesOn } from "../queued.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -517,7 +522,9 @@
   /** A tab's count, drawn only above zero once its read answered. */
   function countOf(id: RepoTabId): { n: number; warn: boolean } | null {
     if (id === "branches" && branches !== null && branches.length > 0) return { n: branches.length, warn: false };
-    if (id === "prs" && openPrs > 0) return { n: openPrs, warn: false };
+    // One on its way counts as its row does, so the tab agrees with the list under it (F-242).
+    const onTheWay = id === "prs" && repoId !== null ? echoesOn(repoId, MADE_PR).length : 0;
+    if (id === "prs" && openPrs + onTheWay > 0) return { n: openPrs + onTheWay, warn: false };
     if (id === "local" && localCount > 0) return { n: localCount, warn: true };
     return null;
   }
@@ -528,6 +535,39 @@
       ? selected.name
       : (branches?.find((option) => !option.isDefault)?.name ?? branchName),
   );
+
+  /** How many branches the header asks before it gives up on finding one with nothing open: a source's burst stays small. */
+  const ASKED = 8;
+  /** The branch *New pull request* starts on, once the header has found one with nothing open from it (F-243). */
+  let toPropose = $state<string | null>(null);
+  /** Where every branch it could start on has a pull request open: the loudest button goes there, as a form saying so offers nothing to create. */
+  let openedFrom = $state<BranchStanding["pr"]>(null);
+  $effect(() => {
+    const choice = selected !== null && !selected.isDefault ? selected : null;
+    const asking = (choice === null ? (branches ?? []).filter((option) => !option.isDefault) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
+    void writesAsked;
+    let live = true;
+    void (async () => {
+      let first: BranchStanding["pr"] = null;
+      for (const { name, id } of ready ? asking.slice(0, ASKED) : []) {
+        const standing = await ports.entityView(id, null).then(branchStanding, () => null);
+        if (!live) return;
+        // A branch that can't be read says nothing about what stands: *proposed* stays, as it was before anything was asked.
+        if (standing === null) break;
+        if (standing.pr === null && (choice !== null || standing.canOpenPr)) {
+          toPropose = name;
+          openedFrom = null;
+          return;
+        }
+        first ??= standing.pr;
+      }
+      toPropose = null;
+      openedFrom = first;
+    })();
+    return () => {
+      live = false;
+    };
+  });
 
   function pick(event: Event) {
     if (repoId === null) return;
@@ -554,6 +594,24 @@
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
+
+  /** Whether the header's actions sit under its title. A width query can't tell, because the branch's name changes how wide they are. */
+  let stacked = $state(false);
+  function watchStack(header: HTMLElement) {
+    const title = header.firstElementChild;
+    const acts = header.querySelector(":scope > .tf-acts");
+    if (title === null || acts === null) return;
+    const read = () => {
+      const box = title.getBoundingClientRect();
+      stacked = box.height > 0 && acts.getBoundingClientRect().top >= box.bottom;
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(read);
+    watch.observe(header);
+    watch.observe(acts);
+    return () => watch.disconnect();
+  }
 </script>
 
 <div class="tf-full">
@@ -566,7 +624,7 @@
       <TfNothingHere message="knobas does not hold this repository. It may not have synced yet." href="#/code" action="All repositories" />
     {/if}
   {:else}
-    <header class="tf-fhead tf-repohead">
+    <header class="tf-fhead tf-repohead" {@attach watchStack}>
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
@@ -581,12 +639,15 @@
       <!-- #2238's order, as the mockup (#2252) draws it: the primary, the others, Open in, Refresh last. -->
       <div class="tf-acts">
         <!-- Compare is this form, with a primary and *Into* and *From* of its own, so these would say it twice. They keep their room,
-             hidden and out of the Tab order, because a shorter row lets the tabs under it jump between tabs (F-249). -->
-        <span class="tf-repohold" class:tf-held={tab === "compare"} inert={tab === "compare"}>
+             hidden and out of the Tab order, because a shorter row lets the tabs under it jump between tabs (F-249). Where the row
+             stacks under the title it starts at the page's edge, so the hidden room goes after what shows (F-256). -->
+        <span class="tf-repohold" class:tf-held={tab === "compare"} class:tf-stacked={stacked} inert={tab === "compare"}>
           {#if oneBranch}
             <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
+          {:else if openedFrom?.entityId}
+            <a class="tf-btn tf-primary" href={itemHash({ entity_id: openedFrom.entityId, kind: "pr" })}>Open PR {openedFrom.number ?? ""}</a>
           {:else if proposed !== null}
-            <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
+            <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(toPropose ?? proposed))}>New pull request</a>
           {/if}
           <label class="tf-bsel"
             ><svg viewBox="0 0 16 16" aria-hidden="true"

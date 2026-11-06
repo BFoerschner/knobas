@@ -37,6 +37,8 @@
 /* A pull request on its way: its title dimmed as a queued thing is, and nothing to open yet (F-242). */
 .tf-rsent .tf-rowt { color: var(--ink-2); font-weight: 500; }
 .tf-repohold.tf-held { visibility: hidden; }
+/* Stacked under the title, the row starts at the page's edge: what shows starts there too, and the room follows it (F-256). */
+.tf-repohold.tf-held.tf-stacked > * { order: 1; }
 /* A repository's title never breaks inside its name. */
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
@@ -417,6 +419,10 @@
 
 /* A pull request's commit picker (#2273; mockups/code-area/diff.html, state "range"): *Commits <choice> base…head ▾*. */
 .tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
+/* On the toolbar's row, not above it (F-246). With no toolbar drawn, while a pick reads or where nothing changes, it stands on its own. */
+.tf-prfiles { position: relative; }
+.tf-prfiles:has(.tf-dtool) > .tf-pickbar { position: absolute; top: 0; left: 0; padding: 0; }
+.tf-prfiles > .tf-dview > .tf-dtool { padding-left: calc(var(--tf-pick-w, 0px) + var(--control-gap)); }
 .tf-pick { display: inline-flex; }
 .tf-pick-lab, .tf-pick-ends { color: var(--ink-2); }
 .tf-menu.tf-pick-m { width: 420px; font-size: var(--t-sm); }

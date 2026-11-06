@@ -47,7 +47,9 @@
 .tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
 
 /* ---------- Files changed, Submit review, Merge… (#842, #843, R-8.15, R-8.17-R-8.19) ---------- */
-/* *Submit review (N pending)*: prototype-6's warn-edged button. */
+/* What this session queued, at the tab row's right end (F-206): the row's height is the tabs', so a chip moves nothing. */
+.tf-tabs .tf-prchips { display: flex; align-items: center; gap: 6px; flex: none; align-self: center; margin-left: auto; padding-left: 16px; }
+/* *Submit review… (N pending)*: prototype-6's warn-edged button. */
 .tf-btn.tf-warnbtn { border-color: var(--warn); color: var(--warn); }
 .tf-gone { margin: 12px 0 0; }
 .tf-prr-line { font-size: var(--t-sm); }

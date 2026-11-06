@@ -331,7 +331,8 @@ test("each branch's standing that lands redraws its own row, not the whole list 
     },
   });
   await draw([REPO, "branches"], null, stand);
-  expect(held).toHaveLength(4);
+  // Each row's, and the header's for the branch it proposes.
+  expect(held).toHaveLength(5);
   filtered.calls = 0;
   for (const release of held) {
     release();
@@ -370,9 +371,10 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   expect(locked.title).toBe("Protected branch: lift its protection on Gitea to delete it");
   expect(text(target.querySelector(".tf-rbranches-note"))).toBe("The first 5 branches; there may be more on Gitea.");
   // Each branch's standing is its own view's read.
-  // Each branch's whole view; the repository's never (#2243): *New branch…*
+  // Each branch's whole view, some twice because the header asks them whether a pull request is open (F-243);
+  // the repository's never (#2243): *New branch…*
   // asks `refused_writes` (#2241).
-  expect(reads.filter(([, section]) => section === null).map(([id]) => id).sort()).toEqual([CHORE, FEATURE, LOCKED, SPIKE].sort());
+  expect(reads.filter(([, section]) => section === null).map(([id]) => id).filter((id, n, all) => all.indexOf(id) === n).sort()).toEqual([CHORE, FEATURE, LOCKED, SPIKE].sort());
 });
 
 test("the Branches filter narrows by name, No PR and Merged", async () => {
@@ -591,13 +593,30 @@ test("New branch… in the header is enabled where the repository's toolbar offe
 
 const COMPARE = (branch: string) => [REPO, "compare", ...branch.split("/")];
 
+test("the second Enter of a double press on New pull request sends nothing: Title has only just been given focus", async () => {
+  const clock = vi.spyOn(performance, "now").mockReturnValue(1_000_000);
+  // The test's document has no layout, and only a drawn field takes focus.
+  const drawn = vi.spyOn(Element.prototype, "getClientRects").mockReturnValue([new DOMRect()] as unknown as DOMRectList);
+  await draw(COMPARE("spike/sepa-instant"));
+  const title = target.querySelector<HTMLInputElement>("#tf-cmp-title")!;
+  expect(document.activeElement).toBe(title);
+  const press = (repeat = false) => title.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, repeat }));
+  expect(press(), "too soon, so held").toBe(false);
+  clock.mockReturnValue(1_002_000);
+  expect(press(true), "held down, so held").toBe(false);
+  expect(press(), "a later Enter sends the form, as any form's does").toBe(true);
+  clock.mockRestore();
+  drawn.mockRestore();
+});
+
 test("the compare page offers Open PR #N where a pull request is already open from the branch", async () => {
   await draw(COMPARE("feature/PAY-231-sepa-retry"), "PAY-231");
   // Compare is its own tab since #2257 (the mockup's ruling on #2252).
   expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toBe("Compare");
   expect(text(target.querySelector(".tf-compare .tf-cexists"))).toBe("PR #142 is already open from this branch.");
-  expect(button("Open PR #142", target)!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
-  expect(button("Open PR #142", target)!.classList.contains("tf-sm")).toBe(true);
+  const form = target.querySelector<HTMLElement>(".tf-compare")!;
+  expect(button("Open PR #142", form)!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
+  expect(button("Open PR #142", form)!.classList.contains("tf-sm")).toBe(true);
   expect(button("Create pull request", target)).toBeUndefined();
   // Nothing to submit, so nothing to fill in: only Into and From stay, to pick another branch.
   expect(target.querySelector("#tf-cmp-title")).toBeNull();
@@ -633,6 +652,10 @@ test("the compare page proposes Into and From, the change and its commits, and q
   view = null;
   await draw(["gitea:tidewater/payout-service", "prs"]);
   expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Instant SEPA spikeQueued"]);
+  // The tab counts it too, so it agrees with the list under it, and the toast has no tab to offer: it is on it.
+  const tab = [...target.querySelectorAll(".tf-tabs a")].find((a) => text(a).startsWith("Pull requests"))!;
+  expect(text(tab.querySelector(".tf-count"))).toBe(String(1 + [...target.querySelectorAll("tbody tr.tf-row")].filter((row) => text(row).includes("Open")).length));
+  expect(toasts.items.at(-1)!.action?.label).not.toBe("Show pull requests");
 });
 
 test("a branch name git would refuse says so while typing, and the primary stays off (F-247)", async () => {

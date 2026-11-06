@@ -3,9 +3,11 @@
   `renderPR`: `#/pr/<entity id>` and its tabs `/conversation`, `/diff` and
   `/commits`, which share the header and the one read.
 
-  - **The header**: `PR #<n> <title>`, its state, head into base and author
-    (*you* for the reader's own); the toolbar's *Review…*, or *Submit review
-    (N pending)* in warn while line comments wait (#842, `TfPrReview`),
+  - **The header**: `PR #<n> <title>`, its state, labels, head into base and
+    author (*you* for the reader's own); what this session queued stands at the
+    tab row's right end, where a chip can't wrap the line and move the tabs
+    (F-206). The toolbar's *Review…*, or *Submit review… (N pending)* in warn
+    left of *Merge…* while line comments wait (#842, `TfPrReview`, F-254),
     *Update branch*, *Edit*, *Close* (or *Reopen*) and *Merge…* (#843,
     `TfPrMerge`). A write is drawn only where the source's view offers it
     (ADR-0020 rule 4).
@@ -105,6 +107,8 @@
   import { initials } from "../tickets/tickets";
   import {
     PR_TABS,
+    REVIEW_SENT,
+    acting,
     commitParts,
     conversationOf,
     conflictsOf,
@@ -122,6 +126,7 @@
     reviewersOf,
     tabCounts,
     type PrTab,
+    type Verdict,
   } from "./pr";
   import { askAgain, echoWrite, echoOn, echoesOn, sameWords, sentWrites, settleEchoes, takeAgain, watchEchoes, type Echo, type EchoListen } from "../queued.svelte";
   import TfEntityAction from "../TfEntityAction.svelte";
@@ -498,7 +503,10 @@
     if (prId === null) return read;
     for (const echo of echoesOn(prId, REQUESTED))
       if (!read.some((reviewer) => reviewer.who === echo.text)) read.push({ who: echo.text, state: "Review requested", tone: "muted", note: echo.state });
-    return read;
+    // The reader's own verdict, on its way: until the read holds it, this row says where it went (F-251).
+    const verdict = echoOn(prId, "review");
+    if (verdict === null) return read;
+    return [...read.filter((reviewer) => reviewer.who !== me), { who: me ?? "You", state: REVIEW_SENT[verdict.text as Verdict].state, tone: "info", note: verdict.state }];
   });
 
   /** Ask `who` for a review (#2303): queued, drawn requested at once, and read back by the refresh after it. */
@@ -546,11 +554,26 @@
     if (again !== null) drafts.put(`comment:${prId}`, again);
   });
 
+  /**
+   * A dialog that sends gives focus back to the button that opened it, so the second `Enter` of a double press would open it
+   * again. For this long after a send those buttons take no press; a real second label or edit comes later than this.
+   */
+  const SETTLING_MS = 800;
+  let sentAt = -SETTLING_MS;
+  const settling = () => performance.now() - sentAt < SETTLING_MS;
+
   /** Echo a write queued as `verb`, followed under `name`. */
   function echoChip(id: string, verb: string, name: string, write: QueuedWrite, chose = "") {
+    sentAt = performance.now();
     // What was chosen names it: *Add label backport*, and a second label is a second chip.
     const text = chose === "" ? verb : `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${chose}`;
     echoWrite(id, verb, text, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null, ...(chose === "" ? {} : { many: true }) });
+  }
+
+  /** Echo a review queued with `verdict`: its chip and its row under Reviewers say which (F-251). */
+  function echoReview(id: string, verdict: Verdict, write: QueuedWrite) {
+    sentAt = performance.now();
+    echoWrite(id, "review", verdict, { write, base: header.state?.text ?? null, following: { name: "Review" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
   }
 
   /**
@@ -569,19 +592,18 @@
     reopen: ["merge", ...STATE_CHANGES],
   };
 
-  /** The act a write's chip names, as *Review asked of sven* does: *Close sent* reads as if something was sent to close (F-236). */
+  /** The act a write's chip names, in one grammar: the act in -ing, what it acts on, then the state. *Close sent* reads as if something was sent to close (F-236). */
   const ACTS: Record<string, string> = {
     merge: "Merging",
     close: "Closing",
     reopen: "Reopening",
     update: "Updating branch",
     edit: "Saving edit",
-    review: "Sending review",
   };
 
   /** The chip an echo draws, which is also what holds a button back: the act, or a source's own action as its words and what was chosen, and where its write is (#2103). */
   function chipOf(echo: Echo): string {
-    const act = ACTS[echo.kind] ?? `${echo.text.charAt(0).toUpperCase()}${echo.text.slice(1)}`;
+    const act = echo.kind === "review" ? REVIEW_SENT[echo.text as Verdict].act : (ACTS[echo.kind] ?? acting(echo.text));
     return `${act}, ${echo.state}`;
   }
 
@@ -610,7 +632,7 @@
   let shown = $state<Write | null>(null);
 
   function open(write: Write) {
-    if (write.action.disabled === null && heldBy(write.key) === null) shown = write;
+    if (write.action.disabled === null && heldBy(write.key) === null && !settling()) shown = write;
   }
 
   /** The composer's words are this pull request's own draft, through `Esc`, a move to another and a return (the key table). */
@@ -680,12 +702,8 @@
         <h1>{name} {title}</h1>
         <div class="tf-sub">
           {#if header.state !== null}<TfStateChip text={header.state.text} tone={header.state.tone ?? 'muted'} />{/if}
-          {#each chips as echo (`${echo.kind}\n${echo.text}`)}
-            <!-- A review request names the act and the login as written: a state word would turn it into *Sven sent*. -->
-            {" "}{#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<span class="tf-chip tf-info">{chipOf(echo)}</span>{/if}
-          {/each}
           {#each detail?.labels ?? [] as label (label)}
-            {" "}<span class="tf-chip">{label}</span>
+            {" "}<span class="tf-lab">{label}</span>
           {/each}
           {#if header.head !== null}
             {" "}<span class="tf-mono">{header.head}</span>{#if header.base !== null}{" "}into <span class="tf-mono">{header.base}</span>{/if}{#if header.author !== null},{/if}
@@ -694,6 +712,19 @@
         </div>
       </div>
       <div class="tf-acts">
+        {#if waiting > 0 && takesReview}
+          <!-- Left of *Merge…*, so it comes and goes without moving the buttons a reader is working with (F-254). -->
+          <button
+            type="button"
+            class="tf-btn"
+            class:tf-warnbtn={reviewRefused === null}
+            aria-disabled={reviewRefused !== null ? "true" : undefined}
+            title={reviewRefused ?? undefined}
+            onclick={() => {
+              if (reviewRefused === null && !settling()) reviewing = true;
+            }}>Submit review… ({waiting} pending)</button
+          >
+        {/if}
         {#if merge !== null}
           {@const hold = heldBy("merge")}
           <!-- The primary comes first (#2238 header order). Blocked by the source it is a default button, enabled, because it opens a dialog that names each reason (#843); held by a queued write, it opens nothing and looks it. -->
@@ -708,25 +739,14 @@
             }}>Merge…</button
           >
         {/if}
-        {#if waiting > 0 && takesReview}
-          <button
-            type="button"
-            class="tf-btn"
-            class:tf-warnbtn={reviewRefused === null}
-            aria-disabled={reviewRefused !== null ? "true" : undefined}
-            title={reviewRefused ?? undefined}
-            onclick={() => {
-              if (reviewRefused === null) reviewing = true;
-            }}>Submit review ({waiting} pending)</button
-          >
-        {:else if reviewable}
+        {#if !(waiting > 0 && takesReview) && reviewable}
           <button
             type="button"
             class="tf-btn"
             aria-disabled={reviewRefused !== null ? "true" : undefined}
             title={reviewRefused ?? undefined}
             onclick={() => {
-              if (reviewRefused === null) reviewing = true;
+              if (reviewRefused === null && !settling()) reviewing = true;
             }}>Review…</button
           >
         {/if}
@@ -759,6 +779,15 @@
           >{entry.label}{#if count !== null && count > 0}{" "}<span class="tf-count">{count}</span>{/if}</a
         >
       {/each}
+      {#if chips.length > 0}
+        <!-- Under the buttons they answer, and on a row whose height nothing here changes: in the meta line they wrapped it and moved the tabs (F-206). -->
+        <span class="tf-prchips">
+          {#each chips as echo (`${echo.kind}\n${echo.text}`)}
+            <!-- A review request names the act and the login as written: a state word would turn it into *Sven sent*. -->
+            {#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<span class="tf-chip tf-info">{chipOf(echo)}</span>{/if}
+          {/each}
+        </span>
+      {/if}
     </nav>
     {#if !tabKnown}
       <TfNothingHere message="This pull request has no such tab." href={prHash(prId)} action="Overview" />
@@ -1041,7 +1070,7 @@
     {pending}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(write) => echoChip(prId, "review", "Review", write)}
+    onqueued={(write, verdict) => echoReview(prId, verdict, write)}
     onclose={() => (reviewing = false)}
     headOf={() => ports.entityView(prId, "files").then((answer) => diffOf(answer)?.commentable?.head ?? null)}
   />

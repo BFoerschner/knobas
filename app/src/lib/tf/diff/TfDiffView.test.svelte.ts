@@ -424,6 +424,40 @@ test("a pick holds the pill while the page stands where the pick put it, the rea
   expect(pill()).toBe("src/c.rs");
 });
 
+test("v keeps the file it marked current through the collapse, so j goes on from it (F-250)", () => {
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  let top = 300;
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => top, set: () => {} });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 1500 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 600 });
+  // The collapse shortens the page, so the browser moves it: that is not the reader scrolling.
+  const viewed = $state({
+    paths: [] as string[],
+    set: (path: string, on: boolean) => {
+      top = 100;
+      viewed.paths = on ? [...viewed.paths, path] : viewed.paths.filter((p) => p !== path);
+    },
+  });
+  draw({ files: [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")], layout: createDiffLayout(() => null), viewed }, page);
+  const pill = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+  target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/a.rs']")!.click();
+  flushSync();
+  key("j");
+  flushSync();
+  expect(pill()).toBe("src/b.rs");
+  key("v");
+  flushSync();
+  page.dispatchEvent(new Event("scroll"));
+  flushSync();
+  expect(viewed.paths).toEqual(["src/b.rs"]);
+  expect(pill()).toBe("src/b.rs");
+  key("j");
+  flushSync();
+  expect(pill()).toBe("src/c.rs");
+});
+
 test("each key does what it says, and none fires while typing in a comment", () => {
   const layout = createDiffLayout(() => memoryStorage());
   const paths: string[] = [];

@@ -50,7 +50,7 @@
     /** The pull request's source: where the review goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
-    onqueued: (write: QueuedWrite) => void;
+    onqueued: (write: QueuedWrite, verdict: Verdict) => void;
     onclose: () => void;
     /** The head the pull request's diff is drawn at now, as its source says (`Commenting.head`); `null` where it does not. */
     headOf?: (() => Promise<string | null>) | null;
@@ -103,7 +103,7 @@
       const write = await submitWrite(payload);
       pending.settle(prId, sent, summary);
       toastQueued(`submit review on ${name}`, source, { write });
-      onqueued(write);
+      onqueued(write, chosen.verdict);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the review: ${ipcErrorMessage(cause)}`, tone: "err" });

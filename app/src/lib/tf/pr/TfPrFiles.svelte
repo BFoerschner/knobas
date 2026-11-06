@@ -246,6 +246,19 @@
     }
   }
 
+  /**
+   * The picker shares the diff's toolbar row (F-246), but sits outside it because each pick draws a new diff and the picker, with
+   * its focus, has to outlive that. The toolbar leaves room for however wide the picker's words are.
+   */
+  function pickRoom(bar: HTMLElement) {
+    const read = () => bar.parentElement?.style.setProperty("--tf-pick-w", `${bar.offsetWidth}px`);
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(read);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }
+
   const commentable = $derived(diff?.commentable ?? null);
   const review = $derived(
     commentable
@@ -287,8 +300,9 @@
 {:else if view === null}
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
 {:else if view !== undefined}
+  <div class="tf-prfiles">
   {#if range !== null}
-    <div class="tf-pickbar">
+    <div class="tf-pickbar" {@attach pickRoom}>
       <TfPrPicker {range} {choice} onchoose={(next) => (choice = next)} />
     </div>
   {/if}
@@ -316,4 +330,5 @@
       />
     {/key}
   {/if}
+  </div>
 {/if}

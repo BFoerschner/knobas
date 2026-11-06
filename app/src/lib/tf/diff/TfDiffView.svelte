@@ -565,6 +565,7 @@
   function spy(host: HTMLElement) {
     const found = host.closest(".tf-main, .tf-bmain");
     scroller = found;
+    filesHost = host;
     if (found === null) return;
     const read = () => {
       if (heldAt !== null && Math.abs(found.scrollTop - heldAt) < SCROLLED) return;
@@ -657,12 +658,33 @@
     return () => window.removeEventListener("keydown", keys);
   });
 
+  let filesHost: HTMLElement | null = null;
+  const cardOf = (key: string) => filesHost?.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`) ?? null;
+  /** The file a mark is changing, and where its head stands on screen. */
+  let marking: { key: string; path: string; on: boolean; top: number } | null = null;
+
   /** Marks a file viewed or not; a collapse the reader set by hand gives way to it. */
   function setViewed(file: DrawnFile, on: boolean) {
-    const { [keyOf(file)]: _, ...rest } = folds;
+    const key = keyOf(file);
+    const { [key]: _, ...rest } = folds;
     folds = rest;
+    const top = scroller?.getBoundingClientRect().top ?? 0;
+    marking = { key, path: file.path, on, top: Math.max(cardOf(key)?.getBoundingClientRect().top ?? top, top) };
+    current = key;
     viewed?.set(file.path, on);
   }
+
+  // The file keeps its place through the collapse, so it stays current, a second press finds its box under the pointer, and the next
+  // `j` goes on from it. The page moved because of the mark, not the reader, so the spy leaves the choice alone (F-250).
+  $effect(() => {
+    void folds;
+    if (marking === null || isViewed(marking.path) !== marking.on) return;
+    const { key, top } = marking;
+    marking = null;
+    const card = cardOf(key);
+    if (scroller !== null && card !== null) scroller.scrollTop += card.getBoundingClientRect().top - top;
+    hold();
+  });
 </script>
 
 {#snippet said(comments: readonly LineComment[])}

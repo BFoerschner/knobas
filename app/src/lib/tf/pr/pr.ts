@@ -385,6 +385,21 @@ export function mergeReasons(merge: ViewAction | null): string[] {
 /** The verdicts a review can carry, in prototype-6's order. */
 export type Verdict = "comment" | "approve" | "request_changes";
 
+/** A review on its way, in the write chips' grammar (*Approving, sent*), and the state its row draws until the read holds it (F-251). */
+export const REVIEW_SENT: Record<Verdict, { act: string; state: string }> = {
+  approve: { act: "Approving", state: "Approved" },
+  request_changes: { act: "Requesting changes", state: "Changes requested" },
+  comment: { act: "Commenting", state: "Commented" },
+};
+
+/** A write's words as its chip says them: the act in -ing, then what it acts on. *Add label backport* is *Adding label backport*. */
+export function acting(words: string): string {
+  const [first = "", ...rest] = words.split(" ");
+  const word = first.toLowerCase();
+  const stem = word.endsWith("e") && !word.endsWith("ee") ? word.slice(0, -1) : /^[^aeiou]*[aeiou][^aeiouwxy]$/.test(word) ? `${word}${word.at(-1)}` : word;
+  return [`${stem.charAt(0).toUpperCase()}${stem.slice(1)}ing`, ...rest].join(" ");
+}
+
 /** One choice of *Submit review* (R-8.18): its verdict, its words, and the source's action that sends it. */
 export interface ReviewChoice {
   verdict: Verdict;
