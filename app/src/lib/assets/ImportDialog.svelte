@@ -376,7 +376,7 @@
   );
 </script>
 
-<TfDialog why={busy || preview !== null ? null : isImporter ? `Press ${producerLabel()} first: nothing is read yet.` : "Choose the estate file."}
+<TfDialog why={busy || preview !== null ? null : !isImporter ? "Choose the estate file." : landing !== null ? `Press Put them in ${landingName} first.` : `Press Read ${producerLabel()} first.`}
   closeButton
   title="Import an estate file"
   subtitle={chosen ?? "Nothing is written until you press Import"}

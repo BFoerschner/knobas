@@ -190,6 +190,8 @@
 
   /** The press says what it did: the rows move, but not always, and not always where the reader is looking. */
   async function retry() {
+    // A second press while one is out sends nothing, so it has nothing to say.
+    if (queue.flushing) return;
     await queue.flush(null);
     if (queue.error !== null) return;
     const left = queue.counts.pending;

@@ -22,8 +22,8 @@
   (a pick, a row that went) hands it back here rather than to the page.
 
   **The scrim.** A dialog with a footer has something to lose, so a click on the
-  scrim does nothing and leaves focus where it was. A viewer and the launcher have
-  no footer, and that click closes them.
+  scrim does nothing and leaves focus where it was. A viewer has no footer, and the
+  launcher's only names keys (`scrimCloses`): that click closes them.
 
   **The missing line.** `why` is what a disabled primary waits for (Controls, the
   enabled rule): this draws it, just left of *Cancel*, and the gate refuses a

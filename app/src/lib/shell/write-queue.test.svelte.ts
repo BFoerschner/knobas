@@ -69,6 +69,7 @@ const {
   writeWords,
 } = await import("./write-queue.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
+const { toasts, reset: resetToasts } = await import("./toasts.svelte");
 
 /**
  * ADR-0012's canonical sentence, **read out of the ADR at test time**.
@@ -1188,11 +1189,13 @@ test("double-clicking Retry waiting writes sends one flush_writes", async () => 
   counts = { pending: 1, held: 0, refused: 0 };
   const screen = await render();
   calls.length = 0;
+  resetToasts();
   const button = screen.button("Retry waiting writes")!;
   button.click();
   button.click();
   await settle();
   expect(calls.filter((c) => c.command === "flush_writes")).toHaveLength(1);
+  expect(toasts.items.filter((toast) => /waiting/.test(toast.text)), "one press, one answer").toHaveLength(1);
   // …and the button is back once the send has answered.
   expect(screen.button("Retry waiting writes")!.disabled).toBe(false);
   button.click();
