@@ -15,6 +15,11 @@
  * between ancestors), as a view's is. A kind whose path misses falls back to
  * its word, as ADR-0007's miss fails toward a row that says less, not
  * something wrong.
+ *
+ * A pull request's title starts with its number, read off its id, so `#142`
+ * finds a row that says it found it (F-654): *payout-service*, then *#142
+ * Idempotent retry window*. Not in the key cell, whose 118 px would then cut
+ * the repository's name.
  */
 import { keyOf } from "../time/format";
 
@@ -47,6 +52,12 @@ const parts = (path: string, sep: string) =>
 
 /** The row's cells; `singular` is its kind's word, *Pull request*, drawn lower-case where nothing better is known. */
 export function cellsOf(row: CellSource, singular: string): Cells {
+  const cells = placeOf(row, singular);
+  const number = row.kind === "pr" ? /#\d+$/.exec(row.entity_id)?.[0] : undefined;
+  return number === undefined ? cells : { ...cells, title: `${number} ${cells.title}` };
+}
+
+function placeOf(row: CellSource, singular: string): Cells {
   const { kind, entity_id: entityId, title, path, cell } = row;
   const word: Cells = { cell: singular.toLowerCase(), mono: false, title };
   const sent = cell?.trim();

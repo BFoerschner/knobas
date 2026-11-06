@@ -63,7 +63,7 @@
 
   async function syncNow(run: NonNullable<typeof sync>) {
     await run.start(detail.source.display_name);
-    if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
+    if (run.failed !== null) push({ text: `Could not sync ${detail.source.display_name}: ${run.failed}`, tone: "err" });
   }
 
   /** *Refreshing…* or *Syncing…*: the button is disabled, and ⌘R presses nothing. */

@@ -447,7 +447,7 @@ test("a source run the not-offered answer asked for and was refused says why in 
 
   refreshButton()!.click();
   await settle();
-  expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not sync: the engine is starting"]);
+  expect(toasts.items.map((toast) => toast.text)).toEqual([`Could not sync ${detail().source.display_name}: the engine is starting`]);
   expect(refreshButton()?.textContent).toBe("Sync now");
 });
 

@@ -1045,6 +1045,73 @@ test("a failing credential is said on top, and Re-enter password stores the new 
   expect(target.querySelector('[role="dialog"]')).toBeNull();
 });
 
+/** Ports whose `sync:state` the test sends, and the sender. */
+function syncEvents(extra: Partial<SettingsPorts> = {}) {
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  const p = ports({
+    listen: vi.fn((_event: string, handler: (event: { payload: unknown }) => void) => {
+      handlers.add(handler);
+      return Promise.resolve(() => void handlers.delete(handler));
+    }),
+    ...extra,
+  });
+  const send = (row: Pick<SourceSyncStatus, "source_id" | "run_id" | "last_outcome"> & Partial<SourceSyncStatus>) => {
+    const whole: SourceSyncStatus = { running: false, started_at: null, last_finished_at: null, next_run_at: null, backoff_until: null, last_changed: null, ...row };
+    for (const handler of [...handlers]) handler({ payload: whole });
+  };
+  return { p, send };
+}
+
+test("a source's Sync now ends in one toast, in Syncing…'s place, and says how it failed (F-652)", async () => {
+  toasts.items = [];
+  const { p, send } = syncEvents();
+  await open(["source", "jira"], p);
+  button("Sync now").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Syncing Jira…"]);
+  // While it runs, the button holds focus and a press asks nothing more.
+  button("Sync now").click();
+  await settle();
+  expect(p.syncNow).toHaveBeenCalledOnce();
+  send({ source_id: "jira", run_id: 42, last_outcome: "ok", last_changed: true });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced Jira"]);
+
+  button("Sync now").click();
+  await settle();
+  send({ source_id: "jira", run_id: 42, last_outcome: "unauthorized" });
+  await settle();
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([["Could not sync Jira: the sign-in failed", "err"]]);
+  toasts.items = [];
+});
+
+test("a source's Sync now refused says so and gives the button back", async () => {
+  toasts.items = [];
+  await open(["source", "jira"], ports({ syncNow: vi.fn(() => Promise.reject({ code: "not_ready", message: "starting", source_id: null })) }));
+  button("Sync now").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not sync Jira: starting"]);
+  expect(button("Sync now").getAttribute("aria-disabled")).toBeNull();
+  toasts.items = [];
+});
+
+test("Sync all ends in one toast, in its start's place, once every run has (F-652)", async () => {
+  toasts.items = [];
+  const { p, send } = syncEvents();
+  await open(["sources"], p);
+  button("Sync all").click();
+  await settle();
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]!.text).toMatch(/^Syncing /);
+  send({ source_id: "jira", run_id: 1, last_outcome: "ok", last_changed: true });
+  await settle();
+  expect(toasts.items[0]!.text).toMatch(/^Syncing /);
+  send({ source_id: "teamcity", run_id: 2, last_outcome: "ok", last_changed: false });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced 2 sources"]);
+  toasts.items = [];
+});
+
 /** The credential row's line, and the Re-enter dialog's note under it. */
 async function storedLines(secretsInMemory: boolean): Promise<{ row: string; note: string }> {
   await open(["source", "teamcity"], ports({ appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: secretsInMemory })) }));
@@ -1803,7 +1870,7 @@ test("a source's page opened mid-run draws the walk, and the run's row fills in 
   );
   expect(watchSync).toHaveBeenCalledTimes(1);
   expect(watchSync.mock.calls[0]?.[0]).toBe("jira");
-  expect(button("Sync now").disabled).toBe(true);
+  expect(button("Sync now").getAttribute("aria-disabled")).toBe("true");
   expect(runResults()[0]).toBe("Running…");
 
   channels[0]!(progress(7, { items: 1240, elapsed_ms: 83_000, walked: 120, of: 300, unit: "repositories" }));

@@ -6,10 +6,10 @@
   row's state (#1499).
 -->
 <script lang="ts">
-  import { ipcErrorMessage } from "../../ipc";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { expiryNote, signInFails, type Health } from "../../shell/health.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { createAllSync } from "../role-sync.svelte";
   import type { SettingsPorts } from "./ports";
   import { sourceDrafts } from "./source-drafts.svelte";
   import { EXPIRY_CLASS, bareAddress, holdings, sourceHash, sourceState } from "./settings";
@@ -28,7 +28,7 @@
     statuses: Record<string, SourceSyncStatus>;
     health: Pick<Health, "get">;
     now: Date;
-    ports: Pick<SettingsPorts, "syncAll">;
+    ports: Pick<SettingsPorts, "syncAll" | "syncStatus" | "listen">;
     onstarted: (ids: string[]) => void;
     onstopped: (ids: string[]) => void;
     /** Opens *Add a source* (#903). */
@@ -53,12 +53,16 @@
     if (allRunning) return;
     const ids = sources.filter((source) => source.enabled).map((source) => source.id);
     onstarted(ids);
-    try {
+    // One for each press: its answer takes this toast's place when its runs end (F-652).
+    const run = createAllSync(ports, async () => {
       const runs = await ports.syncAll();
-      push({ text: startedText(runs.length) });
-    } catch (cause) {
+      push({ text: startedText(runs.length), subject: "sync:all" });
+      return runs;
+    });
+    await run.start();
+    if (run.failed !== null) {
       onstopped(ids);
-      push({ text: `Could not sync: ${ipcErrorMessage(cause)}`, tone: "err" });
+      push({ text: `Could not sync: ${run.failed}`, tone: "err" });
     }
   }
 </script>

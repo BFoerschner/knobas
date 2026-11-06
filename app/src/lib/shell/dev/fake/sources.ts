@@ -612,7 +612,8 @@ function syncRole(args: Record<string, unknown>): { source_id: string; run_id: n
 /** `sync_all`: every enabled source runs, for long enough to look at. `?fake-sync-held` keeps them going, as for `sync_role`. */
 function syncAll(): number[] {
   const on = FIXTURE_SOURCES.filter((source) => source.enabled);
-  const runs = on.map((source, index) => ({ source, run_id: 91 + index }));
+  // Past every fixture's last run, which `sync_status` answers: a press must wait for each run's own ending.
+  const runs = on.map((source, index) => ({ source, run_id: 291 + index }));
   for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), running: true, run_id });
   if (!new URLSearchParams(location.search).has("fake-sync-held")) {
     setTimeout(() => {

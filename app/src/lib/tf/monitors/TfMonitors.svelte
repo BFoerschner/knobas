@@ -660,7 +660,7 @@
       ports.badgesChanged?.();
       push({
         text: hidden
-          ? `Hid ${row.name}. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.`
+          ? `Hid ${row.name}. Its alerts stay quiet.`
           : `${row.name} is back on the roster, and its alerts reach the inbox again.`,
         ...(hidden ? { action: { label: "Undo", run: () => void setHidden({ ...row, hidden: true }, false) } } : {}),
       });

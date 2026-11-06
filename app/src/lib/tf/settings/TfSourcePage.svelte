@@ -64,6 +64,7 @@
   import { BOARDS_SECTION, savedViewSystem } from "./boards";
   import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { createSourceSyncs } from "../role-sync.svelte";
   import type { Layers } from "../layers.svelte";
   import { sourceDrafts } from "./source-drafts.svelte";
   import { configChanges, formValues, pageFields, withAdded, withChanges } from "./source-config";
@@ -417,14 +418,23 @@
   }
 
   // ---- syncing ----
+  /** Ends as every *Sync now* does, in one toast that takes *Syncing…*'s place, even if the reader has left the page (F-652). */
   async function syncNow() {
+    if (status?.running) return;
     onstarted();
-    try {
-      await ports.syncNow(source.id);
-      push({ text: `Syncing ${name}…` });
-    } catch (cause) {
+    const run = createSourceSyncs({
+      syncStatus: ports.syncStatus,
+      listen: ports.listen,
+      syncNow: async (id) => {
+        const started = await ports.syncNow(id);
+        push({ text: `Syncing ${name}…`, subject: `sync:${id}` });
+        return started;
+      },
+    }).of(source.id);
+    await run.start(name);
+    if (run.failed !== null) {
       onstopped();
-      push({ text: `${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+      push({ text: `Could not sync ${name}: ${run.failed}`, tone: "err" });
     }
   }
 
@@ -573,7 +583,8 @@
     <p>{sourceLine(source, adapter?.name ?? source.adapter_kind, status, now)}</p>
   </div>
   <div class="tf-acts">
-    <button class="tf-btn" disabled={status?.running === true} onclick={() => void syncNow()}>Sync now</button>
+    <!-- `aria-disabled`, as a view's *Sync now* and *Sync all* are: a press from the keyboard stays on the button while the run goes. -->
+    <button class="tf-btn" aria-disabled={status?.running ? "true" : undefined} title={status?.running ? `${name} is syncing` : undefined} onclick={() => void syncNow()}>Sync now</button>
   </div>
 </header>
 

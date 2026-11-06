@@ -397,7 +397,7 @@ test("Hide moves a monitor into the closed fold at the roster's end; opened, it 
   expect(rows().at(-1)!.classList.contains("tf-mon-foldrow")).toBe(true);
   expect(count()).toBe("3 monitors, 1 hidden");
   expect(toasts.items.map((t) => t.text)).toContain(
-    "Hid flows-stage. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.",
+    "Hid flows-stage. Its alerts stay quiet.",
   );
 
   fold()!.open = true;

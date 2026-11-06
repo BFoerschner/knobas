@@ -14,11 +14,13 @@
  * read off) gets the run in its place, and its detail says *Sync now* from then.
  *
  * A press that read the item ends in one toast, replaced by the next press's (F-359): *Refreshed from TeamCity*, or
- * what the page knows better, which it says with {@link DetailRefresh.answer} while it reads again.
+ * what the page knows better, which it says with {@link DetailRefresh.answer} while it reads again. While the source's
+ * last sync failed, the toast says that too, since the band above still does (F-362): *Refreshed from TeamCity. Its
+ * sign-in is still failing.*
  */
 import type { EntityDetail } from "../ipc/entity";
 import { ipcErrorMessage } from "../ipc";
-import { refreshEntity, type EntityRefresh } from "../ipc/sources";
+import { refreshEntity, syncStatus, type EntityRefresh, type SourceSyncStatus } from "../ipc/sources";
 import { sourceSyncs, type RoleSync, type RoleSyncs } from "./role-sync.svelte";
 import { push } from "../shell/toasts.svelte";
 
@@ -44,12 +46,22 @@ export interface DetailRefreshPorts {
   refreshEntity: (entityId: string) => Promise<EntityRefresh>;
   /** The runs a detail's *Sync now* starts or joins, by source id. */
   syncs: RoleSyncs;
+  /** How each source's last run ended, for what a *Refresh* adds to its toast (F-362). */
+  syncStatus: () => Promise<SourceSyncStatus[]>;
 }
 
 export const DETAIL_REFRESH_BRIDGE: DetailRefreshPorts = {
   refreshEntity: (entityId) => refreshEntity(entityId),
   syncs: sourceSyncs,
+  syncStatus: () => syncStatus(),
 };
+
+/** What a refreshed item's toast adds while its source's last run failed. Nothing here says the refresh read nothing: it did. */
+const STILL = {
+  unauthorized: "Its sign-in is still failing.",
+  unreachable: "Its last sync couldn't reach it.",
+  error: "Its last sync failed.",
+} as const;
 
 /** One detail's *Refresh*. */
 export interface DetailRefresh {
@@ -124,7 +136,7 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
         state.reading = false;
         const run = ports.syncs.of(detail.source.id);
         await run.start(detail.source.display_name);
-        if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
+        if (run.failed !== null) push({ text: `Could not sync ${detail.source.display_name}: ${run.failed}`, tone: "err" });
         return;
       }
       // Refreshed, gone, or turned off since the detail was read: the detail
@@ -135,9 +147,17 @@ export function createDetailRefresh(ports: DetailRefreshPorts = DETAIL_REFRESH_B
         if (mine === asked) state.reading = false;
       }
       // Gone or turned off, the detail's banner says which.
-      if (mine === asked && answer.outcome === "refreshed" && words !== null) {
-        push({ text: words ?? `Refreshed from ${detail.source.display_name}`, subject: `refresh:${detail.row.entity_id}` });
+      if (mine !== asked || answer.outcome !== "refreshed" || words === null) return;
+      const subject = `refresh:${detail.row.entity_id}`;
+      if (words !== undefined) {
+        push({ text: words, subject });
+        return;
       }
+      const rows = await ports.syncStatus().catch(() => []);
+      if (mine !== asked) return;
+      const outcome = rows.find((row) => row.source_id === detail.source.id)?.last_outcome ?? "ok";
+      const refreshed = `Refreshed from ${detail.source.display_name}`;
+      push({ text: outcome === "ok" ? refreshed : `${refreshed}. ${STILL[outcome]}`, subject });
     },
     answer(said) {
       words = said;

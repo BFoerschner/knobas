@@ -469,7 +469,7 @@ test("leaving the sheet and moving the selection opens it on the next row", asyn
   press("Escape");
   press("ArrowDown");
   press("Tab");
-  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("Backoff");
+  expect(target.querySelector(".tf-ln-pinned .tf-ln-t")?.textContent).toBe("#142 Backoff");
 });
 
 /** Escape leaves the sheet first, then clears the query, and the shell's ladder never sees it. */
@@ -2781,7 +2781,7 @@ test("a result row is three cells, the key cell following the kind's rule", asyn
 
   expect(cells()).toEqual([
     ["Tk", "PAY-231", "Retry failed SEPA payouts"],
-    ["Pr", "payout-service", "Backoff on SEPA retries"],
+    ["Pr", "payout-service", "#142 Backoff on SEPA retries"],
     // The owner is the cell, so the repository's own name is the title.
     ["Rp", "tidewater", "payout-service"],
     ["Pg", "Engineering", "SEPA retry design"],
