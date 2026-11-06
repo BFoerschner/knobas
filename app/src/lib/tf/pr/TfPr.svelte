@@ -34,6 +34,7 @@
 <script lang="ts" module>
   import type {
     CheckoutView,
+    CodeFacts,
     EntityDetail,
     EntityFilter,
     EntityPage,
@@ -48,6 +49,8 @@
   export interface PrPorts {
     getEntity: (entityId: string) => Promise<EntityDetail>;
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
+    /** Which of the commits are the reader's own (F-221); the bridge's when left out. */
+    codeFacts?: (entityIds: string[]) => Promise<CodeFacts[]>;
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     /** A check's link, to the run the mirror holds; never a pasted text. */
@@ -71,6 +74,7 @@
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     entityCheckout,
+    codeFacts,
     entityView,
     getEntity,
     listEntities,
@@ -91,6 +95,7 @@
   import { actionName } from "../../detail/view/actions";
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
+  import { commitLine } from "../repo/file-tree";
   import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
   import { layers } from "../layers.svelte";
   import { pageVisible } from "../kept-pages.svelte";
@@ -243,6 +248,23 @@
    * #2103). `again` is a re-read for the echoes, which keeps what the page
    * drew when it fails.
    */
+  /** The commits on the Commits tab that are the reader's own: those read *You* (F-221). */
+  let myCommits = $state<ReadonlySet<string>>(new Set());
+
+  function readMyCommits(answer: SourceView | null, live: () => boolean) {
+    const ids = commitParts(answer).flatMap((part) => ("commits" in part ? part.commits.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id])) : []));
+    if (ids.length === 0) {
+      myCommits = new Set();
+      return;
+    }
+    (ports.codeFacts ?? codeFacts)(ids).then(
+      (facts) => {
+        if (live()) myCommits = new Set(facts.filter((entry) => entry.mine).map((entry) => entry.entity_id));
+      },
+      () => {},
+    );
+  }
+
   function readView(id: string, live: () => boolean, again = false) {
     const asked = ++viewAsked;
     // A live read asked once a write was sent is a read of the source after it.
@@ -251,6 +273,7 @@
       (answer) => {
         if (!live() || asked !== viewAsked) return;
         view = answer;
+        readMyCommits(answer, () => live() && asked === viewAsked);
         untrack(() => settleEchoes(id, (echo) => landedIn(answer, echo, sentBefore)));
         for (const row of headerOf(answer).checks) {
           const url = row.url;
@@ -809,7 +832,7 @@
                           >{#if opens}<a href={commitHash(repo!.entity_id, row.entity_id!)}>{row.chip ?? ""}</a>{:else}{row.chip ?? ""}{/if}</td
                         >
                         <td class:tf-dim={row.chip === null}>{row.title}</td>
-                        <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
+                        <td class="tf-dim tf-nowrap">{commitLine(row, row.entity_id !== null && myCommits.has(row.entity_id))}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -885,7 +908,7 @@
                     {@const own = me !== null && reviewer.who === me}
                     <div class="tf-prit">
                       <span class="tf-av" class:tf-me={own} aria-hidden="true">{initials(reviewer.who)}</span>
-                      <span class="tf-prgrow">{own ? "you" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim">{` · ${reviewer.note}`}</span>{/if}</span>
+                      <span class="tf-prgrow">{own ? "You" : reviewer.who}{#if reviewer.note !== null}<span class="tf-dim">{` · ${reviewer.note}`}</span>{/if}</span>
                       <TfStateChip text={reviewer.state} tone={reviewer.tone ?? 'muted'} />
                     </div>
                   {/each}
@@ -893,7 +916,7 @@
                     <!-- The reader's own unsent review (#2276): its pending comments, kept across restarts. -->
                     <div class="tf-prit">
                       <span class="tf-av tf-me" aria-hidden="true">{initials(me ?? "you")}</span>
-                      <span class="tf-prgrow">you <span class="tf-dim">· {waiting} pending {waiting === 1 ? "comment" : "comments"}</span></span>
+                      <span class="tf-prgrow">You <span class="tf-dim">· {waiting} pending {waiting === 1 ? "comment" : "comments"}</span></span>
                       <TfStateChip text="Draft" tone="warn" />
                     </div>
                   {/if}

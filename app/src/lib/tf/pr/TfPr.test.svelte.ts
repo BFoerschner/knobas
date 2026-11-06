@@ -1396,7 +1396,7 @@ test("#2276: the reader's unsent review is a Draft in the Reviewers panel", asyn
   pending.add(PR, { path: "src/retry.rs", side: "new", line: 27, body: "Sub-second?" });
   pending.add(PR, { path: "src/retry.rs", side: "new", line: 28, body: "Why 3?" });
   await draw([PR]);
-  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "MA you · 2 pending comments Draft"]);
+  expect(lines(".tf-prreviewers .tf-prit")).toEqual(["PR priya Approved", "MA You · 2 pending comments Draft"]);
 });
 
 test("an address with a tab the pull request does not have says so under its header and tabs, and lights none", async () => {

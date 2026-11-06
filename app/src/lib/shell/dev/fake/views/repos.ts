@@ -17,7 +17,8 @@
  */
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
-import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
+import { ago } from "../../../time";
+import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 
 const RETRY_MAIN = `use std::time::Duration;
@@ -474,12 +475,11 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
   ];
 }
 
-const age = (at: string) => {
-  const days = Math.max(0, Math.round((Date.parse("2026-08-22T14:30:00Z") - Date.parse(at)) / 86_400_000));
-  return days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
-};
+/** An age in the words the adapters write (`knobas_source::view::ago`), against the fixture's clock. */
+const age = (at: string) => ago(at, new Date(SYNCED_AT));
 
-function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
+/** A commit row, the same in every list, as the adapter's `commit_row` is. */
+export function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
   return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null, author };
 }
 
@@ -531,6 +531,13 @@ CODE_FACTS.push((ids) =>
     ...PAYOUT_BRANCHES.map(({ name, tip }) => ({ name, author: tip[2] })),
   ]
     .map(({ name, author }) => ({ entity_id: `${PAYOUT}@refs/heads/${name}`, author }))
+    .filter(({ entity_id }) => ids.has(entity_id))
+    .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
+);
+
+// The branch's commits, whose author the mirror holds as the adapter's rows name it.
+CODE_FACTS.push((ids) =>
+  PAYOUT_COMMITS.map(([sha, , author]) => ({ entity_id: payoutCommitId(sha), author }))
     .filter(({ entity_id }) => ids.has(entity_id))
     .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
 );
@@ -798,7 +805,7 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   }
   if (sectionId === "branches") {
     const rows: ViewRow[] = [
-      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 1 day ago", tone: "muted", chip: "default", url: null },
+      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 2026-08-21", tone: "muted", chip: "default", url: null },
       ...(repoId === PAYOUT
         ? [...PAYOUT_BRANCHES, ...BULK_BRANCHES].map(({ name, tip }) => ({
             entity_id: `${PAYOUT}@refs/heads/${name}`,

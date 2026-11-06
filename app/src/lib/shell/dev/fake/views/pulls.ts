@@ -27,7 +27,7 @@
 import type { DiffFile, Fact, FileThread, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
 import { CORPUS } from "../corpus";
 import { JOB_ROWS } from "../job-reach";
-import { PAYOUT_COMMITS, PAYOUT_MAIN_SHA, payoutCommitId, payoutPrFiles } from "./repos";
+import { commitRow, PAYOUT_COMMITS, PAYOUT_MAIN_SHA, payoutCommitId, payoutPrFiles } from "./repos";
 
 const fact = (label: string, value: string, tone: Fact["tone"] = null): Fact => ({ label, value, tone });
 const section = (id: string, title: string, blocks: ViewBlock[], count: number | null = null, deferred = false): ViewSection => ({
@@ -192,16 +192,7 @@ const DESCRIPTION_142 =
 function view142(): SourceView {
   const title = CORPUS.find((row) => row.entity_id === PR_142)?.title ?? "";
   const blocked = "1 of 2 required approvals; required check Payout_IntegrationTests";
-  const commits = PAYOUT_COMMITS.map(
-    ([sha, subject, author, at]): ViewRow => ({
-      entity_id: payoutCommitId(sha),
-      title: subject,
-      meta: `${author} · ${at.slice(0, 10)}`,
-      tone: null,
-      chip: sha.slice(0, 10),
-      url: null,
-    }),
-  );
+  const commits = PAYOUT_COMMITS.map(([sha, subject, author, at]): ViewRow => commitRow(payoutCommitId(sha), sha, subject, author, at));
   return {
     sections: [
       section("overview", "Overview", [

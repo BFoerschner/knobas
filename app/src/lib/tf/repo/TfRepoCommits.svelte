@@ -6,7 +6,7 @@
   The commits are the source's view of the branch picked (`entity_view`,
   section `commits`): on the default branch its latest commits, on another
   what that branch carries over the default one. A row's who and when is the
-  source's own line (`author · age`), drawn as it came. A commit the mirror
+  source's own line (`author · age`), with *You* for the reader's own. A commit the mirror
   holds opens its diff; one it does not has no id to open and is drawn plain.
 
   *Author: Mine* (#973) keeps the commits whose declared author is mine
@@ -34,6 +34,7 @@
   import Marked from "../filter/Marked.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
+  import { commitLine } from "./file-tree";
   import { commitHash, viewRows, visibleViewRows } from "./repo";
   import { diffHash, picked, rangeOf, selectRange, shaOfCommit, type RangePick } from "../diff/address";
   import TfWaiting from "../TfWaiting.svelte";
@@ -202,7 +203,7 @@
               >{:else}<Marked text={row.chip ?? ""} typed={filter.text} />{/if}</td
           >
           <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={filter.text} /></td>
-          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={row.meta ?? ""} typed={filter.text} /></span></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={commitLine(row, row.entity_id !== null && mine.has(row.entity_id))} typed={filter.text} /></span></td>
           <td class="tf-ropen"
             >{#if shaOfCommit(row.entity_id) !== null}<span class="tf-rowend"><span class="tf-rowacts"><TfOpenObject
                 entityId={repoId}

@@ -6,9 +6,9 @@
  * it came from and when it was last seen"), which is why it is a tested
  * function and not five copies of a `Math.round` in five components.
  *
- * One copy lives outside the shell: the Gitea views' commit and branch rows
- * carry their age in a view's text (`crates/knobas-source-gitea/src/view.rs`,
- * `ago`), because a view row's meta is a string. Change both or neither.
+ * One copy lives outside the shell: the adapters' view rows carry their age in
+ * a view's text (`knobas_source::view::ago`), because a view row's meta is a
+ * string. Change both or neither.
  *
  * The words under a day are `ageLabel`'s (`lib/time/format.ts`), which the
  * stale line's *data is 38 min old* says too (#1986).

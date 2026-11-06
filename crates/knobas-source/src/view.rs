@@ -19,6 +19,29 @@ pub use crate::diff::{
     DiffChange, DiffFile, DiffLine, DiffLineKind, FileThread, Hunk, LineComment, LineThread,
 };
 
+/// How long ago, as the shell's `ago()` (`app/src/lib/shell/time.ts`) says
+/// it, so an age an adapter writes into a row's `meta` reads the same as a
+/// room's row and the same in every adapter: minutes, then hours, then the UTC
+/// date. A time in the future is *just now*.
+#[must_use]
+pub fn ago(then: chrono::DateTime<chrono::Utc>, now: chrono::DateTime<chrono::Utc>) -> String {
+    let seconds = (now - then).num_seconds();
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let minutes = (seconds as f64 / 60.0).round() as i64;
+    if minutes < 1 {
+        return "just now".to_owned();
+    }
+    if minutes < 60 {
+        return format!("{minutes} min ago");
+    }
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    let hours = (minutes as f64 / 60.0).round() as i64;
+    if hours < 24 {
+        return format!("{hours} h ago");
+    }
+    then.format("%Y-%m-%d").to_string()
+}
+
 /// What a view's answer stands at, as
 /// [`Source::view_standing`](crate::Source::view_standing) says before the
 /// read (ADR-0032, #2239). Never on the wire: it is the app's to act on, and
