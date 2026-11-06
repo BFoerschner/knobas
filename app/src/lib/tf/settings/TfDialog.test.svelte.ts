@@ -98,6 +98,31 @@ test("Escape closes it exactly once and does not reach the shell", () => {
   target.remove();
 });
 
+/** A person's press can't be sent from here (`isTrusted`), so the trips press it with real keys. These say what holds nothing. */
+function holdsOnClose(close: () => void): boolean {
+  const target = host();
+  let app: ReturnType<typeof mount> | null = null;
+  const onclose = () => {
+    if (app) void unmount(app);
+    app = null;
+  };
+  app = mount(Modal, { target, props: { onclose } });
+  flushSync();
+  const listening = vi.spyOn(window, "addEventListener");
+  close();
+  flushSync();
+  const held = (listening.mock.calls as unknown[][]).some(([type]) => type === "click");
+  listening.mockRestore();
+  if (app) void unmount(app);
+  target.remove();
+  return held;
+}
+
+test("a dialog closed by a script, or by Esc, holds no press behind it", () => {
+  expect(holdsOnClose(() => document.querySelector<HTMLButtonElement>(".tf-dclose")!.click())).toBe(false);
+  expect(holdsOnClose(() => press("Escape"))).toBe(false);
+});
+
 /** F-616: what was typed is not lost to a click beside the sheet. A dialog with a footer has something to lose. */
 test("a click on the scrim leaves a dialog with a footer open, and focus where it was", () => {
   const onclose = vi.fn();

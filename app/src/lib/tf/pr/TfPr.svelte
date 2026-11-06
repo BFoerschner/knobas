@@ -555,17 +555,11 @@
   });
 
   /**
-   * A dialog that sends gives focus back to the button that opened it, so the second `Enter` of a double press would open it
-   * again. For this long after a send those buttons take no press; a real second label or edit comes later than this.
+   * *Open PR #N* can sit right over *Merge…*, so the second press of a double click would open a dialog on landing. A press with
+   * a still pointer this soon after arriving is the one before it. A pointer that moved here was aimed, so it goes at once.
+   * `Enter` is safe: arriving puts focus on the title. Only the toolbar, as a press elsewhere on the page opens no dialog.
    */
   const SETTLING_MS = 800;
-  let sentAt = -SETTLING_MS;
-  const settling = () => performance.now() - sentAt < SETTLING_MS;
-
-  /**
-   * *Open PR #N* can sit right over *Merge…*, so the second press of a double click would open a dialog on landing. A press with
-   * a pointer this soon after arriving is the one before it. `Enter` is safe: arriving puts focus on the title.
-   */
   let arrivedAt = 0;
   $effect(() => {
     void prId;
@@ -578,13 +572,19 @@
         event.stopPropagation();
       }
     };
+    const aimed = (event: PointerEvent) => {
+      if (event.movementX !== 0 || event.movementY !== 0) arrivedAt = -SETTLING_MS;
+    };
     acts.addEventListener("click", hold, { capture: true });
-    return () => acts.removeEventListener("click", hold, { capture: true });
+    acts.addEventListener("pointermove", aimed);
+    return () => {
+      acts.removeEventListener("click", hold, { capture: true });
+      acts.removeEventListener("pointermove", aimed);
+    };
   }
 
   /** Echo a write queued as `verb`, followed under `name`. */
   function echoChip(id: string, verb: string, name: string, write: QueuedWrite, chose = "") {
-    sentAt = performance.now();
     // What was chosen names it: *Add label backport*, and a second label is a second chip.
     const text = chose === "" ? verb : `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${chose}`;
     echoWrite(id, verb, text, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null, ...(chose === "" ? {} : { many: true }) });
@@ -592,7 +592,6 @@
 
   /** Echo a review queued with `verdict`: its chip and its row under Reviewers say which (F-251). */
   function echoReview(id: string, verdict: Verdict, write: QueuedWrite) {
-    sentAt = performance.now();
     echoWrite(id, "review", verdict, { write, base: header.state?.text ?? null, following: { name: "Review" }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
   }
 
@@ -652,7 +651,7 @@
   let shown = $state<Write | null>(null);
 
   function open(write: Write) {
-    if (write.action.disabled === null && heldBy(write.key) === null && !settling()) shown = write;
+    if (write.action.disabled === null && heldBy(write.key) === null) shown = write;
   }
 
   /** The composer's words are this pull request's own draft, through `Esc`, a move to another and a return (the key table). */
@@ -753,7 +752,7 @@
             aria-disabled={reviewRefused !== null ? "true" : undefined}
             title={reviewRefused ?? undefined}
             onclick={() => {
-              if (reviewRefused === null && !settling()) reviewing = true;
+              if (reviewRefused === null) reviewing = true;
             }}>Review…</button
           >
         {/if}
@@ -802,7 +801,7 @@
               aria-disabled={reviewRefused !== null ? "true" : undefined}
               title={reviewRefused ?? undefined}
               onclick={() => {
-                if (reviewRefused === null && !settling()) reviewing = true;
+                if (reviewRefused === null) reviewing = true;
               }}>Submit review… ({waiting} pending)</button
             >
           {/if}

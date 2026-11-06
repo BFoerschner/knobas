@@ -42,6 +42,7 @@
   import { snoozeFloat, spentAt } from "./snooze-float";
   import { clockLabel } from "../../time/format";
   import { flushSync, onDestroy, onMount, tick } from "svelte";
+  import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
   import { health } from "../../shell/health.svelte";
@@ -350,6 +351,10 @@
   const queueing = new Set<string>();
   /** A Re-run answered holds about two seconds more (F-150), as Builds' does: a second press where the hand rests queues nothing. */
   const rerunHold = new PressHold();
+  /** The held Re-runs whose write has left the queue, so the button says *Sent*. */
+  const rerunSent = new SvelteSet<string>();
+  /** What a held Re-run says, as Builds' does; `null` when it does not hold. */
+  const rerunWord = (key: string) => (rerunHold.held(key) ? (rerunSent.has(key) ? "Sent" : "Queued") : null);
 
   /** *Show in runs*: the failed run's pipeline, where the new run is listed; a run no list holds opens by its own address. */
   async function showInRuns(entry: InboxEntry) {
@@ -367,6 +372,7 @@
     queueing.add(entry.item.key);
     try {
       const write = await ports.submitWrite(form.build(entity));
+      rerunSent.delete(entry.item.key);
       rerunHold.hold(entry.item.key);
       // Named for the toast's sign-in sentence; a list that fails still lets the toast say what was queued.
       const sources = await ports.listSources().catch(() => [] as SourceFacts[]);
@@ -375,7 +381,8 @@
         id: entry.item.source_id,
         display_name: source?.display_name ?? "",
       }, { write, where: { label: "Show in runs", run: () => void showInRuns(entry) } });
-      following.push(followWrite(write, { name: form.label }));
+      const key = entry.item.key;
+      following.push(followWrite(write, { name: form.label, onleave: () => rerunSent.add(key), onstop: () => rerunHold.release(key) }));
       void inbox.refresh();
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
@@ -583,11 +590,12 @@
               type="button"
               class="tf-btn tf-sm"
               class:tf-ghost={ghost}
-              {...refusedAttrs(refusal(entry, action))}
+              {...action === "rerun_build" && rerunWord(item.key) !== null ? { "aria-disabled": "true" as const } : refusedAttrs(refusal(entry, action))}
               data-snooze={action === "snooze" ? item.key : undefined}
               data-act={action}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
-              onclick={(event) => press(entry, action, event)}>{labelOf(action)}</button
+              onclick={(event) => press(entry, action, event)}
+              >{#if action === "rerun_build"}<span class="tf-keepw" data-keep="Queued"><span>{rerunWord(item.key) ?? labelOf(action)}</span></span>{:else}{labelOf(action)}{/if}</button
             >
           {/snippet}
           {#each rowActions(entry).filter((action) => action !== "done" && action !== "snooze") as action (action)}

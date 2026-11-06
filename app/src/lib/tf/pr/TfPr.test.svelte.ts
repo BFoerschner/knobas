@@ -513,10 +513,8 @@ test("a source action draws the dialog its source declares and queues SourceActi
   expect(text(".tf-tabs")).toContain("Stamping release Stable, queued");
 });
 
-test("a sent review says its verdict in the chip and under Reviewers, and a second Enter on Review… opens nothing (F-251)", async () => {
+test("a sent review says its verdict in the chip and under Reviewers (F-251)", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, APPROVE, EDIT, mergeAction(null)]) }));
-  // The second press comes straight after the first, however slow this machine is today.
-  const clock = vi.spyOn(performance, "now").mockReturnValue(1_000_000);
   button("Review…")!.click();
   flushSync();
   document.querySelector<HTMLInputElement>(".tf-dialog input[value=approve]")!.click();
@@ -529,15 +527,6 @@ test("a sent review says its verdict in the chip and under Reviewers, and a seco
   const row = [...target.querySelectorAll(".tf-prreviewers .tf-prit")].at(-1)!;
   expect(row.textContent?.replace(/\s+/g, " ")).toContain("You · queued");
   expect(row.querySelector(".tf-chip")?.textContent?.trim()).toBe("Approved");
-  button("Review…")!.click();
-  flushSync();
-  expect(document.querySelector(".tf-dialog")).toBeNull();
-  // A later press is a real one.
-  clock.mockReturnValue(1_002_000);
-  button("Review…")!.click();
-  flushSync();
-  expect(document.querySelector(".tf-dialog")).not.toBeNull();
-  clock.mockRestore();
 });
 
 test("the second press of a double click on Open PR #N does not open the Merge… it lands on", async () => {
@@ -549,6 +538,23 @@ test("the second press of a double click on Open PR #N does not open the Merge�
   expect(document.querySelector(".tf-dialog")).toBeNull();
   clock.mockReturnValue(1_002_000);
   pressAt();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).not.toBeNull();
+  clock.mockRestore();
+});
+
+test("a pointer that moved onto Merge… on arriving was aimed, so its press goes at once", async () => {
+  const clock = vi.spyOn(performance, "now").mockReturnValue(1_000_000);
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
+  const merge = button("Merge…")!;
+  const move = (movementX: number) => merge.dispatchEvent(Object.defineProperties(new MouseEvent("pointermove", { bubbles: true }), { movementX: { value: movementX }, movementY: { value: 0 } }));
+  // A page redrawn under a still pointer sends a move of nothing, which aims at nothing.
+  move(0);
+  merge.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  move(3);
+  merge.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
   flushSync();
   expect(document.querySelector(".tf-dialog")).not.toBeNull();
   clock.mockRestore();

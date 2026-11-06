@@ -1463,7 +1463,6 @@
   /** A move written: the toast names the old place's way back, so a wrong pick doesn't mean finding it by memory (F-545). */
   function moved(asset: AssetRow, into: string) {
     moving = false;
-    holdStillPress();
     // The address is unchanged — the asset kept its id — so the re-read is
     // what redraws the columns at the new path.
     revision += 1;

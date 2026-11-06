@@ -268,10 +268,14 @@ test("Re-run holds about two seconds once it answers, so a second press queues n
     const before = writes();
     button(rowOf("Payout_Integration"), "Re-run").click();
     await run(20);
-    button(rowOf("Payout_Integration"), "Re-run").click();
+    const held = rowOf("Payout_Integration").querySelector<HTMLButtonElement>("[data-act=rerun_build]")!;
+    expect(held.textContent?.trim(), "it says what the write is doing, as Builds' does").toMatch(/^(Queued|Sent)$/);
+    expect(held.getAttribute("aria-disabled")).toBe("true");
+    held.click();
     await run(20);
     expect(writes() - before, "the second press lands on the hold").toBe(1);
     await run(PRESS_HOLD_MS);
+    expect(held.textContent?.trim()).toBe("Re-run");
     button(rowOf("Payout_Integration"), "Re-run").click();
     await run(20);
     expect(writes() - before).toBe(2);

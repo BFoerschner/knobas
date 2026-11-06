@@ -21,6 +21,12 @@
   to what opened it when it closes, and a control removed while it held focus
   (a pick, a row that went) hands it back here rather than to the page.
 
+  **A press that closes it holds for a moment** (`still-press.ts`): what it covered is now
+  under the pointer and focus is back on its opener, so the second press of a double press
+  lands on nothing. Only after a person's press in it: one that goes with its page, or by itself,
+  has no second press to catch, and neither has `Esc`, where `Enter` straight after reopening it
+  is a person changing their mind.
+
   **The scrim.** A dialog with a footer has something to lose, so a click on the
   scrim does nothing and leaves focus where it was. A viewer has no footer, and the
   launcher's only names keys (`scrimCloses`): that click closes them.
@@ -45,6 +51,7 @@
 
   import { isSendKey } from "../inline-editor";
   import { layers as sharedLayers, type Layer, type Layers } from "../layers.svelte";
+  import { holdStillPress } from "../still-press";
   import TfKeyed from "../TfKeyed.svelte";
 
   let {
@@ -110,7 +117,20 @@
   }
 
   /** This dialog's entry on the layer stack. */
-  const layer: Layer = { kind: "dialog", close: () => onclose() };
+  const layer: Layer = {
+    kind: "dialog",
+    close: () => {
+      steppedOut = true;
+      onclose();
+    },
+  };
+  /** Closed by `Esc`, which holds nothing. */
+  let steppedOut = false;
+  /** A person pressed in it, by pointer or `Enter`. A write may answer long after, so this stands until it closes. */
+  let pressed = false;
+  const notePress = (event: Event) => {
+    if (event.isTrusted && (!(event instanceof KeyboardEvent) || event.key === "Enter")) pressed = true;
+  };
 
   $effect(() => {
     const restoreTo = document.activeElement;
@@ -128,6 +148,7 @@
       fallen.disconnect();
       untrack(off);
       if (restoreTo instanceof HTMLElement && document.contains(restoreTo)) restoreTo.focus();
+      if (pressed && !steppedOut) holdStillPress();
     };
   });
 
@@ -147,6 +168,7 @@
       event.preventDefault();
       // Rung 1 of the Esc ladder, answered here: the shell must not also unwind what is behind the dialog.
       event.stopPropagation();
+      steppedOut = true;
       onclose();
       return;
     }
@@ -179,6 +201,8 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   class="tf-modal"
+  onclickcapture={notePress}
+  onkeydowncapture={notePress}
   onmousedown={(event) => {
     if (event.target === event.currentTarget && !leavesOnScrim) event.preventDefault();
   }}

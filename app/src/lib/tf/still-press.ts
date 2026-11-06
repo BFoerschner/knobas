@@ -3,7 +3,8 @@
  * it covered is now under the pointer, and focus is back on what opened it. So a second press, a double click or a second
  * `Enter`, would shut the drawer behind, walk to a row or open the dialog again. Until the pointer really moves, or for
  * {@link HOLD_MS}, a person's press lands on nothing. Only a press from the person: a script's `click()` isn't trusted and
- * goes through, and so do the arrows, `Tab` and `Esc`.
+ * goes through, and so do the arrows, `Tab` and `Esc`. `TfDialog` does this for every dialog a press closes; a page calls it
+ * only for what isn't a dialog closing: an inline editor's save, a toast's *Undo*.
  */
 export const HOLD_MS = 700;
 

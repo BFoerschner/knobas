@@ -8,8 +8,8 @@ import { expect, test } from "vitest";
 import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
 import { stampLabel } from "../../time/format";
 import {
-  checkReading,
   acting,
+  checkReading,
   checksLine,
   conversationOf,
   headerOf,

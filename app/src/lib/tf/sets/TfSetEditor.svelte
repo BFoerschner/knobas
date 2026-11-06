@@ -43,7 +43,6 @@
   import { entityAddress } from "../address";
   import { inlineEditor } from "../inline-editor";
   import { replaceAddress } from "../opener";
-  import { holdStillPress } from "../still-press";
   import type { EscTarget } from "../escape";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
@@ -292,7 +291,6 @@
 
   function addedPattern(kind: LinkSetMemberKind, query: string) {
     patterning = null;
-    holdStillPress();
     void save((draft) => draft.patterns.push({ kind, query }), undefined, () =>
       addedToast(
         (name) => `Added a pattern to ${name}`,
@@ -305,7 +303,6 @@
 
   function added(kind: LinkSetMemberKind, picked: Candidate[]) {
     picking = null;
-    holdStillPress();
     const ids = new Set(picked.map((row) => row.entity_id));
     const what = picked.length === 1 ? picked[0]!.name : picked.length;
     void save((draft) => draft.members.push(...picked.map((row) => ({ kind, entity_id: row.entity_id }))), undefined, () =>

@@ -507,13 +507,13 @@ test("Publish again saves, sends once, holds as Queued, and pressed again does n
   press.click();
   await settle();
   expect(calls.again).toBe(1);
-  // It lands: the press has nothing left to do, and focus goes to the page it made.
+  // It lands: the press has nothing left to do, so focus is the keeper's, and a second Enter doesn't open the page (F-340).
   standing.again = null;
   hears.get(7)?.(undefined);
   await settle();
   expect(button("Queued")).toBeUndefined();
   expect(pubLine()).toContain("Published.");
-  expect(document.activeElement?.textContent?.trim()).toBe("Open the published page");
+  expect(document.activeElement?.textContent?.trim()).not.toBe("Open the published page");
 });
 
 test("a page edited in the source since says so, and offers no Publish again (F-327)", async () => {

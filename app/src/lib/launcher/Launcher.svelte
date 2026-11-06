@@ -721,27 +721,25 @@
   let enterAt = Number.NEGATIVE_INFINITY;
 
   /**
-   * The second of two quick presses must not fall through the closed box (F-340's trip): focus went back to what held it
-   * and the pointer rests over the page, so it would open a ticket card nobody aimed at. Only a real press counts, and only
-   * for the moment a double press takes.
+   * The second `Enter` of a double press must not fall through the closed box (F-340's trip): focus went back to what held it,
+   * and the page's own keys would open a ticket card nobody aimed at. Only for the moment a double press takes. A pointer's second
+   * press is `TfDialog`'s to hold, which lets go once the pointer moves, so a click aimed at the page straight after goes at once.
    */
   function holdTheSecondPress() {
-    const byEnter = performance.now() - enterAt < 2000;
+    if (performance.now() - enterAt >= 2000) return;
     const stop = () => {
       window.removeEventListener("keydown", onpress, true);
-      window.removeEventListener("click", onpress, true);
       clearTimeout(timer);
     };
-    const onpress = (event: Event) => {
+    const onpress = (event: KeyboardEvent) => {
       if (!event.isTrusted) return;
-      if (event instanceof KeyboardEvent ? byEnter && event.key === "Enter" : true) {
+      if (event.key === "Enter") {
         event.preventDefault();
         event.stopPropagation();
       }
       stop();
     };
     window.addEventListener("keydown", onpress, true);
-    window.addEventListener("click", onpress, true);
     const timer = setTimeout(stop, 400);
   }
 

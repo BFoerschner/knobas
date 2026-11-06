@@ -341,7 +341,6 @@
    */
   function savedSet(set: LinkSetDetail) {
     savingSet = false;
-    holdStillPress();
     const id = detail?.row.entity_id;
     if (id !== undefined) reader.rereadReach(id);
     undoable(savedToast(set), () => {

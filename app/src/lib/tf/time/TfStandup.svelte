@@ -417,14 +417,12 @@
   let pageLink = $state<HTMLAnchorElement | null>(null);
 
   /**
-   * Take a new read of the protocol. Focus on the press stays there while it says
-   * *Queued*; with the write landed and nothing to send, the press goes and focus moves to the page it made.
+   * Take a new read of the protocol. Focus on the press stays there while it says *Queued*; with the write landed and
+   * nothing to send, the press goes and the keeper gives focus to what held it, so a second `Enter` doesn't open the page (F-340).
    */
   function take(answer: Protocol) {
-    const pressed = press !== null && document.activeElement === press;
     protocol = answer;
     edited = timer !== null;
-    if (pressed) void tick().then(() => (press === null || !press.isConnected) && pageLink?.focus());
   }
 
   /** Bumped per read, so one answering late does not put an older protocol back. */

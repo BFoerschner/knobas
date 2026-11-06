@@ -71,6 +71,8 @@
 .tf-tcard.tf-sel { box-shadow: 0 0 0 2px var(--ink), var(--shadow); }
 .tf-tcard.tf-card.tf-sel { box-shadow: 0 0 0 2px var(--card-ink), 0 0 0 4px var(--sel-halo), var(--shadow); }
 .tf-tcard.tf-card .tf-dim, .tf-tcard.tf-card .tf-cep { color: var(--card-ink-2); }
+/* As on the ticket's own card: `--rule` and `--ink-2` are the paper's, and go faint on the yellow in either theme. */
+.tf-tcard.tf-card .tf-lab { border-color: rgba(0,0,0,.25); color: var(--card-ink); }
 /* A card's first line never wraps: the key holds its width, and what follows it gives up first. */
 .tf-thead { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .tf-tcard .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; flex: 0 1 auto; min-width: 7ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
