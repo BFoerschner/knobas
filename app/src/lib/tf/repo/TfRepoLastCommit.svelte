@@ -25,7 +25,8 @@
     at,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "codeFacts">;
+    /** `codeFacts` says whose the commit is; without it the strip names the author as the source does. */
+    ports: Pick<RepoPorts, "entityView"> & Partial<Pick<RepoPorts, "codeFacts">>;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
@@ -52,7 +53,7 @@
           mine = false;
           return;
         }
-        return ports.codeFacts([id]).then(
+        return ports.codeFacts?.([id]).then(
           (facts) => {
             if (alive() && last?.entity_id === id) mine = facts.some((entry) => entry.entity_id === id && entry.mine);
           },
