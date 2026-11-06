@@ -33,6 +33,20 @@ const FIXTURE_HOST = "http://127.0.0.1:5399";
 /** When the fixture claims it last synced. Fixed, so screenshots are stable. */
 export const SYNCED_AT = "2026-08-22T14:30:00Z";
 
+/** The names the fixture's accounts go by, what Jira's `displayName` says beside `name`. */
+const PEOPLE: Record<string, string> = {
+  mara: "Mara Lindqvist",
+  jonas: "Jonas Becker",
+  priya: "Priya Nair",
+  tomasz: "Tomasz Wójcik",
+  lena: "Lena Hoffmann",
+};
+
+/** What the declared `assignee_name` reads for an account (F-107); an account with no name stays the only name. */
+export function fakePersonName(account: string | null): string | null {
+  return account === null ? null : (PEOPLE[account] ?? null);
+}
+
 /** Code's repositories (#837): name, last push, and prototype-6's team and language (#966). */
 const CODE_REPOS: [name: string, updated: string, team: string, language: string][] = [
   ["psp-client", "2026-08-21T13:20:00Z", "Payments", "Rust"],
@@ -649,6 +663,7 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     // that is the shape this corpus is in.
     issue_type: text(entry.payload["type"]),
     assignee,
+    ...(fakePersonName(assignee) === null ? {} : { assignee_name: fakePersonName(assignee)! }),
     updated_at: entry.updated_at,
     path: text(entry.payload["epic"]),
     parent_title: FAKE_EPIC_TITLES[text(entry.payload["epic"]) ?? ""] ?? null,

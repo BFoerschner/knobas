@@ -11,6 +11,7 @@ import {
   columnDone,
   drawnCards,
   moreLanesLine,
+  assigneeName,
   initials,
   laneTitle,
   moreLine,
@@ -316,4 +317,11 @@ test("a column's head reads as a state only when it is called after one it holds
   expect(columnHead("Doing", columns)).toBe("Doing");
   expect(columnHead("To Do", [])).toBe("To do");
   expect(columnHead(null, [])).toBe("No status");
+});
+
+test("a card calls its assignee by name where the source keeps one, else by account (F-107)", () => {
+  expect(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara Lindqvist");
+  expect(assigneeName({ assignee: "mara" })).toBe("mara");
+  expect(assigneeName({ assignee: null })).toBeNull();
+  expect(initials(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" }))).toBe(initials("Mara Lindqvist"));
 });

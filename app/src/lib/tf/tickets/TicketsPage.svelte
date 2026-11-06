@@ -140,7 +140,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { columnHead, columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, columnHead, columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -923,7 +923,7 @@
                   {:else if column === "signals"}
                     <td class="tf-c-signals"><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                   {:else if column === "assignee"}
-                    <td class="tf-c-assignee">{card.assignee ?? "Unassigned"}</td>
+                    <td class="tf-c-assignee">{assigneeName(card) ?? "Unassigned"}</td>
                   {:else if column === "updated"}
                     <td class="tf-dim tf-nowrap">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}

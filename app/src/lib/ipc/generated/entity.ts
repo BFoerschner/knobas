@@ -1370,6 +1370,17 @@ estimate_seconds: number | null,
  */
 reporter?: string, 
 /**
+ * The name to call the reporter by (F-107), through the declared
+ * `reporter_name` path. Absent where the account is the only name.
+ */
+reporter_name?: string, 
+/**
+ * The name to call [`author`](Self::author) by on a ticket, its assignee
+ * (F-107), through the declared `assignee_name` path: what the ticket's
+ * comments call the same person. Absent where the account is the only name.
+ */
+author_name?: string, 
+/**
  * When a ticket was filed (#2403), through the declared `created` path.
  * Absent on the wire on a miss.
  */
@@ -2632,6 +2643,12 @@ issue_type: string | null,
  * ticket and on a miss.
  */
 assignee: string | null, 
+/**
+ * The name to call that account by, at the declared `assignee_name` path
+ * (F-107), so the card's avatar is the one a ticket's page draws. Absent
+ * where the account is the only name; never matched against anything.
+ */
+assignee_name?: string, 
 /**
  * When the source last changed it, or `None` where it never said.
  *

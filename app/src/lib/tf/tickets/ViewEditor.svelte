@@ -52,7 +52,7 @@
     type ConditionField,
     type EditColumn,
   } from "./editor";
-  import { columnHead, columnName, LANE_FIELDS, splitLanes } from "./tickets";
+  import { assigneeName, columnHead, columnName, LANE_FIELDS, splitLanes } from "./tickets";
   import { counted } from "../counted";
   import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
@@ -674,7 +674,7 @@
                       {:else if column === "status"}<td>{columnName(card.status)}</td>
                       {:else if column === "priority"}<td>{card.priority ?? ""}</td>
                       {:else if column === "signals"}<td>{card.signals.length}</td>
-                      {:else if column === "assignee"}<td>{card.assignee ?? "Unassigned"}</td>
+                      {:else if column === "assignee"}<td>{assigneeName(card) ?? "Unassigned"}</td>
                       {:else if column === "updated"}<td>{clockLabel(card.updated_at)}</td>
                       {:else if column === "epic"}<td>{card.path ?? ""}</td>
                       {:else}<td>{card.labels.join(", ")}</td>{/if}

@@ -6,7 +6,7 @@ import type { Attachment, EntityDetail, LinkEntry, LinkRow, PipeStep, SourceView
 import type { EntityRefresh } from "../../../ipc/sources";
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
-import { CORPUS, bodyShown, fakeEpicEntry, mirrorRow } from "./corpus";
+import { CORPUS, bodyShown, fakeEpicEntry, fakePersonName, mirrorRow } from "./corpus";
 import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
 import { fakeStateOf } from "./link-sets";
@@ -280,6 +280,8 @@ function getEntity(args: Record<string, unknown>) {
     kind_info: null,
     body_text: bodyShown(entry.body_text),
     author: entry.author,
+    // The name the source keeps beside the account, on a ticket (F-107).
+    ...(entry.kind === "ticket" && fakePersonName(entry.author) !== null ? { author_name: fakePersonName(entry.author)! } : {}),
     payload: entry.payload,
     web_url: entry.web_url,
     deleted_at: entry.deleted_at,

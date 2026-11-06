@@ -864,7 +864,11 @@ async fn a_failed_build_with_no_status_text_says_only_that_it_failed() {
             .expect("the build is on the stream")
     };
     let (reason, title, detail) = said(&told);
-    assert_eq!(reason, format!("{title} failed"), "the subject leads (F-115)");
+    assert_eq!(
+        reason,
+        format!("{title} failed"),
+        "the subject leads (F-115)"
+    );
     assert_eq!(detail.as_deref(), Some("3 tests failed"));
     let (reason, title, detail) = said(&silent);
     assert_eq!(reason, format!("{title} failed"));

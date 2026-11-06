@@ -137,13 +137,22 @@ export function initials(assignee: string | null): string {
 }
 
 /**
+ * What a card calls its assignee (F-107): the name the source keeps beside the
+ * account, which is what a ticket's comments call the same person, else the
+ * account. Filters and lanes stay on the account, the stored value.
+ */
+export function assigneeName(card: Pick<MiniBoardCard, "assignee" | "assignee_name">): string | null {
+  return card.assignee_name ?? card.assignee;
+}
+
+/**
  * What the Tickets preview and the ticket page draw of a ticket (spec #2227):
  * a board card's fields, or the same fields read off the ticket's detail
  * ({@link ticketFacts}), so both draw from one component.
  */
 export type TicketFacts = Pick<
   MiniBoardCard,
-  "entity_id" | "key" | "title" | "status" | "assignee" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
+  "entity_id" | "key" | "title" | "status" | "assignee" | "assignee_name" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
 >;
 
 /**
@@ -156,7 +165,7 @@ export type TicketFacts = Pick<
  * it is read, or when it cannot be, draws the path line alone.
  */
 export function ticketFacts(
-  detail: Pick<EntityDetail, "row" | "author" | "status" | "priority">,
+  detail: Pick<EntityDetail, "row" | "author" | "author_name" | "status" | "priority">,
   mine: boolean,
   parentTitle: string | null,
 ): TicketFacts {
@@ -166,6 +175,7 @@ export function ticketFacts(
     title: detail.row.title,
     status: detail.status,
     assignee: detail.author,
+    ...(detail.author_name ? { assignee_name: detail.author_name } : {}),
     priority: detail.priority,
     path: detail.row.path,
     parent_title: parentTitle,
@@ -201,7 +211,7 @@ export function previewAction(
   }
   if (lower === "done") return { label: "Open ticket", note: "Done. Opening shows what was attached.", chooses: false };
   if (!card.mine) {
-    return { label: "Open ticket", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned.", chooses: false };
+    return { label: "Open ticket", note: card.assignee ? `Assigned to ${assigneeName(card)}.` : "Unassigned.", chooses: false };
   }
   return {
     label: "Resume work",

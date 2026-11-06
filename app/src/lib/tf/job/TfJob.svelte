@@ -621,6 +621,7 @@
               oncomment={comment}
               attachments={detail.attachments ?? []}
               images={inlineImages}
+              selfName={mine ? (detail.author_name ?? null) : detail.reporter === me ? (detail.reporter_name ?? null) : null}
             />
           </section>
         </div>

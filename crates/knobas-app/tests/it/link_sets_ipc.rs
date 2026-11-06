@@ -1120,3 +1120,108 @@ async fn a_drawer_row_says_what_its_far_end_says_of_itself() {
     assert_eq!(chip.tone, Some(knobas_core::tone::Tone::Info));
     assert_eq!(state_of(&silent), None);
 }
+
+/// F-107: a ticket's detail says what its source calls the assignee and the
+/// reporter beside their accounts, so the page's card and its Conversation name
+/// one person one way. The accounts stay what `mine` and the filters read.
+#[tokio::test]
+async fn a_tickets_detail_names_its_people_as_its_comments_do() {
+    let pool = pool().await;
+    let p = project();
+    let ticket = issue(&pool, &p, 1, None, Some("mara")).await;
+    let bare = issue(&pool, &p, 2, None, Some("jonas")).await;
+    sqlx::query(
+        "update sync.item
+            set author = 'mara',
+                payload = jsonb_set(
+                    jsonb_set(payload, '{fields,assignee,displayName}', '\"Mara Lindqvist\"'),
+                    '{fields,reporter}', '{\"name\": \"lena\", \"displayName\": \"Lena Hoffmann\"}')
+          where entity_id = $1",
+    )
+    .bind(&ticket)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let registry = Registry::for_process();
+    let detail = knobas_app::commands::entity::get_entity_inner(&pool, &registry, &ticket)
+        .await
+        .unwrap();
+    assert_eq!(detail.author.as_deref(), Some("mara"));
+    assert_eq!(detail.author_name.as_deref(), Some("Mara Lindqvist"));
+    assert_eq!(detail.reporter.as_deref(), Some("lena"));
+    assert_eq!(detail.reporter_name.as_deref(), Some("Lena Hoffmann"));
+
+    let detail = knobas_app::commands::entity::get_entity_inner(&pool, &registry, &bare)
+        .await
+        .unwrap();
+    assert_eq!(
+        detail.author_name, None,
+        "the account is the only name it has"
+    );
+}
+
+/// The name roles revert cleanly (F-107). A changed declaration recomputes the
+/// rows derived from it at the next start, so a build with the roles and a build
+/// without them each recompute. They must land on the same rows, because neither
+/// role feeds one: strip the roles as the previous build's declaration has them,
+/// and every derived row reads as it did. The row with the roles back is the
+/// same again.
+#[tokio::test]
+async fn the_name_roles_move_no_derived_row_either_way() {
+    let pool = pool().await;
+    let p = project();
+    let epic = issue(&pool, &p, 1, None, Some("mara")).await;
+    issue(&pool, &p, 2, Some(&epic), Some("jonas")).await;
+
+    let derived = async |pool: &PgPool| -> Vec<String> {
+        let mut rows = Vec::new();
+        for table in [
+            "item_parent",
+            "item_project",
+            "item_field",
+            "item_revision",
+            "item_pipeline",
+        ] {
+            let lines: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "select '{table} ' || t::text from sync.{table} t order by 1"
+            )))
+            .fetch_all(pool)
+            .await
+            .unwrap();
+            rows.extend(lines);
+        }
+        let cells: Vec<String> = sqlx::query_scalar(
+            "select 'key_cell ' || entity_id || ' ' || coalesce(key_cell::text, '')
+               from sync.item order by 1",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        rows.extend(cells);
+        rows
+    };
+    let with_roles = derived(&pool).await;
+    assert!(!with_roles.is_empty(), "the tickets have derived rows");
+
+    let stripped = sqlx::query(
+        "update sync.parent_declaration
+            set payload_paths = (select jsonb_agg(e - 'assignee_name' - 'reporter_name')
+                                   from jsonb_array_elements(payload_paths) e)
+          where payload_paths::text like '%assignee_name%'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(stripped.rows_affected(), 1, "Jira alone declares the roles");
+    assert_eq!(
+        derived(&pool).await,
+        with_roles,
+        "the previous build's declaration"
+    );
+
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    assert_eq!(derived(&pool).await, with_roles, "and this build's again");
+}

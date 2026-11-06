@@ -95,6 +95,17 @@ pub struct EntityDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub reporter: Option<String>,
+    /// The name to call the reporter by (F-107), through the declared
+    /// `reporter_name` path. Absent where the account is the only name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reporter_name: Option<String>,
+    /// The name to call [`author`](Self::author) by on a ticket, its assignee
+    /// (F-107), through the declared `assignee_name` path: what the ticket's
+    /// comments call the same person. Absent where the account is the only name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub author_name: Option<String>,
     /// When a ticket was filed (#2403), through the declared `created` path.
     /// Absent on the wire on a miss.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -179,7 +190,10 @@ pub async fn get_entity_inner(
     // The Connections drawer's dots (F-036). It only opens on a ticket, so no
     // other kind pays for the read.
     if detail.row.kind == "ticket" && !detail.links.is_empty() {
-        let ids = detail.links.iter().map(|entry| entry.other.entity_id.as_str());
+        let ids = detail
+            .links
+            .iter()
+            .map(|entry| entry.other.entity_id.as_str());
         let states = crate::link_sets::states_of(pool, &declarations.as_param(), ids).await?;
         for entry in &mut detail.links {
             entry.other.state = states.get(&entry.other.entity_id).cloned();
@@ -215,6 +229,8 @@ pub async fn get_entity_inner(
         priority: detail.priority,
         estimate_seconds: detail.estimate_seconds,
         reporter: detail.reporter,
+        reporter_name: detail.reporter_name,
+        author_name: detail.author_name,
         created: detail.created,
         time_spent_seconds: detail.time_spent_seconds,
         logged_by: detail.logged_by,

@@ -449,6 +449,32 @@ function steps(): [string | undefined, string | undefined][] {
   return [...target.querySelectorAll(".tf-step")].map((row) => [row.querySelector("strong")?.textContent ?? undefined, row.querySelector(".tf-state")?.textContent ?? undefined]);
 }
 
+test("one person reads one way on the page: the card and Conversation name the reader alike (F-107)", async () => {
+  const { follower } = echoFollower();
+  open("PAY-231", {
+    follower,
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve({ ...TODO_MINE(), author_name: "Mara Lindqvist", reporter: "lena", reporter_name: "Lena Hoffmann" }) : Promise.reject({ code: "not_found" })),
+      submitWrite: () => Promise.resolve({ id: 72 } as never),
+    }),
+  });
+  await settle();
+  const card = target.querySelector("[aria-label='Job card']")!;
+  const row = (term: string) => [...card.querySelectorAll("dl.tf-facts > dt")].find((each) => each.textContent === term)!.nextElementSibling!;
+  expect(squash(row("Assignee"))).toBe("MLMara Lindqvist (you)");
+  expect(squash(row("Reporter"))).toBe("LHLena Hoffmann");
+
+  // Before they have commented, the thread knows only their account; the composer's echo still reads ML.
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box.value = "Looking at the jitter now";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+  expect(squash(target.querySelector(".tf-convo .tf-msg.tf-queued .tf-av")!)).toBe("ML");
+});
+
 test("a To Do ticket of mine shows Start work, proposed in the suggested repository, above the description", async () => {
   const asked: (string | null)[] = [];
   let stored: StartWorkStep[] = [];

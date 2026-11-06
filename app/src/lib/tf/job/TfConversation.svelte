@@ -47,7 +47,10 @@
     oncomment,
     attachments = [],
     images = null,
+    selfName = null,
   }: {
+    /** What the page's card calls the reader, where it does: the composer's avatar before they have commented (F-107). */
+    selfName?: string | null;
     jobKey: string;
     /** The ticket's entity id, which *Edit and resend* names. */
     entityId: string;
@@ -84,8 +87,8 @@
     box?.focus();
   });
 
-  /** The reader as the thread names them: the author of their own comments, else their account. */
-  const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? thread?.me[0] ?? null);
+  /** The reader as the thread names them: the author of their own comments, else as the card does, else their account. */
+  const myName = $derived(thread?.comments.find((c) => c.mine)?.author ?? selfName ?? thread?.me[0] ?? null);
   const drawn = $derived(thread === null ? null : wholeThread(thread, lastVisit));
 
   let convo = $state<HTMLDivElement | null>(null);

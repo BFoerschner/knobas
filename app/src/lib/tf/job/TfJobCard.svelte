@@ -97,6 +97,9 @@
   const labels = $derived(detail.labels ?? []);
   const reporter = $derived(detail.reporter ?? null);
   const reporterMine = $derived(reporter !== null && me !== null && reporter === me);
+  /** What a person is called (F-107): the name the source keeps beside the account, as the Conversation below says it. */
+  const reporterName = $derived(detail.reporter_name ?? reporter);
+  const assigneeName = $derived(detail.author_name ?? detail.author);
   const logged = $derived(loggedRow(detail, me));
   /** A meter segment's width, through the CSSOM: the app's CSP refuses `style=""` in markup, not this. */
   const width = (share: number) => (node: HTMLElement) => {
@@ -256,15 +259,15 @@
     {#if reporter !== null}
       <dt>Reporter</dt>
       <dd>
-        <span class="tf-av" class:tf-me={reporterMine} aria-hidden="true">{initials(reporter)}</span><span
-          >{reporter}{reporterMine ? " (you)" : ""}</span
+        <span class="tf-av" class:tf-me={reporterMine} aria-hidden="true">{initials(reporterName)}</span><span
+          >{reporterName}{reporterMine ? " (you)" : ""}</span
         >
       </dd>
     {/if}
     <dt>Assignee</dt>
     <dd>
-      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(detail.author)}</span><span
-        >{detail.author ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
+      <span class="tf-av" class:tf-me={mine && detail.author !== null} aria-hidden="true">{initials(assigneeName)}</span><span
+        >{assigneeName ?? "Unassigned"}{mine && detail.author !== null ? " (you)" : ""}</span
       >
     </dd>
     {#if detail.issue_type}<dt>Type</dt><dd>{detail.issue_type}</dd>{/if}

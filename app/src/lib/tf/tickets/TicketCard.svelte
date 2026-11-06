@@ -19,7 +19,7 @@
   import Marked from "../filter/Marked.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import Signals from "./Signals.svelte";
-  import { commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
+  import { assigneeName, commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
 
   let {
     card,
@@ -76,7 +76,7 @@
     {#each labels as label (label)}<span class="tf-lab">{label}</span>{/each}
     {#if comments && shows("comments")}<span class="tf-signal tf-dim tf-comments">{comments}</span>{/if}
     {#if shows("assignee")}
-      <span class="tf-av" class:tf-me={card.mine} title={card.assignee ?? "Unassigned"}>{initials(card.assignee)}</span>
+      <span class="tf-av" class:tf-me={card.mine} title={assigneeName(card) ?? "Unassigned"}>{initials(assigneeName(card))}</span>
     {/if}
   </span>
 </button>

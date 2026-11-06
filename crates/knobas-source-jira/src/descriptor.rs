@@ -225,6 +225,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 PayloadPath::of(["fields", "assignee", "name"]),
                 PayloadPath::of(["fields", "assignee", "key"]),
             ],
+            assignee_name: vec![PayloadPath::of(["fields", "assignee", "displayName"])],
             project_key: vec![PayloadPath::of(["fields", "project", "key"])],
             project_name: vec![PayloadPath::of(["fields", "project", "name"])],
             issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
@@ -234,6 +235,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 PayloadPath::of(["fields", "reporter", "name"]),
                 PayloadPath::of(["fields", "reporter", "key"]),
             ],
+            reporter_name: vec![PayloadPath::of(["fields", "reporter", "displayName"])],
             created: vec![PayloadPath::of(["fields", "created"])],
             time_spent: vec![PayloadPath::of(["fields", "timespent"])],
             worklog: vec![knobas_source::WorklogPath {
