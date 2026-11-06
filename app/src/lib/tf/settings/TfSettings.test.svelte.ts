@@ -1261,7 +1261,10 @@ test("Add a source: choosing another adapter resets the config, so no field of t
   expect(dialog().querySelector("#tf-add-cfg-flavor")).not.toBeNull();
   type("#tf-add-cfg-sprint_field", "customfield_99");
 
-  radios[1]!.click();
+  // The pick folded the list, so another kind is one *Change* away (F-656).
+  dialogButton("Change").click();
+  flushSync();
+  dialog().querySelectorAll<HTMLInputElement>(".tf-radio input")[1]!.click();
   flushSync();
   // Gitea's schema and nothing of Jira's: a config carrying `flavor` would be
   // written to a Gitea source's config column, where it means nothing.

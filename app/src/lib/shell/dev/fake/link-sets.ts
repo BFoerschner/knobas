@@ -162,7 +162,8 @@ function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
     return {
       ...row,
       line: monitor.monitor_type || null,
-      state: monitor.state && tone ? { text: monitor.state, tone } : null,
+      // A paused monitor isn't live, as Monitors says: its last sample is only what it read when it was paused.
+      state: monitor.tombstoned ? { text: "paused", tone: "muted" } : monitor.state && tone ? { text: monitor.state, tone } : null,
     };
   }
   const item = CORPUS.find((entry) => entry.entity_id === id);

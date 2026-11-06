@@ -29,6 +29,7 @@ import {
   sourceOf,
   type ColumnPath,
   heldStrip,
+  pressKeepsStrip,
   stripFor,
   COLUMN_WIDTH,
   spareWidth,
@@ -473,6 +474,36 @@ test("a held strip gives way when the selection's own column wouldn't be drawn",
   expect(heldStrip(2, 0, 400, 1)).toBeNull();
   expect(heldStrip(6, 5, 1080, 0)).toBeNull();
   expect(heldStrip(5, 4, 0, 0)).toBeNull();
+});
+
+/**
+ * **A press in the selection's column keeps the strip (F-560)**, so walking a column by pointer moves it once at most.
+ * These are the walk the finding measured: knobas-jira's column at 1440 (1080 wide) and 1241 (881), and the 1100 strip.
+ */
+test("a press on a sibling keeps the strip, and only a next level that doesn't fit folds it", () => {
+  // Fold at the top: a leaf keeps it, and a holder's sixth column doesn't fit, which is the one fold of the walk.
+  expect(pressKeepsStrip(4, 4, false, 1080, 0)).toBe(true);
+  expect(pressKeepsStrip(4, 4, true, 1080, 0)).toBe(false);
+  // Once folded, both kinds of row keep it, so the column doesn't move again.
+  expect(pressKeepsStrip(4, 4, false, 1080, 2)).toBe(true);
+  expect(pressKeepsStrip(4, 4, true, 1080, 2)).toBe(true);
+  // The same walk at 1241.
+  expect(pressKeepsStrip(3, 3, true, 881, 0)).toBe(false);
+  expect(pressKeepsStrip(3, 3, false, 881, 2)).toBe(true);
+  expect(pressKeepsStrip(3, 3, true, 881, 2)).toBe(true);
+  // A next level that fits beside the fold opens without one.
+  expect(pressKeepsStrip(2, 2, true, 1080, 0)).toBe(true);
+  // Narrow: one column wide, so a holder folds and a leaf stays.
+  expect(pressKeepsStrip(1, 1, true, 300, 1)).toBe(false);
+  expect(pressKeepsStrip(1, 1, false, 300, 1)).toBe(true);
+});
+
+test("a press outside the selection's column, or with nothing measured, folds as ever", () => {
+  // Up a level, down a level, and the bare tree with nothing selected.
+  expect(pressKeepsStrip(3, 4, false, 1080, 0)).toBe(false);
+  expect(pressKeepsStrip(5, 4, false, 1080, 2)).toBe(false);
+  expect(pressKeepsStrip(0, -1, false, 1080, 0)).toBe(false);
+  expect(pressKeepsStrip(2, 2, false, 0, 0)).toBe(false);
 });
 
 test("a row holding nothing gives the pane what a holder does", () => {

@@ -1134,6 +1134,86 @@ test("a walk's next level that fits still draws beside the strip", async () => {
   expect(spines()).toEqual([]);
 });
 
+/** F-560: a press in the selection's own column holds the strip as `↓` does. */
+const rowNamed = (name: string) =>
+  [...target.querySelectorAll<HTMLButtonElement>("button.row")].find((one) => one.querySelector("span.nm")?.textContent?.trim() === name)!;
+
+test("a press on a plain row keeps the fold, and a press on a holder that doesn't fit folds once", async () => {
+  const OTHER = row({ id: "asset:b-leaf", parent_id: SITE.id, type_id: "vm", monogram: "VM", name: "b-leaf", has_children: false });
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF, OTHER], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+
+  rowNamed("b-leaf").click();
+  await waitFor(() => expect(marked()).toEqual(["hel1", "b-leaf"]));
+  expect(spines()).toEqual([]);
+
+  // A holder's next level needs a third column, so the strip folds once.
+  const holder = columns()[1]!.find((name) => name !== "a-leaf" && name !== "b-leaf")!;
+  rowNamed(holder).click();
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
+  await waitFor(() => expect(marked()[0]).toBe(holder));
+
+  // Back on a plain row, the fold stands, where it used to come undone.
+  rowNamed("a-leaf").click();
+  flushSync();
+  expect(spines()).toEqual(["hel1"]);
+  await waitFor(() => expect(marked()).toEqual(["a-leaf"]));
+  expect(spines()).toEqual(["hel1"]);
+});
+
+test("a press on the row already selected moves nothing", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  press("ArrowUp");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+
+  rowNamed("a-leaf").click();
+  flushSync();
+  expect(spines()).toEqual([]);
+  expect(columns()).toHaveLength(2);
+});
+
+/** F-562: arriving leaves focus on nothing, and `↑` and `↓` walk from there. */
+test("↓ walks from the selected row with focus on nothing, and takes focus to the row", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  (document.activeElement as HTMLElement | null)?.blur();
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+
+  const event = press("ArrowDown", document.body);
+  expect(event.defaultPrevented).toBe(true);
+  await waitFor(() => expect(marked().slice(0, 2)).toEqual(["hel1", next]));
+  await waitFor(() => expect(document.activeElement?.closest("button.row")?.querySelector("span.nm")?.textContent?.trim()).toBe(next));
+});
+
+test("from outside the view, ↓ leaves a field and an open dialog alone", async () => {
+  const { nav } = render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  const start = nav.route;
+
+  const outside = document.createElement("input");
+  document.body.appendChild(outside);
+  outside.focus();
+  expect(press("ArrowDown", outside).defaultPrevented).toBe(false);
+  outside.remove();
+
+  const dialog = document.createElement("div");
+  dialog.className = "tf-dialog";
+  dialog.tabIndex = -1;
+  document.body.appendChild(dialog);
+  dialog.focus();
+  expect(press("ArrowDown", dialog).defaultPrevented).toBe(false);
+  dialog.remove();
+
+  expect(nav.route).toEqual(start);
+  expect(marked()).toEqual(["hel1", "a-leaf"]);
+});
+
 /** A window with room for every column draws no spine at all. */
 test("a path the window holds collapses nothing", async () => {
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 1400 });

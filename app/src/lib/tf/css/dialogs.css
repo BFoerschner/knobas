@@ -134,6 +134,8 @@
 .tf-add-more[open] > summary { margin-bottom: 8px; }
 .tf-add-more > .tf-dlg-note { margin-top: 8px; }
 .tf-add-inst { display: flex; gap: var(--control-gap); align-items: center; }
+.tf-add-kind { display: flex; gap: var(--control-gap); align-items: center; }
+.tf-add-kind > .tf-radio { flex: 1; min-width: 0; }
 .tf-add-inst input[type="text"] { flex: 1; min-width: 0; }
 /* Settings › Sources › Installed adapters (#1209, #1210) */
 .tf-ext-h { display: flex; align-items: center; gap: 12px; }

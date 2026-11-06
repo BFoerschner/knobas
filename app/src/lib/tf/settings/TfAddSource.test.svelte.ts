@@ -236,3 +236,148 @@ test("an adapter that has gone gives nothing back", async () => {
   expect(radio("Gitea")!.checked).toBe(false);
   expect(field("tf-add-address")).toBeNull();
 });
+
+/** F-656: a press folds the list to the chosen row with *Change*, so the form fits. */
+const kinds = () => [...target.querySelectorAll<HTMLInputElement>("input[name='tf-add-adapter']")];
+const change = () => [...target.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Change");
+
+function key(on: Element, name: string, shiftKey = false) {
+  const event = new KeyboardEvent("keydown", { key: name, shiftKey, bubbles: true, cancelable: true });
+  on.dispatchEvent(event);
+  flushSync();
+  return event;
+}
+
+test("a press on a kind folds the list to that row, and focus goes on to the address", async () => {
+  await open();
+  expect(kinds()).toHaveLength(2);
+  expect(change()).toBeUndefined();
+
+  await pick("Gitea");
+  expect(kinds()).toHaveLength(1);
+  expect(radio("Gitea")!.checked).toBe(true);
+  expect(change()).toBeDefined();
+  expect(document.activeElement).toBe(field("tf-add-address"));
+});
+
+test("an arrow picks and keeps the list open until Tab, which goes on to the address", async () => {
+  await open();
+  const list = target.querySelector("[role='radiogroup']")!;
+  key(list, "ArrowDown");
+  radio("Jira")!.click();
+  flushSync();
+  await settle();
+  expect(radio("Jira")!.checked).toBe(true);
+  expect(kinds()).toHaveLength(2);
+
+  const tab = key(radio("Jira")!, "Tab");
+  await settle();
+  expect(tab.defaultPrevented).toBe(true);
+  expect(kinds()).toHaveLength(1);
+  expect(document.activeElement).toBe(field("tf-add-address"));
+});
+
+test("Change opens the list on the chosen row, a press on that row folds it, and what is typed stays", async () => {
+  await open();
+  await typeAll();
+
+  change()!.click();
+  flushSync();
+  await settle();
+  expect(kinds()).toHaveLength(2);
+  expect(document.activeElement).toBe(radio("Gitea"));
+  expect(field("tf-add-secret")!.value).toBe(TOKEN);
+
+  radio("Gitea")!.click();
+  flushSync();
+  await settle();
+  expect(kinds()).toHaveLength(1);
+  expect(document.activeElement).toBe(field("tf-add-address"));
+  expect(field("tf-add-secret")!.value).toBe(TOKEN);
+  expect(field("tf-add-account-pass")!.value).toBe(PASSWORD);
+});
+
+test("Change holds no secret: not in the draft, and none of it left after Esc and a reopen", async () => {
+  await open();
+  await typeAll();
+  change()!.click();
+  flushSync();
+  await settle();
+
+  expect(JSON.stringify(newSourceDraft.held())).not.toContain(TOKEN);
+  expect(Object.keys(newSourceDraft.held()!).sort()).toEqual(["adapter", "address", "name"]);
+
+  // `Esc` with the list open folds it first, on the button that opened it, and the dialog stays.
+  const one = key(radio("Gitea")!, "Escape");
+  await settle();
+  expect(one.defaultPrevented).toBe(true);
+  expect(closed).not.toHaveBeenCalled();
+  expect(kinds()).toHaveLength(1);
+  expect(document.activeElement).toBe(change());
+
+  esc();
+  expect(closed).toHaveBeenCalledOnce();
+  shut();
+  expectNoSecret();
+
+  await open();
+  expect(kinds()).toHaveLength(1);
+  expect(field("tf-add-secret")!.value).toBe("");
+  expect(field("tf-add-account-pass")!.value).toBe("");
+  expectNoSecret();
+});
+
+test("another kind picked after Change takes the token, the account and its password with it", async () => {
+  await open();
+  await typeAll();
+  change()!.click();
+  flushSync();
+  await settle();
+
+  await pick("Jira");
+  expect(kinds()).toHaveLength(1);
+  expect(radio("Jira")!.checked).toBe(true);
+  expect(field("tf-add-secret")!.value).toBe("");
+  expect(field("tf-add-account-user")!.value).toBe("");
+  expect(field("tf-add-account-pass")!.value).toBe("");
+  expect(target.innerHTML).not.toContain(TOKEN);
+  expect(JSON.stringify(newSourceDraft.held())).not.toContain(TOKEN);
+});
+
+test("a restored draft arrives folded, with Change, an empty token, and the list a press away", async () => {
+  await open();
+  await typeAll();
+  esc();
+  shut();
+  expectNoSecret();
+
+  await open();
+  expect(kinds()).toHaveLength(1);
+  expect(radio("Gitea")!.checked).toBe(true);
+  expect(change()).toBeDefined();
+  expect(document.activeElement).toBe(field("tf-add-address"));
+  expect(field("tf-add-secret")!.value).toBe("");
+
+  change()!.click();
+  flushSync();
+  await settle();
+  expect(kinds()).toHaveLength(2);
+  expect(field("tf-add-secret")!.value).toBe("");
+  expectNoSecret();
+});
+
+test("one adapter has nothing to change to", async () => {
+  app = mount(TfAddSource, {
+    target,
+    props: {
+      ports: { listAdapters: () => Promise.resolve([adapter("gitea")]), testSource, addSource, previewInstallAdapter: vi.fn(), installAdapter: vi.fn() } as never,
+      layers,
+      onclose: closed,
+      onsaved: added,
+    },
+  });
+  await settle();
+  expect(kinds()).toHaveLength(1);
+  expect(change()).toBeUndefined();
+  expect(document.activeElement).toBe(field("tf-add-address"));
+});

@@ -158,7 +158,7 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
       .filter((member) => !member.hidden)
       .map((member) => ({
         id: member.entity_id,
-        title: member.title ?? member.entity_id,
+        title: member.title ?? keyOf(member.entity_id),
         href: rowHash(member.entity_id, member.entity_kind, member.kind),
         section: sectionOf(member.kind),
         kind: kindWord(member.kind),
@@ -177,7 +177,7 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
       setId: null,
       rows: read.parent.links.map((link) => ({
         id: link.entity_id,
-        title: link.title ?? link.entity_id,
+        title: link.title ?? keyOf(link.entity_id),
         href: rowHash(link.entity_id, link.kind, null),
         section: sectionOf(link.kind),
         kind: kindWord(link.kind),
@@ -198,7 +198,7 @@ export function hiddenOf(read: JobLinkSets | null): HiddenRow[] {
   const out = new Map<string, string>();
   for (const set of read?.sets ?? []) {
     for (const member of set.members) {
-      if (member.hidden && !out.has(member.entity_id)) out.set(member.entity_id, member.title ?? member.entity_id);
+      if (member.hidden && !out.has(member.entity_id)) out.set(member.entity_id, member.title ?? keyOf(member.entity_id));
     }
   }
   return [...out].map(([id, title]) => ({ id, title }));

@@ -574,7 +574,8 @@ test("link sets: a monitor row draws its type and its dot, a repository its team
   const roster = h["monitor_roster"]!({}) as { entity_id: string; monitor_type: string }[];
   const kind = roster.find((row) => row.entity_id === "kuma:5")?.monitor_type;
   expect(kind).toBeTruthy();
-  expect(of("kuma:5")).toMatchObject({ line: kind, state: { text: "up", tone: "ok" } });
+  // gitea's monitor is the fixture's paused one, which Monitors says too (F-540).
+  expect(of("kuma:5")).toMatchObject({ line: kind, state: { text: "paused", tone: "muted" } });
   expect(of("mock:tidewater/payout-service")).toMatchObject({ line: "Payments", state: null });
 });
 

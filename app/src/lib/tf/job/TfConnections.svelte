@@ -210,6 +210,8 @@
     {#if shown.length > 0}{@render heldRow("links", shown.length, shown.some((one) => one.link.id === holding?.id))}{/if}
     {#each groups as group (group.key)}
       {@const rows = filterRows(group.rows, text)}
+      <!-- A filter that leaves a group empty takes its heading too (F-563), unless a row there is holding its place under the pointer. -->
+      {#if rows.length > 0 || text.trim() === "" || holding?.list === group.key}
       <h3 data-group={group.key}>
         From {group.label}, <TfKeyed text={group.via} lead /> <span class="tf-count">{rows.length}</span>
         {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={() => { oneditset({ group: group.key, top: body?.scrollTop ?? 0, text }); onclose(); }}>Edit set</a>{/if}
@@ -230,6 +232,7 @@
         </div>
       {/each}
       {@render heldRow(group.key, rows.length, rows.some((one) => one.id === holding?.id))}
+      {/if}
     {/each}
     {#if hidden.length > 0}
       <h3>Hidden on <TfKey value={jobKey} lead /> <span class="tf-count">{hidden.length}</span></h3>

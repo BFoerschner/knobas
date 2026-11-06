@@ -21,6 +21,10 @@
   ends them, as a source added does. The token, the password, the account and a test's answer are this dialog's own state and
   go with it, so a reopened dialog asks for the token and tests again.
 
+  **A pick folds the list** (F-656): a press on a kind leaves that row and *Change*, so the form fits. An arrow picks as it moves, so
+  walking keeps the list open until `Tab`, which goes on to the address. A restored draft arrives folded, and one adapter has nothing
+  to change to. A different kind takes the token, the account and its password with it: they were typed for the kind before.
+
   *Install an adapter* (#1202, #1209, ADR-0028) takes a GitHub repository
   URL (its latest release), a manifest URL, or the path of a local
   `knobas-adapter.json`. *Install…* runs every check and writes nothing
@@ -98,6 +102,11 @@
   /** The last install's answer: what was installed, or why it was refused. */
   let installNote = $state<{ ok: boolean; text: string } | null>(null);
   let radios = $state<HTMLElement | null>(null);
+  /** The list stands folded to the chosen kind. */
+  let folded = $state(false);
+  /** *Change* opened the list, so `Esc` folds it again before it closes the dialog. */
+  let changing = $state(false);
+  let changeButton = $state<HTMLElement | null>(null);
   let form = $state<HTMLElement | null>(null);
 
   $effect(() => {
@@ -114,15 +123,19 @@
           choose(left);
           baseUrl = held.address;
           displayName = held.name;
+          folded = true;
           // Otherwise nothing is preselected (Controls, the enabled rule), unless there is nothing to choose between.
-        } else if (chosen === null && rows.length === 1) choose(rows[0]!);
+        } else if (chosen === null && rows.length === 1) {
+          choose(rows[0]!);
+          folded = true;
+        }
         // What the dialog asks first arrived after it opened, so focus goes in now.
         void tick().then(() => {
           if (dead) return;
           const field = form?.querySelector<HTMLElement>("#tf-add-address");
           (field ?? radios?.querySelector<HTMLElement>("input"))?.focus();
-          // With the field above it in view too, in a short window, as a pick does (F-624).
-          field?.scrollIntoView?.({ block: "center" });
+          // A field means the list has folded, so the chosen row stands just above it, and stays in view (F-656).
+          field?.scrollIntoView?.({ block: "nearest" });
         });
       })
       .catch((cause) => {
@@ -199,6 +212,12 @@
   }
 
   function choose(adapter: SourceDescriptor) {
+    // A token typed for one kind must not go on to another.
+    if (chosen !== null && chosen.id !== adapter.id) {
+      secret = "";
+      accountUser = "";
+      accountPassword = "";
+    }
     chosen = adapter;
     id = freeSourceId(adapter.adapter_kind, taken);
     displayName = adapter.name;
@@ -224,17 +243,61 @@
   let walking = false;
 
   /**
-   * A pick opens the form below the list, which a short window would leave half cut (F-624). A pointer's pick goes on to
-   * the first field; a key's stays on the radios and brings the field into view.
+   * A pick opens the form below the list, which a short window would leave half cut (F-624, F-656). A pointer's pick folds
+   * the list and goes on to the first field. A key's stays on the radios, with the row it picked in view, since the next
+   * arrow goes on from there.
    */
   function reveal() {
     const stay = walking;
     walking = false;
+    if (stay) {
+      void tick().then(() => radios?.querySelector<HTMLElement>("input:checked")?.scrollIntoView?.({ block: "nearest" }));
+      return;
+    }
+    goOn();
+  }
+
+  /** Fold the list to the chosen row and go on to the first field. */
+  function goOn() {
+    folded = true;
+    changing = false;
     void tick().then(() => {
       const field = form?.querySelector<HTMLElement>("#tf-add-address");
-      if (!stay) field?.focus({ preventScroll: true });
-      field?.scrollIntoView?.({ block: stay ? "nearest" : "center" });
+      field?.focus({ preventScroll: true });
+      field?.scrollIntoView?.({ block: "nearest" });
     });
+  }
+
+  /** *Change*: the list again, on the chosen row, so an arrow goes on from it. What is typed stays until another kind is picked. */
+  function change() {
+    folded = false;
+    changing = true;
+    void tick().then(() => {
+      const row = radios?.querySelector<HTMLElement>("input:checked");
+      row?.focus({ preventScroll: true });
+      row?.scrollIntoView?.({ block: "nearest" });
+    });
+  }
+
+  function listKeys(event: KeyboardEvent) {
+    if (event.key === "Tab" && chosen !== null && !folded) {
+      if (event.shiftKey) folded = true;
+      else {
+        event.preventDefault();
+        goOn();
+      }
+      changing = false;
+      return;
+    }
+    if (event.key === "Escape" && changing) {
+      event.preventDefault();
+      event.stopPropagation();
+      folded = true;
+      changing = false;
+      void tick().then(() => changeButton?.focus());
+      return;
+    }
+    walking = true;
   }
 
   /** The dialog's answer is at the end of its body, out of sight in a short window. */
@@ -342,21 +405,33 @@
     {#if adaptersError !== null}
       <p class="tf-fail">Could not read the adapters: {adaptersError}</p>
     {:else if adapters !== null}
-      <div
-        class="tf-radio"
-        role="radiogroup"
-        aria-label="What is it?"
-        tabindex="-1"
-        bind:this={radios}
-        onkeydown={() => (walking = true)}
-        onpointerdown={() => (walking = false)}
-      >
-        {#each adapters as adapter (adapter.id)}
-          <label>
-            <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => { choose(adapter); reveal(); }} />
-            <span>{adapter.name}<small>{kindsHeld(adapter)}</small></span>
-          </label>
-        {/each}
+      <div class="tf-add-kind">
+        <div
+          class="tf-radio"
+          role="radiogroup"
+          aria-label="What is it?"
+          tabindex="-1"
+          bind:this={radios}
+          onkeydown={listKeys}
+          onpointerdown={() => (walking = false)}
+        >
+          {#each folded && chosen !== null ? [chosen] : adapters as adapter (adapter.id)}
+            <label>
+              <!-- A press on the row already chosen sends no change, and goes on all the same. -->
+              <input
+                type="radio"
+                name="tf-add-adapter"
+                checked={chosen?.id === adapter.id}
+                onclick={() => { if (!walking && !folded && chosen?.id === adapter.id) goOn(); }}
+                onchange={() => { choose(adapter); reveal(); }}
+              />
+              <span>{adapter.name}<small>{kindsHeld(adapter)}</small></span>
+            </label>
+          {/each}
+        </div>
+        {#if folded && chosen !== null && adapters.length > 1}
+          <button type="button" class="tf-btn tf-sm" bind:this={changeButton} onclick={change}>Change</button>
+        {/if}
       </div>
     {/if}
     <details class="tf-add-more" open={manifest.trim() !== "" || installNote !== null}>

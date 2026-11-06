@@ -172,4 +172,4 @@ select.tf-stg-in { padding-inline-start: 4px; }
 }
 .tf-sc-chip { max-width: 100%; cursor: grab; gap: 2px 4px; flex-wrap: wrap; white-space: normal; }
 .tf-sc-word { cursor: grab; overflow-wrap: anywhere; min-width: 0; text-align: left; }
-.tf-sc-reset { font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }
+.tf-sc-chip .tf-sc-reset { margin-left: 6px; color: var(--muted); font-weight: 400; text-decoration: underline; text-underline-offset: 2px; }

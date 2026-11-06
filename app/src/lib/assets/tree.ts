@@ -473,6 +473,24 @@ export function heldStrip(columns: number, column: number, available: number, fr
 }
 
 /**
+ * Does a press on a row keep the strip as it stands (F-560)? A press in the selection's own column does, as `↓` does, so
+ * the list stays under the hand. The next level still opens on a press: if it doesn't fit beside the fold, the strip
+ * folds, once, and every press in that column after it finds room. A press in another column is a level change, and folds.
+ *
+ * @param column the pressed row's column.
+ * @param selected the selection's own column.
+ * @param holds the pressed row has a next level.
+ * @param available the strip's width in pixels.
+ * @param from the first full column when the row was pressed.
+ */
+export function pressKeepsStrip(column: number, selected: number, holds: boolean, available: number, from: number): boolean {
+  if (column !== selected) return false;
+  const needs = column + (holds ? 2 : 1);
+  const held = heldStrip(needs, column, available, from);
+  return held !== null && held.to >= needs;
+}
+
+/**
  * What the strip leaves that no further column could use, which the pane takes
  * (F-534, F-548) rather than a band of grey beside it. Room for a whole column
  * stays where it is: it is where the next level opens.

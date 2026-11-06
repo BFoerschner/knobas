@@ -162,6 +162,9 @@
     readsWide,
   } from "./editing";
   import { filterKeys } from "../tf/filter-keys";
+  import { pageVisible } from "../tf/kept-pages.svelte";
+  import { layers as sharedLayers } from "../tf/layers.svelte";
+  import { inTextField } from "../shell/keys";
   import {
     addressOf,
     columnPathFor,
@@ -178,6 +181,7 @@
     sourceOf,
     focusedColumn,
     heldStrip,
+    pressKeepsStrip,
     spareWidth,
     stripFor,
     walk,
@@ -468,9 +472,10 @@
   let writing = $state(false);
 
   /**
-   * A walk by `↑` or `↓` (F-556): where it was going and where from, and the fold, the pane's width and the path when the
-   * key was pressed. The selection moving anywhere else ends it (the effect below), so a level change, a press on another
-   * row and an opened address fold as ever. The path stands until the pane's read lands, so nothing moves meanwhile.
+   * A walk by `↑` or `↓` (F-556), or a press in the selection's own column (F-560): where it was going and where from, and
+   * the fold, the pane's width and the path when it was pressed. The selection moving anywhere else ends it (the effect
+   * below), so a level change and an opened address fold as ever. The path stands until the pane's read lands, so nothing
+   * moves meanwhile.
    */
   let walked = $state.raw<{ of: string; was: string | null; from: number; spare: number; width: number; path: ColumnPath } | null>(null);
 
@@ -1163,10 +1168,19 @@
    */
   const KEEPS_ITS_OWN_KEYS = ".pane, .find";
 
+  /** A press on a row: the strip stands if the press is in the selection's own column and what it opens fits (F-560). */
+  function pressRow(row: AssetRow, column: number): void {
+    const keeps = pressKeepsStrip(column, focusedColumn(path), row.has_children, available, strip.from);
+    walked = keeps ? { of: row.id, was: selectedId, from: strip.from, spare: paneTakes, width: available, path } : null;
+    select(row);
+  }
+
   function onkeydown(event: KeyboardEvent): void {
     if (!WALK_KEYS.includes(event.key)) return;
     const from = event.target;
     if (from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null) return;
+    // A dialog over the tree has the keys, wherever it draws.
+    if (from instanceof Element && from.closest(".tf-dialog") !== null) return;
 
     // `Tab` stops once per column, so the walk starts from the column the row with focus is in.
     const row = from instanceof Element ? from.closest<HTMLElement>("button.row[data-asset]") : null;
@@ -1178,10 +1192,16 @@
     const here = row?.dataset["asset"];
     if (here !== undefined && here !== selectedId && (event.key === "Enter" || (event.key === "ArrowRight" && row?.getAttribute("aria-current") === null))) {
       wantFocus = true;
-      nav.go(addressOf({ id: here }));
+      const asRow = columns[Number(column)]?.find((one) => one.id === here);
+      if (asRow === undefined) nav.go(addressOf({ id: here }));
+      else pressRow(asRow, Number(column));
       return;
     }
-    if (step.go !== "asset") return;
+    // Nowhere to walk, as under an estate's one root: focus still comes to the row, so the press has an answer and `→` goes on.
+    if (step.go !== "asset") {
+      if (row === null && selectedId !== null) tree?.querySelector<HTMLElement>(`.cols button.row[data-asset=${CSS.escape(selectedId)}]`)?.focus();
+      return;
+    }
     // The address is already there, from a column `Tab` reached: only focus has anywhere to go.
     if (step.id === selectedId) {
       tree?.querySelector<HTMLElement>(`.cols button.row[data-asset=${CSS.escape(step.id)}]`)?.focus();
@@ -1194,6 +1214,24 @@
     }
     nav.go(addressOf({ id: step.id }));
   }
+
+  /**
+   * `↑` and `↓` act on the selected row wherever focus rests, unless a field holds it or a dialog is open (F-562), so
+   * arriving at an asset from a ticket or at `#/assets` walks at once. What's inside the view went through its own handler.
+   */
+  const visible = pageVisible();
+  $effect(() => {
+    const onwindow = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || !visible()) return;
+      if (sharedLayers.open.some((layer) => layer.kind !== "panel")) return;
+      const at = document.activeElement;
+      if (inTextField(at) || at?.closest(".view, .tf-dialog, [role='menu']") != null) return;
+      onkeydown(event);
+    };
+    window.addEventListener("keydown", onwindow);
+    return () => window.removeEventListener("keydown", onwindow);
+  });
 
   // -- the search box (story 30) -------------------------------------------
 
@@ -2001,10 +2039,7 @@
                       aria-current={chosen === row.id ? "true" : undefined}
                       data-asset={row.id}
                       tabindex={row.id === stop ? 0 : -1}
-                      onclick={() => {
-                        walked = null;
-                        select(row);
-                      }}
+                      onclick={() => pressRow(row, index)}
                     >
                       <span class="mg" title={row.type_label}>{kindTag(row.monogram)}</span>
                       <span class="nm" title={row.name}><span class="lbl">{row.name}</span></span>

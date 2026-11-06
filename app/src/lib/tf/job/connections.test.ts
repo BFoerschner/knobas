@@ -70,3 +70,10 @@ test("a group's row carries its entity's state for the dot (F-036)", () => {
   const rows = groupsOf({ sets: [set], parent: null })[0]!.rows;
   expect(rows.map((row) => row.state)).toEqual([state, null]);
 });
+
+test("a member knobas has no row for reads by its name, as Save as a link set offered it, not its id (F-561)", () => {
+  const member = { kind: "repo" as const, entity_id: "mock:payout-service", entity_kind: "repo", title: null, hidden: false };
+  const read = { sets: [{ id: "s", name: "S", via: { kind: "manual" as const, value: "jira:PAY-1", title: null }, members: [member] }], parent: null };
+  expect(groupsOf(read)[0]!.rows[0]!.title).toBe("payout-service");
+  expect(hiddenOf({ sets: [{ ...read.sets[0]!, members: [{ ...member, hidden: true }] }], parent: null })[0]!.title).toBe("payout-service");
+});

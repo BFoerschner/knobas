@@ -146,3 +146,28 @@ test("a place whose group has gone falls back to the filter (F-557)", () => {
   flushSync();
   expect(document.activeElement?.getAttribute("aria-label")).toBe("Filter connections");
 });
+
+test("a filter that leaves a group empty hides the group, and clearing it brings the group back (F-563)", () => {
+  const props = open();
+  props.groups = [GROUP, { ...NEW_GROUP, rows: [{ ...GROUP.rows[0]!, id: "kuma:3", title: "jira" }] }];
+  flushSync();
+  const heads = () => [...document.querySelectorAll("h3[data-group]")].map((head) => (head as HTMLElement).dataset.group);
+  expect(heads()).toEqual(["set:payout-stack", "set:sepa-kit"]);
+
+  const field = document.querySelector<HTMLInputElement>(".tf-dfilter input")!;
+  field.value = "jira";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(heads()).toEqual(["set:sepa-kit"]);
+
+  field.value = "nothing has this";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(heads()).toEqual([]);
+  expect(document.querySelector(".tf-dnone")?.textContent).toContain("No links match");
+
+  field.value = "";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(heads()).toEqual(["set:payout-stack", "set:sepa-kit"]);
+});
