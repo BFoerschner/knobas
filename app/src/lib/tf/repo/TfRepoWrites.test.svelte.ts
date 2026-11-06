@@ -686,6 +686,25 @@ test("Into is the diff's base: picking another reads and draws the change agains
   );
 });
 
+test("Into and From the same branch: one line says so, with no diff, no Commits and no count (F-216)", async () => {
+  await draw(COMPARE("spike/sepa-instant"));
+  const into = target.querySelector<HTMLSelectElement>(".tf-compare select")!;
+  into.value = "spike/sepa-instant";
+  into.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(text(target.querySelector(".tf-compare .tf-dwhy"))).toBe("Into and From are the same branch, so there is nothing to compare.");
+  expect(target.querySelector(".tf-compare .tf-side")).toBeNull();
+  expect(target.querySelector(".tf-compare .tf-cdiff")).toBeNull();
+  expect(target.querySelector(".tf-compare .tf-cfiles")).toBeNull();
+  expect(button("Open as diff", target)).toBeUndefined();
+  // Picking another base brings all of it back, with what was typed still there.
+  into.value = "main";
+  into.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(target.querySelector(".tf-compare .tf-cdiff .tf-diff")).not.toBeNull();
+  expect(target.querySelector(".tf-compare .tf-side")).not.toBeNull();
+});
+
 test("the address names Into as well: the page starts on that base, and From keeps it in the address (#2427)", async () => {
   // As the launcher's *Create pull request…* writes it: `compare/<base>...<head>`, one segment.
   await draw([REPO, "compare", "release/1.9...spike/sepa-instant"]);

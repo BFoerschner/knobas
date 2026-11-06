@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { PipeRun, PipeStep, SourceView } from "../../ipc/entity";
+import { layers } from "../layers.svelte";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
@@ -196,7 +197,7 @@ test("a failed step is named, marked, and shown with what it said and the input 
   expect(text(target.querySelector(".tf-empty"))).toBe("A binary file, not drawn.");
 });
 
-test("a step is moved with its grip's arrow keys and removed with its ×; Reset drops the pipeline", async () => {
+test("a step is moved with its grip's arrow keys and removed with its ×; Reset takes the steps and leaves the bar open", async () => {
   const { asked, piped } = pipedPort(() => done("x"));
   draw(piped);
   await settle();
@@ -212,8 +213,55 @@ test("a step is moved with its grip's arrow keys and removed with its ×; Reset 
   expect(asked.at(-1)?.steps).toEqual([{ step: "gunzip" }]);
   button("Reset")!.click();
   await settle();
+  expect(text(target.querySelector(".tf-psteps"))).not.toContain("gunzip");
+  expect(button("Reset")).toBeNull();
+  expect(document.activeElement).toBe(button("Add step…"));
+  button("Close")!.click();
+  await settle();
   expect(target.querySelector(".tf-pipe")).toBeNull();
   expect(button("Pipeline")).not.toBeNull();
+});
+
+test("an untouched bar has nothing to lose: no Not saved and no Reset, a plain Close, and focus goes back on each way out (F-227)", async () => {
+  const { piped } = pipedPort(() => done("x"));
+  draw(piped);
+  await settle();
+  button("Pipeline")!.click();
+  await settle();
+  const said = () => text(target.querySelector(".tf-pipe > .tf-acts"));
+  expect(said()).toBe("Close");
+  expect(document.activeElement).toBe(button("Add step…"));
+  button("Close")!.click();
+  await settle();
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  expect(document.activeElement).toBe(button("Pipeline"));
+
+  button("Pipeline")!.click();
+  await settle();
+  expect(layers.open.at(-1)?.kind).toBe("panel");
+  layers.open.at(-1)!.close();
+  await settle();
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  expect(document.activeElement).toBe(button("Pipeline"));
+});
+
+test("Close keeps what was built: Pipeline brings the steps back, and Not saved speaks once there is a step (F-227)", async () => {
+  const { asked, piped } = pipedPort(() => done("x"));
+  draw(piped);
+  await settle();
+  button("Pipeline")!.click();
+  await settle();
+  await addStep("gzip");
+  expect(text(target.querySelector(".tf-pipe > .tf-acts"))).toContain("Not saved");
+  expect(button("Reset")).not.toBeNull();
+  button("Close")!.click();
+  await settle();
+  // The file is as read again.
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  button("Pipeline")!.click();
+  await settle();
+  expect(asked.at(-1)?.steps).toEqual([{ step: "gunzip" }]);
+  expect(text(target.querySelector(".tf-psteps"))).toContain("gunzip");
 });
 
 const GZ_BYTES = Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0);

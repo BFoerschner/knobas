@@ -19,10 +19,12 @@
   - **One branch**: nothing to compare, so one empty state with *New branch…*.
   - **What it changes**: the diff from *Into* to *From* (#2271), the
     repository's `compare:<into>...<from>` section, drawn by the one diff
-    component (`TfDiffView`): picking another *Into* reads it against that
-    base. *Open as diff* opens the same diff at its own address. Beside it,
-    from the branch's own view, what it carries over the default branch (its
-    *Commits*).
+    component (`TfDiffView`), across the page under the form and *Commits*:
+    picking another *Into* reads it against that base. *Open as diff* opens the
+    same diff at its own address. Beside the form, from the branch's own view,
+    what it carries over the default branch (its *Commits*).
+  - **Into and From the same**: nothing to compare, so one line says so where the
+    form ends, and there is no diff, no *Commits* and no open pull request's line.
 
   A branch the mirror does not hold yet (one this session's edit queued) has
   no view to read: the form still opens, since the pull request names the
@@ -116,6 +118,8 @@
     const asked = addressed;
     if (asked !== null) untrack(() => (base = asked));
   });
+  /** *Into* and *From* are one branch: there is nothing to compare, and no diff, commits or open pull request to speak of. */
+  const same = $derived(base === head);
   let title = $state("");
   let body = $state("");
   /** The ticket the branch's key names, and that key: what *Link the PR to <key>* links to (#984). */
@@ -247,7 +251,7 @@
   const refused = $derived(standing?.prBlocked ?? null);
   const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);
   /** What the primary waits for, in words beside it (design system, the enabled rule). */
-  const needs = $derived(refused ?? (base === head ? "Pick two different branches." : title.trim() === "" ? "Give it a title." : null));
+  const needs = $derived(same ? "Into and From are the same branch, so there is nothing to compare." : (refused ?? (title.trim() === "" ? "Give it a title." : null)));
   const commits = $derived(standing?.commits ?? []);
 
   async function create() {
@@ -319,7 +323,9 @@
         {/if}
       </div>
       <div class="tf-cgo">
-        {#if standing?.pr}
+        {#if same && standing?.pr}
+          <p class="tf-dwhy" role="status">{needs}</p>
+        {:else if standing?.pr}
           <span class="tf-cexists">PR {standing.pr.number ?? ""} is already open from this branch.</span>
           {#if standing.pr.entityId !== null}
             <a class="tf-btn tf-sm" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
@@ -333,41 +339,13 @@
             title={refused ?? undefined}>Create pull request</button>
           {#if needs !== null}<p class="tf-dwhy" role="status">{needs}</p>{/if}
         {/if}
-        {#if changed !== null}
+        {#if changed !== null && !same}
           <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {base}</span>
         {/if}
       </div>
     </form>
-    <h2 class="tf-cgroup-h tf-cchanges">
-      What it changes
-      {#if section !== null && head !== null}
-        <span class="tf-trail"
-          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, ends.base, ends.head)}>Open as diff</a><TfOpenObject
-            entityId={repoId}
-            object={{ kind: "range", base: ends.base, head: ends.head }}
-          /></span
-        >
-      {/if}
-    </h2>
-    {#if base === head}
-      <div class="tf-empty">Into and From are the same branch, so there is nothing to compare.</div>
-    {:else if listed === null || listed.entityId === null}
-      <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
-    {:else}
-      <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
-        {#if files !== null && files.length === 0}
-          <div class="tf-empty">This branch has no commits that {base} lacks.</div>
-        {:else if files !== null}
-          {#if range === null}
-            <p class="tf-cnote" data-testid="no-range">Context does not expand here: the source did not settle which two commits this diff is between, as for a range from the repository's first commit or a branch that merged its base back in.</p>
-          {/if}
-          {#key `${filesFor}\n${range?.base}\n${range?.head}`}
-            <TfDiffView {files} {cut} {context} openAt={head === null ? null : { entityId: repoId, at: head }} />
-          {/key}
-        {/if}
-      </TfWaiting>
-    {/if}
   </div>
+  {#if !same}
   <aside class="tf-side">
     <div class="tf-panel">
       <header><h3>Commits</h3></header>
@@ -382,5 +360,35 @@
       {/if}
     </div>
   </aside>
+  <section class="tf-cdiff">
+    <h2 class="tf-cgroup-h">
+      What it changes
+      {#if section !== null && head !== null}
+        <span class="tf-trail"
+          ><a class="tf-btn tf-sm tf-ghost" href={diffHash(repoId, ends.base, ends.head)}>Open as diff</a><TfOpenObject
+            entityId={repoId}
+            object={{ kind: "range", base: ends.base, head: ends.head }}
+          /></span
+        >
+      {/if}
+    </h2>
+    {#if listed === null || listed.entityId === null}
+      <div class="tf-empty">This branch is not on {sourceName(source)} yet, or knobas has not synced it. What it changes shows here once it has.</div>
+    {:else}
+      <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
+        {#if files !== null && files.length === 0}
+          <div class="tf-empty">This branch has no commits that {base} lacks.</div>
+        {:else if files !== null}
+          {#if range === null}
+            <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
+          {/if}
+          {#key `${filesFor}\n${range?.base}\n${range?.head}`}
+            <TfDiffView {files} {cut} {context} openAt={head === null ? null : { entityId: repoId, at: head }} />
+          {/key}
+        {/if}
+      </TfWaiting>
+    {/if}
+  </section>
+  {/if}
 </div>
 {/if}

@@ -582,17 +582,20 @@
         {:else if proposed !== null}
           <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}
-        <label class="tf-bsel"
-          ><svg viewBox="0 0 16 16" aria-hidden="true"
-            ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
-              d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
-            /></svg
-          ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
-            {#each branches ?? [] as option (option.name)}
-              <option value={option.name}>{option.name}</option>
-            {/each}
-          </select></label
-        >
+        <!-- Compare has *Into* and *From*: a third branch control there would be a second way to set one of them. -->
+        {#if tab !== "compare"}
+          <label class="tf-bsel"
+            ><svg viewBox="0 0 16 16" aria-hidden="true"
+              ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
+                d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
+              /></svg
+            ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
+              {#each branches ?? [] as option (option.name)}
+                <option value={option.name}>{option.name}</option>
+              {/each}
+            </select></label
+          >
+        {/if}
         <button
           type="button"
           class="tf-btn"

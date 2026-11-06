@@ -450,22 +450,18 @@
    */
   const fromDefault = $derived(file === null || editing ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
   const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? fromDefault?.pipeline.steps ?? null));
-  /** The panel the reader opened on this file, which `Esc` closes before it leaves the page. */
+  /** What a closed bar held, by path: *Pipeline* brings the steps back, as the reader built them. */
+  const closedPipes = new SvelteMap<string, PipeStep[]>();
+  /** The panel the reader opened on this file, which *Close* or `Esc` puts away before `Esc` leaves the page. */
   const pipeOpened = $derived(file !== null && !editing && pipes.has(file.path) ? file.path : null);
   let pipeFace = $state<HTMLButtonElement | null>(null);
-  $effect(() => {
-    const at = pipeOpened;
-    if (at === null || !shownPage()) return;
-    return untrack(() =>
-      layers.add({
-        kind: "panel",
-        close: () => {
-          pipes.delete(at);
-          queueMicrotask(() => pipeFace?.focus());
-        },
-      }),
-    );
-  });
+  let suggestFace = $state<HTMLButtonElement | null>(null);
+
+  function closePipe(at: string) {
+    const held = pipes.get(at);
+    if (held !== undefined && held.length > 0) closedPipes.set(at, held);
+    pipes.delete(at);
+  }
   const shownDefault = $derived(
     file !== null && fromDefault !== null && !pipes.has(file.path) ? { name: fromDefault.pipeline.name, pattern: fromDefault.pattern } : null,
   );
@@ -1184,7 +1180,7 @@
           {/if}
           {#if steps === null && ports.piped !== undefined && suggested === null}
             {@const at = file.path}
-            <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, [])}>Pipeline</button>
+            <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
           <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
           <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />
@@ -1214,8 +1210,16 @@
           <b>These bytes look {chip.kind}.</b>
           <span>Nothing has been applied; you see the file as it is.</span>
           <span class="tf-trail">
-            <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
-            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => notNow.add(at)}>Not now</button>
+            <button type="button" class="tf-btn tf-sm tf-primary" bind:this={suggestFace} onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost"
+              onclick={() => {
+                notNow.add(at);
+                // The line goes with the press, and *Pipeline* takes its place.
+                void tick().then(() => pipeFace?.focus());
+              }}>Not now</button
+            >
           </span>
         </div>
       {/if}
@@ -1233,7 +1237,15 @@
           failedAt={pipeFailure?.index ?? null}
           running={piping}
           onchange={(next) => pipes.set(at, next)}
-          onreset={() => pipes.delete(at)}
+          onreset={() => {
+            closedPipes.delete(at);
+            // Back to the default where there is one, else an empty bar for new steps.
+            if (fromDefault !== null) pipes.delete(at);
+            else pipes.set(at, []);
+          }}
+          onclose={pipeOpened !== null && fromDefault === null && shownPage() ? () => closePipe(at) : null}
+          closeTo={() => pipeFace ?? suggestFace}
+          edited={pipes.has(at)}
         />
         {#if pipeFailure !== null}
           <div class="tf-stepfail" role="alert">

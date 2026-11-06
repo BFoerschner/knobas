@@ -876,7 +876,8 @@ test("Merge… follows the source's declared merge: picks the style and queues t
   press("Enter");
   await settle();
   expect(calls.submitWrite).toHaveBeenCalledWith({
-    MergePullRequest: { entity: "gitea:acme/svc#142", style: "squash", delete_branch: true, message: "Backoff (#142)" },
+    // No tick to untick here, so the branch stays: nothing that removes data is preselected (F-028).
+    MergePullRequest: { entity: "gitea:acme/svc#142", style: "squash", delete_branch: false, message: "Backoff (#142)" },
   });
   expect(lastToast()).toBe("Merge queued for Backoff");
 });

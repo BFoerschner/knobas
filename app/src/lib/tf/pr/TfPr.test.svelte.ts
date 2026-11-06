@@ -780,16 +780,40 @@ test("a token that may not comment or review draws Comment and each verdict disa
   await settle();
   expect(target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!.value).toBe("Thanks, looks good.");
 
-  button("Review…")!.click();
+  // Review… is disabled like its neighbours (F-224): a dialog of three dead verdicts could not finish.
+  const review = button("Review…")!;
+  expect(review.getAttribute("aria-disabled")).toBe("true");
+  expect(review.title).toBe(repository);
+  review.click();
   flushSync();
-  const dialog = document.querySelector(".tf-dialog")!;
-  for (const verdict of ["comment", "approve", "request_changes"]) {
-    const radio = dialog.querySelector<HTMLInputElement>(`input[value=${verdict}]`)!;
-    expect(radio.disabled).toBe(true);
-    expect(radio.closest("label")!.title).toBe(repository);
-  }
-  expect(dialogButton("Submit review").disabled).toBe(true);
+  expect(document.querySelector(".tf-dialog")).toBeNull();
   expect(writes).toEqual([]);
+});
+
+test("Update branch's title reads as a sentence and starts on merge; Add label starts with nothing picked (F-210, F-028)", async () => {
+  const label = action("source_action", "Add label…", {
+    values: { id: "add_label" },
+    fields: [{ name: "label", label: "Label", kind: { type: "choice", options: [{ value: "7", label: "needs-qa" }, { value: "9", label: "backport" }] }, value: null, required: true, placeholder: null }],
+  });
+  await draw([PR], ports({ pr: prView([UPDATE, label]) }));
+  button("Update branch…")!.click();
+  flushSync();
+  expect(text(".tf-dialog h2")).toBe("Update the branch of PR #142");
+  expect(document.querySelector<HTMLInputElement>(".tf-dialog input[value=merge]")!.checked).toBe(true);
+  dialogButton("Cancel").click();
+  flushSync();
+
+  button("Add label…")!.click();
+  flushSync();
+  expect(text(".tf-dialog h2")).toBe("Add label to PR #142");
+  expect(document.querySelectorAll(".tf-dialog input:checked")).toHaveLength(0);
+  expect(dialogButton("Add label").disabled).toBe(true);
+  expect(text(".tf-dialog .tf-dwhy")).toBe("Pick one first.");
+  document.querySelector<HTMLInputElement>(".tf-dialog input[value='9']")!.click();
+  flushSync();
+  dialogButton("Add label").click();
+  await settle();
+  expect(writes).toEqual([{ SourceAction: { entity: PR, id: "add_label", fields: { label: "9" } } }]);
 });
 
 test("one's own pull request: no Review…, but Submit review once a line comment waits, Comment its only verdict", async () => {
@@ -890,7 +914,8 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
     "Squash into one commit",
   ]);
   expect(text(".tf-dialog .tf-ck")).toBe("Delete feature/PAY-231-sepa-retry after merging");
-  expect(dialog.querySelector<HTMLInputElement>(".tf-ck input")!.checked).toBe(true);
+  // The source may tick it; it removes data, so it never starts ticked (F-028).
+  expect(dialog.querySelector<HTMLInputElement>(".tf-ck input")!.checked).toBe(false);
   expect(text(".tf-dialog .tf-prm-note")).toBe("After the merge, PAY-231 moves to In review.");
   // The message shows only under Squash, prefilled as the source writes it.
   expect(dialog.querySelector("input[aria-label='Squash commit message']")).toBeNull();
@@ -899,8 +924,6 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
   const message = dialog.querySelector<HTMLInputElement>("input[aria-label='Squash commit message']")!;
   expect(message.value).toBe("SEPA retry with exponential backoff (#142)");
   type(message, "SEPA retry with backoff (#142)");
-  dialog.querySelector<HTMLInputElement>(".tf-ck input")!.click();
-  flushSync();
   dialogButton("Merge").click();
   await settle();
   expect(writes).toEqual([
@@ -917,7 +940,7 @@ test("a merge commit sends no message, and a pull request linked to no ticket dr
   expect(document.querySelector(".tf-prm-note")).toBeNull();
   dialogButton("Merge").click();
   await settle();
-  expect(writes).toEqual([{ MergePullRequest: { entity: PR, style: "merge", delete_branch: true } }]);
+  expect(writes).toEqual([{ MergePullRequest: { entity: PR, style: "merge", delete_branch: false } }]);
 });
 
 test("a merge while the pull request's source fails its sign-in says it waits there", async () => {
@@ -1414,9 +1437,24 @@ test("#2303: Request… is an inline panel with a heading, which Esc closes befo
   button("Request…")!.click();
   flushSync();
   expect(text(".tf-prpick .tf-prpick-h")).toBe("Ask for a review");
+  expect(document.activeElement).toBe(target.querySelector(".tf-prpick button"));
   expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
   layers.open[0]!.close();
-  flushSync();
+  await settle();
   expect(target.querySelector(".tf-prpick")).toBeNull();
   expect(layers.open).toHaveLength(0);
+  expect(document.activeElement).toBe(button("Request…"));
+});
+
+test("the chip of a review request names the act and keeps the login as written (F-225)", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, REQUEST]) }));
+  target.querySelector<HTMLButtonElement>(".tf-prreviewers header button")!.click();
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-prpick button")].find((b) => b.textContent?.includes("olu"))!.click();
+  await settle();
+  const chips = lines(".tf-fhead .tf-sub .tf-chip");
+  expect(chips).toContain("Review asked of olu");
+  expect(chips.join(" ")).not.toContain("Olu");
+  // Focus stays with the panel, not fallen to the body.
+  expect(document.activeElement).not.toBe(document.body);
 });

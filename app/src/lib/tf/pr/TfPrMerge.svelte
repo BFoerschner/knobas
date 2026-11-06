@@ -8,7 +8,7 @@
     disabled with the source's sentence as its tooltip;
   - the style (merge commit, rebase, squash), from the action's `style`
     choice; *Squash* opens its commit message, prefilled by the source;
-  - *Delete <branch> after merging*, ticked where the source ticks it;
+  - *Delete <branch> after merging*, never ticked on arrival: it removes data;
   - where knobas holds a link to a ticket, the line that it moves to In
     Review once the merge lands (the merge follower, `follow_merges`).
 

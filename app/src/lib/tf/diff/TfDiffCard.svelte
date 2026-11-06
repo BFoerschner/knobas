@@ -57,6 +57,8 @@
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
   import { flushSync } from "svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { inlineEditor } from "../inline-editor";
   import type { DiffLine, LineComment, LineThread } from "../../ipc/entity";
   import { lineName } from "../../detail/view/pending-comments.svelte";
   import type { CommandPort } from "../../render/command";
@@ -188,7 +190,8 @@
       });
       if (cell.extra) return;
       for (const d of talk.draftsAt(file.path, cell.line)) out.push({ kind: "draft", key: `d${d.id}`, body: d.body });
-      if (talk.isOpen(file.path, cell.line)) out.push({ kind: "box", key: "box", line: cell.line, onNew });
+      // Keyed by its line: another line's box is another box, with its own way back.
+      if (talk.isOpen(file.path, cell.line)) out.push({ kind: "box", key: `box${targetOf(cell.line).side}${targetOf(cell.line).line}`, line: cell.line, onNew });
     };
     if (split) {
       for (const row of splitRows(file, expanded)) {
@@ -242,9 +245,12 @@
     root?.scrollIntoView?.({ block: "start" });
   }
 
-  /** `n` (`step` 1) and `p` (-1): the next or previous hunk of this file; false when there is none that way. */
-  export function nextHunk(step: 1 | -1): boolean {
-    const to = hunk + step;
+  /**
+   * `n` (`step` 1) and `p` (-1): the next or previous hunk of this file; false when there is none that way.
+   * `entering`: from another file, so its first hunk going down, its last going up.
+   */
+  export function nextHunk(step: 1 | -1, entering = false): boolean {
+    const to = !entering ? hunk + step : step === 1 ? 0 : starts.length - 1;
     if (!drawsLines || to < 0 || to >= starts.length) return false;
     hunk = to;
     show(starts[to]!);
@@ -262,8 +268,29 @@
     flushSync();
     const box = items.findIndex((item) => item.kind === "box");
     if (box >= 0) show(box);
-    root?.querySelector<HTMLTextAreaElement>(".tf-newc textarea")?.focus();
+    focusBox();
     return true;
+  }
+
+  const focusBox = () => root?.querySelector<HTMLTextAreaElement>(".tf-newc:not(.tf-reply) textarea")?.focus();
+
+  /** The `+` that stands for `name`: what focus comes back to as the box goes. */
+  const plusOf = (label: string) => [...(root?.querySelectorAll<HTMLElement>(".tf-addc") ?? [])].find((plus) => plus.getAttribute("aria-label") === label) ?? null;
+  /** A thread's *Reply…*, for the same. */
+  const replyOf = (id: string | null) => [...(root?.querySelectorAll<HTMLElement>(".tf-thr-reply") ?? [])].find((face) => face.dataset["thread"] === id) ?? null;
+
+  /** A kept page answers no key, and comes back to the box it left. */
+  const pageShown = pageVisible();
+
+  /** `Esc` with nothing typed closes the box at once: there is no field to step out of first. `⌘↩` sends it. */
+  function boxKeys(event: KeyboardEvent, words: string, close: () => void, send: () => void) {
+    if (event.key === "Escape" && words.trim() === "") {
+      event.preventDefault();
+      close();
+    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && words.trim() !== "") {
+      event.preventDefault();
+      send();
+    }
   }
 
   const SIGN = { context: " ", add: "+", del: "−" } as const;
@@ -330,8 +357,14 @@
       <div class="tf-said tf-queued"><p><b>You</b> <TfStateChip text="queued" tone="info" /> {body}</p></div>
     {/each}
     {#if talk.isReplying(thread)}
-      <div class="tf-newc tf-reply">
-        <textarea value={talk.replyDraft} oninput={(event) => (talk.replyDraft = event.currentTarget.value)} placeholder="Reply" aria-label="Reply on {file.path}, {lineName(thread.side, thread.line)}"></textarea>
+      <div class="tf-newc tf-reply" {@attach pageShown() && inlineEditor(() => talk.closeReply(), { back: () => replyOf(thread.id) })}>
+        <textarea
+          value={talk.replyDraft}
+          oninput={(event) => (talk.replyDraft = event.currentTarget.value)}
+          onkeydown={(event) => boxKeys(event, talk.replyDraft, () => talk.closeReply(), () => talk.sendReply(file.path, thread))}
+          placeholder="Reply"
+          aria-label="Reply on {file.path}, {lineName(thread.side, thread.line)}"
+        ></textarea>
         <div class="tf-acts">
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.cancelReply()}>Cancel</button>
           <button type="button" class="tf-btn tf-sm tf-primary" disabled={talk.replyDraft.trim() === ""} onclick={() => talk.sendReply(file.path, thread)}>Reply</button>
@@ -339,7 +372,7 @@
       </div>
     {:else if talk.canReply(thread) || talk.canResolve(thread) || resolved}
       <footer class="tf-thr-f">
-        {#if talk.canReply(thread)}<button type="button" class="tf-thr-reply" onclick={() => talk.openReply(thread)}>Reply…</button>{/if}
+        {#if talk.canReply(thread)}<button type="button" class="tf-thr-reply" data-thread={thread.id} onclick={() => talk.openReply(thread)}>Reply…</button>{/if}
         <span class="tf-thr-sp"></span>
         {#if resolved}<button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.show(thread, false)}>Hide</button>{/if}
         {#if talk.canResolve(thread)}<button type="button" class="tf-btn tf-sm" onclick={() => talk.resolve(thread, !resolved)}>{resolved ? "Unresolve" : "Resolve"}</button>{/if}
@@ -353,7 +386,17 @@
   {#if talk.review && !cell.extra}
     {@const at = targetOf(cell.line)}
     {@const name = lineName(at.side, at.line)}
-    <button type="button" class="tf-addc" title="Comment on {name}" aria-label="Comment on {name} of {file.path}" onclick={() => talk.openAt(file.path, cell.line)}>+</button>
+    <button
+      type="button"
+      class="tf-addc"
+      title="Comment on {name}"
+      aria-label="Comment on {name} of {file.path}"
+      onclick={() => {
+        talk.openAt(file.path, cell.line);
+        flushSync();
+        focusBox();
+      }}>+</button
+    >
   {:else}<span></span>{/if}
 {/snippet}
 
@@ -392,8 +435,15 @@
   {:else}
     {@const at = targetOf(it.line)}
     {@const name = lineName(at.side, at.line)}
-    <div class="tf-newc" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)} {@attach keep(it.key)}>
-      <textarea value={talk.draft} oninput={(event) => (talk.draft = event.currentTarget.value)} placeholder="Comment on {name}" aria-label="Comment on {name} of {file.path}"></textarea>
+    {@const label = `Comment on ${name} of ${file.path}`}
+    <div class="tf-newc" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)} {@attach keep(it.key)} {@attach pageShown() && inlineEditor(() => talk.close(), { back: () => plusOf(label) })}>
+      <textarea
+        value={talk.draft}
+        oninput={(event) => (talk.draft = event.currentTarget.value)}
+        onkeydown={(event) => boxKeys(event, talk.draft, () => talk.close(), () => talk.add())}
+        placeholder="Comment on {name}"
+        aria-label={label}
+      ></textarea>
       <div class="tf-acts">
         <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => talk.cancel()}>Cancel</button>
         <button type="button" class="tf-btn tf-sm tf-primary" disabled={talk.draft.trim() === ""} onclick={() => talk.add()}>Add to review</button>

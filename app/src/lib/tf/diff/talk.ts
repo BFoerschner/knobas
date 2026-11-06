@@ -13,9 +13,12 @@ export interface DiffTalk {
   readonly drafts: readonly PendingComment[];
   draftsAt(path: string, line: DiffLine): PendingComment[];
   isOpen(path: string, line: DiffLine): boolean;
-  /** Opens the comment box under `line` of `path`, with an empty draft. */
+  /** Opens the comment box under `line` of `path`, with what was typed there before and left unsent. */
   openAt(path: string, line: DiffLine): void;
   draft: string;
+  /** `Esc`: the box goes and what it holds stays for that line. */
+  close(): void;
+  /** *Cancel*: the box goes and so do its words. */
   cancel(): void;
   /** Keeps the draft pending in the reader's store under its line. */
   add(): void;
@@ -32,6 +35,9 @@ export interface DiffTalk {
   isReplying(thread: LineThread): boolean;
   openReply(thread: LineThread): void;
   replyDraft: string;
+  /** `Esc`: the box goes and what it holds stays for that thread. */
+  closeReply(): void;
+  /** *Cancel*: the box goes and so do its words. */
   cancelReply(): void;
   sendReply(path: string, thread: LineThread): void;
   resolve(thread: LineThread, on: boolean): void;

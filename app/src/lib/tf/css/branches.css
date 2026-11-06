@@ -14,7 +14,7 @@
 .tf-compare .tf-cexists { font-size: var(--t-sm); }
 .tf-compare .tf-cnone { padding-top: 10px; }
 .tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
-.tf .tf-compare .tf-cchanges { margin-top: 18px; }
+.tf-compare .tf-cdiff { grid-column: 1 / -1; min-width: 0; }
 .tf-compare .tf-side { display: flex; flex-direction: column; gap: 14px; }
 .tf-editor { display: grid; grid-template-columns: 48px 1fr; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-editor .tf-nums {

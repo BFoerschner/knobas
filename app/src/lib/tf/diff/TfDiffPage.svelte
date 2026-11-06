@@ -12,9 +12,10 @@
     git when the repository's checkout holds both commits, else the
     repository's section `compare:<base>...<head>` (`address.ts`), drawn by
     the one diff component.
-  - **Ignore whitespace**: offered when the diff was read at the checkout;
-    shown disabled, saying why, when the source served it (no Gitea or
-    Forgejo endpoint returns a diff with whitespace ignored, #2253). Another address keeps
+  - **Ignore whitespace**: in the diff's toolbar, offered when the diff was read
+    at the checkout; disabled, with why as its title, when the source served it
+    (no Gitea or Forgejo endpoint returns a diff with whitespace ignored, #2253).
+    Another address keeps
     the last diff drawn, dimmed, while it is read (#2246). Where the answer
     names its range (#2310), context expands and an image diff renders, each
     side read whole at its sha (`context.ts` `rangeContext`). Where it names
@@ -75,6 +76,7 @@
   import { waitPhase } from "../waiting";
   import { onShownAgain } from "../while-shown.svelte";
   import TfDiffView from "./TfDiffView.svelte";
+  import TfWhitespaceBox from "./TfWhitespaceBox.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection } from "./address";
   import { rangeContext } from "./context";
@@ -109,8 +111,8 @@
   /** Where the drawn diff was read; whitespace is ignored only at the checkout. */
   let readAt = $state<DiffReadAt | null>(null);
   let ignoreWhitespace = $state(false);
-  const uid = $props.id();
-  const why = `${uid}-ws-why`;
+  /** The box's press redraws the diff around it, so focus is put back. */
+  let boxPressed = $state(false);
   const context = $derived(range === null ? null : rangeContext(ports.entityView, range, ports.fileBytes, ports.piped));
 
   const section = $derived(compareSection(base, head));
@@ -188,7 +190,28 @@
   const shown = shortEnd;
   /** Whether an end is a branch name (Spec 5): such a diff is never read at a checkout, whatever it holds. */
   const byName = $derived(!isSha(caretOf(base)[0]) || !isSha(head));
+  /** Why whitespace can't be left out here, where the source served the diff. */
+  const noWhitespace = $derived(
+    readAt === "checkout"
+      ? null
+      : byName
+        ? "A branch name is read at the source, which can't leave whitespace out. Open this diff from its commits to read it at a checkout."
+        : "Read at the source, which can't leave whitespace out. A checkout holding both commits can.",
+  );
 </script>
+
+{#snippet whitespace()}
+  <TfWhitespaceBox
+    checked={readAt === "checkout" && ignoreWhitespace}
+    why={noWhitespace}
+    focus={boxPressed}
+    onleave={() => (boxPressed = false)}
+    onchange={(on) => {
+      boxPressed = true;
+      ignoreWhitespace = on;
+    }}
+  />
+{/snippet}
 
 <div class="tf-full tf-diffpage">
   <TfCrumbs parts={crumbs} {back} />
@@ -200,35 +223,19 @@
     <div class="tf-acts"><TfOpenObject entityId={repoId} object={{ kind: "range", base, head }} size="md" /></div>
   </header>
   <div class="tf-cbody">
-  {#if readAt !== null}
-    <div class="tf-diffws">
-      <label class="tf-ck">
-        <input
-          type="checkbox"
-          checked={readAt === "checkout" && ignoreWhitespace}
-          onchange={(event) => (ignoreWhitespace = event.currentTarget.checked)}
-          disabled={readAt !== "checkout"}
-          aria-describedby={readAt === "checkout" ? undefined : why} />
-        Ignore whitespace
-      </label>
-      {#if readAt !== "checkout"}
-        <span class="tf-cnote" id={why} data-testid="ws-why"
-          >{byName
-            ? "Read from the source, whose API cannot leave whitespace out. A branch name is read where it lives, never at a checkout; open the diff from its commits to read it locally."
-            : "Read from the source, whose API cannot leave whitespace out. A checkout holding both commits can."}</span
-        >
-      {/if}
-    </div>
+  <!-- With no diff drawn there is no toolbar, and a tick that left nothing to draw must still come off. -->
+  {#if readAt !== null && ignoreWhitespace && (files === null || files.length === 0)}
+    <div class="tf-diffws">{@render whitespace()}</div>
   {/if}
   <TfWaiting phase={waitPhase({ drawn: files !== null, reading, failed: failed !== null })} error={failed} shape="lines">
     {#if files !== null && files.length === 0}
       <div class="tf-empty">Nothing changes between {shown(base)} and {shown(head)}.</div>
     {:else if files !== null}
       {#if range === null}
-        <p class="tf-cnote" data-testid="no-range">Context does not expand here: which two commits this diff is between is not settled, as for a range from the repository's first commit or a branch that merged its base back in.</p>
+        <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
       {/if}
       {#key `${section}\n${range?.base}\n${range?.head}\n${ignoreWhitespace}`}
-        <TfDiffView {files} {cut} {context} openAt={{ entityId: repoId, at: head }} />
+        <TfDiffView {files} {cut} {context} openAt={{ entityId: repoId, at: head }} tools={readAt === null ? null : whitespace} />
       {/key}
     {/if}
   </TfWaiting>

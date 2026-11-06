@@ -57,8 +57,10 @@
   /** What the primary waits for, by the labels the reader sees. */
   const stillNeeded = $derived.by(() => {
     if (missing.length === 0) return null;
-    const names = action.fields.filter((field) => missing.includes(field.name)).map((field) => field.label);
-    return `Still needs ${names.join(" and ")}.`;
+    const fields = action.fields.filter((field) => missing.includes(field.name));
+    // A list to pick from is in front of the reader, so the line needs no name for it.
+    if (fields.length === 1 && fields[0]!.kind.type === "choice") return "Pick one first.";
+    return `Still needs ${fields.map((field) => field.label).join(" and ")}.`;
   });
 
   async function send() {

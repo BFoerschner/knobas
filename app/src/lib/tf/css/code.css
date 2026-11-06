@@ -161,8 +161,9 @@
 .tf-rpickbar > .tf-btn { flex: none; margin-right: 22px; }
 .tf-rpickbar .tf-fbar { flex: 1; }
 /* *Ignore whitespace* (#2272): offered on a diff read at the checkout, disabled with its reason otherwise. */
-.tf-diffws { display: flex; align-items: baseline; gap: 12px; margin: 0 0 8px; }
-.tf-diffws .tf-cnote { margin: 0; }
+.tf-diffws { margin: 0 0 8px; }
+.tf-wsbox { white-space: nowrap; align-items: center; }
+.tf-wsbox:has(input:disabled) { color: var(--ink-2); cursor: not-allowed; }
 /*
   The one diff component (#2266, `diff/TfDiffView.svelte`; `mockups/code-area/diff.css`): every diff, file by file.
   Unified: old number, new number, sign and code, the comment cell. Split: each side its number, sign and code.
@@ -170,7 +171,6 @@
 /* The room a diff has decides how it lays out, not the window: Compare has less than a pull request at one width. */
 .tf-dview { container: dview / inline-size; min-width: 0; }
 .tf-dtool { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; margin-bottom: 12px; font-size: var(--t-sm); }
-.tf-dtool-why { font-size: var(--t-xs); }
 .tf-dtool-prog { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-diff { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; overflow: clip; font: var(--t-sm)/1.6 var(--mono); font-variant-ligatures: none; }
 .tf-diff + .tf-diff { margin-top: 12px; }
@@ -421,8 +421,11 @@
 .tf-pick-foot a { color: var(--ink); text-decoration: underline; }
 
 /* The pipeline bar (#2264; mockups/code-area .pipe / .step / .stepfail): bytes → steps → renderer. */
-.tf-pipe { display: flex; flex-direction: column; gap: var(--control-gap); padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); font-size: var(--t-sm); }
-.tf-pipe > .tf-acts { justify-content: flex-end; }
+.tf-pipe { display: flex; flex-wrap: wrap; align-items: center; gap: var(--control-gap); padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--sheet); font-size: var(--t-sm); }
+/* The steps take the row, and what acts on the bar ends it: an untouched bar's *Close* stands beside *Add step…*, not alone under it. */
+.tf-pipe > .tf-psteps { flex: 1 1 320px; min-width: 0; }
+.tf-pipe > .tf-acts { flex-wrap: wrap; }
+.tf-pipe > .tf-psave { flex: 1 1 100%; }
 .tf-psteps { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-plab { font-weight: 600; margin-right: 4px; }
 .tf-parrow { color: var(--ink-2); }

@@ -11,14 +11,20 @@
   read-only git when the repository's checkout holds the commit, with
   *Ignore whitespace* on offer; otherwise the commit's own `diff` section, the
   one source read it always was (the whole view defers it).
+
+  An address that names no commit knobas holds draws the "nothing here" block
+  under the repository's header and tabs, and a read that broke the same block
+  with *Try again*.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
   import { clockLabel } from "../../time/format";
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { ChoiceOption, DiffFile, DiffReadAt, EntityDetail, RangeDiff, SourceView } from "../../ipc/entity";
   import { commitContext, parentOf } from "../diff/context";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import TfWhitespaceBox from "../diff/TfWhitespaceBox.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { shaOfCommit } from "../diff/address";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
@@ -51,19 +57,23 @@
   /** The first parent's address, for the old side of expanded context. */
   let parent = $state<string | null>(null);
   let failed = $state<string | null>(null);
+  /** The read failed because the address names no commit knobas holds, not because the read broke. */
+  let missing = $state(false);
+  /** Bumped by *Try again*. */
+  let attempt = $state(0);
   /** Where the drawn diff was read; whitespace is ignored only at the checkout. */
   let readAt = $state<DiffReadAt | null>(null);
   let ignoreWhitespace = $state(false);
-  const uid = $props.id();
-  const why = `${uid}-ws-why`;
 
   $effect(() => {
     const id = commitId;
+    void attempt;
     let live = true;
     detail = null;
     files = null;
     start = null;
     failed = null;
+    missing = false;
     readAt = null;
     ignoreWhitespace = false;
     // Only a new commit reads it all again; Ignore whitespace re-reads the diff alone.
@@ -122,9 +132,16 @@
     const fail = (error: unknown) => {
       if (mine() && !again) failed = ipcErrorMessage(error);
     };
-    const rowRead = ports.getEntity(id).then((answer) => {
-      if (mine()) detail = answer;
-    }, fail);
+    const rowRead = ports.getEntity(id).then(
+      (answer) => {
+        if (mine()) detail = answer;
+      },
+      (error: unknown) => {
+        fail(error);
+        // The commit's own row is what says it is held: only its answer means the address names nothing.
+        if (mine() && !again) missing = isIpcError(error) && (error.code === "not_found" || error.code === "invalid");
+      },
+    );
     const viewRead = ports.entityView(id, null).then((view) => {
       if (!mine()) return;
       parent = parentOf(view);
@@ -144,6 +161,17 @@
   }
 </script>
 
+{#snippet whitespace()}
+  <TfWhitespaceBox
+    checked={readAt === "checkout" && ignoreWhitespace}
+    why={readAt === "checkout" ? null : "Read at the source, which can't leave whitespace out. A checkout holding this commit can."}
+    onchange={toggleWhitespace}
+  />
+{/snippet}
+
+{#if missing}
+  <TfNothingHere message="knobas does not hold this commit. It may not have synced yet." href={repoHash(repoId, "commits")} action="All commits" />
+{:else}
 <h2 class="tf-cgroup-h">
   {#if sha !== null}<span class="tf-mono">{sha}</span>{/if}
   {detail?.row.title ?? ""}
@@ -165,27 +193,11 @@
     {#if whole !== null}<TfOpenObject entityId={repoId} object={{ kind: "commit", sha: whole }} />{/if}
   </span>
 </h2>
-{#if readAt !== null && failed === null}
-  <div class="tf-diffws">
-    <label class="tf-ck">
-      <input
-        type="checkbox"
-        checked={readAt === "checkout" && ignoreWhitespace}
-        onchange={(event) => toggleWhitespace(event.currentTarget.checked)}
-        disabled={readAt !== "checkout"}
-        aria-describedby={readAt === "checkout" ? undefined : why} />
-      Ignore whitespace
-    </label>
-    {#if readAt !== "checkout"}
-      <span class="tf-cnote" id={why} data-testid="ws-why"
-        >Read from the source, whose API cannot leave whitespace out. A checkout holding this commit can.</span
-      >
-    {/if}
-  </div>
-{/if}
 {#if failed !== null}
-  <p class="tf-cfail">{failed}</p>
+  <TfNothingHere message="This commit could not be read: {failed}" onretry={() => attempt++} />
 {:else if files !== null && files.length === 0}
+  <!-- With no diff drawn there is no toolbar, and a tick that left nothing to draw must still come off. -->
+  {#if ignoreWhitespace}<div class="tf-diffws">{@render whitespace()}</div>{/if}
   <div class="tf-empty">This commit changes no file.</div>
 {:else if files !== null}
   <TfDiffView
@@ -193,5 +205,7 @@
     {cut}
     context={commitContext(ports.entityView, commitId, parent, ports.fileBytes, ports.piped)}
     openAt={whole === null ? null : { entityId: repoId, at: whole }}
+    tools={readAt === null ? null : whitespace}
   />
+{/if}
 {/if}

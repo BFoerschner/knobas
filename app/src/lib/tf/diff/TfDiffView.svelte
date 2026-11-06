@@ -6,8 +6,9 @@
   (#842) is its base; the layout is `mockups/code-area/diff.html`.
 
   - **Toolbar**: Unified / Split, one choice app-wide (`diff-layout`); a
-    column with too little room for split shows unified and says so. Where
-    *Viewed* is offered, how many files are viewed.
+    column with too little room for split presses *Unified* and disables
+    *Split* with a title, and `s` says the same. A caller's own control sits
+    beside them (`tools`). Where *Viewed* is offered, how many files are viewed.
   - **File tree** (`list`, #2268): files under their directories with a
     badge (added, deleted, renamed with similarity, mode, binary) and
     `+N −N`, a filter that narrows the tree and the diffs together, a click
@@ -32,16 +33,18 @@
     raw* / *Run pipeline* says otherwise. A piped diff takes no comments and
     does not expand: its lines are not the file's. A side that fails draws
     the raw diff under the step's error.
-  - **Keys** (`list`, #2268): `j`/`k` files, `n`/`p` hunks, `v` viewed, `c`
-    comment, `s` split; none while typing, none on a hidden page.
+  - **Keys** (`list`, #2268): `j`/`k` files, `n`/`p` hunks, on across files
+    past a collapsed one, `v` viewed, `c` comment, on the hunk `n` reached or
+    in the next open file, `s` split; none while typing, none on a hidden page.
   - **Ceiling** (`cut`): a diff the parser stopped at 50,000 lines says so.
   - **Highlighting**: each side of a file is one text through the renderer
     port (`render`, #2254), so a string or comment that spans hunks is
     highlighted as one. Plain until the tokens arrive.
   - **Capabilities the caller passes in**, absent by default:
     - `viewed`: a *Viewed* box per file that collapses it.
-    - `review`: a `+` per line that opens a comment box; *Add to review*
-      keeps the comment pending in the reader's store under its line.
+    - `review`: a `+` per line that opens a comment box, which takes focus;
+      *Add to review* keeps the comment pending in the reader's store under
+      its line. `Esc` closes the box and keeps what it holds for that line.
     - `openAt`: *Open in…* in each file's header (#2274), on the file at its
       first changed line, read at the diff's head; not on a deleted file.
     Threads the source holds are drawn wherever it answers them: under their
@@ -53,7 +56,7 @@
   import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { lineName } from "../../detail/view/pending-comments.svelte";
-  import { flushSync, onMount, untrack } from "svelte";
+  import { flushSync, onMount, untrack, type Snippet } from "svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { inTextField } from "../../shell/keys";
   import { ago } from "../../shell/time";
@@ -110,6 +113,7 @@
     repository = null,
     pipelines = defaultPipelines,
     piping = diffPipelines,
+    tools = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -139,6 +143,8 @@
     pipelines?: DiffPipelines;
     /** *Run pipelines on diffs*: the app's setting by default. */
     piping?: Pick<DiffPipelinesSetting, "on">;
+    /** A caller's own control in the toolbar, beside the layout: *Ignore whitespace*. */
+    tools?: Snippet | null;
   } = $props();
 
   let filter = $state("");
@@ -150,6 +156,8 @@
   let room = $state(Number.POSITIVE_INFINITY);
   const tight = $derived(narrow.current || room < SPLIT_ROOM);
   const split = $derived(shownLayout(layout.chosen, tight) === "split");
+  /** Why *Split* can't be pressed, and what `s` says then. */
+  const NO_ROOM = "There is too little room here for split. A wider window has it.";
   const uid = $props.id();
   /** Whether the file list is unfolded under its bar, where it has one. */
   let railOpen = $state(false);
@@ -401,10 +409,21 @@
   let open = $state<{ path: string; side: "old" | "new"; line: number } | null>(null);
   let draft = $state("");
   const drafts = $derived(review ? review.pending.of(review.entity) : []);
+  /** What was typed in a box that went without *Add to review* or *Cancel*, by its line, so its words come back. */
+  const unsent = new Map<string, string>();
+  const spot = (at: { path: string; side: string; line: number }) => `${at.path}\n${at.side}\n${at.line}`;
+
+  /** Puts the open box's words by, as it goes or another line takes the box. */
+  function keepDraft() {
+    if (open === null) return;
+    if (draft.trim() === "") unsent.delete(spot(open));
+    else unsent.set(spot(open), draft);
+  }
 
   function addToReview() {
     if (open === null || review === null) return;
     if (review.pending.add(review.entity, { ...open, body: draft }) === null) return;
+    unsent.delete(spot(open));
     open = null;
     draft = "";
     push({ text: "Added to your review. Nothing is sent until you submit it." });
@@ -420,8 +439,9 @@
     draftsAt: (path: string, line: DiffLine) => drafts.filter((d) => sameTarget(d, { path, ...targetOf(line) })),
     isOpen: (path: string, line: DiffLine) => open !== null && sameTarget(open, { path, ...targetOf(line) }),
     openAt(path: string, line: DiffLine) {
+      keepDraft();
       open = { path, ...targetOf(line) };
-      draft = "";
+      draft = unsent.get(spot(open)) ?? "";
     },
     get draft() {
       return draft;
@@ -429,8 +449,14 @@
     set draft(text: string) {
       draft = text;
     },
-    cancel() {
+    close() {
+      keepDraft();
       open = null;
+    },
+    cancel() {
+      if (open !== null) unsent.delete(spot(open));
+      open = null;
+      draft = "";
     },
     add: addToReview,
     canReply: (thread) => !!review?.reply && thread.replies && thread.id !== null,
@@ -442,8 +468,9 @@
     },
     isReplying: (thread) => thread.id !== null && replying === thread.id,
     openReply(thread) {
+      keepReply();
       replying = thread.id;
-      replyDraft = "";
+      replyDraft = (thread.id !== null && unsentReplies.get(thread.id)) || "";
     },
     get replyDraft() {
       return replyDraft;
@@ -451,8 +478,14 @@
     set replyDraft(text: string) {
       replyDraft = text;
     },
-    cancelReply() {
+    closeReply() {
+      keepReply();
       replying = null;
+    },
+    cancelReply() {
+      if (replying !== null) unsentReplies.delete(replying);
+      replying = null;
+      replyDraft = "";
     },
     sendReply(path, thread) {
       const send = review?.reply;
@@ -460,6 +493,7 @@
       if (!send || body === "") return;
       void send(path, thread, body).then((queued) => {
         if (!queued || replying !== thread.id) return;
+        if (thread.id !== null) unsentReplies.delete(thread.id);
         replying = null;
         replyDraft = "";
       });
@@ -480,6 +514,13 @@
   /** The reply box open under one thread (#2277), by the thread's id, and its words. */
   let replying = $state<string | null>(null);
   let replyDraft = $state("");
+  const unsentReplies = new Map<string, string>();
+
+  function keepReply() {
+    if (replying === null) return;
+    if (replyDraft.trim() === "") unsentReplies.delete(replying);
+    else unsentReplies.set(replying, replyDraft);
+  }
   /** Resolved threads the reader opened. */
   let shownThreads = $state<Record<string, boolean>>({});
   /** Pending comments written on an earlier head (#2276): kept apart, never sent. */
@@ -489,7 +530,7 @@
   const homeless = $derived(drafts.filter((d) => !files.some((file) => file.path === d.path)));
 
   /** Each file's card, for the tree and the keys. */
-  type Card = { scrollTo(): void; nextHunk(step: 1 | -1): boolean; comment(): boolean };
+  type Card = { scrollTo(): void; nextHunk(step: 1 | -1, entering?: boolean): boolean; comment(): boolean };
   const cards: Record<string, Card | undefined> = $state({});
   /** The file `j`/`k` is on. */
   let current = $state<string | null>(null);
@@ -564,23 +605,39 @@
         break;
       }
       case "n":
-      case "p":
-        current = keyOf(here);
-        cards[current]?.nextHunk(event.key === "n" ? 1 : -1);
-        hold();
+      case "p": {
+        // Past this file's last hunk, or from a file with no lines drawn, on to the next file that has one.
+        const step = event.key === "n" ? 1 : -1;
+        const from = Math.max(0, at);
+        for (let i = from; i >= 0 && i < keys.length; i += step) {
+          if (!cards[keys[i]!]?.nextHunk(step, i !== from)) continue;
+          current = keys[i]!;
+          hold();
+          break;
+        }
         break;
+      }
       case "v":
         if (!viewed) return;
         current = keyOf(here);
         setViewed(here, !isViewed(here.path));
         break;
-      case "c":
-        current = keyOf(here);
-        if (!cards[current]?.comment()) return;
+      case "c": {
+        if (!review) return;
+        // The file `j` or `n` reached, else the next one with lines to comment on: a collapsed file has none.
+        const from = Math.max(0, at);
+        const taker = [...keys.slice(from), ...keys.slice(0, from)].find((key) => cards[key]?.comment());
+        if (taker === undefined) {
+          push({ text: "No open file takes a comment here. Open one, or show its raw diff, then press c." });
+          break;
+        }
+        current = taker;
         hold();
         break;
+      }
       case "s":
-        layout.set(layout.chosen === "split" ? "unified" : "split");
+        if (tight) push({ text: NO_ROOM });
+        else layout.set(layout.chosen === "split" ? "unified" : "split");
         break;
       default:
         return;
@@ -624,9 +681,18 @@
 <div class="tf-dview">
 <div class="tf-dtool">
   <div class="tf-seg" role="group" aria-label="Layout">
-    <button type="button" aria-pressed={layout.chosen === "unified"} onclick={() => layout.set("unified")}>Unified</button>
-    <button type="button" aria-pressed={layout.chosen === "split"} onclick={() => layout.set("split")}>Split</button>
+    <button type="button" aria-pressed={!split} onclick={() => layout.set("unified")}>Unified</button>
+    <button
+      type="button"
+      aria-pressed={split}
+      aria-disabled={tight ? "true" : undefined}
+      title={tight ? NO_ROOM : undefined}
+      onclick={() => {
+        if (!tight) layout.set("split");
+      }}>Split</button
+    >
   </div>
+  {@render tools?.()}
   {#if anyPipe}
     {@const all = pipeAll ?? piping.on}
     <div class="tf-fchips">
@@ -640,9 +706,6 @@
         }}>Run pipelines</button
       >
     </div>
-  {/if}
-  {#if layout.chosen === "split" && tight}
-    <span class="tf-dim tf-dtool-why">Unified: there is too little room here for split.</span>
   {/if}
   {#if viewed && files.length > 0}
     {@const count = files.filter((file) => isViewed(file.path)).length}

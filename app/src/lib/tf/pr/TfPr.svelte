@@ -97,7 +97,7 @@
   import { isMine, itemHash, keyOf, username } from "../job/job";
   import { commitLine } from "../repo/file-tree";
   import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
-  import { layers } from "../layers.svelte";
+  import { inlineEditor } from "../inline-editor";
   import { pageVisible } from "../kept-pages.svelte";
   import { stateWord } from "../state-word";
   import type { EscTarget } from "../escape";
@@ -116,6 +116,7 @@
     readiness,
     readPrRoute,
     readyLines,
+    reviewChoices,
     reviewersOf,
     tabCounts,
     type PrTab,
@@ -409,6 +410,8 @@
     phrase: string;
     /** The dialog primary's words, where they are not the label. */
     primary?: string;
+    /** The dialog's title, where the label and the name don't read as one. */
+    heading?: string;
     /** `update`, `edit`, `close`, `reopen`: the chip is `<verb> queued`. */
     verb: string;
     /** What keys its button: the verb, or a source action's own id. */
@@ -425,7 +428,7 @@
     const edit = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] === undefined);
     const setState = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] !== undefined);
     const list: Write[] = [];
-    if (update) list.push({ action: update, label: "Update branch…", phrase: "update branch of", verb: "update", key: "update" });
+    if (update) list.push({ action: update, label: "Update branch…", phrase: "update branch of", verb: "update", key: "update", heading: `Update the branch of ${name}` });
     if (edit) list.push({ action: edit, label: "Edit…", phrase: "edit", verb: "edit", key: "edit", primary: "Save changes" });
     if (setState) {
       const verb = setState.values["state"] === "closed" ? "close" : "reopen";
@@ -454,6 +457,11 @@
   const waiting = $derived(prId === null ? 0 : pending.of(prId).length);
   /** Whether the source takes a review now: any of its `submit_review` actions. */
   const takesReview = $derived(actions.some((a) => a.write_op === "submit_review"));
+  /** Why no verdict can be sent (a token that may not write, #2030): *Review…* is disabled like its neighbours, as its dialog could not finish. */
+  const reviewRefused = $derived.by(() => {
+    const choices = reviewChoices(actions, waiting, header.base);
+    return choices.length > 0 && choices.every((choice) => choice.action === null) ? (choices.find((choice) => choice.why !== null)?.why ?? null) : null;
+  });
   /** The ticket knobas links this pull request to, by its key, for *Merge…*'s In Review line. */
   const ticket = $derived.by(() => {
     const linked = detail?.links.find((entry) => entry.other.kind === "ticket");
@@ -475,18 +483,12 @@
   });
   let picking = $state(false);
   let requestFace = $state<HTMLButtonElement | null>(null);
-  let pickList = $state<HTMLDivElement | null>(null);
+  /** Where focus stands when the last person who could be asked was asked, and *Request…* went with them. */
+  let reviewersPanel = $state<HTMLDivElement | null>(null);
   const pageShown = pageVisible();
-  // `Esc` closes the list before it leaves the page. A page keep-alive holds hidden answers to no press.
-  $effect(() => {
-    if (!picking || !pageShown()) return;
-    queueMicrotask(() => pickList?.querySelector("button")?.focus());
-    return untrack(() => layers.add({ kind: "panel", close: closePick }));
-  });
 
   function closePick() {
     picking = false;
-    requestFace?.focus();
   }
   /** The rail's reviewers: the read's, then those asked here that it does not name yet. */
   const railReviewers = $derived.by(() => {
@@ -514,7 +516,7 @@
   /** The comments this session queued that the conversation did not hold when it was read. */
   const queuedComments = $derived(prId === null ? [] : echoesOn(prId, "comment"));
   /** The chips of what this session queued here, beside the state: `close queued`, then `close sent`. */
-  const chips = $derived(prId === null ? [] : echoesOn(prId).filter((echo) => echo.kind !== "comment").map(chipOf));
+  const chips = $derived(prId === null ? [] : echoesOn(prId).filter((echo) => echo.kind !== "comment"));
 
   /**
    * The writes whose landing the view's *State* reads (#1542): each goes once
@@ -662,7 +664,10 @@
         <h1>{name} {title}</h1>
         <div class="tf-sub">
           {#if header.state !== null}<TfStateChip text={header.state.text} tone={header.state.tone ?? 'muted'} />{/if}
-          {#each chips as chip (chip)}{" "}<TfStateChip text={chip} tone="info" />{/each}
+          {#each chips as echo (`${echo.kind}\n${echo.text}`)}
+            <!-- A review request names the act and the login as written: a state word would turn it into *Sven sent*. -->
+            {" "}{#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<TfStateChip text={chipOf(echo)} tone="info" />{/if}
+          {/each}
           {#if header.head !== null}
             {" "}<span class="tf-mono">{header.head}</span>{#if header.base !== null}{" "}into <span class="tf-mono">{header.base}</span>{/if}{#if header.author !== null},{/if}
           {/if}
@@ -685,9 +690,26 @@
           >
         {/if}
         {#if waiting > 0 && takesReview}
-          <button type="button" class="tf-btn tf-warnbtn" onclick={() => (reviewing = true)}>Submit review ({waiting} pending)</button>
+          <button
+            type="button"
+            class="tf-btn"
+            class:tf-warnbtn={reviewRefused === null}
+            aria-disabled={reviewRefused !== null ? "true" : undefined}
+            title={reviewRefused ?? undefined}
+            onclick={() => {
+              if (reviewRefused === null) reviewing = true;
+            }}>Submit review ({waiting} pending)</button
+          >
         {:else if reviewable}
-          <button type="button" class="tf-btn" onclick={() => (reviewing = true)}>Review…</button>
+          <button
+            type="button"
+            class="tf-btn"
+            aria-disabled={reviewRefused !== null ? "true" : undefined}
+            title={reviewRefused ?? undefined}
+            onclick={() => {
+              if (reviewRefused === null) reviewing = true;
+            }}>Review…</button
+          >
         {/if}
         {#each writes as write (write.key)}
           {@const why = heldBy(write.key) ?? write.action.disabled}
@@ -805,7 +827,17 @@
               {/if}
               {#if comment !== null}
                 <div class="tf-compose">
-                  <textarea bind:value={draft} placeholder="Comment on {name}" aria-label="Comment on {name}"></textarea>
+                  <textarea
+                    bind:value={draft}
+                    placeholder="Comment on {name}"
+                    aria-label="Comment on {name}"
+                    onkeydown={(event) => {
+                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                        event.preventDefault();
+                        void send();
+                      }
+                    }}
+                  ></textarea>
                   <div class="tf-acts">
                     <button
                       type="button"
@@ -871,7 +903,7 @@
           </div>
           {/if}
           {#if view}
-            <div class="tf-panel tf-prreviewers">
+            <div class="tf-panel tf-prreviewers" tabindex="-1" bind:this={reviewersPanel}>
               <header
                 ><h3>Reviewers</h3>
                 {#if request !== null && askable.length > 0}
@@ -891,7 +923,8 @@
                 {/if}</header
               >
               {#if picking && request !== null}
-                <div class="tf-prpick" role="group" aria-labelledby="tf-prpick-h" bind:this={pickList}>
+                <!-- `Esc` closes the list before it leaves the page. A page keep-alive holds hidden answers to no press. -->
+                <div class="tf-prpick" role="group" aria-labelledby="tf-prpick-h" {@attach pageShown() && inlineEditor(closePick, { back: () => requestFace ?? reviewersPanel })}>
                   <p class="tf-prpick-h" id="tf-prpick-h">Ask for a review</p>
                   {#each askable as option (option.value)}
                     <button type="button" onclick={() => void requestReview(option.value)}
@@ -1020,7 +1053,7 @@
   <TfEntityAction
     action={write.action}
     entityId={prId}
-    title={/^add\b/i.test(write.label) ? `${plainLabel(write.label)} to ${name}` : `${plainLabel(write.label)} ${name}`}
+    title={write.heading ?? (/^add\b/i.test(write.label) ? `${plainLabel(write.label)} to ${name}` : `${plainLabel(write.label)} ${name}`)}
     what="{write.phrase} {name}"
     primary={write.primary ?? null}
     source={detail?.source ?? null}

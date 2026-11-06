@@ -242,9 +242,9 @@ test("a diff read at the checkout offers Ignore whitespace, and asks again with 
   };
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: BASE, head: HEAD, ports } });
   await settle();
-  const box = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const box = target.querySelector<HTMLInputElement>(".tf-dtool .tf-wsbox input")!;
   expect(box.disabled).toBe(false);
-  expect(target.querySelector("[data-testid=ws-why]")).toBeNull();
+  expect(target.querySelector(".tf-wsbox")!.getAttribute("title")).toBeNull();
   expect(headers(target)).toEqual(["pay.py"]);
 
   box.click();
@@ -252,6 +252,14 @@ test("a diff read at the checkout offers Ignore whitespace, and asks again with 
   expect(asked).toEqual([false, true]);
   expect(headers(target)).toEqual([]);
   expect(target.querySelector(".tf-empty")!.textContent).toContain("Nothing changes");
+  // A tick that left nothing to draw can still come off, and focus stayed on it through the redraw.
+  const still = target.querySelector<HTMLInputElement>(".tf-wsbox input")!;
+  expect(still.checked).toBe(true);
+  expect(document.activeElement).toBe(still);
+  still.click();
+  await settle();
+  expect(headers(target)).toEqual(["pay.py"]);
+  expect(document.activeElement).toBe(target.querySelector(".tf-wsbox input"));
 });
 
 test("when the source answers after whitespace was asked ignored, the box is not left ticked over a diff that shows it", async () => {
@@ -262,24 +270,25 @@ test("when the source answers after whitespace was asked ignored, the box is not
   };
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: BASE, head: HEAD, ports } });
   await settle();
-  target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!.click();
+  target.querySelector<HTMLInputElement>(".tf-wsbox input")!.click();
   await settle();
-  const box = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const box = target.querySelector<HTMLInputElement>(".tf-wsbox input")!;
   expect(box.disabled).toBe(true);
   expect(box.checked).toBe(false);
-  expect(target.querySelector("[data-testid=ws-why]")).not.toBeNull();
+  expect(target.querySelector(".tf-wsbox")!.getAttribute("title")).not.toBeNull();
 });
 
-test("on a diff the source served, Ignore whitespace is disabled and says why", async () => {
+test("on a diff the source served, Ignore whitespace is disabled beside the layout, its reason a title (F-232)", async () => {
   const ports = viaSource(answer);
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: `${BASE}^`, head: HEAD, ports } });
   await settle();
-  const box = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const box = target.querySelector<HTMLInputElement>(".tf-dtool .tf-wsbox input")!;
   expect(box.disabled).toBe(true);
-  const why = document.getElementById(box.getAttribute("aria-describedby")!);
-  expect(why?.textContent).toContain("cannot leave whitespace out");
-  expect(why?.textContent).toContain("A checkout holding both commits can.");
-  expect(why).toBe(target.querySelector("[data-testid=ws-why]"));
+  expect(box.title).toContain("can't leave whitespace out");
+  expect(box.title).toContain("A checkout holding both commits can.");
+  expect(box.closest("label")!.title).toBe(box.title);
+  // Nothing is written above the diff to say so.
+  expect(target.querySelector(".tf-diffws")).toBeNull();
 });
 
 test("a diff between branch names says a checkout never reads it, rather than that one holding both commits could (Spec 5)", async () => {
@@ -289,9 +298,9 @@ test("a diff between branch names says a checkout never reads it, rather than th
   };
   view = mount(TfDiffPage, { target, props: { repoId: REPO, base: "main", head: "spike/sepa-instant", ports } });
   await settle();
-  const why = target.querySelector("[data-testid=ws-why]");
-  expect(why?.textContent).toContain("A branch name is read where it lives, never at a checkout");
-  expect(why?.textContent).not.toContain("A checkout holding both commits can.");
+  const why = target.querySelector(".tf-wsbox")!.getAttribute("title");
+  expect(why).toContain("A branch name is read at the source");
+  expect(why).not.toContain("A checkout holding both commits can.");
 });
 
 test("a diff that names its range runs a file's default pipeline on both sides at its two shas (#2270)", async () => {

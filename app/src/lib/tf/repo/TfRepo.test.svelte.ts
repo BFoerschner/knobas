@@ -484,22 +484,53 @@ test("a commit the checkout holds is read there, offers Ignore whitespace, and t
   expect(text(target.querySelector(".tf-diff .tf-fh"))).toBe("M src/retry.rs +1 −1 Open in…");
   // The whole view is read for its toolbar and parent; its diff is never asked of the source.
   expect(viewReads.filter(([id]) => id === C1)).toEqual([[C1, null]]);
-  const ws = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const ws = target.querySelector<HTMLInputElement>(".tf-dtool .tf-wsbox input")!;
   expect(ws.disabled).toBe(false);
-  expect(target.querySelector("[data-testid=ws-why]")).toBeNull();
+  expect(target.querySelector(".tf-wsbox")!.getAttribute("title")).toBeNull();
   ws.click();
   await settle();
   expect(asked.at(-1)).toEqual([REPO, C1, "c90d11a2b3c4", true]);
   expect(text(target.querySelector(".tf-empty"))).toBe("This commit changes no file.");
+  // With nothing drawn the tick can still come off.
+  expect(target.querySelector<HTMLInputElement>(".tf-diffws .tf-wsbox input")!.checked).toBe(true);
 });
 
 test("a commit no checkout holds is the source's diff, one read, and says why whitespace stays (#2319)", async () => {
   await draw([REPO, "commits", C1]);
   expect(viewReads.filter(([id]) => id === C1)).toEqual(expect.arrayContaining([[C1, null], [C1, "diff"]]));
   expect(viewReads.filter(([id, s]) => id === C1 && s === "diff").length).toBe(1);
-  const ws = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const ws = target.querySelector<HTMLInputElement>(".tf-dtool .tf-wsbox input")!;
   expect(ws.disabled).toBe(true);
-  expect(text(target.querySelector("[data-testid=ws-why]"))).toContain("A checkout holding this commit can.");
+  expect(ws.title).toContain("A checkout holding this commit can.");
+});
+
+test("an address that names no commit draws the nothing-here block under the tabs, no raw words and no header (F-231)", async () => {
+  const bad = "5d77e1a2c3";
+  const refusing = (id: string) => id === bad;
+  const base = ports();
+  await draw(
+    [REPO, "commits", bad],
+    {
+      ...base,
+      getEntity: async (id: string) => {
+        if (refusing(id)) throw { code: "invalid", message: `entity id ${id} has no ':' separating namespace from key` };
+        return base.getEntity(id);
+      },
+    },
+  );
+  expect(text(target.querySelector(".tf-nohere p"))).toBe("knobas does not hold this commit. It may not have synced yet.");
+  expect(target.querySelector(".tf-nohere a")!.getAttribute("href")).toContain("/commits");
+  expect(target.textContent).not.toContain("namespace");
+  expect(target.querySelector(".tf-tabs")).not.toBeNull();
+  expect(target.querySelector(".tf-cgroup-h")).toBeNull();
+});
+
+test("the branch selector is not on Compare, whose Into and From already say it (F-230)", async () => {
+  await draw([REPO, "compare"]);
+  expect(target.querySelector("select[aria-label=Branch]")).toBeNull();
+  expect(target.querySelector("#tf-cmp-from")).not.toBeNull();
+  await draw([REPO, "commits"]);
+  expect(target.querySelector("select[aria-label=Branch]")).not.toBeNull();
 });
 
 test("Pull requests lists this repository's, with a state filter", async () => {
