@@ -224,6 +224,17 @@ test("Add a renderer… is a dialog: focus in, the missing line, Esc out with fo
   expect(document.activeElement).toBe(opener);
 });
 
+test("a removal the backend refuses is said beside the table, with no form open to hold it", async () => {
+  const { ports } = backend([{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
+  ports.setUserRenderers = () => Promise.reject({ code: "invalid", message: "the list could not be written" });
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  [...target.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Remove Cat")!.click();
+  await settle();
+  expect(target.querySelector("[role=alert]")?.textContent).toContain("could not be written");
+  expect(target.querySelector("tbody")?.textContent).toContain("Cat");
+});
+
 test("Run waits for a sample, and says so", async () => {
   const { ports } = backend([{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
