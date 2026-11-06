@@ -10,6 +10,7 @@ import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
 import { sessionFilter } from "../filter/filter-state.svelte";
+import { pageContext } from "../kept-pages.svelte";
 import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
@@ -3305,6 +3306,27 @@ test("Continue reading goes back to where the page was left; opening it another 
   main.dispatchEvent(new Event("scroll"));
   await settle();
   expect(readingAt("confluence:2")).toBe(main.scrollTop);
+  forgetReading();
+});
+
+test("a page keep-alive hides reads 0, and that is not where the reader left it: Continue reading keeps the place (F-431)", async () => {
+  forgetReading();
+  const page = $state({ shown: true });
+  const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }) });
+  view = mount(TfDocs, { target, props, context: pageContext(() => page.shown) });
+  await settle();
+  const main = target.querySelector<HTMLElement>(".tf-rd-main")!;
+  let top = 1200;
+  Object.defineProperty(main, "scrollTop", { get: () => top, set: (n: number) => (top = n), configurable: true });
+  main.dispatchEvent(new Event("scroll"));
+  await settle();
+  expect(readingAt("confluence:2")).toBe(1200);
+
+  page.shown = false;
+  top = 0;
+  main.dispatchEvent(new Event("scroll"));
+  await settle();
+  expect(readingAt("confluence:2")).toBe(1200);
   forgetReading();
 });
 

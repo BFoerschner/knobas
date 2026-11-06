@@ -1003,7 +1003,8 @@
   function follow(): void {
     if (!main || !article) return;
     // Where the reader is on this page, for *Continue reading*. Only with its own page drawn: another's scroll is not this one's.
-    if (place.kind === "page" && page?.entity_id === place.id) noteReading(place.id, main.scrollTop);
+    // And only while shown: a page keep-alive hides reads 0, which isn't where the reader left it.
+    if (shown() && place.kind === "page" && page?.entity_id === place.id) noteReading(place.id, main.scrollTop);
     // A section is the one you are in once its heading is in the column's top third, with its body in view under it.
     const top = main.getBoundingClientRect().top + main.clientHeight / 3;
     let now: number | null = null;
