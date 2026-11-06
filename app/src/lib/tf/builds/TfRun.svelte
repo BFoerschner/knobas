@@ -55,6 +55,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
+  import { jumpAcross } from "../opener";
   import { parentPage } from "../page-name.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
@@ -105,7 +106,6 @@
     sectionOf,
     ticketDraftOf,
     tookLine,
-    jumpAcross,
     type FirstFailure,
   } from "./run";
 
@@ -584,7 +584,7 @@
             <h3>{failureHeading(failure)}</h3>
             {#if failure.details !== null}<pre>{failure.details}</pre>{/if}
             <div class="tf-acts">
-              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")} onclick={jumpAcross}>Show in log</a>
+              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")} onclick={(event) => jumpAcross(event, "Overview")}>Show in log</a>
               {#if failure.location !== null && repoId !== null}
                 <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, failure.location.path)}>Open the test file</a>
               {/if}

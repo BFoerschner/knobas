@@ -23,7 +23,7 @@
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { tick, untrack } from "svelte";
   import type { EchoListen } from "../queued.svelte";
-  import { goAcross } from "../opener";
+  import { jumpAcross } from "../opener";
   import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
@@ -125,10 +125,7 @@
     {#if newPr !== null}<a
         class="tf-btn tf-sm"
         href={newPr}
-        onclick={(event) => {
-          event.preventDefault();
-          goAcross(newPr, "Pull requests");
-        }}>New pull request</a>{/if}
+        onclick={(event) => jumpAcross(event, "Pull requests")}>New pull request</a>{/if}
   </div>
 {:else if shown.length === 0 && sent.length === 0}
   <TfNoMatch noun="pull requests" {filter} />

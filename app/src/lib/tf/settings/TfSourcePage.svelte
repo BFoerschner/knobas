@@ -184,7 +184,7 @@
     saving = true;
     try {
       embedsOn = await ports.setRunEmbeddedHtml(source.id, on);
-      push({ text: embedsOn ? `${name} pages run their embedded HTML.` : `${name} pages draw their embedded HTML as a placeholder.` });
+      push({ text: embedsOn ? `${name} pages run their embedded HTML.` : `${name} pages draw their embedded HTML as a placeholder.`, subject: `embeds:${source.id}` });
     } catch (cause) {
       push({ text: `Could not save ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
@@ -667,7 +667,7 @@
           const select = event.currentTarget;
           const secs = Number(select.value);
           // A schedule the backend refused goes back to the stored one.
-          if (!(await update({ sync_interval_secs: secs }, `${name} syncs every ${intervalWords(secs)}`))) {
+          if (!(await update({ sync_interval_secs: secs }, `${name} syncs every ${intervalWords(secs)}`, `every:${source.id}`))) {
             select.value = String(source.sync_interval_secs);
           }
         }}

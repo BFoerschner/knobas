@@ -1111,7 +1111,8 @@
   async function copySection(p: DocPage, section: number, heading: string): Promise<void> {
     try {
       await io.copy(copyLinkText(p, section));
-      push({ text: `Copied link to ${heading}` });
+      // The clipboard holds one link, so one toast says which.
+      push({ text: `Copied link to ${heading}`, subject: "copy-section" });
     } catch (cause) {
       push({ text: `Could not copy: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -1154,7 +1155,7 @@
   let revealed = $state<string[]>([]);
   /** The toast each *Create page* raised, by parent and title, which the read that holds the page takes the place of. */
   const pageToasts = new Map<string, number>();
-  const pageKey = (parent: string, title: string) => `${parent} ${title}`;
+  const pageKey = (parent: string, title: string) => `${parent}\0${title}`;
 
   /** A tree read drops each queued page it holds: a page of that title under that parent. Now it exists, it can be opened. */
   function settlePages(read: DocsTree): void {

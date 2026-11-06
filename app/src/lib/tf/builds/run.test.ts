@@ -13,7 +13,6 @@ import {
   contextLine,
   failureHeading,
   firstFailure,
-  jumpAcross,
   locationIn,
   parameterRows,
   pipelineOfRun,
@@ -24,7 +23,7 @@ import {
   noSuchRunTab,
   tookLine,
 } from "./run";
-import { takeTold } from "../opener";
+import { jumpAcross, leftName, takeTold } from "../opener";
 
 function run(no: number, tone: "ok" | "err" | null, branch = "main", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -301,7 +300,7 @@ test("a press to another tab of the run is told as a jump, and a ⌘-press stays
     let event!: MouseEvent;
     link.addEventListener("click", (fired) => {
       event = fired;
-      jumpAcross(fired);
+      jumpAcross(fired, "Overview");
     });
     link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...over }));
     return event;
@@ -312,4 +311,5 @@ test("a press to another tab of the run is told as a jump, and a ⌘-press stays
   expect(press().defaultPrevented).toBe(true);
   expect(location.hash).toBe("#/build/p/r/log");
   expect(takeTold(location.hash)).toBe("across");
+  expect(leftName()).toBe("Overview");
 });

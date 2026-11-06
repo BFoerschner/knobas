@@ -1472,7 +1472,7 @@
     if (done === null) return;
     renaming = false;
     holdStillPress();
-    undoable(`Renamed ${name} to ${named}`, () => undoWrite(() => io.editAsset(id, [{ field: "name", value: name }])));
+    undoable(`Renamed ${name} to ${named}`, () => undoWrite(() => io.editAsset(id, [{ field: "name", value: name }])), { subject: `rename:${id}` });
   }
 
   /** The toast's *Undo* outlives the page and any other write under way, so it is not `write`: it sends, and the page reads the answer if it is still here. */
@@ -1490,7 +1490,7 @@
     // what redraws the columns at the new path.
     revision += 1;
     const { id, name, parent_id: from } = asset;
-    undoable(`Moved ${name} to ${into}`, () => undoWrite(() => io.moveAsset(id, from)));
+    undoable(`Moved ${name} to ${into}`, () => undoWrite(() => io.moveAsset(id, from)), { subject: `move:${id}` });
   }
 
   /**

@@ -176,7 +176,7 @@
   import TfRepoTab from "./TfRepoTab.svelte";
   import { parentPage } from "../page-name.svelte";
   import { itemHash } from "../job/job";
-  import { goAcross } from "../opener";
+  import { jumpAcross } from "../opener";
   import { echoesOn } from "../queued.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
@@ -580,11 +580,10 @@
    * The header's press goes to another of the page's tabs: an opening, so `Esc` comes back to the tab it was pressed on (F-259, F-065).
    * The page's name is the repository, which Compare is on too, so the bar names the tab.
    */
-  function pressNewPr(event: MouseEvent, href: string, branch: string) {
-    event.preventDefault();
+  function pressNewPr(event: MouseEvent, branch: string) {
     guessed = selected !== null && !selected.isDefault ? null : { branch, why: toPropose === branch ? "the newest branch with nothing open" : "the newest branch" };
     // A commit is a page of its own, which already names itself.
-    goAcross(href, route.commit !== null ? undefined : REPO_TABS.find((entry) => entry.id === tab)?.label);
+    jumpAcross(event, route.commit !== null ? undefined : REPO_TABS.find((entry) => entry.id === tab)?.label);
   }
 
   function pick(event: Event) {
@@ -666,7 +665,7 @@
             <a class="tf-btn tf-primary" href={itemHash({ entity_id: openedFrom.entityId, kind: "pr" })}>Open PR {openedFrom.number ?? ""}</a>
           {:else if starting !== null}
             {@const href = repoHash(repoId, "compare", encodeURIComponent(starting))}
-            <a class="tf-btn tf-primary" {href} onclick={(event) => pressNewPr(event, href, starting)}>New pull request</a>
+            <a class="tf-btn tf-primary" {href} onclick={(event) => pressNewPr(event, starting)}>New pull request</a>
           {/if}
           <label class="tf-bsel"
             ><svg viewBox="0 0 16 16" aria-hidden="true"

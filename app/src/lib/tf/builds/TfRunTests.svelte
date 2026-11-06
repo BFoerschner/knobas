@@ -22,7 +22,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import type { RunPorts } from "./pipeline-ports";
   import { stateWord } from "../state-word";
-  import { jumpAcross } from "./run";
+  import { jumpAcross } from "../opener";
   import { RESULT_CHIPS, historyLine, keptTests, modulesOf, testTime } from "./run-reads";
 
   let {
@@ -170,7 +170,7 @@
         <div class="tf-tdetail" {@attach win.row(entryKey(entry))}>
           {#if test.details !== null}<pre>{test.details.trimEnd()}</pre>{/if}
           <div class="tf-tacts">
-            <a class="tf-btn tf-sm" href={logHref} onclick={jumpAcross}>Show in log</a>
+            <a class="tf-btn tf-sm" href={logHref} onclick={(event) => jumpAcross(event, "Tests")}>Show in log</a>
             {#if line !== null}<span class="tf-dim">{line}</span>{/if}
           </div>
         </div>

@@ -1,7 +1,7 @@
 /**
- * **A row leaving under a pointer holds its place** (design system, F-138). After a mouse press removes a row, the page draws
- * an empty row of its height in its place, and this says when to let it go: when the pointer leaves it, the window, or a wheel
- * or a key takes the reader on. The list closes up then, so a second press where the pointer rests lands on nothing.
+ * **A row leaving under a pointer holds its place** (design system, F-138, F-064). After a mouse press removes a row, the page
+ * draws it at its height, in `--muted` with nothing to press, and this says when to let it go: when the pointer leaves it, the
+ * window, or a wheel or a key takes the reader on. The list closes up then, so a second press where the pointer rests lands on nothing.
  *
  * A press by key has `detail` 0 and closes at once, because focus moves on with it: {@link heldByPointer} tells them apart.
  */

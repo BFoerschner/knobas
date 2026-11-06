@@ -38,7 +38,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
-  import { goAcross } from "../opener";
+  import { jumpAcross } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
@@ -276,10 +276,7 @@
             ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr && !prSent.has(row.name)}<a
                   class="tf-btn tf-sm"
                   href={compareHash(repoId, row.name)}
-                  onclick={(event) => {
-                    event.preventDefault();
-                    goAcross(compareHash(repoId, row.name), "Branches");
-                  }}>New pull request</a
+                  onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
                 >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"

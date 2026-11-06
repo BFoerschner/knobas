@@ -116,6 +116,19 @@ export function goAcross(hash: string, left?: string): void {
 }
 
 /**
+ * {@link goAcross} for a link's press in a page's body that goes to another of its tabs, where the tab bar is a switch (F-355,
+ * F-259). `left` names the tab it was pressed on, for the bar: *Back to Overview*, not the run both tabs are on. ⌘-click and
+ * the like stay the browser's.
+ */
+export function jumpAcross(event: MouseEvent, left?: string): void {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const href = (event.currentTarget as HTMLAnchorElement | null)?.getAttribute("href");
+  if (!href) return;
+  event.preventDefault();
+  goAcross(href, left);
+}
+
+/**
  * Open a section's top page to come back from. A top page's `Esc` does nothing,
  * since a nav entry brought the reader there. Pressed from a ticket's dialog
  * (*Manage link sets*), it says where it came from, as a card's row does.
