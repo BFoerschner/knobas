@@ -138,3 +138,23 @@ test("Add…: ↓ goes into the list, the arrows walk the ticks, and ↑ from th
   press(first!, "ArrowUp");
   expect(document.activeElement).toBe(filter);
 });
+
+test("Add…: Enter on a row adds what is ticked, and with nothing ticked sends nothing (F-538)", async () => {
+  const candidates = [
+    { entity_id: "x", name: "one", sub: "" },
+    { entity_id: "y", name: "two", sub: "" },
+  ];
+  const added: string[][] = [];
+  view = mount(TfSetPicker, {
+    target,
+    props: { kind: "repo", setName: "Payout stack", have: new Set<string>(), read: async () => candidates, onadd: (picked: { entity_id: string }[]) => added.push(picked.map((row) => row.entity_id)), onclose: () => {} },
+  });
+  await settle();
+  const [first] = [...target.querySelectorAll<HTMLInputElement>("input[type='checkbox']")];
+  press(first!, "Enter");
+  expect(added).toEqual([]);
+  first!.click();
+  await settle();
+  press(first!, "Enter");
+  expect(added).toEqual([["x"]]);
+});

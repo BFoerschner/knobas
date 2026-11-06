@@ -333,6 +333,54 @@ test("Enter on a row navigates to its address and closes the overlay", async () 
   expect(target.querySelector(".tf-launch")).toBeNull();
 });
 
+/** A pointer event at a place on the screen, on `el`. */
+function pointerAt(el: Element, x: number, y: number) {
+  el.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, screenX: x, screenY: y }));
+  el.dispatchEvent(new MouseEvent("mouseenter", { screenX: x, screenY: y }));
+  flushSync();
+}
+
+test("a row under a resting pointer takes no selection, and a real move does; new words start on the first row (F-628)", async () => {
+  const onnavigate = vi.fn();
+  open({ onnavigate });
+  await settle();
+  const box = target.querySelector("input")!;
+  box.value = "sepa";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await debounced();
+  const rows = () => [...target.querySelectorAll<HTMLElement>(".tf-ln-res")];
+  const selected = () => rows().findIndex((row) => row.getAttribute("aria-selected") === "true");
+
+  // Where the pointer already was, then what a layout reports with it still there: the same place, twice.
+  pointerAt(rows()[1]!, 300, 330);
+  pointerAt(rows()[1]!, 300, 330);
+  expect(selected(), "a pointer that did not move").toBe(0);
+
+  pointerAt(rows()[1]!, 300, 334);
+  expect(selected(), "a pointer that moved").toBe(1);
+
+  box.value = "sep";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await debounced();
+  expect(selected(), "new words").toBe(0);
+  press("Enter");
+  await settle();
+  expect(onnavigate).toHaveBeenCalledWith(expect.stringContaining("PAY-231"));
+});
+
+test("a press on the Titles chip leaves focus in the box (F-631)", async () => {
+  open();
+  await settle();
+  const chip = target.querySelector<HTMLButtonElement>(".tf-ln-scope button")!;
+  chip.focus();
+  chip.click();
+  flushSync();
+  await settle();
+  expect(document.activeElement).toBe(target.querySelector("input"));
+  target.querySelector<HTMLButtonElement>(".tf-ln-scope button")!.click();
+  flushSync();
+});
+
 test("Esc clears the query first and only then closes", async () => {
   const onclose = vi.fn();
   const shell = vi.fn();
@@ -2304,7 +2352,7 @@ test("a value suggestion draws inline, a sheet's action keeps two columns like a
     expect(prefix, "the palette draws prefix rows").not.toBeNull();
     expect(getComputedStyle(prefix!).display).toBe("grid");
     // The name spans the tag and the key cell, so what follows starts where a result's title does (F-625).
-    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("var(--ln-name) 1fr");
+    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("minmax(var(--ln-name), max-content) minmax(0, 1fr)");
 
     unmount(app!);
     app = undefined;
@@ -2323,7 +2371,7 @@ test("a value suggestion draws inline, a sheet's action keeps two columns like a
     press("Tab");
     const action = target.querySelector<HTMLElement>(".tf-ln-sheet button[role='option']")!;
     expect(action.classList.contains("tf-ln-opt"), "a sheet action is a prefix row").toBe(true);
-    expect(getComputedStyle(action).gridTemplateColumns).toBe("var(--ln-name) 1fr");
+    expect(getComputedStyle(action).gridTemplateColumns).toBe("minmax(var(--ln-name), max-content) minmax(0, 1fr)");
   } finally {
     style.remove();
   }

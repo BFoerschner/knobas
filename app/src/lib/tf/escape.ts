@@ -21,7 +21,7 @@
  * one section to another, even when something opened it. The opener is the
  * page the current history entry was opened from by an in-app link or button
  * (`opener.ts`, #2229): a run opened from the Job page returns there, one
- * opened from another run returns to that run. An entry reached by `⌘K`, a
+ * opened from another run returns to that run. An entry reached by a
  * deep link, startup or a nav entry has none, and a tab switch keeps the
  * page's own. The shell steps back in history when the opener is the entry
  * before, so `⌘]` goes forward to the detail again; otherwise it goes there, and
@@ -104,7 +104,7 @@ export function escStep(state: EscState): EscStep {
  * Rungs 6 to 9: where `Esc` goes from `route` once nothing is open, or `null`
  * where it does nothing. `opener` is the current entry's (`opener.ts`).
  * A section's top page does nothing, unless it was opened to be returned from
- * (`visiting`: a ticket card's row, spec #2401, or *Manage link sets*): then it goes back.
+ * (`visiting`: a ticket card's row, spec #2401, *Manage link sets*, or the launcher): then it goes back.
  * Settings and the asset tree are the others: places with no nav entry, visited
  * from somewhere and returned from, Settings on every one of its sections alike,
  * and the tree on its bare root as on an asset in it.

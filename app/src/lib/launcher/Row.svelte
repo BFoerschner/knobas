@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import { kindTag } from "../assets/tree";
+  import { aimed } from "./aim";
   import type { Tone } from "../ipc/entity";
 
   let {
@@ -57,7 +58,7 @@
   role="option"
   aria-selected={selected}
   onclick={onopen}
-  onmouseenter={onhover}
+  onpointermove={aimed(onhover)}
 >
   <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{kindTag(monogram)}</span>
   <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>

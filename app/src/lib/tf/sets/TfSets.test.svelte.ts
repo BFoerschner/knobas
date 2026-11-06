@@ -490,7 +490,7 @@ test("Delete removes the set and goes back to the list", async () => {
   await settle();
   expect(deleted).toEqual(["payout-stack"]);
   expect(location.hash).toBe("#/sets");
-  expect(toasts.items.at(-1)?.text).toBe("Deleted the link set. Links drawn on tickets by hand stay.");
+  expect(toasts.items.at(-1)?.text).toBe("Deleted Payout stack. Links drawn on tickets by hand stay.");
 });
 
 const DASHBOARD: LinkSetHint = {
@@ -650,4 +650,55 @@ test("a page pattern waits for a space, and reads space where it stood as projec
   button("Add pattern").click();
   await settle();
   expect(saved.at(-1)?.patterns.at(-1), "the stored query stays the backend's").toEqual({ kind: "page", query: "project:Payouts" });
+});
+
+test("Add to … takes back through Undo: the item goes and the offer comes back (F-536)", async () => {
+  hints = [DASHBOARD];
+  await draw([]);
+  hints = [];
+  button("Add to Payout stack").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.action?.label).toBe("Undo");
+  hints = [DASHBOARD];
+  toast.action?.run();
+  await settle();
+  expect(saved.at(-1)!.members.map((member) => member.entity_id)).not.toContain("tc:Dashboard_Build");
+  expect(target.querySelector(".tf-hint-card")).not.toBeNull();
+});
+
+test("a set's title keeps focus: Enter saves it, Esc on changed words puts them back, Esc on nothing changed goes on (F-539)", async () => {
+  await draw(["payout-stack"]);
+  const name = target.querySelector<HTMLElement>(".tf-set-title")!;
+  name.focus();
+  const key = (which: string) => {
+    const event = new KeyboardEvent("keydown", { key: which, bubbles: true, cancelable: true });
+    const onwards = vi.fn();
+    window.addEventListener("keydown", onwards, { once: true });
+    name.dispatchEvent(event);
+    window.removeEventListener("keydown", onwards);
+    return onwards.mock.calls.length > 0;
+  };
+  name.textContent = "Renamed";
+  key("Enter");
+  await settle();
+  expect(document.activeElement).toBe(name);
+  expect(saved.at(-1)).toMatchObject({ name: "Renamed" });
+
+  name.textContent = "Typed over";
+  expect(key("Escape"), "the field keeps the press").toBe(false);
+  expect(name.textContent).toBe("Renamed");
+  expect(document.activeElement).toBe(name);
+
+  expect(key("Escape"), "nothing to undo: it reaches the shell").toBe(true);
+  expect(document.activeElement).not.toBe(name);
+});
+
+test("a new rule opens on the first kind with something to choose (F-531)", async () => {
+  await draw(["~new"]);
+  button("Add a rule").click();
+  await settle();
+  const kind = target.querySelector<HTMLSelectElement>("select[aria-label='Rule']")!;
+  const value = target.querySelector<HTMLSelectElement>("select[aria-label='Applies to which']")!;
+  expect([...value.options].length, kind.value).toBeGreaterThan(1);
 });

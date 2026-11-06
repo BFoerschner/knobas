@@ -4,8 +4,10 @@
    answers replace each other. Mono only on a ticket's key; everything else is Archivo. */
 .tf-dialog.tf-launch { width: min(840px, calc(100vw - 32px)); height: min(588px, 84vh); }
 /* One column model for every row (F-625): the tag, the key cell, and what a row is about, so a *Go to* row's words start where a result's title does.
-   A name spans the tag and the key cell, whose width holds the longest place, *Settings › Checkouts and Open in*. */
-.tf-launch { --ln-tag: 28px; --ln-key: 168px; --ln-gap: 12px; --ln-name: calc(var(--ln-tag) + var(--ln-gap) + var(--ln-key)); }
+   A name runs across the tag and the key cell, and only a name longer than both pushes its own row's words on (F-640), so a short key stays near its title. */
+.tf-launch { --ln-tag: 28px; --ln-key: 118px; --ln-gap: 12px; --ln-name: calc(var(--ln-tag) + var(--ln-gap) + var(--ln-key)); }
+/* The `>` palette has no key cell to line up with, so one column holds its longest place, *Settings › Checkouts and Open in*. */
+.tf-ln-list.tf-ln-palette { --ln-name: 220px; }
 /* The title names the dialog for a screen reader; the prototype draws no header. */
 .tf-launch > header {
   position: absolute; width: 1px; height: 1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
@@ -83,7 +85,7 @@
 
 /* A line with a name and what it does: the palette, the board's Retry, a suggestion, a sheet's action. */
 .tf .tf-ln-opt {
-  display: grid; grid-template-columns: var(--ln-name) 1fr; gap: var(--ln-gap); align-items: baseline; width: 100%; text-align: left;
+  display: grid; grid-template-columns: minmax(var(--ln-name), max-content) minmax(0, 1fr); gap: var(--ln-gap); align-items: baseline; width: 100%; text-align: left;
   padding: 7px 18px; font-size: var(--t-sm); color: var(--ink-2);
 }
 .tf-ln-opt .tf-ln-nm { color: var(--ink); }
@@ -107,7 +109,7 @@
   justify-self: end; padding: 0 6px; border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet-2);
   font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap;
 }
-.tf .tf-ln-opt:has(> .tf-ln-chord) { grid-template-columns: var(--ln-name) 1fr auto; }
+.tf .tf-ln-opt:has(> .tf-ln-chord) { grid-template-columns: minmax(var(--ln-name), max-content) minmax(0, 1fr) auto; }
 .tf .tf-ln-res:has(> .tf-ln-chord) { grid-template-columns: var(--ln-tag) var(--ln-key) minmax(0, 1fr) auto; }
 
 /* The key panel (#2429): what the keys bind, the keys large as they are pressed, the buttons, the hint. */

@@ -2,9 +2,12 @@
   *Add a source* in the ticket-first look (#903): prototype-6's
   `stgAddSource`, in the `TfDialog` frame.
 
-  *What is it?* is one radio per adapter, described by what it holds. Then the
-  address, the adapter's config form, **generated** from its `config_schema`
-  (spec §3a, `TfSchemaForm`, no per-adapter branch), and the credential. *Test
+  *What is it?* is one radio per adapter, described by what it holds. Then what
+  it can't connect without, in the order a person has it to hand (F-629): the
+  address, how it signs in, the fields that takes, the secret, then the name and
+  the id. The rest of the adapter's config form, **generated** from its
+  `config_schema` (spec §3a, `TfSchemaForm`, no per-adapter branch), waits in a
+  closed fold, since *Test connection* fills most of it. *Test
   connection* tests the draft and fills what it found into empty fields: the
   account into the user (#82), the ids the source reports into theirs (#297).
   *Add source* sends one `add_source` with the secret and the row, as the
@@ -42,6 +45,7 @@
   import type { SettingsPorts } from "./ports";
   import { AUTH_LABEL, defaultIntervalFor, fillFound, freeSourceId, SOURCE_ID_PATTERN } from "../../sources/new-source";
   import { pageFields } from "./source-config";
+  import { IDENTITY_FIELD } from "./settings";
   import { reach } from "./adapter-preview";
   import TfAdapterFacts from "./TfAdapterFacts.svelte";
   import TfDialog from "./TfDialog.svelte";
@@ -115,6 +119,10 @@
 
   const config = $derived(chosen === null ? { fields: [], error: null } : pageFields(chosen.config_schema, { keepUser: true }));
   const validated = $derived(validate(config.fields, configValues));
+  /** Up front, what it needs, and with a password the user it signs in as. With a token, *Test connection* finds the user (#82). */
+  const firstAsked = (field: { key: string; required: boolean }) => field.required || (authKind === "UserPassword" && field.key === IDENTITY_FIELD);
+  const askedFirst = $derived(config.fields.filter(firstAsked));
+  const inFold = $derived(config.fields.filter((field) => !firstAsked(field)));
   const accountHalf = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
   const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
   const secretWord = $derived(authKind === "UserPassword" ? "Password" : "Token");
@@ -355,12 +363,8 @@
         <label for="tf-add-address">Address <small class="tf-req">required</small></label>
         <input id="tf-add-address" aria-label="Address" type="text" placeholder="https://" autocomplete="off" required bind:value={baseUrl} />
       </div>
-      {#if config.error !== null}
-        <p class="tf-fail">{config.error}</p>
-      {:else if config.fields.length > 0}
-        <TfSchemaForm fields={config.fields} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
-      {/if}
       {#if chosen.auth_methods.length > 1}
+        <div class="tf-pane-h">Sign in with</div>
         <div class="tf-radio" role="radiogroup" aria-label="Sign in with">
           {#each chosen.auth_methods as method (method)}
             <label>
@@ -369,6 +373,11 @@
             </label>
           {/each}
         </div>
+      {/if}
+      {#if config.error !== null}
+        <p class="tf-fail">{config.error}</p>
+      {:else if askedFirst.length > 0}
+        <TfSchemaForm fields={askedFirst} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
       {/if}
       <div class="tf-formgrid">
         <label for="tf-add-secret">{secretWord} <small class="tf-req">required</small></label>
@@ -387,6 +396,13 @@
       <p class="tf-dlg-note {idError ? 'tf-stg-errt' : ''}" id="tf-add-id-note">
         {idError ?? "Permanent: everything from this source is named with it."}
       </p>
+      {#if inFold.length > 0}
+        <!-- Open while something in it is wrong, so what the footer names can be reached. -->
+        <details class="tf-add-more" open={inFold.some((field) => validated.errors[field.key])}>
+          <summary>What it syncs and its field ids</summary>
+          <TfSchemaForm fields={inFold} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
+        </details>
+      {/if}
       {#if accountHalf}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
       {#if report !== null}
         {@const note = noteAfterFill(connectionNote(report), filled)}

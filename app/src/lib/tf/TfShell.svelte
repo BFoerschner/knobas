@@ -73,6 +73,9 @@
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
   import { escStep, escTarget, openerName, windowTitle } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
+  import { catchReenterPress, secretPrompt } from "./settings/secret-prompt.svelte";
+  import TfSecretPromptHost from "./settings/TfSecretPromptHost.svelte";
+  import type { SettingsPorts } from "./settings/ports";
   import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
@@ -83,7 +86,7 @@
   import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
   import { installFocusKeep } from "./focus-keep";
-  import { parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
+  import { isTopPage, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -138,6 +141,7 @@
     nav = { back: () => history.back(), forward: () => history.forward() },
     kept = sharedKeptPages,
     keys = launcherKeys,
+    secretPorts,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /**
@@ -181,6 +185,8 @@
     kept?: KeptPagesSetting;
     /** The keys bound (#2429), whose saved lists' chords open search on the list; the window's when omitted. */
     keys?: KeyStore;
+    /** What the credential prompt over a page reads and writes; the bridge's when omitted. */
+    secretPorts?: Pick<SettingsPorts, "listSources" | "listAdapters" | "appStatus" | "setSourceSecret" | "syncNow">;
   } = $props();
 
   let hash = $state(location.hash);
@@ -228,8 +234,13 @@
     pressed = null;
   }
 
+  /** A step to another address of the page `from` was opened from (`#/settings` opened a source, `Esc` goes to `#/settings/sources`): where it was opened. */
+  function openingPlace(from: string, to: string): Place | undefined {
+    return [...places].reverse().find(([left, place]) => place.to === from && samePage(left, to))?.[1];
+  }
+
   /** Once `to` is drawn: back to its place on a return; a new place in a kept page, or a page never shown, at the top. */
-  function settlePlace(to: string, returning: boolean, opening: boolean, left: Element | null) {
+  function settlePlace(to: string, from: string, returning: boolean, opening: boolean, left: Element | null) {
     endReturn?.();
     endReturn = null;
     void tick().then(() => {
@@ -237,7 +248,7 @@
       if (!mainEl || page === null || location.hash !== to) return;
       const first = !drawnPages.has(page);
       drawnPages.add(page);
-      const place = returning ? places.get(to) : undefined;
+      const place = returning ? (places.get(to) ?? openingPlace(from, to)) : undefined;
       if (place !== undefined) endReturn = restorePlace(place, page);
       else if (opening && page === left) resetScrolls(mainEl, page);
       else if (opening && first) mainEl.scrollTop = 0;
@@ -279,8 +290,9 @@
       history.replaceState(stamped(history.state, here), "");
     }
     if (how !== "replace") scopedTicket.hold(here.trip);
+    const was = hash;
     hash = now;
-    if (how !== "replace") settlePlace(now, returning, opening, left);
+    if (how !== "replace") settlePlace(now, was, returning, opening, left);
   }
 
   /**
@@ -291,6 +303,7 @@
   function stampFor(how: Exclude<Told, "replace"> | null, now: string): Opened {
     if (how === "unopened") return { ...NOT_OPENED, prev: hash };
     if (how === "back") return { ...(here.opener?.from ?? NOT_OPENED), prev: hash };
+    if (how === "launched") return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip: null, visit: isTopPage(parseTfHash(now)), prev: hash };
     const trip = tripAt(now);
     if (how === null && samePage(hash, now)) return { opener: here.opener, trip, visit: here.visit, prev: hash };
     return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip, visit: how === "visit", prev: hash };
@@ -679,10 +692,12 @@
     const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);
     window.addEventListener("keydown", onkeydown);
+    window.addEventListener("click", catchReenterPress, true);
     for (const type of MOUSE) window.addEventListener(type, onmouse);
     return () => {
       window.removeEventListener("hashchange", onhash);
       window.removeEventListener("keydown", onkeydown);
+      window.removeEventListener("click", catchReenterPress, true);
       for (const type of MOUSE) window.removeEventListener(type, onmouse);
     };
   });
@@ -731,6 +746,9 @@
   {@render dialogs?.(sync)}
   {#if writeQueuePanel.open}
     <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
+  {/if}
+  {#if secretPrompt.source !== null}
+    <TfSecretPromptHost sourceId={secretPrompt.source} {layers} ports={secretPorts} />
   {/if}
   <TfToasts />
   <div class="tf-floats"></div>

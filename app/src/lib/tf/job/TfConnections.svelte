@@ -48,6 +48,7 @@
     onshow = () => {},
     onapplyset = () => {},
     onsaveset = () => {},
+    oneditset = () => {},
   }: {
     jobKey: string;
     /** The links drawn on the ticket. */
@@ -68,6 +69,8 @@
     /** *Apply a link set…* and *Save as a link set…* (#869). */
     onapplyset?: () => void;
     onsaveset?: () => void;
+    /** *Edit set* pressed: the page is about to be left, to come back to with the drawer open. */
+    oneditset?: () => void;
   } = $props();
 
   let field = $state<HTMLInputElement | null>(null);
@@ -143,7 +146,7 @@
       {@const rows = filterRows(group.rows, text)}
       <h3>
         From {group.label}, <TfKeyed text={group.via} lead /> <span class="tf-count">{rows.length}</span>
-        {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={onclose}>Edit set</a>{/if}
+        {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={() => { oneditset(); onclose(); }}>Edit set</a>{/if}
       </h3>
       {#each rows as row (row.id)}
         <div class="tf-lk">

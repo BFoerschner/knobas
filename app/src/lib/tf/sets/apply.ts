@@ -43,7 +43,8 @@ export function withoutHandRule(set: LinkSetRow, ticketId: string): LinkSetDraft
  * reads as a slip, since the job shows them (ruled in the PR).
  */
 export function applyToast(set: Pick<LinkSetRow, "name" | "members" | "patterns">, key: string): string {
-  return `${set.name} applied to ${key}. ${itemsOf(set).length} items show on the job.`;
+  const count = itemsOf(set).length;
+  return `${set.name} applied to ${key}. ${count === 1 ? "1 item shows" : `${count} items show`} on the job.`;
 }
 
 /** Prototype-6's `saveSet` toast: the set's name and the rule that now shows it. */

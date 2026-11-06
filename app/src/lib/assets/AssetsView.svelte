@@ -1457,6 +1457,9 @@
     }, false);
     if (done === null) return;
     deleting = false;
+    // Focus on the holder's row, not on its *Delete…*: the next `Enter` must not start deleting the parent (F-532).
+    wantFocus = true;
+    push({ text: `Deleted ${current.asset.name}` });
     nav.go(
       parent === null ? hashFor({ view: "assets", tab: "tree", assetId: null }) : addressOf(parent),
     );

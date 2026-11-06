@@ -45,6 +45,7 @@ import type {
 import type { ActivityRow } from "../ipc/entity";
 import { createTestNav } from "./test-nav.svelte";
 import { layers } from "../tf/layers.svelte";
+import { toasts } from "../shell/toasts.svelte";
 import AssetsView from "./AssetsView.svelte";
 import { waitFor } from "../shell/test-wait";
 
@@ -849,6 +850,24 @@ test("moving an asset redraws the columns at its new path", async () => {
   expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-app-02");
 });
 
+test("Move…: → goes into the focused row, ← comes back up onto it, and an empty level keeps focus (F-537, F-543)", async () => {
+  render("#/asset/asset:postgres", estate(seed()));
+  await waitFor(() => expect(panePath()).toContain("hel1 / vm-db-01 / postgres"));
+  click("Move…");
+  click("Estate");
+  await waitFor(() => expect(document.activeElement?.textContent).toContain("hel1"));
+  const press = (key: string) => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  press("ArrowRight");
+  await waitFor(() => expect(text()).toContain("Move into hel1"));
+  await waitFor(() => expect(document.activeElement?.textContent).toContain("vm-app-02"));
+  press("ArrowRight");
+  await waitFor(() => expect(text()).toContain("Move into vm-app-02"));
+  await waitFor(() => expect(document.activeElement?.classList.contains("opts")).toBe(true));
+  press("ArrowLeft");
+  await waitFor(() => expect(text()).toContain("Move into hel1"));
+  await waitFor(() => expect(document.activeElement?.textContent).toContain("vm-app-02"));
+});
+
 /**
  * **The asset's own row cannot be walked into**, so nothing under it can be
  * chosen, and no move from the picker can make a loop (F-502, which overrules
@@ -920,6 +939,9 @@ test("deleting a leaf asks first, then lands on what held it", async () => {
   );
   await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"]]));
   expect(store.rows.map((row) => row.id)).not.toContain("asset:postgres");
+  // Said, and focus on the holder's row: the next `Enter` must not start deleting the holder (F-532).
+  expect(toasts.items.at(-1)?.text).toBe("Deleted postgres");
+  await waitFor(() => expect(document.activeElement?.getAttribute("data-asset")).toBe("asset:vm-db-01"));
 });
 
 /**

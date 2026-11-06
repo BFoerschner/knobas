@@ -193,7 +193,7 @@
     return saves;
   }
 
-  function rename(event: FocusEvent, field: "name" | "description") {
+  function rename(event: Event, field: "name" | "description") {
     const el = event.currentTarget as HTMLElement;
     const text = el.textContent.trim();
     if (!set) return;
@@ -237,18 +237,24 @@
     selection?.addRange(range);
   });
 
-  function enterLeaves(event: KeyboardEvent) {
+  /**
+   * A field edited in place keeps focus (F-539). `Enter` saves it. `Esc` on changed words puts the old ones back and the field
+   * keeps the press; `Esc` on words nothing changed is no edit to undo, so it goes on to the shell and leaves the page, in one press.
+   */
+  function fieldKey(event: KeyboardEvent, field: "name" | "description") {
+    const el = event.currentTarget as HTMLElement;
     if (event.key === "Escape" && set) {
-      // Esc in a field that edits in place puts the old words back, and the field keeps the press.
-      const el = event.currentTarget as HTMLElement;
-      el.textContent = el.getAttribute("aria-label") === "Name" ? set.name : set.description;
+      if (el.textContent.trim() === set[field]) {
+        el.blur();
+        return;
+      }
+      el.textContent = set[field];
       event.stopPropagation();
-      el.blur();
       return;
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      (event.currentTarget as HTMLElement).blur();
+      rename(event, field);
     }
   }
 
@@ -256,10 +262,11 @@
     if (!set) return;
     deleting = false;
     const gone = set.id;
+    const name = set.name;
     await saves;
     try {
       await ports.deleteLinkSet(gone);
-      push({ text: "Deleted the link set. Links drawn on tickets by hand stay." });
+      push({ text: `Deleted ${name}. Links drawn on tickets by hand stay.` });
       location.hash = "#/sets";
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
@@ -329,10 +336,20 @@
     });
   }
 
+  /** A new rule opens on the first kind with something to choose, not on a dead *Choose…* (F-531). */
   function addRule() {
     settled = false;
-    pending = { at: set?.rules.length ?? 0, kind: "epic" };
+    const kind = RULE_KINDS.find((option) => options(option.kind, "").length > 0)?.kind ?? "epic";
+    pending = { at: set?.rules.length ?? 0, kind };
   }
+
+  /** Why a waiting rule has nothing to choose: about this kind, so the rules above it don't contradict the line. */
+  const NONE_OF: Record<LinkSetRuleKind, string> = {
+    epic: "No synced epic has tickets under it yet. Try another kind.",
+    parent: "No synced ticket has sub-tasks yet. Try another kind.",
+    project: "No project has synced yet.",
+    manual: "No ticket has synced yet.",
+  };
 
   /** Whether the waiting rule ended with a value, which keeps focus where it is. */
   let settled = false;
@@ -478,7 +495,7 @@
           bind:this={title}
           {@attach holds(() => set?.name ?? "")}
           onblur={(event) => rename(event, "name")}
-          onkeydown={enterLeaves}></span
+          onkeydown={(event) => fieldKey(event, "name")}></span
         >
       </h1>
       <div
@@ -490,7 +507,7 @@
         data-placeholder="Describe what this set is for."
         {@attach holds(() => set?.description ?? "")}
         onblur={(event) => rename(event, "description")}
-        onkeydown={enterLeaves}
+        onkeydown={(event) => fieldKey(event, "description")}
       ></div>
     </div>
     <!-- Nothing is saved yet, so there is nothing to delete. -->
@@ -562,12 +579,12 @@
             <select aria-label="Rule" value={rule.kind} onchange={(event) => rekind(rule.at, event.currentTarget.value as LinkSetRuleKind)}>
               {#each RULE_KINDS as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}
             </select>
-            <select aria-label="Applies to which" value={rule.value} onchange={(event) => choose(rule.at, rule.kind, event.currentTarget.value)}>
+            <select aria-label="Applies to which" class:tf-mono={rule.kind === "project" && rule.value !== ""} value={rule.value} onchange={(event) => choose(rule.at, rule.kind, event.currentTarget.value)}>
               {#if rule.waiting}<option value="">Choose…</option>{/if}
               {#each options(rule.kind, rule.value) as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
             </select>
             <div class="tf-rule-foot">
-              {#if rule.waiting}<span class="tf-dim tf-rule-n">{options(rule.kind, rule.value).length === 0 ? "Nothing to choose here yet. Try another kind." : "Choose what it applies to."}</span>
+              {#if rule.waiting}<span class="tf-dim tf-rule-n">{options(rule.kind, rule.value).length === 0 ? NONE_OF[rule.kind] : "Choose what it applies to."}</span>
               {:else if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
               <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => dropRule(rule.at, event.currentTarget)}>{rule.at >= set.rules.length ? "Cancel" : "Remove"}</button>
             </div>

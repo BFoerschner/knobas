@@ -13,11 +13,11 @@
  * or the address the last pick runs. The sheet shows the step's choices, the
  * box narrows them, Enter picks; Esc or Backspace on the empty box step back.
  *
- * The order is the spec's: the pair with the chosen job first (*Link to
- * ⟨job⟩*), *Start timer* on a ticket, then what the kind can do, then
- * *Favourite* (#2428), then *Copy key* or *Copy title*. This reverses the 2026-10-21 ruling on #1416 (the
- * two-row chain and the hand-off to the job's dialog); see
- * `docs/decisions/2026-11-02-launcher-sheet.md`.
+ * The order holds still from row to row (F-637): what the kind does first (on a ticket *Work on this*, then
+ * *Start timer*), then the pair with the chosen job (*Link to ⟨job⟩*, then the set), then *Open in*, *Clone*,
+ * *Favourite* (#2428), and *Copy key* or *Copy title*. A chosen job used to put the link on top, which shifted every
+ * position by one and made `Tab`, `Enter` write a link. This reverses the 2026-10-21 ruling on #1416 (the two-row
+ * chain and the hand-off to the job's dialog); see `docs/decisions/2026-11-02-launcher-sheet.md`.
  *
  * Adapter-declared source actions join under the same rule: a row here whose
  * `does` is a `write` of the op the source declares. Today's are the
@@ -279,20 +279,13 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
   const { entityId: id, entityKind: kind, title } = subject;
   const key = keyOf(id);
   const actions: SheetAction[] = [];
-  // The pair: an entity cannot be linked to itself, so the job's own ticket has no row.
-  if (ctx.job !== null && ctx.job.entityId !== id) {
-    actions.push({ id: "link", label: `Link to ${ctx.job.label}`, detail: "← → pick the relation", does: { kind: "link" } });
-  }
-  // The pair's other half: a set it joins, or on a ticket a set shown on it.
-  const set = setAction(subject, ctx.sets ?? []);
-  if (set) actions.push(set);
-  if (kind === "ticket" && ctx.canTime && canBeTarget({ entityId: id, kind })) {
-    actions.push({ id: "timer", label: "Start timer", detail: `Stops the running one first; ${key} becomes the job`, does: { kind: "timer" } });
-  }
   const go = (hash: string): SheetEffect => ({ kind: "go", hash });
   switch (kind) {
     case "ticket":
       actions.push({ id: "work", label: "Work on this", detail: `Makes ${key} the job and opens it`, does: go(jobHash(id)) });
+      if (ctx.canTime && canBeTarget({ entityId: id, kind })) {
+        actions.push({ id: "timer", label: "Start timer", detail: `Stops the running one first; ${key} becomes the job`, does: { kind: "timer" } });
+      }
       break;
     case "pr":
       actions.push({ id: "diff", label: "Review the files", detail: "Files changed", does: go(prHash(id, "diff")) });
@@ -330,6 +323,13 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
       break;
     default:
   }
+  // The pair: an entity cannot be linked to itself, so the job's own ticket has no row.
+  if (ctx.job !== null && ctx.job.entityId !== id) {
+    actions.push({ id: "link", label: `Link to ${ctx.job.label}`, detail: "← → pick the relation", does: { kind: "link" } });
+  }
+  // The pair's other half: a set it joins, or on a ticket a set applied to it.
+  const set = setAction(subject, ctx.sets ?? []);
+  if (set) actions.push(set);
   if (OPENS_IN.has(kind)) {
     const where = kind === "pr" ? "The repository's checkout" : "The checkout on this machine";
     for (const app of ctx.apps) {
@@ -352,7 +352,7 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
 const MEMBER_KINDS: ReadonlySet<string> = new Set<LinkSetMemberKind>(["page", "repo", "pipeline", "asset", "monitor"]);
 
 /**
- * *Add to a set…* on what a set holds, *Show a set on ⟨key⟩…* on a ticket: a
+ * *Add to a set…* on what a set holds, *Apply a link set…* on a ticket, as the ticket page calls it: a
  * flow over every set by name; the pick re-saves that set with one fixed
  * member, or one manual rule (`withHandRule`, the ticket page's *Apply a link
  * set…*). Nothing else, or no sets, no row.
@@ -365,11 +365,11 @@ function setAction(subject: Extract<SheetSubject, { kind: "entity" }>, sets: rea
   const choices = sets.map((set) => ({ id: set.id, label: set.name, detail: set.description }));
   return {
     id: "set",
-    label: member ? "Add to a set…" : `Show a set on ${key}…`,
+    label: member ? "Add to a set…" : "Apply a link set…",
     detail: member ? "A fixed member, shown on every ticket the set applies to" : "The set's members appear on this ticket",
     does: {
       kind: "flow",
-      steps: [{ title: member ? "Add to" : `Show on ${key}`, choices: async () => choices }],
+      steps: [{ title: member ? "Add to" : `Apply to ${key}`, choices: async () => choices }],
       finish: ([setId]) => {
         const set = sets.find((candidate) => candidate.id === setId);
         if (!set) return { kind: "refused", said: "That set is gone." };
@@ -387,7 +387,7 @@ function setAction(subject: Extract<SheetSubject, { kind: "entity" }>, sets: rea
 
 /**
  * *Show on ⟨job⟩* on a set (story 38): the set re-saved with one manual rule
- * on the chosen job's ticket (`withHandRule`, as *Show a set on ⟨key⟩…* on
+ * on the chosen job's ticket (`withHandRule`, as *Apply a link set…* on
  * the ticket does). No job chosen, or the set not among the sets read yet,
  * no row.
  */
@@ -398,7 +398,7 @@ function showOnJob(setId: string, ctx: SheetContext): SheetAction | null {
   const held = set.rules.some((rule) => rule.kind === "manual" && rule.value === job.entityId);
   return {
     id: "show",
-    label: `Show on ${job.label}`,
+    label: `Apply to ${job.label}`,
     detail: "The set's members appear on the job's ticket",
     does: { kind: "save-set", draft: held ? draftOf(set) : withHandRule(set, job.entityId), said: `${set.name} now shows on ${job.label}` },
   };

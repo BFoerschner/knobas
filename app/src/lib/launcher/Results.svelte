@@ -10,6 +10,7 @@
 <script lang="ts">
   import type { SearchResponse } from "../ipc";
   import { clockLabel } from "../time/format";
+  import { aimed } from "./aim";
   import Row from "./Row.svelte";
   import { stateWord } from "../tf/state-word";
   import { cellsOf } from "./cells";
@@ -110,7 +111,7 @@
         role="option"
         aria-selected={index === selected}
         onclick={() => onopen(row)}
-        onmouseenter={() => onhover(index)}
+        onpointermove={aimed(() => onhover(index))}
       >
         <span class="tf-ln-nm">{row.action.label}</span>
         <span class="tf-ln-s">{row.action.detail}</span>
@@ -178,7 +179,7 @@
       role="option"
       aria-selected={index === selected}
       onclick={() => onopen(row)}
-      onmouseenter={() => onhover(index)}
+      onpointermove={aimed(() => onhover(index))}
     >
       <span class="tf-ln-nm">Search Docs for “{row.words}”</span>
       <span class="tf-ln-s">Every space, in the Docs area</span>
@@ -201,7 +202,7 @@
         role="option"
         aria-selected={index === selected}
         onclick={() => onopen(row)}
-        onmouseenter={() => onhover(index)}
+        onpointermove={aimed(() => onhover(index))}
       >
         <span class="tf-ln-nm">Search everything</span>
         <span class="tf-ln-s">Every field, with no filters.</span>

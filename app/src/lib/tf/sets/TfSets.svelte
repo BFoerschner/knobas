@@ -125,14 +125,30 @@
       const draft = draftOf(set);
       draft.members.push({ kind: offer.member.kind, entity_id: offer.member.entity_id });
       await ports.saveLinkSet(draft);
-      push({ text: `Added ${offer.title} to ${offer.set_name}` });
-      const [rows, offered] = await Promise.all([ports.linkSets(), ports.linkSetHints().catch(() => [])]);
-      sets = rows;
-      hints = offered;
+      push({ text: `Added ${offer.title} to ${offer.set_name}`, action: { label: "Undo", run: () => void takeBack(offer) } });
+      await reread();
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     } finally {
       adding = false;
+    }
+  }
+
+  async function reread() {
+    const [rows, offered] = await Promise.all([ports.linkSets(), ports.linkSetHints().catch(() => [])]);
+    sets = rows;
+    hints = offered;
+  }
+
+  /** *Undo* on *Add to …*: the set as it stands now, without the item, so the offer comes back. */
+  async function takeBack(offer: LinkSetHint) {
+    try {
+      const draft = draftOf(await ports.linkSet(offer.set_id));
+      draft.members = draft.members.filter((member) => member.entity_id !== offer.member.entity_id);
+      await ports.saveLinkSet(draft);
+      await reread();
+    } catch (error) {
+      push({ text: `Could not undo it: ${ipcErrorMessage(error)}`, tone: "err" });
     }
   }
 

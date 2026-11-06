@@ -148,7 +148,7 @@
   let linking = $state(false);
   /** *Apply a link set…* and *Save as a link set…* open (#869). */
   let applyingSet = $state(false);
-  /** *Manage link sets* left from the drawer: coming back to this page opens it again, where the reader was. */
+  /** *Manage link sets* or *Edit set* left from the drawer: coming back to this page opens it again, where the reader was. */
   let drawerOnReturn = false;
   let savingSet = $state(false);
 
@@ -333,14 +333,25 @@
     }
   }
 
-  /** *Save link set* (R-7.9): the dialog and the drawer close, the job re-reads, the toast opens the set. */
+  /** *Save link set* (R-7.9): the dialog and the drawer close, the job re-reads, and the toast takes it back (F-536): `Enter` on arrival saves a rule that may reach many tickets. */
   function savedSet(set: LinkSetDetail) {
     savingSet = false;
     drawer = false;
     if (detail) reader.rereadReach(detail.row.entity_id);
     push({
       text: savedToast(set),
-      action: { label: "Open it", run: () => (location.hash = `#/sets/${encodeURIComponent(set.id)}`) },
+      action: {
+        label: "Undo",
+        run: () => {
+          const id = detail?.row.entity_id;
+          void sets
+            .deleteLinkSet(set.id)
+            .then(() => {
+              if (id !== undefined) reader.rereadReach(id);
+            })
+            .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+        },
+      },
     });
   }
 
@@ -698,6 +709,7 @@
       onshow={(memberId) => void showAgain(memberId)}
       onapplyset={() => (applyingSet = true)}
       onsaveset={() => (savingSet = true)}
+      oneditset={() => (drawerOnReturn = true)}
     />
   {/if}
   {#if previewed !== null && previews !== null}

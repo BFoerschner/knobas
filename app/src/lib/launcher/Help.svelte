@@ -17,6 +17,7 @@
   import { kindTag } from "../assets/tree";
   import { kindRegistry } from "../shell/kind-registry.svelte";
   import { kindLabel, kindMonogram } from "../shell/kinds";
+  import { aimed } from "./aim";
   import type { LegendLine } from "./legend";
   import type { LauncherRow } from "./rows";
 
@@ -58,7 +59,7 @@
       role="option"
       aria-selected={i === selected}
       onclick={() => onopen(row)}
-      onmouseenter={() => onhover(i)}
+      onpointermove={aimed(() => onhover(i))}
     >
       <span class="tf-ln-tok">{entry.token}</span>
       <span class="tf-ln-s">{entry.summary}</span>

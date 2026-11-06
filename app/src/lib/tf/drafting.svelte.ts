@@ -53,7 +53,7 @@ export type DraftOutcome = "logged" | "later" | "keep" | "discard";
 /** A start that waits for the running timer's draft to be answered. */
 export interface WaitingStart {
   target: TimerTarget;
-  /** What the toast calls it: `Timing <title>.` */
+  /** What the toast calls it: `Timer running on <title>`. */
   title: string;
 }
 
@@ -124,7 +124,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
    */
   let resume: TimerTarget | null = null;
 
-  const timing = (title: string) => ports.push({ text: `Timing ${title}.` });
+  const timing = (title: string) => ports.push({ text: `Timer running on ${title}` });
 
   /** What a draft's time is called in a toast. A stretch under a minute reads as *The time*: *0m* would say it was lost. */
   const timeOf = (draft: Draft) => (draft.seconds >= 60 ? minutesLabel(Math.floor(draft.seconds / 60)) : "The time");

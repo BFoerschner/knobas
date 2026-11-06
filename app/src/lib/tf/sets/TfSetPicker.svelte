@@ -3,7 +3,7 @@
   `openPicker`: a filterable multi-select over every item of that kind, where
   an item already in the set is ticked, disabled and says *already in*. *Add*
   hands the picked ids back; the editor saves the set. `↓` goes from the filter
-  into the list and the arrows walk it, and `Enter` in the filter adds what is picked.
+  into the list and the arrows walk it, and `Enter` in the filter or on a row adds what is picked.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -72,6 +72,16 @@
   const uid = $props.id();
   let filterEl = $state<HTMLInputElement | null>(null);
   let listEl = $state<HTMLElement | null>(null);
+
+  /** `Enter` on a row adds what is ticked, as `Enter` in the filter does; with nothing ticked there is nothing to send. */
+  function listKey(event: KeyboardEvent) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      add();
+      return;
+    }
+    withinList(event, listEl, filterEl);
+  }
 </script>
 
 <TfDialog why={picked.length === 0 ? "Tick what to add." : null} title="Add {noun} to {setName}" {onclose}>
@@ -93,7 +103,7 @@
       <p class="tf-dim tf-picks-more">No {noun} match “{typed.trim()}”.</p>
     {/if}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="group" aria-label={KIND_LABEL[kind]} bind:this={listEl} onkeydown={(event) => withinList(event, listEl, filterEl)}>
+    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="group" aria-label={KIND_LABEL[kind]} bind:this={listEl} onkeydown={listKey}>
       {#each shown.slice(0, DRAWN) as row (row.entity_id)}
         {@const held = have.has(row.entity_id)}
         <label class:tf-in={held}
@@ -102,7 +112,7 @@
             checked={held || picked.includes(row.entity_id)}
             disabled={held}
             onchange={(event) => toggle(row.entity_id, event.currentTarget.checked)}
-          /> <Marked text={row.name} {typed} /><span class="tf-dim">{held ? "already in" : row.sub}</span></label
+          /> <span class="tf-pick-name"><Marked text={row.name} {typed} /></span><span class="tf-dim">{held ? "already in" : row.sub}</span></label
         >
       {/each}
       {#if shown.length > DRAWN}

@@ -57,7 +57,6 @@
     SyncProgress,
     SyncRunRow,
   } from "../../ipc/sources";
-  import { accountHalfDone, accountOf, ACCOUNT_INCOMPLETE } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
   import { DEFAULT_MIN_SYNC_INTERVAL_SECS } from "../../sources/new-source";
   import { declaresSection, validate } from "../../sources/schema-form";
@@ -94,6 +93,7 @@
   import { replaceAddress } from "../opener";
   import { walkAfter, walkMax, type Walk } from "../../sources/walk";
   import TfDialog from "./TfDialog.svelte";
+  import TfSecretPrompt from "./TfSecretPrompt.svelte";
 
   let {
     source,
@@ -129,7 +129,7 @@
     onremoved: () => void;
     /** A value to add to a list field, unsaved: a Jira view's *Sync WEB too* (#879). */
     add?: ListAddition | undefined;
-    /** Open the credential's prompt on arrival: the status bar's *Re-enter …*. */
+    /** Open the credential's prompt on arrival: a raw `…/reenter` address. A press on one opens over the page you are on (`secret-prompt.svelte.ts`). */
     reenter?: boolean;
   } = $props();
 
@@ -533,61 +533,22 @@
 
   // ---- Re-enter the credential ----
   let reentering = $state(false);
-  let secret = $state("");
-  let accountUser = $state("");
-  let accountPassword = $state("");
-  let signingIn = $state(false);
-  let secretError = $state<string | null>(null);
-  const half = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
-  const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
-  const canSignIn = $derived(!signingIn && !half && (secret !== "" || account !== null));
 
   /** Nothing is stored yet, so nothing here speaks of entering it again. */
   const noneStored = $derived(health?.state === "missing_secret");
 
-  /** The prompt shuts; opened by its address (the status bar's link), the address goes back to the page's, so a reload does not ask again. */
+  /** The prompt shuts; opened by its address (a raw `…/reenter`), the address goes back to the page's, so a reload does not ask again. */
   function closeReenter() {
     reentering = false;
     if (reenter) replaceAddress(sourceHash(source.id));
   }
 
   function openReenter() {
-    secret = "";
-    accountUser = "";
-    accountPassword = "";
-    secretError = null;
     reentering = true;
   }
   $effect(() => {
     if (reenter) untrack(openReenter);
   });
-
-  async function signIn() {
-    if (!canSignIn) return;
-    signingIn = true;
-    secretError = null;
-    try {
-      const next = await ports.setSourceSecret(source.id, { value: secret === "" ? null : secret, account });
-      secret = "";
-      accountUser = "";
-      accountPassword = "";
-      onhealth(next);
-      if (next.state === "unauthorized") {
-        secretError = `${name} refused it${next.detail ? `: ${next.detail}` : ""}.`;
-        return;
-      }
-      closeReenter();
-      push({ text: `Signed in to ${name}. Syncing now.` });
-      onstarted();
-      // The sync is the follow-through, not the transaction: a disabled or
-      // running source refuses it, and the credential is stored either way.
-      await ports.syncNow(source.id).catch(() => onstopped());
-    } catch (cause) {
-      secretError = ipcErrorMessage(cause);
-    } finally {
-      signingIn = false;
-    }
-  }
 
   // ---- Remove… ----
   let removing = $state(false);
@@ -837,38 +798,7 @@
 </section>
 
 {#if reentering}
-  <TfDialog why={!canSignIn && !signingIn && !half ? `Type the ${word.toLowerCase()} to sign in.` : null} title="{noneStored ? 'Enter' : 'Re-enter'} the {name} {word.toLowerCase()}" {layers} onclose={closeReenter}>
-    {#snippet body()}
-      <form
-        class="tf-formgrid"
-        id="tf-reenter"
-        onsubmit={(event) => {
-          event.preventDefault();
-          void signIn();
-        }}
-      >
-        <label for="tf-reenter-secret">{word}</label>
-        <input id="tf-reenter-secret" type="password" autocomplete="off" placeholder={word} bind:value={secret} />
-        {#if acceptsAccount}
-          <label for="tf-reenter-user">Account</label>
-          <input id="tf-reenter-user" type="text" autocomplete="off" placeholder="Username" bind:value={accountUser} />
-          <label for="tf-reenter-pass">Account password</label>
-          <input id="tf-reenter-pass" type="password" autocomplete="off" placeholder="Password" bind:value={accountPassword} />
-        {/if}
-      </form>
-      {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
-      {#if secretError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{secretError}</p>{/if}
-      <p class="tf-dlg-note">
-        {noneStored ? "" : `${stored}. `}Writes waiting for {name} go out once it signs in.{acceptsAccount && !noneStored
-          ? " A field left empty keeps what is stored."
-          : ""}
-      </p>
-    {/snippet}
-    {#snippet footer()}
-      <button class="tf-btn tf-ghost" onclick={closeReenter}>Cancel</button>
-      <button class="tf-btn tf-primary" type="submit" form="tf-reenter" disabled={!canSignIn}>Sign in</button>
-    {/snippet}
-  </TfDialog>
+  <TfSecretPrompt {source} {health} {acceptsAccount} {stored} {ports} {layers} {onhealth} onclose={closeReenter} {onstarted} {onstopped} />
 {/if}
 
 {#if removing}

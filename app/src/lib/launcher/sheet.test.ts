@@ -31,10 +31,11 @@ const entity = (entityKind: string, entityId: string, title = "Title"): SheetSub
 
 const ids = (subject: SheetSubject, ctx: SheetContext = CTX) => sheetActions(subject, ctx).map((action) => action.id);
 
-test("a ticket: the link first, then the timer, Work on this and Copy key", () => {
-  expect(ids(entity("ticket", "jira:PAY-231"))).toEqual(["link", "timer", "work", "fav", "copy"]);
+test("a ticket: Work on this, the timer, the link and Copy key, in one order whatever the job (F-637)", () => {
+  expect(ids(entity("ticket", "jira:PAY-231"))).toEqual(["work", "timer", "link", "fav", "copy"]);
   const actions = sheetActions(entity("ticket", "jira:PAY-231"), CTX);
-  expect(actions[0]?.label).toBe("Link to PAY-999");
+  expect(actions[0]?.label).toBe("Work on this");
+  expect(ids(entity("ticket", "jira:PAY-231"), { ...CTX, job: null })).toEqual(["work", "timer", "fav", "copy"]);
   expect(actions.find((a) => a.id === "work")?.does).toEqual({ kind: "go", hash: "#/job/jira%3APAY-231" });
   expect(actions.find((a) => a.id === "copy")).toMatchObject({ label: "Copy key", does: { kind: "copy", text: "PAY-231" } });
 });
@@ -56,26 +57,26 @@ test("Start timer is a ticket's alone", () => {
 test("a pull request: the files, the conversation, Approve, one Open in per application, Copy title", () => {
   const actions = sheetActions(entity("pr", "gitea:acme/svc#142", "Backoff"), CTX);
   expect(actions.map((a) => a.label)).toEqual([
-    "Link to PAY-999",
     "Review the files",
     "Conversation",
     "Approve",
+    "Link to PAY-999",
     "Open in VS Code",
     "Open in IntelliJ",
     "Favourite",
     "Copy title",
   ]);
-  expect(actions[1]?.does).toEqual({ kind: "go", hash: "#/pr/gitea%3Aacme%2Fsvc%23142/diff" });
-  expect(actions[3]?.does).toMatchObject({ kind: "write", payload: { Approve: { entity: "gitea:acme/svc#142", body: "" } } });
+  expect(actions[0]?.does).toEqual({ kind: "go", hash: "#/pr/gitea%3Aacme%2Fsvc%23142/diff" });
+  expect(actions[2]?.does).toMatchObject({ kind: "write", payload: { Approve: { entity: "gitea:acme/svc#142", body: "" } } });
   expect(actions[5]?.does).toEqual({ kind: "open-in", application: "idea", name: "IntelliJ" });
 });
 
 test("a repository: Pull requests, Branches, Open in, Clone", () => {
-  expect(ids(entity("repo", "gitea:acme/svc"))).toEqual(["link", "prs", "branches", "open-code", "open-idea", "clone", "fav", "copy"]);
+  expect(ids(entity("repo", "gitea:acme/svc"))).toEqual(["prs", "branches", "link", "open-code", "open-idea", "clone", "fav", "copy"]);
 });
 
 test("no application configured: no Open in row", () => {
-  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, apps: [] })).toEqual(["link", "prs", "branches", "clone", "fav", "copy"]);
+  expect(ids(entity("repo", "gitea:acme/svc"), { ...CTX, apps: [] })).toEqual(["prs", "branches", "link", "clone", "fav", "copy"]);
 });
 
 test("a branch opens in each application; a pipeline runs; a monitor is acknowledged", () => {
@@ -147,8 +148,8 @@ const SET = {
 
 test("the set row sits with the pair, after the link, and a member or a manual rule already there is not added twice", async () => {
   const ctx = { ...CTX, sets: [SET] };
-  expect(ids(entity("monitor", "kuma:7"), ctx).slice(0, 3)).toEqual(["link", "set", "ack"]);
-  expect(ids(entity("ticket", "jira:PAY-231"), ctx).slice(0, 3)).toEqual(["link", "set", "timer"]);
+  expect(ids(entity("monitor", "kuma:7"), ctx).slice(0, 3)).toEqual(["ack", "link", "set"]);
+  expect(ids(entity("ticket", "jira:PAY-231"), ctx).slice(0, 4)).toEqual(["work", "timer", "link", "set"]);
   for (const kind of ["pr", "branch", "pipeline", "page", "asset", "repo"]) {
     expect(ids(entity(kind, `x:${kind}`), ctx).includes("set"), kind).toBe(kind !== "pr" && kind !== "branch");
   }
@@ -214,7 +215,7 @@ test("a set: Open, then Show on the chosen job, which shows the set on the job's
   const actions = sheetActions(set, ctx);
   expect(actions.map((a) => a.id)).toEqual(["open", "show"]);
   expect(actions[1]).toMatchObject({
-    label: "Show on PAY-999",
+    label: "Apply to PAY-999",
     does: { kind: "save-set", said: "Payments now shows on PAY-999", draft: { rules: [{ kind: "manual", value: "jira:PAY-231" }, { kind: "manual", value: "jira:PAY-999" }] } },
   });
   // Already shown there: saved as it is, no second rule.

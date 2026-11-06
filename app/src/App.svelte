@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { goWithoutOpener } from "./lib/tf/opener";
+  import { goLaunched, goWithoutOpener } from "./lib/tf/opener";
+  import { askForSecret, reenterSourceOf } from "./lib/tf/settings/secret-prompt.svelte";
   import { listen } from "@tauri-apps/api/event";
 
   import { alerts } from "./lib/assets/alerts.svelte";
@@ -45,9 +46,16 @@
    */
   homeIfBlank(location);
 
-  /** Go to an address the launcher or the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
+  /** Go to an address the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
   function navigate(hash: string) {
     goWithoutOpener(hash);
+  }
+
+  /** A row the launcher opened: a jump that says where it came from (F-047), or the credential prompt over the page, as a press on its link gives. */
+  function launched(hash: string) {
+    const source = reenterSourceOf(hash);
+    if (source === null) goLaunched(hash);
+    else askForSecret(source);
   }
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
@@ -380,7 +388,7 @@
         inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item), actions: Object.fromEntries(inbox.stream.map((entry) => [entry.item.key, entry.actions])) }}
         openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
         ontimer={startTimerOn}
-        onnavigate={navigate}
+        onnavigate={launched}
         onclose={() => {}}
       />
     {/snippet}

@@ -66,6 +66,8 @@
   let picker = $state<HTMLElement | null>(null);
   /** A walk asked for this read, so focus goes on to the level it draws. */
   let walked = false;
+  /** Going up, the row walked out of, which focus goes back to. */
+  let cameFrom: string | null = null;
 
   const columnRead = latestRead<AssetRow[]>();
 
@@ -88,7 +90,7 @@
         rows = answer;
         failure = null;
         loaded = true;
-        if (walked) void tick().then(() => picker?.querySelector<HTMLElement>(".opt:not(:disabled)")?.focus());
+        if (walked) void tick().then(() => land(cameFrom));
         walked = false;
       },
       fail: (cause) => {
@@ -99,14 +101,27 @@
     });
   });
 
+  /** Focus on the level just drawn: the row walked out of, else its first, else the list when the level holds nothing, so focus never falls out of it. */
+  function land(row: string | null) {
+    const options = [...(picker?.querySelectorAll<HTMLElement>(".opt:not(:disabled)") ?? [])];
+    const spot = options.find((option) => option.dataset.row === row) ?? options[0] ?? picker?.querySelector<HTMLElement>(".opts");
+    spot?.focus();
+  }
+
   /** Stand on `row`: it becomes the destination and the level below is drawn. */
   function into(row: AssetRow) {
     stand([...crumb, row]);
   }
 
+  /** `←`: up a level, back on the row walked out of. */
+  function up() {
+    if (crumb.length > 0) stand(crumb.slice(0, -1), crumb.at(-1)?.id ?? null);
+  }
+
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
-  function stand(path: AssetRow[]) {
+  function stand(path: AssetRow[], from: string | null = null) {
     walked = true;
+    cameFrom = from;
     crumb = path;
     at = path.at(-1)?.id ?? null;
     failure = null;
@@ -133,7 +148,7 @@
   {#snippet body()}
     <div class="picker" bind:this={picker}>
       <p class="crumb">
-        <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
+        <button class="link" title="Estate" disabled={crumb.length === 0} onclick={() => stand([])}>
           Estate
         </button>
         {#each crumb as step, index (step.id)}
@@ -153,7 +168,7 @@
         <!-- The list is the one `Tab` stop, and where the dialog arrives: a press there walks it, and none of its keys sends anything. -->
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <ul class="opts" aria-label="Where to move it" tabindex="0" onkeydown={levelKeys}>
+        <ul class="opts" aria-label="Where to move it" tabindex="0" onkeydown={(event) => levelKeys(event, { into: (id) => { const row = rows.find((candidate) => candidate.id === id); if (row) into(row); }, up })}>
           {#each rows as row (row.id)}
             <li>
               <!--
@@ -169,7 +184,7 @@
                   <span class="faint">this asset</span>
                 </button>
               {:else}
-                <button class="opt" title="Open {row.name}" tabindex="-1" onclick={() => into(row)}>
+                <button class="opt" data-row={row.id} title="Open {row.name}" tabindex="-1" onclick={() => into(row)}>
                   <span class="mg">{kindTag(row.monogram)}</span>
                   <span class="nm">{row.name}</span>
                   {#if row.has_children}
@@ -200,8 +215,10 @@
 </TfDialog>
 
 <style>
+  /* `minmax(0, 1fr)`: an automatic track would take the nowrap crumb's width and push the list out of the dialog (F-543). */
   .picker {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
 
@@ -250,6 +267,13 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  /* Inside the list, which scrolls: a ring outside it is cut to a line along the row's edge (F-537). */
+  .opts:focus-visible,
+  .opt:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
   }
 
   .opt {

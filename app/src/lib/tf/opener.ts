@@ -8,8 +8,8 @@
  * entry. A new entry (one with no stamp yet) reached by an in-app link or
  * button from another page gets that page as its opener. These get none:
  *
- * - an address set through {@link goWithoutOpener}: the ⌘K launcher, the
- *   capture window, a notification's click (a deep link), a nav entry;
+ * - an address set through {@link goWithoutOpener}: the capture window, a
+ *   notification's click (a deep link), a nav entry;
  * - the window's first address (startup), and a rooms address the shell
  *   replaces (the shell stamps those itself).
  *
@@ -29,10 +29,11 @@
  *
  * **A card row's narrowing goes with the entries** ({@link Trip}), so stepping to
  * an entry by `Esc`, *Back to* or `⌘[` and `⌘]` narrows the section as that entry
- * was, and a nav entry or the launcher ends it. Two presses stamp explicitly,
+ * was, and a nav entry or the launcher ends it. Three presses stamp explicitly,
  * because the address alone can't say what they mean: {@link goAcross}, a jump to
- * another place on one page, and {@link goVisiting}, a top page opened from
- * somewhere to come back from.
+ * another place on one page; {@link goVisiting}, a top page opened from
+ * somewhere to come back from; and {@link goLaunched}, the launcher's jump, which
+ * is both of those and ends the narrowing.
  */
 import type { Trip } from "./job/scoped.svelte";
 import { parseTfHash, type TfRoute } from "./route";
@@ -82,7 +83,7 @@ export function openerOf(hash: string, name: string, came: Came): Opener {
 const KEY = "knobasOpened";
 
 /** How an address change was made, when it is not a plain in-app link's. */
-export type Told = "unopened" | "replace" | "back" | "across" | "visit";
+export type Told = "unopened" | "replace" | "back" | "across" | "visit" | "launched";
 
 /** The next address change the shell is told about. */
 let told: { hash: string; how: Told } | null = null;
@@ -92,7 +93,7 @@ function goTold(hash: string, how: Told): void {
   told = { hash: location.hash, how };
 }
 
-/** Go to `hash` as a new entry with no opener: the launcher, a deep link, a nav entry, an `Esc` step to a parent. */
+/** Go to `hash` as a new entry with no opener: a deep link, a nav entry, an `Esc` step to a parent. */
 export function goWithoutOpener(hash: string): void {
   goTold(hash, "unopened");
 }
@@ -118,6 +119,15 @@ export function goAcross(hash: string): void {
  */
 export function goVisiting(hash: string): void {
   goTold(hash, "visit");
+}
+
+/**
+ * The launcher's jump (F-047, overruling #2229's "the launcher gets none"): the page it was pressed over is the opener,
+ * as for any other press, and a top page counts as visited, so `Esc` and the bar come back from `>settings` and `asset`
+ * too. A card row's narrowing still ends.
+ */
+export function goLaunched(hash: string): void {
+  goTold(hash, "launched");
 }
 
 /** Put `hash` in place of the address the reader is on: the same entry, its opener kept. */

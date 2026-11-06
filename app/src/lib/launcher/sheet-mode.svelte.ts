@@ -154,12 +154,12 @@ export class SheetMode {
   /** What the empty box says while a sheet is open. */
   readonly placeholder = $derived(
     this.current?.panel
-      ? "press the keys"
+      ? "Press the keys"
       : this.current?.renaming != null
-        ? "the list's new name"
+        ? "The list's new name"
         : this.current?.flow
-          ? "narrow the choices"
-          : "narrow the actions",
+          ? "Narrow the choices"
+          : "Narrow the actions",
   );
   /** What the box holds while a sheet is open. */
   readonly text = $derived(this.current ? (this.current.panel ? "" : (this.current.renaming ?? this.current.filter)) : "");
@@ -399,7 +399,7 @@ export class SheetMode {
       case "timer": {
         const { ontimer } = this.#host;
         if (subject.kind !== "entity" || !ontimer) return;
-        ontimer(subject.entityId, subject.title);
+        ontimer(subject.entityId, nameOf(subject));
         return close();
       }
       case "open-in": {

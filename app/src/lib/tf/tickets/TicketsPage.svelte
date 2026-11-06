@@ -750,8 +750,8 @@
   </nav>
 
   <TfScroller class="tf-board-wrap" {@attach fbarHeight}>
-    {#if subtasksOf !== null}
-      <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. -->
+    {#if subtasksOf !== null || back !== null}
+      <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. A launcher jump has a way back to say too (F-047). -->
       <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
     {/if}
     <header class="tf-fhead tf-board-head">

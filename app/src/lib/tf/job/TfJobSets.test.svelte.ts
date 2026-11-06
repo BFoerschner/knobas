@@ -149,11 +149,16 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
   };
 }
 
+const deleted: string[] = [];
 const sets: JobSetPorts = {
   linkSets: () => Promise.resolve(SETS),
   saveLinkSet: (draft) => {
     saved.push(draft);
     return Promise.resolve(answer(draft));
+  },
+  deleteLinkSet: (id) => {
+    deleted.push(id);
+    return Promise.resolve();
   },
   previewLinkSetRule: (rule) =>
     Promise.resolve(
@@ -405,7 +410,11 @@ test("Save as a link set… ticks the ticket's own items, offers the epic first 
   expect(document.querySelector(".tf-dialog")).toBeNull();
   expect(document.querySelector("[aria-label='Connections']")).toBeNull();
   const toast = toasts.items.find((t) => t.text === "Saved SEPA payouts kit. Every ticket under epic PAY-200 now shows it.")!;
-  expect(toast.action?.label).toBe("Open it");
+  // `Enter` on arrival saves a rule that may reach many tickets, so the toast takes it back (F-536).
+  expect(toast.action?.label).toBe("Undo");
+  toast.action?.run();
+  await settle();
+  expect(deleted).toHaveLength(1);
 });
 
 test("Save link set waits for a name and a tick, and a line says which is missing", async () => {

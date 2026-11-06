@@ -156,6 +156,8 @@
   let walk = $state<HTMLElement | null>(null);
   /** A walk asked for this read, so focus goes on to the level it draws. */
   let walked = false;
+  /** Going up, the row walked out of, which focus goes back to. */
+  let cameFrom: string | null = null;
 
   const editing = $derived(route !== null);
   /** Unique per instance, so two stacked dialogs cannot share a field id. */
@@ -167,7 +169,12 @@
       ok: (answer) => {
         rows = answer;
         loaded = true;
-        if (walked) void tick().then(() => walk?.querySelector<HTMLElement>(".opt")?.focus());
+        if (walked) {
+          void tick().then(() => {
+            const options = [...(walk?.querySelectorAll<HTMLElement>(".opt") ?? [])];
+            (options.find((option) => option.dataset.row === cameFrom) ?? options[0])?.focus();
+          });
+        }
         walked = false;
       },
       fail: (cause) => {
@@ -179,8 +186,9 @@
   });
 
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
-  function stand(path: AssetRow[]) {
+  function stand(path: AssetRow[], from: string | null = null) {
     walked = true;
+    cameFrom = from;
     crumb = path;
     at = path.at(-1)?.id ?? null;
     failure = null;
@@ -360,7 +368,7 @@
         </p>
 
         <p class="crumb">
-          <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
+          <button class="link" title="Estate" disabled={crumb.length === 0} onclick={() => stand([])}>
             Estate
           </button>
           {#each crumb as step, index (step.id)}
@@ -378,11 +386,26 @@
 
         <div class="lvl" bind:this={walk}>
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-          <ul class="opts" aria-label="Where it lands" onkeydown={levelKeys}>
+          <ul
+            class="opts"
+            aria-label="Where it lands"
+            onkeydown={(event) =>
+              levelKeys(event, {
+                // Walks without choosing: an arrow is not a press, so the target stays as it was.
+                into: (id) => {
+                  const row = rows.find((candidate) => candidate.id === id);
+                  if (row?.has_children) stand([...crumb, row]);
+                },
+                up: () => {
+                  if (crumb.length > 0) stand(crumb.slice(0, -1), crumb.at(-1)?.id ?? null);
+                },
+              })}
+          >
             {#each rows as row (row.id)}
               <li>
                 <button
                   class="opt"
+                  data-row={row.id}
                   class:on={target?.id === row.id}
                   title="Land on {row.name}"
                   tabindex={row.id === stop ? 0 : -1}
@@ -573,6 +596,12 @@
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  /* Inside the list, as `MoveDialog` draws it. */
+  .opt:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
   }
 
   .opt {

@@ -92,6 +92,7 @@
   import { entityAddress } from "../tf/address";
   import TfDialog from "../tf/settings/TfDialog.svelte";
   import { docsSearchHash } from "../tf/docs/docs";
+  import { aimed, watchPointer } from "./aim";
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
   import Help from "./Help.svelte";
@@ -464,9 +465,9 @@
   );
   const placeholder = $derived(
     naming !== null
-      ? "the list's name"
+      ? "The list's name"
       : overlay
-        ? "narrow the filters"
+        ? "Narrow the filters"
         : sheet.current
           ? sheet.placeholder
           : seedLabel !== null
@@ -664,16 +665,32 @@
       }
     }
     window.addEventListener("keydown", onkeydown);
+    const stopWatching = watchPointer();
     return () => {
       window.removeEventListener("keydown", onkeydown);
+      stopWatching();
       session.dispose();
     };
   });
 
+  /**
+   * What held focus when the launcher opened, and the address it stood on: its box takes focus before the dialog shell
+   * looks, so the shell's restore finds the box. A close that went nowhere puts focus back (F-632); a jump is the shell's.
+   */
+  let before: { el: Element | null; hash: string } | null = null;
+  $effect.pre(() => {
+    if (open && before === null) before = { el: document.activeElement, hash: location.hash };
+  });
+
   function close() {
+    const was = before;
+    before = null;
     open = false;
     session.dispose();
     onclose();
+    void tick().then(() => {
+      if (was !== null && was.el instanceof HTMLElement && was.el.isConnected && was.el !== document.body && location.hash === was.hash) was.el.focus({ preventScroll: true });
+    });
   }
 
   /**
@@ -1084,7 +1101,10 @@
               <button
                 type="button"
                 title={scope.titles ? "Titles and keys only. ⌘D searches everything" : "Bodies too. ⌘D searches titles only"}
-                onclick={toggleScope}>{scope.titles ? "Titles" : "Everything"}</button
+                onclick={() => {
+                  toggleScope();
+                  box?.focus();
+                }}>{scope.titles ? "Titles" : "Everything"}</button
               >
             </span>
           {/snippet}
@@ -1105,7 +1125,7 @@
               role="option"
               aria-selected={index === suggestionPicked}
               onclick={() => pickSuggestion(suggestion.value)}
-              onmouseenter={() => (suggestionPicked = index)}
+              onpointermove={aimed(() => (suggestionPicked = index))}
             >
               <span class="tf-ln-nm">{suggestion.value}</span>
               <!-- The separator is an expression: Svelte trims an element's leading space (#1515). -->
@@ -1132,7 +1152,7 @@
         {/if}
       {:else}
       <div class="tf-ln-split" class:tf-ln-two={split}>
-      <div id={resultsId} class="tf-ln-list" role="listbox" tabindex="-1" aria-label="Results">
+      <div id={resultsId} class="tf-ln-list" class:tf-ln-palette={session.mode === "actions" && !overlay} role="listbox" tabindex="-1" aria-label="Results">
         {#if overlay}
           <Help
             rows={overlayRows}
@@ -1209,7 +1229,7 @@
                 role="option"
                 aria-selected={i === session.selected}
                 onclick={() => activate(row)}
-                onmouseenter={() => (session.selected = i)}
+                onpointermove={aimed(() => (session.selected = i))}
               >
                 <span class="tf-ln-nm">{row.action.label}</span>
                 <span class="tf-ln-s">{row.action.detail}</span>

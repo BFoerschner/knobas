@@ -260,7 +260,7 @@ test("logging the switch's draft starts the timer it was waiting on", async () =
   flow.settle("logged");
   await settle();
   expect(log).toEqual(["draft jira:PAY-231", "stop", "start jira:OPS-12"]);
-  expect(toasts.map((toast) => toast.text)).toContain("Timing OPS-12.");
+  expect(toasts.map((toast) => toast.text)).toContain("Timer running on OPS-12");
 });
 
 test("Stop, log later on a switch stops the old timer, then starts the waiting one", async () => {

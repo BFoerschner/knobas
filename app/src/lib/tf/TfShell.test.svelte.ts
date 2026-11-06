@@ -19,7 +19,8 @@ import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
 import { sessionFilter } from "./filter/filter-state.svelte";
 import { scopedTicket } from "./job/scoped.svelte";
-import { goAcross, goVisiting, goWithoutOpener, replaceAddress } from "./opener";
+import { goAcross, goLaunched, goVisiting, goWithoutOpener, replaceAddress } from "./opener";
+import type { SettingsPorts } from "./settings/ports";
 import { NAV, SECTION_NAME } from "./route";
 import { chosenJob } from "./job/chosen.svelte";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
@@ -134,7 +135,7 @@ async function at(hash: string) {
   await settle();
 }
 
-/** Go to `hash` with no opener, as the ⌘K launcher, a deep link and an `Esc` step do (#2229). */
+/** Go to `hash` with no opener, as a deep link and an `Esc` step do (#2229). */
 async function reached(hash: string) {
   goWithoutOpener(hash);
   await settle();
@@ -236,6 +237,7 @@ function start(
     rendererDefaults?: TfShellPorts["rendererDefaults"];
     namedPipelines?: TfShellPorts["namedPipelines"];
     keys?: KeyStore;
+    secretPorts?: Pick<SettingsPorts, "listSources" | "listAdapters" | "appStatus" | "setSourceSecret" | "syncNow">;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -286,6 +288,7 @@ function start(
       ...(over.roleSyncs ? { roleSyncs: over.roleSyncs } : {}),
       ...(over.dialogs ? { dialogs: over.dialogs } : {}),
       ...(over.keys ? { keys: over.keys } : {}),
+      ...(over.secretPorts ? { secretPorts: over.secretPorts } : {}),
     },
   });
   flushSync();
@@ -430,10 +433,43 @@ test("a run opened from another run's link: Esc returns to that run, and a secon
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
-test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structural parent", async () => {
+test("a launcher jump says where it came from, to a detail and to a top page, and ends a trip (F-047)", async () => {
+  start({ nav: windowNav });
+  await at("#/settings/keyboard");
+  goLaunched("#/ticket/jira%3APAY-240");
+  await settle();
+  expect(escHint()).toBe("Back to Keyboard Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/settings/keyboard");
+
+  await at("#/code");
+  goLaunched("#/settings/sources");
+  await settle();
+  expect(escHint()).toBe("Back to Code Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/code");
+
+  await at("#/builds");
+  goLaunched("#/tickets");
+  await settle();
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds");
+
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  goLaunched("#/monitors");
+  await settle();
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("a run reached by a deep link: Esc goes to Builds, its structural parent", async () => {
   start({ nav: windowNav });
   await at("#/ticket/jira%3APAY-231");
-  // The launcher's pick, as `App.svelte` makes it.
   goWithoutOpener("#/build/pipe-1/run-4812");
   await settle();
   expect(escHint()).toBe("Back to Builds Esc");
@@ -1126,6 +1162,38 @@ test("⌘[ ⌘] ⌘← ⌘→ and the mouse's back and forward buttons step thro
     window.dispatchEvent(new MouseEvent("mouseup", { button, bubbles: true, cancelable: true }));
     expect(called).toHaveBeenCalledTimes(4);
   }
+});
+
+test("a press on a …/reenter link opens the prompt over the page: the address stays, Cancel is back with focus on the link (F-048)", async () => {
+  const setSourceSecret = vi.fn(async () => ({ source_id: "tc", state: "ok", checked_at: null, detail: null, secret_expires_at: null }) as never);
+  start({
+    secretPorts: {
+      listSources: async () => [{ id: "tc", display_name: "TeamCity", adapter_kind: "teamcity", auth_kind: "UserPassword" }] as never,
+      listAdapters: async () => [],
+      appStatus: async () => ({ secrets_in_memory: false }),
+      setSourceSecret,
+      syncNow: async () => 1,
+    },
+  });
+  await at("#/builds");
+  const link = document.createElement("a");
+  link.href = "#/settings/source/tc/reenter";
+  link.setAttribute("href", "#/settings/source/tc/reenter");
+  link.textContent = "Re-enter password…";
+  document.querySelector(".tf-main")!.append(link);
+  link.click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  const dialog = () => document.querySelector(".tf-dialog");
+  expect(dialog()?.querySelector("h2")?.textContent).toContain("TeamCity");
+  expect(document.activeElement?.id).toBe("tf-reenter-secret");
+  press("Escape");
+  await settle();
+  expect(dialog()).toBeNull();
+  expect(location.hash).toBe("#/builds");
+  expect(document.activeElement).toBe(link);
+  link.remove();
+  expect(setSourceSecret).not.toHaveBeenCalled();
 });
 
 test("history keys leave a text field's own keys, Ctrl+arrows, ⌥ with Ctrl and a key already answered alone", () => {
