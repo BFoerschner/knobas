@@ -18,7 +18,8 @@
   answered, as prototype-6 has no Save button: a set is live, and every job it
   applies to reads the change on its next read. A *Remove* acts at once, so it
   toasts with *Undo*, and removals in a row collapse into one toast (the
-  removal rule). Focus moves to the row that took its place.
+  removal rule). Focus moves to the row that took its place. *Add…* and *Add a
+  pattern…* toast with *Undo* too, and each *Undo* goes by the set's id (`undo-on.ts`).
 
   At `NEW_SET` nothing is saved yet: the first change makes the set, and the
   address moves to it in place. Leaving before that leaves no row behind.
@@ -37,11 +38,12 @@
     LinkSetRuleKind,
     LinkSetRuleRow,
   } from "../../ipc/entity";
-  import { push, tally } from "../../shell/toasts.svelte";
+  import { push, tally, undoable } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
   import { entityAddress } from "../address";
   import { inlineEditor } from "../inline-editor";
   import { replaceAddress } from "../opener";
+  import { holdStillPress } from "../still-press";
   import type { EscTarget } from "../escape";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
@@ -49,6 +51,7 @@
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
   import { draftOf } from "./apply";
+  import { editorShows, undoOn } from "./undo-on";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
   import { assetLine, blankSet, itemsOf, KIND_LABEL, MEMBER_KINDS, NEW_SET, NEW_SET_NAME, onePerKey, PATTERN_KINDS, patternShown, putBack, RULE_KINDS, SHOWN_KEYS, type Removed } from "./sets";
@@ -193,6 +196,13 @@
     return saves;
   }
 
+  /** This set is on screen, so a toast's *Undo* saves through this editor and redraws it. */
+  $effect(() => {
+    const shown = set?.id;
+    if (!shown) return;
+    return editorShows(shown, (change) => save(change));
+  });
+
   function rename(event: Event, field: "name" | "description") {
     const el = event.currentTarget as HTMLElement;
     const text = el.textContent.trim();
@@ -273,17 +283,38 @@
     }
   }
 
+  /** *Add* acts at once, so its toast takes it back, as a *Remove*'s does (F-547). It reads the set the save answered: a new set's id is only then known. */
+  function addedToast(text: (name: string) => string, undo: (draft: LinkSetDraft) => void) {
+    if (!set) return;
+    const { id, name } = set;
+    undoable(text(name), () => undoOn(id, undo, ports));
+  }
+
   function addedPattern(kind: LinkSetMemberKind, query: string) {
     patterning = null;
-    void save((draft) => draft.patterns.push({ kind, query }), `Added a pattern to ${set?.name ?? ""}`);
+    holdStillPress();
+    void save((draft) => draft.patterns.push({ kind, query }), undefined, () =>
+      addedToast(
+        (name) => `Added a pattern to ${name}`,
+        (draft) => {
+          draft.patterns = draft.patterns.filter((held) => !(held.kind === kind && held.query === query));
+        },
+      ),
+    );
   }
 
   function added(kind: LinkSetMemberKind, picked: Candidate[]) {
     picking = null;
-    const name = set?.name ?? "";
-    void save(
-      (draft) => draft.members.push(...picked.map((row) => ({ kind, entity_id: row.entity_id }))),
-      `Added ${picked.length} to ${name}`,
+    holdStillPress();
+    const ids = new Set(picked.map((row) => row.entity_id));
+    const what = picked.length === 1 ? picked[0]!.name : picked.length;
+    void save((draft) => draft.members.push(...picked.map((row) => ({ kind, entity_id: row.entity_id }))), undefined, () =>
+      addedToast(
+        (name) => `Added ${what} to ${name}`,
+        (draft) => {
+          draft.members = draft.members.filter((held) => !ids.has(held.entity_id));
+        },
+      ),
     );
   }
 
@@ -343,13 +374,13 @@
     pending = { at: set?.rules.length ?? 0, kind };
   }
 
-  /** Why a waiting rule has nothing to choose: about this kind, so the rules above it don't contradict the line. */
-  const NONE_OF: Record<LinkSetRuleKind, string> = {
-    epic: "No synced epic has tickets under it yet. Try another kind.",
-    parent: "No synced ticket has sub-tasks yet. Try another kind.",
-    project: "No project has synced yet.",
-    manual: "No ticket has synced yet.",
-  };
+  /** Why a waiting rule has nothing to choose. A rule of this kind above it already holds one, so the line says *other* and doesn't contradict it (F-531). */
+  function noneOf(kind: LinkSetRuleKind): string {
+    const other = set?.rules.some((rule) => rule.kind === kind) ? "other " : "";
+    if (kind === "epic") return `No ${other}synced epic has tickets under it yet. Try another kind.`;
+    if (kind === "parent") return `No ${other}synced ticket has sub-tasks yet. Try another kind.`;
+    return kind === "project" ? `No ${other}project has synced yet.` : `No ${other}ticket has synced yet.`;
+  }
 
   /** Whether the waiting rule ended with a value, which keeps focus where it is. */
   let settled = false;
@@ -374,7 +405,12 @@
   }
 
   function ruleKey(event: KeyboardEvent, waiting: boolean) {
-    if (!waiting || event.key !== "Escape") return;
+    if (event.key !== "Escape") return;
+    // A rule holding its value has no edit to undo, so `Esc` goes on and leaves the page, as the title's does (F-539), not to the body.
+    if (!waiting) {
+      if (event.target instanceof HTMLSelectElement) event.target.blur();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     cancelRule();
@@ -383,21 +419,33 @@
   /**
    * Take one thing out of the set, at once, with *Undo* on the toast. A second
    * removal while that toast shows replaces it: one toast, and its *Undo* puts
-   * back all of them.
+   * back all of them. Each set has its own tally: *Undo* goes to the set it was
+   * removed from, whichever set this editor has moved on to (`undoOn`).
    */
-  const removedToast = tally<{ gone: Removed; named: string }>((held) => ({
-    text: `Removed ${held.length === 1 ? held[0]!.named : held.length} from ${set?.name ?? "the set"}`,
-    action: {
-      label: "Undo",
-      run: () =>
-        void save((draft) =>
-          putBack(
-            draft,
-            held.map((one) => one.gone),
+  const removedTally = (from: string, name: string) =>
+    tally<{ gone: Removed; named: string }>((held) => ({
+      text: `Removed ${held.length === 1 ? held[0]!.named : held.length} from ${name}`,
+      action: {
+        label: "Undo",
+        run: () =>
+          undoOn(
+            from,
+            (draft) =>
+              putBack(
+                draft,
+                held.map((one) => one.gone),
+              ),
+            ports,
           ),
-        ),
-    },
-  }));
+      },
+    }));
+  let removedFrom: { id: string; toast: ReturnType<typeof removedTally> } | null = null;
+
+  function removedToast(one: { gone: Removed; named: string }) {
+    if (!set) return;
+    if (removedFrom?.id !== set.id) removedFrom = { id: set.id, toast: removedTally(set.id, set.name) };
+    removedFrom.toast(one);
+  }
 
   /**
    * Focus after a *Remove* took its row: the next row's *Remove*, else the row before's, else the panel's way of adding one.
@@ -584,7 +632,7 @@
               {#each options(rule.kind, rule.value) as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
             </select>
             <div class="tf-rule-foot">
-              {#if rule.waiting}<span class="tf-dim tf-rule-n">{options(rule.kind, rule.value).length === 0 ? NONE_OF[rule.kind] : "Choose what it applies to."}</span>
+              {#if rule.waiting}<span class="tf-dim tf-rule-n">{options(rule.kind, rule.value).length === 0 ? noneOf(rule.kind) : "Choose what it applies to."}</span>
               {:else if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
               <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => dropRule(rule.at, event.currentTarget)}>{rule.at >= set.rules.length ? "Cancel" : "Remove"}</button>
             </div>

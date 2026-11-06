@@ -408,7 +408,7 @@ test("Save as a link set… ticks the ticket's own items, offers the epic first 
     rules: [{ kind: "epic", value: "jira:PAY-200" }],
   });
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(document.querySelector("[aria-label='Connections']")).toBeNull();
+  expect(document.querySelector("[aria-label='Connections']"), "the drawer stays, to show the new group (F-544)").not.toBeNull();
   const toast = toasts.items.find((t) => t.text === "Saved SEPA payouts kit. Every ticket under epic PAY-200 now shows it.")!;
   // `Enter` on arrival saves a rule that may reach many tickets, so the toast takes it back (F-536).
   expect(toast.action?.label).toBe("Undo");

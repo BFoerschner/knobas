@@ -461,6 +461,7 @@ const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
+const TfAssetTree = (await import("../tf/asset-tree/TfAssetTree.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
@@ -2428,6 +2429,11 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    name: "TfAssetTree",
+    source: "lib/tf/asset-tree/TfAssetTree.svelte",
+    open: (target) => ({ app: mount(TfAssetTree, { target, props: { head: "asset", rest: ["asset:postgres"] } }) }),
   },
   {
     /**

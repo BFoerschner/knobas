@@ -9,6 +9,10 @@
   shared `parseHash`, and `go` writes `location.hash` as the rest of the shell
   does. The page draws its own breadcrumb, which names the asset it is on.
 
+  An estate with one root opens it on arrival, in place of the address (F-054): the
+  same entry with its opener kept, so no history entry and the same way back. Only on
+  arrival: `Esc` and the crumb coming up from that root stay on the bare tree.
+
   A ticket card's *Assets* row (`job/scoped.svelte.ts`) lands here at the ticket's
   first asset: the line under the bar names all it reaches, each a way to it, and
   the columns mark them and what holds them, while the reader stays in the tree.
@@ -17,10 +21,12 @@
   import AssetsView from "../../assets/AssetsView.svelte";
   import { scopedTicket } from "../job/scoped.svelte";
   import { ticketAssets } from "./ticket-assets.svelte";
-  import type { AssetsNav } from "../../assets/tree";
+  import { addressOf, type AssetsNav } from "../../assets/tree";
+  import type { AssetRow } from "../../ipc/assets";
   import { parseHash } from "../../shell/router";
   import type { EscTarget, EscTargetOf } from "../escape";
-  import { goAcross } from "../opener";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { goAcross, replaceAddress } from "../opener";
   import { parentPage } from "../page-name.svelte";
   import { HEAD_NAME } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
@@ -48,6 +54,21 @@
   /** What a card's *Assets* row is showing. */
   const reached = ticketAssets(() => scopedTicket.assetsOf);
 
+  /** The estate's top level, as the view last read it; `null` until it has. */
+  let roots = $state.raw<AssetRow[] | null>(null);
+  /** This visit has had its arrival. A plain note: nothing draws from it, and it goes when the page is hidden. */
+  let arrived = false;
+  const visible = pageVisible();
+  $effect(() => {
+    if (!visible()) {
+      arrived = false;
+      return;
+    }
+    if (arrived || roots === null) return;
+    arrived = true;
+    if (head === "assets" && roots.length === 1) replaceAddress(addressOf(roots[0]!));
+  });
+
   const nav: AssetsNav = {
     get route() {
       return parseHash(address);
@@ -74,6 +95,6 @@
     </p>
   {/if}
   <div class="tf-asset-tree">
-    <AssetsView {nav} marks={reached.marks} onnamed={(name) => (named = name)} onholder={(held) => (holder = held)} />
+    <AssetsView {nav} marks={reached.marks} onnamed={(name) => (named = name)} onholder={(held) => (holder = held)} onroots={(rows) => (roots = rows)} />
   </div>
 </div>

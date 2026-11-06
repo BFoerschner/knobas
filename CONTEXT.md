@@ -356,7 +356,7 @@ The property an [importer](#importer) sets that names the thing it read in the s
 _Avoid_: external id, foreign key, source id (a [source](#source)'s)
 
 **Depends on this**:
-What breaks if an [asset](#asset) goes down: its descendants, and every asset linked to it by `depends-on` or `runs-on`, transitively over both, read from the link's `to` end. The panel in the asset pane that answers *blast radius*. Routes whose target is the asset or anything in its answer are listed beneath as *reachable via routes that would break* and not counted.
+What breaks if an [asset](#asset) goes down: its descendants, and every asset linked to it by `depends-on` or `runs-on`, transitively over both, read from the link's `to` end. The panel in the asset pane that answers *blast radius*. Routes whose target is the asset or anything in its answer break too and are not counted: those not already in the pane's *Reachable via* are listed beneath as *other routes that would break*, and a line says the rest would.
 _Avoid_: blast radius (the question, not the panel), dependents, impact, downstream
 
 **Route**:

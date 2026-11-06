@@ -139,7 +139,8 @@
   // The queued-write line, and the same one the Monitors tab draws for a pause:
   // what a create can honestly say now is that knobas asked, and a toast is
   // where this app says that.
-  import { push } from "../shell/toasts.svelte";
+  import { push, undoable } from "../shell/toasts.svelte";
+  import { holdStillPress } from "../tf/still-press";
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
@@ -269,6 +270,7 @@
     stripWidth,
     onnamed,
     onholder,
+    onroots,
     marks,
   }: {
     /** A ticket's assets to mark in the columns, and what holds them (`TfAssetTree`). */
@@ -303,6 +305,8 @@
     onnamed?: (name: string | null) => void;
     /** The asset holding the selected one, which the shell's `Esc` steps up to; `null` at the top. */
     onholder?: (holder: { id: string; name: string } | null) => void;
+    /** The estate's top level, each time it is read: the page opens a single root on arrival (F-054). */
+    onroots?: (roots: AssetRow[]) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -482,6 +486,11 @@
   let dependsOn = $state<DependsOnThis | null>(null);
   let dependsFailure = $state<string | null>(null);
 
+  /** The routes that would break and aren't already in the pane's *Reachable via*, which would say each one twice (F-509). */
+  const otherRoutes = $derived((dependsOn?.routes ?? []).filter((route) => !detail?.reachable_via.some((via) => via.id === route.id)));
+  /** That list left some out, so a line says they break too: the panel still answers for them. */
+  const repeatedRoutes = $derived((dependsOn?.routes.length ?? 0) > otherRoutes.length);
+
   const detailRead = latestRead<AssetDetail>();
   const dependsRead = latestRead<DependsOnThis>();
   const columnsRead = latestRead<AssetRow[][]>();
@@ -653,6 +662,7 @@
       ok: (lists) => {
         columns = lists;
         loaded = true;
+        onroots?.(lists[0] ?? []);
       },
       fail: (cause) => {
         columns = [];
@@ -1433,10 +1443,32 @@
       closeInline();
       return;
     }
-    const done = await write(() =>
-      io.editAsset(current.asset.id, [{ field: "name", value: nameDraft }]),
-    );
-    if (done !== null) renaming = false;
+    const { id, name } = current.asset;
+    const named = nameDraft.trim();
+    const done = await write(() => io.editAsset(id, [{ field: "name", value: nameDraft }]));
+    if (done === null) return;
+    renaming = false;
+    holdStillPress();
+    undoable(`Renamed ${name} to ${named}`, () => undoWrite(() => io.editAsset(id, [{ field: "name", value: name }])));
+  }
+
+  /** The toast's *Undo* outlives the page and any other write under way, so it is not `write`: it sends, and the page reads the answer if it is still here. */
+  function undoWrite(send: () => Promise<unknown>) {
+    holdStillPress();
+    void send()
+      .then(() => (revision += 1))
+      .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  }
+
+  /** A move written: the toast names the old place's way back, so a wrong pick doesn't mean finding it by memory (F-545). */
+  function moved(asset: AssetRow, into: string) {
+    moving = false;
+    holdStillPress();
+    // The address is unchanged — the asset kept its id — so the re-read is
+    // what redraws the columns at the new path.
+    revision += 1;
+    const { id, name, parent_id: from } = asset;
+    undoable(`Moved ${name} to ${into}`, () => undoWrite(() => io.moveAsset(id, from)));
   }
 
   /**
@@ -2284,11 +2316,15 @@
           {/if}
         </section>
 
-        <section class="grp">
-          <h3 class="lab">Held by</h3>
-          {#if detail.held_by.length === 0}
+        <!-- The columns draw this path, so it waits in a fold (F-509). The fold moves what is under it, so the wires measure again. -->
+        {#if detail.held_by.length === 0}
+          <section class="grp">
+            <h3 class="lab">Held by</h3>
             <p class="empty">At the top of the estate.</p>
-          {:else}
+          </section>
+        {:else}
+          <details class="grp heldby tf-set-fold" ontoggle={measureWires}>
+            <summary class="lab">Held by <span class="tf-count">{detail.held_by.length}</span></summary>
             <ul class="lst">
               {#each detail.held_by as held (held.id)}
                 <li>
@@ -2296,8 +2332,8 @@
                 </li>
               {/each}
             </ul>
-          {/if}
-        </section>
+          </details>
+        {/if}
 
         <section class="grp">
           <h3 class="lab">Holds</h3>
@@ -2450,11 +2486,9 @@
           one a reader wants before pulling a machine out.
 
           The routes come **beneath the list and outside the count**, which is
-          `CONTEXT.md`'s own arrangement: *"Routes whose target is the asset
-          are listed beneath as reachable via routes that would break and not
-          counted"*, which #1553 amended to *"the ones whose target is the
-          asset or anything in its answer"*, so that the number is about
-          assets. They are drawn as plain rows rather than through the
+          `CONTEXT.md`'s own arrangement (#1553), so that the number is about
+          assets. One already in *Reachable via* isn't said twice (F-509): a
+          line says it breaks too. They are drawn as plain rows rather than through the
           `routeRow` snippet above, deliberately: that row carries the
           `data-wire` end the wire measurement reads (#433), and a route here
           landing on the asset or inside it is already in *Reachable via* with
@@ -2497,16 +2531,19 @@
               {/each}
             </ul>
           {/if}
-          {#if dependsOn !== null && dependsOn.routes.length > 0}
-            <p class="lab via">Reachable via routes that would break</p>
+          {#if otherRoutes.length > 0}
+            <p class="lab via">Other routes that would break</p>
             <ul class="lst">
-              {#each dependsOn.routes as route (route.id)}
+              {#each otherRoutes as route (route.id)}
                 <li class="rt">
                   <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
                   <span class="faint mono">{route.url}</span>
                 </li>
               {/each}
             </ul>
+          {/if}
+          {#if repeatedRoutes}
+            <p class="empty alsobreak">The routes under <em>Reachable via</em> would break too.</p>
           {/if}
         </section>
 
@@ -2738,11 +2775,8 @@
     tree={io.assetTree}
     move={io.moveAsset}
     onclose={() => (moving = false)}
-    onmoved={() => {
-      moving = false;
-      // The address is unchanged — the asset kept its id — so the re-read is
-      // what redraws the columns at the new path.
-      revision += 1;
+    onmoved={(into) => {
+      if (detail) moved(detail.asset, into);
     }}
   />
 {/if}
@@ -3509,6 +3543,23 @@
      own: they belong to this panel's answer and are outside its count. */
   .breaks .via {
     margin: 8px 0 4px;
+  }
+
+  .breaks .alsobreak {
+    margin-top: 8px;
+  }
+
+  .heldby summary {
+    list-style: none;
+    cursor: pointer;
+  }
+
+  .heldby summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .heldby[open] summary {
+    margin-bottom: 6px;
   }
 
   /* A line here carries three things and the third is a whole path, which in

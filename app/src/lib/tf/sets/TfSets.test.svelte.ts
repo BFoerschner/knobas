@@ -264,7 +264,33 @@ test("Add… marks what is already in, and adds what was picked as one save", as
     "confluence:2",
   ]);
   expect(saved.at(-1)?.members.at(-1)?.kind).toBe("page");
-  expect(toasts.items.at(-1)?.text).toBe("Added 1 to Payout stack");
+  // One thing is named, and *Undo* takes it back as a *Remove*'s does (F-547).
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Added Payout batch lifecycle to Payout stack");
+  expect(toast.action?.label).toBe("Undo");
+  toast.action?.run();
+  await settle();
+  expect(saved.at(-1)?.members.map((member) => member.entity_id)).not.toContain("confluence:2");
+  expect(saved.at(-1)?.members).toHaveLength(4);
+});
+
+test("a toast's Undo goes to the set it came from, whichever set the editor has moved on to", async () => {
+  await draw(["payout-stack"]);
+  [...target.querySelectorAll<HTMLButtonElement>("article[aria-label='Pages'] .tf-set-add button")].at(-1)!.click();
+  await settle();
+  document.querySelectorAll<HTMLInputElement>(".tf-dialog .tf-picks input")[1]!.click();
+  await settle();
+  button("Add").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  // The editor is gone: the set is read from the backend, changed and saved.
+  void unmount(view!);
+  view = null;
+  stored = saved.at(-1) as unknown as LinkSetDetail;
+  toast.action?.run();
+  await settle();
+  expect(saved.at(-1)?.id).toBe("payout-stack");
+  expect(saved.at(-1)?.members.map((member) => member.entity_id)).not.toContain("confluence:2");
 });
 
 test("a rule is added once its value is chosen, and Remove drops a member as one save", async () => {
@@ -386,7 +412,11 @@ test("Add a pattern… writes the fields as a query, shows what it matches now, 
     { kind: "pipeline", query: "project:Payouts name:Payout_*" },
     { kind: "pipeline", query: "project:Payouts name:Payout_Lint" },
   ]);
-  expect(toasts.items.at(-1)?.text).toBe("Added a pattern to Payout stack");
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Added a pattern to Payout stack");
+  toast.action?.run();
+  await settle();
+  expect(saved.at(-1)?.patterns).toEqual([{ kind: "pipeline", query: "project:Payouts name:Payout_*" }]);
 });
 
 test("a query the backend refuses says why, and Add pattern waits", async () => {

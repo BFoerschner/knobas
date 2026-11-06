@@ -9,6 +9,9 @@ import { afterEach, expect, test, vi } from "vitest";
 
 vi.mock("../../assets/AssetsView.svelte", async () => await import("./nav-stub.svelte"));
 
+import type { AssetRow } from "../../ipc/assets";
+import { pageContext } from "../kept-pages.svelte";
+
 const { default: TfAssetTree } = await import("./TfAssetTree.svelte");
 const { seen } = await import("./nav-stub.svelte");
 
@@ -17,6 +20,7 @@ afterEach(() => {
   if (mounted) unmount(mounted);
   mounted = null;
   seen.nav = null;
+  seen.onroots = null;
   location.hash = "";
 });
 
@@ -43,4 +47,64 @@ test("the page reads its address with parseHash and go sets location.hash", () =
 
   seen.nav?.go("#/asset/other");
   expect(location.hash).toBe("#/asset/other");
+});
+
+const ROOT = { id: "asset:estate", name: "estate" } as AssetRow;
+const OTHER = { id: "asset:other", name: "other" } as AssetRow;
+
+test("a single root opens on arrival, in place of the address, and only on arrival (F-054)", () => {
+  location.hash = "#/assets";
+  const entries = history.length;
+  const props = $state({ head: "assets", rest: [] as string[] });
+  mounted = mount(TfAssetTree, { target: document.body, props });
+  flushSync();
+  expect(location.hash, "nothing read yet").toBe("#/assets");
+
+  seen.onroots?.([ROOT]);
+  flushSync();
+  expect(location.hash).toBe("#/asset/asset:estate");
+  expect(history.length, "no history entry").toBe(entries);
+
+  // `Esc` and the crumb come up from that root to the bare tree, and it stays there.
+  location.hash = "#/assets";
+  props.head = "assets";
+  seen.onroots?.([ROOT]);
+  flushSync();
+  expect(location.hash).toBe("#/assets");
+});
+
+test("hidden and shown again, the page arrives again", () => {
+  location.hash = "#/assets";
+  let shown = $state(true);
+  mounted = mount(TfAssetTree, { target: document.body, props: { head: "assets", rest: [] }, context: pageContext(() => shown) });
+  flushSync();
+  seen.onroots?.([ROOT]);
+  flushSync();
+  location.hash = "#/assets";
+  flushSync();
+  expect(location.hash).toBe("#/assets");
+
+  shown = false;
+  flushSync();
+  shown = true;
+  flushSync();
+  expect(location.hash).toBe("#/asset/asset:estate");
+});
+
+test("an estate with two roots, or with none, stays on the bare tree", () => {
+  location.hash = "#/assets";
+  mounted = mount(TfAssetTree, { target: document.body, props: { head: "assets", rest: [] } });
+  flushSync();
+  seen.onroots?.([ROOT, OTHER]);
+  flushSync();
+  expect(location.hash).toBe("#/assets");
+  void unmount(mounted);
+  mounted = mount(TfAssetTree, { target: document.body, props: { head: "assets", rest: [] } });
+  flushSync();
+  seen.onroots?.([]);
+  flushSync();
+  // The first asset made here is no arrival.
+  seen.onroots?.([ROOT]);
+  flushSync();
+  expect(location.hash).toBe("#/assets");
 });

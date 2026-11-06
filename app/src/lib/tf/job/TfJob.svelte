@@ -83,6 +83,7 @@
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { entityAddress } from "../address";
   import { replaceAddress } from "../opener";
+  import { holdStillPress } from "../still-press";
   import { sectionHash, ticketHash } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
   import type { EscTarget } from "../escape";
@@ -334,13 +335,17 @@
     }
   }
 
-  /** *Save link set* (R-7.9): the dialog and the drawer close, the job re-reads, and the toast takes it back (F-536): `Enter` on arrival saves a rule that may reach many tickets. */
+  /**
+   * *Save link set* (R-7.9): the dialog closes and the job re-reads. As with *Apply*, the drawer stays, so its new group and *Edit set* lead to the set
+   * (F-544), and focus goes back to *Save as a link set…*. The toast takes it back (F-536), on the ticket it was saved from, since the toast outlives a move.
+   */
   function savedSet(set: LinkSetDetail) {
     savingSet = false;
-    drawer = false;
-    if (detail) reader.rereadReach(detail.row.entity_id);
+    holdStillPress();
+    const id = detail?.row.entity_id;
+    if (id !== undefined) reader.rereadReach(id);
     undoable(savedToast(set), () => {
-      const id = detail?.row.entity_id;
+      holdStillPress();
       void sets
         .deleteLinkSet(set.id)
         .then(() => {

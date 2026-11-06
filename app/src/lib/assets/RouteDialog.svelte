@@ -47,6 +47,7 @@
   import { tick } from "svelte";
 
   import { levelKeys } from "./level-keys";
+  import PickerCrumb from "./PickerCrumb.svelte";
   import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type {
@@ -367,22 +368,7 @@
           {/if}
         </p>
 
-        <p class="crumb">
-          <button class="link" title="Estate" disabled={crumb.length === 0} onclick={() => stand([])}>
-            Estate
-          </button>
-          {#each crumb as step, index (step.id)}
-            <span class="sep" aria-hidden="true">/</span>
-            <button
-              class="link"
-              title={step.name}
-              disabled={index === crumb.length - 1}
-              onclick={() => stand(crumb.slice(0, index + 1))}
-            >
-              {step.name}
-            </button>
-          {/each}
-        </p>
+        <div class="crumbline"><PickerCrumb {crumb} onstand={(path) => stand(path)} /></div>
 
         <div class="lvl" bind:this={walk}>
           <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -551,36 +537,8 @@
     font-size: var(--t-sm);
   }
 
-  /* One line whatever the depth: the names above give way and keep their titles, and the level you stand on stays whole. */
-  .crumb {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
+  .crumbline {
     margin: 0 0 6px;
-    font-size: var(--t-xs);
-    color: var(--muted);
-  }
-
-  .crumb button {
-    flex: 0 1 auto;
-    min-width: 2ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .crumb button:last-of-type {
-    flex: none;
-    max-width: 70%;
-  }
-
-  .crumb .sep {
-    flex: none;
-  }
-
-  .crumb button:disabled {
-    color: var(--text);
-    cursor: default;
   }
 
   /* Bounded, for `MoveDialog`'s reason: a level with fifty rows must not push

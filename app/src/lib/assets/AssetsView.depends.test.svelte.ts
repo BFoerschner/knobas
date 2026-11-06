@@ -91,7 +91,7 @@ const NOTHING: DependsOnThis = { assets: [], routes: [] };
  * and every relation on screen comes from the panel's own answer rather than
  * from what holds what.
  */
-function bridge(answers: Answers) {
+function bridge(answers: Answers, extra: Partial<AssetDetail> = {}) {
   const asked: string[] = [];
   /**
    * Set by {@link holdNext}: the next walk answers this promise's resolver and
@@ -135,6 +135,7 @@ function bridge(answers: Answers) {
         monitors: [],
         monitoring: [],
         monitor_targets: [],
+        ...extra,
       });
     },
     dependsOnThis: (assetId: string): Promise<DependsOnThis> => {
@@ -156,10 +157,10 @@ function bridge(answers: Answers) {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(hash: string, answers: Answers) {
+function render(hash: string, answers: Answers, extra: Partial<AssetDetail> = {}) {
   location.hash = hash;
   const nav = createTestNav();
-  const ports = bridge(answers);
+  const ports = bridge(answers, extra);
   app = mount(AssetsView, {
     target,
     props: { nav, now: () => NOW, ports: ports as never },
@@ -243,12 +244,25 @@ test("the routes that would break are listed beneath and are not in the count", 
   });
 
   await waitFor(() => expect(count()).toBe("1"));
-  expect(text()).toContain("Reachable via routes that would break");
+  expect(text()).toContain("Other routes that would break");
   expect(lines()).toEqual([
     "knobas-teamcity depends on",
     "Gitea http://127.0.0.1:3000/",
     "gitea (reverse tunnel) http://gitea.test:3000/",
   ]);
+});
+
+/** The pane says a route once: one already under *Reachable via* isn't listed again, and a line says it breaks too (F-509). */
+test("a route already under Reachable via is not listed again under the routes that would break", async () => {
+  render(
+    "#/asset/asset:knobas-gitea",
+    { [GITEA.id]: { assets: [], routes: [TUNNEL, REVERSE] } },
+    { reachable_via: [TUNNEL] },
+  );
+
+  await waitFor(() => expect(text()).toContain("Other routes that would break"));
+  expect(lines()).toEqual(["gitea (reverse tunnel) http://gitea.test:3000/"]);
+  expect(text()).toContain("The routes under Reachable via would break too.");
 });
 
 /**

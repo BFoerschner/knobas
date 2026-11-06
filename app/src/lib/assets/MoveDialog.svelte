@@ -25,6 +25,7 @@
   import { tick } from "svelte";
 
   import { levelKeys } from "./level-keys";
+  import PickerCrumb from "./PickerCrumb.svelte";
   import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type { assetTree, AssetRow, moveAsset } from "../ipc/assets";
@@ -46,8 +47,8 @@
     tree: typeof assetTree;
     move: typeof moveAsset;
     onclose: () => void;
-    /** The move was written. The Tree re-reads at the new path. */
-    onmoved: (row: AssetRow) => void;
+    /** The move was written, into the place named in words. The Tree re-reads at the new path. */
+    onmoved: (into: string) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -132,7 +133,8 @@
     writing = true;
     failure = null;
     try {
-      onmoved(await move(asset.id, at));
+      await move(asset.id, at);
+      onmoved(here);
     } catch (rejection) {
       // The cycle refusal lands here, in the words `assets::move_to` chose:
       // it names the asset that closes the loop, which is the fact a reader
@@ -147,22 +149,7 @@
 <TfDialog why={alreadyHere ? "Open the place it should go." : null} title="Move {asset.name}" {onclose}>
   {#snippet body()}
     <div class="picker" bind:this={picker}>
-      <p class="crumb">
-        <button class="link" title="Estate" disabled={crumb.length === 0} onclick={() => stand([])}>
-          Estate
-        </button>
-        {#each crumb as step, index (step.id)}
-          <span class="sep" aria-hidden="true">/</span>
-          <button
-            class="link"
-            title={step.name}
-            disabled={index === crumb.length - 1}
-            onclick={() => stand(crumb.slice(0, index + 1))}
-          >
-            {step.name}
-          </button>
-        {/each}
-      </p>
+      <PickerCrumb {crumb} onstand={(path) => stand(path)} />
 
       <div class="lvl">
         <!-- The list is the one `Tab` stop, and where the dialog arrives: a press there walks it, and none of its keys sends anything. -->
@@ -220,38 +207,6 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr);
     gap: 10px;
-  }
-
-  /* One line whatever the depth: the names above give way and keep their titles, and the level you stand on stays whole. */
-  .crumb {
-    display: flex;
-    align-items: baseline;
-    gap: 4px;
-    margin: 0;
-    font-size: var(--t-xs);
-    color: var(--muted);
-  }
-
-  .crumb button {
-    flex: 0 1 auto;
-    min-width: 2ch;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .crumb button:last-of-type {
-    flex: none;
-    max-width: 70%;
-  }
-
-  .crumb .sep {
-    flex: none;
-  }
-
-  .crumb button:disabled {
-    color: var(--text);
-    cursor: default;
   }
 
   /* Bounded: a level with fifty rows must not push the footer buttons out of

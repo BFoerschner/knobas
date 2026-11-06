@@ -848,6 +848,14 @@ test("moving an asset redraws the columns at its new path", async () => {
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]);
   expect(marked()).toEqual(["hel1", "vm-app-02", "postgres"]);
   expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-app-02");
+
+  // A wrong pick need not be found again by memory: the toast says where it went, and takes it back (F-545).
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Moved postgres to vm-app-02");
+  expect(toast.action?.label).toBe("Undo");
+  toast.action?.run();
+  await waitFor(() => expect(panePath()).toContain("hel1 / vm-db-01 / postgres"));
+  expect(store.rows.find((row) => row.id === "asset:postgres")?.parent_id).toBe("asset:vm-db-01");
 });
 
 test("Move…: → goes into the focused row, ← comes back up onto it, and an empty level keeps focus (F-537, F-543)", async () => {
@@ -1146,6 +1154,11 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
   await waitFor(() => expect(text()).toContain("name: postgres → postgres-18"));
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres-18"]]);
   expect(panePath()).toContain("hel1 / vm-db-01 / postgres-18");
+
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Renamed postgres to postgres-18");
+  toast.action?.run();
+  await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]));
 });
 
 /**
