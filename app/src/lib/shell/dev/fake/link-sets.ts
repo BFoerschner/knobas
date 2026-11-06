@@ -38,6 +38,7 @@ import type {
   StateChip,
 } from "../../../ipc/entity";
 import { keyOf } from "../../../time/format";
+import { onePerKey } from "../../../tf/sets/sets";
 import type { Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset, seedOf } from "../fake-seed";
 import { fakePipelines } from "./builds";
@@ -287,7 +288,8 @@ function ruleTickets(rules: readonly LinkSetRule[]): RuleTicket[] {
 }
 
 function rowOf(set: FakeSet): LinkSetRow {
-  const on = ruleTickets(set.rules);
+  // One per key, as the real read counts: two sources can hold the same key.
+  const on = onePerKey(ruleTickets(set.rules));
   return {
     id: set.id,
     name: set.name,
