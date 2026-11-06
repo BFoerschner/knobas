@@ -207,10 +207,11 @@
       }}
     >
       <label for="tf-app-name">Name <small class="tf-req">required</small></label>
-      <input id="tf-app-name" type="text" autocomplete="off" placeholder="MyGitViewer" bind:value={name} />
+      <input id="tf-app-name" aria-label="Name" type="text" autocomplete="off" placeholder="MyGitViewer" bind:value={name} />
       <label for="tf-app-command">Command <small class="tf-req">required</small></label>
       <input
         id="tf-app-command"
+        aria-label="Command"
         class="tf-mono"
         type="text"
         autocomplete="off"

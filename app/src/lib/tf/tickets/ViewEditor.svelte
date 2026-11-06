@@ -637,12 +637,12 @@
               {#each shown.columns as column, at (at)}
                 <div class="tf-vw-mcol" class:tf-vw-over={column.over}>
                   <div class="tf-vw-mh">
-                    <span>{column.name || "Unnamed"}</span><b
+                    <span title={column.name || undefined}>{column.name || "Unnamed"}</span><b
                       >{column.total}{#if column.limit !== null}{" "}of {column.limit}{/if}</b
                     >
                   </div>
                   {#each column.cards as card (card.entity_id)}
-                    <div class="tf-vw-stub"><span class="tf-mono">{card.key}</span>{card.title}</div>
+                    <div class="tf-vw-stub" title="{card.key} {card.title}"><span class="tf-mono">{card.key}</span>{card.title}</div>
                   {/each}
                   {#if column.total > column.cards.length}
                     <div class="tf-vw-stub tf-vw-stub-more">{column.total - column.cards.length} more</div>

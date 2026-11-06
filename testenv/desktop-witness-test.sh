@@ -669,9 +669,9 @@ pin_label $tf/openin/TfAppsManage.svelte '>Add an application…</button>' \
     "the applications dialog still offers Add an application…"
 pin_label $tf/openin/TfAppsManage.svelte 'onclick={onclose}>Done</button>' \
     "the applications dialog still closes on Done"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-name">Name</label>' \
+pin_label $tf/openin/TfAppDialog.svelte 'id="tf-app-name" aria-label="Name"' \
     "the application dialog's name field is still labelled Name"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-command">Command</label>' \
+pin_label $tf/openin/TfAppDialog.svelte 'aria-label="Command"' \
     "the application dialog's command field is still labelled Command"
 pin_label $tf/openin/TfAppDialog.svelte '"Add application"' \
     "the application dialog still adds with a button called Add application"
@@ -992,7 +992,7 @@ pin_label $tf/job/TfConversation.svelte 'aria-label="Comment on {jobKey}"' \
     "the ticket page's compose box still has the name the capture driver knows the page by"
 # The shortcut field is found by the focus, because the dialog and its heading
 # answer to its name too (measured 2026-10-18): `TfDialog` focuses its first field.
-pin_label $tf/settings/TfDialog.svelte 'reachable("input:not(\[disabled\]):not(\[type=radio\])")' \
+pin_label $tf/settings/TfDialog.svelte 'reachable(`.tf-body :is(${FIELD})`)\[0\]' \
     "a dialog still puts the caret in its first field, where the capture driver types"
 # The way to a job the capture driver takes, from Tickets (the demo profile's
 # launcher found no ticket on 2026-10-18).
