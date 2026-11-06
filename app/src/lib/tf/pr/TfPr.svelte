@@ -4,9 +4,10 @@
   `/commits`, which share the header and the one read.
 
   - **The header**: `PR #<n> <title>`, its state, labels, head into base and
-    author (*you* for the reader's own); what this session queued stands at the
-    tab row's right end, where a chip can't wrap the line and move the tabs
-    (F-206), with *Submit review… (N pending)* in warn while line comments wait
+    author (*you* for the reader's own); what the toolbar queued this session
+    stands at the tab row's right end, where a chip can't wrap the line and move
+    the tabs (F-206), and a thread's reply and resolve stay in their thread
+    (F-261), with *Submit review… (N pending)* in warn while line comments wait
     (#842, `TfPrReview`, F-254). The toolbar's *Review…*,
     *Update branch*, *Edit*, *Close* (or *Reopen*) and *Merge…* (#843,
     `TfPrMerge`). A write is drawn only where the source's view offers it
@@ -411,7 +412,7 @@
   const merge = $derived(offered((a) => a.write_op === "merge_pull_request"));
   const comment = $derived(offered((a) => a.write_op === "comment"));
 
-  /** A toolbar write this page queues through its dialog: the button's words and the verb its toast and chip use. */
+  /** A toolbar write this page queues through its dialog: the button's words and the verb its toast uses. */
   interface Write {
     action: ViewAction;
     label: string;

@@ -382,7 +382,9 @@
 .tf-thr-reply + .tf-thr-sp { display: none; }
 .tf-thread.tf-resolved { border-left-color: var(--ok); }
 .tf-thread .tf-reply { margin: 6px 0 0; }
-.tf-said.tf-queued { opacity: 0.8; }
+/* Dimmed by --muted, as a queued comment is, so its *Queued* chip keeps its contrast. */
+.tf-said.tf-queued p { color: var(--muted); }
+.tf-said.tf-queued b { color: var(--ink-2); }
 @media (max-width: 900px) {
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
   .tf-ftreebox { position: static; max-height: none; }
