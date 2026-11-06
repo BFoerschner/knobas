@@ -129,7 +129,7 @@ test("the tiles head themselves: no Spaces heading says what the sub line alread
 test("with This job on, a job's row says what else the page is, which its own panel would have said (F-419)", () => {
   const groups = [
     {
-      reason: "Linked to PAY-231",
+      reason: "Pages on PAY-231",
       pages: [
         { entity_id: "confluence:2", title: "On-call handbook", where: "Operations › Ops home" },
         { entity_id: "confluence:e1", title: "Top 1", where: "Engineering" },
@@ -151,13 +151,13 @@ test("a space with every page listed offers no link to more", () => {
 });
 
 test("the job's pages have a list of their own, first while This job is on", () => {
-  const groups = [{ reason: "Linked to PAY-231", pages: [{ entity_id: "confluence:9", title: "Engineering home", where: "OPS" }] }];
+  const groups = [{ reason: "Pages on PAY-231", pages: [{ entity_id: "confluence:9", title: "Engineering home", where: "OPS" }] }];
   draw({ tree: TREE, job: "PAY-231", groups });
   const body = target.querySelector(".tf-dh-body")!;
   const job = section("Pages on PAY-231")!;
   // The job is the heading, and only another reason is said.
   expect(job.textContent).toContain("OPS");
-  expect(job.textContent).not.toContain("Linked to PAY-231");
+  expect(job.querySelector(".tf-why")?.textContent).toBe("OPS");
   expect(body.firstElementChild).not.toBe(job);
   void unmount(view!);
   draw({ tree: TREE, job: "PAY-231", groups, jobFirst: true });
@@ -219,7 +219,7 @@ test("a page is listed once: a tile skips what the panels hold and keeps its who
 test("the job's heading says in words how many pages it has and how many another panel holds (F-446)", () => {
   const groups = [
     {
-      reason: "Linked to PAY-231",
+      reason: "Pages on PAY-231",
       pages: [
         { entity_id: "confluence:2", title: "On-call handbook", where: "Operations › Ops home" },
         { entity_id: "confluence:e3", title: "Top 3", where: "Engineering" },

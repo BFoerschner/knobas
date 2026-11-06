@@ -334,6 +334,13 @@ export function revealMatch(match: Element): void {
   }
 }
 
+/** How far down `article` a match sits. One in a closed fold has no box of its own, so it counts as where the fold is drawn. */
+export function matchLine(match: Element, article: Element): number {
+  let drawn = match;
+  while (drawn.getClientRects().length === 0 && drawn.parentElement !== null && drawn !== article) drawn = drawn.parentElement;
+  return drawn.getBoundingClientRect().top - article.getBoundingClientRect().top;
+}
+
 /**
  * How long an embed's frame has to say it loaded (#2440): its reporter
  * speaks before the author's HTML runs, so a frame silent this long never
@@ -735,7 +742,7 @@ export interface JobPage {
   where: string;
 }
 
-/** The job's pages under one reason: *Linked to PAY-231*, *Parent PAY-230*. */
+/** The job's pages under one reason: *Pages on PAY-231*, *Parent PAY-230*. */
 export interface JobPageGroup {
   reason: string;
   pages: JobPage[];
@@ -744,14 +751,14 @@ export interface JobPageGroup {
 /**
  * Why the job reaches a page, as its group's heading: one of the parent's own
  * links is *Parent PAY-230* (the job sections' label); a page linked to the
- * ticket is *Linked to PAY-231*; a page further down the walk names its first
- * step, *Via <title>*, when `titles` has the step's title.
+ * ticket is *Pages on PAY-231*, what the home calls them too, since a page the walk found may offer *Link to PAY-231*; a
+ * page further down the walk names its first step, *Via <title>*, when `titles` has the step's title.
  */
 export function reachReason(reached: Reached, job: string, titles: ReadonlyMap<string, string>): string {
   const origin = originLabel(reached);
   if (origin !== null) return origin;
   const step = reached.step === reached.entity_id ? undefined : titles.get(reached.step);
-  return step === undefined ? `Linked to ${job}` : `Via ${step}`;
+  return step === undefined ? `Pages on ${job}` : `Via ${step}`;
 }
 
 /** The ids of the reached pages the tree holds. */

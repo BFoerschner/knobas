@@ -152,6 +152,7 @@
     reachedPages,
     readingAt,
     readingMinutes,
+    matchLine,
     revealMatch,
     scopeName,
     SEARCH_PAUSE_MS,
@@ -823,6 +824,45 @@
     const current = all[at];
     if (current) revealMatch(current);
     current?.scrollIntoView?.({ block: "center" });
+    // A match stepped to is where the reader meant to go: `Esc` stays here, and words typed next search from here.
+    if (findPlace !== null && current && article !== null) findPlace = { top: null, line: matchLine(current, article), landed: main?.scrollTop ?? 0 };
+  }
+
+  /**
+   * Where a bar ⌘F opened started, to read like a browser's find (F-458). `line` is how far down the article the reader
+   * was, which typed words search from, so a longer word never walks on past the place it began. `top` is where the article's
+   * top sat on screen, which `Esc` puts back, or `null` once there is nothing to put back. `landed` is where the scroller was
+   * last put: read somewhere else, the reader scrolled there, and that is their place now.
+   */
+  let findPlace: { top: number | null; line: number; landed: number } | null = null;
+
+  /** Where the page shows from: the scroller's top, below the bar and the crumbs pinned there. */
+  function pinnedBottom(): number {
+    const pinned = [main, main?.querySelector(".tf-findbar"), main?.querySelector(".tf-rd-crumbrow")];
+    return Math.max(...pinned.map((box, at) => (box ? box.getBoundingClientRect()[at === 0 ? "top" : "bottom"] : 0)));
+  }
+
+  /** How far down the article the line being read sits. */
+  function readingLine(): number {
+    return article === null ? 0 : pinnedBottom() - article.getBoundingClientRect().top;
+  }
+
+  const scrolledByHand = (): boolean => findPlace !== null && main !== null && Math.abs(main.scrollTop - findPlace.landed) > 1;
+
+  /** Words typed in the bar: the first match at or below the reading line, past the last back to the first. The page moves only if that match is out of view. */
+  function findFromLine(): void {
+    if (findPlace === null || scrolledByHand()) findPlace = { top: null, line: readingLine(), landed: main?.scrollTop ?? 0 };
+    const all = matches();
+    if (all.length === 0 || article === null || main === null) return;
+    const { line } = findPlace;
+    const box = article;
+    at = Math.max(all.findIndex((match) => matchLine(match, box) >= line - 1), 0);
+    markCurrent(all);
+    const current = all[at]!;
+    revealMatch(current);
+    const seen = current.getBoundingClientRect();
+    if (seen.top < pinnedBottom() || seen.bottom > main.getBoundingClientRect().bottom) current.scrollIntoView?.({ block: "center" });
+    findPlace.landed = main.scrollTop;
   }
 
   /** The page and the query the find bar last started on. */
@@ -851,8 +891,9 @@
     const query = stems;
     if (p === null) return;
     const again = started?.id === p.entity_id && started.stems === query;
-    // Words typed in the bar on this page go to their first match. Only a page newly drawn lands on the section its address names.
+    // Only a page newly drawn lands on the section its address names, or its first match.
     const samePage = started?.id === p.entity_id;
+    if (!samePage) findPlace = null;
     // A bar nobody typed in doesn't follow the reader to the next page.
     if (started !== null && !samePage && untrack(() => find) === "") findTyped = false;
     started = { id: p.entity_id, stems: query };
@@ -878,8 +919,10 @@
       if (place.kind === "page" && place.section !== null && !samePage) {
         document.getElementById(`s-${place.section}`)?.scrollIntoView?.();
         matches();
-      } else if (stems.length > 0) jump(1);
-      else marks = 0;
+      } else if (stems.length > 0) {
+        if (samePage && findTyped) findFromLine();
+        else jump(1);
+      } else marks = 0;
       follow();
     });
   });
@@ -898,28 +941,32 @@
   function setFind(words: string): void {
     find = words;
     findTyped = false;
+    findPlace = null;
   }
 
   let findBox = $state<HTMLInputElement | null>(null);
   /** What held focus when ⌘F opened the bar, which it goes back to when the bar closes. */
   let findFrom: HTMLElement | null = null;
 
-  /** The bar comes in or goes above the page, and the line being read holds still, in a webview that doesn't anchor a scroll too. */
-  function holdingPlace(change: () => void): void {
-    const from = main !== null && article !== null && main.scrollTop > 0 ? article.getBoundingClientRect().top : null;
+  /** The bar comes in or goes above the page, and the line being read holds still, in a webview that doesn't anchor a scroll too. With `to`, the article's top goes back there instead. */
+  function holdingPlace(change: () => void, to: number | null = null): void {
+    const from = to ?? (main !== null && article !== null && main.scrollTop > 0 ? article.getBoundingClientRect().top : null);
     change();
     if (from !== null) void tick().then(() => {
       if (main !== null && article !== null) main.scrollTop += article.getBoundingClientRect().top - from;
     });
   }
 
-  /** The bar closes, and focus left in it, or on nothing, goes back to what held it before ⌘F, else the page's title rather than the body (F-436). */
+  /**
+   * The bar closes, and focus left in it, or on nothing, goes back to what held it before ⌘F, else the page's title rather than the body (F-436).
+   * The page goes back to where the bar opened, unless the reader stepped to a match or scrolled, which says they mean to stay (F-458).
+   */
   function closeFind(): void {
     const at = document.activeElement;
     const free = at === null || at === document.body || at.closest(".tf-findbar") !== null;
     const from = findFrom;
     findFrom = null;
-    holdingPlace(() => setFind(""));
+    holdingPlace(() => setFind(""), scrolledByHand() ? null : (findPlace?.top ?? null));
     if (free) (from?.isConnected ? from : article?.querySelector<HTMLElement>(".tf-rd-title"))?.focus({ preventScroll: true });
   }
 
@@ -927,8 +974,10 @@
   function openFind(): void {
     const at = document.activeElement;
     if (!findOpen) findFrom = at instanceof HTMLElement && at !== document.body ? at : null;
+    const top = !findOpen && article !== null ? article.getBoundingClientRect().top : null;
     holdingPlace(() => (findTyped = true));
     void tick().then(() => {
+      if (top !== null) findPlace = { top, line: readingLine(), landed: main?.scrollTop ?? 0 };
       findBox?.focus({ preventScroll: true });
       findBox?.select();
     });
@@ -1530,7 +1579,7 @@
     {/if}
     {#if findOpen}
       <div class="tf-findbar" role="search">
-        <span>Matches for</span>
+        <span>Find</span>
         <input
           bind:this={findBox}
           value={find}

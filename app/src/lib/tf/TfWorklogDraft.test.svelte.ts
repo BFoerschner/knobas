@@ -168,12 +168,13 @@ test("Enter in From or Minutes presses Log, and with nothing to log it sends not
   await waitFor(() => expect(sent).toHaveLength(1));
 });
 
-test("each candidate is a ticked box with its time and source", async () => {
+test("each candidate is a ticked box with its time alone: the row's own words say what it was (F-158)", () => {
   render();
-  await waitFor(() => expect(target.textContent).toContain("10:02, Gitea"));
   expect(boxes().map((box) => box.checked)).toEqual([true, true]);
   expect(target.textContent).toContain("commit a41f2c PAY-231 backoff jitter");
-  expect(target.textContent).toContain("10:20, you wrote");
+  const times = [...target.querySelectorAll(".tf-cand .tf-dim")].map((time) => time.textContent);
+  expect(times.length).toBe(2);
+  for (const time of times) expect(time).toMatch(/^\d\d:\d\d$/);
 });
 
 test("the comment follows the boxes until it is edited", () => {

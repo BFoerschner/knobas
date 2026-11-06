@@ -1,7 +1,8 @@
 /** `filterKeys`: `Esc` in a box that narrows or finds means one thing everywhere. */
 import { afterEach, expect, test, vi } from "vitest";
 
-import { filterKeys } from "./filter-keys";
+import { filterKeys, installFindKey } from "./filter-keys";
+import { layers } from "./layers.svelte";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -64,4 +65,102 @@ test("the input's own handler can take the key first", () => {
   press(input);
   expect(input.value).toBe("pay");
   off();
+});
+
+/** A box as the browser draws it: jsdom lays nothing out, so a drawn box says so. */
+function drawn(label: string, options?: Parameters<typeof filterKeys>[0], shown = true): { input: HTMLInputElement; off: () => void } {
+  const input = document.createElement("input");
+  input.setAttribute("aria-label", label);
+  input.getClientRects = () => (shown ? [{}] : []) as unknown as DOMRectList;
+  document.body.append(input);
+  return { input, off: filterKeys(options)(input) as () => void };
+}
+
+function findKey(): KeyboardEvent {
+  const event = new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true });
+  window.dispatchEvent(event);
+  return event;
+}
+
+test("⌘F goes to the first box drawn, with its words selected, and pressed again selects them again", () => {
+  const stop = installFindKey();
+  const hidden = drawn("Hidden", {}, false);
+  const { input, off } = drawn("Find in log");
+  input.value = "retry";
+  expect(findKey().defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(input);
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 5]);
+  input.setSelectionRange(5, 5);
+  findKey();
+  expect(document.activeElement).toBe(input);
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 5]);
+  off();
+  hidden.off();
+  stop();
+});
+
+test("⌘F takes the page's own box over one beside the page, and one beside it where it is the only box", () => {
+  const stop = installFindKey();
+  const aside = drawn("Go to file", { aside: true });
+  const own = drawn("Find in file");
+  findKey();
+  expect(document.activeElement).toBe(own.input);
+  own.off();
+  own.input.remove();
+  findKey();
+  expect(document.activeElement).toBe(aside.input);
+  aside.off();
+  stop();
+});
+
+test("⌘F leaves an event something took, and a dialog or a drawer owns the key", () => {
+  const stop = installFindKey();
+  const { input, off } = drawn("Filter");
+  const take = (event: Event) => event.preventDefault();
+  window.addEventListener("keydown", take, { capture: true });
+  findKey();
+  window.removeEventListener("keydown", take, { capture: true });
+  expect(document.activeElement).not.toBe(input);
+  const close = layers.add({ kind: "dialog", close: () => {} });
+  findKey();
+  expect(document.activeElement).not.toBe(input);
+  close();
+  const panel = layers.add({ kind: "panel", close: () => {} });
+  findKey();
+  expect(document.activeElement).toBe(input);
+  panel();
+  off();
+  stop();
+});
+
+test("with no box, ⌘F asks the page, and a modified F is left alone", () => {
+  const nobox = vi.fn();
+  const stop = installFindKey(nobox);
+  const event = findKey();
+  expect(nobox).toHaveBeenCalledOnce();
+  expect(event.defaultPrevented).toBe(false);
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true, bubbles: true }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
+  expect(nobox).toHaveBeenCalledOnce();
+  stop();
+});
+
+test("Esc in a box ⌘F went to clears its words, then gives focus back, and only then falls through", () => {
+  const stop = installFindKey();
+  const button = document.createElement("button");
+  document.body.append(button);
+  button.focus();
+  const { input, off } = drawn("Find in log");
+  findKey();
+  input.value = "retry";
+  expect(press(input)).toEqual({ prevented: true, passed: false });
+  expect(input.value).toBe("");
+  expect(document.activeElement).toBe(input);
+  expect(press(input)).toEqual({ prevented: true, passed: false });
+  expect(document.activeElement).toBe(button);
+  // Come to by hand afterwards, an empty box falls through as any other does.
+  input.focus();
+  expect(press(input)).toEqual({ prevented: false, passed: true });
+  off();
+  stop();
 });

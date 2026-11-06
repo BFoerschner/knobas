@@ -3,7 +3,7 @@
  * what the backend reads is `crates/knobas-app/tests/it/docs_ipc.rs`'s.
  */
 import { createRawSnippet, flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, type MockInstance, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, type MockInstance, onTestFinished, test, vi } from "vitest";
 
 import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, TableCell, Unfilled, WriteAsk } from "../../ipc/entity";
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
@@ -1295,6 +1295,95 @@ test("⌘F opens the find bar on a page with focus in its box, a second selects 
   expect(document.activeElement).toBe(title);
 });
 
+/**
+ * The page laid out as a browser would: a 500 px window on an article with a match every 400 px, which `scrollIntoView` centres.
+ * Each returned step is a person's: ⌘F at a scroll, a word typed, a key in the box.
+ */
+async function findAt(scroll: number) {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED) }));
+  const main = target.querySelector<HTMLElement>(".tf-rd-main")!;
+  const article = () => main.querySelector("mark")?.closest("article") ?? main.querySelector("article")!;
+  const line = (mark: Element) => [...article().querySelectorAll("mark")].indexOf(mark as HTMLElement) * 400;
+  const box = (top: number, bottom = top) => ({ top, bottom }) as DOMRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this === main) return box(0, 500);
+    if (this.tagName === "ARTICLE") return box(-main.scrollTop);
+    if (this.tagName === "MARK") return box(line(this) - main.scrollTop, line(this) - main.scrollTop + 20);
+    return box(0);
+  });
+  vi.spyOn(Element.prototype, "getClientRects").mockImplementation(function (this: Element) {
+    return (this.tagName === "MARK" ? [{}] : []) as unknown as DOMRectList;
+  });
+  Element.prototype.scrollIntoView = function (this: Element) {
+    main.scrollTop = Math.max(line(this) - 240, 0);
+  };
+  onTestFinished(() => {
+    delete (Element.prototype as Partial<Element>).scrollIntoView;
+  });
+  main.scrollTop = scroll;
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  const input = target.querySelector<HTMLInputElement>(".tf-findbar input")!;
+  return {
+    main,
+    count: () => target.querySelector(".tf-findn")?.textContent,
+    type: async (word: string) => {
+      fill(input, word);
+      await settle();
+    },
+    key: async (key: string) => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      await settle();
+    },
+  };
+}
+
+test("words typed in the bar go to the first match at or below the reading line, the count stays true, and the page moves only for one out of view (F-458)", async () => {
+  const bar = await findAt(600);
+  await bar.type("ledger");
+  // Matches at 0, 400, 800 and 1200: the 800 is in the window from 600, so the page stays.
+  expect(bar.count()).toBe("3 of 4");
+  expect(bar.main.scrollTop).toBe(600);
+  // Another word searches from the same line, not from where the last one landed.
+  await bar.type("zebra");
+  expect(bar.count()).toBe("none on this page");
+  await bar.type("ledger");
+  expect(bar.count()).toBe("3 of 4");
+});
+
+test("with the matches only above the reading line the bar goes to the first, and Esc goes back to where it opened (F-458)", async () => {
+  const bar = await findAt(1300);
+  await bar.type("ledger");
+  expect(bar.count()).toBe("1 of 4");
+  expect(bar.main.scrollTop).toBe(0);
+  await bar.key("Escape");
+  expect(target.querySelector(".tf-findbar")).toBeNull();
+  expect(bar.main.scrollTop).toBe(1300);
+});
+
+test("Esc stays on a match stepped to with Enter, which says the reader meant to go there (F-458)", async () => {
+  const bar = await findAt(600);
+  await bar.type("ledger");
+  await bar.key("Enter");
+  expect(bar.count()).toBe("4 of 4");
+  expect(bar.main.scrollTop).toBe(960);
+  await bar.key("Escape");
+  expect(target.querySelector(".tf-findbar")).toBeNull();
+  expect(bar.main.scrollTop).toBe(960);
+});
+
+test("Esc stays where the reader scrolled to with the bar open, and words typed after it search from there (F-458)", async () => {
+  const bar = await findAt(0);
+  await bar.type("ledger");
+  expect(bar.count()).toBe("1 of 4");
+  bar.main.scrollTop = 1000;
+  await bar.type("ledge");
+  expect(bar.count()).toBe("4 of 4");
+  bar.main.scrollTop = 700;
+  await bar.key("Escape");
+  expect(bar.main.scrollTop).toBe(700);
+});
+
 test("⌘F leaves a dialog alone: the dialog owns the keyboard (F-456)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   pageNewPage()!.click();
@@ -1999,7 +2088,7 @@ test("This job is off by default; on, it lists the job's pages by reason and hid
   await settle();
   expect(target.querySelector("select[aria-label='Space']")).toBeNull();
   const groups = [...target.querySelectorAll(".tf-dl-body .tf-dl-for")];
-  expect(groups.map((g) => g.querySelector("h4")?.textContent)).toEqual(["Linked to PAY-231", "Parent PAY-230"]);
+  expect(groups.map((g) => g.querySelector("h4")?.textContent)).toEqual(["Pages on PAY-231", "Parent PAY-230"]);
   expect([...groups[0]!.querySelectorAll("a")].map((a) => [a.getAttribute("href"), a.textContent])).toEqual([
     ["#/page/confluence%3A2", "On-call handbookOperations › Ops home"],
   ]);

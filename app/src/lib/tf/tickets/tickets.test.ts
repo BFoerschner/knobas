@@ -11,7 +11,9 @@ import {
   drawnCards,
   moreLanesLine,
   assigneeName,
+  assigneeOptions,
   firstName,
+  listName,
   initials,
   laneTitle,
   moreLine,
@@ -284,6 +286,36 @@ test("a column's head reads as a state only when it is called after one it holds
   expect(columnHead("Doing", columns)).toBe("Doing");
   expect(columnHead("To Do", [])).toBe("To do");
   expect(columnHead(null, [])).toBe("No status");
+});
+
+test("the List calls someone by the first word of their name, else by their account's first part with a capital (F-107)", () => {
+  expect(listName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara");
+  expect(listName({ assignee: "mara" })).toBe("Mara");
+  expect(listName({ assignee: "jonas.becker" })).toBe("Jonas");
+  expect(listName({ assignee: "lena_h@example.com" })).toBe("Lena");
+  expect(listName({ assignee: null })).toBeNull();
+});
+
+test("*Assignee* offers the source's accounts and the cards' people by the name the column draws (F-161, F-165)", () => {
+  const people = new Map([
+    ["jonas.becker", { name: "Jonas Becker", mine: false }],
+    ["priya", { name: null, mine: false }],
+    ["mara", { name: "Mara Lindqvist", mine: true }],
+  ]);
+  const labels = (accounts: string[], known = people) => assigneeOptions(accounts, known).map((option) => [option.value, option.label]);
+  expect(labels(["@me", "jonas.becker"])).toEqual([
+    ["@me", "Me"],
+    ["jonas.becker", "Jonas"],
+    ["priya", "Priya"],
+  ]);
+  // Your own cards add no row beside *Me*, but an account the source offers stays.
+  expect(labels(["@me", "mara"]).map(([, label]) => label)).toEqual(["Me", "Jonas", "Mara", "Priya"]);
+  // Two people who share a first name: the whole name, or the account where there is none.
+  const twins = new Map([
+    ["jonas.becker", { name: "Jonas Becker", mine: false }],
+    ["jonas.k", { name: null, mine: false }],
+  ]);
+  expect(labels([], twins).map(([, label]) => label)).toEqual(["jonas.k", "Jonas Becker"]);
 });
 
 test("a card calls its assignee by name where the source keeps one, else by account (F-107)", () => {

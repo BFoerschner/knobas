@@ -1084,7 +1084,7 @@
           }}
           onfocus={readEvery}
           onkeydown={goKeys}
-          {@attach filterKeys()}
+          {@attach filterKeys({ aside: true })}
         />
         {#if !going}<kbd>T</kbd>{/if}
       </label>

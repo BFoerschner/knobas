@@ -149,6 +149,37 @@ export function firstName(name: string | null): string | null {
 }
 
 /**
+ * What the List calls someone, in its column and its *Assignee* select (F-107): the first word of the source's name, or with no
+ * name the account's first part with a capital, so `mara` and `Mara Lindqvist` read alike a few rows apart. Drawn, never stored: filters stay on the account.
+ */
+export function listName(card: Pick<MiniBoardCard, "assignee" | "assignee_name">): string | null {
+  if (card.assignee_name) return firstName(card.assignee_name);
+  const part = card.assignee?.split(/[.\s_@-]+/).find(Boolean);
+  return part === undefined ? null : part.charAt(0).toUpperCase() + part.slice(1);
+}
+
+/** Someone the cards read have named or assigned. */
+export interface CardPerson {
+  name: string | null;
+  mine: boolean;
+}
+
+/**
+ * *Assignee*'s options (F-161, F-165): the accounts the source offers and the people on the cards read, each by the name the
+ * column draws, or the whole name where two people share one. You are *Me*, so your own cards add no row of their own.
+ */
+export function assigneeOptions(accounts: readonly string[], people: ReadonlyMap<string, CardPerson>): { value: string; label: string }[] {
+  const offered = [...new Set([...accounts, ...[...people].filter(([, person]) => !person.mine).map(([account]) => account)])].filter((account) => account !== "@me");
+  const short = (account: string) => listName({ assignee: account, assignee_name: people.get(account)?.name ?? null }) ?? account;
+  const taken = new Map<string, number>();
+  for (const account of offered) taken.set(short(account), (taken.get(short(account)) ?? 0) + 1);
+  const named = offered
+    .map((value) => ({ value, label: (taken.get(short(value)) ?? 0) > 1 ? (people.get(value)?.name ?? value) : short(value) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return accounts.includes("@me") ? [{ value: "@me", label: "Me" }, ...named] : named;
+}
+
+/**
  * What the Tickets preview and the ticket page draw of a ticket (spec #2227):
  * a board card's fields, or the same fields read off the ticket's detail
  * ({@link ticketFacts}), so both draw from one component.

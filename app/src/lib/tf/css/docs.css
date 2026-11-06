@@ -46,6 +46,8 @@
 /* What a scroll to a heading or a press of Tab has to clear: the pinned row, and the find bar above it. */
 .tf-rd-main:has(.tf-rd-crumbrow) { scroll-padding-top: 38px; }
 .tf-rd-main:has(.tf-findbar):has(.tf-rd-crumbrow) { scroll-padding-top: 78px; }
+/* The box is pinned inside that padding, so while it holds focus each typed key would scroll the page up 66 px to "reveal" it (F-458). */
+.tf-rd-main:has(.tf-findbar input:focus) { scroll-padding-top: 0; }
 .tf-rd-pages svg { width: 15px; height: 15px; }
 .tf-rd-crumb { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: var(--t-sm); color: var(--ink); min-width: 0; }
 /* The path starts on the title's edge. *Back to* ends where it does on every page. */
@@ -213,6 +215,8 @@
   border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 3px 8px;
   color: var(--ink); min-width: 200px;
 }
+/* About 8 px between the word and the focus ring around the box (F-461). */
+.tf-findbar > span:first-child { margin-right: 6px; }
 .tf-findbar button {
   border: 1px solid var(--rule); background: transparent; border-radius: 3px; cursor: pointer;
   min-width: 26px; height: 26px; color: inherit;

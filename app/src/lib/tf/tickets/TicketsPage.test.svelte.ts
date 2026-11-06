@@ -469,7 +469,7 @@ test("a chip and a dropdown are sent as the grammar's keys", async () => {
   await settle();
   expect(h.reads.at(-1)!.query).toBe("issuetype:Bug");
   const select = target.querySelector<HTMLSelectElement>(".tf-fsel select")!;
-  expect([...select.options].map((o) => o.textContent)).toEqual(["Any", "Me"]);
+  expect([...select.options].map((o) => o.textContent).slice(0, 2)).toEqual(["Any", "Me"]);
   select.value = "@me";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
@@ -500,7 +500,7 @@ test("the list draws the same tickets newest first, the selected row outlined", 
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
 });
 
-test("*Assignee* draws the name the cards give someone, and an account no card names as it is (F-161)", async () => {
+test("*Assignee* draws the name the column draws, and offers the people on the cards it read (F-161, F-165)", async () => {
   const h = harness();
   const asked = h.ports.suggestions;
   h.ports.suggestions = (...args) =>
@@ -510,7 +510,7 @@ test("*Assignee* draws the name the cards give someone, and an account no card n
     }));
   await open(h);
   const select = [...target.querySelectorAll<HTMLSelectElement>(".tf-fsel select")].find((one) => [...one.options].some((option) => option.value === "@me"))!;
-  expect([...select.options].map((one) => one.textContent)).toEqual(["Any", "Me", "Mara Lindqvist", "someone.else"]);
+  expect([...select.options].map((one) => one.textContent)).toEqual(["Any", "Me", "Jonas", "Mara", "Someone"]);
 });
 
 test("the list calls an assignee by first name, with the whole name in its title (F-144)", async () => {
@@ -2026,6 +2026,23 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(selectedKey()).toBe("PAY-0001");
   expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-0001");
   expect(drawn()[0]).toBe("jira:PAY-0001");
+});
+
+test("*Back to All tickets* is a link that does what Esc does (F-153)", async () => {
+  const h = harness();
+  await open(h);
+  scopedTicket.openSubtasks("jira:PAY-1");
+  flushSync();
+  await settle();
+  const link = target.querySelector<HTMLAnchorElement>("a.tf-esc")!;
+  expect(link.textContent).toContain("Back to All tickets");
+  const press = new MouseEvent("click", { bubbles: true, cancelable: true });
+  link.dispatchEvent(press);
+  flushSync();
+  await settle();
+  expect(press.defaultPrevented, "it has no address of its own to go to").toBe(true);
+  expect(scopedTicket.subtasksOf).toBeNull();
+  expect(target.querySelector("h1")!.textContent).toContain("All tickets");
 });
 
 test("the preview's Sub-tasks row narrows the page where it stands, and Esc undoes it, with the bar saying so", async () => {

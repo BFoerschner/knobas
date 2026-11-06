@@ -67,7 +67,7 @@
    */
   function whyOnJob(entityId: string, reason: string, where: string): string {
     return [
-      ...(reason === `Linked to ${job}` ? [] : [reason]),
+      ...(reason === `Pages on ${job}` ? [] : [reason]),
       where,
       ...(entityId === last?.entity_id ? ["read last"] : []),
       ...(forYou.some((item) => item.entity_id === entityId) ? ["mentions you"] : []),

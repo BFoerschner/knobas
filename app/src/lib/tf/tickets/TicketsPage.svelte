@@ -142,7 +142,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { assigneeName, columnHead, columnName, firstName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, columnHead, columnName, LANE_FIELDS, listName, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -379,7 +379,7 @@
   /** What the server read from the typed text, marked on the cards (#1903). */
   const needles = $derived(readNeedles(filter.text));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
-  let assigneeNames = $state.raw<ReadonlyMap<string, string>>(new Map());
+  let cardPeople = $state.raw<ReadonlyMap<string, CardPerson>>(new Map());
 
   /** At most this many chips a group; past it a field has too many values for chips. */
   const CHIPS_AT_MOST = 6;
@@ -388,7 +388,7 @@
     const values = (key: string): FilterOption[] =>
       (suggested?.fields ?? [])
         .filter((field) => field.key === key)
-        .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : (key === "assignee" ? assigneeNames.get(field.value) : undefined) ?? field.value }));
+        .map((field) => ({ value: field.value, label: field.value }));
     return {
       id: filterId,
       placeholder: "Filter tickets",
@@ -400,7 +400,7 @@
         { key: "priority", label: "Priority", options: values("priority").slice(0, CHIPS_AT_MOST) },
       ],
       dropdowns: [
-        { key: "assignee", label: "Assignee", options: values("assignee") },
+        { key: "assignee", label: "Assignee", options: assigneeOptions(values("assignee").map((option) => option.value), cardPeople) },
         {
           key: "under",
           label: "Epic",
@@ -513,10 +513,13 @@
   // ---- what is drawn, and the selection ----
   /** The board's columns as read, before the view's own gather them. */
   const boardColumns = $derived(reader.board?.columns ?? []);
-  // The name the cards give each assignee, so *Assignee* says what the rows say (F-161). Kept as a filter narrows the cards.
+  // Who the cards name, so *Assignee* says what the rows say and offers who they show (F-161). Kept as a filter narrows the cards.
   $effect(() => {
-    const found = reader.bands.flatMap(({ drawn }) => drawn.flatMap((column) => column.cards)).filter((card) => card.assignee_name != null && assigneeNames.get(card.assignee ?? "") !== card.assignee_name);
-    if (found.length > 0) assigneeNames = new Map([...untrack(() => assigneeNames), ...found.map((card): [string, string] => [card.assignee ?? "", card.assignee_name ?? ""])]);
+    const known = untrack(() => cardPeople);
+    const found = reader.bands
+      .flatMap(({ drawn }) => drawn.flatMap((column) => column.cards))
+      .filter((card) => card.assignee != null && (!known.has(card.assignee) || (card.assignee_name != null && known.get(card.assignee)?.name !== card.assignee_name)));
+    if (found.length > 0) cardPeople = new Map([...known, ...found.map((card): [string, CardPerson] => [card.assignee ?? "", { name: card.assignee_name ?? null, mine: card.mine }])]);
   });
   /** The list's rows: every card read, in the header's order; each card says its own status (#1423). */
   const rows = $derived(
@@ -700,7 +703,7 @@
       if ((event.target as Element).closest("a[href]")) railOpen = false;
     }}
   >
-    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" {@attach filterKeys()} /></div>
+    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" {@attach filterKeys({ aside: true })} /></div>
     <div class="tf-vlist">
       <div class="tf-vw-acts">
         <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>New view…</button>
@@ -981,7 +984,7 @@
                   {:else if column === "signals"}
                     <td class="tf-c-signals"><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                   {:else if column === "assignee"}
-                    <td class="tf-c-assignee" title={assigneeName(card) ?? undefined}>{firstName(assigneeName(card)) ?? "Unassigned"}</td>
+                    <td class="tf-c-assignee" title={assigneeName(card) ?? undefined}>{listName(card) ?? "Unassigned"}</td>
                   {:else if column === "updated"}
                     <td class="tf-dim tf-nowrap">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}

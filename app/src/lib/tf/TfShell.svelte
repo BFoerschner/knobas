@@ -86,6 +86,7 @@
   import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
   import { installFocusKeep } from "./focus-keep";
+  import { installFindKey } from "./filter-keys";
   import { installPressGuard } from "./press-guard";
   import { isTopPage, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
@@ -695,6 +696,7 @@
 
   // First, so that a press it swallows reaches nothing else.
   onMount(() => installPressGuard());
+  onMount(() => installFindKey(() => { if (route.view === "full" && route.head === "docs") onsearch(sectionFilter(route)); }));
   onMount(() => installRowRoom());
   onMount(() => installFocusKeep());
   onMount(() => {

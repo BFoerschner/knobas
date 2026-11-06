@@ -1121,6 +1121,18 @@ test("/ in a field is typed; ⌘/ opens search with the section's filter even th
   expect(onsearch.mock.calls).toEqual([["#d "]]);
 });
 
+test("⌘F on Docs' home and a space's page, which draw no box, is Docs' search; on another page with no box it does nothing (F-460)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/docs");
+  press("f", { metaKey: true });
+  await at("#/docs/space/ENG");
+  press("f", { metaKey: true });
+  await at("#/inbox");
+  press("f", { metaKey: true });
+  expect(onsearch.mock.calls).toEqual([["#d "], ["#d "]]);
+});
+
 test("the slash is read by its key, not its code, so a layout that shifts for it still opens search (#2425)", async () => {
   const onsearch = vi.fn();
   start({ onsearch });

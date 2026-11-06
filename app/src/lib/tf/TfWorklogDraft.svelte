@@ -6,8 +6,7 @@
 
   It adds two reads the prototype draws and the draft does not carry:
   `day_blocks` for the intervals and the ticket's title (the draft names its
-  blocks by id), and `list_sources` for the source names ("Goes to Jira",
-  "10:02, Gitea").
+  blocks by id), and `list_sources` for the source name ("Goes to Jira").
 
   **Which buttons depends on what opened it.** After a stop: *Stop, don't log*,
   which drops the draft and not the time (F-140), then *Stop, log later*, *Cancel, keep
@@ -40,7 +39,6 @@
   import {
     dayBlocks as realDayBlocks,
     logWork as realLogWork,
-    type Candidate,
     type DayBlock,
     type Draft,
     type Worklog,
@@ -139,13 +137,6 @@
     return `${head}: ${list}`;
   });
 
-  /** Where a candidate was seen, as the prototype says it. */
-  function seenIn(candidate: Candidate): string {
-    if (candidate.source === "mirror" && candidate.entity_id !== null) return sourceName(candidate.entity_id);
-    if (candidate.source === "note") return "note";
-    return "you wrote";
-  }
-
   /** Leaving without answering: a stop's draft leaves the clock running, any other is dropped. */
   function leave() {
     // A log in flight answers for itself; leaving now would say "unlogged".
@@ -233,7 +224,7 @@
                   onchange={() => form.toggle(candidate.id)}
                 />
                 <span>{candidate.bullet.replace(/^- /, "")}</span>
-                <span class="tf-dim">{clockReading(candidate.at)}, {seenIn(candidate)}</span>
+                <span class="tf-dim">{clockReading(candidate.at)}</span>
               </label>
             {/each}
           </fieldset>
