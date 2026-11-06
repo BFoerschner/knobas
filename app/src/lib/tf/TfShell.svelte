@@ -71,7 +71,7 @@
     type WriteQueue as Queue,
   } from "../shell/write-queue.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
-  import { escStep, escTarget, openerName, windowTitle } from "./escape";
+  import { escHolder, escStep, escTarget, escThrough, openerName, windowTitle } from "./escape";
   import { keptPages as sharedKeptPages, type KeptPagesSetting } from "./kept-pages.svelte";
   import { catchReenterPress, secretPrompt } from "./settings/secret-prompt.svelte";
   import TfSecretPromptHost from "./settings/TfSecretPromptHost.svelte";
@@ -636,6 +636,7 @@
           : {
               filter: field.hasAttribute("data-filter"),
               text: field instanceof HTMLInputElement ? field.value : "",
+              through: escThrough(field),
             },
       route,
       opener: here.opener,
@@ -649,10 +650,10 @@
       field.value = "";
       field.dispatchEvent(new Event("input", { bubbles: true }));
     } else if (step.do === "blur") {
-      // A composer that is always on its page has nothing to close: `Esc` steps out to the composer itself, so the next `Tab` is back in it and focus isn't lost.
-      const composer = field?.closest<HTMLElement>(".tf-compose");
+      // Out to what holds the field, never the body: the next `Tab` is back in it, and the next `Esc` is the page's.
+      const holder = field === null ? null : escHolder(field);
       field?.blur();
-      composer?.focus({ preventScroll: true });
+      holder?.focus({ preventScroll: true });
     }
     else if (step.do === "go") leave(step.hash, step.opened);
   }

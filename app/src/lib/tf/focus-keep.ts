@@ -2,10 +2,12 @@
  * **The focus keeper** (design system, The press rule): a press never drops the reader's place on the body.
  *
  * The shell installs one keeper over the page and the Connections drawer. It notes what holds focus there, and when that goes away or is
- * disabled and focus has nowhere else to be, it hands focus on: the same control in that row, else the same control in
- * the row that took its place (or the one before, at the end of a list), else that row itself, because a second `Enter`
- * must repeat the press or do nothing, and never open whatever that row happens to lead with. `Tab` goes on into the row.
- * With no such row: the same words on the page, else the page's heading.
+ * disabled and focus has nowhere else to be, it hands focus on. While the pressed row is still there: the same words in
+ * that row, else the row itself, never a neighbour and never what happens to stand at the same place, because a second
+ * `Enter` must repeat the press or do nothing (F-646, F-447). Once the row has left: the same words in the row that took
+ * its place (or the one before, at the end of a list), else that row itself. `Tab` goes on into the row.
+ * A control with no row: the same words beside it, else what held it (F-340), never what follows it. With neither left:
+ * the same words on the page, else the page's heading.
  *
  * A move made by key with no place to return to focuses the page's heading (F-052), so the next `Tab` starts on the
  * page and not back at the top bar. So does a dialog or the launcher closed by key with nothing to give focus back to.
@@ -26,6 +28,8 @@ const KEPT = ".tf-main, .tf-drawer";
 const CONTROL = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 /** How long a move by key waits for its page to draw a heading, in ms. */
 const WAIT_FOR_HEADING = 1500;
+/** What a control with no row can hand focus back to stops here: the page has its heading for that. */
+const PAGE = ".tf-main, .tf-kept, body";
 
 const later = (run: () => void): number => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : (setTimeout(run, 16) as unknown as number));
 const stop = (handle: number): void => {
@@ -60,15 +64,23 @@ interface Held {
   control: HTMLElement;
   said: string;
   row: Element | null;
-  /** The control's place among the row's. */
-  nth: number;
   list: Element | null;
   /** The row's place in its list. */
   at: number;
   key: string | null;
-  parent: Element | null;
+  /** What holds it, nearest first, up to the drawer it is in or the page. */
+  above: HTMLElement[];
   /** The drawer it was in: what is left of it takes focus before the page behind it does. */
-  drawer: Element | null;
+  drawer: HTMLElement | null;
+}
+
+function holders(control: HTMLElement): HTMLElement[] {
+  const above: HTMLElement[] = [];
+  for (let at = control.parentElement; at !== null && !at.matches(PAGE); at = at.parentElement) {
+    above.push(at);
+    if (at.matches(".tf-drawer")) break;
+  }
+  return above;
 }
 
 function note(control: HTMLElement): Held {
@@ -78,12 +90,11 @@ function note(control: HTMLElement): Held {
     control,
     said: saidBy(control),
     row,
-    nth: row === null ? 0 : controlsIn(row).indexOf(control),
     list,
     at: row !== null && list !== null ? [...list.children].indexOf(row) : -1,
     key: row === null ? null : rowKey(row),
-    parent: control.parentElement,
-    drawer: control.closest(".tf-drawer"),
+    above: holders(control),
+    drawer: control.closest<HTMLElement>(".tf-drawer"),
   };
 }
 
@@ -94,15 +105,17 @@ function rowAt(list: Element, at: number): Element | null {
   return [...list.children].slice(at).find((child) => rows.includes(child)) ?? rows.at(-1)!;
 }
 
-/** In `row`, the control saying `said`; `nth` when the row is the one it was in and it says something else now; else the row. */
-function inRow(row: Element, held: Held, sameRow: boolean): HTMLElement | null {
-  const controls = controlsIn(row);
-  const same = controls.find((el) => saidBy(el) === held.said);
+/** `el`, ready to take focus without becoming a stop on the way through the page. */
+function ready(el: HTMLElement): HTMLElement {
+  if (!el.hasAttribute("tabindex")) el.tabIndex = -1;
+  return el;
+}
+
+/** In `within`, the control saying what `held` said; else `within` itself. */
+function sameWordsIn(within: Element, held: Held): HTMLElement | null {
+  const same = controlsIn(within).find((el) => saidBy(el) === held.said);
   if (same !== undefined) return same;
-  if (sameRow && controls.length > 0) return controls[Math.min(Math.max(held.nth, 0), controls.length - 1)]!;
-  if (controls.length === 0 || !(row instanceof HTMLElement)) return null;
-  row.tabIndex = -1;
-  return row;
+  return within instanceof HTMLElement ? ready(within) : null;
 }
 
 /** The page shown in `.tf-main`. */
@@ -113,43 +126,32 @@ function shownPage(): Element | null {
 /** The page's heading, ready to take focus. It isn't a stop on the way through the page, so a `Tab` doesn't land on it. */
 function headingOf(page: Element | null): HTMLElement | null {
   const heading = page?.querySelector<HTMLElement>("h1") ?? null;
-  if (heading !== null && !heading.hasAttribute("tabindex")) heading.setAttribute("tabindex", "-1");
-  return heading;
+  return heading === null ? null : ready(heading);
+}
+
+/** The shown page's heading, ready to take focus: where a place with nothing nearer ends. */
+export function pageHeading(): HTMLElement | null {
+  return headingOf(shownPage());
 }
 
 /** Where focus goes now `held` has gone. */
 function nextFor(held: Held): HTMLElement | null {
   if (held.row !== null) {
+    if (held.row.isConnected) return sameWordsIn(held.row, held);
     const list = held.list?.isConnected ? held.list : null;
-    if (held.row.isConnected) {
-      const own = inRow(held.row, held, true);
-      if (own !== null) return own;
-    }
     if (list !== null) {
       // Redrawn: the row that says it is the same one.
       const again = held.key === null ? undefined : [...list.children].find((child) => child.matches(ROW) && rowKey(child) === held.key);
-      if (again !== undefined) {
-        const own = inRow(again, held, true);
-        if (own !== null) return own;
-      }
+      if (again !== undefined) return sameWordsIn(again, held);
       const took = rowAt(list, held.at);
-      if (took !== null) {
-        const own = inRow(took, held, false);
-        if (own !== null) return own;
-      }
+      if (took !== null) return sameWordsIn(took, held);
     }
-  } else if (held.parent?.isConnected) {
-    const near = controlsIn(held.parent);
-    const same = near.find((el) => saidBy(el) === held.said);
-    if (same !== undefined) return same;
-    // Disabled where it stands: what follows it, else what is before it.
-    if (held.control.isConnected) {
-      const after = near.find((el) => held.control.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING);
-      if (after !== undefined) return after;
-      if (near.length > 0) return near.at(-1)!;
-    }
+  } else {
+    // What held it, or the nearest that is left when the whole of it went (*Add 47m*'s group).
+    const near = held.above.find((el) => el.isConnected && el.closest("[hidden]") === null);
+    if (near !== undefined) return sameWordsIn(near, held);
   }
-  if (held.drawer?.isConnected) return controlsIn(held.drawer)[0] ?? null;
+  if (held.drawer?.isConnected) return sameWordsIn(held.drawer, held);
   const page = shownPage();
   // The same words, where only one control says them: a block the page drew anew.
   if (page !== null && held.said !== "") {
@@ -195,6 +197,8 @@ export function installFocusKeep(): () => void {
     const next = gone ? nextFor(held) : held.control;
     held = null;
     next?.focus({ preventScroll: true });
+    // What can't take focus (nothing drawn for it) still doesn't drop the reader's place on the body.
+    if (next !== null && document.activeElement !== next) headingOf(shownPage())?.focus({ preventScroll: true });
   };
   const soon = () => {
     if (checking === null) checking = later(check);

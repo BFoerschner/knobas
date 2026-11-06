@@ -5,8 +5,9 @@
  * 1. a dialog is open           → close the topmost dialog;
  * 2. a drawer is open           → close it;
  * 3. a filter field has text    → clear it, focus stays;
- * 4. another text field has focus → blur it (an empty filter falls through to the rungs below, and blurs only where
- *    they do nothing);
+ * 4. another text field has focus → step out to what holds it, its composer, form or section, never the body (an
+ *    empty filter falls through to the rungs below, and steps out only where they do nothing). So does a field marked
+ *    {@link escThroughUntouched} while the reader hasn't touched it: *Title* on Compare, and only that;
  * 5. an inline panel is open    → close it;
  * 6. a top page                 → nothing;
  * 7. an opener is known         → go to the opener;
@@ -41,12 +42,15 @@
  * itself on those rungs: the asset tree's `←` walks up its columns, and its `Esc`
  * follows the bar like any page's, whatever has focus.
  *
- * Pure: the shell describes what is open and acts on the answer. Every dialog
+ * {@link escStep} is pure: the shell describes what is open and acts on the answer. Every dialog
  * registers on the layer stack (`TfDialog`, the one dialog shell, #1527), so
  * rung 1 sees it even when focus is outside it. `TfDialog` also answers an
  * `Esc` pressed inside it and stops the event, so that press never reaches the
  * shell.
  */
+import type { Attachment } from "svelte/attachments";
+
+import { pageHeading } from "./focus-keep";
 import { segmentKey } from "./job/job";
 import { HEAD_NAME, isTopPage, parentOf, parseTfHash, SECTION_NAME, type TfRoute } from "./route";
 
@@ -55,7 +59,7 @@ export interface EscState {
   /** Open dialogs, drawers and inline panels, oldest first. */
   layers: readonly { kind: "dialog" | "drawer" | "panel" }[];
   /** The focused text field, or `null` when focus is not in one. */
-  field: { filter: boolean; text: string } | null;
+  field: { filter: boolean; text: string; through?: boolean } | null;
   route: TfRoute;
   /** The page the current history entry was opened from, and its name, or `null` (`opener.ts`). */
   opener: EscTarget | null;
@@ -90,7 +94,7 @@ export function escStep(state: EscState): EscStep {
   }
   if (state.field) {
     if (state.field.filter && state.field.text !== "") return { do: "clear-filter" };
-    if (!state.field.filter) return { do: "blur" };
+    if (!state.field.filter && state.field.through !== true) return { do: "blur" };
   }
   const panel = state.layers.map((layer) => layer.kind).lastIndexOf("panel");
   if (panel !== -1) return { do: "close", index: panel };
@@ -98,6 +102,69 @@ export function escStep(state: EscState): EscStep {
   if (target !== null) return { do: "go", hash: target.hash, opened: target.opened };
   // An empty filter on a page `Esc` doesn't leave: out of the box, so the page's keys answer again.
   return state.field ? { do: "blur" } : { do: "nothing" };
+}
+
+/** What marks a field `Esc` passes through. */
+const THROUGH = "data-esc-through";
+
+/** Whether `Esc` in this field is the rungs below it right now. */
+export function escThrough(field: Element): boolean {
+  return field.hasAttribute(THROUGH);
+}
+
+/**
+ * On a field the app itself focused, because the page is for filling it in (Compare's *Title*, F-241): `Esc` leaves in
+ * one press while the reader hasn't touched it (F-255). A `Tab` or a press into it is the reader's own, a key in it or
+ * the blur that takes focus away ends it, and words typed end it for good, so it never leaves with typed words on one press.
+ */
+export const escThroughUntouched: Attachment<HTMLElement> = (field) => {
+  let readers = false;
+  let typed = false;
+  const aim = (event: KeyboardEvent) => {
+    readers = event.key === "Tab";
+  };
+  const pressed = () => {
+    readers = true;
+    field.removeAttribute(THROUGH);
+  };
+  const focused = () => {
+    if (!readers && !typed) field.setAttribute(THROUGH, "");
+    readers = false;
+  };
+  const left = () => field.removeAttribute(THROUGH);
+  const keyed = (event: KeyboardEvent) => {
+    if (event.key !== "Escape") left();
+  };
+  const input = () => {
+    typed = true;
+    left();
+  };
+  window.addEventListener("keydown", aim, true);
+  field.addEventListener("pointerdown", pressed);
+  field.addEventListener("focus", focused);
+  field.addEventListener("blur", left);
+  field.addEventListener("keydown", keyed);
+  field.addEventListener("input", input);
+  return () => {
+    window.removeEventListener("keydown", aim, true);
+    field.removeEventListener("pointerdown", pressed);
+    field.removeEventListener("focus", focused);
+    field.removeEventListener("blur", left);
+    field.removeEventListener("keydown", keyed);
+    field.removeEventListener("input", input);
+    left();
+  };
+};
+
+/**
+ * Where rung 4 ends: the field's composer, else its form or section, ready to take focus, else the page's heading, which
+ * draws no ring. The next `Tab` goes back in, and the next `Esc` is the page's.
+ */
+export function escHolder(field: HTMLElement): HTMLElement | null {
+  const holder = field.closest<HTMLElement>(".tf-compose") ?? field.closest<HTMLElement>("form, section");
+  if (holder === null) return pageHeading() ?? document.querySelector<HTMLElement>(".tf-main");
+  if (!holder.hasAttribute("tabindex")) holder.tabIndex = -1;
+  return holder;
 }
 
 /**

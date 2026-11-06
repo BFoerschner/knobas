@@ -76,7 +76,7 @@ test("a row without the same control takes focus itself, so a second Enter press
   expect(document.activeElement).toBe(next);
 });
 
-test("a control replaced in its row hands focus to what stands at its place there", async () => {
+test("a control replaced in its row hands focus to the row, so a second Enter presses nothing it didn't aim at (F-447, F-340)", async () => {
   const { row } = page();
   const pause = buttonIn(row(0), "Pause");
   pause.focus();
@@ -84,7 +84,105 @@ test("a control replaced in its row hands focus to what stands at its place ther
   resume.textContent = "Resume";
   pause.replaceWith(resume);
   await settle();
-  expect(document.activeElement).toBe(resume);
+  expect(document.activeElement).toBe(row(0));
+  expect(row(0).getAttribute("tabindex")).toBe("-1");
+});
+
+test("a control that goes from a row that stays keeps focus in that row, and never hands it to a neighbour (F-646)", async () => {
+  const { row } = page();
+  const first = row(0);
+  first.innerHTML = `<td>VS Code</td><td><button>Make default</button></td>`;
+  row(1).innerHTML = `<td>Terminal</td><td><button>Make default</button></td>`;
+  first.querySelector("button")!.focus();
+  first.querySelector("button")!.remove();
+  await settle();
+  expect(document.activeElement).toBe(first);
+});
+
+test("a control that goes from a row with a link doesn't land on the link (F-447)", async () => {
+  const { row } = page();
+  const first = row(0);
+  buttonIn(first, "Pause").remove();
+  const hide = buttonIn(first, "Hide");
+  hide.focus();
+  hide.remove();
+  await settle();
+  expect(document.activeElement).toBe(first);
+});
+
+test("a row redrawn under its own key keeps focus, and a neighbour doesn't take it", async () => {
+  const { row } = page();
+  const key = row(0).querySelector("a")!.getAttribute("href")!;
+  buttonIn(row(0), "Hide").focus();
+  const again = row(0).cloneNode(true) as HTMLElement;
+  buttonIn(again, "Hide").remove();
+  row(0).replaceWith(again);
+  await settle();
+  expect(document.activeElement).toBe(again);
+  expect(again.querySelector("a")!.getAttribute("href")).toBe(key);
+});
+
+/** Controls with no row: a bar under the page's heading. */
+function bar(): { bar: HTMLElement; main: HTMLElement } {
+  const main = document.createElement("main");
+  main.className = "tf-main";
+  const kept = document.createElement("div");
+  kept.className = "tf-kept";
+  kept.innerHTML = `<h1>Standup</h1><section><div class="bar"><button>Day after</button><a href="#/x">Open the page</a></div></section>`;
+  main.append(kept);
+  document.body.append(main);
+  return { bar: kept.querySelector<HTMLElement>(".bar")!, main };
+}
+
+test("a control with no row, disabled where it stands, gives focus to what holds it and not to what follows it (F-340)", async () => {
+  const { bar: holder } = bar();
+  const press = holder.querySelector("button")!;
+  press.focus();
+  press.disabled = true;
+  await settle();
+  expect(document.activeElement).toBe(holder);
+  expect(holder.getAttribute("tabindex")).toBe("-1");
+});
+
+test("a control with no row swapped for another with the same words goes to those words", async () => {
+  const { bar: holder } = bar();
+  const press = holder.querySelector("button")!;
+  press.focus();
+  const twin = document.createElement("button");
+  twin.textContent = "Day after";
+  press.replaceWith(twin);
+  await settle();
+  expect(document.activeElement).toBe(twin);
+});
+
+test("a control with no row whose whole group went gives focus to the nearest holder left, not the heading (F-340)", async () => {
+  const { bar: holder } = bar();
+  const section = holder.parentElement!;
+  holder.querySelector("button")!.focus();
+  holder.remove();
+  await settle();
+  expect(document.activeElement).toBe(section);
+});
+
+test("a control with no row and nothing left of what held it falls to the heading", async () => {
+  const { bar: holder, main } = bar();
+  holder.querySelector("button")!.focus();
+  holder.parentElement!.remove();
+  await settle();
+  expect(document.activeElement).toBe(main.querySelector("h1"));
+});
+
+test("in a drawer, what's left of the drawer takes focus, and the × that would close it doesn't", async () => {
+  const main = document.createElement("main");
+  main.className = "tf-main";
+  const drawer = document.createElement("div");
+  drawer.className = "tf-drawer";
+  drawer.innerHTML = `<button>×</button><ul><li><a href="#/a">A</a><button>Unlink</button></li></ul>`;
+  document.body.append(main, drawer);
+  drawer.querySelector<HTMLElement>("li button")!.focus();
+  drawer.querySelector("ul")!.remove();
+  await settle();
+  expect(document.activeElement).toBe(drawer);
 });
 
 test("a control that is disabled hands focus on, and doesn't wait to be enabled", async () => {

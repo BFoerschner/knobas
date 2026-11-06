@@ -39,6 +39,7 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import { escThroughUntouched } from "../escape";
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
@@ -354,7 +355,7 @@
         </select>
         {#if !standing?.pr}
           <label for="tf-cmp-title">Title</label>
-          <input id="tf-cmp-title" type="text" autocomplete="off" bind:this={titleField} bind:value={title} />
+          <input id="tf-cmp-title" type="text" autocomplete="off" bind:this={titleField} bind:value={title} {@attach escThroughUntouched} />
           <label for="tf-cmp-body">Description</label>
           <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
           {#if ticket !== null}

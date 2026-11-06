@@ -36,6 +36,7 @@
 -->
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
+  import { PressHold } from "../press-hold.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { inlineEditor } from "../inline-editor";
   import { clockLabel } from "../../time/format";
@@ -345,6 +346,8 @@
   });
   /** Re-runs whose `submit_write` has not answered: a double click is one press. */
   const queueing = new Set<string>();
+  /** A Re-run answered holds about two seconds more (F-150), as Builds' does: a second press where the hand rests queues nothing. */
+  const rerunHold = new PressHold();
 
   /** *Show in runs*: the failed run's pipeline, where the new run is listed; a run no list holds opens by its own address. */
   async function showInRuns(entry: InboxEntry) {
@@ -358,10 +361,11 @@
   async function rerun(entry: InboxEntry) {
     const entity = entry.item.entity_id;
     const form = ACTION_FORMS["rerun_build"];
-    if (entity === null || !form || form.kind !== "immediate" || queueing.has(entry.item.key)) return;
+    if (entity === null || !form || form.kind !== "immediate" || queueing.has(entry.item.key) || rerunHold.held(entry.item.key)) return;
     queueing.add(entry.item.key);
     try {
       const write = await ports.submitWrite(form.build(entity));
+      rerunHold.hold(entry.item.key);
       // Named for the toast's sign-in sentence; a list that fails still lets the toast say what was queued.
       const sources = await ports.listSources().catch(() => [] as SourceFacts[]);
       const source = sources.find((row) => row.id === entry.item.source_id);

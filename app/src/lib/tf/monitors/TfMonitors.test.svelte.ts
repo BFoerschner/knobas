@@ -5,7 +5,7 @@
  * *Create monitor*'s two writes.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetDetail, AssetEdit, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
@@ -18,6 +18,7 @@ import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
 import { pressRefreshKey, refreshProbe, type RefreshProbe } from "../refresh.fixture";
+import { PRESS_HOLD_MS } from "../press-hold.svelte";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -290,7 +291,36 @@ test("an ack survives leaving the page: a remount over the now-acked alert still
   expect(button(rows()[0]!, "Ack")).toBeUndefined();
 });
 
-test("Undo on the ack's toast takes it back, and so does pressing Acked", async () => {
+test("Acked holds about two seconds, so a second press isn't an un-ack, and Undo and a later press still are (F-351)", async () => {
+  await draw([]);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const run = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      flushSync();
+    };
+    button(rows()[0]!, "Ack")!.click();
+    await run(10);
+    button(rows()[0]!, "Acked")!.click();
+    await run(10);
+    expect(unacks, "the second press lands on the hold").toEqual([]);
+    expect(button(rows()[0]!, "Acked")).toBeDefined();
+    toasts.items.find((t) => t.text.startsWith("Acked"))!.action!.run();
+    await run(10);
+    expect(unacks, "Undo isn't held").toEqual(["kuma:2"]);
+
+    button(rows()[0]!, "Ack")!.click();
+    await run(10);
+    await run(PRESS_HOLD_MS);
+    button(rows()[0]!, "Acked")!.click();
+    await run(10);
+    expect(unacks, "after the hold, a press takes it back").toEqual(["kuma:2", "kuma:2"]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Undo on the ack's toast takes it back", async () => {
   await draw([]);
   const down = rows()[0]!;
   button(down, "Ack")!.click();
@@ -302,13 +332,6 @@ test("Undo on the ack's toast takes it back, and so does pressing Acked", async 
   expect(unacks).toEqual(["kuma:2"]);
   expect(button(rows()[0]!, "Ack")).toBeDefined();
   expect(toasts.items.at(-1)!.text).toContain("is asking again");
-
-  button(rows()[0]!, "Ack")!.click();
-  await settle();
-  button(rows()[0]!, "Acked")!.click();
-  await settle();
-  expect(unacks).toEqual(["kuma:2", "kuma:2"]);
-  expect(button(rows()[0]!, "Acked")).toBeUndefined();
 });
 
 test("Pause and Resume queue the source's op for that monitor", async () => {
@@ -918,12 +941,22 @@ test("an alert that closed under the row says so in words, not as a failure, and
 
 test("taking an ack back takes its toast's Undo with it", async () => {
   await draw([]);
-  button(rows()[0]!, "Ack")!.click();
-  await settle();
-  expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(true);
-  button(rows()[0]!, "Acked")!.click();
-  await settle();
-  expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(false);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const run = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      flushSync();
+    };
+    button(rows()[0]!, "Ack")!.click();
+    await run(10);
+    expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(true);
+    await run(PRESS_HOLD_MS);
+    button(rows()[0]!, "Acked")!.click();
+    await run(10);
+    expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("the page shown again reads the sources again, so a token entered in Settings takes the band away", async () => {

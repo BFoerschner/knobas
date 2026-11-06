@@ -71,6 +71,7 @@
   import type { QueuedWrite, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import type { WriteFollower } from "../../shell/follow-write";
   import { counted } from "../counted";
+  import { PressHold } from "../press-hold.svelte";
   import type { OpenJobPorts } from "../job/open-jobs";
   import type { SourceFacts } from "../job/job";
   import type { DetailRefreshPorts } from "../refresh.svelte";
@@ -594,13 +595,17 @@
 
   // -- the row actions -------------------------------------------------------
 
+  /** *Acked* holds about two seconds after it says so (F-351): a double press is one ack, and *Undo* is there at once. */
+  const ackHold = new PressHold();
+
   async function ack(row: MonitorRow) {
     if (pressing[row.entity_id]) return;
     pressing[row.entity_id] = true;
     try {
       const alert = await ports.ackAlert(row.entity_id);
       acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
-      ackToasts.set(row.entity_id, push({ text: "Acked. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row) } }));
+      ackHold.hold(row.entity_id);
+      ackToasts.set(row.entity_id, push({ text: "Acked. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row, true) } }));
     } catch (error) {
       refusedAck(row, error);
     } finally {
@@ -608,9 +613,9 @@
     }
   }
 
-  /** *Acked* pressed, or *Undo* on the ack's toast: the alert asks again, in the inbox too. */
-  async function unack(row: MonitorRow) {
-    if (pressing[row.entity_id]) return;
+  /** *Acked* pressed, or *Undo* on the ack's toast (`undo`, which no hold stops): the alert asks again, in the inbox too. */
+  async function unack(row: MonitorRow, undo = false) {
+    if (pressing[row.entity_id] || (!undo && ackHold.held(row.entity_id))) return;
     pressing[row.entity_id] = true;
     try {
       await ports.unackAlert(row.entity_id);

@@ -16,6 +16,7 @@ import { dismiss, toasts } from "../../shell/toasts.svelte";
 import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import TfInbox from "./TfInbox.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
+import { PRESS_HOLD_MS } from "../press-hold.svelte";
 
 const NOW = new Date(2026, 7, 22, 15, 0);
 const at = (h: number, m: number, d = 22) => new Date(2026, 7, d, h, m).toISOString();
@@ -253,6 +254,30 @@ test("Re-run queues the source's write and says so", async () => {
   await settle();
   expect(calls).toContain(`write ${JSON.stringify({ RerunBuild: { entity: "tc:Payout#1187" } })}`);
   expect(toasts.items.at(-1)!.text).toBe("Queued: re-run Payout_IntegrationTests #1187.");
+});
+
+test("Re-run holds about two seconds once it answers, so a second press queues nothing, and a later one a new run (F-150)", async () => {
+  await open();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const run = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      flushSync();
+    };
+    const writes = () => calls.filter((call) => call.startsWith("write ")).length;
+    const before = writes();
+    button(rowOf("Payout_Integration"), "Re-run").click();
+    await run(20);
+    button(rowOf("Payout_Integration"), "Re-run").click();
+    await run(20);
+    expect(writes() - before, "the second press lands on the hold").toBe(1);
+    await run(PRESS_HOLD_MS);
+    button(rowOf("Payout_Integration"), "Re-run").click();
+    await run(20);
+    expect(writes() - before).toBe(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("Re-run the source's credential cannot make is drawn disabled saying why, and queues nothing (#2040)", async () => {

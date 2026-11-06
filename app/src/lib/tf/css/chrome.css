@@ -262,6 +262,8 @@
 :is(tr, li, [data-row], [data-entity], .tf-rowhost, .tf-ib, .tf-r, .tf-lk)[tabindex="-1"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* A page's heading takes focus after a move by key (`focus-keep.ts`), to start the next `Tab` there. It can't be pressed, so it draws no ring. */
 .tf-main h1[tabindex="-1"]:focus { outline: none; }
+/* A section `Esc` stepped out to (`escape.ts`): its words run to its edge, so its ring stands clear of them. */
+section[tabindex="-1"]:focus-visible { outline-offset: 6px; }
 
 /* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's
    `.tf-wtabs` (`role="tab"`, `aria-selected`) draw their tabs with this one rule. */
