@@ -786,7 +786,7 @@ test("a typed and a custom property are edited in the pane and the history says 
   expect(text()).toContain("ports: nothing → 5432");
 
   // Now one of the reader's own, of a kind the type never declared.
-  click("Add a property");
+  click("Add a property…");
   type("New property key", "backup window");
   type("New property value", "02:00");
   click("Add");
@@ -1110,7 +1110,7 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
   render("#/asset/asset:postgres", store);
   await waitFor(() => expect(columns()).toHaveLength(3));
 
-  click("Rename");
+  click("Rename…");
   type("Name", "postgres-18");
   click("Save");
 
@@ -1154,11 +1154,11 @@ test("Esc in a property editor cancels the edit and does not walk the selection"
   // The add form's *first* field, not its last: the key box and the kind
   // picker are as much a way out of the form as the value box is, and a
   // handler hung on one field would have left the other two walking.
-  click("Add a property");
+  click("Add a property…");
   const key = field("New property key");
   key.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
   flushSync();
-  expect(text()).toContain("Add a property");
+  expect(text()).toContain("Add a property…");
   expect(location.hash).toBe("#/asset/asset:postgres");
 });
 
@@ -1179,7 +1179,7 @@ test("a custom property is stored as the kind the picker was set to", async () =
   render("#/asset/asset:postgres", store);
   await waitFor(() => expect(text()).toContain("Image postgres:18"));
 
-  click("Add a property");
+  click("Add a property…");
   type("New property key", "metrics port");
   choose("New property kind", "number");
   type("New property value", "9187");
@@ -1194,7 +1194,7 @@ test("a custom property is stored as the kind the picker was set to", async () =
   // And the form comes back on `text` rather than on the kind it was last
   // left in: a reader adding a hostname after a port should not be handed a
   // number box.
-  click("Add a property");
+  click("Add a property…");
   expect((field("New property kind") as HTMLSelectElement).value).toBe("text");
 });
 
@@ -1358,7 +1358,7 @@ test("a certificate expiry is written on a route as a property and cleared again
   await waitFor(() => expect(text()).toContain("Postgres UI"));
 
   click("Edit…");
-  click("Add a property");
+  click("Add a property…");
   type("Property key", "cert_expires");
   choose("Property kind", "date");
   type("Property value", "2026-12-01");
@@ -1491,7 +1491,7 @@ test("Rename takes focus with the name selected, has a Cancel, and is on the lay
   render("#/asset/asset:postgres", estate(seed()));
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
-  click("Rename");
+  click("Rename…");
   flushSync();
   const input = field("Name") as HTMLInputElement;
   expect(document.activeElement).toBe(input);
@@ -1502,7 +1502,7 @@ test("Rename takes focus with the name selected, has a Cancel, and is on the lay
   expect(target.querySelector("input[aria-label='Name']")).toBeNull();
   expect(layers.open).toEqual([]);
 
-  click("Rename");
+  click("Rename…");
   flushSync();
   layers.open[0]!.close();
   flushSync();
@@ -1513,7 +1513,7 @@ test("Add a property takes focus and says what Add waits for", async () => {
   render("#/asset/asset:postgres", estate(seed()));
   await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
 
-  click("Add a property");
+  click("Add a property…");
   flushSync();
   expect(document.activeElement).toBe(field("New property key"));
   expect(text()).toContain("Needs a key and a value.");

@@ -400,7 +400,7 @@
   }
 
   function chipWord(r: RunRow): string {
-    return r.finished === null ? resultWord(r) : stateWord(r.state?.text ?? "");
+    return stateWord(r.finished === null ? resultWord(r) : (r.state?.text ?? ""));
   }
 
   // -- the writes ---------------------------------------------------------------

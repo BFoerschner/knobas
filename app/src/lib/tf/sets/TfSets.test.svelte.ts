@@ -83,6 +83,8 @@ function ports(): SetPorts {
   return {
     linkSets: async () => [STACK, ONCALL],
     linkSetHints: async () => hints,
+    assetTypeNames: async () => ({ vm: "VM" }),
+    monitors: async () => [],
     linkSet: async (id) => {
       if (id !== stored.id) throw { code: "not_found", message: `no link set is called ${id}`, source_id: null };
       return stored;
@@ -342,7 +344,7 @@ test("a member row draws its dot and its line, and a pattern its query and what 
   await draw(["payout-stack"]);
   const assets = target.querySelector("article[aria-label='Assets'] .tf-member")!;
   expect(assets.querySelector(".tf-dot")?.className).toBe("tf-dot tf-err");
-  expect(assets.querySelector(".tf-member-line")?.textContent).toBe("vm, prod");
+  expect(assets.querySelector(".tf-member-line")?.textContent).toBe("VM, prod");
   const page = target.querySelector("article[aria-label='Pages'] .tf-member")!;
   expect(page.querySelector(".tf-dot")).toBeNull();
   expect(page.querySelector(".tf-member-line")?.textContent).toBe("ENG › Payments");

@@ -38,6 +38,7 @@
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
   import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
   import { rangeContext } from "../diff/context";
@@ -373,7 +374,7 @@
       {#if commits.length > 0}
         <div class="tf-rows">
           {#each commits as commit, n (n)}
-            <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}>{commit.title}</span></div>
+            <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}><TfKeyed text={commit.title} /></span></div>
           {/each}
         </div>
       {:else if standing !== null}

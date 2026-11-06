@@ -782,7 +782,7 @@ test("Add a source shows an adapter's roles, hosts and limits before it installs
     ["From", "/releases/knobas-adapter.json"],
     ["Roles", "wasm-fixture:survey-desk, CI"],
     ["Hosts", "It may reach this source's address, api.example.com and the host in its mirror setting, and no other host."],
-    ["Limits", "30 s per call (asked for), 256 MiB of memory (the default)"],
+    ["Limits", "30s per call (asked for), 256 MiB of memory (the default)"],
   ]);
 });
 
@@ -1796,14 +1796,14 @@ test("a source's page opened mid-run draws the walk, and the run's row fills in 
 
   channels[0]!(progress(7, { items: 1240, elapsed_ms: 83_000, walked: 120, of: 300, unit: "repositories" }));
   await settle();
-  expect(runReading()).toBe("120 of 300 repositories · 1,240 items · 83 s");
+  expect(runReading()).toBe("120 of 300 repositories · 1,240 items · 1m 23s");
   const bar = target.querySelector<HTMLProgressElement>(".tf-stg-run progress")!;
   expect([bar.max, bar.value]).toEqual([300, 120]);
 
   // A message without a reading keeps the last one: the writing phase sends none.
   channels[0]!(progress(7, { phase: "writing", items: 1302, elapsed_ms: 91_400 }));
   await settle();
-  expect(runReading()).toBe("120 of 300 repositories · 1,302 items · 91 s");
+  expect(runReading()).toBe("120 of 300 repositories · 1,302 items · 1m 31s");
 
   // The ending: the reading goes, and the runs are read again with the row filled in.
   runs[0] = { ...runs[0]!, finished_at: AGO(0), outcome: "ok", upserted: 1302 };
@@ -1843,7 +1843,7 @@ test("a run that starts while the page is open is watched, and leaving the page 
   expect(watchSync).toHaveBeenCalledTimes(1);
   channels[0]!(progress(8, { items: 3, elapsed_ms: 1_000, walked: 1, of: 4, unit: "projects" }));
   await settle();
-  expect(runReading()).toBe("1 of 4 projects · 3 items · 1 s");
+  expect(runReading()).toBe("1 of 4 projects · 3 items · 1s");
 
   // Leave for the list and come back: the page that left hears nothing more,
   // and the page that came back watches the run again on a channel of its own.
@@ -1858,7 +1858,7 @@ test("a run that starts while the page is open is watched, and leaving the page 
   expect(runReading() ?? "", "the left page's channel still reaches the page").not.toContain("999");
   channels[1]!(progress(8, { items: 5, elapsed_ms: 2_000, walked: 2, of: 4, unit: "projects" }));
   await settle();
-  expect(runReading()).toBe("2 of 4 projects · 5 items · 2 s");
+  expect(runReading()).toBe("2 of 4 projects · 5 items · 2s");
   expect(stops[1]?.aborted).toBe(false);
 });
 

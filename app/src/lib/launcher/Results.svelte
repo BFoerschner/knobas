@@ -11,6 +11,7 @@
   import type { SearchResponse } from "../ipc";
   import { clockLabel } from "../time/format";
   import Row from "./Row.svelte";
+  import { stateWord } from "../tf/state-word";
   import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
   import { holdsAnswer, ticketsFirst, type LauncherRow } from "./rows";
@@ -123,7 +124,7 @@
       <Row
         monogram={group.monogram}
         tone={hit.state?.tone ?? null}
-        kindName={hit.state ? `${group.label}: ${hit.state.text}` : group.label}
+        kindName={hit.state ? `${group.label}: ${stateWord(hit.state.text)}` : group.label}
         cell={cells.cell}
         mono={cells.mono}
         title={cells.title}

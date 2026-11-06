@@ -26,6 +26,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import TfKey from "../TfKey.svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
@@ -364,7 +365,7 @@
     {/if}
   {/snippet}
   {#snippet footer()}
-    <span class="tf-runsum">{summary}</span>
+    <span class="tf-runsum">On <TfKey value={shownBranch} />{summary.slice(`On ${shownBranch}`.length)}</span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" onclick={run}>Run</button>
   {/snippet}

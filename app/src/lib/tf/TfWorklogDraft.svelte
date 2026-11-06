@@ -26,6 +26,7 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import TfKey from "./TfKey.svelte";
 
   import { listSources as realListSources, type SourceSummary } from "../ipc/sources";
   import {
@@ -239,7 +240,7 @@
         <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Cancel</button>
       {/if}
       <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
-        Log {form.reading} to {form.key}
+        Log {form.reading} to <TfKey value={form.key} />
       </button>
   {/snippet}
 </TfDialog>

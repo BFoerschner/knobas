@@ -223,7 +223,7 @@ test("a snoozed row says when it comes back in the words a credential's sentence
 
 test("a credential row says its fix once the sources are read, and opens the prompt", () => {
   const row = item({ category: "failed_sign_in", source_id: "kuma", entity_id: null, kind: null });
-  expect(opener(row, () => "Enter token")).toEqual({ label: "Enter token", href: "#/settings/source/kuma/reenter" });
+  expect(opener(row, () => "Enter token")).toEqual({ label: "Enter token…", href: "#/settings/source/kuma/reenter" });
   expect(opener(row, () => null)).toEqual({ label: "Source settings", href: "#/settings/source/kuma" });
 });
 

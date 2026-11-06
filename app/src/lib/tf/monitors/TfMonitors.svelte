@@ -3,8 +3,8 @@
   one page with two tabs as prototype-6's `renderMonitors(tab)`.
 
   - **Monitors**: the filter bar (text over monitor, asset and type; *This
-    job / My jobs / All*; *Down / Warning / Up / Paused*; *Type*), then the
-    roster sorted down, warning, paused, up. Each row: the monitor and its
+    job / My jobs / All*; *Down / Slow / Up / Paused / Pending / Maintenance*; *Type*), then the
+    roster sorted down, slow, paused, up. Each row: the monitor and its
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
     *Ack* on a down monitor, *Pause* or *Resume* where the source offers

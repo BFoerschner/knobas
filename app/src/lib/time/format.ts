@@ -30,10 +30,16 @@ export function minutesLabel(minutes: number): string {
   return rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }
 
-/** A length given in **seconds**, as a run's: `38 s`, `4 m 12 s`. */
+/**
+ * A length given in **seconds**, as a run's: `38s`, `4m 12s`, `4m`, and from an hour {@link minutesLabel}'s `1h 2m`, where
+ * the seconds stop mattering. One spelling with the timesheet's, so a run and a worklog read alike (design system, Words).
+ */
 export function secondsLabel(seconds: number): string {
-  if (seconds < 60) return `${seconds} s`;
-  return `${Math.floor(seconds / 60)} m ${String(seconds % 60).padStart(2, "0")} s`;
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes >= 60) return minutesLabel(minutes);
+  const rest = seconds % 60;
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");

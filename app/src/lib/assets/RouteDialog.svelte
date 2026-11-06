@@ -435,7 +435,7 @@
           class="tf-btn tf-sm"
           onclick={() => properties.push({ key: "", kind: "text", value: "" })}
         >
-          Add a property
+          Add a property…
         </button>
       </div>
 

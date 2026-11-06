@@ -18,6 +18,7 @@ import { matchesAll } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
 import { echoWrite, type Echo } from "../queued.svelte";
 import { reenterWords, secretNoun } from "../settings/settings";
+import { stateWord } from "../state-word";
 import { pipelineHash, runTone, shortTime } from "./builds";
 
 /**
@@ -261,10 +262,10 @@ export function resultWord(run: RunRow): string {
   return run.state?.text ?? "finished";
 }
 
-/** A bar's tip: *#1187 FAILURE, main · 4 m 12 s, today 10:05*. */
+/** A bar's tip: *#1187 Failed, main · 4m 12s, today 10:05*. */
 export function barTip(run: RunRow, now: Date = new Date()): string {
-  const head = `${run.number !== null ? `#${run.number}` : "queued"} ${resultWord(run)}${run.branch ? `, ${run.branch}` : ""}`;
-  const took = run.duration_seconds !== null ? secondsLabel(run.duration_seconds) : resultWord(run);
+  const head = `${run.number !== null ? `#${run.number}` : "queued"} ${stateWord(resultWord(run))}${run.branch ? `, ${run.branch}` : ""}`;
+  const took = run.duration_seconds !== null ? secondsLabel(run.duration_seconds) : stateWord(resultWord(run));
   const at = run.started ?? run.updated_at;
   return `${head} · ${took}${at ? `, ${shortTime(at, now)}` : ""}`;
 }
@@ -461,7 +462,7 @@ export function staleLine(
     const lead = since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
     return {
       text: `${lead} Runs you start wait in the queue until it works again.`,
-      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}`, words: reenterWords(source.auth_kind), secret },
+      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}/reenter`, words: `${reenterWords(source.auth_kind)}…`, secret },
     };
   }
   if (run && !run.running && (run.last_outcome === "unreachable" || run.last_outcome === "error")) {

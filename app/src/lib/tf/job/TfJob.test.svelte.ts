@@ -478,11 +478,11 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   const picker = calls.list.filter((filter) => filter.reach === null && filter.kinds.join() === "repo");
   expect(picker.map((filter) => filter.role)).toEqual(["code-host"]);
   expect(steps()).toEqual([
-    ["Create branch", "ready"],
-    ["Open pull request", "ready"],
-    ["Link PR to ticket", "ready"],
-    ["Move ticket", "ready"],
-    ["Start timer", "ready"],
+    ["Create branch", "Ready"],
+    ["Open pull request", "Ready"],
+    ["Link PR to ticket", "Ready"],
+    ["Move ticket", "Ready"],
+    ["Start timer", "Ready"],
   ]);
   const select = target.querySelector<HTMLSelectElement>(".tf-step select[aria-label='Repository']")!;
   expect([...select.options].map((option) => option.textContent)).toEqual(["tidewater/payout-service (suggested)", "tidewater/ledger"]);
@@ -490,7 +490,7 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   // A step nothing has sent yet is the reader's to edit (#1707).
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")?.disabled).toBe(false);
   expect(select.disabled).toBe(false);
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To Do to In Progress");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To do → In progress");
   const stepper = target.querySelector(".tf-tkread .tf-steps")!;
   expect(stepper.compareDocumentPosition(target.querySelector(".tf-tkdesc")!) & Node.DOCUMENT_POSITION_FOLLOWING, "the steps sit above the description").toBeTruthy();
 });
@@ -526,7 +526,7 @@ test("each step's state follows the flow as its writes move through the queue, a
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
   await settle();
   expect(acted).toEqual(["run"]);
-  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "queued", "ready", "ready"]);
+  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["Done", "Queued", "Ready", "Ready"]);
   const queued = target.querySelector(".tf-step[data-step='pr']")!;
   // A queued step's write is still open: it is amended in the write queue,
   // not here (#1707). A step that landed is not edited either.
@@ -541,7 +541,7 @@ test("each step's state follows the flow as its writes move through the queue, a
   [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Skip")!.click();
   await settle();
   expect(acted).toEqual(["run", "retry 2", "skip 2"]);
-  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "skipped", "done", "done"]);
+  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["Done", "Skipped", "Done", "Done"]);
   // A step that already landed offers neither.
   const done = target.querySelector(".tf-step[data-step='branch']")!;
   expect([...done.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
@@ -568,7 +568,7 @@ test("a failed step keeps Retry, which runs it again (#1998)", async () => {
   });
   await settle();
   const failed = target.querySelector(".tf-step[data-step='pr']")!;
-  expect(failed.querySelector(".tf-state")?.textContent).toBe("failed");
+  expect(failed.querySelector(".tf-state")?.textContent).toBe("Failed");
   expect([...failed.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry", "Skip"]);
   [...failed.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
   await settle();
@@ -598,7 +598,7 @@ test("Check again on a queued step whose write was discarded redraws it failed, 
   const row = target.querySelector(".tf-step[data-step='pr']")!;
   [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Check again")!.click();
   await settle();
-  expect(row.querySelector(".tf-state")?.textContent).toBe("failed");
+  expect(row.querySelector(".tf-state")?.textContent).toBe("Failed");
   expect([...row.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry", "Skip"]);
   expect(row.querySelector(".tf-swdetail")?.textContent).toBe("the write was discarded before it went");
 });
@@ -679,7 +679,7 @@ test("Start work's move the source's credential cannot make is drawn saying why,
   expect(ran).toEqual(["skip 4"]);
   // Skipped, the row still says why: the reader did not choose the skip.
   const skipped = target.querySelector(".tf-step[data-step='status']")!;
-  expect(skipped.querySelector(".tf-state")!.textContent).toBe("skipped");
+  expect(skipped.querySelector(".tf-state")!.textContent).toBe("Skipped");
   expect(skipped.textContent).toContain(reason);
 });
 

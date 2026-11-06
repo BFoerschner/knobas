@@ -16,6 +16,7 @@
   import type { RendererDefaults } from "../../render/defaults.svelte";
   import type { CommandSteps, NamedPipelines } from "../../render/pipelines.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { secondsLabel } from "../../time/format";
   import { putBack, removalToast } from "./removed";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
 
@@ -144,9 +145,9 @@
           <tr>
             <td><b>{s.name}</b></td>
             <td class="tf-small"><span class="tf-mono">{s.command}</span></td>
-            <td class="tf-small">{s.timeout_secs} s</td>
+            <td class="tf-small">{secondsLabel(s.timeout_secs)}</td>
             <td class="tf-right">
-              <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {s.name}" onclick={() => editStep(at)}>Edit</button>
+              <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {s.name}…" onclick={() => editStep(at)}>Edit…</button>
               <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {s.name}" onclick={() => void removeStep(at)}
                 >Remove</button
               >
@@ -201,7 +202,7 @@
             <td class="tf-small">{p.steps.map((s) => stepName(s, stepCommands.list)).join(" → ")}</td>
             <td class="tf-small tf-mono">{usedBy(p.id).join(" ")}</td>
             <td class="tf-right">
-              <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {p.name}" onclick={() => editPipe(at)}>Edit</button>
+              <button class="tf-btn tf-sm tf-ghost" aria-label="Edit {p.name}…" onclick={() => editPipe(at)}>Edit…</button>
               <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {p.name}" onclick={() => void removePipe(at)}
                 >Remove</button
               >

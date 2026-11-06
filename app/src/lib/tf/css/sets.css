@@ -4,7 +4,7 @@
 .tf-sets .tf-tbl .tf-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-sets-tbl td { vertical-align: top; }
 /* A row's title is the name you scan the list by (Type). The row opens it, so it has no underline until pointed at (Layout). */
-.tf-cbody .tf-sets-tbl a.tf-set-name { font-weight: 500; }
+.tf-cbody .tf-sets-tbl a.tf-set-name { font-size: var(--t-md); font-weight: 500; }
 /* One rule a line, and air between rules rather than an indent: a hanging line read as a second item. */
 .tf-sets-rule { display: block; }
 .tf-sets-rule + .tf-sets-rule { margin-top: 4px; }

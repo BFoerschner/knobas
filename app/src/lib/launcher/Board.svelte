@@ -11,6 +11,7 @@
   import type { LauncherHome } from "../ipc";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { kindRegistry } from "../shell/kind-registry.svelte";
+  import { stateWord } from "../tf/state-word";
   import { cellsOf } from "./cells";
   import Row from "./Row.svelte";
   import type { LauncherRow } from "./rows";
@@ -51,7 +52,7 @@
     <Row
       monogram={kindMonogram(item.kind, info)}
       tone={item.state?.tone ?? null}
-      kindName={item.state ? `${word}: ${item.state.text}` : word}
+      kindName={item.state ? `${word}: ${stateWord(item.state.text)}` : word}
       cell={cells.cell}
       mono={cells.mono}
       title={cells.title}

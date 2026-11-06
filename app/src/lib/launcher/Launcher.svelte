@@ -1019,7 +1019,7 @@
       control and the write agree about when there is a query.
     -->
     <button class="tf-btn tf-sm tf-ln-save" onclick={startNaming} disabled={session.savedId !== null}>
-      {session.savedId === null ? "Save as list" : "Saved as list"}
+      {session.savedId === null ? "Save as list…" : "Saved as list"}
     </button>
   {/if}
 {/snippet}

@@ -8,6 +8,7 @@ import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ip
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 import { keyOf } from "../../time/format";
 import { entityAddress } from "../address";
+import { stateWord } from "../state-word";
 import type { SectionTally } from "../job/sections";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
@@ -37,7 +38,17 @@ export function isDone(status: string | null): boolean {
  * name; a ticket's status is its card's (#1423).
  */
 export function columnName(status: string | null): string {
-  return sentenceCase(status) ?? "No status";
+  return status === null || status === "" ? "No status" : stateWord(status);
+}
+
+/**
+ * A column's head. A view's column called after a status it holds reads as that status does; one named anything else keeps
+ * the words it was given, by the reader or by a board in the source, because `stateWord` takes states and *Waiting on Björn*
+ * is a name.
+ */
+export function columnHead(name: string | null, columns: readonly { name: string; statuses: readonly (string | null)[] }[]): string {
+  const own = columns.find((column) => column.name === name);
+  return name !== null && name !== "" && own !== undefined && !own.statuses.includes(name) ? name : columnName(name);
 }
 
 /**
@@ -51,7 +62,8 @@ export function shortKey(key: string): string {
 
 /**
  * A source's word as a label: Gitea says *closed* and *high* where Jira says *Done* and *High*, and the shell's
- * labels are sentence case. Only the first letter moves, so *In Progress* stays as its source wrote it.
+ * labels are sentence case. Only the first letter moves, for a word that is not a state, such as a priority: a status goes
+ * through {@link columnName}, and so `stateWord`.
  */
 export function sentenceCase<Word extends string | null>(word: Word): Word | string {
   return word === null || word === "" ? word : word[0]!.toLocaleUpperCase() + word.slice(1);
@@ -183,7 +195,7 @@ export function previewAction(
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",
-      note: "Creates a branch and PR, moves it to In Progress, starts the timer. You review each step.",
+      note: "Creates a branch and PR, moves it to In progress, starts the timer. You review each step.",
       chooses: true,
     };
   }

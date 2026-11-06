@@ -31,6 +31,9 @@
 -->
 <script lang="ts" module>
   import { SvelteMap } from "svelte/reactivity";
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import { stateWord } from "../state-word";
   import { replaceAddress } from "../opener";
 
   import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
@@ -320,7 +323,7 @@
   let railOpen = $state(false);
 
   function stateText(run: RunRow): string {
-    return run.state?.text ?? "";
+    return stateWord(run.state?.text ?? "");
   }
 </script>
 
@@ -354,7 +357,7 @@
     >
       {#each strip as run (run.entity_id)}<i class={`tf-run-${runTone(run)}`}></i>{/each}
     </span>
-    {#if why !== ""}<span class="tf-pi-why">{why}</span>{/if}
+    {#if why !== ""}<span class="tf-pi-why"><TfKeyed text={why} /></span>{/if}
   </a>
 {/snippet}
 
@@ -415,7 +418,7 @@
         <div class="tf-pl-pin">
           <a class="tf-pi" href={pipelineHash(outside.entity_id)} aria-current="true" title={outside.name}>
             <span class="tf-pi-nm" class:tf-bad={isFailing(outside)}>{outside.name}</span>
-            <span class="tf-pi-why">{scope === "job" && !jobsOwn.some((p) => p.entity_id === outside.entity_id) ? `Not in ${job}` : "Hidden by the filter"}</span>
+            <span class="tf-pi-why">{#if scope === "job" && !jobsOwn.some((p) => p.entity_id === outside.entity_id)}Not in <TfKey value={job ?? ""} />{:else}Hidden by the filter{/if}</span>
           </a>
         </div>
       {/if}

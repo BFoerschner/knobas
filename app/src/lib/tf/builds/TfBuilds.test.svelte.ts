@@ -140,7 +140,7 @@ test("a bare #/builds selects the first failing pipeline and lists its runs newe
   const first = target.querySelector(".tf-runs tbody tr");
   expect(first?.textContent).toContain("#1187");
   expect(first?.textContent).toContain("Failed");
-  expect(first?.textContent).toContain("4 m 12 s");
+  expect(first?.textContent).toContain("4m 12s");
   expect(target.querySelectorAll(".tf-runs tbody tr")).toHaveLength(14);
 });
 

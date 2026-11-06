@@ -104,8 +104,7 @@
 .tf-status button, .tf-status a {
   border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
 }
-.tf-status a.tf-sources { font-weight: 600; text-decoration: none; }
-.tf-status a.tf-sources:hover { text-decoration: underline; }
+.tf-status a.tf-sources { font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .tf-status .tf-queue { margin-left: auto; }
 /* Queued is the info tone; a write that needs the reader is warn (#1409). */
 .tf-status button.tf-queued { color: var(--info); font-weight: 600; }
@@ -298,6 +297,8 @@
    chip's size and weight, so a key on a chip does not shrink a step under its neighbours. */
 .tf .tf-key { font-weight: 400; }
 .tf .tf-key-lead { font-weight: 600; }
+/* A key in a button is part of its label, so it takes the label's weight. */
+.tf .tf-btn .tf-key { font-weight: inherit; }
 .tf .tf-chip.tf-key { font-size: var(--t-xs); font-weight: 600; }
 .tf-chip.tf-ok { background: var(--ok-bg); color: var(--ok); } .tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); }
 .tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }

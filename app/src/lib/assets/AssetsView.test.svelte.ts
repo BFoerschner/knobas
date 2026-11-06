@@ -781,7 +781,7 @@ test("an inherited value names the ancestor it came from and links to it", async
   expect(pane).toContain("Owner Björn inherited from hel1");
   // Health is the worst of this asset and everything under it. Here they are
   // the same, so the pane does not repeat the own status.
-  expect(pane).toContain("Health warn");
+  expect(pane).toContain("Health Warning");
   expect(pane).not.toContain("own status");
 
   const note = [
@@ -814,7 +814,7 @@ test("a value set on the asset itself says so and offers no link", async () => {
   expect(target.querySelectorAll("aside.pane button.src")).toHaveLength(0);
   // The site is rated by nobody and still reads `warn`, because the container
   // two levels down is — that is the rollup, in the pane.
-  expect(text()).toContain("Health warn own status none");
+  expect(text()).toContain("Health Warning own status none");
 });
 
 /**

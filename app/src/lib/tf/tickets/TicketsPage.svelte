@@ -140,7 +140,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { columnHead, columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -828,7 +828,7 @@
       {#each reader.bands as { lane, drawn } (lane.key ?? "")}
         <div class="tf-lane" class:tf-laned={reader.laned}>
           {#if lane.key !== null}
-            <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
+            <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
             {#each drawn as { column, cards, done } (columnKey(column))}
@@ -836,7 +836,7 @@
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               <div class="tf-col">
                 <h3>
-                  {columnName(column.status)}
+                  {columnHead(column.status, view?.columns ?? [])}
                   <span
                     class="tf-count"
                     class:tf-err={limit !== null && column.total > limit}

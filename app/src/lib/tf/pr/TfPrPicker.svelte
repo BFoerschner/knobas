@@ -10,6 +10,7 @@
 -->
 <script lang="ts">
   import type { DiffRange } from "../../ipc/entity";
+  import TfKeyed from "../TfKeyed.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { diffHash, picked, selectRange } from "../diff/address";
   import { commitsSince, pickedEnds, sinceOffered, type PrPick } from "../diff/pick";
@@ -92,7 +93,7 @@
           <button type="button" role="menuitemcheckbox" aria-checked={on} class="tf-pick-c" class:tf-on={on} onclick={(event) => pickCommit(at, event.shiftKey)}>
             <span class="tf-pick-box" aria-hidden="true">{on ? "✓" : ""}</span>
             <span class="tf-mono">{commit.sha.slice(0, 7)}</span>
-            <span class="tf-pick-title" title={commit.title}>{commit.title}</span>
+            <span class="tf-pick-title" title={commit.title}><TfKeyed text={commit.title} /></span>
             {#if commit.meta}<span class="tf-pick-kb">{commit.meta}</span>{/if}
           </button>
         {/each}

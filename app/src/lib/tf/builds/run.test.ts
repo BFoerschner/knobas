@@ -77,9 +77,9 @@ test("the previous run on the branch is the next older finished one on the same 
 });
 
 test("took says the duration and the difference to the previous run on the branch", () => {
-  expect(tookLine(RUNS[1]!, RUNS[3]!)).toBe("4 m 12 s, −16 s against #1185");
-  expect(tookLine(RUNS[3]!, RUNS[4]!)).toBe("4 m 28 s, +28 s against #1184");
-  expect(tookLine(RUNS[4]!, null)).toBe("4 m 00 s");
+  expect(tookLine(RUNS[1]!, RUNS[3]!)).toBe("4m 12s, −16s against #1185");
+  expect(tookLine(RUNS[3]!, RUNS[4]!)).toBe("4m 28s, +28s against #1184");
+  expect(tookLine(RUNS[4]!, null)).toBe("4m");
   expect(tookLine(RUNS[0]!, null)).toBe("still running");
   expect(tookLine(run(1189, null, "main", { started: null }), null)).toBe("not started");
 });

@@ -52,7 +52,7 @@
     type ConditionField,
     type EditColumn,
   } from "./editor";
-  import { columnName, LANE_FIELDS, sentenceCase, splitLanes } from "./tickets";
+  import { columnHead, columnName, LANE_FIELDS, splitLanes } from "./tickets";
   import { counted } from "../counted";
   import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
@@ -133,6 +133,8 @@
   const saveLabel = $derived(editing ? "Save view" : "Create view");
   /** Fixed for the dialog's life: a saved view stays one. */
   const fixedSource = untrack(() => savedViewSource);
+  /** A preview column's head, as the board will draw it. */
+  const headOf = (name: string) => (statuses.includes(name) ? columnName(name) : columnHead(name, columns ?? []));
   /** The saved view's query and sub-query, each only when it has one (#2050). */
   const fixedQueries = fixedSource === null ? [] : savedViewQueries(fixedSource);
   const title = $derived(fixedSource ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
@@ -241,7 +243,7 @@
   }
   const loose = $derived(looseStatuses(columns ?? [], statuses));
   const looseLine = $derived(
-    `${loose.join(", ")} ${loose.length > 1 ? "are" : "is"} on no column, so those tickets do not show on the board.`,
+    `${loose.map(columnName).join(", ")} ${loose.length > 1 ? "are" : "is"} on no column, so those tickets do not show on the board.`,
   );
 
   const CARD_FIELDS: [CardField, string][] = [
@@ -523,7 +525,7 @@
                           class="tf-vw-val"
                           aria-pressed={column.statuses.includes(status)}
                           disabled={fixedSource !== null}
-                          onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{sentenceCase(status)}</button
+                          onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{columnName(status)}</button
                         >
                       {/each}
                     </div>
@@ -637,7 +639,7 @@
               {#each shown.columns as column, at (at)}
                 <div class="tf-vw-mcol" class:tf-vw-over={column.over}>
                   <div class="tf-vw-mh">
-                    <span title={column.name || undefined}>{column.name || "Unnamed"}</span><b
+                    <span title={column.name ? headOf(column.name) : undefined}>{column.name ? headOf(column.name) : "Unnamed"}</span><b
                       >{column.total}{#if column.limit !== null}{" "}of {column.limit}{/if}</b
                     >
                   </div>

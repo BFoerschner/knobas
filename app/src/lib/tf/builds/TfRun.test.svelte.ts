@@ -323,7 +323,7 @@ test("the header names the pipeline and number with the result, then branch, who
   expect(h1.textContent).toContain("Payout_IntegrationTests #1187");
   expect(h1.querySelector(".tf-chip.tf-err")?.textContent).toBe("Failed");
   const sub = target.querySelector(".tf-bhead .tf-sub")!.textContent!;
-  expect(sub).toMatch(/^feature\/PAY-231-sepa-retry, started by VCS change a41f2c, .+, took 4 m 12 s$/);
+  expect(sub).toMatch(/^feature\/PAY-231-sepa-retry, started by VCS change a41f2c, .+, took 4m 12s$/);
   expect(button("Re-run")).toBeDefined();
   expect(button("Run again with changes…")).toBeDefined();
   expect(button("Stop")).toBeUndefined();
@@ -464,7 +464,7 @@ test("the Run panel lists branch, commit, who started it, agent, start and took 
   expect(facts["Commit"]).toBe("a41f2c");
   expect(facts["Started by"]).toBe("VCS change a41f2c");
   expect(facts["Agent"]).toBe("linux-agent-03");
-  expect(facts["Took"]).toBe("4 m 12 s, −16 s against #1185");
+  expect(facts["Took"]).toBe("4m 12s, −16s against #1185");
   expect(panel.querySelector("dd a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Apayout-service/commits/gitea%3Acommit%3Aa41f2c");
 });
 
@@ -620,12 +620,12 @@ test("under the header, the steps bar draws one segment per step of the run's lo
   const drawn = segments();
   expect(drawn.map((a) => a.querySelector("text")?.textContent)).toEqual(["Checkout", "cargo build --tests", "cargo test --test sepa_retry"]);
   expect(drawn.map((a) => a.querySelector("title")?.textContent)).toEqual([
-    "Checkout, 12 s",
-    "cargo build --tests, 2 m 10 s",
-    "cargo test --test sepa_retry, 1 m 22 s",
+    "Checkout, 12s",
+    "cargo build --tests, 2m 10s",
+    "cargo test --test sepa_retry, 1m 22s",
   ]);
   expect(drawn.map((a) => a.querySelector("rect")?.getAttribute("class"))).toEqual(["tf-sbseg tf-ok", "tf-sbseg tf-ok", "tf-sbseg tf-err"]);
-  // Width by duration: 130 s of 224 s.
+  // Width by duration: 130s of 224s.
   expect(parseFloat(drawn[1]!.querySelector("svg")!.getAttribute("width")!)).toBeCloseTo(58.04, 1);
   expect(drawn.every((a) => a.getAttribute("href") === `#/build/${encodeURIComponent(PIPE)}/${encodeURIComponent("teamcity:build:1187")}/log`)).toBe(true);
 });
@@ -747,7 +747,7 @@ test("a sync of the run's source finishing reads the run again: a running run dr
   expect(drawn.reads).toBe(2);
   expect(views, "the view again, and its failed test now that it finished").toEqual(["", "", "tests"]);
   expect(target.querySelector("h1 .tf-chip")?.textContent).toBe("Passed");
-  expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5 m");
+  expect(target.querySelector(".tf-bhead .tf-sub")!.textContent).toContain("took 5m");
   expect(button("Stop")).toBeUndefined();
   expect(button("Re-run")).toBeDefined();
   expect(target.querySelector(".tf-callout.tf-info")).toBeNull();
@@ -815,7 +815,7 @@ test("Re-run leaves the run queued on its pipeline, from the newest run held, an
   button("Re-run")!.click();
   await settle();
   expect(echoesOn(PIPE, QUEUED_RUN)).toMatchObject([{ write: 9, kind: QUEUED_RUN, text: FEATURE, base: "teamcity:build:1188", state: "queued" }]);
-  expect(target.textContent).not.toContain("queued");
+  expect(target.textContent).not.toMatch(/queued/i);
 });
 
 test("Run in Run again with changes… leaves the run queued on its pipeline too, the default branch as none", async () => {

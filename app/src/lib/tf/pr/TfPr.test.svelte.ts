@@ -891,7 +891,7 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
   ]);
   expect(text(".tf-dialog .tf-ck")).toBe("Delete feature/PAY-231-sepa-retry after merging");
   expect(dialog.querySelector<HTMLInputElement>(".tf-ck input")!.checked).toBe(true);
-  expect(text(".tf-dialog .tf-prm-note")).toBe("After the merge, PAY-231 moves to In Review.");
+  expect(text(".tf-dialog .tf-prm-note")).toBe("After the merge, PAY-231 moves to In review.");
   // The message shows only under Squash, prefilled as the source writes it.
   expect(dialog.querySelector("input[aria-label='Squash commit message']")).toBeNull();
   dialog.querySelector<HTMLInputElement>("input[value=squash]")!.click();

@@ -136,7 +136,7 @@ test("a renderer that draws diffs says so in its form, and an edit keeps it (#22
   expect(sent.at(-1)?.[0]?.diff).toBe(true);
   expect(renderersFor({ path: "a.page", binary: false })[0]?.diff).toBe(true);
 
-  button("Edit").click();
+  button("Edit…").click();
   flushSync();
   expect(box().checked).toBe(true);
   button("Save").click();

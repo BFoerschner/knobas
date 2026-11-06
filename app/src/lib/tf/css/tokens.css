@@ -75,6 +75,8 @@ body { font: var(--t-sm)/1.45 var(--sans); -webkit-font-smoothing: antialiased; 
 button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; letter-spacing: inherit; word-spacing: inherit; }
 /* No word alone on a last line, where the engine can avoid it. */
 .tf p, .tf small, .tf .tf-sub { text-wrap: pretty; }
+/* A browser's `small` is a fifth off whatever holds it, which lands between steps (11.67, 12.5). */
+.tf small { font-size: var(--t-xs); }
 button { cursor: pointer; }
 a { color: var(--info); text-decoration: none; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }

@@ -132,9 +132,9 @@
           <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
           {#if editable && said}
             {#if said.refusal === null}
-              <button type="button" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section</button>
+              <button type="button" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section…</button>
             {:else}
-              <button type="button" disabled title={refusalReason(said.refusal, sourceName)}>Edit section</button>
+              <button type="button" disabled title={refusalReason(said.refusal, sourceName)}>Edit section…</button>
             {/if}
           {/if}
         </span>

@@ -8,6 +8,7 @@
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { clockLabel } from "../time/format";
   import Row from "./Row.svelte";
+  import { stateWord } from "../tf/state-word";
   import { cellsOf } from "./cells";
   import type { LauncherRow } from "./rows";
 
@@ -26,7 +27,7 @@
     return {
       monogram,
       tone: item.state?.tone ?? null,
-      kindName: item.state ? `${word}: ${item.state.text}` : word,
+      kindName: item.state ? `${word}: ${stateWord(item.state.text)}` : word,
       cell: cells.cell,
       mono: cells.mono,
       title: cells.title,

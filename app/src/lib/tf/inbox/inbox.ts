@@ -125,7 +125,7 @@ export function opener(
   if (item.category === "credential_expiry" || item.category === "failed_sign_in") {
     const page = `#/settings/source/${encodeURIComponent(item.source_id)}`;
     const fix = credentialFix?.(item.source_id) ?? null;
-    return fix === null ? { label: "Source settings", href: page } : { label: fix, href: `${page}/reenter` };
+    return fix === null ? { label: "Source settings", href: page } : { label: `${fix}…`, href: `${page}/reenter` };
   }
   if (item.category === "alert") {
     const monitor = item.key?.startsWith(ALERT_KEY) ? item.key.slice(ALERT_KEY.length) : "";

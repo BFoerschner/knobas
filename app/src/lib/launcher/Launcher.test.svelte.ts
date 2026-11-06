@@ -1545,7 +1545,7 @@ test("save as list is offered on a query, never on an empty box", async () => {
 
   await search("sepa retries");
   const button = target.querySelector<HTMLButtonElement>("button.tf-ln-save");
-  expect(button?.textContent?.trim()).toBe("Save as list");
+  expect(button?.textContent?.trim()).toBe("Save as list…");
 
   button!.click();
   await settle();
@@ -1564,7 +1564,7 @@ test("save as list is offered on a query, never on an empty box", async () => {
 
   // And the next keystroke is a different query, so the control comes back.
   await search("sepa retries and more");
-  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list");
+  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list…");
 });
 
 /**
@@ -1641,7 +1641,7 @@ test("save as list is off a time query and a failed search", async () => {
   });
   await settle();
   await search("sepa retries");
-  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list");
+  expect(target.querySelector("button.tf-ln-save")?.textContent?.trim()).toBe("Save as list…");
 });
 
 // ── Value suggestions for `kind:`, `source:` and `under:` (#601) ──────────
@@ -2739,7 +2739,7 @@ test("the monogram takes the state's tone, and a row with no state is uncoloured
   const monograms = [...target.querySelectorAll<HTMLElement>(".tf-ln-res .tf-ln-mg")];
   expect(monograms.map((mg) => mg.dataset["tone"] ?? null)).toEqual(["info", "ok", null, null, "err", "err", null, null]);
   // The colour is the only sign, so the state is named for a screen reader.
-  expect(monograms[0]!.getAttribute("aria-label")).toBe("Ticket: In Progress");
+  expect(monograms[0]!.getAttribute("aria-label")).toBe("Ticket: In progress");
   expect(monograms[2]!.getAttribute("aria-label")).toBe("Repository");
 });
 

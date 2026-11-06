@@ -18,6 +18,16 @@ import type {
 } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 
+/**
+ * An asset member's line in words. The read sends *type id, environment* (`link_sets::line_of`): `container_engine, dev`
+ * draws as *Container engine, dev*. A type the estate no longer names reads with its underscores gone.
+ */
+export function assetLine(line: string, names: Readonly<Record<string, string>>): string {
+  const [type = "", ...rest] = line.split(", ");
+  const word = names[type] ?? (type.charAt(0).toUpperCase() + type.slice(1)).replaceAll("_", " ");
+  return [word, ...rest].join(", ");
+}
+
 /** The editor's panels, in prototype-6's order (R-7.7). */
 export const MEMBER_KINDS: readonly LinkSetMemberKind[] = ["repo", "pipeline", "page", "asset", "monitor"];
 

@@ -33,17 +33,20 @@ describe("minutesLabel: Day, Week, Log all, the launcher board, the draft button
 
 describe("secondsLabel: a run's length", () => {
   test.each([
-    [38, "38 s"],
-    [252, "4 m 12 s"],
-    [65, "1 m 05 s"],
+    [38, "38s"],
+    [252, "4m 12s"],
+    [65, "1m 5s"],
+    [240, "4m"],
+    [3725, "1h 2m"],
+    [7200, "2h"],
   ])("%d seconds reads %s", (seconds, text) => {
     expect(secondsLabel(seconds)).toBe(text);
   });
 
-  // CHANGED: Settings said "3 min 12 s" for a run Builds called "3 m 12 s".
-  test("Builds and Settings agree on a run's length: 192 s is 3 m 12 s on both", () => {
-    expect(secondsLabel(192)).toBe("3 m 12 s");
-    expect(secondsLabel(180)).toBe("3 m 00 s");
+  // CHANGED: a run read "4 m 12 s" where a worklog read "2h 10m" (F-037).
+  test("a run and a worklog read alike: 192 s is 3m 12s, and 3 minutes is minutesLabel's 3m", () => {
+    expect(secondsLabel(192)).toBe("3m 12s");
+    expect(secondsLabel(180)).toBe(minutesLabel(3));
   });
 });
 

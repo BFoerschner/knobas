@@ -103,7 +103,7 @@ export interface StepSegment {
   name: string;
   /** `wait`: a step of a running run its log has not reached yet (#1016). */
   state: StepState | "wait";
-  /** The name and how long it took: "Checkout, 12 s", "cargo test, running", or "Publish, not started". */
+  /** The name and how long it took: "Checkout, 12s", "cargo test, running", or "Publish, not started". */
   tip: string;
   x: number;
   width: number;
@@ -309,7 +309,7 @@ export function historyLine(history: readonly TestOutcome[], branch: string | nu
   return `Failed in ${of}${where}.`;
 }
 
-/** A test's time: "42 ms", or "1m 02s" past a minute. */
+/** A test's time: "42 ms", or "1m 2s" past a minute. */
 export function testTime(ms: number | null): string | null {
   if (ms === null) return null;
   return ms < 60_000 ? `${ms} ms` : secondsLabel(Math.round(ms / 1000));

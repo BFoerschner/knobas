@@ -142,7 +142,7 @@
         >
       {/if}
       {#if ticket !== null}
-        <p class="tf-dim tf-prm-note">After the merge, <TfKey value={ticket} /> moves to In Review.</p>
+        <p class="tf-dim tf-prm-note">After the merge, <TfKey value={ticket} /> moves to In review.</p>
       {/if}
     </form>
   {/snippet}

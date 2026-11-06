@@ -24,6 +24,7 @@
   import { inFloatHost } from "../floats";
   import type { Layers } from "../layers.svelte";
   import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
   import { itemHash } from "./job";
 
@@ -104,12 +105,12 @@
     </div>
   </div>
   <div class="tf-dbody">
-    <h3>Linked on {jobKey} <span class="tf-count">{shown.length}</span></h3>
+    <h3>Linked on <TfKey value={jobKey} lead /> <span class="tf-count">{shown.length}</span></h3>
     {#each shown as entry (entry.link.id)}
       {@const also = alsoIn(entry.other.entity_id)}
       <div class="tf-lk">
         <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
-          ><span class="tf-lk-t"><span class="tf-lk-name"><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{kindWord(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</span></span
+          ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{kindWord(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</span></span
           ><span class="tf-chev" aria-hidden="true">›</span></a
         >
         <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
@@ -124,17 +125,17 @@
     {#each groups as group (group.key)}
       {@const rows = filterRows(group.rows, text)}
       <h3>
-        From {group.label}, {group.via} <span class="tf-count">{rows.length}</span>
+        From {group.label}, <TfKeyed text={group.via} lead /> <span class="tf-count">{rows.length}</span>
         {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={onclose}>Edit set</a>{/if}
       </h3>
       {#each rows as row (row.id)}
         <div class="tf-lk">
           {#if row.href !== null}
             <a class="tf-lk-go" href={row.href} onclick={onclose}
-              ><span class="tf-lk-t"><span class="tf-lk-name"><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span><span class="tf-chev" aria-hidden="true">›</span></a
+              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span><span class="tf-chev" aria-hidden="true">›</span></a
             >
           {:else}
-            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name"><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span></div>
+            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span></div>
           {/if}
           {#if group.setId !== null}
             <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>
@@ -143,7 +144,7 @@
       {/each}
     {/each}
     {#if hidden.length > 0}
-      <h3>Hidden on {jobKey} <span class="tf-count">{hidden.length}</span></h3>
+      <h3>Hidden on <TfKey value={jobKey} lead /> <span class="tf-count">{hidden.length}</span></h3>
       {#each hidden as row (row.id)}
         <div class="tf-lk">
           <div class="tf-lk-go tf-dim"><span class="tf-lk-t"><span class="tf-lk-name">{row.title}</span></span></div>

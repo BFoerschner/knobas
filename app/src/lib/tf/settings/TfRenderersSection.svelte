@@ -45,6 +45,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
+  import { secondsLabel } from "../../time/format";
   import type { CommandOutput, RendererDefault, RendererInput } from "../../ipc/app";
   import { COMMAND_PREFIX, installCommands } from "../../render/command";
   import { allRenderers, type Renderer } from "../../render/registry";
@@ -264,9 +265,9 @@
               <td class="tf-small"><span class="tf-mono">{r.command}</span></td>
               <td class="tf-small tf-mono">{r.patterns.join(" ")}</td>
               <td class="tf-small tf-mono">{r.fences.join(" ")}</td>
-              <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {r.timeout_secs} s</td>
+              <td class="tf-small">{r.input} → {r.output.toUpperCase()}, {secondsLabel(r.timeout_secs)}</td>
               <td class="tf-right">
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => edit(at)}>Edit</button>
+                <button class="tf-btn tf-sm tf-ghost" onclick={() => edit(at)}>Edit…</button>
                 <button class="tf-btn tf-sm tf-ghost tf-danger" aria-label="Remove {r.name}" onclick={() => void remove(at)}>Remove</button>
               </td>
             </tr>

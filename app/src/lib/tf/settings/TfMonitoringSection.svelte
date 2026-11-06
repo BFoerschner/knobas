@@ -53,7 +53,7 @@
 <header class="tf-stg-h"><h1>Monitoring</h1><p>How Uptime Kuma data is read.</p></header>
 {#if stored !== null}
   <div class="tf-stg-row">
-    <label class="tf-stg-l" for="tf-mon-slow">Slow above<small>A response slower than this draws as a warning.</small></label>
+    <label class="tf-stg-l" for="tf-mon-slow">Slow above<small>A response slower than this reads as Slow.</small></label>
     <div class="tf-stg-c tf-stg-inl">
       <input
         id="tf-mon-slow"

@@ -380,9 +380,9 @@ test("a credential row says its fix in the status bar's words and opens the prom
     ],
   });
   const link = (words: string) => rowOf(words).querySelector<HTMLAnchorElement>(".tf-acts a")!;
-  expect(text(link("No credential"))).toBe("Enter token");
+  expect(text(link("No credential"))).toBe("Enter token…");
   expect(link("No credential").getAttribute("href")).toBe("#/settings/source/kuma/reenter");
-  expect(text(link("was rejected"))).toBe("Re-enter password");
+  expect(text(link("was rejected"))).toBe("Re-enter password…");
 });
 
 function picker(row: Element): HTMLInputElement {

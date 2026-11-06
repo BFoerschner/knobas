@@ -61,10 +61,10 @@ test("the log is its steps' folds with the lines outside them loose, in order", 
 test("the steps bar is one segment per step, as wide as its share of the time, toned by result, with the duration as its tip", () => {
   const segments = stepSegments(LOG, false);
   expect(segments.map((s) => [s.index, s.name, s.state, s.tip])).toEqual([
-    [0, "Checkout", "ok", "Checkout, 12 s"],
-    [1, "cargo test", "err", "cargo test, 1 m 22 s"],
+    [0, "Checkout", "ok", "Checkout, 12s"],
+    [1, "cargo test", "err", "cargo test, 1m 22s"],
   ]);
-  // 12 s of 94 s, then 82 s of 94 s: each starts where the one before ends.
+  // 12s of 94s, then 82s of 94s: each starts where the one before ends.
   expect(segments[0]!.x).toBe(0);
   expect(segments[0]!.width).toBeCloseTo(12.77, 1);
   expect(segments[1]!.x).toBeCloseTo(12.77, 1);
@@ -75,7 +75,7 @@ test("a running step has no duration yet: it says running, and takes the mean of
   const passing: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
   const segments = stepSegments(passing, true);
   expect(segments.map((s) => [s.state, s.tip])).toEqual([
-    ["ok", "Checkout, 12 s"],
+    ["ok", "Checkout, 12s"],
     ["run", "cargo test, running"],
   ]);
   expect(segments[1]!.width).toBeCloseTo(50, 1);
@@ -85,12 +85,12 @@ test("a running run's steps the log has not reached are drawn after the running 
   const running: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
   const segments = stepSegments(running, true, ["Checkout", "cargo test", "Build image", "Publish"]);
   expect(segments.map((s) => [s.index, s.name, s.state, s.tip])).toEqual([
-    [0, "Checkout", "ok", "Checkout, 12 s"],
+    [0, "Checkout", "ok", "Checkout, 12s"],
     [1, "cargo test", "run", "cargo test, running"],
     [2, "Build image", "wait", "Build image, not started"],
     [3, "Publish", "wait", "Publish, not started"],
   ]);
-  // Each step without a duration takes the 12 s the one finished step took.
+  // Each step without a duration takes the 12s the one finished step took.
   for (const s of segments) expect(s.width).toBeCloseTo(25, 1);
   expect(segments[3]!.x).toBeCloseTo(75, 1);
 });
@@ -127,7 +127,7 @@ test("a step is err with an error in it, running when it is the last of a run in
   const passing: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: "warn" }] };
   expect(stepState(passing, 1, true)).toBe("run");
   expect(stepState(passing, 1, false)).toBe("ok");
-  expect(stepSummary(LOG.steps[1]!, "err")).toBe("1 m 22 s, 3 lines");
+  expect(stepSummary(LOG.steps[1]!, "err")).toBe("1m 22s, 3 lines");
   expect(stepSummary(LOG.steps[0]!, "run")).toBe("running, 2 lines");
   expect(stepSummary({ ...LOG.steps[0]!, seconds: null, first: 1, last: 1 }, "ok")).toBe("1 line");
 });

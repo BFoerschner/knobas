@@ -19,6 +19,8 @@
   ticket you are on"). Only the `running` row carries `tf-tm-run`.
 -->
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
@@ -587,7 +589,7 @@
               {clockReading(run.from, key)} to {clockReading(run.to, key)}.
               <small>Each is its own ticket or linked to it. One action adds them all.</small>
             </span>
-            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to {keyOf(run.entityId)}</button>
+            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to <TfKey value={keyOf(run.entityId)} /></button>
           </div>
         {/if}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -616,8 +618,8 @@
               {#if row.state === "offered"}
                 {@const linked = linkedTo(row)}
                 <small>
-                  {targetReading(row.target)} was in front of you.
-                  {#if linked !== null}It is linked to {keyOf(linked)}.{/if}
+                  <TfKeyed text={targetReading(row.target)} /> was in front of you.
+                  {#if linked !== null}It is linked to <TfKey value={keyOf(linked)} />.{/if}
                 </small>
               {:else if row.state === "label"}
                 <small>
@@ -654,7 +656,7 @@
                   class="tf-btn tf-sm"
                   onclick={() => giveTo(row, to, `Assigned to ${keyOf(to)}. It is in Log all now.`)}
                 >
-                  Assign to {keyOf(to)}
+                  Assign to <TfKey value={keyOf(to)} />
                 </button>
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
               {:else}
@@ -668,7 +670,7 @@
                   class="tf-btn tf-sm"
                   onclick={() => giveTo(row, to, `Added ${durationOf(row)} to ${keyOf(to)}`)}
                 >
-                  Add to {keyOf(to)}
+                  Add to <TfKey value={keyOf(to)} />
                 </button>
               {/if}
               <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
@@ -680,7 +682,7 @@
                   class="tf-btn tf-sm"
                   onclick={() => addOpen(row, to, `Made a block on ${job.key}, ${span(row)}`)}
                 >
-                  Add to {job.key}
+                  Add to <TfKey value={job.key} />
                 </button>
                 <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {:else}

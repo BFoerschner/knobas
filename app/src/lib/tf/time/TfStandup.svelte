@@ -37,6 +37,7 @@
   without one.
 -->
 <script lang="ts">
+  import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { onDestroy, untrack } from "svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
@@ -608,10 +609,10 @@
               {@const href = lineHash(line)}
               {@const key = lineKey(line)}
               {#snippet words()}
-                {#if key}<span class="tf-mono">{key}</span>{" "}{/if}{line.title}{#if alert}{" "}{line.reason}<span
+                {#if key}<span class="tf-mono">{key}</span>{" "}{/if}{line.title}{#if alert}{" "}<TfKeyed text={line.reason} /><span
                     class="tf-dim">{`, ${alertSince(line)}`}</span
-                  >{:else if yesterday}{`: ${line.reason}`}{:else}{" "}<span
-                    class="tf-dim">({line.reason})</span
+                  >{:else if yesterday}: <TfKeyed text={line.reason} />{:else}{" "}<span
+                    class="tf-dim">(<TfKeyed text={line.reason} />)</span
                   >{/if}
               {/snippet}
               <li>

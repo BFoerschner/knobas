@@ -9,6 +9,7 @@
  * condition; any other token (`is:mine`, a `source:` scope, a quoted phrase) stays in
  * the words as typed, so nothing a reader typed is lost.
  */
+import { stateWord } from "../state-word";
 import type { MiniBoardColumn } from "../../ipc/entity";
 import type { ViewColumn } from "../../ipc/search";
 import { grammarToken } from "../filter/filter";
@@ -175,7 +176,7 @@ export type EditColumn = ViewColumn;
 
 /** One column per status, named by it, in the board's order. */
 export function onePerStatus(statuses: string[]): EditColumn[] {
-  return statuses.map((status) => ({ name: status, statuses: [status], limit: null }));
+  return statuses.map((status) => ({ name: stateWord(status), statuses: [status], limit: null }));
 }
 
 /** The columns a view opens the editor with: its own, or one per status. */

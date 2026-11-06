@@ -42,6 +42,8 @@
 
   /** The relations a job's link offers, one list with the launcher's *Link to ⟨job⟩* (#2426). */
   const OFFERED = JOB_LINK_RELATIONS;
+  /** A repository's or a branch's name is a code value (design system, Type). */
+  const codeTitle = (kind: string) => kind === "repo" || kind === "branch";
 
   // svelte-ignore state_referenced_locally
   // Read once: a `Session` owns a debounce timer and a request counter.
@@ -122,7 +124,7 @@
         <span id="tf-lk-to-{uid}">Link to</span>
         <div class="tf-onrow" role="group" aria-labelledby="tf-lk-to-{uid}">
           <span class="tf-chosen"
-            ><TfTick /><span class="tf-chosent" title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
+            ><TfTick /><span class="tf-chosent" class:tf-mono={codeTitle(target.kind)} title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
           >
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
         </div>
@@ -146,7 +148,7 @@
           <div class="tf-fwide tf-picklist" role="listbox" aria-label="Link targets">
             {#each hits as hit, index (hit.entity_id)}
               <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(hit)}>
-                <span>{hit.title}</span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
+                <span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
               </button>
             {/each}
           </div>

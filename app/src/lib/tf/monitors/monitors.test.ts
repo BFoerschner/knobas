@@ -7,6 +7,7 @@ import { describe, expect, test } from "vitest";
 
 import type { AssetDetail, AssetProperty, MonitorRow, RouteRow, UnmonitoredAsset } from "../../ipc/assets";
 import { jobIndex } from "../job/open-jobs";
+import { stateWord } from "../state-word";
 import {
   stateChip,
   gaps,
@@ -18,6 +19,7 @@ import {
   segments,
   sorted,
   uptimeText,
+  STATE_CHIPS,
   visibleMonitors,
   type KeptMonitors,
 } from "./monitors";
@@ -285,5 +287,25 @@ describe("Create monitor opens with", () => {
   test("Ping on a VM's hostname, else its IP", () => {
     expect(prefill(detail("vm", "vm-pay-01", [text("ip", "10.0.0.4")]))).toEqual({ name: "vm-pay-01", kind: "ping", target: "10.0.0.4" });
     expect(prefill(detail("vm", "vm-pay-01", [text("ip", "10.0.0.4"), text("hostname", "vm-pay-01.lan")])).target).toBe("vm-pay-01.lan");
+  });
+});
+
+describe("the state pills read what the chips read", () => {
+  const NO_JOBS = jobIndex([]);
+  const states = ["down", "warn", "up", "pending", "maintenance"] as const;
+  test.each(states)("a %s row is kept by the pill its chip names, and by no other", (state) => {
+    const it = row({ state, response_time_ms: state === "warn" ? 8400 : 40 });
+    const word = stateWord(stateChip(it).label);
+    expect(STATE_CHIPS as readonly string[]).toContain(word);
+    for (const pill of STATE_CHIPS) {
+      const kept = visibleMonitors([it], { scope: "all", job: null, states: [pill], type: "", text: "" }, NO_JOBS).shown;
+      expect(kept.length).toBe(pill === word ? 1 : 0);
+    }
+  });
+
+  test("a paused monitor is kept by Paused whatever it last read, and slow needs no response to say so", () => {
+    const paused = row({ state: "up", tombstoned: true });
+    expect(visibleMonitors([paused], { scope: "all", job: null, states: ["Paused"], type: "", text: "" }, NO_JOBS).shown).toEqual([paused]);
+    expect(stateChip(row({ state: "warn", response_time_ms: null })).label).toBe("slow");
   });
 });

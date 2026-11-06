@@ -23,7 +23,9 @@
   import { untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
+  import type { MonitorRow } from "../../ipc/assets";
   import type {
+    LinkSetMemberRow,
     LinkSetDetail,
     LinkSetDraft,
     LinkSetMemberKind,
@@ -44,8 +46,10 @@
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
-  import { itemsOf, KIND_LABEL, MEMBER_KINDS, onePerKey, PATTERN_KINDS, putBack, RULE_KINDS, SHOWN_KEYS, type Removed } from "./sets";
+  import { assetLine, itemsOf, KIND_LABEL, MEMBER_KINDS, onePerKey, PATTERN_KINDS, putBack, RULE_KINDS, SHOWN_KEYS, type Removed } from "./sets";
   import { toneClass } from "../tone";
+  import { kindWord, stateChip } from "../monitors/monitors";
+  import { stateWord } from "../state-word";
   import TfSetPattern from "./TfSetPattern.svelte";
   import TfSetPicker from "./TfSetPicker.svelte";
 
@@ -78,6 +82,18 @@
   let picking = $state<LinkSetMemberKind | null>(null);
   /** The kind whose *Add a pattern…* dialog is open. */
   let patterning = $state<LinkSetMemberKind | null>(null);
+  /** What a member's line and a monitor's dot read from. Both can fail: the row then says what the set read said. */
+  let typeNames = $state<Record<string, string>>({});
+  let roster = $state<MonitorRow[]>([]);
+  const memberLine = (member: LinkSetMemberRow) =>
+    member.line === null ? null : member.kind === "asset" ? assetLine(member.line, typeNames) : member.kind === "monitor" ? kindWord(member.line) : member.line;
+  /** A monitor's dot says what its chip on Monitors says, so a paused monitor is grey here too. */
+  function memberState(member: LinkSetMemberRow) {
+    const row = member.kind === "monitor" ? roster.find((held) => held.entity_id === member.entity_id) : undefined;
+    if (row === undefined) return member.state;
+    const chip = stateChip(row);
+    return { text: chip.label, tone: chip.tone ?? ("muted" as const) };
+  }
   /** The saves asked for so far, in order (see `save`). */
   let saves: Promise<void> = Promise.resolve();
 
@@ -101,6 +117,18 @@
     ports.ruleChoices().then(
       (read) => {
         if (live) choices = read;
+      },
+      () => {},
+    );
+    ports.assetTypeNames().then(
+      (read) => {
+        if (live) typeNames = read;
+      },
+      () => {},
+    );
+    ports.monitors().then(
+      (read) => {
+        if (live) roster = read;
       },
       () => {},
     );
@@ -407,11 +435,12 @@
               </div>
             {/each}
             {#each members as member (member.entity_id)}
+              {@const state = memberState(member)}
               <div class="tf-member">
                 <!-- A dot only where the source reports a state: tone is for state, and a row of grey dots says nothing. -->
-                {#if member.state}<span class="tf-dot {toneClass(member.state)}"></span>{/if}
+                {#if state}<span class="tf-dot {toneClass(state)}" title={stateWord(state.text)}></span>{/if}
                 <a class="tf-member-name" class:tf-mono={kind === "repo"} href={entityAddress(kind, member.entity_id)}>{member.title ?? keyOf(member.entity_id)}</a>
-                {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{member.line}</span>{/if}
+                {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{memberLine(member)}</span>{/if}
                 <button
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"

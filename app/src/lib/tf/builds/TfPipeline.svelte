@@ -34,6 +34,7 @@
   button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
+  import { stateWord } from "../state-word";
   import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import { secondsLabel } from "../../time/format";
@@ -603,7 +604,7 @@
       >
         {#each history as run, at (run.entity_id)}
           {@const h = barHeight(run, max)}
-          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${resultWord(run)}`}>
+          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${stateWord(resultWord(run))}`}>
             <title>{barTip(run)}</title>
             <rect class={`tf-bar tf-run-${runTone(run)}`} x={at * (BAR_STEP)} y={CHART_HEIGHT - h} width={BAR_WIDTH} height={h} rx="2" />
           </a>
@@ -670,7 +671,7 @@
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
                   <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet. -->
-                  <b>{run.state?.text ?? "queued"}</b>
+                  <b>{stateWord(run.state?.text ?? "queued")}</b>
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}

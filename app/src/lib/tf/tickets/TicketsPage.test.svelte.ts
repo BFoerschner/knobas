@@ -337,8 +337,8 @@ test("every synced ticket on the board: a column per status, eight cards then Sh
   await open(h);
   expect(h.reads[0]).toEqual({ perColumn: 8, query: null });
   expect(columns()).toEqual([
-    { head: "To Do 12", cards: 8, more: "Show 4 more" },
-    { head: "In Progress 1", cards: 1, more: null },
+    { head: "To do 12", cards: 8, more: "Show 4 more" },
+    { head: "In progress 1", cards: 1, more: null },
     { head: "Done 5", cards: 3, more: "Show 2 more done" },
   ]);
   expect(count()).toBe("18 tickets");
@@ -395,7 +395,7 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
   }
   expect(input.selectionStart).toBe(4);
   expect(h.reads.at(-1)).toEqual({ perColumn: 50, query: "sepa" });
-  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+  expect(columns()).toEqual([{ head: "To do 1", cards: 1, more: null }]);
   expect(count()).toBe("1 of 18 tickets");
   expect(target.querySelector(".tf-tcard mark")!.textContent).toBe("SEPA");
 
@@ -416,7 +416,7 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
   for (const char of "bulk") type(field(), char);
   await settle();
   expect(columns()).toEqual([
-    { head: "To Do 60", cards: 50, more: "Show 10 more" },
+    { head: "To do 60", cards: 50, more: "Show 10 more" },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
   ]);
   expect(count()).toBe("115 of 133 tickets");
@@ -424,7 +424,7 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
   expect(columns()).toEqual([
-    { head: "To Do 60", cards: 60, more: null },
+    { head: "To do 60", cards: 60, more: null },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
   ]);
 });
@@ -463,7 +463,7 @@ test("Show N more reads the column whole and draws all of it", async () => {
   await open(h);
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
-  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 12, more: null });
+  expect(columns()[0]).toEqual({ head: "To do 12", cards: 12, more: null });
   expect(columns()[2]!.cards).toBe(3);
 });
 
@@ -496,7 +496,7 @@ test("the list's Show N more reads every ticket, and the board keeps its caps", 
   expect(target.querySelector(".tf-list-more")).toBeNull();
   layout("Board");
   await settle();
-  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 8, more: "Show 4 more" });
+  expect(columns()[0]).toEqual({ head: "To do 12", cards: 8, more: "Show 4 more" });
   expect(columns()[2]!.cards).toBe(3);
 });
 
@@ -617,24 +617,24 @@ test("lanes split the board into bands by size, each with its columns and count,
     {
       head: "jonas.becker 11",
       columns: [
-        { head: "To Do 11", cards: 8, more: "Show 3 more" },
-        { head: "In Progress 0", cards: 0, more: null },
+        { head: "To do 11", cards: 8, more: "Show 3 more" },
+        { head: "In progress 0", cards: 0, more: null },
         { head: "Done 0", cards: 0, more: null },
       ],
     },
     {
       head: "Unassigned 5",
       columns: [
-        { head: "To Do 0", cards: 0, more: null },
-        { head: "In Progress 0", cards: 0, more: null },
+        { head: "To do 0", cards: 0, more: null },
+        { head: "In progress 0", cards: 0, more: null },
         { head: "Done 5", cards: 3, more: "Show 2 more done" },
       ],
     },
     {
       head: "mara.lindqvist 2",
       columns: [
-        { head: "To Do 1", cards: 1, more: null },
-        { head: "In Progress 1", cards: 1, more: null },
+        { head: "To do 1", cards: 1, more: null },
+        { head: "In progress 1", cards: 1, more: null },
         { head: "Done 0", cards: 0, more: null },
       ],
     },
@@ -1144,7 +1144,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
   expect(searchLine().textContent).toBe("every synced ticket");
   // Every ticket, one column per status of the board.
   expect(dialog()!.querySelector(".tf-vw-n b")!.textContent).toBe("18");
-  expect(previewCols()).toEqual(["To Do12", "In Progress1", "Done5"]);
+  expect(previewCols()).toEqual(["To do12", "In progress1", "Done5"]);
   expect(inDialog("Create view").disabled).toBe(true);
 
   inDialog("Add a condition").click();
@@ -1211,21 +1211,21 @@ test("each status sits on one column, an over-limit column is err, tickets on no
   const pressed = (col: HTMLElement) =>
     [...col.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
   // In Progress onto the first column leaves its own.
-  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "In Progress")!.click();
+  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "In progress")!.click();
   await settle();
-  expect(cols().map(pressed)).toEqual([["To Do", "In Progress"], [], ["Done"]]);
+  expect(cols().map(pressed)).toEqual([["To do", "In progress"], [], ["Done"]]);
   input(cols()[0]!.querySelector<HTMLInputElement>('input[aria-label="At most"]')!, "10");
   // Done off its column: on no column.
   [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "Done")!.click();
   // Columns and limits redraw the answer already read; only the query reads again.
   await settle();
   expect(dialog()!.textContent).toContain("Done is on no column, so those tickets do not show on the board.");
-  expect(previewCols()).toEqual(["To Do13 of 10", "In Progress0", "Done0"]);
+  expect(previewCols()).toEqual(["To do13 of 10", "In progress0", "Done0"]);
   expect(dialog()!.querySelector(".tf-vw-mcol")!.classList.contains("tf-vw-over")).toBe(true);
   expect(dialog()!.textContent).toContain("5 of them sit in a status on no column.");
   inDialog("One column per status").click();
   await settle();
-  expect(cols().map(pressed)).toEqual([["To Do"], ["In Progress"], ["Done"]]);
+  expect(cols().map(pressed)).toEqual([["To do"], ["In progress"], ["Done"]]);
   expect(dialog()!.textContent).not.toContain("on no column");
 });
 
@@ -1395,7 +1395,7 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
   // PAY-1 is To Do and mine, under *Ready*.
   expect(columns()[0]!.head).toBe("Ready 12");
   const facts = [...preview().querySelectorAll(".tf-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
-  expect(facts).toContainEqual(["Status", "To Do"]);
+  expect(facts).toContainEqual(["Status", "To do"]);
   expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Start work");
 
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
@@ -1404,7 +1404,7 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
   const status = (key: string) =>
     [...target.querySelectorAll(".tf-tbl tbody tr")].find((tr) => tr.querySelector("td")!.textContent === key)!.children[statusAt]!
       .textContent;
-  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To Do", "In Progress", "Done"]);
+  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To do", "In progress", "Done"]);
 });
 
 test("two sources holding PAY-1: each card and row names its source and opens by it; a unique key names none (#1476)", async () => {
@@ -1921,7 +1921,7 @@ test("a source of any adapter kind that fills the ticket system has its tickets 
   expect(listed.map((cells) => cells[0]).sort()).toEqual(["TRK-1", "TRK-2"]);
   const bare = listed.find((cells) => cells[0] === "TRK-2")!;
   // Key, Summary, Status, Priority, Signals, Assignee, Updated: nothing declared, nothing drawn.
-  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In Progress", "", "", "Unassigned", "never"]);
+  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In progress", "", "", "Unassigned", "never"]);
 });
 
 test("every board read asks for the ticket system, and the shell's source list answering reads nothing again (#1299)", async () => {

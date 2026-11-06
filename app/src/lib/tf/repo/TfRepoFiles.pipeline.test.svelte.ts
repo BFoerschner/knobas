@@ -113,7 +113,7 @@ const button = (label: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label || b.getAttribute("aria-label") === label) ?? null;
 
 async function addStep(label: string) {
-  button("Add step")!.click();
+  button("Add step…")!.click();
   flushSync();
   const row = [...target.querySelectorAll<HTMLButtonElement>(".tf-pmenu [role=menuitem]")].find((b) => text(b).startsWith(label));
   expect(row, label).toBeDefined();
@@ -329,10 +329,10 @@ test("the person's command steps are in the Add step menu, under Your commands",
   await settle();
   button("Pipeline")!.click();
   await settle();
-  button("Add step")!.click();
+  button("Add step…")!.click();
   flushSync();
   expect(text(target.querySelector(".tf-pmenu .tf-menu"))).toContain("Your commands");
-  button("Add step")!.click();
+  button("Add step…")!.click();
   flushSync();
   await addStep("Upper");
   expect(asked.at(-1)?.steps).toEqual([{ step: "command", id: "upper" }]);

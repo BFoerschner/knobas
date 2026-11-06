@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import { dismiss, hold, release, toasts, type ToastAction } from "../shell/toasts.svelte";
+  import TfKeyed from "./TfKeyed.svelte";
 
   /**
    * What held focus before a toast took it. A pressed toast goes away with the button in it, and a dialog under it
@@ -45,7 +46,7 @@
         if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) release(toast.id, "focus");
       }}
     >
-      <span>{toast.text}</span>
+      <span><TfKeyed text={toast.text} /></span>
       {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action, index (index)}
         <button onclick={() => press(toast.id, action)}>{action.label}</button>
       {/each}

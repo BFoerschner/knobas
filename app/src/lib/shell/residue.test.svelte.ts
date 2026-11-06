@@ -702,6 +702,8 @@ function setPorts() {
   return {
     linkSets: () => deferred([set]),
     linkSetHints: () => deferred([]),
+    assetTypeNames: () => deferred({}),
+    monitors: () => deferred([]),
     linkSet: () => deferred(set),
     saveLinkSet: () => deferred(set),
     deleteLinkSet: () => deferred(undefined),

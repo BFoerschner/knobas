@@ -82,7 +82,7 @@ test("a command step added here is saved whole with its name, command and timeou
   button("Save step").click();
   await settle();
   expect(s.stepSaves).toEqual([[{ id: null, name: "Upper", command: "tr a-z A-Z", timeout_secs: 4 }]]);
-  expect(cells(".tf-rnd-steps")).toEqual([["Upper", "tr a-z A-Z", "4 s"]]);
+  expect(cells(".tf-rnd-steps")).toEqual([["Upper", "tr a-z A-Z", "4s"]]);
 });
 
 test("a named pipeline is listed with the patterns that use it, and an edit keeps its id so they follow", async () => {
@@ -91,7 +91,7 @@ test("a named pipeline is listed with the patterns that use it, and an edit keep
   await settle();
   expect(cells(".tf-rnd-pipes")).toEqual([["Gzipped JSON", "gunzip → jq", "*.json.gz"]]);
 
-  button("Edit Gzipped JSON").click();
+  button("Edit Gzipped JSON…").click();
   flushSync();
   button("Remove jq").click();
   flushSync();

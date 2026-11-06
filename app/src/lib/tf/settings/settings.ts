@@ -326,11 +326,11 @@ export function startedWords(iso: string, now: Date = new Date()): string {
 
 /**
  * A watched run's line (#1384), the wizard's reading on a source's page:
- * *120 of 300 repositories · 1,240 items · 83 s*, without the walk until the
+ * *120 of 300 repositories · 1,240 items · 1m 23s*, without the walk until the
  * run reports one and without the total when the adapter has none.
  */
 export function runProgressWords(items: number, elapsedMs: number, walk: Walk | null): string {
-  const parts = [`${items.toLocaleString("en-GB")} items`, `${Math.round(elapsedMs / 1000)} s`];
+  const parts = [`${items.toLocaleString("en-GB")} items`, secondsLabel(Math.round(elapsedMs / 1000))];
   if (walk !== null) {
     const of = walk.of === undefined ? "" : ` of ${walk.of.toLocaleString("en-GB")}`;
     parts.unshift(`${walk.walked.toLocaleString("en-GB")}${of} ${walk.unit}`.trimEnd());

@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
+  columnHead,
   sentenceCase,
   shortKey,
   aroundLines,
@@ -302,4 +303,17 @@ test("a source's lower-case word reads as a label, and a written one stays as it
   expect(sentenceCase("closed")).toBe("Closed");
   expect(sentenceCase("In Progress")).toBe("In Progress");
   expect(sentenceCase(null)).toBeNull();
+});
+
+test("a column's head reads as a state only when it is called after one it holds", () => {
+  const columns = [
+    { name: "In Progress", statuses: ["In Progress"] },
+    { name: "Waiting on Björn", statuses: ["Blocked"] },
+    { name: "Doing", statuses: ["In Progress", "In Review"] },
+  ];
+  expect(columnHead("In Progress", columns)).toBe("In progress");
+  expect(columnHead("Waiting on Björn", columns)).toBe("Waiting on Björn");
+  expect(columnHead("Doing", columns)).toBe("Doing");
+  expect(columnHead("To Do", [])).toBe("To do");
+  expect(columnHead(null, [])).toBe("No status");
 });

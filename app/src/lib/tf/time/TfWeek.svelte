@@ -13,6 +13,7 @@
 -->
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { minutesLabel } from "../../time/format";
 
@@ -168,7 +169,7 @@
   {#each ready.held as note (note)}
     <div class="tf-tm-held">
       <span class="tf-dot tf-warn"></span>
-      <span>{note} <button class="tf-btn tf-sm" onclick={() => onqueue()}>Open the queue</button></span>
+      <span><TfKeyed text={note} /> <button class="tf-btn tf-sm" onclick={() => onqueue()}>Open the queue</button></span>
     </div>
   {/each}
 

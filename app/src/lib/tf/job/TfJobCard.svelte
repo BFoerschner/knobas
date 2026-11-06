@@ -37,6 +37,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
+  import { stateWord } from "../state-word";
   import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
@@ -298,7 +299,7 @@
           ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
               class="tf-st"
               class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
-              ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{row.state.text}</span
+              ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{stateWord(row.state.text)}</span
             >{:else if row.note !== undefined}<span class="tf-st">{row.note}</span>{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
         >
       {/each}

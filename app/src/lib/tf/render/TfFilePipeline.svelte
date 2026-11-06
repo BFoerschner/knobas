@@ -212,7 +212,7 @@
     <span class="tf-pstep tf-prenderer">{shownAs}</span>
     <span class="tf-pmenu">
       <button bind:this={face} type="button" class="tf-btn tf-sm tf-ghost" aria-haspopup="menu" aria-expanded={adding} onclick={() => (adding = !adding)}
-        >Add step</button
+        >Add step…</button
       >
       <TfMenu bind:open={adding} opener={face} label="Add step" className="tf-pmenu-m" align="start" {layers}>
           <div class="tf-rsw-mh">Built in</div>

@@ -104,13 +104,13 @@
     <button
       class="tf-timer tf-card"
       title="Timer (⌘T)"
-      aria-label="Timer on {clockOn}, {clock}. Stop and log"
+      aria-label="Timer on {clockOn}, {clock}. Stop and log…"
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
     >
       <span class="tf-timer-key" class:tf-mono={timer.current?.target.kind === "entity"} title={clockOn}>{clockOn}</span>
       <span class="tf-timer-t">{clock}</span>
-      <span class="tf-timer-stop" title="Stop and log"><i></i></span>
+      <span class="tf-timer-stop" title="Stop and log…"><i></i></span>
     </button>
   {:else}
     <button

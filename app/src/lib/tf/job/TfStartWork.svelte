@@ -27,6 +27,7 @@
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
   import TfKey from "../TfKey.svelte";
+  import { stateWord } from "../state-word";
 
   import type { EntityDetail, StartWorkStep } from "../../ipc/entity";
   import type { Timer } from "../../shell/timer.svelte";
@@ -183,7 +184,7 @@
     <div class="tf-step tf-st-{state}" data-step={row.id}>
       <span class="tf-num">{index + 1}</span>
       <strong>{row.label}</strong>
-      <span class="tf-state {state === 'ready' ? 'tf-dim' : ''}">{state}</span>
+      <span class="tf-state {state === 'ready' ? 'tf-dim' : ''}">{stateWord(state)}</span>
       <div class="tf-field">
         {#if row.id === "branch"}
           <input aria-label={row.label} value={text(op(of)["name"])} disabled={!of || !editable(of.outcome)} onchange={(event) => amend(of, "name", event.currentTarget.value)} />
@@ -200,7 +201,7 @@
           <span class="tf-stepval">{text((of?.payload as Record<string, unknown> | undefined)?.['relation']) || 'implements'} <TfKey value={key} /></span>
           <span class="tf-dim tf-small">stays in knobas</span>
         {:else if row.id === "status"}
-          <input aria-label={row.label} value="{detail.status ?? 'To Do'} to {text(op(of)['status']) || 'In Progress'}" readonly {...refusedAttrs(moveRefused)} />
+          <input aria-label={row.label} value="{stateWord(detail.status ?? 'To Do')} → {stateWord(text(op(of)['status']) || 'In Progress')}" readonly {...refusedAttrs(moveRefused)} />
           <span class="tf-dim tf-small">{detail.source.display_name} transition</span>
         {:else}
           <span class="tf-stepval"><TfKey value={key} /></span>

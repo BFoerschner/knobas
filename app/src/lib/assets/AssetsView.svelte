@@ -81,6 +81,7 @@
   landed.
 -->
 <script lang="ts">
+  import { stateWord } from "../tf/state-word";
   import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage, isIpcError, type SearchResponse } from "../ipc";
@@ -2018,7 +2019,7 @@
             <div class="prop force">
               <dt>Health</dt>
               <dd>
-                <span class="hl {detail.asset.health}">{detail.asset.health}</span>
+                <span class="hl {detail.asset.health}">{stateWord(detail.asset.health)}</span>
                 {#if detail.asset.health !== detail.asset.status}
                   <!--
                     Only when the two differ: repeating "own status: down"
@@ -2039,7 +2040,7 @@
           from, and setting the stored half beside that is a design of its own.
         -->
         <div class="acts">
-          <button class="tf-btn tf-sm" data-reopen="rename" onclick={beginRename}>Rename</button>
+          <button class="tf-btn tf-sm" data-reopen="rename" onclick={beginRename}>Rename…</button>
           <button class="tf-btn tf-sm" onclick={() => (moving = true)}>Move…</button>
           <!--
             Story 36: the same gesture a ticket's slide-over offers, opening
@@ -2202,7 +2203,7 @@
                 writeFailure = null;
               }}
             >
-              Add a property
+              Add a property…
             </button>
           {/if}
         </section>

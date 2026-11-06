@@ -1424,7 +1424,7 @@ test("the meta line names who created the page: version 1's entry, else the edit
 
 test("Edit section opens the text, saves it through the queue against the version read; a refused one says why", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!;
   expect(box.value).toBe("Ask Mara.");
@@ -1441,7 +1441,7 @@ test("Edit section opens the text, saves it through the queue against the versio
   if (view) unmount(view);
   target.innerHTML = "";
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...RICH, sections: [{ number: 1, text: null, refusal: "table" as const }] })) }));
-  const refused = button("Edit section")!;
+  const refused = button("Edit section…")!;
   expect(refused.disabled).toBe(true);
   expect(refused.title).toBe(
     "This section has a table, code or a macro. knobas edits text-only sections; edit this one in Confluence.",
@@ -1468,12 +1468,12 @@ test("a comment goes through the queue; copy link and the actions a source does 
   await draw(["confluence:2"]);
   expect(button("Comment")).toBeUndefined();
   expect(button("New page here…")).toBeUndefined();
-  expect(button("Edit section")).toBeUndefined();
+  expect(button("Edit section…")).toBeUndefined();
 });
 
 test("Esc closes an open section editor first, and focus goes back to its Edit section (the return contract)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!;
   const heard = vi.fn();
@@ -1483,7 +1483,7 @@ test("Esc closes an open section editor first, and focus goes back to its Edit s
   await settle();
   expect(heard, "the shell's Esc never hears it").not.toHaveBeenCalled();
   expect(target.querySelector("textarea[aria-label='Section text']")).toBeNull();
-  expect(document.activeElement?.textContent).toBe("Edit section");
+  expect(document.activeElement?.textContent).toBe("Edit section…");
 });
 
 test("New page marks its title as needed in words, and says beside the footer what is missing until there is one (the enabled rule)", async () => {
@@ -1544,7 +1544,7 @@ test("the writes the page's credential cannot make are drawn disabled saying why
     ["Comment", "comment", 1],
     ["New page…", "create_page", 1],
     ["New page here…", "create_page", 1],
-    ["Edit section", "update_page", 1],
+    ["Edit section…", "update_page", 1],
   ];
   for (const [label, op, count] of refused) {
     const buttons = drawn(label);
@@ -1577,7 +1577,7 @@ test("the page's writes stay enabled where the source refuses nothing, or cannot
       }),
     }),
   );
-  for (const label of ["Comment", "New page…", "New page here…", "Edit section"]) {
+  for (const label of ["Comment", "New page…", "New page here…", "Edit section…"]) {
     const b = button(label)!;
     expect(b.getAttribute("aria-disabled"), label).toBeNull();
     expect(b.title, label).toBe("");
@@ -1656,7 +1656,7 @@ test("an editor open before the refusal lands saves nothing, its Save section dr
       refusedWrites: vi.fn(() => new Promise<RefusedWrite[]>((resolve) => (answer = resolve))),
     }),
   );
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   expect(target.querySelector("textarea[aria-label='Section text']")).not.toBeNull();
   answer([{ entity: "confluence:2", op: "update_page", reason }]);
@@ -2046,7 +2046,7 @@ function fill(field: HTMLInputElement | HTMLTextAreaElement, value: string) {
 }
 
 async function saveSection(words: string) {
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, words);
   button("Save section")!.click();
@@ -2099,7 +2099,7 @@ test("Save section draws the queued text in place of the old, marked queued, unt
 test("Edit section while a save is queued starts from the queued text", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   await saveSection("Ask Priya.");
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!.value).toBe("Ask Priya.");
 });
@@ -2319,7 +2319,7 @@ test("a sync run's re-read keeps the picked space, the search, an open section e
   select.value = "confluence/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");
@@ -2577,7 +2577,7 @@ test("the refresh event's re-read keeps the picked space, the search, an open se
   select.value = "confluence/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");
@@ -2627,7 +2627,7 @@ test("Refresh ends the header actions, reads the page from its source, then the 
   select.value = "confluence/OPS";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
-  button("Edit section")!.click();
+  button("Edit section…")!.click();
   await settle();
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!, "Half typed");
   fill(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!, "Half said");

@@ -41,6 +41,7 @@
   import { untrack, type Snippet } from "svelte";
 
   import { layers as sharedLayers, type Layer, type Layers } from "../layers.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
 
   let {
     title,
@@ -170,7 +171,7 @@
   <div class="tf-dialog {className}" role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1" bind:this={dialog} {onkeydown}>
     <header class="tf-dhead">
       <div class="tf-dtitle">
-        <h2 id={titleId}>{#if typeof title === "string"}{title}{:else}{@render title()}{/if}</h2>
+        <h2 id={titleId}>{#if typeof title === "string"}<TfKeyed text={title} lead />{:else}{@render title()}{/if}</h2>
         {#if subtitle}<p class="tf-dsub">{subtitle}</p>{/if}
       </div>
       {#snippet close()}
