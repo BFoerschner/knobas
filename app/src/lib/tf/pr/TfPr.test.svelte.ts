@@ -510,7 +510,7 @@ test("a source action draws the dialog its source declares and queues SourceActi
   await settle();
   expect(writes).toEqual([{ SourceAction: { entity: PR, id: "stamp_release", fields: { channel: "stable", note: "for 2.0" } } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-tabs")).toContain("Stamping release Stable, queued");
+  expect(text(".tf-tabs")).toContain("Stamp release Stable, queued");
 });
 
 test("a sent review says its verdict in the chip and under Reviewers (F-251)", async () => {
@@ -1317,11 +1317,150 @@ test("a source action says queued, then sent, and goes on the re-read once sent 
   flushSync();
   dialogButton("Stamp release").click();
   await settle();
-  expect(chips()).toEqual(["Open", "Stamping release, queued"]);
+  expect(chips()).toEqual(["Open", "Stamp release, queued"]);
   sent(80);
-  expect(chips()).toEqual(["Open", "Stamping release, sent"]);
+  expect(chips()).toEqual(["Open", "Stamp release, sent"]);
   await sync.refreshed(PR, 80);
   expect(chips()).toEqual(["Open"]);
+});
+
+// -- What the chip row draws (F-261): pressed on the page, because a list of verbs never held what really feeds it. -----
+
+/** A *Files* read with one open thread, whose source takes a reply and a resolve. */
+function threadView(resolvedBy: string | null = null): SourceView {
+  const file = {
+    path: "src/sepa/retry.rs",
+    old_path: null,
+    change: "modified",
+    additions: 1,
+    deletions: 0,
+    hunks: [{ header: "@@ -21 +21,2 @@", lines: [{ kind: "ctx", old: 21, new: 21, text: "fn retry() {}" }, { kind: "add", old: null, new: 22, text: "// jitter" }] }],
+    truncated: false,
+    threads: [{ side: "new", line: 21, outdated: false, comments: [{ author: "jonas", body: "Should the jitter be bounded?", at: null }], id: "4088", resolved_by: resolvedBy, replies: true }],
+  };
+  return {
+    sections: [
+      {
+        id: "files",
+        title: "Files",
+        count: 1,
+        deferred: false,
+        blocks: [{ type: "diff", files: [file], truncated: false, commentable: { write_op: "submit_review", reply: "reply_to_thread", resolve: "resolve_thread", head: "c90d11" }, gone: [] }],
+      },
+    ],
+    actions: [],
+  } as unknown as SourceView;
+}
+
+const threadButton = (name: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent?.trim() === name)!;
+const chipRow = () => [...target.querySelectorAll(".tf-tabs .tf-chip")].map((c) => c.textContent?.trim());
+
+async function drawThread(resolvedBy: string | null = null) {
+  let id = 0;
+  await draw(
+    [PR, "diff"],
+    ports({
+      pr: prView([COMMENT, EDIT, mergeAction(null)]),
+      entityView: async (_id, section) => (section === "files" ? threadView(resolvedBy) : prView([COMMENT, EDIT, mergeAction(null)])),
+      submitWrite: async (payload) => {
+        writes.push(payload);
+        return { id: ++id } as never;
+      },
+    }),
+    echoFollower().follower,
+  );
+}
+
+async function reply(words: string) {
+  threadButton("Reply…").click();
+  flushSync();
+  const box = target.querySelector<HTMLTextAreaElement>(".tf-thread textarea")!;
+  box.value = words;
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  threadButton("Reply").click();
+  await settle();
+}
+
+test("a reply stays in its thread: none of its words reach the chip row, on any tab (F-261)", async () => {
+  await drawThread();
+  for (const words of ["Fixed it, please look again", "Merge when green", "A".repeat(400)]) {
+    await reply(words);
+    expect(text(".tf-thread")).toContain(words);
+    expect(chipRow()).toEqual([]);
+  }
+  expect(writes.map((write) => Object.keys(write)[0])).toEqual(["ReplyToThread", "ReplyToThread", "ReplyToThread"]);
+  expect(target.querySelector(".tf-prchips")).toBeNull();
+});
+
+test("Resolve and Unresolve stay in their thread: the chip row says neither (F-261)", async () => {
+  await drawThread();
+  threadButton("Resolve").click();
+  await settle();
+  expect(writes).toEqual([{ ResolveThread: { entity: PR, thread: "4088", resolved: true } }]);
+  expect(text(".tf-thread")).toContain("Resolved");
+  expect(chipRow()).toEqual([]);
+  threadButton("Unresolve").click();
+  await settle();
+  expect(writes[1]).toEqual({ ResolveThread: { entity: PR, thread: "4088", resolved: false } });
+  expect(text(".tf-thread")).toContain("Resolve");
+  expect(chipRow()).toEqual([]);
+  expect(text(".tf-tabs")).not.toMatch(/Resolveding|Opening/);
+});
+
+test("a thread's press and a toolbar's together: only the toolbar's has a chip, in the words it was written with (F-261)", async () => {
+  await drawThread();
+  await reply("Fixed it, please look again");
+  button("Edit…")!.click();
+  flushSync();
+  const title = document.querySelector<HTMLInputElement>(".tf-formgrid input[type=text]")!;
+  title.value = "SEPA retry with backoff";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Save changes").click();
+  await settle();
+  expect(chipRow()).toEqual(["Saving edit, queued"]);
+  expect(target.querySelector(".tf-tabs .tf-chip")?.getAttribute("title")).toBe("Saving edit, queued");
+});
+
+test("the same choice pressed twice is two writes, and the page stays drawn (F-261, the key of F-257)", async () => {
+  const label = action("source_action", "Add label", {
+    values: { id: "add_label" },
+    fields: [{ name: "label", label: "Label", kind: { type: "choice", options: [{ value: "backport", label: "backport" }] }, value: null, required: true, placeholder: null }],
+  });
+  let id = 0;
+  await draw(
+    [PR],
+    ports({
+      pr: prView([EDIT, UPDATE, label, mergeAction(null)]),
+      submitWrite: async (payload) => {
+        writes.push(payload);
+        return { id: ++id } as never;
+      },
+    }),
+    echoFollower().follower,
+  );
+  for (const n of [1, 2]) {
+    button("Add label…")!.click();
+    flushSync();
+    document.querySelector<HTMLInputElement>(".tf-formgrid input[value=backport]")!.click();
+    flushSync();
+    dialogButton("Add label").click();
+    await settle();
+    expect(chipRow()).toEqual(Array.from({ length: n }, () => "Add label backport, queued"));
+  }
+  // The app's own write keeps one chip, whatever was chosen in its dialog.
+  for (const n of [1, 2]) {
+    button("Update branch…")!.click();
+    flushSync();
+    document.querySelector<HTMLInputElement>(".tf-formgrid input[value=merge]")!.click();
+    flushSync();
+    dialogButton("Update branch").click();
+    await settle();
+    expect(chipRow().filter((chip) => chip?.startsWith("Updating branch"))).toEqual(["Updating branch, queued"]);
+    expect(writes.length).toBe(2 + n);
+  }
+  expect(text("h1")).toContain("SEPA retry");
 });
 
 // -- Refresh (#2107) -----------------------------------------------------------

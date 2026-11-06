@@ -107,8 +107,10 @@
   import { initials } from "../tickets/tickets";
   import {
     PR_TABS,
+    REQUESTED,
     REVIEW_SENT,
-    acting,
+    SOURCE_ACTION,
+    chipAct,
     commitParts,
     conversationOf,
     conflictsOf,
@@ -419,9 +421,9 @@
     primary?: string;
     /** The dialog's title, where the label and the name don't read as one. */
     heading?: string;
-    /** `update`, `edit`, `close`, `reopen`: the chip is `<verb> queued`. */
+    /** `update`, `edit`, `close`, `reopen`, or a source's label in lower case: how the toast says it with what was chosen. */
     verb: string;
-    /** What keys its button: the verb, or a source action's own id. */
+    /** What keys its button and its echo: the verb, or a source action's own id. */
     key: string;
   }
 
@@ -452,7 +454,7 @@
       const label = actionName(own.label);
       const verb = label.toLowerCase();
       // A source's action that asks for something first says so, as every label does (design system, Labels).
-      list.push({ action: own, label: own.fields.length > 0 && !label.endsWith("…") ? `${label}…` : label, phrase: `${verb} on`, verb, key: `source:${own.values["id"] ?? label}` });
+      list.push({ action: own, label: own.fields.length > 0 && !label.endsWith("…") ? `${label}…` : label, phrase: `${verb} on`, verb, key: `${SOURCE_ACTION}${own.values["id"] ?? label}` });
     }
     return list;
   });
@@ -477,8 +479,6 @@
   let reviewing = $state(false);
   let merging = $state(false);
 
-  /** The echo kind of a review request queued here (#2303), one per reviewer. */
-  const REQUESTED = "reviewer";
   /** *Request…* in the Reviewers panel, where the source offers it to this reader (ADR-0020 rule 4). */
   const request = $derived(offered((a) => a.write_op === "request_reviewers"));
   /** Who *Request…* may ask: the source's choices, less those asked this session. */
@@ -525,8 +525,11 @@
 
   /** The comments this session queued that the conversation did not hold when it was read. */
   const queuedComments = $derived(prId === null ? [] : echoesOn(prId, "comment"));
-  /** The chips of what this session queued here, beside the state: `close queued`, then `close sent`. */
-  const chips = $derived(prId === null ? [] : echoesOn(prId).filter((echo) => echo.kind !== "comment"));
+  /**
+   * The chips of what the toolbar queued this session, by an allow-list (F-261): `chipAct`'s kinds and a review request. `TfPrFiles` queues
+   * a thread's reply and resolve on this pull request too, and they draw in their thread.
+   */
+  const chips = $derived(prId === null ? [] : echoesOn(prId).filter((echo) => echo.kind === REQUESTED || chipAct(echo) !== null));
 
   /**
    * The writes whose landing the view's *State* reads (#1542): each goes once
@@ -583,11 +586,12 @@
     };
   }
 
-  /** Echo a write queued as `verb`, followed under `name`. */
-  function echoChip(id: string, verb: string, name: string, write: QueuedWrite, chose = "") {
-    // What was chosen names it: *Add label backport*, and a second label is a second chip.
-    const text = chose === "" ? verb : `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${chose}`;
-    echoWrite(id, verb, text, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null, ...(chose === "" ? {} : { many: true }) });
+  /** Echo a toolbar write under its `kind` (`close`, or `source:<id>`), followed under `name`. */
+  function echoChip(id: string, kind: string, name: string, write: QueuedWrite, chose = "") {
+    const own = kind.startsWith(SOURCE_ACTION);
+    // A source's action says its button's words, and what was chosen names it: *Add label backport*, and a second label is a second chip.
+    const text = own && chose !== "" ? `${name} ${chose}` : own ? name : kind;
+    echoWrite(id, kind, text, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null, ...(own && chose !== "" ? { many: true } : {}) });
   }
 
   /** Echo a review queued with `verdict`: its chip and its row under Reviewers say which (F-251). */
@@ -611,19 +615,9 @@
     reopen: ["merge", ...STATE_CHANGES],
   };
 
-  /** The act a write's chip names, in one grammar: the act in -ing, what it acts on, then the state. *Close sent* reads as if something was sent to close (F-236). */
-  const ACTS: Record<string, string> = {
-    merge: "Merging",
-    close: "Closing",
-    reopen: "Reopening",
-    update: "Updating branch",
-    edit: "Saving edit",
-  };
-
-  /** The chip an echo draws, which is also what holds a button back: the act, or a source's own action as its words and what was chosen, and where its write is (#2103). */
+  /** The chip an echo draws, which is also what holds a button back: what it names, then where its write is (#2103). */
   function chipOf(echo: Echo): string {
-    const act = echo.kind === "review" ? REVIEW_SENT[echo.text as Verdict].act : (ACTS[echo.kind] ?? acting(echo.text));
-    return `${act}, ${echo.state}`;
+    return `${chipAct(echo)}, ${echo.state}`;
   }
 
   /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
@@ -789,9 +783,10 @@
         <!-- Under the buttons they answer, and on a row whose height nothing here changes: in the meta line a chip wrapped it, and in the toolbar
              *Submit review…* took the title's room, and either moved the tabs under a reader in the middle of a review (F-206, F-254). -->
         <span class="tf-prchips">
-          {#each chips as echo (`${echo.kind}\n${echo.text}`)}
+          <!-- Keyed on the write: the same words pressed twice are two writes, and a shared key would blank the page. Each keeps its whole words in its title, as a long one ends in an ellipsis rather than scroll the tabs (F-261). -->
+          {#each chips as echo (echo.write ?? `${echo.kind}\n${echo.text}`)}
             <!-- A review request names the act and the login as written: a state word would turn it into *Sven sent*. -->
-            {#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<span class="tf-chip tf-info">{chipOf(echo)}</span>{/if}
+            {#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<span class="tf-chip tf-info" title={chipOf(echo)}>{chipOf(echo)}</span>{/if}
           {/each}
           {#if waiting > 0 && takesReview}
             <button
@@ -1117,11 +1112,11 @@
     action={write.action}
     entityId={prId}
     title={write.heading ?? (/^add\b/i.test(write.label) ? `${plainLabel(write.label)} to ${name}` : `${plainLabel(write.label)} ${name}`)}
-    what={(chose) => (chose === "" || write.key.startsWith("source:") === false ? `${write.phrase} ${name}` : `${write.verb} ${chose} on ${name}`)}
+    what={(chose) => (chose === "" || !write.key.startsWith(SOURCE_ACTION) ? `${write.phrase} ${name}` : `${write.verb} ${chose} on ${name}`)}
     primary={write.primary ?? null}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(queued, chose) => echoChip(prId, write.verb, plainLabel(write.label), queued, chose)}
+    onqueued={(queued, chose) => echoChip(prId, write.key, plainLabel(write.label), queued, chose)}
     onclose={() => (shown = null)}
   />
 {/if}

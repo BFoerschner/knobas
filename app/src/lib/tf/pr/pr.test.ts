@@ -8,7 +8,7 @@ import { expect, test } from "vitest";
 import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
 import { stampLabel } from "../../time/format";
 import {
-  acting,
+  chipAct,
   checkReading,
   checksLine,
   conversationOf,
@@ -408,11 +408,13 @@ test("a check that counts its tests reads as Builds says it, failed first, and t
   expect(checkReading(row(null, "7 min ago"))).toBe("7 min ago");
 });
 
-test("a write's chip says the act in -ing, then what it acts on (F-236)", () => {
-  expect(acting("Add label backport")).toBe("Adding label backport");
-  expect(acting("stamp release")).toBe("Stamping release");
-  expect(acting("Rebase")).toBe("Rebasing");
-  expect(acting("Pin")).toBe("Pinning");
-  expect(acting("Request")).toBe("Requesting");
-  expect(acting("Agree")).toBe("Agreeing");
+test("a chip's words are the app's own or a source's as written; nothing else reaches the row (F-261, F-236)", () => {
+  expect(chipAct({ kind: "merge", text: "merge" })).toBe("Merging");
+  expect(chipAct({ kind: "update", text: "update" })).toBe("Updating branch");
+  expect(chipAct({ kind: "review", text: "request_changes" })).toBe("Requesting changes");
+  // A source's action keeps its button's words, whatever they are.
+  for (const words of ["Add label backport", "Merge when green", "stamp release", "Pin"]) expect(chipAct({ kind: "source:x", text: words })).toBe(words);
+  // A thread's echoes, a comment, and anything a later page queues on a pull request stay out until they are listed.
+  for (const kind of ["reply\n4088", "resolve\n4088", "comment", "constructor", ""]) expect(chipAct({ kind, text: "Fixed it" })).toBeNull();
+  expect(chipAct({ kind: "review", text: "resolved" })).toBeNull();
 });

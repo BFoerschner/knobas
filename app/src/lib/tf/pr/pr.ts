@@ -392,12 +392,28 @@ export const REVIEW_SENT: Record<Verdict, { act: string; state: string }> = {
   comment: { act: "Commenting", state: "Commented" },
 };
 
-/** A write's words as its chip says them: the act in -ing, then what it acts on. *Add label backport* is *Adding label backport*. */
-export function acting(words: string): string {
-  const [first = "", ...rest] = words.split(" ");
-  const word = first.toLowerCase();
-  const stem = word.endsWith("e") && !word.endsWith("ee") ? word.slice(0, -1) : /^[^aeiou]*[aeiou][^aeiouwxy]$/.test(word) ? `${word}${word.at(-1)}` : word;
-  return [`${stem.charAt(0).toUpperCase()}${stem.slice(1)}ing`, ...rest].join(" ");
+/** The echo kind of a review request queued from the rail (#2303), one per reviewer. */
+export const REQUESTED = "reviewer";
+/** How the echo kind of a source's own action starts: `source:<its id>`. Nothing the app queues itself starts so. */
+export const SOURCE_ACTION = "source:";
+/** The app's own toolbar writes, as their chips say them: words the app wrote, one by one. *Close sent* reads as if something was sent to close (F-236). */
+const ACTS: Readonly<Record<string, string>> = {
+  merge: "Merging",
+  close: "Closing",
+  reopen: "Reopening",
+  update: "Updating branch",
+  edit: "Saving edit",
+};
+
+/**
+ * What a write's chip names, or `null` for an echo the chip row doesn't draw. This is an allow-list of what `TfPr`'s toolbar queues:
+ * a thread's reply and resolve draw in their thread, and a comment in the conversation (F-261). No word here is inflected or
+ * otherwise rewritten, because an echo's `text` can be a reader's reply or a source's label. A source's own action keeps its button's words.
+ */
+export function chipAct(echo: { kind: string; text: string }): string | null {
+  if (echo.kind === "review") return REVIEW_SENT[echo.text as Verdict]?.act ?? null;
+  if (echo.kind.startsWith(SOURCE_ACTION)) return echo.text;
+  return Object.hasOwn(ACTS, echo.kind) ? (ACTS[echo.kind] ?? null) : null;
 }
 
 /** One choice of *Submit review* (R-8.18): its verdict, its words, and the source's action that sends it. */
