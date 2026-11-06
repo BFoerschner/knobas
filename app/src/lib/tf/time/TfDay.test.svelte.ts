@@ -648,18 +648,46 @@ test("without a current job an open stretch offers Assign… only", async () => 
   expect(row("open").textContent).not.toContain("Add to");
 });
 
-test("Dismiss on an offered block dismisses it, says knobas will not offer it again, and the day re-reads", async () => {
-  const sent = render();
-  await settle();
-  expect(button(row("offered"), "Dismiss").className).toContain("tf-ghost");
-  button(row("offered"), "Dismiss").click();
-  await settle();
-  expect(sent.dismissals).toEqual([2]);
-  expect(sent.deletes).toEqual([]);
-  expect(toasts.items.at(-1)?.text).toBe("Dismissed. knobas will not offer it again.");
-  expect(rows()).not.toContain("offered");
-  // Only an offer has it.
-  expect(() => button(row("unlogged"), "Dismiss")).toThrow();
+test("Dismiss hides the offer at once and sends when the toast's Undo has had its time, and the day re-reads (F-339)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render();
+    await settle();
+    expect(button(row("offered"), "Dismiss").className).toContain("tf-ghost");
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    expect(sent.dismissals).toEqual([]);
+    const toast = toasts.items.at(-1)!;
+    expect([toast.text, toast.action?.label]).toEqual(["Dismissed. knobas will not offer it again.", "Undo"]);
+    expect(rows()).not.toContain("offered");
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(sent.dismissals).toEqual([2]);
+    expect(sent.deletes).toEqual([]);
+    expect(rows()).not.toContain("offered");
+    // Only an offer has it.
+    expect(() => button(row("unlogged"), "Dismiss")).toThrow();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Undo on Dismiss puts the offer back and nothing is ever sent (F-339)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render();
+    await settle();
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    toasts.items.at(-1)!.action!.run();
+    await settle();
+    expect(rows()).toContain("offered");
+    vi.advanceTimersByTime(60_000);
+    await settle();
+    expect(sent.dismissals).toEqual([]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 // #1108: job, its pull request (confirmed link to the job), job again.

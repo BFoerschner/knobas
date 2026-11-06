@@ -382,7 +382,9 @@
     try {
       const write = await ports.submitWrite(payload);
       echoRun(pipeline, write, runBranch(payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline), { write });
+      // Pressed on the Runs tab the row is there already; from another tab, sent, the toast leads to it (F-350).
+      const where = tab === "runs" ? undefined : { label: "Show in runs", run: () => (location.hash = tabHash(id, "runs")) };
+      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline), { write, where });
       return write.id;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });

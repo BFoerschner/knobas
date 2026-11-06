@@ -419,7 +419,8 @@
       const write = await ports.submitWrite(request.payload);
       id = write.id;
       echoRun(pipeline, write, runBranch(request.payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline), { write });
+      // Once sent, the way to the run it started: the page's own runs, where it is drawn (F-338, F-350).
+      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline), { write, where: { label: "Show in runs", run: () => (location.hash = pipelineHash(pipelineId)) } });
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
       return null;

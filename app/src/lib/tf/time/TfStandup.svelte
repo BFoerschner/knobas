@@ -456,10 +456,12 @@
       failure = null;
       const source = target === null ? null : { id: target.stored.source_id, display_name: target.reading.split(" › ")[0] ?? "" };
       const write = protocol?.again ?? null;
-      if (write === null) push({ text: "Sent: the page has what the note says now." });
+      const page = pageId;
+      const where = page === null ? undefined : { label: "Open the page", run: () => (location.hash = `#/page/${encodeURIComponent(page)}`) };
+      if (write === null) push({ text: "Sent: publish the protocol again.", ...(where === undefined ? {} : { action: where }) });
       // Already held or refused, the line under the heading says why.
       else if (write.state === "pending") {
-        toastQueued("publish the protocol again", source, { write: { id: write.write_id, state: write.state }, follower: io.follower });
+        toastQueued("publish the protocol again", source, { write: { id: write.write_id, state: write.state }, follower: io.follower, where });
         followAgain();
       }
     } catch (cause) {

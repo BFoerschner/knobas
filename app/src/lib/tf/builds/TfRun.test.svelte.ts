@@ -822,6 +822,18 @@ test("Re-run holds as what its write is doing, and a second press queues nothing
   expect(drawn.writes).toHaveLength(1);
 });
 
+test("Re-run's toast, once sent, leads to the runs (F-338, F-350)", async () => {
+  draw("teamcity:build:1187", undefined, { submitWrite: () => Promise.resolve({ id: 9, state: "sent" } as QueuedWrite) });
+  await settle();
+  button("Re-run")!.click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toMatch(/^Sent: /);
+  expect(toast.action?.label).toBe("Show in runs");
+  toast.action!.run();
+  expect(location.hash).toBe(`#/builds/${encodeURIComponent(PIPE)}`);
+});
+
 test("Re-run leaves the run queued on its pipeline, from the newest run held, and draws no queued row here", async () => {
   draw();
   await settle();

@@ -39,7 +39,7 @@
   import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
   import type { SessionPorts } from "../../launcher/session.svelte";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
-  import { push } from "../../shell/toasts.svelte";
+  import { heldWrite, push, undoable } from "../../shell/toasts.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
@@ -328,19 +328,8 @@
     }
     dialog = null;
     refusal = null;
-    push({
-      text: said,
-      ...(undo === undefined
-        ? {}
-        : {
-            action: {
-              label: "Undo",
-              run: () => {
-                undo(done).then(reread, (error: unknown) => push({ text: ipcErrorMessage(error), tone: "err" }));
-              },
-            },
-          }),
-    });
+    if (undo === undefined) push({ text: said });
+    else undoable(said, () => void undo(done).then(reread, (error: unknown) => push({ text: ipcErrorMessage(error), tone: "err" })));
     await reread();
     return true;
   }
@@ -445,50 +434,50 @@
     );
   }
 
+  /**
+   * A write with no reverse command (`dismiss_block`) or one a block's marks can't come back from (`delete_block`): the
+   * block leaves the day at once and the write is held for the toast's life, then sent; *Undo* cancels a write that never
+   * happened, so the block keeps its id, its context and its worklog mark (the #835 pattern, F-339). The toast outlives
+   * the view, so leaving the day loses nothing; closing the window inside those seconds does, and the block is simply
+   * there next time.
+   */
+  function holdBlock(id: number, text: string, send: () => Promise<void>) {
+    held = [...held, { id, sent: false }];
+    const release = () => (held = held.filter((hold) => hold.id !== id));
+    heldWrite(
+      text,
+      () => {
+        void send()
+          .then(
+            () => (held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold))),
+            (error: unknown) => {
+              release();
+              push({ text: ipcErrorMessage(error), tone: "err" });
+            },
+          )
+          .then(reread);
+      },
+      release,
+      { ms: UNDO_MS },
+    );
+  }
+
   /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
   function dismiss(row: DayRow) {
     const block = row.block;
     if (block === null) return;
-    void write(() => io.dismissBlock(block.block.id), "Dismissed. knobas will not offer it again.");
+    const id = block.block.id;
+    holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id));
   }
 
-  /**
-   * *Delete block* (#1429): the block leaves the day at once and the delete is
-   * held for the toast's life, then sent; *Undo* cancels a write that never
-   * happened, so the block keeps its id, its context and its worklog mark (the
-   * #835 pattern). The timer outlives the view, so leaving the day does not lose
-   * the delete; closing the window inside those seconds does, and the block is
-   * simply there next time.
-   */
+  /** *Delete block* (#1429). */
   function remove() {
     const current = dialog;
     if (current === null || current.mode !== "edit" || current.row.block === null) return;
     const id = current.row.block.block.id;
     dialog = null;
     refusal = null;
-    held = [...held, { id, sent: false }];
-    const release = () => (held = held.filter((hold) => hold.id !== id));
-    const pending = setTimeout(async () => {
-      try {
-        await io.deleteBlock(id);
-        held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold));
-      } catch (error) {
-        release();
-        push({ text: ipcErrorMessage(error), tone: "err" });
-      }
-      await reread();
-    }, UNDO_MS);
-    push({
-      text: "Deleted the block",
-      ms: UNDO_MS,
-      action: {
-        label: "Undo",
-        run: () => {
-          clearTimeout(pending);
-          release();
-        },
-      },
-    });
+    holdBlock(id, "Deleted the block", () => io.deleteBlock(id));
   }
 
   function open(next: NonNullable<typeof dialog>) {
