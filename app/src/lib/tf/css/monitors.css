@@ -45,7 +45,12 @@
 }
 /* The figures' columns go, and the figures stay: under the bars, in the row. */
 @media (max-width: 1040px) {
-  .tf-mon .tf-num, .tf-monc-num { display: none; }
+  /* Narrowed to nothing, not `display: none`: a row's `colspan="7"` (the fold, a failure, a gap) would make two new columns of the
+     rest of the table's width, and with a hidden monitor the table stopped short of its box. */
+  .tf-monc-num { width: 0; }
+  .tf-mon :is(th, td).tf-num { padding: 0; overflow: hidden; }
+  .tf-mon th.tf-num { visibility: hidden; }
+  .tf-mon td.tf-num > * { display: none; }
   .tf-mon-figs { display: block; margin-top: 2px; }
   /* Now the last column: wide enough for the row's actions, which take the figures' line on hover and leave the bars
      readable, so the bar under the pointer keeps its title. Lowered from the row's middle by what puts the group's top at the figures' line. */

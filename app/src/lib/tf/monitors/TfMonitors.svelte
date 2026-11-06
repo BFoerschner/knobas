@@ -836,8 +836,8 @@
                   <td><div class="tf-mon-state"><TfStateChip text={chip.label} />{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
                   <td>{#each was.assets as asset (asset.id)}<div><span class="tf-mon-asset">{asset.name}</span>{" "}<span class="tf-mon-type">{asset.type_label}</span></div>{/each}</td>
                   <td><div class="tf-mon-24"><span class="tf-mon-figs">{responseText(was.response_time_ms)}, {uptimeText(was)}</span></div></td>
-                  <td class="tf-num">{responseText(was.response_time_ms)}</td>
-                  <td class="tf-num">{uptimeText(was)}</td>
+                  <td class="tf-num"><span>{responseText(was.response_time_ms)}</span></td>
+                  <td class="tf-num"><span>{uptimeText(was)}</span></td>
                   <td></td>
                 {:else}<td colspan="7"></td>{/if}
               </tr>
