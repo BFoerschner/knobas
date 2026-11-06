@@ -175,7 +175,7 @@
           <button type="button" class="tf-fold" aria-expanded={isOpen} onclick={() => toggle(entry.path)}
             >{entry.name}/</button
           >
-          <span class="tf-sz">{filesText(entry) ?? ""}</span>
+          <span class="tf-sz tf-rowval">{filesText(entry) ?? ""}</span>
           <span class="tf-rowend"><span class="tf-rowacts"
             ><button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => download({ kind: "folder", path: entry.path }, `${entry.name}/`)}
               >Download folder</button
@@ -186,7 +186,7 @@
       {:else}
         <div class={`tf-arow tf-rowhost ${indent}`}>
           <button type="button" class="tf-nm tf-aopen" title="Open {entry.name}" onclick={() => showPreview(entry)}>{entry.name}</button>
-          <span class="tf-sz">{entry.size === null ? "" : sizeText(entry.size)}</span>
+          <span class="tf-sz tf-rowval">{entry.size === null ? "" : sizeText(entry.size)}</span>
           <span class="tf-rowend"><span class="tf-rowacts">
             <button type="button" class="tf-btn tf-sm" onclick={() => download({ kind: "file", path: entry.path }, entry.name)}>Download</button>
           </span></span>

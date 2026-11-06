@@ -202,7 +202,7 @@
               >{:else}<Marked text={row.chip ?? ""} typed={filter.text} />{/if}</td
           >
           <td class:tf-dim={row.chip === null}><Marked text={row.title} typed={filter.text} /></td>
-          <td class="tf-dim tf-nowrap"><Marked text={row.meta ?? ""} typed={filter.text} /></td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval"><Marked text={row.meta ?? ""} typed={filter.text} /></span></td>
           <td class="tf-ropen"
             >{#if shaOfCommit(row.entity_id) !== null}<span class="tf-rowend"><span class="tf-rowacts"><TfOpenObject
                 entityId={repoId}

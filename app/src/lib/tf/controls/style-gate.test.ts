@@ -26,6 +26,9 @@
  * - (i) a pill toggle is drawn outside `.tf-fchips`: a class round enough to be a pill (`border-radius` of 9 px or more)
  *   that also answers `aria-pressed`;
  * - (j) a grid's label column is a literal `132px`: it is `var(--tf-label)`;
+ * - (k) `*` is the subject of a rule that sets a width, a height, `overflow` or `position`: a shared layout rule names
+ *   what it lays out;
+ * - (l) `role="menu"` appears outside `TfMenu.svelte`: a menu is `TfMenu`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -51,7 +54,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j";
+type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j" | "k" | "l";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -284,6 +287,11 @@ function markupClasses(text: string): Set<string> {
   return names;
 }
 
+/** The one component that may draw a `role="menu"` (rule l). */
+const MENU_COMPONENT = "lib/tf/TfMenu.svelte";
+/** What a shared layout rule may not set on `*` (rule k). */
+const LAYOUT = /^(?:(?:min-|max-)?(?:width|height)|overflow(?:-[xy])?|position)$/;
+
 /** Every breach of rules (a), (b) and (c) under `root`, one per (rule, file, key). */
 function scan(root: string): Violation[] {
   const found = new Map<string, Violation>();
@@ -301,6 +309,10 @@ function scan(root: string): Violation[] {
         }
         if (decls.some(([prop, value]) => prop === "grid-template-columns" && /(?<![\d.])132px/.test(value))) {
           add({ rule: "j", file, key: selector, detail: "sets a literal 132px label column; use `var(--tf-label)`" });
+        }
+        const laidOut = decls.filter(([prop]) => LAYOUT.test(prop)).map(([prop]) => prop);
+        if (file !== OLD_SHEET && laidOut.length > 0 && /^\*(?![\w-])/.test(compounds(selector).at(-1) ?? "")) {
+          add({ rule: "k", file, key: selector, detail: `sets ${laidOut.join(", ")} on \`*\`; a shared layout rule names what it lays out` });
         }
         const disabled = DISABLED.test(compounds(selector).at(-1) ?? "");
         const sizing = decls.filter(([prop]) => SIZING.test(prop) || (disabled && DISABLED_LOOK.test(prop))).map(([prop]) => prop);
@@ -335,6 +347,10 @@ function scan(root: string): Violation[] {
       for (const name of UNPORTED.filter((n) => used.has(n))) {
         add({ rule: "b", file, key: name, detail: `uses the unported button class ${name}` });
       }
+      const markup = text.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/g, "").replace(/<!--[\s\S]*?-->/g, "");
+      if (file !== MENU_COMPONENT && /\brole=["']menu["']/.test(markup)) {
+        add({ rule: "l", file, key: 'role="menu"', detail: "draws a menu by hand; a menu is `TfMenu`, which draws in the float host" });
+      }
     }
   }
   return [...found.values()];
@@ -368,8 +384,8 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
     if (!/^\d+\.txt$/.test(entry.list)) {
       failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
-    } else if (!/^[abcfghij]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
-      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g|h|i|j> <file> <selector or class>  <reason>\``);
+    } else if (!/^[abcfghijkl]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g|h|i|j|k|l> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
     } else if (listed.has(id)) {
@@ -423,6 +439,41 @@ function planted(sources: Record<string, string>, lists: Record<string, string> 
     rmSync(dir, { recursive: true, force: true });
   }
 }
+
+test("(k) a rule that lays out `*` fails, and one that names its subject or sets something else passes", () => {
+  for (const css of [
+    ".tf-main > .tf-kept > * { width: 100vw; }",
+    ".tf-x > * { overflow: hidden; }",
+    "@media (max-width: 900px) { .tf-x * { position: absolute; } }",
+    ".tf-x > *:first-child { min-height: 10px; }",
+  ]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(k\) lib\/tf\/css\/view\.css /);
+  }
+  expect(
+    planted({
+      "lib/tf/css/view.css": [
+        ".tf-keptpage { width: 100vw; }",
+        ".tf-x > * { flex: none; }",
+        ".tf-x > * + * { margin-top: 4px; }",
+        ".tf-x > .tf-y { overflow: hidden; }",
+      ].join("\n"),
+    }),
+  ).toEqual([]);
+});
+
+test("(l) a `role=\"menu\"` outside `TfMenu` fails; `TfMenu`'s own and a word about one in a comment pass", () => {
+  const failures = planted({ "lib/tf/x/TfX.svelte": '<div class="tf-menu" role="menu"></div>' });
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatch(/^\(l\) lib\/tf\/x\/TfX\.svelte /);
+  expect(
+    planted({
+      [MENU_COMPONENT]: '<div class="tf-menu" role="menu"></div>',
+      "lib/tf/x/TfX.svelte": '<!-- a `role="menu"` is TfMenu -->\n<button role="menuitem">x</button>',
+    }),
+  ).toEqual([]);
+});
 
 test("(a) a control sized outside the controls stylesheet fails, and the same rule in it passes", () => {
   for (const css of [

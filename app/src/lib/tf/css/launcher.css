@@ -134,7 +134,7 @@
   display: grid; grid-template-columns: 28px 118px minmax(0, 1fr); gap: 12px; align-items: center; width: 100%;
   text-align: left; min-height: 38px; padding: 6px 18px; font-size: var(--t-md); color: var(--ink);
 }
-.tf-ln-res > * { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tf-ln-res > :is(.tf-ln-mg, .tf-ln-k, .tf-ln-t, .tf-ln-chord) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-ln-mg {
   display: inline-flex; align-items: center; justify-content: center; height: 20px; border: 1px solid var(--rule);
   border-radius: 3px; font-size: var(--t-2xs); font-weight: 600; letter-spacing: .04em; color: var(--ink-2); flex: none;

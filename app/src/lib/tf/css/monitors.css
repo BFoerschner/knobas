@@ -10,9 +10,9 @@
 .tf-monc-bars { width: 170px; }
 .tf-monc-num { width: 92px; }
 .tf-monc-watch { width: 17%; }
-/* The actions hang over the row's end on hover (Motion), so this column holds nothing at rest but a row's *Ack*. */
-.tf-monc-acts { width: 20px; }
-.tf-mon:has(.tf-mon-ack) .tf-monc-acts { width: 72px; }
+/* Fixed whether or not a row holds *Ack*, so the columns do not move as a filter hides the last one down. The row's other
+   actions stand in place of its figures on hover (Motion), or of its bars where the figures have left their columns. */
+.tf-monc-acts { width: 72px; }
 /* The chip holds the word and the time is plain text: beside it here, under it where the column narrows. Neither is cut. */
 .tf-mon-state { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; }
 .tf-mon-since { font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
@@ -39,7 +39,7 @@
   .tf-mbar-axis { width: 95px; }
   .tf-monc-state { width: 160px; }
   .tf-monc-bars { width: 122px; }
-  .tf-monc-num { width: 76px; }
+  .tf-monc-num { width: 90px; }
   .tf-monc-watch { width: 24%; }
   .tf-mon-state { flex-direction: column; align-items: flex-start; }
 }
@@ -47,6 +47,9 @@
 @media (max-width: 1040px) {
   .tf-mon .tf-num, .tf-monc-num { display: none; }
   .tf-mon-figs { display: block; margin-top: 2px; }
+  /* Now the last column: wide enough for the row's actions, which replace the bars and figures on hover. */
+  .tf-monc-bars { width: 190px; }
+  .tf-mon tr:is(:hover, :focus-within) .tf-mon-24, .tf-mon tr:has(.tf-rowacts [aria-expanded="true"]) .tf-mon-24 { visibility: hidden; }
 }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */

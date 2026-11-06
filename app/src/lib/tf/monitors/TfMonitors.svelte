@@ -682,7 +682,7 @@
               <td><a href={addressOf(asset.id)}>{asset.name}</a></td>
               <td>{asset.type_label}</td>
               <td>{asset.environment ?? ""}</td>
-              <td>{asset.owner ?? ""}</td>
+              <td><span class="tf-rowval">{asset.owner ?? ""}</span></td>
               <td class="tf-mon-acts">
                 {#if word !== null}
                   <TfStateChip text="Monitor {word}" tone="info" title={asset.monitor_on_its_way === null ? undefined : queuedTitle(asset.monitor_on_its_way)} />
@@ -703,9 +703,9 @@
     {#if entries.length > 0}
       <table class="tf-tbl tf-mon">
         <!-- Fixed columns: an action taken on one row, or a filter, moves nothing in the others. -->
-        <colgroup><col class="tf-monc-name" /><col class="tf-monc-state" /><col class="tf-monc-bars" /><col class="tf-monc-num" /><col class="tf-monc-num" /><col class="tf-monc-watch" /><col class="tf-monc-acts" /></colgroup>
+        <colgroup><col class="tf-monc-name" /><col class="tf-monc-state" /><col class="tf-monc-watch" /><col class="tf-monc-bars" /><col class="tf-monc-num" /><col class="tf-monc-num" /><col class="tf-monc-acts" /></colgroup>
         <thead>
-          <tr><th>Monitor</th><th>State</th><th>Last 24 h<span class="tf-mbar-axis" aria-hidden="true"><span>24 h ago</span><span>now</span></span></th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th>Watches</th><th><span class="tf-sr">Actions</span></th></tr>
+          <tr><th>Monitor</th><th>State</th><th>Watches</th><th>Last 24 h<span class="tf-mbar-axis" aria-hidden="true"><span>24 h ago</span><span>now</span></span></th><th class="tf-num">Response</th><th class="tf-num">30 days</th><th><span class="tf-sr">Actions</span></th></tr>
         </thead>
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
@@ -737,15 +737,7 @@
               <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
                 <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
-                <td>
-                  <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
-                    {#each barsOf(segments(row, now.getTime()), hourlyBars.current) as bar (bar.at)}<i class="tf-seg-{bar.state}" title={bar.title}></i>{/each}
-                  </span>
-                  <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
-                  <span class="tf-mon-figs" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
-                </td>
-                <td class="tf-num">{responseText(row.response_time_ms)}</td>
-                <td class="tf-num">{uptimeText(row)}</td>
+                <!-- Before the bars and figures, not after them: the row's actions stand in the last column's place on hover, and this column's links have to stay in reach. -->
                 <td>
                   {#each row.assets as asset (asset.id)}
                     <div><a class="tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
@@ -753,6 +745,17 @@
                     <span class="tf-dim">no asset</span>
                   {/each}
                 </td>
+                <td>
+                  <div class="tf-mon-24">
+                    <span class="tf-mbar" role="img" aria-label="Last 24 hours of {row.name}">
+                      {#each barsOf(segments(row, now.getTime()), hourlyBars.current) as bar (bar.at)}<i class="tf-seg-{bar.state}" title={bar.title}></i>{/each}
+                    </span>
+                    <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
+                    <span class="tf-mon-figs" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
+                  </div>
+                </td>
+                <td class="tf-num"><span class="tf-rowval">{responseText(row.response_time_ms)}</span></td>
+                <td class="tf-num"><span class="tf-rowval">{uptimeText(row)}</span></td>
                 <td class="tf-mon-acts"><div class="tf-rowend">
                   {#if down}
                     <button type="button" class="tf-btn tf-sm tf-mon-ack" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}

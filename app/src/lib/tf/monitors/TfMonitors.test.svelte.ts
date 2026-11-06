@@ -231,8 +231,8 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   ]);
   const [, , , up] = rows();
   const cells = [...up!.querySelectorAll("td")].map(text);
-  // The second is the figures under the bars, which CSS draws only where their columns have gone.
-  expect(cells.slice(1, 6)).toEqual(["Up", "140 ms, 99.98 %", "140 ms", "99.98 %", "payouts Service"]);
+  // The third is the figures under the bars, which CSS draws only where their columns have gone.
+  expect(cells.slice(1, 6)).toEqual(["Up", "payouts Service", "140 ms, 99.98 %", "140 ms", "99.98 %"]);
   expect(up!.querySelectorAll(".tf-mbar i")).toHaveLength(48);
   expect(up!.querySelector<HTMLAnchorElement>("td a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
 });

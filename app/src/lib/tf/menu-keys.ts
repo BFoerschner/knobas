@@ -1,11 +1,15 @@
+/** What a menu's keys move between: an item that can be pressed, of any of the three roles. */
+export const MENU_ITEMS = '[role^="menuitem"]:not([disabled]):not([aria-disabled="true"])';
+
 /**
- * The keys of a `role="menu"` (design system, Controls): ↑ and ↓ move between its items, Home and End go to its ends,
+ * The keys of a `role="menu"` (design system, *Layers*): ↑ and ↓ move between its items, Home and End go to its ends,
  * and it closes when focus leaves it. A press never scrolls the page behind it. Attach it to the menu; `close` is the
- * menu's own close, which is told to keep focus where it went.
+ * menu's own close, which is told to keep focus where it went. Focus going to `opener` is no leaving: the press that
+ * moved it there is about to answer, and closing here would have that press open the menu again.
  */
-export function menuKeys(close: () => void) {
+export function menuKeys(close: () => void, opener: () => HTMLElement | null = () => null) {
   return (menu: HTMLElement) => {
-    const items = () => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])')];
+    const items = () => [...menu.querySelectorAll<HTMLElement>(MENU_ITEMS)];
     function onkey(event: KeyboardEvent) {
       const all = items();
       if (all.length === 0) return;
@@ -23,7 +27,7 @@ export function menuKeys(close: () => void) {
     function onleave(event: FocusEvent) {
       const next = event.relatedTarget;
       // Focus going nowhere is a click on nothing, which the menu's own outside-click answers.
-      if (next instanceof Node && !menu.contains(next)) close();
+      if (next instanceof Node && !menu.contains(next) && !opener()?.contains(next)) close();
     }
     menu.addEventListener("keydown", onkey);
     menu.addEventListener("focusout", onleave);

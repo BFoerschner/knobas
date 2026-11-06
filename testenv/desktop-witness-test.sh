@@ -729,7 +729,7 @@ pin_label $tf/openin/TfOpenObject.svelte '}}>Open in…<svg class="tf-caret"' \
     "the pull request's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenObject.svelte '<b>Diff tool</b>' \
     "the menu's Diff tool item still starts Diff tool"
-pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono">{page}</span>' \
+pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono" title={page}>{page}</span>' \
     "the menu's Browser item still starts Browser and names the page"
 pin_label $tf/pr/TfPr.svelte 'header.base !== null && header.head !== null' \
     "the pull request header draws Open in… once the source view names both branches"

@@ -695,7 +695,7 @@
                   waiting
                 {/if}
               </td>
-              <td class="tf-nowrap tf-dim tf-num tf-run-at">{run.started !== null ? shortTime(run.started) : ""}</td>
+              <td class="tf-nowrap tf-dim tf-num tf-run-at"><span class="tf-rowval">{run.started !== null ? shortTime(run.started) : ""}</span></td>
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
                   <span class="tf-rowend"><span class="tf-rowacts">

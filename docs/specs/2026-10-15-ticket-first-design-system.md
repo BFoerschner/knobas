@@ -160,7 +160,7 @@ No fill and `--muted` text: a disabled primary is on `--sheet-2` with a `--rule`
 
 **The enabled rule.** A primary is disabled until there is something to do (a pattern with neither a project nor a name, a move to where the asset already is, a link set with no name or nothing ticked), and a line says what is missing: a tooltip alone is not enough. The line is one markup, `<p class="tf-dwhy" role="status">`, in a dialog's footer just left of its buttons, and under the primary on a form that is a page (Compare). Needed fields are marked in words, a `.tf-req` *required* in the label, and nothing is preselected among things the reader chooses between: *Apply a link set…* picks nothing until a row is picked or a filter is typed, when the top match is picked so `Enter` applies it (#2289). A list with one choice has nothing to choose, so that choice is taken. A dialog that saves what is already there starts with it (Save link set's ticks and its rule, R-7.9).
 
-**The removal rule.** A press that removes something either confirms in a dialog or acts at once with *Undo* on its toast. Repeats collapse into one toast (`tally`, in `shell/toasts.svelte.ts`), whose *Undo* puts back all of them: a set editor's members, patterns and rules, a row of a settings list, the Inbox's answers. What removes files or can't be rebuilt confirms: a pull request's worktree does, and so does a route's *Delete route…*. *Undo* puts back what was there or it is not offered: the asset pane's *Unlink* has it for a link drawn by hand, and *Unlink…* confirms for a link from anywhere else, because `create_link` records whatever it draws as drawn by hand. The Inbox's *Snooze* and *Done* follow it, undoing by a snooze until now, which clears both in the backend. *Ack* has no way back: its toast says the alert stays open.
+**The removal rule.** A press that removes something either confirms in a dialog or acts at once with *Undo* on its toast. Repeats collapse into one toast (`tally`, in `shell/toasts.svelte.ts`), whose *Undo* puts back all of them: a set editor's members, patterns and rules, a row of a settings list, the Inbox's answers. What removes files or can't be rebuilt confirms: a pull request's worktree does, and so does a route's *Delete route…*. *Undo* puts back what was there or it is not offered: the asset pane's and the Connections drawer's *Unlink* have it for a link drawn by hand, and *Unlink…* confirms for a link from anywhere else, because `create_link` records whatever it draws as drawn by hand. The Inbox's *Snooze* and *Done* follow it, undoing by a snooze until now, which clears both in the backend. *Ack* has no way back: its toast says the alert stays open.
 
 ### Dialogs
 
@@ -174,6 +174,14 @@ One grid, `.tf-formgrid`, in a dialog or on a page. A short control has its labe
 
 A list of options (`.tf-picklist`) rests unfilled, and fills on hover, on focus and under the arrow keys. Nothing looks chosen until it is: the picked one shows a tick and an `--ink` ring (`.tf-chosen`, in the block dialog and *Link to…*). A lone recent ticket therefore takes one more click, and `Enter` still takes the first.
 
+### Layers
+
+**Anything that floats draws in one host at the shell's root, never inside a page.** The host (`.tf-floats`, `floats.ts`) sits inside `.tf`, so the tokens and delegated events hold, and it makes no stacking context, so a page's `overflow`, sticky band or `z-index` can't reach what is in it. The order is a drawer at 21, a dialog at 30, a menu at 35 (so a menu a dialog opened is over it), a toast at 40. The Connections drawer and every menu draw there. A combo box's list is part of its field and stays beside it.
+
+A menu is `TfMenu`, the one `role="menu"`, and the gate refuses another. It is placed from its opener: under it, or over it when it fits only there or there is more room, with the opener's edge as its own, inside the window, and scrolling when it is taller than the room. It follows its opener through a scroll and a resize. It is on the layer stack as a dialog is, so the page's keys wait. `↑`, `↓`, `Home` and `End` move between the items that can be pressed. `Esc`, `Tab` and a pick close it and focus its opener, so a dialog a pick opens returns there. A click anywhere else closes it and leaves focus where the click put it. A move to another address closes it, so it never stands over a kept page. A row's actions hold on while the menu one of them opened is open.
+
+A shared layout rule names what it lays out. The gate refuses `*` as the subject of a rule that sets a width, a height, `overflow` or `position`: the page's `100vw` once reached the drawer through one. `.tf-keptpage` holds that width now.
+
 ### Job scope
 
 One control, `TfScope`, as wide as its words on every page: *This job* with its count as a badge, *Mine* where the page has one, then *All*. The badge is a dash until the read answers, so the control keeps its width. Its default is *All* on every page, and a ticket card's row turns *This job* on, on each list the section holds, Builds' rail and runs alike. It does not repeat the key: the top bar names the job (*Start PAY-231*), and a page a row narrowed to another ticket says so in its bar. The button's title names the ticket. The Inbox draws no control when no job is chosen, because a lone *All* chooses nothing. Amended 2026-11-05: Builds' rail used to default to *This job* (#850); one default means one answer to "why is this page showing fewer".
@@ -184,7 +192,7 @@ Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog fo
 
 ### Header
 
-The title block on the left and `.tf-acts` on the right, on the title line, top-aligned to it, while both fit. What fits decides this, not the window's width: the title asks for at least 360 px, and when the actions don't fit beside that they wrap as one group, under the title and above the subline. A group never wraps a button at a time. The actions come in this order:
+The title block on the left and `.tf-acts` on the right, top-aligned, while both fit. What fits decides this, not the window's width. The block is the title and its subline together and asks for at least 360 px, so a long subline wraps inside it and stays with the title it describes. When the actions don't fit beside that they wrap as one group under the block: title, meta, actions. A group never wraps a button at a time, and a subline can't run under the actions on one row. Amended 2026-11-06, reversing Round 10's subline under the actions. The actions come in this order:
 
 1. the primary;
 2. the other actions;
@@ -246,6 +254,8 @@ There is no third way to draw danger.
 | A code value | `.tf-key` |
 | A state's chip | `.tf-chip.tf-err` |
 | A row's fading group | `.tf-rowend .tf-rowacts` |
+| A row's last value, which the group stands in place of | `.tf-rowend .tf-rowval` |
+| A menu's opener (`TfMenu`) | `.tf-r button[aria-haspopup="menu"]` |
 
 A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end, centred on the strip, `var(--control-gap)` apart.
 
@@ -261,6 +271,8 @@ A strip's or a row's trailing group of actions is `.tf-trail`: pushed to the end
 - **(h)** a `font-size` or a `font` shorthand's size is not a `--t-*` token, apart from the reading face and code (a rule that sets `--serif` or `--mono`), the Docs title and the PDF's text layer;
 - **(i)** a pill toggle is drawn outside `.tf-fchips`: a class with a `border-radius` of 9 px or more that also answers `aria-pressed`;
 - **(j)** a grid's label column is a literal `132px`: it is `var(--tf-label)`;
+- **(k)** `*` is the subject of a rule that sets a `width`, `height`, `overflow` or `position`: a shared layout rule names what it lays out ([Layers](#layers));
+- **(l)** `role="menu"` appears outside `TfMenu.svelte`: a menu is `TfMenu` ([Layers](#layers));
 - **(d)** an allowlist entry has no reason;
 - **(e)** an allowlist entry matches nothing.
 
@@ -298,7 +310,7 @@ A section's own page has no breadcrumb bar, unless a ticket card's row opened it
 
 The asset tree (`#/assets`, `#/asset/<id>`) is viewport-high: a crumb bar drawn at both addresses, the canonical header with one line at both (the title names the asset), its open alerts (folded to start with, then the reader's fold, which a selection does not change), a filter band, then the Miller columns scrolling sideways beside a fixed pane. So the first click moves no row: a column is 220 px at both addresses, and what the strip leaves stays blank, because a last column that took the room shrank under the pointer. An estate with nothing in it and a failed read have no pane. A wire runs behind a row's words and tag, which stand on the row's own fill, so it never reads as a strikethrough. An inline editor in the pane (*Rename*, a property, *Add a property*) takes focus with its text selected, has a *Cancel*, and closes first on `Esc` wherever focus is; a rule waiting for its value in a set's *Applies to* does the same. A *Depends on this* row draws only the part of its path it does not share with the selected asset, the whole path in its title. It has no nav entry and nothing lights for it, because `docs/decisions/2026-11-05-cut-dependencies-and-proposed-links.md` keeps it from moving under Monitors. Its crumb starts at *Asset tree*. In a column the selected asset is the ink pill and the assets above it on the path a paler one, so the path reads and one row says where you are. An asset's kind is a two-letter tag written like an element's symbol, in sentence case and in Archivo (*Si*, *Hv*, *Vm*, *Ce*, *Ct*), with the word itself in the tag's title and heading the pane.
 
-A filter bar is a full-width band under the page's tabs, on every page. Its search takes what the row leaves, from 140 to 360 px, so a placeholder is short enough to fit at 140. A group of pills stays whole: the row wraps between groups.
+A filter bar is a full-width band under the page's tabs, on every page. Its search takes what the row leaves, from 140 to 360 px, so a placeholder is short enough to fit at 140. A group of pills stays whole: the row wraps between groups. The bar's last things are one group (`.tf-ftail`): its selects, or its last pills where it has none, then the count at the row's end, so the count never wraps alone. The count holds the room its longest text needs and no more. *Save as a view…* is in the Tickets header's actions, and only while a filter is on, because with none there is nothing to save.
 
 A key in mono carries no underline until pointed at. A link made of words has an underline, in a sentence, on its own or in a banner, with one exception: the name of a row that opens as a whole (a table's `.tf-row`, a list row that is one link) has none until pointed at, because the row answers the pointer. A link in a row that does not open, or a second link in one that does, keeps it.
 
@@ -306,7 +318,7 @@ A diff shows split only while its own column has 900 px, and says so where it sh
 
 The top bar and the filter bar stay put, and the content under them scrolls. A board scrolls sideways inside itself. The page never scrolls sideways. Content aligns left. The only centred blocks are empty states, the Docs home and the ticket page's reading column.
 
-Monitors' columns stay fixed. The state chip holds the word (*Down*), and how long is plain `--t-xs` text: beside the chip from 1241 px up, under it below that, so a down row is two lines there. State takes its room from Monitor. A slow monitor's time is its Response. Below 1041 px Response and 30 days leave their columns and stay in the row, under the bars. Column heads stay under the filter bar above 900 px, and scroll with the rows at 900 px and below.
+Monitors' columns stay fixed, whatever a filter leaves: the action column is 72 px whether or not a row holds *Ack*. They run Monitor, State, Watches, Last 24 h, Response, 30 days, because a row's actions stand in place of its last values on hover and Watches holds links, which have to stay in reach. The state chip holds the word (*Down*), and how long is plain `--t-xs` text: beside the chip from 1241 px up, under it below that, so a down row is two lines there. State takes its room from Monitor. A slow monitor's time is its Response. Below 1041 px Response and 30 days leave their columns and stay in the row, under the bars, and the actions stand in place of those. Column heads stay under the filter bar above 900 px, and scroll with the rows at 900 px and below.
 
 A run's steps bar draws each step as wide as its time and, where the bar has room for every name, at least as wide as its name; with no room the short names stay whole and the longest give up their ends. A step's name that is a command line is code, there and in the Log tab's step heads.
 
@@ -319,10 +331,10 @@ The ticket page is two columns that each scroll on their own (spec #2396): the c
 Motion answers something the person did, and there's very little of it.
 
 - A running build or timer pulses its dot (1.4 s, opacity to 35 %). That's the only motion nobody started.
-- The Connections drawer slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
+- The Connections drawer, under 480 px wide and with a dialog's title line, slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
 - A route's wire on the asset tree fades in over 160 ms when a selection brings it.
-- A row's repeated actions fade in on hover and on focus within the row (`.tf-rowacts`). At rest they hold no room: `.tf-rowend` is the end of the row, and the group hangs to its left on the hover fill, over the end of the last column. Where nothing hovers they stand in the row. An action only some rows offer because of their state (*Ack*, *Open PR*) stands in `.tf-rowend`, not in the group, and stays.
+- A row's repeated actions appear in place of the last column's value, and no word is cut. They fade in on hover and on focus within the row (`.tf-rowacts`). At rest they hold no room: `.tf-rowend` is the end of the row, and the group hangs to its left while the value (`.tf-rowval`) hides, with no plate or gradient. The last column is at least as wide as the group and holds no link, so the hovered row's last value is out of sight and nothing that can be pressed is. Where nothing hovers they stand in the row. An action only some rows offer because of their state (*Ack*, *Open PR*) stands in `.tf-rowend`, not in the group, and stays. The Inbox has no value column to replace, so from 901 px its words keep the group's room on their right and a long title wraps a line earlier at rest; stacked, the time's line is a small button's height and holds the group. Nothing moves on hover.
 
 There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.
 

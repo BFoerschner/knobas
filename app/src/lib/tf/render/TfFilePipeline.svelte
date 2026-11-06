@@ -12,12 +12,11 @@
   because it is a pattern's default says so where *Not saved* stands.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
-
   import type { CommandStep } from "../../ipc/app";
   import type { PipeFormat, PipeStep } from "../../ipc/entity";
   import { FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import TfMenu from "../TfMenu.svelte";
 
   let {
     steps,
@@ -62,7 +61,6 @@
 
   let adding = $state(false);
   let face = $state<HTMLButtonElement | null>(null);
-  let menu = $state<HTMLDivElement | null>(null);
   let bar = $state<HTMLDivElement | null>(null);
   let typing: ReturnType<typeof setTimeout> | null = null;
   let dragged: number | null = null;
@@ -85,44 +83,9 @@
     }
   }
 
-  $effect(() => {
-    if (!adding) return;
-    const off = untrack(() => layers.add({ kind: "dialog", close: () => closeMenu() }));
-    queueMicrotask(() => menu?.querySelector<HTMLElement>("button")?.focus());
-    const outside = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && !menu?.contains(target) && !face?.contains(target)) adding = false;
-    };
-    window.addEventListener("click", outside, true);
-    return () => {
-      off();
-      window.removeEventListener("click", outside, true);
-    };
-  });
   $effect(() => () => {
     if (typing !== null) clearTimeout(typing);
   });
-
-  function closeMenu() {
-    adding = false;
-    face?.focus();
-  }
-
-  function menuKeys(event: KeyboardEvent) {
-    const items = [...(menu?.querySelectorAll<HTMLElement>("button, a") ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeMenu();
-    } else if (event.key === "ArrowDown" && items.length > 0) {
-      event.preventDefault();
-      items[(at + 1) % items.length]?.focus();
-    } else if (event.key === "ArrowUp" && items.length > 0) {
-      event.preventDefault();
-      items[(at - 1 + items.length) % items.length]?.focus();
-    }
-  }
 
   function add(make: (name: string) => PipeStep) {
     adding = false;
@@ -251,9 +214,7 @@
       <button bind:this={face} type="button" class="tf-btn tf-sm tf-ghost" aria-haspopup="menu" aria-expanded={adding} onclick={() => (adding = !adding)}
         >Add step</button
       >
-      {#if adding}
-        <!-- svelte-ignore a11y_interactive_supports_focus -->
-        <div class="tf-menu" role="menu" tabindex="-1" aria-label="Add step" bind:this={menu} onkeydown={menuKeys}>
+      <TfMenu bind:open={adding} opener={face} label="Add step" className="tf-pmenu-m" align="start" {layers}>
           <div class="tf-rsw-mh">Built in</div>
           {#each STEP_CHOICES as choice (choice.id)}
             <button type="button" role="menuitem" onclick={() => add(choice.make)}
@@ -270,8 +231,7 @@
           <a role="menuitem" href="#/settings/renderers" onclick={() => (adding = false)}
             ><span>Add a command step…</span><span class="tf-rsw-kb">Settings › Renderers</span></a
           >
-        </div>
-      {/if}
+      </TfMenu>
     </span>
   </div>
   <div class="tf-acts">

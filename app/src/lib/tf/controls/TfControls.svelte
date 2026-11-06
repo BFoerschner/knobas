@@ -7,11 +7,14 @@
 -->
 <script lang="ts">
   import TfKey from "../TfKey.svelte";
+  import TfMenu from "../TfMenu.svelte";
   import TfStateChip from "../TfStateChip.svelte";
 
   let layout = $state<"board" | "list">("board");
   let mine = $state(true);
   let failing = $state(false);
+  let menuOpen = $state(false);
+  let menuFace = $state<HTMLButtonElement | null>(null);
 </script>
 
 <div class="tf-full">
@@ -104,13 +107,24 @@
           <span class="tf-rend"><TfStateChip text="In Progress" tone="info" /><TfStateChip text="FAILURE" tone="err" /></span>
         </div>
         <div class="tf-r">
-          <span class="tf-t">A row's repeated actions hang over its end on hover; a state's action stays there</span>
+          <span class="tf-t">A row's repeated actions stand in place of its last value on hover; a state's action stays</span>
           <span class="tf-rend tf-rowend">
+            <span class="tf-dim tf-rowval">2 h ago</span>
             <button type="button" class="tf-btn tf-sm">Ack</button>
             <span class="tf-rowacts">
               <button type="button" class="tf-btn tf-sm tf-ghost">Pause</button>
               <button type="button" class="tf-btn tf-sm tf-ghost">Hide</button>
             </span>
+          </span>
+        </div>
+        <div class="tf-r">
+          <span class="tf-t">A menu draws in the host at the shell's root, placed from its opener</span>
+          <span class="tf-rend">
+            <button type="button" class="tf-btn tf-sm" aria-haspopup="menu" aria-expanded={menuOpen} bind:this={menuFace} onclick={() => (menuOpen = !menuOpen)}>More</button>
+            <TfMenu bind:open={menuOpen} opener={menuFace} label="More">
+              <button type="button" role="menuitem" onclick={() => (menuOpen = false)}>An item</button>
+              <button type="button" role="menuitem" onclick={() => (menuOpen = false)}>Another item</button>
+            </TfMenu>
           </span>
         </div>
       </div>

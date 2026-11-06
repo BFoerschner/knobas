@@ -501,7 +501,7 @@
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
-              <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
+              <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</span></td>
               <td class="tf-nowrap tf-right"><span class="tf-rowend"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></span></td>
             </tr>
           {/each}

@@ -134,6 +134,7 @@
   import { alerts as sharedAlerts, type Alerts } from "./alerts.svelte";
   import { latestRead } from "../shell/latest-read";
   import TfDialog from "../tf/settings/TfDialog.svelte";
+  import { LINK_CAME_FROM } from "../tf/job/connections";
   import { ago } from "../shell/time";
   // The queued-write line, and the same one the Monitors tab draws for a pause:
   // what a create can honestly say now is that knobas asked, and a toast is
@@ -366,15 +367,6 @@
   let columns = $state<AssetRow[][]>([]);
   let failure = $state<string | null>(null);
   /** {@link failure} when the address names nothing the estate holds: the one nothing-here state, not a failed read. */
-  /** Where a link came from, as *Unlink…* says it. A hand-drawn link never asks, so its line is not drawn. */
-  const LINK_CAME_FROM: Record<LinkEntry["link"]["origin"], string> = {
-    manual: "you",
-    suggested: "a suggestion you accepted",
-    imported: "an import",
-    source: "the source",
-    implied: "a reference in a note",
-  };
-
   const NOT_HELD = "knobas does not hold this asset. It may have been deleted, or not have synced yet.";
   /** Nothing has come back yet — told apart from "an estate with nothing in it". */
   let loaded = $state(false);

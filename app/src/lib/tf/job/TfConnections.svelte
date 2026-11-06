@@ -9,17 +9,22 @@
   applies and one for the parent (#867), a set's rows with *Hide here* and the
   group with *Edit set*; and **Hidden on KEY** with *Show again*.
 
-  It registers with the shell's layer stack while open, so `Esc` closes it
-  (rung 2), as does a click on the scrim; focus goes to its filter and returns
-  to what opened it, the *Connections* button.
+  It draws in the host at the shell's root, as whatever floats does (design
+  system, *Layers*), so its one root is the wrapper. It registers with the
+  shell's layer stack while open, so `Esc` closes it (rung 2), as does a click
+  on the scrim; focus goes to its filter and returns to what opened it, the
+  *Connections* button. Its title line is a dialog's, and a row is the shape of
+  the ticket card's rows: what it is under its name, then a chevron.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
 
   import type { LinkEntry } from "../../ipc/entity";
   import Marked from "../filter/Marked.svelte";
+  import { inFloatHost } from "../floats";
   import type { Layers } from "../layers.svelte";
-  import { filterLinks, filterRows, sectionOf, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
+  import TfKey from "../TfKey.svelte";
+  import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
   import { itemHash } from "./job";
 
   let {
@@ -74,13 +79,16 @@
   });
 </script>
 
+<div class="tf-drawerhost" {@attach inFloatHost}>
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="tf-scrim" onclick={onclose}></div>
 <aside class="tf-drawer" aria-label="Connections">
-  <header>
-    <h2>Connections of <span class="tf-mono">{jobKey}</span></h2>
-    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={onclose}>Esc</button>
+  <header class="tf-dhead">
+    <div class="tf-dtitle"><h2>Connections of <TfKey value={jobKey} /></h2></div>
+    <button type="button" class="tf-iconbtn tf-dclose" aria-label="Close" onclick={onclose}>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+    </button>
   </header>
   <div class="tf-dfilter">
     <label class="tf-fsearch">
@@ -100,11 +108,11 @@
     {#each shown as entry (entry.link.id)}
       {@const also = alsoIn(entry.other.entity_id)}
       <div class="tf-lk">
-        <div>
-          <a href={itemHash(entry.other)} onclick={onclose}><Marked text={entry.other.title} typed={text} /></a>
-          <div class="tf-how">{sectionOf(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</div>
-        </div>
-        <button type="button" class="tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">Unlink</button>
+        <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
+          ><span class="tf-lk-t"><span class="tf-lk-name"><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{kindWord(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</span></span
+          ><span class="tf-chev" aria-hidden="true">›</span></a
+        >
+        <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
       </div>
     {:else}
       {#if text.trim() !== ""}
@@ -121,16 +129,15 @@
       </h3>
       {#each rows as row (row.id)}
         <div class="tf-lk">
-          <div>
-            {#if row.href !== null}
-              <a href={row.href} onclick={onclose}><Marked text={row.title} typed={text} /></a>
-            {:else}
-              <Marked text={row.title} typed={text} />
-            {/if}
-            <div class="tf-how">{row.section}</div>
-          </div>
+          {#if row.href !== null}
+            <a class="tf-lk-go" href={row.href} onclick={onclose}
+              ><span class="tf-lk-t"><span class="tf-lk-name"><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span><span class="tf-chev" aria-hidden="true">›</span></a
+            >
+          {:else}
+            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name"><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span></div>
+          {/if}
           {#if group.setId !== null}
-            <button type="button" class="tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>
           {/if}
         </div>
       {/each}
@@ -139,11 +146,12 @@
       <h3>Hidden on {jobKey} <span class="tf-count">{hidden.length}</span></h3>
       {#each hidden as row (row.id)}
         <div class="tf-lk">
-          <div class="tf-dim">{row.title}</div>
-          <button type="button" class="tf-x tf-shown" onclick={() => onshow(row.id)} aria-label="Show again: {row.title}">Show again</button>
+          <div class="tf-lk-go tf-dim"><span class="tf-lk-t"><span class="tf-lk-name">{row.title}</span></span></div>
+          <button type="button" class="tf-btn tf-sm tf-ghost tf-x tf-shown" onclick={() => onshow(row.id)} aria-label="Show again: {row.title}">Show again</button>
         </div>
       {/each}
     {/if}
     <p class="tf-dnote">Links and link sets stay in knobas and are never written to a source.</p>
   </div>
 </aside>
+</div>

@@ -49,7 +49,8 @@
 .tf-atree { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
 /* A row's *Download* hangs over its end on hover (Motion), so the size ends the row at rest. */
 .tf-arow:hover { background: var(--sheet-2); }
-.tf-arow { display: grid; grid-template-columns: minmax(0, 1fr) 90px auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
+/* The size is the last value: *Download folder* stands in its place on hover, so the column is as wide as that. */
+.tf-arow { display: grid; grid-template-columns: minmax(0, 1fr) 122px auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-arow:first-child { border-top: 0; }
 .tf-arow .tf-nm { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tf-arow .tf-sz { text-align: right; color: var(--ink-2); font-size: var(--t-xs); }

@@ -623,7 +623,7 @@
                 <div class="tf-r">
                   <span class="tf-t tf-mono">{artifact.title}</span>
                   <span class="tf-rend">
-                    {#if artifact.meta !== null}<span class="tf-dim">{artifact.meta}</span>{/if}
+                    {#if artifact.meta !== null}<span class="tf-dim tf-rowval">{artifact.meta}</span>{/if}
                     {#if artifact.url !== null}
                       <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button></span></span>
                     {/if}

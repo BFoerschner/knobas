@@ -255,7 +255,7 @@
                 >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
           <td>{row.author ?? ""}</td>
-          <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
           <td class="tf-nowrap tf-racts"
             ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
                   >New pull request</a

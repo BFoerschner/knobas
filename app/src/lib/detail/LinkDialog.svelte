@@ -317,7 +317,7 @@
     font-size: var(--t-xs);
   }
 
-  .picked > * {
+  .picked > :is(.t, .k) {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;

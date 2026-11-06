@@ -729,6 +729,10 @@
             >
           </div>
         {/if}
+        <!-- With nothing to save it is not offered. On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
+        {#if isFiltering(filter) && (!view?.saved_view_source || offersCopy(view))}
+          <button type="button" class="tf-btn tf-ghost" onclick={() => void saveAsView()}>Save as a view…</button>
+        {/if}
         {#if view}
           <button type="button" class="tf-btn" onclick={() => editView(view)}
             >{view.saved_view_source === null ? "Edit view…" : "View settings…"}</button
@@ -773,12 +777,6 @@
           </label>
         {/if}
       {/snippet}
-      {#snippet saveButton()}
-        <!-- On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
-        {#if !view?.saved_view_source || offersCopy(view)}
-          <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view…</button>
-        {/if}
-      {/snippet}
       <FilterBar
         {config}
         {filter}
@@ -786,7 +784,6 @@
         total={reader.total}
         onchange={() => reader.setFilter(filterNow())}
         extra={lanesSwitch}
-        after={saveButton}
       />
     {/if}
 

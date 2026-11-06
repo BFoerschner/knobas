@@ -63,14 +63,12 @@
 .tf-rd-on { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control-h); padding-right: 6px; color: var(--ink-2); white-space: nowrap; }
 .tf-rd-on .tf-key { color: var(--ink); }
 .tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; }
-.tf-fhead.tf-rd-head::after { content: none; }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
 /* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136). */
 .tf-rd-page > .tf-banner { margin: 10px 0 0; }
-.tf-rd-more { position: relative; display: inline-flex; }
-.tf-rd-more .tf-menu { left: auto; right: 0; }
-.tf-rd-more .tf-menu button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
+.tf-rd-more { display: inline-flex; }
+.tf-menu.tf-rd-m button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
 .tf-rd-moresync { display: contents; }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
 .tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }

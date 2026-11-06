@@ -12,6 +12,11 @@
 .tf-ib time { white-space: nowrap; font-size: var(--t-xs); color: var(--ink-2); grid-row: 1 / span 2; font-variant-numeric: tabular-nums; }
 /* Every title starts on one edge: a failure's dot hangs in a gutter the others keep empty. */
 .tf-ib .tf-what { font-weight: 500; position: relative; padding-left: 14px; }
+/* There is no value column to replace here, so the words keep the group's room on their right at rest, and a long title
+   wraps a line earlier rather than go under it. Nothing moves on hover. */
+@media (min-width: 901px) {
+  .tf-inbox .tf-ib:has(.tf-rowacts) :is(.tf-what, .tf-ctx) { padding-right: 153px; }
+}
 .tf-ib .tf-what .tf-dot { position: absolute; left: 0; top: .5em; }
 .tf-ib .tf-ctx { grid-column: 2; padding-left: 14px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-ib .tf-acts { grid-row: 1 / span 2; grid-column: 3; display: inline-flex; gap: var(--control-gap); justify-content: flex-end; }
@@ -29,6 +34,8 @@
   .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
   /* Stacked, the time and the actions keep the titles' edge: a failure's dot still hangs in the gutter. */
   .tf-ib time, .tf-ib .tf-acts { margin-left: 14px; }
+  /* The time's line holds the group, so it is a small button's height whether the group is showing or not. */
+  .tf-ib time { display: flex; align-items: center; min-height: var(--control-h-sm); }
   .tf-ib { position: relative; }
   .tf-ib .tf-acts { justify-content: flex-start; order: 3; }
   /* Stacked, the end of the row is the row: the group hangs at its top right, over the time's line. */

@@ -54,7 +54,7 @@
     onchange?: () => void;
     /** What the view adds after the dropdowns: Tickets' *Lanes*. */
     extra?: Snippet;
-    /** What follows the count at the end of the bar (Tickets' *Save as a view*, #812). */
+    /** What follows the count at the end of the bar (Monitors' hidden count). */
     after?: Snippet | undefined;
   } = $props();
 
@@ -90,6 +90,12 @@
     filter.scope = id;
     onchange();
   }
+
+  const shownChips = $derived((config.chips ?? []).filter((group) => group.options.length > 0));
+  const hasSelects = $derived(extra !== undefined || (config.dropdowns ?? []).some((dropdown) => dropdown.options.length > 0));
+  /** With no select to go with it, the last pills keep the count company when the row wraps. */
+  const tailChips = $derived(hasSelects ? null : (shownChips.at(-1) ?? null));
+  const leadChips = $derived(tailChips === null ? shownChips : shownChips.slice(0, -1));
 </script>
 
 <div class="tf-fbar" data-fid={config.id}>
@@ -114,42 +120,44 @@
   {#if scopes.length > 0}
     <TfScope {scopes} {scope} onpick={pick} />
   {/if}
-  {#each config.chips ?? [] as group (group.key)}
-    {#if group.options.length > 0}
-      <div class="tf-fchips" role="group" aria-label={group.label}>
-        {#each group.options as option (option.value)}
-          {@const on = (filter.chips[group.key] ?? []).includes(option.value)}
-          <button type="button" aria-pressed={on} onclick={() => toggle(group.key, option.value)}>
-            {option.label}
-          </button>
-        {/each}
-      </div>
-    {/if}
-  {/each}
-  {#each config.dropdowns ?? [] as dropdown (dropdown.key)}
-    {#if dropdown.options.length > 0}
-      <label class="tf-fsel">
-        {dropdown.label}
-        <select
-          aria-label={dropdown.label}
-          class:tf-set={!!filter.dropdowns[dropdown.key]}
-          value={filter.dropdowns[dropdown.key] ?? ""}
-          onchange={(event) => choose(dropdown.key, event.currentTarget.value)}
-        >
-          <option value="">Any</option>
-          {#each dropdown.options as option (option.value)}
-            <option value={option.value}>{option.label}</option>
-          {/each}
-        </select>
-      </label>
-    {/if}
-  {/each}
-  {@render extra?.()}
-  <!-- One flex item, so the count and what follows it wrap together, at the right of the bar's last row. -->
-  <span class="tf-fend">
-    <span class="tf-fcount" aria-live="polite"
-      >{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
-    >
-    {@render after?.()}
-  </span>
+  {#snippet pills(group: (typeof shownChips)[number])}
+    <div class="tf-fchips" role="group" aria-label={group.label}>
+      {#each group.options as option (option.value)}
+        {@const on = (filter.chips[group.key] ?? []).includes(option.value)}
+        <button type="button" aria-pressed={on} onclick={() => toggle(group.key, option.value)}>
+          {option.label}
+        </button>
+      {/each}
+    </div>
+  {/snippet}
+  {#each leadChips as group (group.key)}{@render pills(group)}{/each}
+  <!-- One flex item, so the bar's last things wrap together, the count at the end of their row: it never wraps alone. -->
+  <div class="tf-ftail">
+    {#if tailChips !== null}{@render pills(tailChips)}{/if}
+    {#each config.dropdowns ?? [] as dropdown (dropdown.key)}
+      {#if dropdown.options.length > 0}
+        <label class="tf-fsel">
+          {dropdown.label}
+          <select
+            aria-label={dropdown.label}
+            class:tf-set={!!filter.dropdowns[dropdown.key]}
+            value={filter.dropdowns[dropdown.key] ?? ""}
+            onchange={(event) => choose(dropdown.key, event.currentTarget.value)}
+          >
+            <option value="">Any</option>
+            {#each dropdown.options as option (option.value)}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+    {/each}
+    {@render extra?.()}
+    <span class="tf-fend">
+      <span class="tf-fcount" aria-live="polite" data-room={total === null ? "" : countLine(Math.max(0, total - 1), total, config.noun, config.one)}
+        >{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
+      >
+      {@render after?.()}
+    </span>
+  </div>
 </div>

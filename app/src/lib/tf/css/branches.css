@@ -1,6 +1,8 @@
 /* ---------- Branches, compare and edit (#839, #840, #845, R-8.6, R-8.8, R-8.11) ---------- */
 .tf-rbranches td:first-child { width: 34%; }
 .tf-rbranches .tf-racts { text-align: right; }
+/* The last value: *Delete…* stands in its place on hover, so it is at least as wide. */
+.tf-rbranches td .tf-rowval { display: inline-block; min-width: 76px; }
 .tf-rbranches td:first-child .tf-mono { font-size: var(--t-sm); }
 .tf-rbranches-note { margin: 8px 0 0; }
 /* A banner inside a dialog's body: a rounded block, not a strip across a panel. */

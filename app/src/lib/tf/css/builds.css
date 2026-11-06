@@ -27,7 +27,8 @@
 .tf .tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 18px 0 6px; }
 .tf .tf-runs .tf-dayh:first-child { margin-top: 14px; }
 .tf-runs .tf-run-dur { width: 150px; }
-.tf-runs .tf-run-at { width: 110px; }
+/* The last value: *Log* and *Run again…* stand in its place on hover, so it is as wide as they are. */
+.tf-runs .tf-run-at { width: 140px; }
 .tf-runs .tf-run-acts { width: 20px; padding-left: 0; text-align: right; }
 .tf-durbar { vertical-align: middle; margin-right: 6px; }
 .tf-durbar rect { fill: var(--ink-2); opacity: .35; }
@@ -170,7 +171,7 @@
   .tf-runs .tf-run-trig { width: 92px; }
   .tf-runs .tf-run-tests { width: 136px; }
   .tf-runs .tf-run-dur { width: 70px; }
-  .tf-runs .tf-run-at { width: 104px; }
+  .tf-runs .tf-run-at { width: 140px; }
   .tf-durbar { display: none; }
 }
 /* Who started a run goes first: the branch is what you scan by, and keeps 190 px or more. */

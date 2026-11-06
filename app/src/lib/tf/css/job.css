@@ -224,13 +224,6 @@
   margin: 0 12px 8px; padding: 8px 10px; border-radius: 6px; background: var(--sheet-2);
   display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--t-sm);
 }
-.tf-openin { position: relative; }
-.tf-menu {
-  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column;
-  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 4px;
-}
-.tf-menu button { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
-.tf-menu button:hover { background: var(--sheet-2); }
 .tf-rows { display: flex; flex-direction: column; }
 .tf-r {
   display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-top: 1px solid var(--rule-2);
@@ -239,6 +232,8 @@
 a.tf-r:hover { background: var(--sheet-2); }
 .tf-r .tf-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+/* The last value: *Download* stands in its place on hover, so it is at least as wide. */
+.tf-r .tf-rend .tf-rowval { min-width: 72px; text-align: right; }
 .tf-r .tf-repo { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 .tf-minif {
   display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--field); border-radius: 4px;

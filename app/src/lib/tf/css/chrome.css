@@ -120,7 +120,7 @@
 .tf-main { overflow: hidden auto; min-height: 0; min-width: 0; }
 /* The clip holds what passes under the bar, so it is no overflow to scroll to and nothing can slide the page sideways. */
 .tf-main > .tf-kept:not([hidden]) { display: block; height: 100%; overflow-x: clip; }
-.tf-main > .tf-kept > * { width: 100vw; }
+.tf-keptpage { width: 100vw; height: 100%; }
 /* A viewport-high page's inner scroller (`TfScroller.svelte`): the host is measured, the scroller fills it, and the one
    body is the host's width, so a bar appearing moves nothing there either. */
 .tf-shost { container-type: inline-size; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); min-width: 0; min-height: 0; }
@@ -144,16 +144,12 @@
 .tf-crumbs .tf-esc .tf-esc-t + .tf-key { margin-left: -2px; }
 .tf-crumbs a.tf-esc .tf-esc-t { text-decoration: underline; text-underline-offset: 2px; }
 .tf-crumbs a.tf-esc:hover { color: var(--ink); }
-/* The title and the actions share a line while both fit (Controls, *Header*). What fits decides, not the window: the
-   actions wrap as one group, under the title, never a button at a time. The rest of the title block runs the full
-   width under them, so a long subline is never squeezed into what the buttons leave. */
+/* The title block and the actions share a line while both fit (Controls, *Header*). What fits decides, not the window:
+   the block asks for 360 px and a long subline wraps inside it, so the subline stays with the title it describes, and
+   the actions wrap as one group, under the block, never a button at a time. */
 .tf-fhead { padding: 16px 22px 12px; display: flex; flex-wrap: wrap; gap: 2px 12px; align-items: flex-start; }
-/* A subline starts a line of its own however short it is: one held to 76ch would otherwise fit beside the actions. */
-.tf-fhead::after { content: ""; flex: 0 0 100%; order: 1; }
-.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) { display: contents; }
-.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) > h1, .tf-fhead > :is(h1, .tf-board-title, .tf-fr-title) { flex: 1 1 360px; min-width: 0; }
-.tf-fhead > div:first-child:not(.tf-board-title, .tf-fr-title):has(> h1) > :not(h1) { flex: 0 0 100%; order: 2; }
-.tf-fhead > .tf-acts { flex: 0 1 auto; order: 1; }
+.tf-fhead > :is(div:first-child, h1, .tf-board-title, .tf-fr-title) { flex: 1 1 360px; min-width: 0; }
+.tf-fhead > .tf-acts { flex: 0 1 auto; }
 /* A title's line is a control's height, so it shares a centre with the buttons on its line and starts at one height on every page. */
 .tf-fhead h1 { font-size: var(--t-3xl); line-height: var(--control-h); font-weight: 700; font-variation-settings: "wdth" 85; }
 /* A code value as a title (a repository's name) holds to the scale; `.tf-mono`'s .9em would make it 12.6 px. */
@@ -165,8 +161,8 @@
 .tf-syncnow { align-self: flex-start; }
 
 /* The view's *Sync now* where a reader's header has no room for it: an item of *More*, not a button. */
-.tf-rd-more .tf-menu button.tf-syncnow { display: flex; width: 100%; height: auto; min-height: 0; justify-content: flex-start; border: 0; background: none; box-shadow: none; padding: 6px 10px; border-radius: 4px; font-weight: 400; }
-.tf-rd-more .tf-menu button.tf-syncnow:hover { background: var(--sheet-2); }
+.tf-menu.tf-rd-m button.tf-syncnow { display: flex; width: 100%; height: auto; min-height: 0; justify-content: flex-start; border: 0; background: none; box-shadow: none; padding: 6px 10px; border-radius: 4px; font-weight: 400; }
+.tf-menu.tf-rd-m button.tf-syncnow:hover { background: var(--sheet-2); }
 
 /* A fold's mark: one drawn chevron, so it is the same size and weight in every list. */
 :is(.tf-pl-fold, .tf-mon-fold, .tf-rd-fold, .tf-collapse, .tf-set-fold, .tf-add-more, .tf-run-opts) > summary::before, .tf-rd-linked summary::before, .tf-rd-tree details > summary::before, .tf-logv details > summary::before, .tf-arow > .tf-fold::before {
@@ -242,17 +238,22 @@
 
 /* A row's repeated actions (design system, Motion): a column of the same words on every row competes with the data, so
    they fade in on hover and on focus within the row, and at rest they hold no room. `.tf-rowend` is the end of the row:
-   an action only some rows offer because of their state (*Ack*, *Open PR*) stands in it and stays, and the group
-   hangs to its left, on the hover fill, over the end of the last column. Where nothing hovers the group stands in the row. */
+   an action only some rows offer because of their state (*Ack*, *Open PR*) stands in it and stays, and the group hangs
+   to its left, in place of the last column's value (`.tf-rowval`): the value hides and the group stands there, with no
+   plate, so no word is cut. That column is at least as wide as the group, and it holds no link, which would go out of
+   reach as the pointer came to it. Where nothing hovers the group stands in the row. */
 .tf-rowend { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--control-gap); vertical-align: middle; }
 .tf-rowacts { display: inline-flex; align-items: center; gap: var(--control-gap); }
 @media (hover: hover) {
   .tf-rowend { position: relative; min-height: 1px; }
   .tf-rowacts {
-    position: absolute; right: 100%; top: 50%; transform: translateY(-50%); z-index: 1; padding: 0 var(--control-gap) 0 16px; white-space: nowrap;
-    background: linear-gradient(to right, transparent, var(--sheet-2) 12px); opacity: 0; pointer-events: none; transition: opacity 120ms ease-out;
+    position: absolute; right: 100%; top: 50%; transform: translateY(-50%); z-index: 1; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: opacity 120ms ease-out;
   }
-  :is(tr, li, .tf-rowhost, .tf-ib, .tf-r):is(:hover, :focus-within) .tf-rowacts, .tf-rowacts.tf-on { opacity: 1; pointer-events: auto; }
+  .tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { margin-right: var(--control-gap); }
+  /* An open menu is in the float host, so its group holds on by the opener's `aria-expanded`, with the row no longer hovered. */
+  :is(tr, li, .tf-rowhost, .tf-ib, .tf-r):is(:hover, :focus-within) .tf-rowacts, .tf-rowacts.tf-on, .tf-rowacts:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
+  :is(tr, li, .tf-rowhost, .tf-r):is(:hover, :focus-within):has(.tf-rowacts) .tf-rowval, :is(tr, li, .tf-rowhost, .tf-r):has(.tf-rowacts [aria-expanded="true"]) .tf-rowval { visibility: hidden; }
   /* The fill the group sits on is the row's own. */
   :is(tr, li, .tf-r):has(.tf-rowacts):hover, tr:has(.tf-rowacts):hover > td { background: var(--sheet-2); }
 }

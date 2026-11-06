@@ -6,14 +6,14 @@
   reviewed and how many commits came since), then the commits: a click picks
   one, a shift-click stretches the pick to a range, as *Commits* picks
   (`diff/address.ts`). The pick has its own address too: *Open as diff*.
-  Arrow keys move, `Esc` closes, as the other menus do.
+  `TfMenu` draws it.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
   import type { DiffRange } from "../../ipc/entity";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { diffHash, picked, selectRange } from "../diff/address";
   import { commitsSince, pickedEnds, sinceOffered, type PrPick } from "../diff/pick";
+  import TfMenu from "../TfMenu.svelte";
 
   let {
     range,
@@ -29,7 +29,6 @@
 
   let open = $state(false);
   let face = $state<HTMLButtonElement | null>(null);
-  let menu = $state<HTMLDivElement | null>(null);
 
   const short = (sha: string) => sha.replace(/\^$/, "").slice(0, 7) + (sha.endsWith("^") ? "^" : "");
   const ends = $derived(pickedEnds(range, choice) ?? { base: range.base, head: range.head });
@@ -41,42 +40,6 @@
     if (anchor === end) return range.commits[anchor]?.title ?? "One commit";
     return `${Math.abs(anchor - end) + 1} commits`;
   });
-
-  $effect(() => {
-    if (!open) return;
-    const off = untrack(() => layers.add({ kind: "dialog", close: () => close() }));
-    queueMicrotask(() => menu?.querySelector<HTMLElement>("[aria-checked=true], button")?.focus());
-    const outside = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && !menu?.contains(target) && !face?.contains(target)) open = false;
-    };
-    window.addEventListener("click", outside, true);
-    return () => {
-      off();
-      window.removeEventListener("click", outside, true);
-    };
-  });
-
-  function close() {
-    open = false;
-    face?.focus();
-  }
-
-  function onkeydown(event: KeyboardEvent) {
-    const items = [...(menu?.querySelectorAll<HTMLElement>("button, a") ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-    } else if (event.key === "ArrowDown" && items.length > 0) {
-      event.preventDefault();
-      items[(at + 1) % items.length]?.focus();
-    } else if (event.key === "ArrowUp" && items.length > 0) {
-      event.preventDefault();
-      items[(at - 1 + items.length) % items.length]?.focus();
-    }
-  }
 
   function choose(next: PrPick) {
     open = false;
@@ -108,9 +71,7 @@
       aria-hidden="true"><path d="M4 6l4 4 4-4" /></svg
     ></button
   >
-  {#if open}
-    <!-- svelte-ignore a11y_interactive_supports_focus -->
-    <div class="tf-menu" role="menu" tabindex="-1" aria-label="Commits" bind:this={menu} {onkeydown}>
+  <TfMenu bind:open opener={face} label="Commits" className="tf-pick-m" align="start" focusOn="[aria-checked=true]" {layers}>
       <button type="button" role="menuitemradio" aria-checked={choice.kind === "all"} class:tf-on={choice.kind === "all"} onclick={() => choose({ kind: "all" })}>
         <span class="tf-pick-tick" aria-hidden="true">{choice.kind === "all" ? "✓" : ""}</span>All commits{" "}<span class="tf-pick-kb">{range.commits.length}</span>
       </button>
@@ -131,7 +92,7 @@
           <button type="button" role="menuitemcheckbox" aria-checked={on} class="tf-pick-c" class:tf-on={on} onclick={(event) => pickCommit(at, event.shiftKey)}>
             <span class="tf-pick-box" aria-hidden="true">{on ? "✓" : ""}</span>
             <span class="tf-mono">{commit.sha.slice(0, 7)}</span>
-            <span class="tf-pick-title">{commit.title}</span>
+            <span class="tf-pick-title" title={commit.title}>{commit.title}</span>
             {#if commit.meta}<span class="tf-pick-kb">{commit.meta}</span>{/if}
           </button>
         {/each}
@@ -141,6 +102,5 @@
           The pick has its own address: link it, go back to it.{" "}<a role="menuitem" href={diffHash(range.repository, ends.base, ends.head)} onclick={() => (open = false)}>Open as diff</a>
         </div>
       {/if}
-    </div>
-  {/if}
+  </TfMenu>
 </span>

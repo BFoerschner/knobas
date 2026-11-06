@@ -8,7 +8,7 @@
 }
 .tf-fsearch {
   display: flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--field);
-  border-radius: 4px; height: var(--control-h-sm); padding: 0 8px; flex: 1 1 160px; min-width: 140px; max-width: 360px; color: var(--ink-2);
+  border-radius: 4px; height: var(--control-h-sm); padding: 0 8px; flex: 1 1 140px; min-width: 140px; max-width: 360px; color: var(--ink-2);
 }
 .tf-fsearch:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-fsearch input { border: 0; background: none; outline: none; color: var(--ink); flex: 1; min-width: 0; padding: 1px 0; }
@@ -30,7 +30,11 @@
 @media (max-width: 900px) {
   .tf-runbody > .tf-fbar, .tf-rbar { margin-left: -16px; margin-right: -16px; }
 }
+/* The bar's last things stay one flex item, so when the row has no room they wrap together: its selects, or its last pills
+   where it has none, then the count at the row's end. The count never wraps alone. */
+.tf-ftail { display: flex; align-items: center; gap: var(--control-gap); flex: 1 0 auto; max-width: 100%; }
 .tf-fend { margin-left: auto; display: inline-flex; align-items: center; gap: var(--control-gap); flex: none; }
-/* Room for "0 of 34 tickets" at rest, so filtering moves nothing left of it. */
-.tf-fcount { display: inline-block; min-width: 15ch; text-align: right; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The room its longest text needs, drawn in an empty row of its grid (`data-room`), so filtering moves nothing left of it. */
+.tf-fcount { display: inline-grid; justify-items: end; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tf-fcount::after { content: attr(data-room); height: 0; overflow: hidden; visibility: hidden; }
 

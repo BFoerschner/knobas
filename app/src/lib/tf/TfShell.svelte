@@ -716,4 +716,5 @@
     <WriteQueue {queue} {now} {layers} onclose={() => (writeQueuePanel.open = false)} />
   {/if}
   <TfToasts />
+  <div class="tf-floats"></div>
 </div>

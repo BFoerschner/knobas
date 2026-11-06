@@ -67,10 +67,11 @@
   import type { Timer } from "../../shell/timer.svelte";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
-  import { alsoIn, hiddenOf, linkedOn, groupsOf, type GroupRow } from "./connections";
+  import { alsoIn, hiddenOf, linkedOn, groupsOf, LINK_CAME_FROM, type GroupRow } from "./connections";
   import { blockerEntries, footAction, segmentKey, isMine, keyOf, offersStartWork, username, type FrameKinds } from "./job";
   import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
+  import TfDialog from "../settings/TfDialog.svelte";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
   import { createJobReader } from "./job-reader.svelte";
@@ -340,7 +341,29 @@
     reader.rereadReach(id);
   }
 
-  async function unlinkEntry(entry: LinkEntry) {
+  /** The link *Unlink…* is asking about: one knobas could not draw again as it was (the removal rule). */
+  let unlinking = $state<LinkEntry | null>(null);
+
+  /** A link drawn by hand goes at once with *Undo*. `create_link` would redraw any other as drawn by hand, so it asks first. */
+  function unlinkEntry(entry: LinkEntry) {
+    if (entry.link.origin === "manual") void withdrawLink(entry);
+    else unlinking = entry;
+  }
+
+  async function confirmUnlink(entry: LinkEntry) {
+    const id = detail?.row.entity_id;
+    try {
+      await ports.unlink(entry.link.id);
+      unlinking = null;
+      rereadLinks(id);
+      push({ text: "Unlinked in knobas only." });
+    } catch (cause) {
+      unlinking = null;
+      push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  async function withdrawLink(entry: LinkEntry) {
     const { link } = entry;
     // *Undo* re-reads the ticket it was unlinked on: its toast outlives a move to another job.
     const id = detail?.row.entity_id;
@@ -614,7 +637,7 @@
       alsoIn={(entityId) => alsoIn(inherited, entityId)}
       {layers}
       onclose={() => (drawer = false)}
-      onunlink={(entry) => void unlinkEntry(entry)}
+      onunlink={unlinkEntry}
       onlinkto={() => {
         linking = true;
       }}
@@ -646,6 +669,18 @@
       onsaved={savedSet}
       onclose={() => (savingSet = false)}
     />
+  {/if}
+  {#if unlinking !== null}
+    {@const link = unlinking}
+    <TfDialog title="Unlink {link.other.title || link.other.entity_id}?" {layers} onclose={() => (unlinking = null)}>
+      {#snippet body()}
+        <p>It came from {LINK_CAME_FROM[link.link.origin]}. Linking it again would mark it as drawn by hand, so this can't be undone.</p>
+      {/snippet}
+      {#snippet footer()}
+        <button type="button" class="tf-btn tf-ghost" onclick={() => (unlinking = null)}>Cancel</button>
+        <button type="button" class="tf-btn tf-primary tf-danger" onclick={() => void confirmUnlink(link)}>Unlink</button>
+      {/snippet}
+    </TfDialog>
   {/if}
   {#if linking}
     <TfLinkTo

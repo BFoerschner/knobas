@@ -16,18 +16,17 @@
 .tf-vw-more:hover { background: var(--sheet-2); }
 .tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more { color: var(--sheet); }
 .tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more:hover { background: rgba(255,255,255,.15); }
-.tf-vw-menu { position: relative; display: inline-flex; }
-.tf-vw-menu .tf-menu { width: 200px; }
-.tf-vw-menu .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
-.tf-vw-menu .tf-menu b { font-weight: 500; }
-.tf-vw-menu .tf-menu .tf-menu-danger { color: var(--err); }
+.tf-vw-menu { display: inline-flex; }
+.tf-menu.tf-vw-m { width: 200px; }
+.tf-vw-m b { font-weight: 500; }
+.tf-menu.tf-vw-m .tf-menu-danger { color: var(--err); }
 .tf-vw-none { font-size: var(--t-sm); margin: 8px; }
 /* Jira views (#877): the groups' source note, the list's foot, View settings' Jira part. */
 .tf-vw-sync { font-weight: 400; color: var(--ink-2); }
 .tf-vw-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 8px 0; line-height: 1.4; }
 .tf-views .tf-vw-foot a { display: inline; padding: 0; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-views .tf-vw-foot a:hover { background: none; color: var(--ink); }
-.tf-vw-menu .tf-menu button span { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-vw-m button span { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-vw-source-query { font: var(--t-xs) var(--mono); font-variant-ligatures: none; background: var(--sheet-2); border-radius: 4px; padding: 8px 10px; white-space: pre-wrap; margin: 8px 0; }
 .tf-q { font: var(--t-xs) var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 .tf-vw-warn { color: var(--warn); }

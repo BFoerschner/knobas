@@ -151,6 +151,8 @@
 /* The sha, in the repository's table and a pull request's: its own width, and the message takes the rest. */
 .tf-rcommits td.tf-mono { width: 110px; white-space: nowrap; }
 .tf-rcommits td.tf-nowrap { width: 1%; }
+/* The last value: *Open in…* stands in its place on hover, so it is at least as wide. */
+.tf-rcommits td.tf-nowrap .tf-rowval { display: inline-block; min-width: 96px; }
 .tf-rcommits td.tf-ropen { width: 1%; padding-top: 0; padding-bottom: 0; text-align: right; white-space: nowrap; }
 /* A commit picked for *Diff selected* (#2271). */
 .tf-rcommits tr.tf-picked td { background: var(--info-bg); }
@@ -387,15 +389,14 @@
  */
 .tf-rsw-face, .tf-pick-face { gap: 6px; }
 .tf-rsw-face b, .tf-pick-face b { font-weight: 600; }
-:is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > :is(button, a) { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
-:is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > :is(button, a):is(:hover, :focus-visible), :is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu > .tf-on { background: var(--sheet-2); }
-:is(.tf-rsw, .tf-pick, .tf-pmenu) .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-menu:is(.tf-rsw-m, .tf-pick-m, .tf-pmenu-m) > :is(button, a) { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.tf-menu:is(.tf-rsw-m, .tf-pick-m, .tf-pmenu-m) > :is(button, a):is(:hover, :focus-visible), .tf-menu:is(.tf-rsw-m, .tf-pick-m, .tf-pmenu-m) > .tf-on { background: var(--sheet-2); }
 .tf-rsw-mh, .tf-pick-mh { padding: 6px 10px 2px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
 
 /* The renderer switcher (#2263; mockups/code-area/file.html, state "switcher"): *Render as <name> ▾*. */
-.tf-rsw { position: relative; display: inline-flex; }
+.tf-rsw { display: inline-flex; }
 .tf-rsw-lab { color: var(--ink-2); }
-.tf-rsw .tf-menu { width: 330px; font-size: var(--t-sm); }
+.tf-menu.tf-rsw-m { width: 330px; font-size: var(--t-sm); }
 .tf-rsw-tick { width: 14px; flex: none; color: var(--ink); }
 .tf-rsw-name { min-width: 0; }
 .tf-rsw-sub { display: block; font-size: var(--t-xs); color: var(--ink-2); }
@@ -407,9 +408,9 @@
 
 /* A pull request's commit picker (#2273; mockups/code-area/diff.html, state "range"): *Commits <choice> base…head ▾*. */
 .tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }
-.tf-pick { position: relative; display: inline-flex; }
+.tf-pick { display: inline-flex; }
 .tf-pick-lab, .tf-pick-ends { color: var(--ink-2); }
-.tf-pick .tf-menu { left: 0; right: auto; width: 420px; max-height: 60vh; overflow: auto; font-size: var(--t-sm); }
+.tf-menu.tf-pick-m { width: 420px; font-size: var(--t-sm); }
 .tf-pick-tick { width: 14px; flex: none; }
 .tf-pick-box { width: 14px; height: 14px; flex: none; border: 1px solid var(--rule); border-radius: 3px; display: inline-grid; place-items: center; font-size: var(--t-2xs); }
 .tf-pick-c.tf-on .tf-pick-box { background: var(--ink); color: var(--paper); border-color: var(--ink); }
@@ -435,8 +436,8 @@
 .tf-px { display: inline-grid; place-items: center; width: 22px; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--rule-2); background: none; color: var(--ink-2); cursor: pointer; }
 .tf-pstep.tf-pbad { border-color: var(--err); background: var(--err-bg); color: var(--err); }
 .tf-pstep.tf-prenderer { padding: 0 8px; font-weight: 600; background: var(--info-bg); border-color: var(--info); color: var(--info); }
-.tf-pmenu { position: relative; display: inline-flex; }
-.tf-pmenu .tf-menu { width: 320px; font-size: var(--t-sm); }
+.tf-pmenu { display: inline-flex; }
+.tf-menu.tf-pmenu-m { width: 320px; font-size: var(--t-sm); }
 .tf-pmono { font-family: var(--mono); font-variant-ligatures: none; }
 /* #2265: the person's own command step (mockup `.step.user`), the save form, the suggestion chip (`.suggest`). */
 .tf-pstep.tf-puser .tf-pname::after { content: " cmd"; font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); }
@@ -448,12 +449,12 @@
 .tf-stepfail .tf-sfcols b { display: block; font-size: var(--t-xs); margin-bottom: 4px; }
 
 /* The file header's *More* (⋯) (#2311, mockups/code-area/file.html): Edit, History, the source's page. */
-.tf-fmore { position: relative; display: inline-flex; }
+.tf-fmore { display: inline-flex; }
 /* Icon-only, square at its row's small height: `.tf-iconbtn.tf-sm` in chrome.css (#2238). */
 .tf-fmore > .tf-iconbtn svg { width: 14px; height: 14px; }
 .tf-fmore svg { fill: currentColor; }
-.tf-fmore .tf-menu { font-size: var(--t-sm); }
-.tf-fmore .tf-menu > a, .tf-fmore .tf-menu > span { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
-.tf-fmore .tf-menu > a:hover, .tf-fmore .tf-menu > a:focus-visible { background: var(--sheet-2); }
-.tf-fmore .tf-menu > span[aria-disabled="true"] { color: var(--ink-2); cursor: default; }
-.tf-fmore .tf-menu small { font-size: var(--t-xs); max-width: 260px; }
+.tf-menu.tf-fmore-m { font-size: var(--t-sm); }
+.tf-fmore-m > a, .tf-fmore-m > span { display: flex; flex-direction: column; padding: 6px 10px; border-radius: 4px; color: var(--ink); text-decoration: none; }
+.tf-fmore-m > a:hover, .tf-fmore-m > a:focus-visible { background: var(--sheet-2); }
+.tf-fmore-m > span[aria-disabled="true"] { color: var(--ink-2); cursor: default; }
+.tf-fmore-m small { font-size: var(--t-xs); max-width: 260px; }

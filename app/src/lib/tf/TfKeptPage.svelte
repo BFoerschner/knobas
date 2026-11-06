@@ -90,12 +90,14 @@
 {/snippet}
 
 <div class="tf-kept" hidden={!visible} bind:this={wrapper}>
-  {#if page.crumbs && route.view === "full"}
-    <div class="tf-full">
-      <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} sectionTop />
+  <div class="tf-keptpage">
+    {#if page.crumbs && route.view === "full"}
+      <div class="tf-full">
+        <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} sectionTop />
+        <Page {...pageProps} {...frameProps} />
+      </div>
+    {:else}
       <Page {...pageProps} {...frameProps} />
-    </div>
-  {:else}
-    <Page {...pageProps} {...frameProps} />
-  {/if}
+    {/if}
+  </div>
 </div>
