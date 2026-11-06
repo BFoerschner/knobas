@@ -772,7 +772,7 @@
 </nav>
 {#if tab === "all"}
   <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal}>
-    {#snippet after()}{#if hiddenRows.length > 0}<span class="tf-mon-hidn">, {hiddenRows.length} hidden</span>{/if}{/snippet}
+    {#snippet after()}<span class="tf-mon-hidn">{#if hiddenRows.length > 0}, {hiddenRows.length} hidden{/if}</span>{/snippet}
   </FilterBar>
 {:else}
   <FilterBar config={unwatchedConfig} filter={unwatchedFilter} shown={unwatched === null ? null : shownUnwatched.length} total={unwatched?.length ?? null} />

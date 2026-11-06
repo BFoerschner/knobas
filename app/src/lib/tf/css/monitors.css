@@ -78,6 +78,9 @@
 .tf-mon .tf-mon-at > td:last-child { box-shadow: inset -2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
 .tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
 .tf-mon-hidn { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }
+/* The count keeps room for *, 1 hidden*, as `.tf-fcount` does for its own words: *Hide* wrapping the band would move the rows under the pointer. */
+.tf-fend:has(> .tf-mon-hidn) { justify-content: flex-end; min-width: 146px; }
+.tf-mon-hidn:empty { display: none; }
 /* A row *Hide* took away keeps its height and its words, dimmed and with no controls, until the pointer leaves it (F-064). */
 .tf-mon tr.tf-mon-held > td { height: var(--tf-row-held); }
 .tf-mon tr.tf-mon-held :is(td, .tf-mon-since, .tf-mon-figs) { color: var(--muted); }
