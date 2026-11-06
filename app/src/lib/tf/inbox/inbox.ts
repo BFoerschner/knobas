@@ -9,6 +9,7 @@
  * `title` and `reason`, subject first (F-115), and `detail` its second reading.
  */
 import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
+import { failedBuildLine } from "../builds/builds";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
 import { MENTION_TAB, monitorHash, sectionHash, ticketHash } from "../route";
@@ -86,6 +87,12 @@ export function sentence(item: Pick<InboxItem, "category" | "reason" | "title">)
 export function named(item: Pick<InboxItem, "category" | "reason" | "title">): string {
   const title = item.title.trim();
   return title === "" || item.reason.toLowerCase().includes(title.toLowerCase()) ? sentence(item) : title;
+}
+
+/** What a row's second line adds after its kind and job: a failed build's tests in the words Builds uses (F-010), else the source's own line. */
+export function detailOf(item: Pick<InboxItem, "category" | "detail">): string | null {
+  if (!item.detail) return null;
+  return item.category === "failed_build" ? failedBuildLine(item.detail) : item.detail;
 }
 
 /** A failure is drawn with an err dot (a failed build, a monitor down, a refused sign-in). */

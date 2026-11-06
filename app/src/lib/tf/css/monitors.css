@@ -5,7 +5,7 @@
 .tf-mbar i { flex: none; width: 2px; border-radius: 1px; background: var(--ok); opacity: .8; }
 .tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: var(--t-2xs); font-weight: 400; color: var(--ink-2); }
 .tf-mon { table-layout: fixed; }
-.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed):hover > td { background: var(--sheet-2); }
+.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed, .tf-mon-held):hover > td { background: var(--sheet-2); }
 .tf-monc-state { width: 216px; }
 .tf-monc-bars { width: 170px; }
 .tf-monc-num { width: 92px; }
@@ -73,5 +73,6 @@
 .tf-mon .tf-mon-at > td:last-child { box-shadow: inset -2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
 .tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
 .tf-mon-hidn { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }
-/* A row *Hide* took away holds its height under the pointer until the pointer leaves it. */
-.tf-mon tr.tf-mon-held > td { height: var(--tf-row-held); padding: 0; background: none; }
+/* A row *Hide* took away keeps its height and its words, dimmed and with no controls, until the pointer leaves it (F-064). */
+.tf-mon tr.tf-mon-held > td { height: var(--tf-row-held); }
+.tf-mon tr.tf-mon-held :is(td, .tf-mon-since, .tf-mon-figs) { color: var(--muted); }

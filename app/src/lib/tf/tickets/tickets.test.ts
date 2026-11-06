@@ -11,6 +11,7 @@ import {
   drawnCards,
   moreLanesLine,
   assigneeName,
+  firstName,
   initials,
   laneTitle,
   moreLine,
@@ -289,5 +290,8 @@ test("a card calls its assignee by name where the source keeps one, else by acco
   expect(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara Lindqvist");
   expect(assigneeName({ assignee: "mara" })).toBe("mara");
   expect(assigneeName({ assignee: null })).toBeNull();
+  expect(firstName("Mara Lindqvist")).toBe("Mara");
+  expect(firstName("mara")).toBe("mara");
+  expect(firstName(null)).toBeNull();
   expect(initials(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" }))).toBe(initials("Mara Lindqvist"));
 });

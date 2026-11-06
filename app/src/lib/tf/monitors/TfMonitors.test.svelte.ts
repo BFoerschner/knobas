@@ -355,6 +355,26 @@ const names = () => monitorRows().map((tr) => text(tr.querySelector("td")).repla
 const count = () => text(target.querySelector(".tf-fcount")) + text(target.querySelector(".tf-mon-hidn"));
 const row = (name: string) => monitorRows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
 
+test("a mouse's Hide leaves the row's words in its place, with nothing to press, until the pointer leaves it (F-064)", async () => {
+  let roster = ROSTER;
+  await draw([], "PAY-231", ports({
+    monitorRoster: async () => roster,
+    setMonitorHidden: async (id, hidden) => {
+      roster = roster.map((each) => (each.entity_id === id ? { ...each, hidden } : each));
+      return hidden;
+    },
+  }));
+  button(row("flows-stage"), "Hide")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  const held = target.querySelector(".tf-mon-held")!;
+  expect(text(held)).toContain("flows-stage");
+  expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
+  expect(held.querySelector(".tf-chip")!.classList.contains("tf-err"), "no tone").toBe(false);
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+  await settle();
+  expect(target.querySelector(".tf-mon-held")).toBeNull();
+});
+
 test("Hide moves a monitor into the closed fold at the roster's end; opened, it is dimmed with Unhide and no Ack", async () => {
   let roster = ROSTER;
   const stand = ports({

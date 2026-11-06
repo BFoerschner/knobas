@@ -672,7 +672,7 @@ test("Dismiss hides the offer at once and sends when the toast's Undo has had it
   }
 });
 
-test("a mouse's Dismiss leaves an empty row of its height until the pointer leaves it, and a key's closes at once (F-138)", async () => {
+test("a mouse's Dismiss leaves the row's words at its height until the pointer leaves it, and a key's closes at once (F-138, F-064)", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     render();
@@ -684,7 +684,8 @@ test("a mouse's Dismiss leaves an empty row of its height until the pointer leav
     await settle();
     const held = target.querySelector(".tf-tm-rowheld")!;
     expect(rowsOf().indexOf(held), "where it stood").toBe(at);
-    expect(held.querySelector("button"), "a second press lands on nothing").toBeNull();
+    expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
+    expect(held.textContent, "it still says what it was").toContain("knobas saw");
     expect(rowsOf()).toHaveLength(before);
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
     await settle();
@@ -872,4 +873,13 @@ test("a row's actions stand in their slots, and Other ticket… stands beside a 
   expect(slot(row("offered"))).toEqual([["Add to PAY-228", "tf-tm-s1"], ["Other ticket…", "tf-tm-s2"], ["Dismiss", "tf-tm-s3"]]);
   expect(slot(row("open"))).toEqual([["Add to PAY-231", "tf-tm-s1"], ["Other ticket…", "tf-tm-s2"]]);
   expect(slot(row("unlogged")).at(-1)).toEqual(["Edit…", "tf-tm-s3"]);
+});
+
+test("a day with nothing on it draws its one line and Add a block, not five figures and a strip (F-354)", async () => {
+  render({ blocks: [], open: [], day: "2026-08-20" });
+  await settle();
+  expect(target.querySelector(".tf-tm-sum")).toBeNull();
+  expect(target.querySelector(".tf-tm-strip")).toBeNull();
+  expect(target.querySelector(".tf-tm-legend")).toBeNull();
+  expect(squash(target.querySelector(".tf-tm-empty")?.textContent)).toContain("Add a block…");
 });

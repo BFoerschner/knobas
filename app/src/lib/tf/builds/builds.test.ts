@@ -6,6 +6,8 @@ import { expect, test } from "vitest";
 
 import type { PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import {
+  failedBuildLine,
+  testsWords,
   foldOpen,
   pinnedOf,
   reasonsLine,
@@ -215,4 +217,15 @@ test("the rail's time climbs the one ladder at every width (F-049): the clock to
   expect(latestTime(at(new Date(2026, 7, 16, 9, 0)), now)).toBe("Sun 09:00");
   expect(latestTime(at(new Date(2026, 7, 15, 9, 0)), now)).toBe("15 Aug");
   expect(latestTime(pipeline("B", []), now)).toBe("");
+});
+
+test("a run's tests read one way, and only TeamCity's own failed-build line is read as counts (F-010)", () => {
+  expect(testsWords({ failed: 1, passed: 41, ignored: 0 })).toBe("1 failed, 41 passed");
+  expect(testsWords({ failed: 0, passed: 41, ignored: 2 })).toBe("41 passed, 2 ignored");
+  expect(testsWords({ failed: 0, passed: 0, ignored: 0 })).toBe("0 passed");
+  expect(failedBuildLine("Tests failed: 3 (3 new), passed: 212")).toBe("3 failed, 212 passed");
+  expect(failedBuildLine("Tests failed: 3")).toBe("3 failed");
+  expect(failedBuildLine("Tests failed: 1, passed: 9, ignored: 2")).toBe("1 failed, 9 passed, 2 ignored");
+  expect(failedBuildLine("Tests failed: 1, passed: 9, muted: 2"), "a shape it doesn't know stays the source's").toBe("Tests failed: 1, passed: 9, muted: 2");
+  expect(failedBuildLine("Compilation error")).toBe("Compilation error");
 });

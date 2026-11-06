@@ -9,6 +9,9 @@
   A project the source's credential cannot file in (`refused_writes`, #2052,
   asked about every project drawn) stays pickable, and picked draws *Create
   ticket* disabled with the reason above it: another project may take it.
+
+  A surface that names a `draftKey` keeps what was changed through `Esc` and ×, as *New page* does (F-647). *Cancel* is the
+  explicit discard, and filing ends the draft too.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -16,6 +19,7 @@
   import type { Project } from "../ipc/entity";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
   import { canFile, projectEntity, type TicketDraft } from "./create-ticket";
+  import { drafts } from "./drafts.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
 
@@ -25,9 +29,12 @@
     words = false,
     layers = sharedLayers,
     refusedWrites,
+    draftKey,
     onclose,
     onfile,
   }: {
+    /** Where what was typed outlives the dialog; with none, it goes with the dialog. */
+    draftKey?: string | undefined;
     /** What the dialog opens with. */
     draft: TicketDraft;
     projects: readonly Project[];
@@ -42,7 +49,23 @@
 
   const uid = $props.id();
 
-  let editing = $state<TicketDraft>(untrack(() => ({ ...draft })));
+  let editing = $state<TicketDraft>(
+    untrack(() => ({ ...draft, ...(draftKey !== undefined && drafts.has(draftKey) ? (JSON.parse(drafts.get(draftKey)) as TicketDraft) : {}) })),
+  );
+
+  // Only what differs from what the dialog opened with is a draft, so one opened and left holds nothing back.
+  $effect(() => {
+    if (draftKey === undefined) return;
+    const same = editing.project === draft.project && editing.type === draft.type && editing.title === draft.title && editing.body === draft.body;
+    const words = same ? "" : JSON.stringify(editing);
+    untrack(() => drafts.put(draftKey, words));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discard(): void {
+    if (draftKey !== undefined) drafts.forget(draftKey);
+    onclose();
+  }
 
   let refused = $state<RefusedWrite[]>([]);
   /** As a string, so the same projects drawn again ask nothing again. */
@@ -99,14 +122,17 @@
     {#if cannot !== null}<p class="tf-dlg-note tf-fail">{cannot}</p>{/if}
   {/snippet}
   {#snippet footer()}
-    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={discard}>Cancel</button>
     <button
       class="tf-btn tf-primary"
       {...refusedAttrs(cannot)}
       disabled={!canFile(editing)}
       onclick={() => {
         const filed = { ...editing };
-        if (canFile(filed) && cannot === null) onfile(filed);
+        if (canFile(filed) && cannot === null) {
+          if (draftKey !== undefined) drafts.forget(draftKey);
+          onfile(filed);
+        }
       }}
     >
       Create ticket

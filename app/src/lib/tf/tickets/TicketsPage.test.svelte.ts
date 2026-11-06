@@ -104,6 +104,7 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
       path: "PAY-300",
       comment_count: 0,
       assignee: "mara.lindqvist",
+      assignee_name: "Mara Lindqvist",
       signals: [
         { kind: "failing-build", text: "build failed", tone: "err" },
         { kind: "open-pr", text: "PR #142 open", tone: "info" },
@@ -497,6 +498,17 @@ test("the list draws the same tickets newest first, the selected row outlined", 
   expect(rows[0]!.classList.contains("tf-sel")).toBe(true);
   expect(rows[0]!.textContent).toContain("PAY-200");
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
+});
+
+test("the list calls an assignee by first name, with the whole name in its title (F-144)", async () => {
+  await open(harness());
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')]
+    .find((b) => b.textContent === "List")!
+    .click();
+  await settle();
+  const named = [...target.querySelectorAll<HTMLElement>(".tf-tbl td.tf-c-assignee")].filter((td) => td.title.includes(" "));
+  expect(named.length).toBeGreaterThan(0);
+  for (const cell of named) expect(cell.textContent).toBe(cell.title.split(" ")[0]);
 });
 
 test("the list's Show N more reads every ticket, and the board keeps its caps", async () => {

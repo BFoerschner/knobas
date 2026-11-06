@@ -143,6 +143,11 @@ export function assigneeName(card: Pick<MiniBoardCard, "assignee" | "assignee_na
   return card.assignee_name ?? card.assignee;
 }
 
+/** What a list's narrow column calls someone: the first word of the name the source gave, on one line. The whole name is the cell's title. */
+export function firstName(name: string | null): string | null {
+  return name?.trim().split(/\s+/)[0] || null;
+}
+
 /**
  * What the Tickets preview and the ticket page draw of a ticket (spec #2227):
  * a board card's fields, or the same fields read off the ticket's detail

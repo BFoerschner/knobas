@@ -524,7 +524,7 @@
   const FOLD_KEY = "\u0000hidden-fold";
   const HELD_KEY = "\u0000held-row";
   /** The row a mouse press on *Hide* sent to the fold, still holding its place under the pointer (F-138). */
-  let holding = $state.raw<{ id: string; at: number; height: number } | null>(null);
+  let holding = $state.raw<{ id: string; row: MonitorRow; at: number; height: number } | null>(null);
   /** Where its empty row stands: once it has left the list, and until *Undo* brings it back. */
   const holdAt = $derived(holding !== null && !rows.some((row) => row.entity_id === holding?.id) ? holding.at : null);
   $effect(() => {
@@ -652,7 +652,7 @@
     if (pressing[row.entity_id]) return;
     pressing[row.entity_id] = true;
     const box = hidden && heldByPointer(event) ? (event?.currentTarget as Element).closest("tr")?.getBoundingClientRect() : undefined;
-    if (box !== undefined) holding = { id: row.entity_id, at: rows.indexOf(row), height: box.height };
+    if (box !== undefined) holding = { id: row.entity_id, row, at: rows.indexOf(row), height: box.height };
     try {
       await ports.setMonitorHidden(row.entity_id, hidden);
       if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
@@ -826,8 +826,21 @@
           {#each win.slice(entries) as entry (entryKey(entry))}
             {@const row = entry.row}
             {#if row === null && entry.held}
+              <!-- Its words stay, dimmed, for as long as the pointer rests on it (F-064). Nothing in them can be pressed. -->
               <!-- svelte-ignore a11y_no_static_element_interactions -->
-              <tr class="tf-mon-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(HELD_KEY)} {@attach heldHeight(holding?.height ?? 0)}><td colspan="7"></td></tr>
+              <tr class="tf-mon-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(HELD_KEY)} {@attach heldHeight(holding?.height ?? 0)}>
+                {#if holding !== null}
+                  {@const was = holding.row}
+                  {@const chip = stateChip(was, now)}
+                  <td>{was.name}{#if was.monitor_type}{" "}<span class="tf-mon-type">{kindWord(was.monitor_type)}</span>{/if}</td>
+                  <td><div class="tf-mon-state"><TfStateChip text={chip.label} />{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
+                  <td>{#each was.assets as asset (asset.id)}<div><span class="tf-mon-asset">{asset.name}</span>{" "}<span class="tf-mon-type">{asset.type_label}</span></div>{/each}</td>
+                  <td><div class="tf-mon-24"><span class="tf-mon-figs">{responseText(was.response_time_ms)}, {uptimeText(was)}</span></div></td>
+                  <td class="tf-num">{responseText(was.response_time_ms)}</td>
+                  <td class="tf-num">{uptimeText(was)}</td>
+                  <td></td>
+                {:else}<td colspan="7"></td>{/if}
+              </tr>
             {:else if row === null}
               <tr class="tf-mon-foldrow" {@attach win.row(FOLD_KEY)}>
                 <td colspan="7">

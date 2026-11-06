@@ -22,6 +22,9 @@
 
   A row whose source's credential cannot log work (`refused_writes`, #2052)
   is drawn unticked, its box disabled, with the reason; it is never sent.
+
+  An edited comment outlives the dialog through `Esc` and × (F-647). *Cancel* is the explicit discard, and a worklog
+  that went takes its comment's draft with it.
 -->
 <script lang="ts">
   import { minutesLabel } from "../../time/format";
@@ -44,6 +47,7 @@
   import type { Timer } from "../../shell/timer.svelte";
   import { readerDay } from "../../time/day";
   import { columnHeading, minutesOf } from "../../time/week";
+  import { drafts } from "../drafts.svelte";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   
@@ -87,6 +91,8 @@
     plan: PlannedWorklog;
     ticked: boolean;
     comment: string;
+    /** What the draft said, so only a comment that was changed is held. */
+    drafted: string;
   }
   let rows = $state<Row[] | null>(null);
   let failure = $state<string | null>(null);
@@ -97,7 +103,18 @@
   const cannot = (plan: PlannedWorklog) => refusalOf(refused, plan.entity_id, "log_work");
 
   const id = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `${plan.day} ${plan.entity_id}`;
+  const draftKey = (plan: Pick<PlannedWorklog, "day" | "entity_id">) => `log-all:${id(plan)}`;
 
+  function keepWords(row: Row) {
+    if (row.comment === row.drafted) drafts.forget(draftKey(row.plan));
+    else drafts.put(draftKey(row.plan), row.comment);
+  }
+
+  /** *Cancel*: the explicit discard. */
+  function discard() {
+    for (const row of rows ?? []) drafts.forget(draftKey(row.plan));
+    onclose();
+  }
 
   onMount(() => {
     void (async () => {
@@ -112,7 +129,12 @@
             ),
           ),
         );
-        rows = plan.map((entry, index) => ({ plan: entry, ticked: true, comment: comments[index] ?? "" }));
+        rows = plan.map((entry, index) => ({
+          plan: entry,
+          ticked: true,
+          comment: drafts.has(draftKey(entry)) ? drafts.get(draftKey(entry)) : (comments[index] ?? ""),
+          drafted: comments[index] ?? "",
+        }));
         const tickets = [...new Set(plan.map((entry) => entry.entity_id))];
         refused = await askRefused(tickets.map((entity) => ({ entity, op: "log_work" })), io.refusedWrites);
         for (const row of rows) if (cannot(row.plan) !== null) row.ticked = false;
@@ -164,6 +186,7 @@
               comment: row.comment,
             }),
           );
+          drafts.forget(draftKey(row.plan));
         } catch (error) {
           refused ??= ipcErrorMessage(error);
         }
@@ -230,6 +253,7 @@
                     rows="2"
                     aria-label="Comment for {ticket}, {dayHeading(row.plan.day)}"
                     bind:value={row.comment}
+                    oninput={() => keepWords(row)}
                   ></textarea>
                 </td>
               </tr>
@@ -246,7 +270,7 @@
       <p class="tf-dim tf-note">Time on "No target, app open" is not offered. Assign it to a ticket in the day first.</p>
   {/snippet}
   {#snippet footer()}
-      <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+      <button type="button" class="tf-btn tf-ghost" onclick={discard}>Cancel</button>
       {#if rows !== null && rows.length > 0}
         <button type="button" class="tf-btn tf-primary" disabled={sending || ticked.length === 0} onclick={() => void send()}>
           Log {ticked.length} worklog{ticked.length === 1 ? "" : "s"}

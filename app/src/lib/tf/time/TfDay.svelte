@@ -437,7 +437,7 @@
   }
 
   /** The row a mouse press on *Dismiss* took away, still holding its place under the pointer (F-138). */
-  let holding = $state.raw<{ id: number; at: number; height: number } | null>(null);
+  let holding = $state.raw<{ id: number; row: DayRow; at: number; height: number } | null>(null);
   /** Where its empty row stands. An *Undo* brings the row itself back, and that is drawn instead. */
   const holdAt = $derived(holding !== null && isHeld(holding.id) ? holding.at : null);
   $effect(() => {
@@ -445,13 +445,16 @@
     return holdUnderPointer(() => document.querySelector(".tf-tm-rowheld"), () => (holding = null));
   });
 
+  /** Nothing to draw: not while the last row a press took away still holds its place, or what stands under the pointer would move. */
+  const nothing = $derived(rows.length === 0 && holdAt === null);
+
   /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
   function dismiss(row: DayRow, event: MouseEvent) {
     const block = row.block;
     if (block === null) return;
     const id = block.block.id;
     const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-tm-row")?.getBoundingClientRect() : undefined;
-    if (box !== undefined) holding = { id, at: rows.indexOf(row), height: box.height };
+    if (box !== undefined) holding = { id, row, at: rows.indexOf(row), height: box.height };
     holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id), reread, UNDO_MS);
   }
 
@@ -496,13 +499,16 @@
     </p>
   </div>
 {:else if ready !== null}
-  <div class="tf-tm-sum">
-    <div><b>{minutesLabel(figures.tracked)}</b><span>tracked</span></div>
-    <div><b>{minutesLabel(figures.logged)}</b><span>logged</span></div>
-    <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{minutesLabel(figures.toLog)}</b><span>to log</span></div>
-    <div><b>{unknown.offered ? "–" : minutesLabel(figures.offered)}</b><span>offered by knobas</span></div>
-    <div><b>{unknown.open ? "–" : minutesLabel(figures.open)}</b><span>open, app in front</span></div>
-  </div>
+  <!-- A day with nothing on it says so once: five figures of *0m* and an empty strip would say it six times (F-354). -->
+  {#if !nothing}
+    <div class="tf-tm-sum">
+      <div><b>{minutesLabel(figures.tracked)}</b><span>tracked</span></div>
+      <div><b>{minutesLabel(figures.logged)}</b><span>logged</span></div>
+      <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{minutesLabel(figures.toLog)}</b><span>to log</span></div>
+      <div><b>{unknown.offered ? "–" : minutesLabel(figures.offered)}</b><span>offered by knobas</span></div>
+      <div><b>{unknown.open ? "–" : minutesLabel(figures.open)}</b><span>open, app in front</span></div>
+    </div>
+  {/if}
 
   {#if ready.pastHorizon}
     <p class="tf-tm-note">
@@ -511,84 +517,98 @@
     </p>
   {/if}
 
-  <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks" bind:this={stripEl}>
-    <defs>
-      <pattern id="tf-tm-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <rect class="tf-tm-hatch" width="5" height="10" />
-      </pattern>
-    </defs>
-    <rect class="tf-tm-bed" x="0" y="22" width="100%" height="62" rx="6" />
-    {#each hours as hour (hour)}
-      {@const x = `${Math.round(((hour - frame.from) / (frame.to - frame.from)) * 10_000) / 100}%`}
-      <line class="tf-tm-hr" x1={x} x2={x} y1="22" y2="84" />
-      <text class="tf-tm-hl" {x} y="14" text-anchor="middle">{hourLabel(hour)}</text>
-    {/each}
-    {#each rows as row (row.key)}
-      {@const at = place(key, frame, row.from, row.to)}
-      {@const label = stripLabel(row, at)}
-      <svg
-        class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
-        x="{at.left}%"
-        y="30"
-        width="{at.width}%"
-        height="46"
-        overflow="visible"
-        role="button"
-        tabindex="0"
-        aria-label="{span(row)}, {row.target ? targetReading(row.target) : 'open'}"
-        onclick={() => select(row)}
-        onkeydown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            select(row);
-          }
-        }}
-      >
-        <title>{span(row)}{row.target ? `, ${targetReading(row.target)}` : ""}</title>
-        <rect width="100%" height="100%" rx="4" />
-        {#if label !== null}
-          <text
-            class={row.target === null || row.target.kind === "label" ? "tf-tm-plain" : ""}
-            x="6"
-            y="50%"
-            dominant-baseline="central"
-            aria-hidden="true">{label}</text
-          >
-        {/if}
-      </svg>
-    {/each}
-    {#if nowAt !== null}
-      <rect class="tf-tm-now" x="{nowAt}%" y="18" width="2" height="70">
-        <title>Now, {clockOf(clock.toISOString())}</title>
-      </rect>
-      <!-- Drawn on the bed, so it never meets an hour's label above it; late in the day, on the line's left, so it stays on the bed. -->
-      <text class="tf-tm-nowl" x="{nowAt}%" dx={nowAt > 96 ? -5 : 5} y="80" text-anchor={nowAt > 96 ? "end" : "start"}>now</text>
-    {/if}
-  </svg>
-
-  <div class="tf-tm-legend">
-    <span><i class="tf-tm-manual"></i>You tracked</span>
-    <span><i class="tf-tm-logged"></i>Logged</span>
-    <span><i class="tf-tm-run"></i>Timer running</span>
-    <span><i class="tf-tm-passive"></i>Offered: what was in front of you</span>
-    <span><i class="tf-tm-gap"></i>Open: app in front, no target</span>
-    <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>Add a block…</button>
-  </div>
-
-  {#if rows.length === 0}
+  {#if nothing}
     <div class="tf-tm-empty">
       {#if key === today}
         <p>Nothing tracked yet today. ⌘T starts the timer on whatever is in front of you, and every stretch it runs lands here.</p>
       {:else}
         <p>Nothing tracked on this day. Add a block for time you spent on it.</p>
-        <button class="tf-btn tf-sm" onclick={() => open({ mode: "add" })}>Add a block…</button>
       {/if}
+      <button class="tf-btn tf-sm" onclick={() => open({ mode: "add" })}>Add a block…</button>
     </div>
   {:else}
+    <svg class="tf-tm-strip" width="100%" height="84" role="group" aria-label="The day's blocks" bind:this={stripEl}>
+      <defs>
+        <pattern id="tf-tm-hatch" width="10" height="10" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <rect class="tf-tm-hatch" width="5" height="10" />
+        </pattern>
+      </defs>
+      <rect class="tf-tm-bed" x="0" y="22" width="100%" height="62" rx="6" />
+      {#each hours as hour (hour)}
+        {@const x = `${Math.round(((hour - frame.from) / (frame.to - frame.from)) * 10_000) / 100}%`}
+        <line class="tf-tm-hr" x1={x} x2={x} y1="22" y2="84" />
+        <text class="tf-tm-hl" {x} y="14" text-anchor="middle">{hourLabel(hour)}</text>
+      {/each}
+      {#each rows as row (row.key)}
+        {@const at = place(key, frame, row.from, row.to)}
+        {@const label = stripLabel(row, at)}
+        <svg
+          class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
+          x="{at.left}%"
+          y="30"
+          width="{at.width}%"
+          height="46"
+          overflow="visible"
+          role="button"
+          tabindex="0"
+          aria-label="{span(row)}, {row.target ? targetReading(row.target) : 'open'}"
+          onclick={() => select(row)}
+          onkeydown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              select(row);
+            }
+          }}
+        >
+          <title>{span(row)}{row.target ? `, ${targetReading(row.target)}` : ""}</title>
+          <rect width="100%" height="100%" rx="4" />
+          {#if label !== null}
+            <text
+              class={row.target === null || row.target.kind === "label" ? "tf-tm-plain" : ""}
+              x="6"
+              y="50%"
+              dominant-baseline="central"
+              aria-hidden="true">{label}</text
+            >
+          {/if}
+        </svg>
+      {/each}
+      {#if nowAt !== null}
+        <rect class="tf-tm-now" x="{nowAt}%" y="18" width="2" height="70">
+          <title>Now, {clockOf(clock.toISOString())}</title>
+        </rect>
+        <!-- Drawn on the bed, so it never meets an hour's label above it; late in the day, on the line's left, so it stays on the bed. -->
+        <text class="tf-tm-nowl" x="{nowAt}%" dx={nowAt > 96 ? -5 : 5} y="80" text-anchor={nowAt > 96 ? "end" : "start"}>now</text>
+      {/if}
+    </svg>
+
+    <div class="tf-tm-legend">
+      <span><i class="tf-tm-manual"></i>You tracked</span>
+      <span><i class="tf-tm-logged"></i>Logged</span>
+      <span><i class="tf-tm-run"></i>Timer running</span>
+      <span><i class="tf-tm-passive"></i>Offered: what was in front of you</span>
+      <span><i class="tf-tm-gap"></i>Open: app in front, no target</span>
+      <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>Add a block…</button>
+    </div>
+
     <div class="tf-tm-list">
       {#snippet heldRow()}
+        <!-- Its words stay, dimmed, for as long as the pointer rests on it (F-064). Nothing in them can be pressed. -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="tf-tm-row tf-tm-rowheld" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}></div>
+        <div class="tf-tm-row tf-tm-rowheld" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}>
+          {#if holding !== null}
+            {@const row = holding.row}
+            {@const target = row.target}
+            <span class="tf-tm-when">{span(row)}<b>{durationOf(row)}</b></span>
+            <span class="tf-tm-what">
+              knobas saw
+              {#if target !== null && target.kind === "entity"}<span class="tf-mono">{targetReading(target)}</span> {titleOf(row)}{:else if target !== null}{target.label} (label){/if}
+              {#if target !== null}<small>{targetReading(target)} was in front of you.</small>{/if}
+            </span>
+            <span class="tf-tm-state"><TfStateChip text="offered" /></span>
+            <span class="tf-tm-acts"></span>
+          {/if}
+        </div>
       {/snippet}
       {#each rows as row, index (row.key)}
         {#if holdAt === index}{@render heldRow()}{/if}

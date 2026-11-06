@@ -115,11 +115,23 @@
 .tf-row.tf-sel td:last-child { box-shadow: inset -2px 0 0 var(--tf-sel-ink), inset 0 2px 0 var(--tf-sel-ink), inset 0 -2px 0 var(--tf-sel-ink); }
 /* A row's second line is words, even under a key: only a code value is mono. */
 .tf-tbl .tf-sub { display: block; font-family: var(--sans); font-size: var(--t-xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
-/* A long key gives up its end, not the summary's room; its title has the whole of it. */
-.tf-tbl .tf-keycell { max-width: 200px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
-/* The summary is the column you read: it takes what the others leave. A signal keeps its line, and its dot the first. */
-.tf-tbl .tf-c-summary { width: 100%; min-width: 150px; font-weight: 500; }
-.tf-tbl .tf-c-signals { white-space: nowrap; }
+.tf-tbl .tf-keycell { font-weight: 600; }
+.tf-tbl .tf-c-summary { font-weight: 500; }
+/* The List's columns stand still (F-151, F-144): a filter, a pill or a sort moves none of them, and each has its width here.
+   The summary is the column you read, so it takes the rest. A value too long for its column ends in an ellipsis, with the
+   whole of it in its title. A signal wraps instead, because each one is a sentence. */
+.tf-list .tf-tbl { table-layout: fixed; }
+.tf-list .tf-c-key { width: 116px; }
+.tf-list .tf-c-status { width: 92px; }
+.tf-list .tf-c-priority { width: 76px; }
+.tf-list .tf-c-signals { width: 136px; }
+.tf-list .tf-c-assignee { width: 92px; }
+.tf-list .tf-c-updated { width: 80px; }
+.tf-list .tf-c-epic { width: 96px; }
+.tf-list .tf-c-labels { width: 120px; }
+.tf-list tbody td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-list tbody td:is(.tf-c-summary, .tf-c-signals) { white-space: normal; overflow-wrap: anywhere; }
+.tf-list .tf-keycell .tf-sub { overflow: hidden; text-overflow: ellipsis; }
 .tf-tbl .tf-sub { font-weight: 400; }
 /* A row's title (design system, *Type*): the name you scan a list by. */
 .tf-tbl .tf-rowt { font-size: var(--t-md); font-weight: 500; }
@@ -128,6 +140,9 @@
 /* A narrow pane keeps the columns you scan by; the preview beside it has the priority and the assignee. */
 @container (max-width: 760px) { .tf-tbl :is(.tf-c-priority, .tf-c-assignee) { display: none; } }
 @container (max-width: 640px) { .tf-tbl .tf-c-signals { display: none; } }
+/* A view that adds the Epic or Labels column gives them the room of the two columns that matter least here, so the summary keeps its share. */
+@container (max-width: 900px) { .tf-tbl:has(th:is(.tf-c-epic, .tf-c-labels)) :is(.tf-c-priority, .tf-c-signals) { display: none; } }
+@container (max-width: 760px) { .tf-tbl:has(th.tf-c-epic) .tf-c-labels { display: none; } }
 .tf .tf-nowrap { white-space: nowrap; }
 .tf-list-more { align-self: flex-start; padding: 5px 12px; }
 .tf-preview {

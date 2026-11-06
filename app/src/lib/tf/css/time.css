@@ -68,8 +68,10 @@
 }
 .tf-tm-row:last-child { border-bottom: 0; }
 .tf-tm-row:hover { background: var(--sheet-2); }
+/* A row *Dismiss* took away keeps its height and its words, dimmed and with no controls, until the pointer leaves it (F-064). */
 .tf-tm-row.tf-tm-rowheld { min-height: var(--tf-row-held); cursor: default; }
 .tf-tm-row.tf-tm-rowheld:hover { background: none; }
+.tf-tm-rowheld :is(.tf-tm-when, .tf-tm-when b, .tf-tm-what, .tf-tm-what small) { color: var(--muted); }
 .tf-tm-row.tf-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
 .tf-tm-when { font-size: var(--t-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); display: flex; flex-direction: column; }
 .tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }

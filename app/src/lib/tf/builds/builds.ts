@@ -301,3 +301,22 @@ export function reasonsLine(reasons: readonly PipelineReason[], job: string): st
 export function reasonsById(rows: readonly JobPipeline[]): Map<string, PipelineReason[]> {
   return new Map(rows.map((row) => [row.pipeline_id, row.reasons]));
 }
+
+/** A run's tests in the one form the app draws them (F-010): *1 failed, 41 passed*, with an empty count left out. */
+export function testsWords(tests: { failed: number; passed: number; ignored: number }): string {
+  const said = [
+    ...(tests.failed > 0 ? [`${tests.failed} failed`] : []),
+    ...(tests.passed > 0 ? [`${tests.passed} passed`] : []),
+    ...(tests.ignored > 0 ? [`${tests.ignored} ignored`] : []),
+  ];
+  return said.join(", ") || "0 passed";
+}
+
+/**
+ * TeamCity's status line for a failed build (*Tests failed: 3 (3 new), passed: 212*), which is all the Inbox holds of its tests,
+ * read as counts and drawn as Builds draws them. Any other line is the source's own words, and stays as it wrote them.
+ */
+export function failedBuildLine(line: string): string {
+  const counts = /^Tests failed: (\d+)(?: \(\d+ new\))?(?:, passed: (\d+))?(?:, ignored: (\d+))?$/.exec(line);
+  return counts === null ? line : testsWords({ failed: Number(counts[1]), passed: Number(counts[2] ?? 0), ignored: Number(counts[3] ?? 0) });
+}

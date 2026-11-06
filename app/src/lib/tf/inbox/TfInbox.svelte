@@ -13,9 +13,9 @@
   button is only for what a link can't say: *Ack*, *Re-run*, a credential's fix, and on
   hover *Snooze…* and *Done*. `j` and `k` walk the rows, as on Tickets (F-143).
 
-  **A row leaving under a pointer holds its place (F-138).** After a mouse press takes a
-  row away, it stays as an empty row of its height until the pointer leaves it, and the
-  list closes up then, so a second press where the pointer rests lands on nothing. A key
+  **A row leaving under a pointer holds its place (F-138, F-064).** After a mouse press takes
+  a row away, it keeps its height and its words, dimmed and with no controls, until the pointer
+  leaves it, and the list closes up then, so a second press where the pointer rests lands on nothing. A key
   press closes at once and moves focus to the same action on the next row. A second `Enter`
   repeats what the first did or does nothing, and never opens a row: a next row with no such
   action, or a press by mouse, leaves focus on the row itself, for `Tab` and `j` to go on from.
@@ -42,6 +42,7 @@
   import { snoozeFloat, spentAt } from "./snooze-float";
   import { clockLabel } from "../../time/format";
   import { flushSync, onDestroy, onMount, tick } from "svelte";
+  import type { Attachment } from "svelte/attachments";
   import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -78,7 +79,7 @@
   import { reenterWords, secretNoun } from "../settings/settings";
   import TfKey from "../TfKey.svelte";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { backLabel, expiryOf, failed, fixOf, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
+  import { backLabel, detailOf, expiryOf, failed, fixOf, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -158,13 +159,15 @@
   const shelf = $derived(inbox.snoozed);
 
   /** The row a mouse press took away, still holding its place under the pointer (F-138). */
-  let holding = $state.raw<{ entry: InboxEntry; list: "stream" | "shelf"; at: number; height: number } | null>(null);
+  let holding = $state.raw<{ entry: InboxEntry; list: "stream" | "shelf"; at: number; height: number; acts: number } | null>(null);
   /** Its key while the list no longer holds it. A failed answer's re-read brings it back, and that row is drawn instead. */
   const heldKey = $derived.by(() => {
     if (holding === null) return null;
     const key = holding.entry.item.key;
     return (holding.list === "stream" ? rows : shelf).some((row) => row.item.key === key) ? null : key;
   });
+  /** The held key in the list it left: the row it was may stand in the other one by now, a woken or snoozed row drawn as itself. */
+  const heldIn = (which: "stream" | "shelf"): string | null => (holding?.list === which ? heldKey : null);
   const withHeld = (list: readonly InboxEntry[], which: "stream" | "shelf"): readonly InboxEntry[] =>
     holding === null || holding.list !== which || heldKey === null ? list : [...list.slice(0, holding.at), holding.entry, ...list.slice(holding.at)];
   const drawn = $derived(withHeld(rows, "stream"));
@@ -189,7 +192,7 @@
     const row = heldByPointer(event) ? (event?.currentTarget as Element | null)?.closest(".tf-ib") : null;
     if (row !== null && row !== undefined) {
       const box = row.getBoundingClientRect();
-      holding = { entry, list, at: among.findIndex((one) => one.item.key === entry.item.key), height: box.height };
+      holding = { entry, list, at: among.findIndex((one) => one.item.key === entry.item.key), height: box.height, acts: row.querySelector(".tf-acts")?.getBoundingClientRect().width ?? 0 };
       // A woken row lands in the list above the shelf, which would slide the held row out from under the pointer.
       void tick().then(() => {
         const held = document.querySelector(".tf-ib-held");
@@ -200,6 +203,11 @@
     // By `detail`, not by `row`: a pick from the Snooze float is a pointer's press with no row around it.
     keepPlace(entry, among, heldByPointer(event) ? null : action);
   }
+
+  /** The held row's words wrap as they did: its actions have gone and their column stays, through the CSSOM as the height is. */
+  const heldActs = (width: number): Attachment<HTMLElement> => (node) => {
+    node.style.setProperty("--tf-row-held-acts", `${width}px`);
+  };
 
   // Held until the pointer leaves the row, the page is left, or a wheel or key takes the reader on.
   $effect(() => {
@@ -564,16 +572,25 @@
     {@const belongs = index.jobOf(item)}
     {@const belongsId = index.jobIdOf(item)}
     <div class="tf-ctx">
-      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}{#if item.detail}{" · "}<span class="tf-ctx-more">{item.detail}</span>{/if}
+      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}{#if detailOf(item)}{" · "}<span class="tf-ctx-more">{detailOf(item)}</span>{/if}
+    </div>
+  {/snippet}
+  <!-- The words of a row a press took away, for as long as the pointer rests on it: nothing in them can be pressed. -->
+  {#snippet heldWords(item: InboxEntry["item"], back: string | null)}
+    {@const belongs = index.jobOf(item)}
+    <time datetime={item.occurred_at}>{when(item.occurred_at)}</time>
+    <div class="tf-what">{sentence(item)}</div>
+    <div class="tf-ctx">
+      {kindOf(item.category)}{belongs !== null ? `, job ${belongs}` : ", no job"}{back !== null ? `, back ${back}` : ""}{#if detailOf(item)}{" · "}{detailOf(item)}{/if}
     </div>
   {/snippet}
   <div class="tf-inbox" {@attach win.list}>
     {#each win.slice(drawn) as entry (entry.item.key)}
       {@const item = entry.item}
       {@const fix = fixOf(item, credentialFix)}
-      {#if heldKey === item.key}
+      {#if heldIn("stream") === item.key}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="tf-ib tf-ib-held" data-row={item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(item.key)} {@attach heldHeight(holding?.height ?? 0)}></div>
+        <div class="tf-ib tf-ib-held" data-row={item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(item.key)} {@attach heldHeight(holding?.height ?? 0)} {@attach heldActs(holding?.acts ?? 0)}>{@render heldWords(item, null)}</div>
       {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <div class="tf-ib" data-row={item.key} onclick={followRow} {@attach win.row(item.key)}>
@@ -653,9 +670,9 @@
       <summary>Snoozed <span class="tf-count">{shelf.length}</span></summary>
       <div class="tf-ishelf-rows">
         {#each shelfDrawn as entry (entry.item.key)}
-          {#if heldKey === entry.item.key}
+          {#if heldIn("shelf") === entry.item.key}
             <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="tf-ib tf-ib-held" data-row={entry.item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}></div>
+            <div class="tf-ib tf-ib-held" data-row={entry.item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)} {@attach heldActs(holding?.acts ?? 0)}>{@render heldWords(entry.item, backLabel(entry.item))}</div>
           {:else}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="tf-ib" data-row={entry.item.key} onclick={followRow}>

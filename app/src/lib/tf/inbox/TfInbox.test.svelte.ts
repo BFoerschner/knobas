@@ -191,7 +191,7 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
     "Payout_IntegrationTests #1187 failed",
     "Payout dashboard latency: assigned to you",
   ]);
-  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231 · Testenv", "Build, job PAY-231 · Tests failed: 3", "Assignment, job PAY-240"]);
+  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231 · Testenv", "Build, job PAY-231 · 3 failed", "Assignment, job PAY-240"]);
   expect(rows().map((row) => text(row.querySelector("time")))).toEqual(["13:50", "12:40", "10:14", "yesterday 16:30"]);
   expect(rows().map((row) => row.querySelector(".tf-dot.tf-err") !== null)).toEqual([false, true, true, false]);
   expect(rows().map((row) => [...row.querySelectorAll(".tf-acts > *")].map((each) => text(each)).join(" "))).toEqual([
@@ -227,7 +227,7 @@ test("All is the first scope shown; This job keeps what the job reaches", async 
   expect(rows()).toHaveLength(4);
   (scopes[0] as HTMLButtonElement).click();
   flushSync();
-  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231 · Testenv", "Build, job PAY-231 · Tests failed: 3"]);
+  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231 · Testenv", "Build, job PAY-231 · 3 failed"]);
 });
 
 test("a kind chip keeps that kind", async () => {
@@ -235,7 +235,7 @@ test("a kind chip keeps that kind", async () => {
   const chip = [...target.querySelectorAll(".tf-fchips button")].find((b) => b.textContent === "Build") as HTMLButtonElement;
   chip.click();
   flushSync();
-  expect(ctxs()).toEqual(["Build, job PAY-231 · Tests failed: 3"]);
+  expect(ctxs()).toEqual(["Build, job PAY-231 · 3 failed"]);
 });
 
 test("the Inbox draws no search field and leaves / to the shell, which opens the launcher on #i (#2425)", async () => {
@@ -379,7 +379,7 @@ test("a plain press on the sentence lifts its href until the button comes up, so
   expect(link.getAttribute("href"), "⌘-click stays the browser's").toBe(href);
 });
 
-test("a row a mouse press took away keeps its height, with its words gone, until the pointer leaves it (F-138)", async () => {
+test("a row a mouse press took away keeps its height and its words, with no controls, until the pointer leaves it (F-138, F-064)", async () => {
   await open();
   const row = rowOf("dashboard");
   const at = rows().indexOf(row);
@@ -388,14 +388,22 @@ test("a row a mouse press took away keeps its height, with its words gone, until
   const held = target.querySelector<HTMLElement>(".tf-ib-held")!;
   expect(held).not.toBeNull();
   expect(rows().indexOf(held), "where it stood").toBe(at);
-  expect(held.textContent).toBe("");
-  expect(held.querySelector("button"), "a second press lands on nothing").toBeNull();
+  expect(held.textContent).toContain("dashboard");
+  expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
   expect(calls).toEqual(["done new_assignment:jira:PAY-240"]);
 
   window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
   await settle();
   expect(target.querySelector(".tf-ib-held")).toBeNull();
   expect(rows()).toHaveLength(3);
+});
+
+test("a woken row is drawn as itself in the list above while its place holds in the shelf (F-064)", async () => {
+  await open();
+  button(shelfRows()[0]!, "Wake").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  expect(target.querySelectorAll(".tf-ib-held")).toHaveLength(1);
+  expect(target.querySelector(".tf-ishelf .tf-ib-held")).not.toBeNull();
 });
 
 test("a key's press closes the list at once and puts focus on the next row's same action (F-138)", async () => {

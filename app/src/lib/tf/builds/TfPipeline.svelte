@@ -56,7 +56,7 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { runHash, runTone, shortTime } from "./builds";
+  import { testsWords, runHash, runTone, shortTime } from "./builds";
   import { RunHold } from "./run-hold.svelte";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
@@ -691,8 +691,7 @@
               >
               <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-run-tests"
-                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{run.tests
-                    .passed} passed{#if run.tests.ignored > 0}, {run.tests.ignored} ignored{/if}{/if}</td
+                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{testsWords({ ...run.tests, failed: 0 })}{/if}</td
               >
               <td class="tf-nowrap tf-num tf-run-dur">
                 {#if run.duration_seconds !== null}

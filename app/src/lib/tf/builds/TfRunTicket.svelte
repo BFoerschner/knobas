@@ -69,6 +69,8 @@
 
   let links = $state<LinkEntry[]>([]);
   let asking = $state<TicketDraft | null>(null);
+  /** Whether what is typed in the dialog outlives it: *Edit and resend* brings its own words, and they win. */
+  let keeping = $state(true);
   let projects = $state<Project[]>([]);
 
   const tickets = $derived(linkedTickets(links));
@@ -143,11 +145,12 @@
   // *Edit and resend*: the dialog again, with what was filed.
   $effect(() => {
     const again = takeAgain<TicketDraft>(runId, TICKET);
-    if (again !== null) untrack(() => void open(again));
+    if (again !== null) untrack(() => void open(again, false));
   });
 
-  async function open(from: TicketDraft) {
+  async function open(from: TicketDraft, keepWords = true) {
     asking = from;
+    keeping = keepWords;
     try {
       projects = await ports.projects();
     } catch (cause) {
@@ -192,6 +195,7 @@
     {projects}
     words
     refusedWrites={ports.refusedWrites}
+    draftKey={keeping ? `run-ticket:${runId}` : undefined}
     onclose={() => (asking = null)}
     onfile={(filed) => void file(filed)}
   />

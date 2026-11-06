@@ -142,7 +142,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { assigneeName, columnHead, columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, columnHead, columnName, firstName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -530,6 +530,8 @@
   const listColumns = $derived(
     LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
   );
+  /** How many characters of a key `.tf-c-key` holds in the code face. */
+  const KEY_ROOM = 12;
   const SORTABLE: readonly SortColumn[] = ["key", "summary", "status", "priority", "assignee", "updated"];
   const sortable = (column: string): column is SortColumn => (SORTABLE as readonly string[]).includes(column);
   const listCut = $derived(boardColumns.some((column) => column.cards.length < column.total));
@@ -596,9 +598,12 @@
     return () => seen.disconnect();
   }
 
-  /** A long key gives up its middle, so `payout-service#143` and `#138` stay told apart. */
+  /** A long key gives up its middle, so `payout-service#143` and `#138` stay told apart: what the Key column's width holds, with the number whole. */
   function keepsItsEnd(key: string): string {
-    return key.length <= 24 ? key : `${key.slice(0, 15)}…${key.slice(-8)}`;
+    if (key.length <= KEY_ROOM) return key;
+    const number = key.lastIndexOf("#");
+    const end = key.slice(number < 0 ? -5 : number);
+    return `${key.slice(0, KEY_ROOM - 1 - end.length)}…${end}`;
   }
 
   /** The other layout, on the same ticket: the one the preview shows, even where nothing was picked yet. */
@@ -954,7 +959,7 @@
                 {#each listColumns as [column] (column)}
                   {#if column === "key"}
                     {@const source = sourceOf(card)}
-                    <td class="tf-mono tf-nowrap tf-keycell" title={card.key}
+                    <td class="tf-mono tf-nowrap tf-keycell" title={source ? `${card.key}, ${source}` : card.key}
                       ><Marked text={keepsItsEnd(shortKey(card.key))} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
                     >
                   {:else if column === "summary"}
@@ -964,19 +969,19 @@
                         >{/if}</td
                     >
                   {:else if column === "status"}
-                    <td class="tf-nowrap">{columnName(card.status)}</td>
+                    <td class="tf-nowrap" title={columnName(card.status)}>{columnName(card.status)}</td>
                   {:else if column === "priority"}
-                    <td class="tf-c-priority">{sentenceCase(card.priority) ?? ""}</td>
+                    <td class="tf-c-priority" title={sentenceCase(card.priority) ?? undefined}>{sentenceCase(card.priority) ?? ""}</td>
                   {:else if column === "signals"}
                     <td class="tf-c-signals"><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                   {:else if column === "assignee"}
-                    <td class="tf-c-assignee">{assigneeName(card) ?? "Unassigned"}</td>
+                    <td class="tf-c-assignee" title={assigneeName(card) ?? undefined}>{firstName(assigneeName(card)) ?? "Unassigned"}</td>
                   {:else if column === "updated"}
                     <td class="tf-dim tf-nowrap">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}
-                    <td class="tf-mono tf-nowrap">{card.path ?? ""}</td>
+                    <td class="tf-c-epic tf-mono tf-nowrap" title={card.path ?? undefined}>{card.path ?? ""}</td>
                   {:else}
-                    <td>{card.labels.join(", ")}</td>
+                    <td class="tf-c-labels" title={card.labels.join(", ") || undefined}>{card.labels.join(", ")}</td>
                   {/if}
                 {/each}
               </tr>

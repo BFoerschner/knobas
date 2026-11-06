@@ -13,6 +13,7 @@ import {
   contextLine,
   failureHeading,
   firstFailure,
+  jumpAcross,
   locationIn,
   parameterRows,
   pipelineOfRun,
@@ -23,6 +24,7 @@ import {
   noSuchRunTab,
   tookLine,
 } from "./run";
+import { takeTold } from "../opener";
 
 function run(no: number, tone: "ok" | "err" | null, branch = "main", extra: Partial<RunRow> = {}): RunRow {
   return {
@@ -290,4 +292,24 @@ test("Re-run sends the run's branch and every value it ran with that is not a de
   expect(onMain.payload).toEqual({
     RunBuild: { entity: "teamcity:buildType:A", branch: null, parameters: [], clean_checkout: false, first_in_queue: false },
   });
+});
+
+test("a press to another tab of the run is told as a jump, and a ⌘-press stays the browser's (F-355)", () => {
+  const press = (over: MouseEventInit = {}) => {
+    const link = document.createElement("a");
+    link.setAttribute("href", "#/build/p/r/log");
+    let event!: MouseEvent;
+    link.addEventListener("click", (fired) => {
+      event = fired;
+      jumpAcross(fired);
+    });
+    link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...over }));
+    return event;
+  };
+  location.hash = "#/build/p/r/overview";
+  expect(press({ metaKey: true }).defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/build/p/r/overview");
+  expect(press().defaultPrevented).toBe(true);
+  expect(location.hash).toBe("#/build/p/r/log");
+  expect(takeTold(location.hash)).toBe("across");
 });

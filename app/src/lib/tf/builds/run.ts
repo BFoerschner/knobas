@@ -12,6 +12,7 @@
 import type { LinkEntry, PipelineSettings, RunRow, SourceView, ViewRow, ViewSection } from "../../ipc/entity";
 import type { TicketDraft } from "../create-ticket";
 import { secondsLabel } from "../../time/format";
+import { goAcross } from "../opener";
 import { runHash, runTone } from "./builds";
 import { branchName, defaultBranch, shortSha } from "./pipeline";
 import { fieldsOf, overridesOf, runPayload, valuesFrom, type RunRequest, type StartValue } from "./run-dialog";
@@ -266,4 +267,16 @@ export function rerunRequest(
     summary: `Re-run of #${run.number ?? ""}, same settings`,
     preset: null,
   };
+}
+
+/**
+ * A press in a run's body that goes to another of its tabs (F-355): a jump to come back from, where the tab bar is a switch.
+ * `Esc` from the log returns to the card or test it was pressed on. ⌘-click and the like stay the browser's.
+ */
+export function jumpAcross(event: MouseEvent): void {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const href = (event.currentTarget as HTMLAnchorElement | null)?.getAttribute("href");
+  if (!href) return;
+  event.preventDefault();
+  goAcross(href);
 }

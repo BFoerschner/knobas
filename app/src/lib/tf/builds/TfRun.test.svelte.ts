@@ -1353,3 +1353,26 @@ test("a tab a run doesn't have says so, marks no tab, and offers Overview", asyn
   expect(target.querySelector('.tf-tabs [aria-current="page"]')).toBeNull();
   expect(target.querySelector('[aria-label="Artifacts"].tf-panel')).toBeNull();
 });
+
+test("what was typed in Create ticket outlives Esc and ×, and Cancel ends it (F-647)", async () => {
+  draw();
+  await settle();
+  const title = () => document.querySelector<HTMLInputElement>(".tf-dialog input[aria-label='Ticket title']")!;
+  button("Create ticket…")!.click();
+  await settle();
+  const prefilled = title().value;
+  title().value = "My own words";
+  title().dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>(".tf-dialog .tf-dclose")!.click();
+  await settle();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  button("Create ticket…")!.click();
+  await settle();
+  expect(title().value).toBe("My own words");
+  dialogButton("Cancel")!.click();
+  await settle();
+  button("Create ticket…")!.click();
+  await settle();
+  expect(title().value).toBe(prefilled);
+});
