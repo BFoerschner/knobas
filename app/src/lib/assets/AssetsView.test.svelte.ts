@@ -1110,6 +1110,22 @@ test("a press on the holder a walk stopped on opens its column", async () => {
   expect(columns()).toHaveLength(2);
 });
 
+test("a walk ends once the selection goes elsewhere, so coming back folds as ever", async () => {
+  const { nav } = render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  expect(spines()).toEqual([]);
+  const held = location.hash;
+
+  nav.go(`#/asset/${SITE.id}`);
+  await waitFor(() => expect(marked()[0]).toBe("hel1"));
+  nav.go(held);
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
+});
+
 test("a walk's next level that fits still draws beside the strip", async () => {
   render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
   await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));

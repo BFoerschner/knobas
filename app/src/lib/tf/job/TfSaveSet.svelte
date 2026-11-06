@@ -6,8 +6,9 @@
   ticket, every ticket under its epic with today's count, every sub-task with
   today's count, or every ticket in its project. *Save link set* writes a new
   set through `save_link_set` and hands it back with its one rule; it waits for
-  a name and a tick, and a line beside it says which is missing. `Enter` in the
-  name or on a picked rule saves when it can.
+  a name no set has and a tick, and a line beside it says which is missing. The
+  suggested name arrives selected. `Enter` in the name or on a picked rule saves
+  when it can.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";

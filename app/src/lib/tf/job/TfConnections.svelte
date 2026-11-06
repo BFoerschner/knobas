@@ -107,8 +107,8 @@
   });
 
   let body = $state<HTMLElement | null>(null);
-  /** *Apply a link set…* or *Save as a link set…* was pressed, so the group the job's next read adds is its answer. */
-  let awaitingGroup = false;
+  /** *Apply a link set…* or *Save as a link set…* was pressed, at this scroll, so the group the job's next read adds is its answer. A group added above the fold has moved the scroll by the time it's drawn. */
+  let awaitingFrom: number | null = null;
   // svelte-ignore state_referenced_locally
   let knownGroups = new Set(groups.map((group) => group.key));
   /** The group a save or an apply brought into view, and where the list stood before it. */
@@ -122,9 +122,9 @@
       if (body !== null) body.scrollTop = broughtFrom.top;
       broughtFrom = null;
     }
-    if (!awaitingGroup || fresh === undefined) return;
-    awaitingGroup = false;
-    broughtFrom = { group: fresh, top: body?.scrollTop ?? 0 };
+    if (awaitingFrom === null || fresh === undefined) return;
+    broughtFrom = { group: fresh, top: awaitingFrom };
+    awaitingFrom = null;
     const heads = body?.querySelectorAll<HTMLElement>("[data-group]") ?? [];
     [...heads].find((head) => head.dataset.group === fresh)?.scrollIntoView?.({ block: "start" });
   });
@@ -175,8 +175,8 @@
     </label>
     <div class="tf-dacts">
       <button type="button" class="tf-btn tf-sm" onclick={onlinkto}>Link to…</button>
-      <button type="button" class="tf-btn tf-sm" onclick={() => { awaitingGroup = true; onapplyset(); }}>Apply a link set…</button>
-      <button type="button" class="tf-btn tf-sm" onclick={() => { awaitingGroup = true; onsaveset(); }}>Save as a link set…</button>
+      <button type="button" class="tf-btn tf-sm" onclick={() => { awaitingFrom = body?.scrollTop ?? 0; onapplyset(); }}>Apply a link set…</button>
+      <button type="button" class="tf-btn tf-sm" onclick={() => { awaitingFrom = body?.scrollTop ?? 0; onsaveset(); }}>Save as a link set…</button>
     </div>
   </div>
   <div class="tf-dbody" bind:this={body}>
