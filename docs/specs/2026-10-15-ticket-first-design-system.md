@@ -346,6 +346,10 @@ Motion answers something the person did, and there's very little of it.
 - The Connections drawer, under 480 px wide and with a dialog's title line, slides in from the right (R-6.1), the Docs tree's drawer below 900 px from the left (R-10.9, #2084), and a drawer's scrim fades in 0.15 s.
 - A toast rises 20 px into place.
 - A route's wire on the asset tree fades in over 160 ms when a selection brings it.
+- One person reads one way on a page. Where a source keeps a name beside the account, the name is drawn, with the avatar made from it: *Mara Lindqvist (you)* on a ticket's card, *You* where the reader leads a line. Filters, lanes and *mine* stay on the account.
+- An Inbox row leads with its subject (*knobas-jira is down*, *Payout CSV export: jonas asked for your review*). What would bury it, an asset's path or a build's status, goes on the row's second line.
+- A row of the Connections drawer draws its state's dot and word, as the ticket card's rows do, and its action stands in that place on hover and focus.
+- *Ack* is knobas's own, so it can be taken back: *Undo* on its toast, and *Acked* is a press that takes it back. The alert then asks again.
 - A row's repeated actions appear in place of the last column's value, and no word is cut. They fade in on hover and on focus within the row (`.tf-rowacts`). At rest they hold no room: `.tf-rowend` is the end of the row, and the group hangs to its left while the value (`.tf-rowval`) hides, with no plate or gradient. The last column is at least as wide as the group and holds no link, so the hovered row's last value is out of sight and nothing that can be pressed is. Where nothing hovers they stand in the row. An action only some rows offer because of their state (*Ack*, *Open PR*) stands in `.tf-rowend`, not in the group, and stays. The Inbox has no value column to replace, so from 901 px its words keep the group's room on their right and a long title wraps a line earlier at rest; stacked, the time's line is a small button's height and holds the group. Nothing moves on hover.
 
 There are no entrance animations on views or sections. With `prefers-reduced-motion` everything above stops.
