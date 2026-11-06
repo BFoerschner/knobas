@@ -6,6 +6,12 @@
  */
 export const secretPrompt = $state<{ source: string | null; returnTo: HTMLElement | null }>({ source: null, returnTo: null });
 
+/** Back to no prompt: a test's reset. */
+export function resetSecretPrompt(): void {
+  secretPrompt.source = null;
+  secretPrompt.returnTo = null;
+}
+
 /** The source a `…/reenter` address asks for, or `null` for any other address. */
 export function reenterSourceOf(hash: string): string | null {
   const found = /^#\/settings\/source\/([^/]+)\/reenter$/u.exec(hash);

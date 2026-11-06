@@ -140,8 +140,7 @@
 .tf-crumbs .tf-sep { color: var(--ink-2); }
 /* *Back to <name>*: a link, drawn as the crumbs are. The key beside it is a key, so the underline stops at the words. */
 .tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
-.tf-crumbs .tf-esc .tf-esc-t + .tf-key { margin-left: -2px; }
-.tf-crumbs a.tf-esc :is(.tf-esc-t, .tf-key) { text-decoration: underline; text-underline-offset: 2px; }
+.tf-crumbs a.tf-esc .tf-esc-t { text-decoration: underline; text-underline-offset: 2px; }
 .tf-crumbs a.tf-esc:hover { color: var(--ink); }
 /* The title block and the actions share a line while both fit (Controls, *Header*). What fits decides, not the window:
    the block asks for 360 px and a long subline wraps inside it, so the subline stays with the title it describes, and

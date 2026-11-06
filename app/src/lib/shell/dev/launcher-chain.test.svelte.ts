@@ -106,7 +106,9 @@ function chain(): string[] | null {
 }
 
 /** A ticket's actions after the pair: the timer, the job, the key. */
-const TICKET_OWN = ["Start timer", "Work on this", "Favourite", "Copy key"];
+const TICKET_OWN = ["Work on this", "Start timer", "Favourite", "Copy key"];
+/** A ticket's sheet with the chosen job's link in its place, after what the ticket does (F-637). */
+const withLink = (key: string) => ["Work on this", "Start timer", `Link to ${key}`, "Favourite", "Copy key"];
 
 async function openOn(hash: string, drawn: string): Promise<void> {
   location.hash = hash;
@@ -119,7 +121,7 @@ test("over a job, Tab on another result offers Link to the job, then the ticket'
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-231", ...TICKET_OWN]);
+  expect(chain()).toEqual(withLink("PAY-231"));
 });
 
 test("on the job's own ticket there is no Link row", async () => {
@@ -146,7 +148,7 @@ test.each([
   await until(() => target.textContent?.includes(drawn) ?? false, `${hash} never drew ${drawn}`);
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-231", ...TICKET_OWN]);
+  expect(chain()).toEqual(withLink("PAY-231"));
 });
 
 test("with no chosen job, Link to is not offered on Builds: never a guessed job", async () => {
@@ -176,7 +178,7 @@ test("starting the timer on a ticket makes it the chosen job: #/job draws it, an
   await until(() => target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim() === "Builds", "Builds never drew");
   await search("PAY-240");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-231", ...TICKET_OWN]);
+  expect(chain()).toEqual(withLink("PAY-231"));
 });
 
 test("running Start work on a ticket makes it the chosen job", async () => {
@@ -186,7 +188,7 @@ test("running Start work on a ticket makes it the chosen job", async () => {
   // Another ticket chosen meanwhile, by a timer started on it from the launcher.
   await search("PAY-231");
   press("Tab");
-  expect(chain()).toEqual(["Link to PAY-240", ...TICKET_OWN]);
+  expect(chain()).toEqual(withLink("PAY-240"));
   press("ArrowDown");
   press("Enter");
   await until(() => chosenJob.id === "mock:PAY-231", "the timer's ticket never became the chosen job");
@@ -206,6 +208,9 @@ test("Link to writes the link with the relation picked inline, and the job's Con
   await openOn("#/job/PAY-231", "Retry failed SEPA payouts");
   await search("PAY-240");
   press("Tab");
+  // Down to the link, after what the ticket does.
+  press("ArrowDown");
+  press("ArrowDown");
   // related → implements → documents → runs on
   press("ArrowRight");
   press("ArrowRight");
@@ -223,6 +228,8 @@ test("from Time, Link to writes against the chosen job and stays on the page", a
   await until(() => currentJob.entityId === null, "Time never replaced the job");
   await search("PAY-240");
   press("Tab");
+  press("ArrowDown");
+  press("ArrowDown");
   press("Enter");
   await until(() => linked.length === 1, "the sheet never wrote the link");
   expect(linked[0]).toMatchObject({ fromId: "mock:PAY-231", toId: "mock:PAY-240", relation: "related" });

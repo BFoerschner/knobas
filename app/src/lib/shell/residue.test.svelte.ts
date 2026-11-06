@@ -444,6 +444,7 @@ const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).defaul
 const WriteQueuePanel = (await import("./WriteQueue.svelte")).default;
 const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
+const TfSecretPromptHost = (await import("../tf/settings/TfSecretPromptHost.svelte")).default;
 const TfInstalledAdapters = (await import("../tf/settings/TfInstalledAdapters.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
@@ -2172,6 +2173,17 @@ const CASES: Case[] = [
       app: mount(TfAddSource, {
         target,
         props: { ports: settingsPorts(), layers: createLayers(), onclose: () => {}, onsaved: () => {} },
+      }),
+    }),
+  },
+  {
+    /** The credential prompt over a page (F-048): its reads land after the unmount. */
+    name: "TfSecretPromptHost",
+    source: "lib/tf/settings/TfSecretPromptHost.svelte",
+    open: (target) => ({
+      app: mount(TfSecretPromptHost, {
+        target,
+        props: { sourceId: "jira", layers: createLayers(), ports: settingsPorts() },
       }),
     }),
   },

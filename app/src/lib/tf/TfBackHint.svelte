@@ -31,7 +31,7 @@
 </script>
 
 <!-- A key is told from the words by its face, and the whole link is underlined (F-053), so it reads as one link to the thing it names. -->
-{#snippet words()}{#if code}<span class="tf-esc-t">Back to</span> <span class="tf-mono tf-key">{name}</span>{:else}<span class="tf-esc-t">Back to {name}</span>{/if}{/snippet}
+{#snippet words()}{#if code}<span class="tf-esc-t">Back to <span class="tf-mono tf-key">{name}</span></span>{:else}<span class="tf-esc-t">Back to {name}</span>{/if}{/snippet}
 {#if back.hash === undefined}
   <span class="tf-esc">{@render words()} <kbd>Esc</kbd></span>
 {:else}

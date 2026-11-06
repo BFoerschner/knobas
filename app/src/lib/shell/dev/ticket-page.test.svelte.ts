@@ -351,10 +351,10 @@ test("on a ticket page, Link to targets that ticket, not the chosen job", async 
   await search("PAY-231");
   inLauncher("Tab");
   const rows = [...target.querySelectorAll('[aria-label="Actions on the selected result"] .tf-ln-nm')].map((row) => row.textContent?.trim());
-  expect(rows[0]).toBe("Link to PAY-240");
+  expect(rows).toContain("Link to PAY-240");
 });
 
-test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Tickets", async () => {
+test("a ticket result in ⌘K opens the ticket page, and Esc there goes back to the page it was pressed over (F-047)", async () => {
   await openOn("#/builds", "Builds");
   await search("PAY-240");
   inLauncher("Enter");
@@ -362,7 +362,7 @@ test("a ticket result in ⌘K opens the ticket page, and Esc there goes to Ticke
   await pageOf("PAY-240");
   await until(() => launcher() === null, "the launcher stayed open");
   key("Escape");
-  await until(() => location.hash === "#/tickets", `Esc went to ${location.hash}`);
+  await until(() => location.hash.startsWith("#/builds"), `Esc went to ${location.hash}`);
 });
 
 test("a bare #/ticket lands on Tickets, and an unreadable id says it was not found", async () => {
