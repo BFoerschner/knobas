@@ -342,6 +342,120 @@ async fn a_source_whose_child_rows_are_all_withdrawn_names_no_parent() {
     assert_eq!(answers, vec![(gitea, FilterAnswer::NoValues)]);
 }
 
+/// Commits in a withdrawn run: well past what a bounded look reads
+/// (`coverage::UNDER_COVERAGE_SQL`'s 256), at two child rows a commit. A backward scan
+/// does not read in strict order, so a run only just past 256 can leave what lies
+/// behind it within its reach.
+const RUN: i64 = 500;
+
+/// **A live child row answers wherever it sits among withdrawn ones.** The probe
+/// looks at the far end of a source's child rows first, and a bounded look can end
+/// having seen nothing live. So a live row at either end or between two runs of
+/// withdrawn rows answers, and only a source with none live says it names nothing.
+/// Each source keeps a repo, whose row names no parent, so it has a corpus either way.
+#[tokio::test]
+async fn a_live_child_row_answers_wherever_it_sits_among_withdrawn_ones() {
+    use FilterAnswer::{Answered, NoValues};
+    // (case, withdrawn rows written before, a live one between?, withdrawn rows after)
+    let cases = [
+        ("live, then a run withdrawn", 0, true, RUN, Answered),
+        ("a run withdrawn, then live", RUN, true, 0, Answered),
+        ("a run withdrawn either side", RUN, true, RUN, Answered),
+        ("a run withdrawn and nothing live", RUN, false, 0, NoValues),
+        ("a few withdrawn and nothing live", 3, false, 0, NoValues),
+    ];
+    let (pool, searcher) = searcher().await;
+    for (case, before, live, after, expected) in cases {
+        let t = token().to_lowercase();
+        let gitea = format!("gitea-{t}");
+        configure(&pool, &gitea, "gitea").await;
+        let full = format!("o{t}/payout-{t}");
+        let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
+        item(&pool, &gitea, "repo", &full, repo.clone()).await;
+        let commit = serde_json::json!({ "repository": repo });
+        commits(&pool, &gitea, "gone-a", before, &commit).await;
+        if live {
+            commits(&pool, &gitea, "live", 1, &commit).await;
+        }
+        commits(&pool, &gitea, "gone-b", after, &commit).await;
+        sqlx::query("update knobas.entity set deleted_at = now() where id like $1")
+            .bind(format!("{gitea}:gone-%"))
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let answers = under_answers(&searcher, &format!("under:{full} source:{gitea}")).await;
+        assert_eq!(answers, vec![(gitea, expected)], "{case}");
+    }
+}
+
+/// `count` commits in one write, and so together in the child index.
+async fn commits(
+    pool: &sqlx::PgPool,
+    source: &str,
+    tag: &str,
+    count: i64,
+    payload: &serde_json::Value,
+) {
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title)
+         select $1 || ':' || $2 || '-' || g, 'commit', 't'
+           from generate_series(1, $3::bigint) g",
+    )
+    .bind(source)
+    .bind(tag)
+    .bind(count)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                item_updated_at)
+         select $1 || ':' || $2 || '-' || g, $1, 'commit', 't', 't', $4, now()
+           from generate_series(1, $3::bigint) g",
+    )
+    .bind(source)
+    .bind(tag)
+    .bind(count)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A child row counts only under the adapter the source is configured with, at
+/// the far end of the range as anywhere else. A live row from another adapter is
+/// the last row of the source's range here, behind a run of withdrawn ones.
+#[tokio::test]
+async fn a_live_child_row_of_another_adapter_names_nothing_at_either_end() {
+    let (pool, searcher) = searcher().await;
+    let t = token().to_lowercase();
+    let gitea = format!("gitea-{t}");
+    configure(&pool, &gitea, "gitea").await;
+    let full = format!("o{t}/payout-{t}");
+    let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
+    item(&pool, &gitea, "repo", &full, repo.clone()).await;
+    let commit = serde_json::json!({ "repository": repo });
+    commits(&pool, &gitea, "gone", RUN, &commit).await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id like $1")
+        .bind(format!("{gitea}:gone-%"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm, source_id)
+         values ($1, 'jira', 'stranger', 'ticket', 'child', $2)",
+    )
+    .bind(format!("{gitea}:{full}"))
+    .bind(&gitea)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let answers = under_answers(&searcher, &format!("under:{full} source:{gitea}")).await;
+    assert_eq!(answers, vec![(gitea, FilterAnswer::NoValues)]);
+}
+
 /// Which sources `under:` lists is the corpus question, and its answer can sit
 /// beneath a run of rows the launcher leaves out. Commits are the common case:
 /// a Gitea's newest rows are usually commits, and they name a parent while the
