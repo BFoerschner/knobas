@@ -5,7 +5,7 @@
  * backend derives is `knobas-core`'s `inbox` tests; here the calls are counted.
  */
 import { pageContext } from "../kept-pages.svelte";
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { createInbox, type Inbox } from "../../inbox/inbox.svelte";
@@ -312,6 +312,104 @@ test("Done completes the item", async () => {
   expect(rows()).toHaveLength(3);
 });
 
+test("a click on a row with no selection follows its link, and one that selected words doesn't (F-142)", async () => {
+  await open();
+  const row = rowOf("dashboard");
+  const link = row.querySelector<HTMLAnchorElement>(".tf-what a")!;
+  const followed: string[] = [];
+  link.addEventListener("click", (event) => {
+    if (!event.defaultPrevented) followed.push(link.getAttribute("href")!);
+    event.preventDefault();
+  });
+  row.querySelector("time")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  expect(followed).toEqual(["#/ticket/jira%3APAY-240"]);
+
+  const selection = window.getSelection()!;
+  selection.selectAllChildren(row.querySelector(".tf-ctx")!);
+  row.querySelector("time")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  expect(followed, "the drag selected words").toHaveLength(1);
+  selection.removeAllRanges();
+
+  button(row, "Snooze…").click();
+  flushSync();
+  expect(followed, "a button answers for itself").toHaveLength(1);
+});
+
+test("a plain press on the sentence lifts its href until the button comes up, so a drag can select (F-142)", async () => {
+  await open();
+  const link = rowOf("dashboard").querySelector<HTMLAnchorElement>(".tf-what a")!;
+  const href = link.getAttribute("href");
+  link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }));
+  expect(link.hasAttribute("href"), "a browser won't start a selection on a link").toBe(false);
+  window.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  expect(link.getAttribute("href")).toBe(href);
+  link.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, metaKey: true }));
+  expect(link.getAttribute("href"), "⌘-click stays the browser's").toBe(href);
+});
+
+test("a row a mouse press took away keeps its height, with its words gone, until the pointer leaves it (F-138)", async () => {
+  await open();
+  const row = rowOf("dashboard");
+  const at = rows().indexOf(row);
+  button(row, "Done").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  const held = target.querySelector<HTMLElement>(".tf-ib-held")!;
+  expect(held).not.toBeNull();
+  expect(rows().indexOf(held), "where it stood").toBe(at);
+  expect(held.textContent).toBe("");
+  expect(held.querySelector("button"), "a second press lands on nothing").toBeNull();
+  expect(calls).toEqual(["done new_assignment:jira:PAY-240"]);
+
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+  await settle();
+  expect(target.querySelector(".tf-ib-held")).toBeNull();
+  expect(rows()).toHaveLength(3);
+});
+
+test("a key's press closes the list at once and puts focus on the next row's same action (F-138)", async () => {
+  await open();
+  const row = rowOf("dashboard");
+  const press = button(row, "Done");
+  press.focus();
+  press.click();
+  await settle();
+  expect(target.querySelector(".tf-ib-held")).toBeNull();
+  const active = document.activeElement as HTMLElement;
+  expect(active.textContent).toBe("Done");
+  expect(active.closest<HTMLElement>(".tf-ib")!.dataset["row"]).not.toBe((row as HTMLElement).dataset["row"]);
+});
+
+test("j and k walk the rows, and focus goes to each row's link (F-143)", async () => {
+  await open();
+  const key = (name: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+  key("j");
+  flushSync();
+  expect(document.activeElement).toBe(rows()[0]!.querySelector(".tf-what a"));
+  key("j");
+  flushSync();
+  expect(document.activeElement).toBe(rows()[1]!.querySelector(".tf-what a"));
+  key("k");
+  flushSync();
+  expect(document.activeElement).toBe(rows()[0]!.querySelector(".tf-what a"));
+});
+
+test("Tab goes through a row's words before its actions: the job's key comes before them (F-143)", async () => {
+  await open();
+  const row = rowOf("dashboard");
+  const stops = [...row.querySelectorAll<HTMLElement>("a, button")].map((stop) => stop.closest(".tf-ctx") ? "key" : stop.closest(".tf-what") ? "link" : "action");
+  expect(stops.indexOf("key")).toBeLessThan(stops.indexOf("action"));
+});
+
+test("after the last Wake, focus goes to the woken row, not the body (F-148)", async () => {
+  await open();
+  const wake = button(shelfRows()[0]!, "Wake");
+  wake.focus();
+  wake.click();
+  await tick();
+  expect(shelfRows()).toHaveLength(0);
+  expect((document.activeElement as HTMLElement).closest(".tf-inbox")).not.toBeNull();
+});
+
 test("Snooze offers the presets, and one moves the item to the snoozed line", async () => {
   await open();
   const row = rowOf("Idempotent");
@@ -445,9 +543,7 @@ test("a change event with a half-typed year snoozes nothing and keeps the picker
 test("a past date and a press of Snooze make no call and no success toast (#1437)", async () => {
   const row = await openPicker();
   typeDate(row, "2026-08-20");
-  const press = button(row.querySelector(".tf-isnooze")!, "Snooze");
-  press.disabled = false;
-  press.click();
+  button(row.querySelector(".tf-isnooze")!, "Snooze").click();
   picker(row).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   await settle();
   expect(snoozeCalls()).toEqual([]);
@@ -464,6 +560,17 @@ test("a future date and a press of Snooze make one call at 09:00, close the pick
   expect(snoozeCalls()).toEqual([`snooze review_request:gitea:payouts#142 ${new Date(2026, 7, 25, 9, 0).toISOString()}`]);
   expect(snoozeToasts()).toHaveLength(1);
   expect(row.querySelector(".tf-isnooze")).toBeNull();
+});
+
+test("Snooze with no day picked goes to the date field and says what it wants (F-148)", async () => {
+  const row = await openPicker();
+  const press = button(row.querySelector(".tf-isnooze")!, "Snooze");
+  expect(press.disabled).toBe(false);
+  press.click();
+  flushSync();
+  expect(document.activeElement).toBe(picker(row));
+  expect(row.querySelector(".tf-isnooze")!.textContent).toContain("Pick a day after today");
+  expect(snoozeCalls()).toEqual([]);
 });
 
 test("Enter in the date field commits a future date once (#1437)", async () => {

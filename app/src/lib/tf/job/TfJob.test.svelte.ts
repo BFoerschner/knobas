@@ -733,7 +733,8 @@ async function runWith(after: StartWorkStep["outcome"][]) {
 test("Run all steps says how many writes it queued, with Show queue (#1426)", async () => {
   const items = await runWith(["queued", "queued", "queued", "pending"]);
   const started = items.find((toast) => toast.text.startsWith("Started work on"))!;
-  expect(started.text).toBe("Started work on PAY-231. 3 writes queued.");
+  // One press, one line: the timer it started is the toast's last words (F-145).
+  expect(started.text).toBe("Started work on PAY-231. 3 writes queued. Timer running.");
   expect(started.action?.label).toBe("Show queue");
   started.action!.run();
   expect(writeQueuePanel.open).toBe(true);
@@ -741,13 +742,13 @@ test("Run all steps says how many writes it queued, with Show queue (#1426)", as
 
 test("Run all steps with one queued step says '1 write queued.', with none no count (#1426)", async () => {
   expect((await runWith(["succeeded", "queued", "pending", "pending"])).map((toast) => toast.text)).toContain(
-    "Started work on PAY-231. 1 write queued.",
+    "Started work on PAY-231. 1 write queued. Timer running.",
   );
   unmount(job!);
   job = null;
   const items = await runWith(["succeeded", "succeeded", "skipped", "succeeded"]);
   const started = items.find((toast) => toast.text.startsWith("Started work on"))!;
-  expect(started.text).toBe("Started work on PAY-231.");
+  expect(started.text).toBe("Started work on PAY-231. Timer running.");
   expect(started.action).toBeUndefined();
 });
 
@@ -788,9 +789,10 @@ test("the stepper leaves once the ticket no longer offers Start work: its move l
 });
 
 /** PAY-231 with its stepper up and nothing run; the flow's run answers `after`. */
-function stepping(after: StartWorkStep["outcome"][], timer?: { current: RunningTimer | null; elapsed: string | null }) {
+function stepping(after: StartWorkStep["outcome"][], timer?: { current: RunningTimer | null; elapsed: string | null }, layers?: Layers) {
   open("PAY-231", {
     ...(timer ? { timer } : {}),
+    ...(layers ? { layers } : {}),
     ports: ports({
       listSources: MARA,
       getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
@@ -843,8 +845,135 @@ test("Start work chooses nothing until its steps run, and Cancel leaves everythi
   named("Run all steps")!.click();
   await settle();
   expect(chosenJob.id, "the run is what chooses").toBe(ID);
-  expect(toasts.items.map((toast) => toast.text)).toContain("Started work on PAY-231, in place of PAY-99. 4 writes queued.");
+  expect(toasts.items.map((toast) => toast.text)).toContain("Started work on PAY-231, in place of PAY-99. 4 writes queued. Timer running.");
   expect(target.querySelector(".tf-steps footer")!.textContent, "nothing to cancel once it ran").not.toContain("Cancel");
+});
+
+/** PAY-231's stepper, with what reached the backend; its first step can be skipped before the run. */
+function skipping(refused: string | null = null) {
+  const sent: string[] = [];
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      ...(refused === null ? {} : { refusedWrites: () => Promise.resolve([{ entity: ID, op: "transition", reason: refused }]) }),
+      startWork: {
+        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        run: () => {
+          sent.push("run");
+          return Promise.resolve(flow(["queued", "queued", "queued", "queued"]));
+        },
+        retry: () => Promise.resolve([]),
+        skip: (id) => {
+          sent.push(`skip ${id}`);
+          return Promise.resolve(flow(["skipped", "queued", "queued", "queued"]));
+        },
+        amend: () => Promise.resolve([]),
+      },
+    }),
+  });
+  return sent;
+}
+const inStep = (step: string, word: string) => [...target.querySelectorAll<HTMLButtonElement>(`.tf-step[data-step='${step}'] button`)].find((b) => b.textContent === word);
+const stateOfStep = (step: string) => target.querySelector(`.tf-step[data-step='${step}'] .tf-state`)!.textContent;
+
+test("Skip before the first run only marks the step, Include takes it back, and nothing is sent or chosen (F-137)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const sent = skipping();
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  toasts.items.length = 0;
+
+  const press = inStep("branch", "Skip")!;
+  press.focus();
+  press.click();
+  await settle();
+  expect(sent, "a mark sends nothing").toEqual([]);
+  expect(stateOfStep("branch")).toBe("Skipped");
+  expect(chosenJob.id, "a mark chooses nothing").toBe("jira:PAY-99");
+  expect(toasts.items).toEqual([]);
+  expect(named("Cancel"), "nothing has run, so it can still be left").toBeDefined();
+  expect(document.activeElement, "the same button, so a keyboard's place stays").toBe(press);
+  expect(press.textContent).toBe("Include");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")!.disabled, "a step that won't run takes no edits").toBe(true);
+
+  press.click();
+  await settle();
+  expect(stateOfStep("branch")).toBe("Ready");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")!.disabled).toBe(false);
+  expect(sent).toEqual([]);
+});
+
+test("Run all steps sends the marked step through skip, once, and that is what chooses (F-137)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const sent = skipping();
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  inStep("branch", "Skip")!.click();
+  await settle();
+  named("Run all steps")!.click();
+  await settle();
+  expect(sent).toEqual(["skip 1"]);
+  expect(chosenJob.id).toBe(ID);
+  expect(stateOfStep("branch")).toBe("Skipped");
+});
+
+test("with a refused move, the first step's Skip is off and says why, since one step can sit out a run (F-137)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const sent = skipping("This Jira user cannot move tickets in PAY");
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  const skip = inStep("branch", "Skip")!;
+  expect(skip.getAttribute("aria-disabled")).toBe("true");
+  expect(target.querySelector(".tf-step[data-step='branch']")!.textContent).toContain("Only one step can sit out a run");
+  skip.click();
+  await settle();
+  expect(stateOfStep("branch"), "the press does nothing").toBe("Ready");
+  named("Run all steps")!.click();
+  await settle();
+  expect(sent).toEqual(["skip 4"]);
+});
+
+test("the timer step's Skip can be taken back too, and the run then starts it", async () => {
+  chosenJob.choose("jira:PAY-99");
+  stepping(["queued", "queued", "queued", "queued"]);
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  inStep("timer", "Skip")!.click();
+  await settle();
+  expect(stateOfStep("timer")).toBe("Skipped");
+  inStep("timer", "Include")!.click();
+  await settle();
+  expect(stateOfStep("timer")).toBe("Ready");
+  named("Run all steps")!.click();
+  await settle();
+  expect(calls.start.map(([id]) => id)).toEqual([ID]);
+});
+
+test("the steps opened on this page are a panel for Esc until something runs (F-139)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const layers = createLayers();
+  stepping(["queued", "queued", "queued", "queued"], undefined, layers);
+  await settle();
+  expect(layers.open).toHaveLength(0);
+  named("Start work")!.click();
+  await settle();
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  layers.open[0]!.close();
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  expect(layers.open).toHaveLength(0);
+  expect(document.activeElement, "as Cancel does").toBe(named("Start work"));
+
+  named("Start work")!.click();
+  await settle();
+  named("Run all steps")!.click();
+  await settle();
+  expect(layers.open, "once something ran, Esc leaves the page").toHaveLength(0);
 });
 
 test("the Tickets preview's Start work opens the ticket on its steps, once (F-130)", async () => {

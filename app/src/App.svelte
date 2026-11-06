@@ -161,8 +161,8 @@
   }
 
   /** *Start timer* on a ticket: the running ticket's draft first (R-13.2). */
-  function startTimerOn(entityId: string, title: string) {
-    void drafts.switchTo({ kind: "entity", entity_id: entityId }, title);
+  function startTimerOn(entityId: string, title: string, quiet = false) {
+    void drafts.switchTo({ kind: "entity", entity_id: entityId }, title, quiet);
   }
 
   // ⌘T with nothing in front starts on the page's job (#1435): on the Job page the job on screen, else the chosen job (spec #2227);

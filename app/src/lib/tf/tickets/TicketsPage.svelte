@@ -102,7 +102,9 @@
 
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { flushSync, onMount, untrack } from "svelte";
+  import { flushSync, onMount, tick, untrack } from "svelte";
+  import { stamped, stampOf } from "../opener";
+  import { parseTfHash } from "../route";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -219,7 +221,36 @@
   const narrowedHere = $derived(subtasksOf !== null && back === null);
   $effect(() => {
     if (!narrowedHere || !pageShown()) return;
-    return untrack(() => layers.add({ kind: "panel", close: () => scopedTicket.clear() }));
+    return untrack(() =>
+      layers.add({
+        kind: "panel",
+        close: () => {
+          scopedTicket.clear();
+          // The list is read again and its rows drawn anew, so a keyboard's place goes to the page's heading.
+          shownHeading()?.focus({ preventScroll: true });
+        },
+      }),
+    );
+  });
+  const shownHeading = () => [...document.querySelectorAll<HTMLElement>(".tf-board-title h1")].find((heading) => !heading.closest(".tf-kept[hidden]"));
+  /**
+   * Narrowed where it stands, the page's own history entry says so, as an entry a card's row opened does, so a ticket
+   * opened from here and `Esc` come back to the same narrowed list (F-141). The shell reads this stamp on arriving.
+   */
+  $effect(() => {
+    const trip = subtasksOf !== null ? scopedTicket.trip : null;
+    if (back !== null || !pageShown() || parseTfHash(location.hash).view !== "tickets") return;
+    const had = stampOf(history.state);
+    if (had === null || (had.trip?.entityId ?? null) === (trip?.entityId ?? null)) return;
+    history.replaceState(stamped(history.state, { ...had, trip }), "");
+  });
+  // Arriving narrowed, the press's own control has gone or is hidden: focus takes the page's heading, so Tab starts here (F-148).
+  $effect(() => {
+    if (subtasksOf === null || !pageShown()) return;
+    void tick().then(() => {
+      if (document.activeElement !== document.body && document.activeElement !== null) return;
+      shownHeading()?.focus({ preventScroll: true });
+    });
   });
 
   // ---- the views ----
@@ -725,7 +756,7 @@
     {/if}
     <header class="tf-fhead tf-board-head">
       <div class="tf-board-title">
-        <h1>
+        <h1 tabindex="-1">
           {#if subtasksOf !== null}Sub-tasks of <TfKey value={subtasksOf} />{:else}{view?.name ?? (viewId === null ? "All tickets" : "This view")}{/if}
         </h1>
         {#if view && view.saved_view_source === null}<span class="tf-q"

@@ -265,6 +265,10 @@ export function handlers(): Handlers {
     start_work_skip: (args) => {
       const step = stepById(Number(args["stepId"]));
       step.outcome = "skipped";
+      // `start_work::skip` settles the step and runs the flow on past it.
+      for (const other of flowOf(step)) {
+        if (other.outcome === "pending") other.outcome = other.step === "link_pull_request" ? "succeeded" : "queued";
+      }
       return flowOf(step);
     },
     start_work_amend: (args) => {

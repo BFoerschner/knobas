@@ -108,18 +108,20 @@ function toastSent(id: number, what: string, where: ToastAction | undefined): vo
  * queued (every step skipped or already there). The sign-in sentence follows
  * the count, as on every other queued write, and only when something waits.
  * `replaced` is the job this one takes over from, which the toast names (F-130):
- * "Started work on PAY-240, in place of PAY-231."
+ * "Started work on PAY-240, in place of PAY-231." `timing`: the same press starts
+ * the timer, so one line ends "Timer running." rather than a second toast (F-145).
  */
-export function toastStarted(key: string, queued: number, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health, replaced: string | null = null): void {
+export function toastStarted(key: string, queued: number, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health, replaced: string | null = null, timing = false): void {
   const started = replaced === null ? `Started work on ${key}.` : `Started work on ${key}, in place of ${replaced}.`;
+  const running = timing ? " Timer running." : "";
   if (queued <= 0) {
-    push({ text: started });
+    push({ text: `${started}${running}` });
     return;
   }
   const failing = failingName(source, store);
   const count = `${started} ${queued === 1 ? "1 write" : `${queued} writes`} queued.`;
   push({
-    text: withSignIn(count, failing),
+    text: `${withSignIn(count, failing)}${running}`,
     action: { label: "Show queue", run: openWriteQueue },
   });
 }

@@ -159,9 +159,11 @@ test("Stop, log later stops the clock and says where the time is", async () => {
   expect(flow.open).toBeNull();
   expect(running()).toBeNull();
   expect(log).toEqual(["draft jira:PAY-231", "stop"]);
-  expect(toasts.map((toast) => toast.text)).toEqual(["Timer stopped. The time is kept in today's blocks, unlogged."]);
-  expect(toasts[0]?.action?.label).toBe("Open the day");
-  toasts[0]?.action?.run();
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]?.text).toMatch(/^Timer stopped\. .* stays in the day to log later\.$/);
+  expect(toasts[0]?.action?.label).toBe("Undo");
+  expect(toasts[0]?.more?.[0]?.label).toBe("Open the day");
+  toasts[0]?.more?.[0]?.run();
   expect(log.at(-1)).toBe("open the day");
 });
 
@@ -187,7 +189,7 @@ test("Keep running after a Log that failed puts the clock back on the ticket", a
   expect(running()?.target).toEqual(PAY);
 });
 
-test("Discard after a stop stops the clock and writes nothing", async () => {
+test("Stop, don't log stops the clock and writes nothing", async () => {
   const { flow, log, toasts, running } = rig();
   flow.stop();
   await settle();
@@ -195,7 +197,42 @@ test("Discard after a stop stops the clock and writes nothing", async () => {
   await settle();
   expect(running()).toBeNull();
   expect(log).toEqual(["draft jira:PAY-231", "stop"]);
+  expect(toasts).toHaveLength(1);
+  // The stop makes a block, so the time is not dropped, and the toast says so (F-140).
+  expect(toasts[0]?.text).toMatch(/^Timer stopped, nothing logged\. .* stays in the day\.$/);
+  expect(toasts[0]?.action?.label).toBe("Undo");
+});
+
+test("Undo on a stop starts the clock again on the ticket", async () => {
+  const { flow, log, toasts, running } = rig();
+  flow.stop();
+  await settle();
+  flow.settle("discard");
+  await settle();
+  toasts[0]?.action?.run();
+  await settle();
+  expect(log.at(-1)).toBe("start jira:PAY-231");
+  expect(running()?.target).toEqual(PAY);
+  expect(toasts.at(-1)?.text).toBe("Timer running again.");
+});
+
+test("a quiet start says nothing: the press's own toast says the timer runs (F-145)", async () => {
+  const { flow, toasts, log } = rig({ running: null });
+  await flow.switchTo(OPS, "OPS-12", true);
+  await settle();
+  expect(log).toContain("start jira:OPS-12");
   expect(toasts).toEqual([]);
+});
+
+test("a switch's answer is one toast: the new timer's, saying where the old time is", async () => {
+  const { flow, toasts } = rig();
+  await flow.switchTo(OPS, "OPS-12");
+  await settle();
+  flow.settle("later");
+  await settle();
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]?.text).toMatch(/^Timing OPS-12\. .* stays in the day, unlogged\.$/);
+  expect(toasts[0]?.action?.label).toBe("Open the day");
 });
 
 test("a stop with nothing to draft stops the clock and offers the ad-hoc dialog's check", async () => {
@@ -303,7 +340,7 @@ test("a shown draft whose stretch is on another ticket's clock leaves that clock
   expect(log).toEqual([]);
 });
 
-test("Discard on a switch's draft still starts the timer it was waiting on", async () => {
+test("Stop, don't log on a switch's draft still starts the timer it was waiting on", async () => {
   const { flow, log } = rig();
   await flow.switchTo(OPS, "OPS-12");
   await settle();

@@ -26,7 +26,7 @@
   import TfCardRows from "../job/TfCardRows.svelte";
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
-  import { columnName, epicLine, previewAction, sentenceCase, type TicketFacts } from "./tickets";
+  import { assigneeName, columnName, epicLine, previewAction, sentenceCase, type TicketFacts } from "./tickets";
 
   let {
     card,
@@ -63,7 +63,7 @@
     <dt>Status</dt>
     <dd>{columnName(card.status)}</dd>
     <dt>Assignee</dt>
-    <dd>{card.assignee ?? "Unassigned"}</dd>
+    <dd>{assigneeName(card) ?? "Unassigned"}{card.mine && card.assignee !== null ? " (you)" : ""}</dd>
     <dt>Priority</dt>
     <dd>{sentenceCase(card.priority) ?? "None"}</dd>
     {#if epic}<dt>Epic</dt>

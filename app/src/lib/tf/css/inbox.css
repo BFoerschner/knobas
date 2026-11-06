@@ -12,13 +12,15 @@
 .tf-ib time { white-space: nowrap; font-size: var(--t-xs); color: var(--ink-2); grid-row: 1 / span 2; font-variant-numeric: tabular-nums; }
 /* Every title starts on one edge: a failure's dot hangs in a gutter the others keep empty. */
 .tf-ib .tf-what { font-weight: 500; padding-left: 14px; }
-/* The sentence is the row's link: no underline at rest, and the whole row answers the pointer, as a list's rows do. */
+/* The sentence is the row's link: no underline at rest, and a click on the row follows it, as a list's rows do (F-142).
+   Nothing stretches over the row, so its words can be selected. Pointing at something else the row holds names that instead. */
 .tf-ib .tf-what a { color: inherit; text-decoration: none; }
-.tf-ib .tf-what a::after { content: ""; position: absolute; inset: 0; }
-.tf-ib .tf-what a:hover { text-decoration: underline; text-underline-offset: 2px; }
-/* What can be pressed stands over the row's link. */
-.tf-ib .tf-acts > a, .tf-ib .tf-acts > button, .tf-ib .tf-ctx a, .tf-isnooze { position: relative; z-index: 1; }
-@media (hover: none) { .tf-ib .tf-acts > .tf-rowacts { position: relative; z-index: 1; } }
+.tf-ib:has(.tf-what a) { cursor: pointer; }
+.tf-ib:not(:has(.tf-acts :hover, .tf-ctx a:hover, .tf-isnooze:hover)):hover .tf-what a { text-decoration: underline; text-underline-offset: 2px; }
+/* The row a mouse press took away keeps its room, empty, until the pointer leaves it (F-138). */
+.tf-ib.tf-ib-held { min-height: var(--tf-ib-held); cursor: default; }
+.tf-ib.tf-ib-held:hover { background: none; }
+.tf-inbox-h:focus { outline: none; }
 /* There is no value column to replace here, so the words keep the group's room on their right at rest, and a long title
    wraps a line earlier rather than go under it. Nothing moves on hover. */
 @media (min-width: 901px) {
@@ -41,12 +43,11 @@
   .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
   /* Stacked, the time and the actions keep the titles' edge: a failure's dot still hangs in the gutter. */
   .tf-ib time, .tf-ib .tf-acts { margin-left: 14px; }
-  /* The time's line holds the group, so it is a small button's height whether the group is showing or not. */
-  .tf-ib time { display: flex; align-items: center; min-height: var(--control-h-sm); }
-  .tf-ib .tf-acts { justify-content: flex-start; order: 3; }
-  /* Stacked, the end of the row is the row: the group hangs at its top right, over the time's line. */
+  /* Stacked, all of a row's actions stand together on one line at its foot, showing, so the eye has one place to look (F-146). */
+  .tf-ib .tf-acts { justify-content: flex-start; order: 3; margin-top: 6px; }
   .tf-ib .tf-acts.tf-rowend { position: static; }
-  .tf-ib .tf-rowacts { right: 14px; top: 6px; transform: none; }
+  .tf-ib .tf-rowacts { position: static; transform: none; opacity: 1; pointer-events: auto; }
+  .tf-ib .tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { margin-right: 0; }
   .tf-isnooze { order: 4; }
 }
 

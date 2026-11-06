@@ -11,9 +11,14 @@
  *   so the stretch is a block before `log_work` re-derives the day's blocks;
  * - *Stop, log later* stops the clock and leaves the time in the day;
  * - *Keep running* closes the draft and touches nothing: no time is lost;
- * - *Discard* stops the clock and writes nothing: the stop the reader pressed
- *   still happens, and the time stays in the day, unlogged, as with *Stop,
- *   log later* but without its toast.
+ * - *Stop, don't log* (outcome `discard`, F-140) stops the clock and writes
+ *   nothing. Its time stays in the day, unlogged, as with *Stop, log later*: a
+ *   stop makes a block, and only the Day tab deletes one. So it was never
+ *   *Discard*, and the toast says what really happened.
+ *
+ * Both stops' toasts offer *Undo*, which starts the clock again on the ticket,
+ * and *Open the day*. A switch's says it in the new timer's one line, with no
+ * *Undo*, since a timer is already running on what the reader moved to.
  *
  * A stop on something with no draft (a label, a page, a ticket whose source
  * takes no worklogs) stops the clock at once and asks `ad_hoc_block` what the
@@ -40,6 +45,7 @@ import type { Timer } from "../shell/timer.svelte";
 import type { ToastSpec } from "../shell/toasts.svelte";
 import { readerDay } from "../time/day";
 import { localDay } from "../time/draft";
+import { minutesLabel } from "../time/format";
 
 /** How the reader left the draft. */
 export type DraftOutcome = "logged" | "later" | "keep" | "discard";
@@ -82,8 +88,11 @@ export interface DraftFlow {
   refuse(): void;
   /** Stop pressed (`⌘T`, the chip) with a timer running. */
   stop(): void;
-  /** Start on `target`, through the running timer's draft when there is one. */
-  switchTo(target: TimerTarget, title: string): Promise<void>;
+  /**
+   * Start on `target`, through the running timer's draft when there is one.
+   * `quiet`: the press's own toast says the timer runs (*Run all steps*, F-145).
+   */
+  switchTo(target: TimerTarget, title: string, quiet?: boolean): Promise<void>;
   /** Show a draft no stop opened: the ad-hoc dialog's *Log to a ticket…*. */
   show(draft: Draft): void;
   /** *Log*'s first step: stop the clock under the open draft, if it runs. */
@@ -117,12 +126,34 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
 
   const timing = (title: string) => ports.push({ text: `Timing ${title}.` });
 
-  function startWaiting(after: WaitingStart | null) {
+  /** What a draft's time is called in a toast. A stretch under a minute reads as *The time*: *0m* would say it was lost. */
+  const timeOf = (draft: Draft) => (draft.seconds >= 60 ? minutesLabel(Math.floor(draft.seconds / 60)) : "The time");
+
+  function startWaiting(after: WaitingStart | null, left: string | null = null) {
     if (after === null) return;
     void ports.timer
       .start(after.target)
-      .then(() => timing(after.title))
+      .then(() => {
+        if (left === null) timing(after.title);
+        else ports.push({ text: `Timing ${after.title}. ${left}`, action: { label: "Open the day", run: ports.onday } });
+      })
       .catch(ports.complain);
+  }
+
+  /** A stop's toast: what happened to the time, and the way back to the clock. */
+  function sayStopped(text: string, running: TimerTarget) {
+    ports.push({
+      text,
+      action: {
+        label: "Undo",
+        run: () =>
+          void ports.timer
+            .start(running)
+            .then(() => ports.push({ text: "Timer running again." }))
+            .catch(ports.complain),
+      },
+      more: [{ label: "Open the day", run: ports.onday }],
+    });
   }
 
   /** What a closed block with no draft calls for: `ad_hoc_block`'s dialog, or nothing. */
@@ -184,13 +215,13 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       if (this.busy) return this.refuse();
       void through(null);
     },
-    async switchTo(target, title) {
+    async switchTo(target, title, quiet = false) {
       if (this.busy) return this.refuse();
       const running = ports.timer.current;
       if (running === null) {
         try {
           await ports.timer.start(target);
-          timing(title);
+          if (!quiet) timing(title);
         } catch (error) {
           ports.complain(error);
         }
@@ -247,13 +278,13 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       inFlight += 1;
       void (was.running === null || stopped ? Promise.resolve() : ports.timer.stop())
         .then(() => {
-          if (outcome === "later") {
-            ports.push({
-              text: "Timer stopped. The time is kept in today's blocks, unlogged.",
-              action: { label: "Open the day", run: ports.onday },
-            });
+          // A log has its own toast, and with no clock under it the draft was only a look: *Cancel* has nothing to say.
+          if (outcome === "logged" || was.running === null) return startWaiting(was.after);
+          const time = timeOf(was.draft);
+          if (was.after !== null) {
+            return startWaiting(was.after, `${time} stays in the day, unlogged.`);
           }
-          startWaiting(was.after);
+          sayStopped(outcome === "later" ? `Timer stopped. ${time} stays in the day to log later.` : `Timer stopped, nothing logged. ${time} stays in the day.`, was.running);
         })
         .catch(ports.complain)
         .finally(() => (inFlight -= 1));

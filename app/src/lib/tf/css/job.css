@@ -277,6 +277,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-step.tf-st-done .tf-num { background: var(--ok); border-color: var(--ok); color: var(--sheet); }
 .tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
 .tf-step.tf-st-failed .tf-num { border-color: var(--err); color: var(--err); }
+.tf-step.tf-st-skipped :is(input, select) { color: var(--ink-2); }
 .tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tf-step input, .tf-step select {
   font: var(--t-sm) var(--mono); font-variant-ligatures: none; border: 1px solid var(--rule); background: var(--field); color: var(--ink);
@@ -299,6 +300,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 
 /* ---------- the worklog draft (`TfWorklogDraft.svelte`) ---------- */
 .tf-dialog.tf-logdlg { width: min(720px, calc(100vw - 32px)); }
+.tf-dialog.tf-logdlg .tf-fine { font-size: var(--t-xs); }
 
 /* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
 .tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }

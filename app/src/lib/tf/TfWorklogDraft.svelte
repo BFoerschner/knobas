@@ -9,8 +9,8 @@
   blocks by id), and `list_sources` for the source names ("Goes to Jira",
   "10:02, Gitea").
 
-  **Which buttons depends on what opened it.** After a stop: *Discard*, set
-  apart as the one that drops the time, then *Stop, log later*, *Cancel, keep
+  **Which buttons depends on what opened it.** After a stop: *Stop, don't log*,
+  which drops the draft and not the time (F-140), then *Stop, log later*, *Cancel, keep
   running* and *Log*. Without one (the ad-hoc dialog's *Log to a ticket…*):
   *Cancel* and *Log*, with nothing about a clock. A stop's draft opens over the running clock (#896); what each button
   does to it is `drafting.svelte.ts`'s, and this answers with an outcome,
@@ -232,7 +232,7 @@
   {/snippet}
   {#snippet footer()}
       {#if stopped}
-        <button class="tf-btn tf-ghost tf-danger tf-first" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
+        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Stop, don't log</button>
         <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("later")}>
           Stop, log later
         </button>

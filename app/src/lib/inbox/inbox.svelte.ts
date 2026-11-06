@@ -279,7 +279,10 @@ export function createInbox(ports?: InboxPorts): Inbox {
     const entry = take(key);
     if (!entry) return;
     if (until.getTime() <= Date.now()) {
-      streamRows = [{ ...entry, item: { ...entry.item, snoozed_until: null } }, ...streamRows];
+      // Where the re-read will put it, newest first: a row that jumped would lose the focus on it and the eye too.
+      const back = { ...entry, item: { ...entry.item, snoozed_until: null } };
+      const at = streamRows.findIndex((row) => row.item.occurred_at < back.item.occurred_at);
+      streamRows = at < 0 ? [...streamRows, back] : [...streamRows.slice(0, at), back, ...streamRows.slice(at)];
       state.count += 1;
     } else {
       snoozedRows = [...snoozedRows, { ...entry, item: { ...entry.item, snoozed_until: until.toISOString() } }];

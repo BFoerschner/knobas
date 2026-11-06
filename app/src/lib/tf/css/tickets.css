@@ -1,6 +1,7 @@
 /* ---------- Tickets (#810): views, the ticket board or list, the preview ---------- */
 /* One row bounded by the page, never sized by its content: an `auto` row made any text
    change in the preview re-lay out the whole list table (perf audit after #2200). */
+.tf-board-title h1:focus { outline: none; }
 .tf-tickets { display: grid; grid-template-columns: 230px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr); height: 100%; }
 .tf-views { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-vlist { overflow: auto; padding: 12px 10px 14px; flex: 1; }

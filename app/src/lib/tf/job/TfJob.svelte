@@ -132,8 +132,8 @@
     layers: Layers;
     /** The timer verb: with a timer running, stop it into the worklog draft. */
     ontimer: (() => void) | undefined;
-    /** Start the timer on this ticket, stopping another into its draft first. */
-    onstarttimer: (entityId: string, title: string) => void;
+    /** Start the timer on this ticket, stopping another into its draft first. `quiet`: the press's own toast says it runs. */
+    onstarttimer: (entityId: string, title: string, quiet?: boolean) => void;
     ports?: JobPorts;
     today?: () => Date;
     /** *Apply a link set…* and *Save as a link set…* (#869). */
@@ -264,6 +264,7 @@
     linking = false;
     stepping = false;
     steppedTo = false;
+    stepsHere = false;
     stepsStarted = false;
     // Only the address re-opens a job: what the reader reads before its first
     // await is not a reason to read again.
@@ -501,6 +502,8 @@
   /** A press brought the reader to the steps, so focus goes to them. */
   let steppedTo = $state(false);
   let stepsStarted = $state(false);
+  /** *Start work* at the foot of this page opened the steps, so `Esc` closes them as *Cancel* does (F-139). From the Tickets preview, `Esc` still goes back to the list. */
+  let stepsHere = $state(false);
   const offersSteps = $derived(detail ? offersStartWork(detail.status, mine) : false);
   $effect(() => {
     if (pinned && offersSteps) stepping = true;
@@ -523,8 +526,15 @@
   function cancelSteps() {
     stepping = false;
     steppedTo = false;
+    stepsHere = false;
     void tick().then(() => [...document.querySelectorAll<HTMLElement>(".tf-ticketcard .tf-go .tf-btn")].find((go) => !go.closest(".tf-kept[hidden]"))?.focus({ preventScroll: true }));
   }
+  /** While nothing has run, the steps are a panel on the page, and `Esc` takes them first. */
+  const stepsArePanel = $derived(stepsHere && starting && !stepsStarted && !pinned);
+  $effect(() => {
+    if (!stepsArePanel || !pageShown()) return;
+    return untrack(() => layers.add({ kind: "panel", close: cancelSteps }));
+  });
   const timerOnIt = $derived(
     detail !== null && detail !== undefined && timer.current?.target.kind === "entity" && timer.current.target.entity_id === detail.row.entity_id,
   );
@@ -549,6 +559,7 @@
       case "start-work":
         steppedTo = true;
         stepping = true;
+        stepsHere = true;
         return;
       case "choose":
         chooseSaying(id);
@@ -598,7 +609,8 @@
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
   <div class="tf-full tf-ticketpage">
-  <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
+  <!-- While the steps are a panel, `Esc` closes them and stays on this ticket, so the hint names the ticket with no link. -->
+  <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} back={stepsArePanel ? { name: key } : back} />
   <div class="tf-ws" {@attach cardSide}>
     <TfJobCard
       {detail}

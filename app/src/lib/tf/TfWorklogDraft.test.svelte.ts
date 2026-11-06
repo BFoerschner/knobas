@@ -179,11 +179,11 @@ test("it says where the worklog goes, and quotes ADR-0012", async () => {
   expect(text()).toContain("The comment follows the boxes you tick until you edit it.");
 });
 
-test("opened by a stop it offers Discard, Stop, log later, Cancel, keep running and Log", () => {
+test("opened by a stop it offers Stop, don't log, Stop, log later, Cancel, keep running and Log", () => {
   render({ stopped: true });
   expect(button("Stop, log later")).toBeDefined();
   expect(button("Cancel, keep running")).toBeDefined();
-  expect(button("Discard")).toBeDefined();
+  expect(button("Stop, don't log")).toBeDefined();
   expect(button("Log 2h 44m to PAY-231")).toBeDefined();
 });
 
@@ -198,7 +198,7 @@ test("each button answers with its outcome", () => {
   const { outcomes } = render();
   button("Cancel, keep running")!.click();
   button("Stop, log later")!.click();
-  button("Discard")!.click();
+  button("Stop, don't log")!.click();
   expect(outcomes).toEqual(["keep", "later", "discard"]);
 });
 
