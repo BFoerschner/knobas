@@ -6,7 +6,7 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { expect, test, vi } from "vitest";
 
-import { inlineEditor } from "./inline-editor";
+import { inlineEditor, isSendKey, sendKey } from "./inline-editor";
 import { createLayers } from "./layers.svelte";
 import Fixture from "./inline-editor.fixture.svelte";
 
@@ -116,5 +116,64 @@ test("a selector can name what takes focus", () => {
   expect(document.activeElement?.id).toBe("b");
   if (typeof done === "function") done();
   expect(layers.open).toEqual([]);
+  node.remove();
+});
+
+function keyed(init: KeyboardEventInit): KeyboardEvent {
+  return new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+}
+
+test("\u2318Enter sends what it was told to, in an editor and in a composer of its own", () => {
+  const node = document.createElement("div");
+  node.innerHTML = "<textarea></textarea>";
+  document.body.append(node);
+  const send = vi.fn();
+  const off = sendKey(send)(node) as () => void;
+  node.querySelector("textarea")!.dispatchEvent(keyed({ key: "Enter" }));
+  expect(send).not.toHaveBeenCalled();
+  node.querySelector("textarea")!.dispatchEvent(keyed({ key: "Enter", metaKey: true }));
+  node.querySelector("textarea")!.dispatchEvent(keyed({ key: "Enter", ctrlKey: true }));
+  expect(send).toHaveBeenCalledTimes(2);
+  off();
+  node.remove();
+});
+
+test("\u2318Enter with nothing named presses the primary, unless it is off, and doesn't press twice what a handler took", () => {
+  const node = document.createElement("div");
+  node.innerHTML = '<textarea></textarea><button class="tf-primary">Send</button>';
+  document.body.append(node);
+  const press = vi.fn();
+  node.querySelector("button")!.addEventListener("click", press);
+  const off = sendKey()(node) as () => void;
+  const box = node.querySelector("textarea")!;
+  box.dispatchEvent(keyed({ key: "Enter", metaKey: true }));
+  expect(press).toHaveBeenCalledOnce();
+  node.querySelector("button")!.disabled = true;
+  box.dispatchEvent(keyed({ key: "Enter", metaKey: true }));
+  expect(press).toHaveBeenCalledOnce();
+  node.querySelector("button")!.disabled = false;
+  const took = keyed({ key: "Enter", metaKey: true });
+  box.addEventListener("keydown", (event) => event.preventDefault(), { once: true });
+  box.dispatchEvent(took);
+  expect(isSendKey(took)).toBe(false);
+  expect(press).toHaveBeenCalledOnce();
+  off();
+  node.remove();
+});
+
+test("escCloses: one Esc from inside a field closes an editor that keeps its words, and the shell doesn't hear it", () => {
+  const node = document.createElement("div");
+  node.innerHTML = "<textarea></textarea>";
+  document.body.append(node);
+  const close = vi.fn();
+  const layers = createLayers();
+  const off = inlineEditor(close, { layers, escCloses: true })(node) as () => void;
+  const shell = vi.fn();
+  window.addEventListener("keydown", shell);
+  node.querySelector("textarea")!.dispatchEvent(keyed({ key: "Escape" }));
+  window.removeEventListener("keydown", shell);
+  expect(close).toHaveBeenCalledOnce();
+  expect(shell).not.toHaveBeenCalled();
+  off();
   node.remove();
 });

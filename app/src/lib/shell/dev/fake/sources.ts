@@ -7,7 +7,7 @@ import type { AdapterPreview, AdapterStatus, AuthMethod, AuthState, KindPaths, S
 import type { FakeBridge, Handlers } from "../fake-tauri";
 import { keepSeed, onFakeReset } from "../fake-seed";
 import { fills } from "../../../tf/roles.svelte";
-import { CORPUS, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
+import { CORPUS, fakeEmpty, ROLE_CLAIMERS, SYNCED_AT, TICKET_STATES } from "./corpus";
 
 /** The sources *Run embedded HTML* is off for (#2440): `fake/docs.ts` reads it for a page's `run_embeds`. */
 export const EMBEDS_OFF = new Set<string>();
@@ -335,10 +335,19 @@ const FIXTURE_ADAPTERS: SourceDescriptor[] = [
   }),
 ];
 
+/**
+ * The sources as they answer: under `?fake-empty=wiki` no source holds pages, so Docs draws what it draws with no wiki
+ * source set up, on a built app as on a dev server.
+ */
+function answeredSources(): SourceSummary[] {
+  if (!fakeEmpty("wiki")) return FIXTURE_SOURCES;
+  return FIXTURE_SOURCES.map((source) => ({ ...source, roles: source.roles.filter((claim) => claim.role !== "wiki") }));
+}
+
 // The role a faked read asks for (#1294) is answered from these sources'
 // claims and misses, and from the frames their adapter declares kinds on.
 ROLE_CLAIMERS.push(() =>
-  FIXTURE_SOURCES.map((source) => {
+  answeredSources().map((source) => {
     const adapter = FIXTURE_ADAPTERS.find((entry) => entry.adapter_kind === source.adapter_kind);
     return { ...source, payload_paths: adapter && "payload_paths" in adapter ? adapter.payload_paths : [] };
   }),
@@ -622,7 +631,7 @@ export function handlers(): Handlers {
     // and one with a PAT running out, because those are the two rows a person
     // has to *do* something about and they are the ones a screenshot has to be
     // able to show.
-    list_sources: () => FIXTURE_SOURCES,
+    list_sources: () => answeredSources(),
     list_adapters: () => FIXTURE_ADAPTERS,
     preview_install_adapter: (args) => previewFor(String(args["manifest"] ?? "")),
     install_adapter: (args) => installAdapter(args),

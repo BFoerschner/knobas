@@ -27,6 +27,8 @@
     viewer = false,
     why = null,
     onsubmit = () => {},
+    onprimary = () => {},
+    primary = "plain",
   }: {
     onclose: () => void;
     content?: "button" | "input" | "select" | "radios" | "rows" | "none";
@@ -37,6 +39,9 @@
     viewer?: boolean;
     why?: string | null;
     onsubmit?: () => void;
+    onprimary?: () => void;
+    /** What the footer's primary is, for `Enter` on a radio. */
+    primary?: "plain" | "danger" | "off" | "guarded";
   } = $props();
 
   let gone = $state(false);
@@ -46,7 +51,7 @@
 
 {#snippet actions()}
   <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-  <button class="tf-btn tf-primary">Add</button>
+  <button class="tf-btn tf-primary" class:tf-danger={primary === "danger"} disabled={primary === "off"} data-no-enter={primary === "guarded" ? "" : undefined} onclick={onprimary}>Add</button>
 {/snippet}
 
 <TfDialog title={markupTitle ? keyed : "Add source"} subtitle="Step 1 of 5" {onclose} {layers} {closeButton} {className} {why} footer={viewer ? undefined : actions}>

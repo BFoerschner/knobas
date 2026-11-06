@@ -6,13 +6,13 @@
 .tf-vfind + .tf-vlist { padding-top: 4px; padding-right: 2px; scrollbar-gutter: stable; }
 .tf-vw-row { position: relative; }
 /* The row's `…` draws over its count on hover, so the name keeps the room and every count ends on one edge. */
-.tf-vw-row:is(:hover, :focus-within):has(.tf-vw-more) .tf-count { visibility: hidden; }
+.tf-vw-row:is(:hover, :has(.tf-vw-more:is(:focus-visible, [aria-expanded="true"]))):has(.tf-vw-more) .tf-count { visibility: hidden; }
 .tf-vw-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-vw-row .tf-vw-menu { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); }
 .tf-vw-more {
   border: 0; background: none; color: inherit; cursor: pointer; padding: 1px 6px; border-radius: 3px; opacity: 0; font-size: var(--t-sm);
 }
-.tf-vw-row:hover .tf-vw-more, .tf-vw-more:focus-visible, .tf-vw-row:focus-within .tf-vw-more, .tf-vw-more[aria-expanded="true"] { opacity: 1; }
+.tf-vw-row:hover .tf-vw-more, .tf-vw-more:focus-visible, .tf-vw-more[aria-expanded="true"] { opacity: 1; }
 .tf-vw-more:hover { background: var(--sheet-2); }
 .tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more { color: var(--sheet); }
 .tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more:hover { background: rgba(255,255,255,.15); }

@@ -64,18 +64,10 @@ import type {
   TableCell,
 } from "../../../ipc/entity";
 import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
-import { CORPUS, fakeRoleScope } from "./corpus";
+import { CORPUS, fakeEmpty, fakeRoleScope } from "./corpus";
 import { linkedTickets } from "./entity";
 import { EMBEDS_OFF } from "./sources";
 import { keyOf } from "../../../time/format";
-
-/**
- * `?fake-empty=docs,sets,assets`: those areas answer with nothing, to draw their
- * empty states. Read per answer, as the address can change under a dev server.
- */
-function fakeEmpty(area: string): boolean {
-  return (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes(area);
-}
 
 /** The role `docs_tree` is read for, as `knobas_source::role::WIKI` spells it. */
 const WIKI_ROLE = "wiki";

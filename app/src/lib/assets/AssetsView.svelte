@@ -160,6 +160,7 @@
     proseParts,
     readsWide,
   } from "./editing";
+  import { filterKeys } from "../tf/filter-keys";
   import {
     addressOf,
     columnPathFor,
@@ -1774,6 +1775,7 @@
         spellcheck="false"
         oninput={(event) => typed(event.currentTarget.value)}
         onkeydown={onboxkey}
+        {@attach filterKeys()}
       />
       {#if query !== ""}
         <button type="button" class="tf-fclear" aria-label="Clear the search" onclick={() => typed("")}>✕</button>

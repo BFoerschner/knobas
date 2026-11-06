@@ -5,7 +5,8 @@
  * 1. a dialog is open           → close the topmost dialog;
  * 2. a drawer is open           → close it;
  * 3. a filter field has text    → clear it, focus stays;
- * 4. a text field has focus     → blur it;
+ * 4. another text field has focus → blur it (an empty filter falls through to the rungs below, and blurs only where
+ *    they do nothing);
  * 5. an inline panel is open    → close it;
  * 6. a top page                 → nothing;
  * 7. an opener is known         → go to the opener;
@@ -89,12 +90,14 @@ export function escStep(state: EscState): EscStep {
   }
   if (state.field) {
     if (state.field.filter && state.field.text !== "") return { do: "clear-filter" };
-    return { do: "blur" };
+    if (!state.field.filter) return { do: "blur" };
   }
   const panel = state.layers.map((layer) => layer.kind).lastIndexOf("panel");
   if (panel !== -1) return { do: "close", index: panel };
   const target = escTarget(state.route, state.opener, state.visiting, state.parent);
-  return target === null ? { do: "nothing" } : { do: "go", hash: target.hash, opened: target.opened };
+  if (target !== null) return { do: "go", hash: target.hash, opened: target.opened };
+  // An empty filter on a page `Esc` doesn't leave: out of the box, so the page's keys answer again.
+  return state.field ? { do: "blur" } : { do: "nothing" };
 }
 
 /**

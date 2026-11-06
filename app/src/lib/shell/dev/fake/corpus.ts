@@ -904,6 +904,15 @@ export interface FakeClaimer {
 }
 
 /**
+ * `?fake-empty=docs,sets,assets,wiki`: those areas answer with nothing, to draw their empty states. `wiki` is the one
+ * that takes a claim away: no source holds pages, as `sources.ts` answers it. Read per answer, as the address can change
+ * under a dev server.
+ */
+export function fakeEmpty(area: string): boolean {
+  return (new URLSearchParams(globalThis.location?.search).get("fake-empty") ?? "").split(",").includes(area);
+}
+
+/**
  * The fake sources, handed in by `sources.ts`. It reads `CORPUS` as it
  * loads, so this module cannot import it back.
  */

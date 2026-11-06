@@ -24,14 +24,15 @@
   `filter.text`, so the bar re-renders only what changed and the view below
   re-renders only its results.
 
-  **Keys**: `Esc` is the shell's ladder (`escape.ts`), which finds this field
-  by its `data-filter`: the first press clears it, the second leaves it. `/`
+  **Keys**: `Esc` is `filterKeys`'s: a press clears the words and focus stays, and a press
+  on the empty box falls through to the shell's ladder (`escape.ts`). `/`
   is not the bar's (#2425): outside a field the shell opens the launcher with
   the section's filter, which is the section's search.
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
 
+  import { filterKeys } from "../filter-keys";
   import { countLine, type FilterConfig, type FilterState } from "./filter";
   import TfScope from "./TfScope.svelte";
 
@@ -106,7 +107,7 @@
     >
     <input
       bind:this={field}
-      data-filter
+      {@attach filterKeys()}
       value={filter.text}
       oninput={typed}
       placeholder={config.placeholder}

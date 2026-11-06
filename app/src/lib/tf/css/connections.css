@@ -65,10 +65,10 @@ a.tf-lk-go:hover .tf-lk-name { text-decoration: underline; }
 .tf-lk-st { min-width: 72px; font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; }
 .tf-lk-st.tf-asks { color: var(--ink); }
 .tf-lk-st .tf-dot { margin-right: 5px; }
-.tf-lk:has(> .tf-x):is(:hover, :focus-within) .tf-lk-st { visibility: hidden; }
+.tf-lk:has(> .tf-x):is(:hover, :has(> .tf-x:is(:focus-visible, .tf-shown))) .tf-lk-st { visibility: hidden; }
 .tf-how { display: block; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-lk > .tf-x { position: absolute; right: 34px; top: 50%; transform: translateY(-50%); opacity: 0; transition: opacity .1s; }
-.tf-lk:hover > .tf-x, .tf-lk:focus-within > .tf-x, .tf-lk > .tf-x.tf-shown { opacity: 1; }
+.tf-lk:hover > .tf-x, .tf-lk > .tf-x:focus-visible, .tf-lk > .tf-x.tf-shown { opacity: 1; }
 .tf-dnone { padding: 0 16px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-dnote { font-size: var(--t-xs); color: var(--ink-2); padding: 0 16px; }
 

@@ -163,11 +163,12 @@ test("the first field is the first of any kind, a select or a textarea too, ahea
   target.remove();
 });
 
-test("with no field, a radio takes focus ahead of a button, and Enter on it sends nothing", () => {
+test("with no field, a radio takes focus ahead of a button, and Enter on it presses the primary, once (the key table, F-240)", () => {
   const behind = opener();
   const onsubmit = vi.fn();
+  const onprimary = vi.fn();
   const target = host();
-  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onsubmit } });
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onsubmit, onprimary } });
   flushSync();
 
   const radio = target.querySelector<HTMLInputElement>("input[type=radio]")!;
@@ -175,6 +176,24 @@ test("with no field, a radio takes focus ahead of a button, and Enter on it send
   const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
   radio.dispatchEvent(enter);
   expect(enter.defaultPrevented, "implicit submission is the keydown's default").toBe(true);
+  expect(onprimary).toHaveBeenCalledOnce();
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test.each(["danger", "guarded", "off"] as const)("Enter on a radio doesn't reach a primary that is %s", (primary) => {
+  const behind = opener();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onprimary, primary } });
+  flushSync();
+
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  target.querySelector<HTMLInputElement>("input[type=radio]")!.dispatchEvent(enter);
+  expect(enter.defaultPrevented).toBe(true);
+  expect(onprimary).not.toHaveBeenCalled();
 
   unmount(app);
   behind.remove();

@@ -18,7 +18,7 @@ import type { SourceSummary } from "../ipc/sources";
 import { health, signInFails, type Health } from "./health.svelte";
 import type { QueuedWrite } from "../ipc/sources";
 import { willNotGo, writeFollower, type WriteFollower } from "./follow-write";
-import { amend, dismiss, push, toasts } from "./toasts.svelte";
+import { amend, dismiss, push, toasts, type ToastAction } from "./toasts.svelte";
 import { onWithdrawn, openWriteQueue } from "./write-queue.svelte";
 
 /** The source a write goes to: its id, to read its credential, and its name, to say it. */
@@ -45,6 +45,8 @@ export interface QueuedToastHow {
   write?: (Pick<QueuedWrite, "id"> & Partial<Pick<QueuedWrite, "state">>) | null | undefined;
   follower?: WriteFollower | undefined;
   store?: Pick<Health, "get"> | undefined;
+  /** Where the write's effect shows, offered once it has gone: *Show in runs*. Without it, a sent toast offers nothing. */
+  where?: ToastAction | undefined;
 }
 
 /**
@@ -66,7 +68,7 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
   const write = how.write;
   if (write === null || write === undefined) return id;
   if (write.state === "sent") {
-    toastSent(id, what);
+    toastSent(id, what, how.where);
     return id;
   }
   let stopFollow: () => void = () => {};
@@ -87,16 +89,16 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
     if (!toasts.items.some((toast) => toast.id === id)) return finish();
     if (row === undefined) {
       finish();
-      toastSent(id, what);
+      toastSent(id, what, how.where);
     } else if (willNotGo(row)) finish();
   });
   if (over) stopFollow();
   return id;
 }
 
-/** The write a toast from {@link toastQueued} named has gone: it says so where it stands, and offers no queue. */
-function toastSent(id: number, what: string): void {
-  amend(id, { text: `Sent: ${what}.` });
+/** The write a toast from {@link toastQueued} named has gone: it says so where it stands, and offers where it shows rather than a queue. */
+function toastSent(id: number, what: string, where: ToastAction | undefined): void {
+  amend(id, where === undefined ? { text: `Sent: ${what}.` } : { text: `Sent: ${what}.`, action: where });
 }
 
 /**

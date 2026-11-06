@@ -160,6 +160,14 @@ const later = (run: () => void): void => {
 /** What ends a return's hold: the reader moving, by any means. */
 const READER_MOVES = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
 
+/** Returns under way. */
+let restoring = 0;
+
+/** Whether a return is still putting a place back: focus is its to set until it is over (`focus-keep.ts`). */
+export function placeRestoring(): boolean {
+  return restoring > 0;
+}
+
 /**
  * Put `place` back on `page`: the scroll now and on each frame until it stays, the
  * focus once its row is there, and again if a redraw takes that row away. Returns
@@ -172,9 +180,12 @@ export function restorePlace(place: Place, page: Element): () => void {
   let focused: HTMLElement | null = null;
   const started = performance.now();
   const end = () => {
+    if (over) return;
     over = true;
+    restoring -= 1;
     for (const type of READER_MOVES) window.removeEventListener(type, end, true);
   };
+  restoring += 1;
   for (const type of READER_MOVES) window.addEventListener(type, end, true);
   const step = () => {
     if (over) return;

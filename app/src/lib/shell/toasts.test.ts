@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { dismiss, hold, push, release, reset, toasts } from "./toasts.svelte";
+import { amend, dismiss, heldWrite, hold, push, release, reset, toasts, undoable } from "./toasts.svelte";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -119,4 +119,100 @@ test("a hold on a toast that has gone does nothing", () => {
     hold(id, "hover");
     release(id, "hover");
   }).not.toThrow();
+});
+
+test("the same words again are the one toast, on a new time, with the newest press's buttons", () => {
+  const first = vi.fn();
+  const newest = vi.fn();
+  const id = push({ text: "Syncing 5 sources.", action: { label: "Show", run: first } });
+  vi.advanceTimersByTime(6000);
+  expect(push({ text: "Syncing 5 sources.", action: { label: "Show", run: newest } })).toBe(id);
+  expect(toasts.items).toHaveLength(1);
+  toasts.items[0]!.action!.run();
+  expect(first).not.toHaveBeenCalled();
+  expect(newest).toHaveBeenCalledOnce();
+  vi.advanceTimersByTime(6000);
+  expect(toasts.items).toHaveLength(1);
+  vi.advanceTimersByTime(1000);
+  expect(toasts.items).toHaveLength(0);
+});
+
+test("the same words in another tone are another toast", () => {
+  push({ text: "Refused." });
+  push({ text: "Refused.", tone: "err" });
+  expect(toasts.items).toHaveLength(2);
+});
+
+test("a repeat of a toast held under the pointer stays held, with a full time for later", () => {
+  const id = push({ text: "Sent." });
+  hold(id, "hover");
+  push({ text: "Sent." });
+  vi.advanceTimersByTime(60_000);
+  expect(toasts.items).toHaveLength(1);
+  release(id, "hover");
+  vi.advanceTimersByTime(6000);
+  expect(toasts.items).toHaveLength(1);
+  vi.advanceTimersByTime(600);
+  expect(toasts.items).toHaveLength(0);
+});
+
+test("a second toast amended to the words of a first stands alone", () => {
+  push({ text: "Sent: re-run." });
+  const second = push({ text: "Queued: re-run." });
+  amend(second, { text: "Sent: re-run." });
+  expect(toasts.items.map((toast) => toast.id)).toEqual([second]);
+});
+
+test("undoable: Undo undoes, and a repeat's Undo takes back both", () => {
+  const first = vi.fn();
+  const second = vi.fn();
+  undoable("Hidden.", first);
+  undoable("Hidden.", second);
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]!.action!.label).toBe("Undo");
+  toasts.items[0]!.action!.run();
+  expect(first).toHaveBeenCalledOnce();
+  expect(second).toHaveBeenCalledOnce();
+});
+
+test("heldWrite sends when the toast ends on its time, or by its \u00d7", () => {
+  const send = vi.fn();
+  heldWrite("Dismissed.", send, () => {});
+  expect(send).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(6500);
+  expect(send).toHaveBeenCalledOnce();
+
+  const byHand = vi.fn();
+  const id = heldWrite("Dismissed too.", byHand, () => {});
+  dismiss(id);
+  dismiss(id);
+  expect(byHand).toHaveBeenCalledOnce();
+});
+
+test("heldWrite on Undo puts back and never sends", () => {
+  const send = vi.fn();
+  const undo = vi.fn();
+  const id = heldWrite("Dismissed.", send, undo);
+  toasts.items[0]!.action!.run();
+  dismiss(id);
+  vi.advanceTimersByTime(10_000);
+  expect(undo).toHaveBeenCalledOnce();
+  expect(send).not.toHaveBeenCalled();
+});
+
+test("heldWrite repeated: both are sent, or both put back", () => {
+  const send = vi.fn();
+  heldWrite("Dismissed.", () => send(1), () => {});
+  heldWrite("Dismissed.", () => send(2), () => {});
+  expect(toasts.items).toHaveLength(1);
+  vi.advanceTimersByTime(6500);
+  expect(send.mock.calls).toEqual([[1], [2]]);
+});
+
+test("a reset sends nothing that was held", () => {
+  const send = vi.fn();
+  heldWrite("Dismissed.", send, () => {});
+  reset();
+  vi.advanceTimersByTime(10_000);
+  expect(send).not.toHaveBeenCalled();
 });

@@ -32,6 +32,10 @@
  * - (m) a component draws the missing line by hand inside a `TfDialog` (it is `TfDialog`'s `why`), outside one in any
  *   markup but `<p class="tf-dwhy" role="status">`, or says *(needed)* (a needed field is a `.tf-req` *required*);
  * - (n) a `TfDialog`'s footer has a primary disabled for more than a send in flight, and the dialog passes no `why`;
+ * - (o) a box that narrows or finds (a placeholder or label starting *Filter* or *Find*) has no `filterKeys`: `Esc` means one
+ *   thing in all of them (the key table);
+ * - (p) a rule hides a row's value on `:focus-within`: focus on a row's link reveals nothing, and only `row-room.ts` knows
+ *   what the group covers;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -57,7 +61,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n";
+type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -363,6 +367,9 @@ function scan(root: string): Violation[] {
         if (decls.some(([prop, value]) => prop === "grid-template-columns" && /(?<![\d.])132px/.test(value))) {
           add({ rule: "j", file, key: selector, detail: "sets a literal 132px label column; use `var(--tf-label)`" });
         }
+        if (/:focus-within/.test(selector) && /\.tf-rowval/.test(selector)) {
+          add({ rule: "p", file, key: selector, detail: "hides a row's value on focus; `row-room.ts` measures what the group covers, and chrome.css hides `.tf-covered`" });
+        }
         const laidOut = decls.filter(([prop]) => LAYOUT.test(prop)).map(([prop]) => prop);
         if (file !== OLD_SHEET && laidOut.length > 0 && /^\*(?![\w-])/.test(compounds(selector).at(-1) ?? "")) {
           add({ rule: "k", file, key: selector, detail: `sets ${laidOut.join(", ")} on \`*\`; a shared layout rule names what it lays out` });
@@ -405,6 +412,11 @@ function scan(root: string): Violation[] {
         add({ rule: "l", file, key: 'role="menu"', detail: "draws a menu by hand; a menu is `TfMenu`, which draws in the float host" });
       }
       if (file !== DIALOG_COMPONENT) missingLine(file, markup, add);
+      for (const box of markup.matchAll(/<input\b/g)) {
+        const tag = markup.slice(box.index, tagEnd(markup, box.index));
+        const named = /\b(?:placeholder|aria-label)="(?:Filter|Find)\b/.test(tag) || /\bdata-filter\b/.test(tag);
+        if (named && !/filterKeys\(/.test(tag)) add({ rule: "o", file, key: tag.slice(0, 60), detail: "a box that narrows or finds answers `Esc` with `{@attach filterKeys()}`" });
+      }
     }
   }
   return [...found.values()];
@@ -531,6 +543,19 @@ test("(l) a `role=\"menu\"` outside `TfMenu` fails; `TfMenu`'s own and a word ab
 
 /** The rules a component alone breaches. */
 const rulesFor = (file: string, markup: string): string[] => planted({ [file]: markup }).map((failure) => failure.slice(1, 2));
+
+test("(o) a filter or find box with no `filterKeys` fails, and one with it, or any other field, passes", () => {
+  expect(rulesFor("lib/x/Y.svelte", '<input placeholder="Filter changed files" />')).toEqual(["o"]);
+  expect(rulesFor("lib/x/Y.svelte", '<input aria-label="Find in log" value={typed} />')).toEqual(["o"]);
+  expect(rulesFor("lib/x/Y.svelte", '<input placeholder="Filter changed files" {@attach filterKeys()} />')).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", '<input placeholder="Name" />')).toEqual([]);
+});
+
+test("(p) a value hidden on focus within fails; the group's own hover and the marked value pass", () => {
+  const rule = (css: string) => rulesFor("lib/tf/css/x.css", css);
+  expect(rule("tr:is(:hover, :focus-within) .tf-rowval { visibility: hidden; }")).toEqual(["p"]);
+  expect(rule("tr:hover .tf-rowval.tf-covered { visibility: hidden; }")).toEqual([]);
+});
 
 test("(m) a hand-drawn missing line in a dialog, a second markup and *(needed)* fail; the page's one markup and `TfDialog`'s own pass", () => {
   const dialog = (footer: string, open = "<TfDialog>") => `${open}{#snippet footer()}${footer}{/snippet}</TfDialog>`;

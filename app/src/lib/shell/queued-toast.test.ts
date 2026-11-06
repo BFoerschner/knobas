@@ -146,3 +146,23 @@ test("Start work's toast adds the sign-in sentence only when something waits (#1
   toastStarted("PAY-240", 0, TEAMCITY, storeWith("unauthorized"));
   expect(toasts.items.at(-1)!.text).toBe("Started work on PAY-240.");
 });
+
+test("once the write has gone, a toast given a where offers it in place of the queue (F-350)", () => {
+  let hear: Hear = () => {};
+  const follower: WriteFollower = { follow: (_id, heard) => ((hear = heard), () => {}) };
+  const shown: string[] = [];
+  toastQueued("re-run Payout_Lint #4811", null, { write: { id: 7 }, follower, where: { label: "Show in runs", run: () => shown.push("runs") } });
+  expect(toasts.items.at(-1)!.action!.label).toBe("Show queue");
+
+  hear(undefined);
+  expect(toasts.items.at(-1)!.text).toBe("Sent: re-run Payout_Lint #4811.");
+  expect(toasts.items.at(-1)!.action!.label).toBe("Show in runs");
+  toasts.items.at(-1)!.action!.run();
+  expect(shown).toEqual(["runs"]);
+});
+
+test("a write already sent offers its where straight away", () => {
+  toastQueued("re-run Payout_Lint #4811", null, { write: { id: 7, state: "sent" }, where: { label: "Show in runs", run: () => {} } });
+  expect(toasts.items.at(-1)!.text).toBe("Sent: re-run Payout_Lint #4811.");
+  expect(toasts.items.at(-1)!.action!.label).toBe("Show in runs");
+});

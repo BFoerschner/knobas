@@ -81,6 +81,8 @@
   import { onRefreshKey } from "./page-refresh.svelte";
   import { PAGES } from "./pages";
   import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
+  import { installRowRoom } from "./row-room";
+  import { installFocusKeep } from "./focus-keep";
   import { parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
@@ -671,6 +673,8 @@
   }
   const MOUSE = ["mousedown", "mouseup", "auxclick"] as const;
 
+  onMount(() => installRowRoom());
+  onMount(() => installFocusKeep());
   onMount(() => {
     const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);

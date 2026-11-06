@@ -40,7 +40,8 @@
 </script>
 
 {#if drawn}
-  <button type="button" class="tf-btn tf-syncnow" disabled={sync.running} {title} onclick={press}
+  <!-- `aria-disabled`, not `disabled`: a press from the keyboard stays on the button while the runs go (F-052). -->
+  <button type="button" class="tf-btn tf-syncnow" aria-disabled={sync.running ? "true" : undefined} {title} onclick={press}
     >{sync.running ? "Syncing…" : "Sync now"}</button
   >
 {/if}

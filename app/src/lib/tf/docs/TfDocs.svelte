@@ -159,6 +159,7 @@
   import { replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
   import type { EscTarget } from "../escape";
+  import { filterKeys } from "../filter-keys";
 
   /** The page's own reads and writes; *Link to…* uses the job's ports. */
   export interface DocsPorts {
@@ -1242,7 +1243,7 @@
     {#if find !== "" && page !== null}
       <div class="tf-findbar" role="search">
         <span>Matches for</span>
-        <input value={find} oninput={(e) => (find = e.currentTarget.value)} onkeydown={onfindkey} aria-label="Find in page" />
+        <input value={find} oninput={(e) => (find = e.currentTarget.value)} onkeydown={onfindkey} aria-label="Find in page" {@attach filterKeys({ close: () => (find = "") })} />
         <span>{marks === 0 ? "none on this page" : `${Math.max(at, 0) + 1} of ${marks}`}</span>
         <button type="button" onclick={() => jump(-1)} aria-label="Previous">↑</button>
         <button type="button" onclick={() => jump(1)} aria-label="Next">↓</button>

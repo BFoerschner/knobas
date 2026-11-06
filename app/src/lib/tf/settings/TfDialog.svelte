@@ -29,8 +29,10 @@
   enabled rule): this draws it, just left of *Cancel*, and the gate refuses a
   second markup for it.
 
-  `Enter` on a tick or a radio is not a submit: it is one more thing to decide, and
-  the form's primary may send.
+  **`Enter` on a radio presses the footer's primary**, so a keyboard reaches a harmless
+  write without tabbing past *Cancel* (the key table, F-240). A danger primary or one marked
+  `data-no-enter` (*Merge*) is not reached this way, and neither is one that is off. `Enter` on
+  a tick sends nothing: it is one more thing to decide.
 
   Deliberately not a native `<dialog>`: `showModal()` puts the element in the
   top layer, where `::backdrop`, not `.tf-modal`, draws the dim. What a native
@@ -127,6 +129,14 @@
     };
   });
 
+  /** `Enter` on a radio: the footer's primary, if it can be pressed and is safe to reach by a key that also means *go on*. */
+  function pressPrimary() {
+    const primary = dialog?.querySelector<HTMLButtonElement>("footer .tf-primary");
+    if (!primary || primary.disabled || primary.getAttribute("aria-disabled") === "true") return;
+    if (primary.matches(".tf-danger, [data-no-enter]")) return;
+    primary.click();
+  }
+
   function onkeydown(event: KeyboardEvent) {
     // A field that takes the key for itself says so (the launcher's box opens its action chain on `Tab`, #1422).
     if (event.defaultPrevented) return;
@@ -140,6 +150,7 @@
     }
     if (event.key === "Enter" && event.target instanceof HTMLInputElement && (event.target.type === "radio" || event.target.type === "checkbox")) {
       event.preventDefault();
+      if (event.target.type === "radio") pressPrimary();
       return;
     }
     if (event.key !== "Tab") return;

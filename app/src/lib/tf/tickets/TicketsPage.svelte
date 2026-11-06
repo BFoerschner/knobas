@@ -171,6 +171,7 @@
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfRailBar from "../TfRailBar.svelte";
   import type { EscTarget } from "../escape";
+  import { filterKeys } from "../filter-keys";
 
   let {
     ready,
@@ -655,7 +656,7 @@
       if ((event.target as Element).closest("a[href]")) railOpen = false;
     }}
   >
-    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" /></div>
+    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" {@attach filterKeys()} /></div>
     <div class="tf-vlist">
       <div class="tf-vw-acts">
         <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>New view…</button>

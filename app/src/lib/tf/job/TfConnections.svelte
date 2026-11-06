@@ -32,6 +32,7 @@
   import type { Tone } from "../../ipc/entity";
   import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
   import { itemHash } from "./job";
+  import { filterKeys } from "../filter-keys";
 
   let {
     jobKey,
@@ -112,7 +113,7 @@
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
         ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
       >
-      <input bind:this={field} bind:value={text} data-filter placeholder="Filter connections" aria-label="Filter connections" />
+      <input bind:this={field} bind:value={text} {@attach filterKeys()} placeholder="Filter connections" aria-label="Filter connections" />
     </label>
     <div class="tf-dacts">
       <button type="button" class="tf-btn tf-sm" onclick={onlinkto}>Link to…</button>

@@ -305,6 +305,12 @@ test("Sources lists each source with its state, address, holdings and last sync"
   button("Sync all").click();
   await settle();
   expect(p.syncAll).toHaveBeenCalledOnce();
+  // F-630: what really started, and a press that would add nothing is off with its reason.
+  expect(button("Sync all").getAttribute("aria-disabled")).toBe("true");
+  expect(button("Sync all").title).toBe("Every source is syncing");
+  button("Sync all").click();
+  await settle();
+  expect(p.syncAll).toHaveBeenCalledOnce();
 });
 
 test("Save sends what changed in the connection through update_source", async () => {

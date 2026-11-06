@@ -14,6 +14,7 @@
   import { intoList, withinList } from "./list-keys";
   import type { Candidate } from "./ports";
   import { KIND_LABEL } from "./sets";
+  import { filterKeys } from "../filter-keys";
 
   let {
     kind,
@@ -79,7 +80,7 @@
     <label class="tf-fsearch tf-wide"
       ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
         ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-      ><input bind:this={filterEl} bind:value={typed} form="tf-pick-{uid}" placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" onkeydown={(event) => intoList(event, listEl)} /></label
+      ><input bind:this={filterEl} bind:value={typed} {@attach filterKeys()} form="tf-pick-{uid}" placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" onkeydown={(event) => intoList(event, listEl)} /></label
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the {noun}: {failed}</p>

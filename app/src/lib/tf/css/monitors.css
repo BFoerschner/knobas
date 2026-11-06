@@ -49,7 +49,7 @@
   .tf-mon-figs { display: block; margin-top: 2px; }
   /* Now the last column: wide enough for the row's actions, which replace the bars and figures on hover. */
   .tf-monc-bars { width: 190px; }
-  .tf-mon tr:is(:hover, :focus-within) .tf-mon-24, .tf-mon tr:has(.tf-rowacts [aria-expanded="true"]) .tf-mon-24 { visibility: hidden; }
+  .tf-mon tr:hover .tf-mon-24, .tf-mon tr:has(.tf-rowacts :is(:focus-visible, [aria-expanded="true"])) .tf-mon-24 { visibility: hidden; }
 }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */

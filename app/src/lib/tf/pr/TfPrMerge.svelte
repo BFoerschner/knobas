@@ -152,6 +152,7 @@
       type="submit"
       class="tf-btn tf-primary"
       form="tf-prm-{uid}"
+      data-no-enter
       aria-disabled={action.disabled !== null ? "true" : undefined}
       title={action.disabled ?? undefined}
       disabled={busy}>Merge</button

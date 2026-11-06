@@ -52,6 +52,7 @@
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
 -->
 <script lang="ts">
+  import { filterKeys } from "../filter-keys";
   import TfStateChip from "../TfStateChip.svelte";
   import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
@@ -723,7 +724,7 @@
     <div class="tf-dnav tf-rail" id="{uid}-files">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" />
+        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys()} />
       </label>
       {#if tree.length === 0}
         <div class="tf-empty tf-flist-none">
@@ -796,9 +797,8 @@
         {repository}
       />
     {/each}
-    {#if filter.trim() !== "" && drawn.length === 0}
-      <div class="tf-empty"><p>No changed file matches the filter.</p></div>
-    {:else if gone.length > 0 || homeless.length > 0}
+    <!-- A filter that matches nothing says so once, in the file list beside its box, with its way off. -->
+    {#if (filter.trim() === "" || drawn.length > 0) && (gone.length > 0 || homeless.length > 0)}
       <details class="tf-outdated tf-gone">
         <summary>Comments on files that are no longer in this change</summary>
         {#each gone as g, n (n)}

@@ -238,11 +238,12 @@
 .tf-trail { margin-left: auto; display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; }
 
 /* A row's repeated actions (design system, Motion): a column of the same words on every row competes with the data, so
-   they fade in on hover and on focus within the row, and at rest they hold no room. `.tf-rowend` is the end of the row:
-   an action only some rows offer because of their state (*Ack*, *Open PR*) stands in it and stays, and the group hangs
-   to its left, in place of the last column's value (`.tf-rowval`): the value hides and the group stands there, with no
-   plate, so no word is cut. That column is at least as wide as the group, and it holds no link, which would go out of
-   reach as the pointer came to it. Where nothing hovers the group stands in the row. */
+   they fade in on hover or when keyboard focus is inside the group, and at rest they hold no room. Focus on the row's own
+   link reveals nothing (F-046). `.tf-rowend` is the end of the row: an action only some rows offer because of their state
+   (*Ack*, *Open PR*) stands in it and stays, and the group hangs to its left, over the end of the last column. A value
+   (`.tf-rowval`) hides only if the group covers it: `row-room.ts` measures on the way in and marks it `.tf-covered`, so a
+   value with room beside the group stays, and no word is cut. The column holds no link, which would go out of reach as
+   the pointer came to it. Where nothing hovers the group stands in the row. */
 .tf-rowend { display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--control-gap); vertical-align: middle; }
 .tf-rowacts { display: inline-flex; align-items: center; gap: var(--control-gap); }
 @media (hover: hover) {
@@ -253,11 +254,13 @@
   }
   .tf-rowend > :not(.tf-rowacts) ~ .tf-rowacts { margin-right: var(--control-gap); }
   /* An open menu is in the float host, so its group holds on by the opener's `aria-expanded`, with the row no longer hovered. */
-  :is(tr, li, .tf-rowhost, .tf-ib, .tf-r):is(:hover, :focus-within) .tf-rowacts, .tf-rowacts.tf-on, .tf-rowacts:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
-  :is(tr, li, .tf-rowhost, .tf-r):is(:hover, :focus-within):has(.tf-rowacts) .tf-rowval, :is(tr, li, .tf-rowhost, .tf-r):has(.tf-rowacts [aria-expanded="true"]) .tf-rowval { visibility: hidden; }
+  :is(tr, li, .tf-rowhost, .tf-ib, .tf-r):hover .tf-rowacts, .tf-rowacts.tf-on, .tf-rowacts:has(:focus-visible), .tf-rowacts:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
+  :is(tr, li, .tf-rowhost, .tf-r):hover:has(.tf-rowacts) .tf-rowval.tf-covered, :is(tr, li, .tf-rowhost, .tf-r):has(.tf-rowacts :is(:focus-visible, [aria-expanded="true"])) .tf-rowval.tf-covered { visibility: hidden; }
   /* The fill the group sits on is the row's own. */
   :is(tr, li, .tf-r):has(.tf-rowacts):hover, tr:has(.tf-rowacts):hover > td { background: var(--sheet-2); }
 }
+/* A page's heading takes focus after a move by key (`focus-keep.ts`), to start the next `Tab` there. It can't be pressed, so it draws no ring. */
+.tf-main h1[tabindex="-1"]:focus { outline: none; }
 
 /* An underline tab strip (#2294): a page's `.tf-tabs` (the current tab `aria-current`) and the job's
    `.tf-wtabs` (`role="tab"`, `aria-selected`) draw their tabs with this one rule. */

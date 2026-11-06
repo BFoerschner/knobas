@@ -1129,7 +1129,8 @@ test("a hit opens with every match marked and the find bar, and the search stays
   expect(marks.map((m) => m.textContent)).toEqual(["Ledger"]);
   expect(bar.textContent).toContain("1 of 1");
   expect(target.querySelector(".tf-toc .tf-hits")?.textContent).toBe("1");
-  button("✕")!.click();
+  // The key table: `Esc` in a find bar closes it, with its words in it, as its ✕ does.
+  bar.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   await settle();
   expect(target.querySelector(".tf-findbar")).toBeNull();
   expect(target.querySelector(".tf-rd-page mark")).toBeNull();

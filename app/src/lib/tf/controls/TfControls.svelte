@@ -9,6 +9,7 @@
   import TfKey from "../TfKey.svelte";
   import TfMenu from "../TfMenu.svelte";
   import TfStateChip from "../TfStateChip.svelte";
+  import { filterKeys } from "../filter-keys";
 
   let layout = $state<"board" | "list">("board");
   let mine = $state(true);
@@ -44,7 +45,7 @@
 
   <div class="tf-fbar">
     <label class="tf-fsearch">
-      <input type="text" placeholder="Filter" aria-label="Filter" />
+      <input type="text" placeholder="Filter" aria-label="Filter" {@attach filterKeys()} />
     </label>
     <label class="tf-fsel">
       Branch

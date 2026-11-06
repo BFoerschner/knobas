@@ -29,6 +29,15 @@ test("an inline panel closes before Esc leaves the page, after a field has let g
   expect(escStep({ ...state, layers: [{ kind: "panel" as const }, { kind: "dialog" as const }] })).toEqual({ do: "close", index: 1 });
 });
 
+test("an empty filter falls through to what Esc would do without it, and blurs only where that is nothing", () => {
+  const route = parseTfHash("#/pr/gh:pr-12");
+  const field = { filter: true, text: "" };
+  expect(escStep({ layers: [], field: { filter: true, text: "pay" }, route, opener: TICKET })).toEqual({ do: "clear-filter" });
+  expect(escStep({ layers: [], field, route, opener: TICKET })).toEqual({ do: "go", hash: TICKET.hash, opened: true });
+  expect(escStep({ layers: [{ kind: "panel" as const }], field, route, opener: TICKET })).toEqual({ do: "close", index: 0 });
+  expect(escStep({ layers: [], field, route: parseTfHash("#/code/repos"), opener: null })).toEqual({ do: "blur" });
+});
+
 test("a hint names what Esc lands on: a section's deeper address by the name the page gave itself", () => {
   expect(openerName(parseTfHash("#/builds/teamcity:Payout_Lint"), "Payout_Lint")).toBe("Payout_Lint");
   expect(openerName(parseTfHash("#/docs/space/ENG"), "Engineering")).toBe("Engineering");

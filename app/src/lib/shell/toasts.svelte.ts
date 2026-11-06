@@ -28,14 +28,17 @@ export interface ToastSpec {
   more?: ToastAction[];
   /** How long before it dismisses itself. */
   ms?: number;
+  /** Runs once when it goes, however it goes: see {@link heldWrite}. */
+  onend?: () => void;
 }
 
-export interface ToastItem extends ToastSpec {
+export interface ToastItem extends Omit<ToastSpec, "onend"> {
   id: number;
 }
 
 /** Long enough to read a sentence, short enough not to stack up. */
 const DEFAULT_MS = 6500;
+const UNDO = "Undo";
 /** What a toast keeps once the pointer or focus has left it: enough to reach back for *Undo*. */
 const AFTER_HOLD_MS = 2000;
 
@@ -68,19 +71,84 @@ function arm(id: number, ms: number): ReturnType<typeof setTimeout> {
  */
 export const toasts = $state<{ items: ToastItem[] }>({ items: [] });
 
-/** Raise a toast. Returns its id, so a caller can dismiss it early. */
+/** What runs when a toast ends, for a write held until then ({@link heldWrite}). */
+const endings = new Map<number, () => void>();
+
+/**
+ * The same words again while a toast still says them: the one toast stands and its time starts over (the removal rule).
+ * Its buttons are the newest press's. Two *Undo*s are one that takes back both, because each press has something to undo.
+ */
+function again(toast: ToastItem, spec: ToastSpec, ms: number): number {
+  const before = toast.action;
+  const action = spec.action;
+  if (before?.label === UNDO && action?.label === UNDO) toast.action = { label: UNDO, run: () => { before.run(); action.run(); } };
+  else if (action === undefined) delete toast.action;
+  else toast.action = action;
+  if (spec.more === undefined) delete toast.more;
+  else toast.more = spec.more;
+  const ending = endings.get(toast.id);
+  if (spec.onend !== undefined) endings.set(toast.id, ending === undefined ? spec.onend : () => { ending(); spec.onend?.(); });
+  const timer = timers.get(toast.id)!;
+  timer.left = ms;
+  if (timer.handle !== null) {
+    clearTimeout(timer.handle);
+    timer.handle = arm(toast.id, ms);
+    timer.ends = Date.now() + ms;
+  }
+  return toast.id;
+}
+
+/** Raise a toast. Returns its id, so a caller can dismiss it early. A repeat of a live toast's words is that toast again. */
 export function push(spec: ToastSpec): number {
-  const id = ++nextId;
-  toasts.items.push({ ...spec, id });
   const ms = spec.ms ?? DEFAULT_MS;
+  const same = toasts.items.find((item) => item.text === spec.text && (item.tone ?? "plain") === (spec.tone ?? "plain"));
+  if (same !== undefined) return again(same, spec, ms);
+  const id = ++nextId;
+  const { onend, ...item } = spec;
+  toasts.items.push({ ...item, id });
+  if (onend !== undefined) endings.set(id, onend);
   timers.set(id, { handle: arm(id, ms), ends: Date.now() + ms, left: ms, holds: new Set() });
   return id;
+}
+
+/**
+ * A press that acted at once, with its way back. `undo` runs on *Undo*. Repeats of the same words are one toast whose
+ * *Undo* takes all of them back.
+ */
+export function undoable(text: string, undo: () => void, spec: Omit<ToastSpec, "text" | "action" | "onend"> = {}): number {
+  return push({ ...spec, text, action: { label: UNDO, run: undo } });
+}
+
+/**
+ * A press with no reverse command behind it: the page hides the thing at once, and `send` runs when the toast ends,
+ * unless *Undo* was pressed, when `undo` puts the thing back and nothing is ever sent. A quit inside those seconds sends
+ * nothing, so use it only where that is harmless.
+ */
+export function heldWrite(text: string, send: () => void, undo: () => void, spec: Omit<ToastSpec, "text" | "action" | "onend"> = {}): number {
+  let undone = false;
+  return push({
+    ...spec,
+    text,
+    action: {
+      label: UNDO,
+      run: () => {
+        undone = true;
+        undo();
+      },
+    },
+    onend: () => {
+      if (!undone) send();
+    },
+  });
 }
 
 /** Change what a live toast says, in place and on its time: the write it named has moved on. Gone already, nothing happens. */
 export function amend(id: number, spec: Pick<ToastSpec, "text" | "action">): void {
   const toast = toasts.items.find((item) => item.id === id);
   if (toast === undefined) return;
+  // Two presses of one write, the second now saying what the first says: one toast, as a repeat is.
+  const twin = toasts.items.find((item) => item.id !== id && item.text === spec.text && (item.tone ?? "plain") === (toast.tone ?? "plain"));
+  if (twin !== undefined) dismiss(twin.id);
   toast.text = spec.text;
   if (spec.action === undefined) delete toast.action;
   else toast.action = spec.action;
@@ -116,6 +184,7 @@ export function release(id: number, why: ToastHold): void {
 export function reset(): void {
   for (const timer of timers.values()) if (timer.handle !== null) clearTimeout(timer.handle);
   timers.clear();
+  endings.clear();
   toasts.items = [];
 }
 
@@ -128,6 +197,9 @@ export function dismiss(id: number): void {
   if (timer !== undefined && timer.handle !== null) clearTimeout(timer.handle);
   timers.delete(id);
   toasts.items = toasts.items.filter((toast) => toast.id !== id);
+  const ending = endings.get(id);
+  endings.delete(id);
+  ending?.();
 }
 
 /**

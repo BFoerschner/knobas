@@ -22,6 +22,7 @@
   import { intoList, withinList } from "../sets/list-keys";
   import { contentLines } from "../sets/sets";
   import TfKey from "../TfKey.svelte";
+  import { filterKeys } from "../filter-keys";
 
   let {
     jobKey,
@@ -115,7 +116,7 @@
     <label class="tf-fsearch tf-wide"
       ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
         ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-      ><input bind:this={filterEl} bind:value={typed} form="tf-aps-{uid}" placeholder="Filter link sets" aria-label="Filter link sets" onkeydown={(event) => intoList(event, listEl)} /></label
+      ><input bind:this={filterEl} bind:value={typed} {@attach filterKeys()} form="tf-aps-{uid}" placeholder="Filter link sets" aria-label="Filter link sets" onkeydown={(event) => intoList(event, listEl)} /></label
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the link sets: {failed}</p>

@@ -65,6 +65,7 @@
   read at; *More* (⋯) holds *Edit*, *History* and its page on the source.
 -->
 <script lang="ts">
+  import { filterKeys } from "../filter-keys";
   import { flushSync, tick, untrack } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
@@ -983,10 +984,6 @@
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       tree?.querySelector<HTMLElement>(going ? "a.tf-gotof" : "[data-path]")?.focus();
-    } else if (event.key === "Escape" && goTyped !== "") {
-      event.preventDefault();
-      event.stopPropagation();
-      goTyped = "";
     }
   }
 
@@ -1087,6 +1084,7 @@
           }}
           onfocus={readEvery}
           onkeydown={goKeys}
+          {@attach filterKeys()}
         />
         {#if !going}<kbd>T</kbd>{/if}
       </label>
@@ -1279,7 +1277,7 @@
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
               ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
             >
-            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} />
+            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} {@attach filterKeys()} />
             <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
           </label>
           <span class="tf-nav2">

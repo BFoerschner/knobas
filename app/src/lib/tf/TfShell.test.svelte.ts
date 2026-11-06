@@ -301,7 +301,7 @@ function filterField(text: string): HTMLInputElement {
   return field;
 }
 
-test("Esc unwinds dialog, drawer, filter text, filter focus, then leaves the ticket page, one layer per press; an old tab address has no rung of its own (#2399)", async () => {
+test("Esc unwinds dialog, drawer, filter text, then leaves the ticket page, one layer per press; an old tab address has no rung of its own (#2399)", async () => {
   const layers = createLayers();
   const closed: string[] = [];
   const offDrawer = layers.add({ kind: "drawer", close: () => (closed.push("drawer"), offDrawer()) });
@@ -322,10 +322,7 @@ test("Esc unwinds dialog, drawer, filter text, filter focus, then leaves the tic
   expect(typed, "clearing the filter tells the view it changed").toEqual([""]);
   expect(document.activeElement).toBe(field);
 
-  press("Escape");
-  expect(document.activeElement).not.toBe(field);
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231/conv");
-
+  // The key table: an empty box falls through, so it costs no press of its own.
   press("Escape");
   await settle();
   expect(location.hash, "the page has no tabs: Esc goes to Tickets, its structural parent").toBe("#/tickets");
@@ -1836,7 +1833,7 @@ test("a role with no enabled source draws no Sync now", async () => {
   }
 });
 
-test("Sync now says Syncing… and is disabled until its runs end, then returns", async () => {
+test("Sync now says Syncing… and is off, holding focus, until its runs end, then returns", async () => {
   const { asked, syncs, end } = roleSyncHarness();
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
   await at("#/docs");
@@ -1844,7 +1841,7 @@ test("Sync now says Syncing… and is disabled until its runs end, then returns"
   await settle();
   expect(asked).toEqual(["wiki"]);
   expect(syncButton()?.textContent?.trim()).toBe("Syncing…");
-  expect(syncButton()?.disabled).toBe(true);
+  expect(syncButton()?.getAttribute("aria-disabled")).toBe("true");
 
   // Still going on another view of the role? No: each role has its own runs.
   await at("#/builds");
@@ -1855,7 +1852,7 @@ test("Sync now says Syncing… and is disabled until its runs end, then returns"
   end(41);
   await settle();
   expect(syncButton()?.textContent?.trim()).toBe("Sync now");
-  expect(syncButton()?.disabled).toBe(false);
+  expect(syncButton()?.hasAttribute("aria-disabled")).toBe(false);
 });
 
 test("a view not re-read on a run's end reads again when its Sync now runs end", async () => {
@@ -1901,7 +1898,7 @@ test("⌘R while Sync now says Syncing… runs nothing more, and a held key pres
   await at("#/docs");
   cmdR();
   await settle();
-  expect(syncButton()?.disabled).toBe(true);
+  expect(syncButton()?.getAttribute("aria-disabled")).toBe("true");
   expect(cmdR().defaultPrevented).toBe(true);
   await settle();
   expect(asked).toEqual(["wiki"]);

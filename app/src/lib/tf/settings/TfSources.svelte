@@ -8,7 +8,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
-  import { expiryNote, type Health } from "../../shell/health.svelte";
+  import { expiryNote, signInFails, type Health } from "../../shell/health.svelte";
   import { push } from "../../shell/toasts.svelte";
   import type { SettingsPorts } from "./ports";
   import { sourceDrafts } from "./source-drafts.svelte";
@@ -35,12 +35,27 @@
     onadd: () => void;
   } = $props();
 
+  /** Each source *Sync all* would start is running already, so a press would add nothing (F-630). */
+  const allRunning = $derived.by(() => {
+    const on = sources.filter((source) => source.enabled);
+    return on.length > 0 && on.every((source) => statuses[source.id]?.running === true);
+  });
+
+  /** What really started: a source whose sign-in fails has a run, and it won't read anything until the sign-in works. */
+  function startedText(runs: number): string {
+    const stuck = sources.filter((source) => source.enabled && signInFails(health.get(source.id)?.state)).map((source) => source.display_name || source.id);
+    const going = Math.max(0, runs - stuck.length);
+    const syncing = stuck.length === 0 ? `Syncing ${going} source${going === 1 ? "" : "s"}.` : `Syncing ${going} of ${runs} sources.`;
+    return stuck.length === 0 ? syncing : `${syncing} ${new Intl.ListFormat("en").format(stuck)} can't sign in.`;
+  }
+
   async function syncAll() {
+    if (allRunning) return;
     const ids = sources.filter((source) => source.enabled).map((source) => source.id);
     onstarted(ids);
     try {
       const runs = await ports.syncAll();
-      push({ text: `Syncing all ${runs.length} source${runs.length === 1 ? "" : "s"}` });
+      push({ text: startedText(runs.length) });
     } catch (cause) {
       onstopped(ids);
       push({ text: `Could not sync: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -56,7 +71,7 @@
   <div class="tf-acts">
     <button class="tf-btn tf-primary" onclick={onadd}>Add a source…</button>
     {#if sources.length > 0}
-      <button class="tf-btn" onclick={() => void syncAll()}>Sync all</button>
+      <button class="tf-btn" aria-disabled={allRunning ? "true" : undefined} title={allRunning ? "Every source is syncing" : undefined} onclick={() => void syncAll()}>Sync all</button>
     {/if}
   </div>
 </header>

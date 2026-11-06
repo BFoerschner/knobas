@@ -20,6 +20,7 @@
     error* reveal a line before scrolling to it.
 -->
 <script lang="ts">
+  import { filterKeys } from "../filter-keys";
   import { flushSync, tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -212,7 +213,7 @@
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
       ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
     >
-    <input placeholder="Find in log" aria-label="Find in log" value={typed} oninput={find} onkeydown={keys} />
+    <input placeholder="Find in log" aria-label="Find in log" value={typed} oninput={find} onkeydown={keys} {@attach filterKeys()} />
     <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
   </label>
   <span class="tf-nav2">

@@ -41,6 +41,7 @@ export const RESETS: Record<string, () => Promise<void>> = {
   // The stack and its dismiss timers, in one reset.
   "shell/toasts.svelte.ts#toasts": async () => (await import("./toasts.svelte")).reset(),
   "shell/toasts.svelte.ts#timers": async () => (await import("./toasts.svelte")).reset(),
+  "shell/toasts.svelte.ts#endings": async () => (await import("./toasts.svelte")).reset(),
   // The panel and the withdrawal subscribers, in one reset.
   "shell/write-queue.svelte.ts#writeQueuePanel": async () => (await import("./write-queue.svelte")).reset(),
   "shell/write-queue.svelte.ts#withdrawals": async () => (await import("./write-queue.svelte")).reset(),

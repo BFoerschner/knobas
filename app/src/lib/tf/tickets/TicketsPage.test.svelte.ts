@@ -325,7 +325,7 @@ const columns = () =>
   }));
 const count = () => target.querySelector(".tf-fcount")!.textContent;
 const preview = () => target.querySelector<HTMLElement>(".tf-preview")!;
-const field = () => target.querySelector<HTMLInputElement>("input[data-filter]")!;
+const field = () => target.querySelector<HTMLInputElement>(".tf-fbar input[data-filter]")!;
 
 function type(input: HTMLInputElement, char: string) {
   const at = input.selectionStart ?? input.value.length;
@@ -1007,7 +1007,7 @@ test("a view whose text the grammar cannot read opens as text with a line naming
   expect(target.querySelector(".tf-vw-warn")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
     "The search cannot read sprint:next in this view, so it shows no tickets.",
   );
-  expect(target.querySelector("input[data-filter]")).toBeNull();
+  expect(target.querySelector(".tf-fbar input[data-filter]")).toBeNull();
   expect(target.querySelector(".tf-views .tf-vw-row .tf-count")).toBeNull();
 });
 
