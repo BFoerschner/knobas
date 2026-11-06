@@ -76,7 +76,8 @@ readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's na
 readonly TICKETS_FILTER='Filter tickets'  # tickets/TicketsPage.svelte
 # The preview's button, worded by the ticket's state (`tickets.ts`'
 # `previewAction`); each is a link to the ticket's page, which draws the job
-# page either way (spec #2396): *Open ticket* only reads, the others choose it.
+# page either way (spec #2396): *Open ticket* only reads, *Start work* shows the
+# steps and chooses nothing yet, *Resume work* chooses and starts the timer.
 readonly JOB_LINKS=('Start work' 'Resume work' 'Open ticket')
 readonly CAPTURE_BOX='Capture'                            # capture/CaptureWindow.svelte
 # The **window**'s title (`capture.rs`'s `.title("Capture")`), a different fact
