@@ -335,7 +335,7 @@ test("the pinned card's foot offers Start timer, and Stop and log while the time
   await settle();
   expect(text(), "the running time is the top bar chip's alone").not.toContain("12:04");
   expect(text()).not.toContain("since 13:58");
-  const stop = [...target.querySelectorAll("button")].find((button) => button.textContent === "Stop and log")!;
+  const stop = [...target.querySelectorAll("button")].find((button) => button.textContent === "Stop and log…")!;
   stop.click();
   expect(calls.stop).toBe(1);
 });

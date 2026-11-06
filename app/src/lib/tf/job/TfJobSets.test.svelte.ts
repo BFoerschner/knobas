@@ -257,10 +257,10 @@ test("Apply a link set… picks nothing on arrival, and its primary waits with a
     ["Apply", "tf-btn tf-primary"],
   ]);
   expect(dialog().querySelector<HTMLButtonElement>("footer .tf-primary")!.disabled).toBe(true);
-  expect(squash(dialog().querySelector("footer .tf-picked"))).toBe("Pick a link set.");
+  expect(squash(dialog().querySelector("footer .tf-dwhy"))).toBe("Pick a link set.");
   pick("Payout stack");
   expect(footer().at(-1)?.[0]).toBe("Apply Payout stack");
-  expect(dialog().querySelector("footer .tf-picked")).toBeNull();
+  expect(dialog().querySelector("footer .tf-dwhy")).toBeNull();
 });
 
 /** #2289: typing is how the top match gets picked, so `Enter` in the filter still applies it. */
@@ -362,7 +362,7 @@ test("Save link set waits for a name and a tick, and a line says which is missin
   button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
   await settle();
   const primary = () => button(dialog(), "Save link set");
-  const line = () => squash(dialog().querySelector("footer .tf-picked"));
+  const line = () => squash(dialog().querySelector("footer .tf-dwhy"));
   expect(primary().disabled).toBe(false);
   const name = dialog().querySelector<HTMLInputElement>("input[aria-label='Name']")!;
   name.value = "   ";

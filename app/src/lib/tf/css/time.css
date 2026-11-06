@@ -81,24 +81,6 @@
 .tf .tf-tm-foot a { text-decoration: underline; }
 .tf-tm-empty { padding: 22px; color: var(--ink-2); text-align: center; }
 .tf .tf-tm-empty p { margin: 0 0 10px; }
-/* The block dialog's *On* row (#1428, #1429): the kind switch is as wide as its words and never
-   grows; the field takes the rest of the row and shrinks below its own width rather than push
-   out of it. job.css's `.tf-formgrid input { width: 100% }` stays: `flex: 1` sets the basis.
-   The list under it is a wide field. */
-.tf-tm-choices { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.tf-tm-on { display: flex; gap: 8px; align-items: center; min-width: 0; }
-.tf-tm-on > .tf-seg { flex: none; }
-.tf-tm-on > input, .tf-tm-on > .tf-tm-picked { flex: 1; min-width: 0; }
-/* A picked ticket (Forms): a tick and an ink ring, at a field's height. */
-.tf-tm-picked {
-  display: flex; align-items: center; gap: 6px; height: var(--control-h); padding: 0 8px; border-radius: 4px; color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--ink); font-size: var(--t-sm);
-}
-.tf-tm-picked > svg { flex: none; }
-.tf-tm-pickedt { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* What the primary waits for, on the footer's line. */
-.tf-tm-need { margin-right: auto; align-self: center; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-first ~ .tf-tm-need { margin-left: 12px; }
 .tf-tm-refusal { color: var(--err); font-size: var(--t-sm); }
 
 /* The Week tab (#828): a row per target, a column per day. Today alone is tinted; the weekend goes quiet with muted figures and no fill. */

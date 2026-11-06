@@ -689,7 +689,7 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   // Nothing is picked first (the enabled rule); Approve with a summary sends both comments.
   expect(dialog.querySelector<HTMLInputElement>(".tf-radio input:checked")).toBeNull();
   expect(dialogButton("Submit review").disabled).toBe(true);
-  expect(text(".tf-dialog footer .tf-first")).toBe("Pick a verdict.");
+  expect(text(".tf-dialog footer .tf-dwhy")).toBe("Pick a verdict.");
   dialog.querySelector<HTMLInputElement>("input[value=approve]")!.click();
   flushSync();
   type(dialog.querySelector("textarea")!, "Looks right.");
@@ -756,7 +756,7 @@ test("Request changes waits for its words; Comment waits for a line comment", as
   dialog.querySelector<HTMLInputElement>("input[value=request_changes]")!.click();
   flushSync();
   expect(dialogButton("Submit review").disabled).toBe(true);
-  expect(text(".tf-dialog footer .tf-first")).toBe("Request changes needs a summary.");
+  expect(text(".tf-dialog footer .tf-dwhy")).toBe("Request changes needs a summary.");
   type(dialog.querySelector("textarea")!, "Bound the jitter.");
   expect(dialogButton("Submit review").disabled).toBe(false);
   dialogButton("Submit review").click();

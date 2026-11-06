@@ -127,7 +127,7 @@
   {#snippet title()}Save <TfKey value={key} />’s connections as a link set{/snippet}
   {#snippet body()}
     <div class="tf-formgrid">
-    <label for="tf-ssn-{uid}">Name (needed)</label>
+    <label for="tf-ssn-{uid}">Name <small class="tf-req">required</small></label>
     <input id="tf-ssn-{uid}" class="tf-set-savename" type="text" aria-label="Name" autocomplete="off" bind:value={name} />
     <span>What goes in (at least one)</span>
     <div class="tf-picks tf-fwide" role="group" aria-label="What goes in">
@@ -174,7 +174,7 @@
     </div>
   {/snippet}
   {#snippet footer()}
-    {#if missing !== null}<span class="tf-dim tf-picked">{missing}</span>{/if}
+    {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={writing || missing !== null} onclick={() => void save()}>Save link set</button>
   {/snippet}

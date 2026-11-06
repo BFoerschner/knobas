@@ -3,7 +3,7 @@
  * something acts at once and offers *Undo* on its toast, and repeats collapse
  * into one toast, whose *Undo* puts them all back.
  */
-import { push, toasts } from "../../shell/toasts.svelte";
+import { tally } from "../../shell/toasts.svelte";
 
 /** One thing removed, and where it stood in its list. */
 export interface Removed<T> {
@@ -20,26 +20,12 @@ export function putBack<T>(list: readonly T[], removed: readonly Removed<T>[]): 
 }
 
 /**
- * What a list calls after each removal: `key` names the toast, `plural` is what
- * the collapsed one counts (*Removed 2 renderers*), and `restore` gets every
- * removal the toast still stands for.
+ * What a list calls after each removal: `plural` is what the collapsed toast
+ * counts (*Removed 2 renderers*), and `restore` gets every removal it stands for.
  */
-export function removalToast<T>(key: string, plural: string, restore: (removed: readonly Removed<T>[]) => void) {
-  let live: { id: number; removed: Removed<T>[] } | null = null;
-  return (one: Removed<T>): void => {
-    const held = live !== null && toasts.items.some((toast) => toast.id === live?.id) ? live.removed : [];
-    const removed = [...held, one];
-    const id = push({
-      key,
-      text: removed.length === 1 ? `Removed ${one.name}` : `Removed ${removed.length} ${plural}`,
-      action: {
-        label: "Undo",
-        run: () => {
-          live = null;
-          restore(removed);
-        },
-      },
-    });
-    live = { id, removed };
-  };
+export function removalToast<T>(plural: string, restore: (removed: readonly Removed<T>[]) => void): (one: Removed<T>) => void {
+  return tally<Removed<T>>((removed) => ({
+    text: removed.length === 1 ? `Removed ${removed[0]!.name}` : `Removed ${removed.length} ${plural}`,
+    action: { label: "Undo", run: () => restore(removed) },
+  }));
 }

@@ -330,7 +330,7 @@
             disabled={!ready && refused === null}
             aria-disabled={refused !== null ? "true" : undefined}
             title={refused ?? undefined}>Create pull request</button>
-          {#if needs !== null}<span class="tf-dim tf-small">{needs}</span>{/if}
+          {#if needs !== null}<p class="tf-dwhy" role="status">{needs}</p>{/if}
         {/if}
         {#if changed !== null}
           <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {base}</span>

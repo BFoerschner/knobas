@@ -28,8 +28,6 @@ export interface ToastSpec {
   more?: ToastAction[];
   /** How long before it dismisses itself. */
   ms?: number;
-  /** One toast per key: a repeat replaces the one showing, so rapid presses never stack (the removal rule). */
-  key?: string;
 }
 
 export interface ToastItem extends ToastSpec {
@@ -55,8 +53,6 @@ export const toasts = $state<{ items: ToastItem[] }>({ items: [] });
 
 /** Raise a toast. Returns its id, so a caller can dismiss it early. */
 export function push(spec: ToastSpec): number {
-  const showing = spec.key === undefined ? undefined : toasts.items.find((toast) => toast.key === spec.key);
-  if (showing) dismiss(showing.id);
   const id = ++nextId;
   toasts.items.push({ ...spec, id });
   const ms = spec.ms ?? DEFAULT_MS;
@@ -86,4 +82,21 @@ export function dismiss(id: number): void {
   clearTimeout(timers.get(id));
   timers.delete(id);
   toasts.items = toasts.items.filter((toast) => toast.id !== id);
+}
+
+/**
+ * Repeats that collapse into one toast (the removal rule, design system,
+ * Disabled). While a tally's toast is on screen the next press replaces it,
+ * holding everything pressed so far, so ten quick answers are one toast and its
+ * *Undo* takes back all ten. Once the toast has gone the tally starts again.
+ */
+export function tally<T>(draw: (held: readonly T[]) => ToastSpec): (one: T) => void {
+  let id: number | null = null;
+  let held: T[] = [];
+  return (one) => {
+    if (id !== null && toasts.items.some((toast) => toast.id === id)) dismiss(id);
+    else held = [];
+    held = [...held, one];
+    id = push(draw(held));
+  };
 }

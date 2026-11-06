@@ -190,7 +190,7 @@
           <input id="tf-tm-to" type="time" bind:value={form.to} />
         {/if}
         <span id="tf-tm-on-l">On</span>
-        <div class="tf-tm-on" role="group" aria-labelledby="tf-tm-on-l">
+        <div class="tf-onrow" role="group" aria-labelledby="tf-tm-on-l">
             <div class="tf-seg" role="group" aria-label="What the time was on">
               <button type="button" aria-pressed={form.kind === "entity"} onclick={() => (form.kind = "entity")}
                 >A ticket</button
@@ -209,9 +209,9 @@
                 bind:value={form.label}
               />
             {:else if form.picked !== null}
-              <span class="tf-tm-picked"
+              <span class="tf-chosen"
                 ><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" /></svg
-                ><span class="tf-tm-pickedt" title="{keyOf(form.picked.entityId)} {form.picked.title}"><span class="tf-mono">{keyOf(form.picked.entityId)}</span>
+                ><span class="tf-chosent" title="{keyOf(form.picked.entityId)} {form.picked.title}"><span class="tf-mono">{keyOf(form.picked.entityId)}</span>
                 {form.picked.title}</span></span
               >
               <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
@@ -231,7 +231,7 @@
         {#if form.kind === "entity" && form.picked === null}
           {#if session.error}<p class="tf-dim">{session.error}</p>{/if}
           {#if choices.length > 0}
-            <div class="tf-fwide tf-tm-choices">
+            <div class="tf-fwide tf-choices">
               <div class="tf-pane-h" id="tf-tm-pick-{uid}">{session.raw.trim() === "" ? "Recent tickets, pick one" : "Pick a ticket"}</div>
               <div class="tf-picklist" role="listbox" aria-labelledby="tf-tm-pick-{uid}">
                 {#each choices as choice, index (choice.entityId)}
@@ -253,7 +253,7 @@
       {#if mode === "edit"}
         <button type="button" class="tf-btn tf-ghost tf-danger tf-first" onclick={ondelete}>Delete block</button>
       {/if}
-      {#if missing !== null}<span class="tf-tm-need">{missing}</span>{/if}
+      {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
       <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
       <button type="submit" class="tf-btn tf-primary" form="tf-tm-form-{uid}" disabled={!ready}>{SAVE[mode]}</button>
   {/snippet}

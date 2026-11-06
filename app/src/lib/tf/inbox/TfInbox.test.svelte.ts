@@ -184,10 +184,10 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
   expect(rows().map((row) => text(row.querySelector("time")))).toEqual(["13:50", "12:40", "10:14", "yesterday 16:30"]);
   expect(rows().map((row) => row.querySelector(".tf-dot.tf-err") !== null)).toEqual([false, true, true, false]);
   expect(rows().map((row) => [...row.querySelectorAll(".tf-acts > *")].map((each) => text(each)).join(" "))).toEqual([
-    "Review Snooze Done",
-    "Open monitor Ack Snooze Done",
-    "Open log Re-run Snooze Done",
-    "Open ticket Snooze Done",
+    "Review Snooze… Done",
+    "Open monitor Ack Snooze… Done",
+    "Open log Re-run Snooze… Done",
+    "Open ticket Snooze… Done",
   ]);
   expect(rowOf("Idempotent").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
   expect(text(target.querySelector(".tf-ishelf summary"))).toBe("Snoozed 1");
@@ -292,7 +292,7 @@ test("Done completes the item", async () => {
 test("Snooze offers the presets, and one moves the item to the snoozed line", async () => {
   await open();
   const row = rowOf("Idempotent");
-  button(row, "Snooze").click();
+  button(row, "Snooze…").click();
   flushSync();
   button(row, "Next Monday").click();
   await settle();
@@ -308,7 +308,7 @@ test("Snooze offers the presets, and one moves the item to the snoozed line", as
 test("a snooze's toast takes it back with Undo", async () => {
   await open({ clock: true });
   const row = rowOf("Idempotent");
-  button(row, "Snooze").click();
+  button(row, "Snooze…").click();
   flushSync();
   button(row, "Tomorrow").click();
   await settle();
@@ -398,7 +398,7 @@ function typeDate(row: Element, value: string) {
 async function openPicker() {
   await open();
   const row = rowOf("Idempotent");
-  button(row, "Snooze").click();
+  button(row, "Snooze…").click();
   flushSync();
   return row;
 }
@@ -462,12 +462,12 @@ test("a credential expiry also offers After it expires, the day after the expiry
     ],
   });
   const review = rowOf("Idempotent");
-  button(review, "Snooze").click();
+  button(review, "Snooze…").click();
   flushSync();
   expect(text(review.querySelector(".tf-isnooze")), "a review has no expiry to hang it on").not.toContain("After it expires");
 
   const row = rowOf("TeamCity credential");
-  button(row, "Snooze").click();
+  button(row, "Snooze…").click();
   flushSync();
   button(row, "After it expires").click();
   await settle();
@@ -537,7 +537,7 @@ test("an inbox left open across midnight ticks its clock: a row reads yesterday 
     expect(text(rowOf("Idempotent").querySelector("time"))).toBe("yesterday 13:50");
 
     const row = rowOf("Idempotent");
-    button(row, "Snooze").click();
+    button(row, "Snooze…").click();
     flushSync();
     button(row, "Tomorrow").click();
     await settle();

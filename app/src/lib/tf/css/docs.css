@@ -273,7 +273,6 @@
 .tf-sec-edit .tf-acts .tf-dim { font-size: var(--t-xs); margin-right: auto; }
 .tf-cmts .tf-compose { margin-top: 12px; }
 /* The line beside the footer that says what is missing (the enabled rule). */
-.tf-np-why { margin-right: auto; align-self: center; }
 .tf-formgrid .tf-np-text {
   width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
   background: var(--field); color: var(--ink); resize: vertical;

@@ -290,7 +290,7 @@
 <TfDialog closeButton title={route === null ? `Add a route to ${asset.name}` : `Edit route ${route.name}`} subtitle={route === null ? null : `On ${asset.name}`} {onclose}>
   {#snippet body()}
     <div class="tf-formgrid form">
-        <label for="{fieldId}-name">Name (needed)</label>
+        <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -301,7 +301,7 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-        <label for="{fieldId}-url">URL or endpoint (needed)</label>
+        <label for="{fieldId}-url">URL or endpoint <small class="tf-req">required</small></label>
         <input
           class="inp"
           id="{fieldId}-url"
@@ -439,7 +439,7 @@
     {#if editing}
       <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => (confirming = true)}>Delete route…</button>
     {/if}
-    {#if name.trim() === "" || url.trim() === ""}<span class="tf-dim tf-picked">{name.trim() === "" ? (url.trim() === "" ? "Name it, and say where it answers." : "Name it first.") : "Say where it answers."}</span>{/if}
+    {#if name.trim() === "" || url.trim() === ""}<p class="tf-dwhy" role="status">{name.trim() === "" ? (url.trim() === "" ? "Name it, and say where it answers." : "Name it first.") : "Say where it answers."}</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"
@@ -464,9 +464,9 @@
 {/if}
 
 <style>
-  /* *URL or endpoint (needed)* on one line: a dialog of long names widens the token (design system, Forms). */
+  /* *URL or endpoint required* on one line, 141 px: a dialog of long names widens the token (design system, Forms). */
   .form {
-    --tf-label: 172px;
+    --tf-label: 148px;
   }
 
   /* A note on the field above it, in the field's column. */

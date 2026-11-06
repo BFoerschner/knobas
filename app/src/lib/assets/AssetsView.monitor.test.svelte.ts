@@ -202,7 +202,7 @@ function click(label: string) {
 function field(label: string): HTMLInputElement | HTMLSelectElement {
   const where = reachable();
   const tag = [...where.querySelectorAll("label")].find(
-    (candidate) => (candidate.textContent ?? "").replace("(needed)", "").trim() === label,
+    (candidate) => (candidate.textContent ?? "").replace("required", "").trim() === label,
   );
   const found =
     tag === undefined

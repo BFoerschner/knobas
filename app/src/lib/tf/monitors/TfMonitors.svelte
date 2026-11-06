@@ -428,8 +428,8 @@
   const rows = $derived(markedRow !== null && !kept.shown.includes(markedRow) ? [markedRow, ...kept.shown] : kept.shown);
   const hiddenRows = $derived(markedRow === null ? kept.hidden : kept.hidden.filter((row) => row !== markedRow));
   const foldOpen = $derived(hiddenFoldOpen(hiddenFold.open, kept));
-  /** The roster's own size, for the count: a hidden monitor is counted apart. */
-  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden).length);
+  /** The roster's own size, for the count: a hidden monitor is counted apart, unless it is marked and so a row of the list. */
+  const unhiddenTotal = $derived(roster === null ? null : roster.filter((row) => !row.hidden || row === markedRow).length);
 
   /** Only the reader's toggle is remembered, not the one the open attribute raises as the fold is drawn. */
   function toggleFold(event: Event) {
@@ -658,7 +658,7 @@
 </nav>
 {#if tab === "all"}
   <FilterBar {config} {filter} shown={roster === null ? null : rows.length} total={unhiddenTotal}>
-    {#snippet after()}{#if kept.hidden.length > 0}<span class="tf-mon-hidn">, {kept.hidden.length} hidden</span>{/if}{/snippet}
+    {#snippet after()}{#if hiddenRows.length > 0}<span class="tf-mon-hidn">, {hiddenRows.length} hidden</span>{/if}{/snippet}
   </FilterBar>
 {:else}
   <FilterBar config={unwatchedConfig} filter={unwatchedFilter} shown={unwatched === null ? null : shownUnwatched.length} total={unwatched?.length ?? null} />
@@ -717,8 +717,8 @@
                   <!-- The summary alone, as Builds' folds: the hidden rows follow it while it is open. -->
                   <details class="tf-mon-fold" open={foldOpen} ontoggle={toggleFold}>
                     <summary
-                      ><span>{counted(kept.hidden.length, "hidden monitor", "hidden monitors")}</span>
-                      <span class="tf-dim">{kept.hidden.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span></summary
+                      ><span>{counted(hiddenRows.length, "hidden monitor", "hidden monitors")}</span>
+                      <span class="tf-dim">{hiddenRows.length === 1 ? "Its alerts don’t" : "Their alerts don’t"} reach the inbox or notify you.</span></summary
                     >
                   </details>
                 </td>

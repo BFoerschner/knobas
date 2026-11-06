@@ -27,8 +27,8 @@
   });
 
   // The removal rule: gone at once, with *Undo* on one toast however many went.
-  const stepRemoved = removalToast<CommandStepDraft>("step-removed", "command steps", (removed) => void storeSteps(putBack(stepCommands.list.map(stepDraft), removed)));
-  const pipeRemoved = removalToast<NamedPipelineDraft>("pipeline-removed", "pipelines", (removed) => void storePipes(putBack(pipelines.list.map(pipeDraft), removed)));
+  const stepRemoved = removalToast<CommandStepDraft>("command steps", (removed) => void storeSteps(putBack(stepCommands.list.map(stepDraft), removed)));
+  const pipeRemoved = removalToast<NamedPipelineDraft>("pipelines", (removed) => void storePipes(putBack(pipelines.list.map(pipeDraft), removed)));
 
   async function removeStep(at: number) {
     const gone = stepCommands.list[at]!;

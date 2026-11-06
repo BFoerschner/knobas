@@ -179,7 +179,7 @@
   {/snippet}
 
   {#snippet footer()}
-    {#if alreadyHere}<span class="tf-dim tf-picked">Open the place it should go.</span>{/if}
+    {#if alreadyHere}<p class="tf-dwhy" role="status">Open the place it should go.</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={writing || alreadyHere} title={alreadyHere ? `${asset.name} is already here` : undefined} onclick={() => void submit()}>
       {writing ? "Moving…" : alreadyHere ? "Already here" : `Move into ${here}`}

@@ -116,7 +116,7 @@
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    {#if !chosen}<span class="tf-dim tf-picked">Pick a project or type a name.</span>{/if}
+    {#if !chosen}<p class="tf-dwhy" role="status">Pick a project or type a name.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={!addable} onclick={() => onadd(query)}>Add pattern</button>
   {/snippet}

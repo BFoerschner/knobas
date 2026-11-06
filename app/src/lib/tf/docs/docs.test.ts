@@ -1,6 +1,7 @@
 /** The Docs reader's rules (#859): which page an address opens, the tree, the header's words. */
 import { expect, test } from "vitest";
 
+import { keyParts } from "../TfKeyed.svelte";
 import type { DocBlock, DocPage, DocsTree } from "../../ipc/entity";
 import {
   childrenByParent,
@@ -189,7 +190,6 @@ import {
   hitLine,
   hitsLine,
   hitWhere,
-  keyRuns,
   OUTLINE_ROOM,
   READING_MIN,
   readerFit,
@@ -299,10 +299,7 @@ test("the reader's width decides its header: the outline folds first, and Sync n
 });
 
 test("a sentence's ticket keys are told from its words", () => {
-  expect(keyRuns("Linked to PAY-231")).toEqual([
-    { text: "Linked to ", key: false },
-    { text: "PAY-231", key: true },
-  ]);
-  expect(keyRuns("Via Payout worker")).toEqual([{ text: "Via Payout worker", key: false }]);
-  expect(keyRuns("Parent PAY-230, Engineering").map((run) => run.key)).toEqual([false, true, false]);
+  expect(keyParts("Linked to PAY-231")).toEqual(["Linked to ", "PAY-231", ""]);
+  expect(keyParts("Via Payout worker")).toEqual(["Via Payout worker"]);
+  expect(keyParts("Parent PAY-230, Engineering")).toEqual(["Parent ", "PAY-230", ", Engineering"]);
 });

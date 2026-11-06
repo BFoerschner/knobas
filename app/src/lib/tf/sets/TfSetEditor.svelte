@@ -31,7 +31,7 @@
     LinkSetRuleKind,
     LinkSetRuleRow,
   } from "../../ipc/entity";
-  import { dismiss, push, toasts } from "../../shell/toasts.svelte";
+  import { push, tally } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
   import { layers } from "../layers.svelte";
   import { entityAddress } from "../address";
@@ -80,8 +80,6 @@
   let patterning = $state<LinkSetMemberKind | null>(null);
   /** The saves asked for so far, in order (see `save`). */
   let saves: Promise<void> = Promise.resolve();
-  /** What the toast on screen can put back, and that toast, so another *Remove* joins it. */
-  let undoable: { toast: number; removed: Removed[] } | null = null;
 
   $effect(() => {
     void attempt;
@@ -270,24 +268,22 @@
    * removal while that toast shows replaces it: one toast, and its *Undo* puts
    * back all of them.
    */
+  const removedToast = tally<{ gone: Removed; named: string }>((held) => ({
+    text: `Removed ${held.length === 1 ? held[0]!.named : held.length} from ${set?.name ?? "the set"}`,
+    action: {
+      label: "Undo",
+      run: () =>
+        void save((draft) =>
+          putBack(
+            draft,
+            held.map((one) => one.gone),
+          ),
+        ),
+    },
+  }));
+
   function removeOne(gone: Removed, named: string, change: (draft: LinkSetDraft) => void) {
-    void save(change, undefined, () => {
-      const live = undoable !== null && toasts.items.some((toast) => toast.id === undoable!.toast) ? undoable : null;
-      if (live !== null) dismiss(live.toast);
-      const removed = [...(live?.removed ?? []), gone];
-      const text = `Removed ${removed.length === 1 ? named : removed.length} from ${set?.name ?? "the set"}`;
-      const toast = push({
-        text,
-        action: {
-          label: "Undo",
-          run: () => {
-            undoable = null;
-            void save((draft) => putBack(draft, removed));
-          },
-        },
-      });
-      undoable = { toast, removed };
-    });
+    void save(change, undefined, () => removedToast({ gone, named }));
   }
 
   function dropMember(at: number, named: string) {

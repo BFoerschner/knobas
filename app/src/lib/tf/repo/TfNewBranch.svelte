@@ -107,7 +107,7 @@
     </form>
   {/snippet}
   {#snippet footer()}
-    {#if name.trim() === ""}<span class="tf-dim tf-small tf-first">Name the branch.</span>{/if}
+    {#if name.trim() === ""}<p class="tf-dwhy" role="status">Name the branch.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-newbranch" disabled={!ready}>Create branch</button>
   {/snippet}

@@ -1491,13 +1491,13 @@ test("New page marks its title as needed in words, and says beside the footer wh
   button("New page here…")!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
-  expect(dialog.textContent).toContain("Title (needed)");
-  expect(dialog.querySelector(".tf-np-why")?.textContent).toBe("Give the page a title.");
+  expect(dialog.querySelector(".tf-req")?.textContent).toBe("required");
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("Give the page a title.");
   const create = [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!;
   expect(create.disabled).toBe(true);
   fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, "Rotas");
   await settle();
-  expect(dialog.querySelector(".tf-np-why")).toBeNull();
+  expect(dialog.querySelector(".tf-dwhy")).toBeNull();
   expect(create.disabled).toBe(false);
 });
 

@@ -366,6 +366,15 @@
   let columns = $state<AssetRow[][]>([]);
   let failure = $state<string | null>(null);
   /** {@link failure} when the address names nothing the estate holds: the one nothing-here state, not a failed read. */
+  /** Where a link came from, as *Unlink…* says it. A hand-drawn link never asks, so its line is not drawn. */
+  const LINK_CAME_FROM: Record<LinkEntry["link"]["origin"], string> = {
+    manual: "you",
+    suggested: "a suggestion you accepted",
+    imported: "an import",
+    source: "the source",
+    implied: "a reference in a note",
+  };
+
   const NOT_HELD = "knobas does not hold this asset. It may have been deleted, or not have synced yet.";
   /** Nothing has come back yet — told apart from "an estate with nothing in it". */
   let loaded = $state(false);
@@ -415,6 +424,8 @@
   let creating = $state<CreateAt | null>(null);
   let moving = $state(false);
   let deleting = $state(false);
+  /** The link *Unlink…* is asking about: one knobas could not draw again as it was. */
+  let unlinking = $state<LinkEntry | null>(null);
   /** The route editor: open on a new route, or on one of the pane's own. */
   let exposing = $state(false);
   let editingRoute = $state<RouteRow | null>(null);
@@ -1206,6 +1217,7 @@
     creating = null;
     moving = false;
     deleting = false;
+    unlinking = null;
     exposing = false;
     editingRoute = null;
     linking = false;
@@ -1577,14 +1589,17 @@
    * asset's history back in step: unlinking is a mutation like any other here,
    * and `write` is the one path every mutation in this view takes. It asks
    * nothing, so its toast has *Undo*, which draws the same link again (the
-   * removal rule).
+   * removal rule). `create_link` always records a link as drawn by hand
+   * (`knobas_core::link::draw`), so that holds only for a link that was: one
+   * from anywhere else could not come back as it was, and asks first instead.
    */
   async function removeLink(entry: LinkEntry) {
+    if (entry.link.origin !== "manual") {
+      unlinking = entry;
+      return;
+    }
     const { from_id, to_id, relation, note } = entry.link;
-    const done = await write(async () => {
-      await io.unlink(entry.link.id);
-      return true;
-    });
+    const done = await withdraw(entry);
     if (done === null) return;
     push({
       text: `Unlinked ${entry.other.title || entry.other.entity_id}`,
@@ -1593,6 +1608,17 @@
         run: () => void write(() => io.relink(from_id, to_id, relation, note ?? undefined)),
       },
     });
+  }
+
+  const withdraw = (entry: LinkEntry) =>
+    write(async () => {
+      await io.unlink(entry.link.id);
+      return true;
+    });
+
+  async function confirmUnlink(entry: LinkEntry) {
+    const done = await withdraw(entry);
+    if (done !== null) unlinking = null;
   }
 </script>
 
@@ -2698,6 +2724,24 @@
       revision += 1;
     }}
   />
+{/if}
+
+{#if unlinking !== null}
+  {@const link = unlinking}
+  <TfDialog title="Unlink {link.other.title || link.other.entity_id}?" onclose={() => (unlinking = null)}>
+    {#snippet body()}
+      <p class="ask">It came from {LINK_CAME_FROM[link.link.origin]}. Linking it again would mark it as drawn by hand, so this can't be undone.</p>
+      {#if writeFailure}
+        <p class="fail" role="alert">{writeFailure}</p>
+      {/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (unlinking = null)}>Cancel</button>
+      <button class="tf-btn tf-primary tf-danger" disabled={writing} onclick={() => void confirmUnlink(link)}>
+        {writing ? "Unlinking…" : "Unlink"}
+      </button>
+    {/snippet}
+  </TfDialog>
 {/if}
 
 {#if deleting && detail}

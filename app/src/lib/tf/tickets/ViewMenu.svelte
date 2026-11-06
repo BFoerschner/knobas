@@ -97,7 +97,7 @@
         >
         {#if copies}
           <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
-            ><b>Make an editable copy</b><span>your own view, starting from this {savedViewKind}</span></button
+            ><b>Make an editable copy…</b><span>your own view, starting from this {savedViewKind}</span></button
           >
         {/if}
         <hr />
@@ -106,7 +106,7 @@
         >
       {:else}
         <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view…</b></button>
-        <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate</b></button>
+        <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate…</b></button>
         <hr />
         <button type="button" role="menuitem" class="tf-menu-danger" onclick={() => pick(ondelete)}><b>Delete</b></button>
       {/if}

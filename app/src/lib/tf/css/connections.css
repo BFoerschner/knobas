@@ -80,7 +80,6 @@
 /* A list's option, not a field and not yet a choice: the fill alone says which the keys are on. */
 .tf-picklist button[aria-selected="true"] { background: var(--sheet-2); }
 .tf-pane-h:has(+ .tf-picklist) { margin-bottom: -6px; }
-.tf-picked { display: flex; gap: 8px; align-items: center; }
 
 /* ---------- the *This job* choice's key in a segmented control ---------- */
 .tf-seg .tf-jobk { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-xs); }

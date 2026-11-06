@@ -382,7 +382,7 @@
             </p>
             {#if oncopy}
               <div class="tf-vw-btns">
-                <button type="button" class="tf-btn tf-sm" onclick={oncopy}>Make an editable copy</button>
+                <button type="button" class="tf-btn tf-sm" onclick={oncopy}>Make an editable copy…</button>
               </div>
             {/if}
           </section>

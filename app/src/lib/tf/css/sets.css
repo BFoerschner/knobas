@@ -77,9 +77,8 @@
 .tf-bak-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tf-picks .tf-pickrow > .tf-bak-size { flex: none; width: 72px; text-align: right; white-space: nowrap; }
 .tf-picks.tf-hidden-empty { display: none; }
-/* What the primary waits for, or how many are picked: beside the footer's buttons, and beside *Cancel* when an extra action holds the far left. */
-.tf-picked { margin-right: auto; align-self: center; }
-.tf-first + .tf-picked { margin-right: 0; }
+/* How many are picked, where *Tick what to add.* stood (`.tf-dwhy`), so the line stays put as the first tick lands. */
+.tf-dialog footer .tf-picked { margin-left: auto; align-self: center; font-size: var(--t-xs); }
 /* The shared `.tf-roll` follows a heading inside its box; here the heading is above the box. */
 .tf-set .tf-roll { padding-top: 10px; }
 .tf-stays { margin: 0; font-size: var(--t-xs); }

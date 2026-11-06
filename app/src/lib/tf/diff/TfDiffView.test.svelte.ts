@@ -323,7 +323,7 @@ test("a rename shows old → new with its similarity, and a binary file a badge 
   const bin = cardOf("assets/logo.png");
   expect(squash(bin.querySelector(".tf-fh"))).toBe("BIN assets/logo.png");
   expect(bin.querySelectorAll(".tf-ln")).toHaveLength(0);
-  expect(squash(bin.querySelector(".tf-dwhy"))).toBe("A binary file: no lines to draw.");
+  expect(squash(bin.querySelector(".tf-dfwhy"))).toBe("A binary file: no lines to draw.");
   // The tree: each file under its directory with its badge.
   expect(treeRows()).toEqual(["assets", "BIN logo.png", "src/queue", "R 92% legacy.rs +1 −1"]);
 });
@@ -474,10 +474,10 @@ test("a 3,000-line file shows Load diff, and loading it shows its lines", () => 
   draw({ files: [big], layout: createDiffLayout(() => null) });
   const card = cardOf("src/big.rs");
   expect(card.querySelectorAll(".tf-ln")).toHaveLength(0);
-  expect(squash(card.querySelector(".tf-dwhy"))).toBe("Over 1,500 lines (3,000 changed): not loaded until you ask; nothing is cut. Load diff");
-  card.querySelector<HTMLButtonElement>(".tf-dwhy button")!.click();
+  expect(squash(card.querySelector(".tf-dfwhy"))).toBe("Over 1,500 lines (3,000 changed): not loaded until you ask; nothing is cut. Load diff");
+  card.querySelector<HTMLButtonElement>(".tf-dfwhy button")!.click();
   flushSync();
-  expect(card.querySelector(".tf-dwhy")).toBeNull();
+  expect(card.querySelector(".tf-dfwhy")).toBeNull();
   // Windowed: the first lines are drawn, and the rest is room below them, not cut.
   const drawnRows = card.querySelectorAll(".tf-ln");
   expect(squash(drawnRows[0])).toBe("1+ row 1");
@@ -496,7 +496,7 @@ test("a diff the ceiling cut says so, naming the ceiling", () => {
 test("a generated file over the Load diff limit starts open on its Load diff line; a small one collapsed", () => {
   const big = file("src/generated/schema.rs", { additions: 1_912, deletions: 1_640 });
   draw({ files: [big, file("src/generated/small.rs")], layout: createDiffLayout(() => null) });
-  expect(squash(cardOf("src/generated/schema.rs").querySelector(".tf-dwhy"))).toBe(
+  expect(squash(cardOf("src/generated/schema.rs").querySelector(".tf-dfwhy"))).toBe(
     "Generated, and over 1,500 lines (3,552 changed): not loaded until you ask; nothing is cut. Load diff",
   );
   expect(cardOf("src/generated/small.rs").querySelector(".tf-fh-caret")!.getAttribute("aria-expanded")).toBe("false");

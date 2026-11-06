@@ -121,10 +121,10 @@
           </span>
           <button
             class="tf-btn tf-sm"
-            title="Remove this link. Linking again is one action."
+            title={entry.link.origin === "manual" ? "Remove this link. Linking again is one action." : "Remove this link. Asks first, because linking again would mark it as drawn by hand."}
             onclick={() => onunlink(entry)}
           >
-            Unlink
+            {entry.link.origin === "manual" ? "Unlink" : "Unlink…"}
           </button>
         </div>
         {#if entry.link.note}

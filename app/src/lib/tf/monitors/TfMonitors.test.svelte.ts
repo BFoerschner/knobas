@@ -350,6 +350,14 @@ test("Hide moves a monitor into the closed fold at the roster's end; opened, it 
   expect(count()).toBe("4 monitors");
 });
 
+test("a marked monitor that is hidden is a row of the list, so neither the count nor the fold counts it again", async () => {
+  const hiddenTwo = ROSTER.map((each) => (each.entity_id === "kuma:2" || each.entity_id === "kuma:1" ? { ...each, hidden: true } : each));
+  await draw(["at", "kuma:2"], "PAY-231", ports({ monitorRoster: async () => hiddenTwo }));
+  expect(target.querySelector("tr.tf-mon-at")?.textContent).toContain("flows-stage");
+  expect(text(fold()!.querySelector("summary"))).toMatch(/^1 hidden monitor /);
+  expect(count()).toBe(`${monitorRows().length} monitors, 1 hidden`);
+});
+
 test("the fold stays as the reader left it, and opens by itself on a search only hidden monitors answer", async () => {
   await draw([], "PAY-231", ports({ monitorRoster: async () => ROSTER.map((each) => (each.entity_id === "kuma:1" ? { ...each, hidden: true } : each)) }));
   expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner"]);

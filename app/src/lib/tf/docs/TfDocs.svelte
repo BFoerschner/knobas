@@ -121,7 +121,7 @@
   import TfDocOutline from "./TfDocOutline.svelte";
   import TfDocsHome from "./TfDocsHome.svelte";
   import TfDocTree from "./TfDocTree.svelte";
-  import TfKeyWords from "./TfKeyWords.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
@@ -1113,7 +1113,7 @@
       {:else if jobOn}
         {#each jobGroups as group (group.reason)}
           <div class="tf-dl-for">
-            <h4><TfKeyWords text={group.reason} /></h4>
+            <h4><TfKeyed text={group.reason} /></h4>
             {#each group.pages as item (item.entity_id)}
               <a href={pageHash(item.entity_id)} aria-current={item.entity_id === current ? "true" : undefined}
                 >{item.title}<span class="tf-why">{item.where}</span></a

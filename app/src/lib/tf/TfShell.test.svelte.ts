@@ -541,6 +541,18 @@ test("back to a page: the row that opened the detail has focus again, and the pa
   expect(main.scrollTop).toBe(80);
 });
 
+test("one address told twice is not a return: the scroll the reader makes next stays", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  // Two writes before the events are delivered: each event reads the address as it is by then, so both name this one.
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await settle();
+  main.scrollTop = 80;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(main.scrollTop).toBe(80);
+});
+
 test("a top page never navigates on Esc, even when it has an opener", async () => {
   start({ nav: windowNav });
   await at("#/build/pipe-1/run-4812");

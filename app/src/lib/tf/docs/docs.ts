@@ -599,14 +599,6 @@ export function hitWhere(hit: Pick<DocHit, "space" | "path">, spanning: boolean)
   return spanning && hit.space ? `${hit.space.name ?? hit.space.key} › ${where}` : where;
 }
 
-/** `text` as runs, each ticket key in it marked, so a sentence can set its keys in mono (design system, Type). */
-export function keyRuns(text: string): { text: string; key: boolean }[] {
-  return text
-    .split(/\b([A-Z][A-Z0-9_]*-\d+)\b/)
-    .map((run, at) => ({ text: run, key: at % 2 === 1 }))
-    .filter((run) => run.text !== "");
-}
-
 /** What a snippet opens with: its section, or *Comment by Priya*. */
 export function snippetLabel(snippet: DocSnippet): string | null {
   if (snippet.comment_by !== null) {

@@ -134,7 +134,7 @@
 <TfDialog closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
   {#snippet body()}
     <div class="tf-formgrid form">
-        <label for="{fieldId}-name">Name (needed)</label>
+        <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -149,7 +149,7 @@
           What it is called in Uptime Kuma, and what attaches it here. The next poll
           finds a monitor of this name and draws the <em>monitored-by</em> link.
         </span>
-        <label for="{fieldId}-url">URL to check (needed)</label>
+        <label for="{fieldId}-url">URL to check <small class="tf-req">required</small></label>
         <input
           class="inp"
           id="{fieldId}-url"
@@ -188,7 +188,7 @@
   {/snippet}
 
   {#snippet footer()}
-    {#if name.trim() === "" || url.trim() === ""}<span class="tf-dim tf-picked">{name.trim() === "" ? "Name it first." : "Say what to check."}</span>{/if}
+    {#if name.trim() === "" || url.trim() === ""}<p class="tf-dwhy" role="status">{name.trim() === "" ? "Name it first." : "Say what to check."}</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={!ready} onclick={() => void submit()}>
       {writing ? "Queueing…" : "Create"}
@@ -197,11 +197,6 @@
 </TfDialog>
 
 <style>
-  /* *URL to check (needed)* on one line: a dialog of long names widens the token (design system, Forms). */
-  .form {
-    --tf-label: 172px;
-  }
-
   /* A note on the field above it, in the field's column. `.inp` and `.fail` are `unported.css`' and the buttons are
      `.tf-btn` (`chrome.css`): redeclaring any of them here is how two dialogs come to look different. */
   .hint {

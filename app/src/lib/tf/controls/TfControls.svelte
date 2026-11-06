@@ -118,11 +118,12 @@
 
     <section class="tf-dialog" aria-labelledby="tf-ctl-dialog">
       <header><h2 id="tf-ctl-dialog">A dialog footer</h2></header>
-      <div class="tf-body"><p>The extra action on the far left, then a ghost Cancel, then the primary.</p></div>
+      <div class="tf-body"><p>The extra action on the far left, what the primary waits for, then a ghost Cancel, then the primary.</p></div>
       <footer>
         <button type="button" class="tf-btn tf-ghost tf-danger tf-first">Delete</button>
+        <p class="tf-dwhy" role="status">Name it first.</p>
         <button type="button" class="tf-btn tf-ghost">Cancel</button>
-        <button type="button" class="tf-btn tf-primary">Save</button>
+        <button type="button" class="tf-btn tf-primary" disabled>Save</button>
       </footer>
     </section>
 

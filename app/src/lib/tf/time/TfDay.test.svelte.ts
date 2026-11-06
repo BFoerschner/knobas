@@ -485,7 +485,7 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
   expect(options()).toEqual(["OPS-77 Rotate the gateway certificates"]);
   button(target, "OPS-77 Rotate the gateway certificates").click();
   flushSync();
-  expect(squash(target.querySelector(".tf-tm-picked")?.textContent)).toBe("OPS-77 Rotate the gateway certificates");
+  expect(squash(target.querySelector(".tf-chosen")?.textContent)).toBe("OPS-77 Rotate the gateway certificates");
   button(target, "Assign").click();
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
@@ -498,15 +498,15 @@ test("the picker marks no row until the arrow keys move, the footer says what As
   await settle();
   const marked = () => target.querySelectorAll('[role="dialog"] [role="option"][aria-selected="true"]').length;
   expect(marked()).toBe(0);
-  expect(squash(target.querySelector(".tf-tm-need")?.textContent)).toBe("Pick a ticket first.");
+  expect(squash(target.querySelector(".tf-dialog footer .tf-dwhy")?.textContent)).toBe("Pick a ticket first.");
   const box = target.querySelector<HTMLInputElement>('[aria-label="Search for a ticket"]')!;
   box.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
   flushSync();
   expect(marked()).toBe(1);
   box.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   flushSync();
-  expect(target.querySelector(".tf-tm-need")).toBeNull();
-  expect(target.querySelector(".tf-tm-picked svg")).not.toBeNull();
+  expect(target.querySelector(".tf-dialog footer .tf-dwhy")).toBeNull();
+  expect(target.querySelector(".tf-chosen svg")).not.toBeNull();
 });
 
 test("Assign… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
@@ -581,7 +581,7 @@ test("the On row's field takes the row and shows what the block is on; the kind 
     await settle();
     const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
     expect(on.value).toBe("Standup and planning");
-    const kind = target.querySelector<HTMLElement>(".tf-tm-on > .tf-seg")!;
+    const kind = target.querySelector<HTMLElement>(".tf-onrow > .tf-seg")!;
     expect([getComputedStyle(kind).flexGrow, getComputedStyle(kind).flexShrink]).toEqual(["0", "0"]);
     expect([getComputedStyle(on).flexGrow, getComputedStyle(on).minWidth]).toEqual(["1", "0px"]);
     button(target, "Cancel").click();
@@ -590,7 +590,7 @@ test("the On row's field takes the row and shows what the block is on; the kind 
     // A ticket reads by its key and title, in a field that grows the same way.
     button(row("unlogged"), "Edit…").click();
     await settle();
-    const picked = target.querySelector<HTMLElement>(".tf-tm-on > .tf-tm-picked")!;
+    const picked = target.querySelector<HTMLElement>(".tf-onrow > .tf-chosen")!;
     expect(squash(picked.textContent)).toBe("PAY-231 Retry failed SEPA payouts");
     expect([getComputedStyle(picked).flexGrow, getComputedStyle(picked).minWidth]).toEqual(["1", "0px"]);
   } finally {

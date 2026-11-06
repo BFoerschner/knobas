@@ -282,7 +282,7 @@ test("Resume work chooses the ticket and starts the timer on it; the foot then s
   await until(() => sent.some((call) => call.cmd === "start_timer"), "the timer never started");
   const started = sent.find((call) => call.cmd === "start_timer")!.args["target"] as { entity_id?: string };
   expect(started.entity_id).toBe("mock:PAY-231");
-  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
+  await until(() => foot(pageCard()!)?.textContent?.trim() === "Stop and log…", `the pinned foot read ${foot(pageCard()!)?.textContent}`);
   expect(pageCard()!.querySelector(".tf-clock"), "the running time is the chip's alone").toBeNull();
 });
 

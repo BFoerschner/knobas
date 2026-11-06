@@ -624,7 +624,7 @@ function field(label: string): HTMLInputElement | HTMLSelectElement {
   );
   if (named !== null) return named;
   const tag = [...where.querySelectorAll("label")].find(
-    (candidate) => (candidate.textContent ?? "").replace("(needed)", "").trim() === label,
+    (candidate) => (candidate.textContent ?? "").replace("required", "").trim() === label,
   );
   const found =
     tag === undefined

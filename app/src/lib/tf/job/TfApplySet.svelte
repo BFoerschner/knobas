@@ -119,7 +119,7 @@
   {/snippet}
   {#snippet footer()}
     <a class="tf-btn tf-first" href="#/sets" onclick={onclose}>Manage link sets</a>
-    {#if missing !== null}<span class="tf-dim tf-picked">{missing}</span>{/if}
+    {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-aps-{uid}" disabled={chosen === null}
       >{chosen === null ? "Apply" : `Apply ${chosen.name}`}</button

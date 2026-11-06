@@ -97,7 +97,7 @@
 >
   {#snippet body()}
     <div class="tf-formgrid">
-        <label for="{fieldId}-name">Name (needed)</label>
+        <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -148,7 +148,7 @@
   {/snippet}
 
   {#snippet footer()}
-    {#if name.trim() === ""}<span class="tf-dim tf-picked">Name it first.</span>{/if}
+    {#if name.trim() === ""}<p class="tf-dwhy" role="status">Name it first.</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"

@@ -192,10 +192,10 @@
   }
 
   /** The removal rule: gone at once, with *Undo* on one toast however many went. */
-  const rendererRemoved = removalToast<UserRendererDraft>("renderer-removed", "renderers", (removed) => {
+  const rendererRemoved = removalToast<UserRendererDraft>("renderers", (removed) => {
     if (saved !== null) void store(putBack(saved.map(draftOf), removed));
   });
-  const defaultRemoved = removalToast<RendererDefault>("default-removed", "defaults", (removed) => void storeDefaults(putBack(defaults.list, removed)));
+  const defaultRemoved = removalToast<RendererDefault>("defaults", (removed) => void storeDefaults(putBack(defaults.list, removed)));
 
   async function remove(at: number) {
     if (saved === null) return;

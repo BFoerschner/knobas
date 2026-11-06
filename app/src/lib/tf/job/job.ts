@@ -528,7 +528,7 @@ export function footAction(ticket: {
   timerOnIt: boolean;
 }): { label: string; does: FootDoes } | null {
   if (ticket.pinned) {
-    return ticket.timerOnIt ? { label: "Stop and log", does: "stop" } : { label: "Start timer", does: "start-timer" };
+    return ticket.timerOnIt ? { label: "Stop and log…", does: "stop" } : { label: "Start timer", does: "start-timer" };
   }
   if ((ticket.status?.toLowerCase() ?? "") === "done") return null;
   if (offersStartWork(ticket.status, ticket.mine)) return { label: "Start work", does: "start-work" };

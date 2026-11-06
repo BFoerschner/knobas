@@ -113,7 +113,7 @@
           <option value={p.entity_id}>{label(p.entity_id)}</option>
         {/each}
       </select>
-      <span>Title (needed)</span>
+      <span>Title <small class="tf-req">required</small></span>
       <input type="text" aria-label="Title" bind:value={title} />
       {#if job !== null}
         <label class="tf-ck"><input type="checkbox" bind:checked={link} /> <span>Link it to <TfKey value={job} /></span></label>
@@ -130,7 +130,7 @@
     <p class="tf-dlg-note">Created in {sourceName} through the write queue. Tables and macros need {sourceName} for now.</p>
   {/snippet}
   {#snippet footer()}
-    {#if title.trim() === ""}<span class="tf-dlg-note tf-np-why">Give the page a title.</span>{/if}
+    {#if title.trim() === ""}<p class="tf-dwhy" role="status">Give the page a title.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       type="button"

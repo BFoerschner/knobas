@@ -260,6 +260,9 @@
    */
   function arrive() {
     const now = location.hash;
+    // Two writes before the events are delivered are two events that read one address. The second moved nothing, and
+    // its stamped entry would read as a return, whose hold would then undo the reader's next scroll.
+    if (now === hash) return;
     const how = takeTold(now);
     const had = stampOf(history.state);
     const left = shownKept();

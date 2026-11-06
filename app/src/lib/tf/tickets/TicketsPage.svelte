@@ -776,7 +776,7 @@
       {#snippet saveButton()}
         <!-- On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
         {#if !view?.saved_view_source || offersCopy(view)}
-          <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
+          <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view…</button>
         {/if}
       {/snippet}
       <FilterBar
@@ -824,7 +824,7 @@
       {:else}
         <div class="tf-empty">
           <p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p>
-          <a class="tf-btn tf-sm" href="#/settings/sources">Add a source…</a>
+          <a class="tf-btn tf-sm" href="#/settings/sources">Open Settings › Sources</a>
         </div>
       {/if}
     {:else if showing.layout === "board"}

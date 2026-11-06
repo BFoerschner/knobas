@@ -143,7 +143,7 @@
     </form>
   {/snippet}
   {#snippet footer()}
-    {#if needs !== null}<span class="tf-dim tf-small tf-first">{needs}</span>{/if}
+    {#if needs !== null}<p class="tf-dwhy" role="status">{needs}</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-prr-{uid}" disabled={busy || missing.length > 0}>Submit review</button>
   {/snippet}

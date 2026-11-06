@@ -377,6 +377,45 @@ test("unlinking withdraws the link and re-reads the asset", async () => {
 });
 
 /**
+ * `create_link` always records a link as drawn by hand (`knobas_core::link::draw`), so *Undo* could not bring back one
+ * from anywhere else as it was. The removal rule's other way: it asks first, and offers no *Undo*.
+ */
+test("a link that did not start by hand asks before it is withdrawn, and offers no Undo", async () => {
+  DEPLOYED_FROM.link.origin = "source";
+  try {
+    const { reads, unlinked, relinked } = render("#/asset/asset:postgres");
+    await settle();
+    const before = reads.length;
+    const toastsBefore = toasts.items.length;
+    const press = target.querySelectorAll<HTMLButtonElement>(".sec .row.lrow .tf-btn")[0]!;
+    expect(press.textContent?.trim(), "the label says it asks").toBe("Unlink…");
+    press.click();
+    await settle();
+    expect(unlinked, "nothing is withdrawn yet").toEqual([]);
+    const dialog = target.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("It came from the source.");
+    const button = (name: string) => [...dialog.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === name)!;
+
+    button("Cancel").click();
+    await settle();
+    expect(unlinked).toEqual([]);
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+
+    press.click();
+    await settle();
+    [...target.querySelector('[role="dialog"]')!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Unlink")!.click();
+    await settle();
+    expect(unlinked).toEqual(["link-deploy"]);
+    expect(reads.length, "the pane read the asset again").toBeGreaterThan(before);
+    expect(target.querySelector('[role="dialog"]')).toBeNull();
+    expect(toasts.items.length, "no toast offers to take it back").toBe(toastsBefore);
+    expect(relinked).toEqual([]);
+  } finally {
+    DEPLOYED_FROM.link.origin = "manual";
+  }
+});
+
+/**
  * Story 32's first badge, on the column rows: the count the backend gave, and
  * **no badge at all** where there is nothing to count.
  *

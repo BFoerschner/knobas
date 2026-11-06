@@ -1001,7 +1001,7 @@ test("Save as a view saves the view's text plus the chips, dropdowns and words, 
   type(field(), "r");
   target.querySelector<HTMLButtonElement>('[aria-label="Layout"] button:last-child')!.click();
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector("code")!.textContent).toBe("project:PAY issuetype:Story r");
@@ -1052,7 +1052,7 @@ test("Duplicate opens New view on a copy called Copy of …, with the view's tex
   await open(harness([], VIEWS));
   menuOf("My work").click();
   await settle();
-  menuItem("Duplicate").click();
+  menuItem("Duplicate…").click();
   await settle();
   expect(dialog()!.querySelector<HTMLInputElement>("input")!.value).toBe("Copy of My work");
   expect(dialog()!.querySelector("code")!.textContent).toBe("assignee:@me");
@@ -1373,7 +1373,7 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
     "View settings…lanes, cards and list columns",
-    "Make an editable copyyour own view, starting from this board",
+    "Make an editable copy…your own view, starting from this board",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
 });
@@ -1483,7 +1483,7 @@ test("View settings on a Jira view says how much a copy keeps and offers Make an
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain(
     "To change which tickets it holds, change it in Jira, or make your own copy. A copy keeps 1 of 2 parts of the query.",
   );
-  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(fromLine()).toBe(COPIED);
@@ -1504,14 +1504,14 @@ test("a saved view from a source without translate_query offers no editable copy
   ]);
   menuOf("Payments and Ops flow").click();
   flushSync();
-  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view")).toBe(false);
+  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view…")).toBe(false);
 
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const text = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(text).toContain("To change which tickets it holds, change it in Jira.");
   expect(text).not.toContain("copy");
-  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy")).toBe(false);
+  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy…")).toBe(false);
   expect(h.translated).toEqual([]);
 });
 
@@ -1537,7 +1537,7 @@ test("Save as a view on a Jira view is a copy too: the JQL it could test, then t
   [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Story")!.click();
   type(field(), "r");
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("");
@@ -1752,7 +1752,7 @@ test("a second ticket system's view says where it comes from, what decides it, a
   expect(settings).toContain("Only how it looks here. Kestrel still decides which tickets.");
   noJira(settings);
 
-  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy…")!.click();
   await settle();
   expect(fromLine()).toBe(
     "Copied from the Kestrel board Customs flow. It no longer follows Kestrel. Left out, because knobas cannot test it: fixVersion is EMPTY (knobas does not sync fix versions).",

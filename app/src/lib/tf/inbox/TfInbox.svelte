@@ -8,7 +8,7 @@
   each saying when it comes back, with *Wake*.
 
   Answers are drawn at once (#775), so a press says so in a toast that collapses
-  repeats (`tally.ts`) and takes them back with *Undo*: a snooze with a date now
+  repeats (`tally`) and takes them back with *Undo*: a snooze with a date now
   brings an item back from the shelf or from *Done*, because the backend's snooze
   clears `done_at`. An ack has no way back, and its toast says what it left open.
   An answer that fails says so in a toast too, where the reader is looking.
@@ -44,7 +44,7 @@
   import { followWrite } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, tally } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -54,7 +54,6 @@
   import { ticketHash } from "../route";
   import { reenterWords, secretNoun } from "../settings/settings";
   import TfKey from "../TfKey.svelte";
-  import { tally } from "./tally";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import { backLabel, expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
 
@@ -293,7 +292,7 @@
   let pickedValue = $state("");
 
   /** Each button's word: a source op's is its form's (`ACTION_FORMS`), knobas' own are here. */
-  const LABEL: Record<string, string> = { ack: "Ack", snooze: "Snooze", done: "Done" };
+  const LABEL: Record<string, string> = { ack: "Ack", snooze: "Snooze…", done: "Done" };
   const labelOf = (action: string) => ACTION_FORMS[action]?.label ?? LABEL[action] ?? action;
 
   function press(entry: InboxEntry, action: string) {

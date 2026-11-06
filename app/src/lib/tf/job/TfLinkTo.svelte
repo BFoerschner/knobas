@@ -8,7 +8,7 @@
   says in one line (R-15.2).
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import type { LinkRow } from "../../ipc/entity";
   import type { SearchHit } from "../../ipc/search";
@@ -54,24 +54,44 @@
   let note = $state("");
   let failure = $state<string | null>(null);
   let writing = $state(false);
+  /** The highlighted hit, for the arrow keys and `Enter`. Its own index, because the list drops this ticket's own row. */
+  let cursor = $state(0);
+  /** Whether the arrow keys have moved: until then no row is marked, though `Enter` takes the first (design system, Forms). */
+  let keyed = $state(false);
+  const uid = $props.id();
+  let field = $state<HTMLInputElement | null>(null);
 
-  const hits = $derived(
-    session.rows.flatMap((row, index) => (row.kind === "hit" && row.hit.entity_id !== entityId ? [{ hit: row.hit, index }] : [])),
-  );
+  const hits = $derived(session.rows.flatMap((row) => (row.kind === "hit" && row.hit.entity_id !== entityId ? [row.hit] : [])));
 
   function pick(hit: SearchHit) {
     target = hit;
     failure = null;
   }
 
+  function change() {
+    target = null;
+    cursor = 0;
+    keyed = false;
+    // The box is drawn again on the next tick; focus it there.
+    void tick().then(() => field?.focus());
+  }
+
+  function onsearch(event: Event & { currentTarget: HTMLInputElement }) {
+    cursor = 0;
+    keyed = false;
+    session.type(event.currentTarget.value);
+  }
+
   function onsearchkey(event: KeyboardEvent) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
-      session.move(event.key === "ArrowDown" ? 1 : -1);
+      keyed = true;
+      const last = hits.length - 1;
+      cursor = Math.min(Math.max(0, last), Math.max(0, cursor + (event.key === "ArrowDown" ? 1 : -1)));
     } else if (event.key === "Enter") {
       event.preventDefault();
-      const row = session.current;
-      if (row?.kind === "hit") pick(row.hit);
+      const hit = hits[cursor];
+      if (hit !== undefined) pick(hit);
     }
   }
 
@@ -93,48 +113,56 @@
 
 <TfDialog title="Link {jobKey}" {onclose} {layers}>
   {#snippet body()}
-    {#if target}
-      <div class="tf-picked">
-        <span>{target.title}</span>
-        <span class="tf-dim">{kindSingular(target.kind, null)}</span>
-        <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (target = null)}>Change</button>
-      </div>
-    {:else}
-      <input
-        type="text"
-        autocomplete="off"
-        placeholder="Search for a ticket, PR, build, page, asset"
-        aria-label="Search for a ticket, PR, build, page, asset"
-        value={session.raw}
-        oninput={(event) => session.type(event.currentTarget.value)}
-        onkeydown={onsearchkey}
-      />
-      {#if session.error}
-        <p class="tf-dim">{session.error}</p>
-      {/if}
-      {#if hits.length > 0}
-        <div class="tf-picklist" role="listbox" aria-label="Link targets">
-          {#each hits as { hit, index } (hit.entity_id)}
-            <button type="button" role="option" aria-selected={index === session.selected} onclick={() => pick(hit)}>
-              <span>{hit.title}</span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
-            </button>
-          {/each}
+    <div class="tf-formgrid">
+      {#if target}
+        <span id="tf-lk-to-{uid}">Link to</span>
+        <div class="tf-onrow" role="group" aria-labelledby="tf-lk-to-{uid}">
+          <span class="tf-chosen"
+            ><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" /></svg
+            ><span class="tf-chosent" title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
+          >
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
         </div>
+      {:else}
+        <label for="tf-lk-to-{uid}">Link to <small class="tf-req">required</small></label>
+        <input
+          id="tf-lk-to-{uid}"
+          type="text"
+          autocomplete="off"
+          placeholder="Search for a ticket, PR, build, page, asset"
+          aria-label="Search for a ticket, PR, build, page, asset"
+          bind:this={field}
+          value={session.raw}
+          oninput={onsearch}
+          onkeydown={onsearchkey}
+        />
+        {#if session.error}
+          <p class="tf-dim">{session.error}</p>
+        {/if}
+        {#if hits.length > 0}
+          <div class="tf-fwide tf-picklist" role="listbox" aria-label="Link targets">
+            {#each hits as hit, index (hit.entity_id)}
+              <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(hit)}>
+                <span>{hit.title}</span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       {/if}
-    {/if}
-    <label class="tf-field"
-      >Relation
-      <select aria-label="Relation" bind:value={relation}>
+      <label for="tf-lk-rel-{uid}">Relation</label>
+      <select id="tf-lk-rel-{uid}" bind:value={relation}>
         {#each OFFERED as option (option.id)}
           <option value={option.id}>{option.label.charAt(0).toUpperCase() + option.label.slice(1)}</option>
         {/each}
       </select>
-    </label>
-    <input type="text" placeholder="Note (optional)" aria-label="Note (optional)" bind:value={note} />
+      <label for="tf-lk-note-{uid}">Note</label>
+      <input id="tf-lk-note-{uid}" type="text" placeholder="Optional" bind:value={note} />
+    </div>
     {#if failure}<p class="tf-fail" role="alert">{failure}</p>{/if}
     <p class="tf-dim tf-small">Links stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
+    {#if !target}<p class="tf-dwhy" role="status">Pick what to link it to.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={!target || writing} onclick={() => void link()}>Link</button>
   {/snippet}

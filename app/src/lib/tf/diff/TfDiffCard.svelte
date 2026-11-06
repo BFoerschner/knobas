@@ -458,16 +458,16 @@
     {#if rendered !== null && shows !== "lines"}
       <TfDiffRendered plan={rendered} path={file.path} {sides} swipe={shows === "swipe"} {sideOf} {load} {render} {commands} />
     {:else if file.change === "binary"}
-      <div class="tf-dwhy">A binary file: no lines to draw.</div>
+      <div class="tf-dfwhy">A binary file: no lines to draw.</div>
     {:else if !drawsLines}
-      <div class="tf-dwhy">
+      <div class="tf-dfwhy">
         <span>{chip === "generated" ? "Generated, and over" : "Over"} {n(LOAD_OVER)} lines ({n(changed)} changed): not loaded until you ask; nothing is cut.</span>
         <button type="button" class="tf-btn tf-sm" onclick={onload}>Load diff</button>
       </div>
     {:else if file.hunks.length === 0 && file.old_mode && file.new_mode && file.old_mode !== file.new_mode}
-      <div class="tf-dwhy">File mode changed from <span class="tf-mono">{file.old_mode}</span> to <span class="tf-mono">{file.new_mode}</span>. No content change.</div>
+      <div class="tf-dfwhy">File mode changed from <span class="tf-mono">{file.old_mode}</span> to <span class="tf-mono">{file.new_mode}</span>. No content change.</div>
     {:else if file.hunks.length === 0 && file.change === "renamed"}
-      <div class="tf-dwhy">Renamed{file.similarity != null ? ` with ${file.similarity}% similarity` : ""}. No content change.</div>
+      <div class="tf-dfwhy">Renamed{file.similarity != null ? ` with ${file.similarity}% similarity` : ""}. No content change.</div>
     {:else}
       <div class="tf-dbody" {@attach win.list}>
         {#each win.slice(items) as it (it.key)}{@render item(it)}{/each}

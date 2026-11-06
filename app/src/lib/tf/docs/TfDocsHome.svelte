@@ -19,7 +19,7 @@
   import type { DocSpace, DocsTree } from "../../ipc/entity";
   import { counted } from "../counted";
   import TfKey from "../TfKey.svelte";
-  import TfKeyWords from "./TfKeyWords.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import { sourceRoles, WIKI } from "../roles.svelte";
   import { continueReading, forYouWhy, pageHash, spaceHash, spaceId, topPages, type JobPageGroup } from "./docs";
 
@@ -98,7 +98,7 @@
         {#each jobRows as page (page.entity_id)}
           <a class="tf-dh-row" href={pageHash(page.entity_id)}>
             <span class="tf-dh-t">{page.title}</span>
-            <span class="tf-why"><TfKeyWords text={whyOnJob(page.reason, page.where)} /></span>
+            <span class="tf-why"><TfKeyed text={whyOnJob(page.reason, page.where)} /></span>
           </a>
         {/each}
         {#if jobPages.length > jobRows.length}
