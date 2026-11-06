@@ -11,6 +11,8 @@
 .tf-toast.tf-err { background: var(--err); }
 .tf-toast button { border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; white-space: nowrap; flex: none; }
 .tf-toast .tf-x { text-decoration: none; opacity: .7; }
+/* On a failure's red, .7 reads at 3.76:1. */
+.tf-toast.tf-err .tf-x { opacity: 1; }
 /* A toast never sits on a dialog's footer: while one is open the newest toast stands in the band a dialog leaves under it
    (`dialogs.css`), and the older ones wait. They come back when it closes, if their time has not run out. */
 body:has(.tf-modal) .tf-toasts { bottom: 6px; }
