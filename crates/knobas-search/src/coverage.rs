@@ -105,9 +105,12 @@
 //! cycles five kinds through every source. Add a Gitea of 20,000 commits over 430
 //! rows it keeps, and that source took the grouped read on every `under:` keystroke:
 //! 25 to 44 ms at p50 once analyzed and 155 to 160 never analyzed, against about 1
-//! through the look at each kind (#2503). A source another source crowds out of every
-//! kind it holds still goes to the grouped read, and the look that found nothing adds
-//! about 0.1 ms to it.
+//! through the look at each kind (#2503). Three sources still go to the grouped read:
+//! one another source crowds out of every kind it holds, one that holds no kept kind
+//! at all, and under `author:` one in the corpus that names nobody, as a TeamCity does.
+//! The look that settled nothing adds about 0.1 ms to that read under a kind scope and
+//! about 1 ms without one, which every such `author:` keystroke pays (0.5 to 1.9 ms over
+//! six runs of 60 pairs).
 //!
 //! `sync.item` is cheaper than `sync.live_item` for that read and is **not** used:
 //! half of the statement's cost is the tombstone join, and dropping it would let an
@@ -161,8 +164,8 @@ use crate::vocab::{SourceVocab, Vocabulary};
 /// **Why 64.** It costs about 5 µs a row, through the item and the entity, so
 /// about 1 ms for the benchmark's three sources with rows. A walk four times
 /// the length costs 1 ms more over 100,000 items and took a top-N sort of the
-/// table at 3,000. The length only moves how often the grouped read is asked: a
-/// walk that runs out only sends its source there.
+/// table at 3,000. The length only moves how often the reads behind it are asked: a
+/// walk that runs out only sends its source on to them.
 pub(crate) const NEWEST_ROWS_SQL: &str = r"
 select s.id as source_id,
        walk.in_scope,
@@ -266,7 +269,7 @@ select newest.source_id                     as source_id,
 /// 100,000 items. A source it does not name passes every row in scope, since the
 /// corpus question is still open. A known source has a row here only if it is
 /// authored, so its `authored` is true whenever it appears, and [`report`] keeps
-/// what the walk said when it does not.
+/// what the bounded reads said when it does not.
 ///
 /// `sync.live_item`, never `sync.item` -- see the module docs for what that
 /// costs and why it is worth it. The columns are named rather than `select *`ed:
@@ -310,15 +313,17 @@ select i.source_id                            as source_id,
 /// * **The far end of the range first (#2504).** A withdrawn child row passes
 ///   nothing, so reading from the head of the range goes on past it with an item
 ///   and an entity lookup. The sweep keeps withdrawn rows on purpose (`SWEEP`,
-///   `crates/knobas-sync/src/lib.rs`), so a run of them stays at the head for
-///   good: 13 ms a keystroke for 5,000 of them and 133 for 46,668. An index holds
+///   `crates/knobas-sync/src/lib.rs`), so a run of them can stay at the head for
+///   good: 4 to 8 ms a keystroke for 5,000 of them and 40 to 90 for 46,668, by
+///   whether `sync.item_parent` has statistics. An index holds
 ///   equal keys in the order of the rows' places in the table, and a sync rewrites
 ///   an item's parents when it changes the item (`sync.resolve_item_parents`), so
 ///   the far end is what the source wrote last, which is usually live. It is a
 ///   bounded look, so it costs next to nothing when wrong, and it only ever says
 ///   yes: a live row anywhere is a live row. The head's read stays behind it, as
 ///   the proof for a source with none. Its cost is unchanged, plus the look, which
-///   is 0.5 ms for a source whose far end is the withdrawn run.
+///   is 0.5 ms for a source whose far end is a withdrawn run. A run at each end costs
+///   the head's run and that look, and the far run is not read past its 256 rows.
 /// * **Why 256, not the walk's 64.** Equal keys share posting lists of about 220
 ///   rows, a sixth of a page, and a backward scan reads each one from its low end
 ///   (`_bt_readpage`). So the live rows at the very end of the range can sit behind
@@ -407,7 +412,7 @@ struct NewestRows {
 /// [`coverage_of`] knows to leave it out.
 ///
 /// A source can be both: in the corpus with no authored row yet. Its probe says
-/// so until the grouped read says otherwise.
+/// so until a later read says otherwise.
 fn settle(walks: Vec<NewestRows>, by_author: bool) -> (Vec<SourceProbe>, Vec<String>) {
     let mut probes = Vec::new();
     let mut unsettled = Vec::new();
@@ -486,8 +491,8 @@ fn take_what_was_seen(
     });
 }
 
-/// The grouped read's rows over what the walk already said: a source it names
-/// takes its answer, and a source it does not name keeps the walk's.
+/// The grouped read's rows over what the bounded reads already said: a source it
+/// names takes its answer, and a source it does not name keeps theirs.
 ///
 /// The assertion is the gate's only witness that [`report`] binds `$4`. An unbound
 /// `$4` changes no answer, only the cost, 43 ms against 23. No lock can show it

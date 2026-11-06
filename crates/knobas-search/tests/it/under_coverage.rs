@@ -342,6 +342,12 @@ async fn a_source_whose_child_rows_are_all_withdrawn_names_no_parent() {
     assert_eq!(answers, vec![(gitea, FilterAnswer::NoValues)]);
 }
 
+/// Commits in a withdrawn run: well past what a bounded look reads
+/// (`coverage::UNDER_COVERAGE_SQL`'s 256), at two child rows a commit. A backward scan
+/// does not read in strict order, so a run only just past 256 can leave what lies
+/// behind it within its reach.
+const RUN: i64 = 500;
+
 /// **A live child row answers wherever it sits among withdrawn ones.** The probe
 /// looks at the far end of a source's child rows first, and a bounded look can end
 /// having seen nothing live. So a live row at either end or between two runs of
@@ -350,10 +356,6 @@ async fn a_source_whose_child_rows_are_all_withdrawn_names_no_parent() {
 #[tokio::test]
 async fn a_live_child_row_answers_wherever_it_sits_among_withdrawn_ones() {
     use FilterAnswer::{Answered, NoValues};
-    // Well past what a bounded look reads (`coverage::UNDER_COVERAGE_SQL`'s 256), at
-    // two child rows a commit. A backward scan does not read in strict order, so a
-    // run only just past 256 can leave the live row within its reach.
-    const RUN: i64 = 500;
     // (case, withdrawn rows written before, a live one between?, withdrawn rows after)
     let cases = [
         ("live, then a run withdrawn", 0, true, RUN, Answered),
@@ -433,16 +435,8 @@ async fn a_live_child_row_of_another_adapter_names_nothing_at_either_end() {
     let full = format!("o{t}/payout-{t}");
     let repo = serde_json::json!({ "full_name": full, "name": format!("payout-{t}") });
     item(&pool, &gitea, "repo", &full, repo.clone()).await;
-    for n in 0..135 {
-        item(
-            &pool,
-            &gitea,
-            "commit",
-            &format!("gone-{n}"),
-            serde_json::json!({ "repository": repo }),
-        )
-        .await;
-    }
+    let commit = serde_json::json!({ "repository": repo });
+    commits(&pool, &gitea, "gone", RUN, &commit).await;
     sqlx::query("update knobas.entity set deleted_at = now() where id like $1")
         .bind(format!("{gitea}:gone-%"))
         .execute(&pool)

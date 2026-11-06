@@ -1344,10 +1344,10 @@ enum UnderAnswer {
 /// (`under::left_out_tokens`, #2488). The three empty shapes are here to gate
 /// that path, `only commits beneath` at its costly end, a name 5,000 commits
 /// carry. A second, empty Gitea source is configured so the probe pays its
-/// worst case, two sources on one adapter (#642). Three rows after the six add a
+/// worst case, two sources on one adapter (#642). Four rows after the six add a
 /// shape the corpus cannot hold and take it away again: parents at density (#2500),
-/// a Gitea under its commits (#2503) and withdrawn child rows ahead of live ones
-/// (#2504).
+/// a Gitea under its commits, `under:` and `author:` (#2503), and withdrawn child rows
+/// ahead of live ones (#2504).
 #[tokio::test]
 #[ignore = "seeds a 100k corpus with declared parents and asserts on wall-clock time; run it deliberately"]
 async fn under_is_under_the_same_budget_beside_a_hundred_thousand_items() {
