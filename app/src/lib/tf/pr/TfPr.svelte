@@ -6,8 +6,8 @@
   - **The header**: `PR #<n> <title>`, its state, labels, head into base and
     author (*you* for the reader's own); what this session queued stands at the
     tab row's right end, where a chip can't wrap the line and move the tabs
-    (F-206). The toolbar's *Review…*, or *Submit review… (N pending)* in warn
-    left of *Merge…* while line comments wait (#842, `TfPrReview`, F-254),
+    (F-206), with *Submit review… (N pending)* in warn while line comments wait
+    (#842, `TfPrReview`, F-254). The toolbar's *Review…*,
     *Update branch*, *Edit*, *Close* (or *Reopen*) and *Merge…* (#843,
     `TfPrMerge`). A write is drawn only where the source's view offers it
     (ADR-0020 rule 4).
@@ -562,6 +562,26 @@
   let sentAt = -SETTLING_MS;
   const settling = () => performance.now() - sentAt < SETTLING_MS;
 
+  /**
+   * *Open PR #N* can sit right over *Merge…*, so the second press of a double click would open a dialog on landing. A press with
+   * a pointer this soon after arriving is the one before it. `Enter` is safe: arriving puts focus on the title.
+   */
+  let arrivedAt = 0;
+  $effect(() => {
+    void prId;
+    if (pageShown()) arrivedAt = performance.now();
+  });
+  function holdArrivingPress(acts: HTMLElement) {
+    const hold = (event: MouseEvent) => {
+      if (event.detail > 0 && performance.now() - arrivedAt < SETTLING_MS) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    acts.addEventListener("click", hold, { capture: true });
+    return () => acts.removeEventListener("click", hold, { capture: true });
+  }
+
   /** Echo a write queued as `verb`, followed under `name`. */
   function echoChip(id: string, verb: string, name: string, write: QueuedWrite, chose = "") {
     sentAt = performance.now();
@@ -711,20 +731,7 @@
           {#if header.author !== null}{" "}by {mine ? "you" : header.author}{/if}
         </div>
       </div>
-      <div class="tf-acts">
-        {#if waiting > 0 && takesReview}
-          <!-- Left of *Merge…*, so it comes and goes without moving the buttons a reader is working with (F-254). -->
-          <button
-            type="button"
-            class="tf-btn"
-            class:tf-warnbtn={reviewRefused === null}
-            aria-disabled={reviewRefused !== null ? "true" : undefined}
-            title={reviewRefused ?? undefined}
-            onclick={() => {
-              if (reviewRefused === null && !settling()) reviewing = true;
-            }}>Submit review… ({waiting} pending)</button
-          >
-        {/if}
+      <div class="tf-acts" {@attach holdArrivingPress}>
         {#if merge !== null}
           {@const hold = heldBy("merge")}
           <!-- The primary comes first (#2238 header order). Blocked by the source it is a default button, enabled, because it opens a dialog that names each reason (#843); held by a queued write, it opens nothing and looks it. -->
@@ -739,7 +746,7 @@
             }}>Merge…</button
           >
         {/if}
-        {#if !(waiting > 0 && takesReview) && reviewable}
+        {#if reviewable}
           <button
             type="button"
             class="tf-btn"
@@ -779,13 +786,26 @@
           >{entry.label}{#if count !== null && count > 0}{" "}<span class="tf-count">{count}</span>{/if}</a
         >
       {/each}
-      {#if chips.length > 0}
-        <!-- Under the buttons they answer, and on a row whose height nothing here changes: in the meta line they wrapped it and moved the tabs (F-206). -->
+      {#if chips.length > 0 || (waiting > 0 && takesReview)}
+        <!-- Under the buttons they answer, and on a row whose height nothing here changes: in the meta line a chip wrapped it, and in the toolbar
+             *Submit review…* took the title's room, and either moved the tabs under a reader in the middle of a review (F-206, F-254). -->
         <span class="tf-prchips">
           {#each chips as echo (`${echo.kind}\n${echo.text}`)}
             <!-- A review request names the act and the login as written: a state word would turn it into *Sven sent*. -->
             {#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<span class="tf-chip tf-info">{chipOf(echo)}</span>{/if}
           {/each}
+          {#if waiting > 0 && takesReview}
+            <button
+              type="button"
+              class="tf-btn tf-sm"
+              class:tf-warnbtn={reviewRefused === null}
+              aria-disabled={reviewRefused !== null ? "true" : undefined}
+              title={reviewRefused ?? undefined}
+              onclick={() => {
+                if (reviewRefused === null && !settling()) reviewing = true;
+              }}>Submit review… ({waiting} pending)</button
+            >
+          {/if}
         </span>
       {/if}
     </nav>

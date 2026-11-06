@@ -446,7 +446,7 @@
     {:else if compare !== null}
       <a class="tf-btn tf-primary" href={compare}>New pull request</a>
     {/if}
-    <!-- With no job's branch to propose there is no button: each repository and branch row offers its own (F-252). -->
+    <!-- With no job's branch to propose there is no button: a repository's own page offers it, on the branch it finds (F-252). -->
     <!-- *Sync now* last in the header (#2238 header order). -->
     {@render sync?.()}
   </div>

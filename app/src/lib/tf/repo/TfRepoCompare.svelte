@@ -294,8 +294,12 @@
    */
   const ARRIVING_MS = 800;
   let titleGivenAt = -ARRIVING_MS;
-  function holdArrivingEnter(event: KeyboardEvent) {
-    if (event.key === "Enter" && event.target === titleField && (event.repeat || performance.now() - titleGivenAt < ARRIVING_MS)) event.preventDefault();
+  function holdArrivingEnter(form: HTMLFormElement) {
+    const hold = (event: KeyboardEvent) => {
+      if (event.key === "Enter" && event.target === titleField && (event.repeat || performance.now() - titleGivenAt < ARRIVING_MS)) event.preventDefault();
+    };
+    form.addEventListener("keydown", hold);
+    return () => form.removeEventListener("keydown", hold);
   }
   // On arriving at the form, and again if a ticket's words replace the proposal below.
   $effect(() => {
@@ -345,7 +349,7 @@
     <h2 class="tf-cgroup-h">{standing?.pr ? "Compare" : "New pull request"}</h2>
     <form
       class="tf-panel tf-cform"
-      onkeydown={holdArrivingEnter}
+      {@attach holdArrivingEnter}
       onsubmit={(event) => {
         event.preventDefault();
         void create();

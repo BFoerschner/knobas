@@ -252,7 +252,7 @@ test("the primary opens the job's open pull request, not a compare page that onl
   expect(primary.getAttribute("href")).toMatch(/^#\/pr\//);
 });
 
-test("New pull request opens the compare page for the job's branch; with no job there is no button, as each row offers one (F-252)", async () => {
+test("New pull request opens the compare page for the job's branch; with no job there is no off button, as a repository's page offers it (F-252)", async () => {
   const base = ports();
   await draw([], "PAY-231", {
     ...base,

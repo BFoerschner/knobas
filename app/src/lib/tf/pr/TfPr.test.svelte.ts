@@ -540,6 +540,20 @@ test("a sent review says its verdict in the chip and under Reviewers, and a seco
   clock.mockRestore();
 });
 
+test("the second press of a double click on Open PR #N does not open the Merge… it lands on", async () => {
+  const clock = vi.spyOn(performance, "now").mockReturnValue(1_000_000);
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
+  const pressAt = () => button("Merge…")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+  pressAt();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  clock.mockReturnValue(1_002_000);
+  pressAt();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).not.toBeNull();
+  clock.mockRestore();
+});
+
 test("a label is the one outlined label look, not a state chip (F-060, F-253)", async () => {
   const base = ports();
   await draw([PR], { ...base, getEntity: async (id) => ({ ...(await base.getEntity(id)), labels: ["payments"] }) });
@@ -702,12 +716,14 @@ const type = (field: HTMLInputElement | HTMLTextAreaElement, value: string) => {
   flushSync();
 };
 
-test("line comments waiting turn Review… into Submit review… (N pending), which sends them with the verdict", async () => {
+test("line comments waiting add Submit review… (N pending), which sends them with the verdict", async () => {
   pending.add(PR, { path: "src/sepa/retry.rs", side: "new", line: 14, body: "Bound it." });
   pending.add(PR, { path: "src/sepa/retry.rs", side: "old", line: 9, body: "Why was this 60 s?" });
   await draw([PR], ports({ author: "jonas", pr: prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]) }));
   // In Review…'s place, after the primary (#2238 header order).
-  expect(buttons().slice(0, 2)).toEqual(["Submit review… (2 pending)", "Merge…"]);
+  expect(buttons().slice(0, 2)).toEqual(["Merge…", "Review…"]);
+  // On the tab row, so its coming moves no button and no tab (F-254).
+  expect(button("Submit review… (2 pending)")!.closest(".tf-tabs")).not.toBeNull();
   expect(button("Submit review… (2 pending)")!.classList.contains("tf-warnbtn")).toBe(true);
   button("Submit review… (2 pending)")!.click();
   flushSync();
