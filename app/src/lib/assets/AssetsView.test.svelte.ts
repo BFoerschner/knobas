@@ -1191,6 +1191,17 @@ test("↓ walks from the selected row with focus on nothing, and takes focus to 
   await waitFor(() => expect(document.activeElement?.closest("button.row")?.querySelector("span.nm")?.textContent?.trim()).toBe(next));
 });
 
+test("↓ with nowhere to walk still brings focus to the selected row, as under an estate's one root", async () => {
+  render(`#/asset/${SITE.id}`, ESTATE, { stripWidth: 1400 });
+  await waitFor(() => expect(marked()[0]).toBe("hel1"));
+  (document.activeElement as HTMLElement | null)?.blur();
+  const start = location.hash;
+
+  press("ArrowDown", document.body);
+  await waitFor(() => expect(document.activeElement?.closest("button.row")?.querySelector("span.nm")?.textContent?.trim()).toBe("hel1"));
+  expect(location.hash).toBe(start);
+});
+
 test("from outside the view, ↓ leaves a field and an open dialog alone", async () => {
   const { nav } = render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
   await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));

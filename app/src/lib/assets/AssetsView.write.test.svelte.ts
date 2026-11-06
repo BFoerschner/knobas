@@ -1161,6 +1161,24 @@ test("renaming writes the old-to-new line and redraws the column", async () => {
   await waitFor(() => expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]));
 });
 
+/** The field goes on that press, so the same `Enter` must not reach the walk, which would step into the first thing a holder holds. */
+test("Enter in Rename's field saves and stays on a holder", async () => {
+  const store = estate(seed());
+  render("#/asset/asset:vm-db-01", store);
+  await waitFor(() => expect(columns()).toHaveLength(3));
+  const start = location.hash;
+
+  click("Rename…");
+  type("Name", "vm-db-02");
+  const name = target.querySelector<HTMLInputElement>("input[aria-label='Name']")!;
+  name.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  flushSync();
+
+  await waitFor(() => expect(text()).toContain("name: vm-db-01 → vm-db-02"));
+  expect(location.hash).toBe(start);
+  expect(target.querySelector("input[aria-label='Name']")).toBeNull();
+});
+
 /**
  * **`Esc` in an inline editor closes the editor and nothing else.**
  *

@@ -1179,8 +1179,9 @@
     if (!WALK_KEYS.includes(event.key)) return;
     const from = event.target;
     if (from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null) return;
-    // A dialog over the tree has the keys, wherever it draws.
-    if (from instanceof Element && from.closest(".tf-dialog") !== null) return;
+    // A dialog over the tree has the keys, wherever it draws. And a key whose control went on that same press, as `Enter` in
+    // *Rename*'s field does, has been answered, and is on its way up from nowhere the walk can read.
+    if (from instanceof Element && (from.closest(".tf-dialog") !== null || !from.isConnected)) return;
 
     // `Tab` stops once per column, so the walk starts from the column the row with focus is in.
     const row = from instanceof Element ? from.closest<HTMLElement>("button.row[data-asset]") : null;
