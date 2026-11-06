@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 
 import type { RoleRun, SourceSyncStatus } from "../ipc/sources";
 import { EVENTS } from "../ipc";
+import { toasts } from "../shell/toasts.svelte";
 import { createRoleSyncs, createSourceSyncs, type RoleSyncPorts } from "./role-sync.svelte";
 
 function status(source_id: string, run_id: number, running: boolean): SourceSyncStatus {
@@ -136,4 +137,24 @@ test("a detail's Sync now runs its one source, held by source id, until that run
   send(status("kuma", 12, false));
   expect(sync.running).toBe(false);
   expect(sync.revision).toBe(1);
+});
+
+test("a press ends in one toast, when every run has, replaced by the next press's (F-448)", async () => {
+  toasts.items = [];
+  const { ports, send } = harness([{ source_id: "confluence", run_id: 7 }]);
+  const sync = createRoleSyncs(ports).of("wiki");
+  await sync.start();
+  await settle();
+  expect(toasts.items).toEqual([]);
+  send({ ...status("confluence", 7, false), last_outcome: "ok", last_changed: true });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced wiki"]);
+  await sync.start();
+  await settle();
+  send({ ...status("confluence", 7, false), last_outcome: "ok", last_changed: false });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Wiki is up to date"]);
+  await sync.start("Tidewater Confluence");
+  await settle();
+  send({ ...status("confluence", 7, false), last_outcome: "unreachable" });
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([["Could not sync Tidewater Confluence: the source can't be reached", "err"]]);
+  toasts.items = [];
 });

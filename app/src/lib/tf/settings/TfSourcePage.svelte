@@ -250,12 +250,12 @@
     return rows.find((row) => row.id === source.id)?.config ?? source.config;
   }
 
-  async function update(change: SourcePatch | (() => Promise<SourcePatch>), done: string): Promise<SourceSummary | null> {
+  async function update(change: SourcePatch | (() => Promise<SourcePatch>), done: string, subject?: string): Promise<SourceSummary | null> {
     saving = true;
     try {
       const next = await ports.updateSource(source.id, typeof change === "function" ? await change() : change);
       onchanged(next);
-      push({ text: done });
+      push(subject === undefined ? { text: done } : { text: done, subject });
       return next;
     } catch (cause) {
       push({ text: `Could not save ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -692,6 +692,7 @@
             { enabled: !source.enabled },
             // A write is sent the moment it is queued, paused or not (#1438): the pause holds the sync, not what the reader sends.
             source.enabled ? "Paused. Nothing syncs until you turn it on; writes you make still go." : `${name} syncs again.`,
+            `syncing:${source.id}`,
           )}><i></i></button>
     </div>
   </div>

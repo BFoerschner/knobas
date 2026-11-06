@@ -157,12 +157,13 @@ export const escThroughUntouched: Attachment<HTMLElement> = (field) => {
 };
 
 /**
- * Where rung 4 ends: the field's composer, else its form or section, ready to take focus, else the page's heading, which
+ * Where rung 4 ends: the field's composer, else its form or section, ready to take focus, else, with neither or only a pane's scroller around it, the page's heading, which
  * draws no ring. The next `Tab` goes back in, and the next `Esc` is the page's.
  */
 export function escHolder(field: HTMLElement): HTMLElement | null {
   const holder = field.closest<HTMLElement>(".tf-compose") ?? field.closest<HTMLElement>("form, section");
-  if (holder === null) return pageHeading() ?? document.querySelector<HTMLElement>(".tf-main");
+  // A pane's scroller is a section only as markup: focus on it draws its clipped ring down the pane's edge (F-649).
+  if (holder === null || holder.matches(".tf-scroller")) return pageHeading() ?? document.querySelector<HTMLElement>(".tf-main");
   if (!holder.hasAttribute("tabindex")) holder.tabIndex = -1;
   return holder;
 }

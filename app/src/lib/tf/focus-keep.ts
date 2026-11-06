@@ -28,8 +28,8 @@ const KEPT = ".tf-main, .tf-drawer";
 const CONTROL = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 /** How long a move by key waits for its page to draw a heading, in ms. */
 const WAIT_FOR_HEADING = 1500;
-/** What a control with no row can hand focus back to stops here: the page has its heading for that. */
-const PAGE = ".tf-main, .tf-kept, body";
+/** What a control with no row can hand focus back to stops here: the page has its heading for that, and a pane's scroller would draw a clipped ring (F-649). */
+const PAGE = ".tf-main, .tf-kept, .tf-scroller, body";
 
 const later = (run: () => void): number => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : (setTimeout(run, 16) as unknown as number));
 const stop = (handle: number): void => {
@@ -258,7 +258,8 @@ export function installFocusKeep(): () => void {
         if (performance.now() - started < WAIT_FOR_HEADING) waiting = later(step);
         return;
       }
-      if (!focusFree()) return;
+      // The nav link it was pressed on is no place to read from: `Tab` goes on into the page (F-052).
+      if (!focusFree() && document.activeElement?.closest(".tf-nav") == null) return;
       if (placeRestoring()) {
         started = performance.now();
         waiting = later(step);

@@ -10,10 +10,15 @@
  * view whose rows are not re-read on a run's end by themselves re-reads on it.
  *
  * Nothing here decides who fills a role: the answer's runs are the runs.
+ *
+ * A press ends in one toast, replaced by the next press's (F-448): *Synced wiki*, *TeamCity is up to date*, and a run that
+ * failed says so. The ask refused keeps its *Could not sync: <why>*, which the button raises.
  */
 import { EVENTS, ipcErrorMessage } from "../ipc";
 import { syncNow, syncRole, syncStatus, type RoleRun, type SourceSyncStatus } from "../ipc/sources";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { push } from "../shell/toasts.svelte";
+import { roleWord } from "./settings/settings";
 
 export interface RoleSyncPorts {
   syncRole: (role: string) => Promise<RoleRun[]>;
@@ -22,6 +27,9 @@ export interface RoleSyncPorts {
   syncStatus: () => Promise<SourceSyncStatus[]>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
 }
+
+/** Why a run that ended didn't sync, in the words after *Could not sync <name>:*. */
+const WHY = { unauthorized: "the sign-in failed", unreachable: "the source can't be reached", error: "the run failed" } as const;
 
 /** One role's *Sync now*. */
 export interface RoleSync {
@@ -34,8 +42,8 @@ export interface RoleSync {
   readonly revision: number;
   /** Why the last ask was refused, or `null`. */
   readonly failed: string | null;
-  /** Ask for the runs; nothing while they still go. */
-  start(): Promise<void>;
+  /** Ask for the runs; nothing while they still go. `name` is what the answer calls them: else the role's word. */
+  start(name?: string): Promise<void>;
 }
 
 export interface RoleSyncs {
@@ -94,8 +102,18 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
     failed: null,
   });
   let stop: (() => void) | null = null;
+  /** What this ask's runs have said so far, for its answer. */
+  let said: { name: string; why: string | null; changed: boolean } = { name: role, why: null, changed: false };
 
   const going = () => Object.keys(state.pending).length;
+
+  /** What the press ends in, once every run has. */
+  function answer() {
+    const { name, why, changed } = said;
+    const subject = `sync:${role}`;
+    if (why !== null) push({ text: `Could not sync ${name}: ${why}`, tone: "err", subject });
+    else push({ text: changed ? `Synced ${name}` : `${name.charAt(0).toUpperCase()}${name.slice(1)} is up to date`, subject });
+  }
 
   function finish(ended: boolean) {
     stop?.();
@@ -111,7 +129,12 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
     if (ours === undefined || row.running || row.run_id === null || row.run_id < ours) return;
     const { [row.source_id]: _ended, ...rest } = state.pending;
     state.pending = rest;
-    if (!state.asking && going() === 0) finish(true);
+    if (row.last_outcome !== null && row.last_outcome !== "ok") said.why = WHY[row.last_outcome];
+    if (row.last_changed !== false) said.changed = true;
+    if (!state.asking && going() === 0) {
+      answer();
+      finish(true);
+    }
   }
 
   return {
@@ -128,10 +151,11 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
     get failed() {
       return state.failed;
     },
-    async start() {
+    async start(name = roleWord(role)) {
       if (state.asking || going() > 0) return;
       state.asking = true;
       state.failed = null;
+      said = { name, why: null, changed: false };
       try {
         // Listening first, so an ending sent while the answer travels is heard.
         const off = await ports.listen(EVENTS.syncState, ({ payload }) => heard(payload as SourceSyncStatus));
@@ -140,6 +164,7 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
         state.pending = Object.fromEntries(runs.map((run) => [run.source_id, run.run_id]));
         state.asking = false;
         if (runs.length === 0) {
+          push({ text: `Nothing to sync for ${name}`, subject: `sync:${role}` });
           finish(false);
           return;
         }

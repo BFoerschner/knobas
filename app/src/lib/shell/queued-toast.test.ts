@@ -10,8 +10,8 @@ import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { createHealth } from "./health.svelte";
 import type { Hear, WriteFollower } from "./follow-write";
 import type { QueuedWrite } from "../ipc/sources";
-import { toastQueued, toastStarted } from "./queued-toast";
-import { toasts } from "./toasts.svelte";
+import { reviewSubject, toastQueued, toastStarted } from "./queued-toast";
+import { push, toasts } from "./toasts.svelte";
 import { noteWithdrawn, reset as resetQueue, writeQueuePanel } from "./write-queue.svelte";
 
 const TEAMCITY = { id: "teamcity", display_name: "TeamCity" };
@@ -165,4 +165,34 @@ test("a write already sent offers its where straight away", () => {
   toastQueued("re-run Payout_Lint #4811", null, { write: { id: 7, state: "sent" }, where: { label: "Show in runs", run: () => {} } });
   expect(toasts.items.at(-1)!.text).toBe("Sent: re-run Payout_Lint #4811.");
   expect(toasts.items.at(-1)!.action!.label).toBe("Show in runs");
+});
+
+test("a write about the same subject takes the toast's place, and the older write can't change its words (F-360)", () => {
+  const older = heardFollower();
+  const newer = heardFollower();
+  const one = toastQueued("publish the protocol", TEAMCITY, { store: storeWith(null), write: { id: 1 }, follower: older.follower, subject: "standup" });
+  older.hear(undefined);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Sent: publish the protocol."]);
+  const twoStore = storeWith(null);
+  const two = toastQueued("publish it again", TEAMCITY, { store: twoStore, write: { id: 2 }, follower: newer.follower, subject: "standup" });
+  expect(two).toBe(one);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Queued: publish it again."]);
+  newer.hear(undefined);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Sent: publish it again."]);
+});
+
+test("a write still going stops being followed once a toast took its place (F-360)", () => {
+  const older = heardFollower();
+  const newer = heardFollower();
+  toastQueued("publish the protocol", TEAMCITY, { store: storeWith(null), write: { id: 1 }, follower: older.follower, subject: "standup" });
+  toastQueued("publish it again", TEAMCITY, { store: storeWith(null), write: { id: 2 }, follower: newer.follower, subject: "standup" });
+  expect(older.follows()).toBe(0);
+  older.hear(undefined);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Queued: publish it again."]);
+});
+
+test("submitting a review takes the place of the toast that said nothing was sent (F-260)", () => {
+  push({ text: "Added to your review. Nothing is sent until you submit it.", subject: reviewSubject("pr") });
+  toastQueued("submit review on PR #142", TEAMCITY, { store: storeWith(null), subject: reviewSubject("pr") });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Queued: submit review on PR #142."]);
 });

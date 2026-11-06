@@ -86,6 +86,7 @@
   import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
   import { installFocusKeep } from "./focus-keep";
+  import { installPressGuard } from "./press-guard";
   import { isTopPage, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
@@ -692,6 +693,8 @@
   }
   const MOUSE = ["mousedown", "mouseup", "auxclick"] as const;
 
+  // First, so that a press it swallows reaches nothing else.
+  onMount(() => installPressGuard());
   onMount(() => installRowRoom());
   onMount(() => installFocusKeep());
   onMount(() => {

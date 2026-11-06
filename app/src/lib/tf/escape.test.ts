@@ -143,3 +143,17 @@ test("the window is named for the page, by what the page calls itself (F-015)", 
   expect(windowTitle(parseTfHash("#/settings/appearance"), "Appearance")).toBe("Appearance · knobas");
   expect(windowTitle(parseTfHash("#/ticket/jira%3APAY-231"), "PAY-231")).toBe("PAY-231 · knobas");
 });
+
+test("Esc in a field whose only holder is a pane's scroller lands on the heading, which draws no ring (F-649)", () => {
+  document.body.innerHTML = `<div class="tf-main"><h1>Monitoring</h1><section class="tf-scroller"><input /></section></div>`;
+  const heading = document.querySelector("h1");
+  expect(escHolder(document.querySelector("input")!)).toBe(heading);
+  expect(document.querySelector(".tf-scroller")!.hasAttribute("tabindex")).toBe(false);
+  document.body.replaceChildren();
+});
+
+test("Esc in a field in a section inside the scroller still lands on that section", () => {
+  document.body.innerHTML = `<div class="tf-main"><h1>Monitoring</h1><section class="tf-scroller"><section class="inner"><input /></section></section></div>`;
+  expect(escHolder(document.querySelector("input")!)).toBe(document.querySelector(".inner"));
+  document.body.replaceChildren();
+});

@@ -216,3 +216,43 @@ test("a reset sends nothing that was held", () => {
   vi.advanceTimersByTime(10_000);
   expect(send).not.toHaveBeenCalled();
 });
+
+test("a toast with a live toast's subject takes its place, with the first Undo (F-648)", () => {
+  const undone: string[] = [];
+  const first = undoable("Terminal is the default", () => undone.push("VS Code"), { subject: "default" });
+  const second = undoable("Fork is the default", () => undone.push("Terminal"), { subject: "default" });
+  expect(second).toBe(first);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Fork is the default"]);
+  toasts.items[0]!.action!.run();
+  expect(undone).toEqual(["VS Code"]);
+});
+
+test("a toast with no Undo keeps the Undo it replaced, and takes the new words, tone and buttons otherwise", () => {
+  const undo = vi.fn();
+  undoable("Paused", undo, { subject: "syncing" });
+  push({ text: "Syncs again", subject: "syncing" });
+  expect(toasts.items[0]!.text).toBe("Syncs again");
+  toasts.items[0]!.action!.run();
+  expect(undo).toHaveBeenCalledOnce();
+  reset();
+  push({ text: "Added", subject: "review", action: { label: "Open", run: () => {} } });
+  push({ text: "Failed", tone: "err", subject: "review", action: { label: "Retry", run: () => {} } });
+  expect(toasts.items.map((toast) => [toast.text, toast.tone, toast.action?.label])).toEqual([["Failed", "err", "Retry"]]);
+});
+
+test("a toast about something else, or about nothing, stands beside it", () => {
+  push({ text: "One", subject: "a" });
+  push({ text: "Two", subject: "b" });
+  push({ text: "Three" });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["One", "Two", "Three"]);
+});
+
+test("a replaced toast starts its time over", () => {
+  push({ text: "One", subject: "a", ms: 1000 });
+  vi.advanceTimersByTime(900);
+  push({ text: "Two", subject: "a", ms: 1000 });
+  vi.advanceTimersByTime(900);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Two"]);
+  vi.advanceTimersByTime(100);
+  expect(toasts.items).toEqual([]);
+});

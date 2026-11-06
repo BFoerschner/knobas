@@ -93,7 +93,7 @@
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
-  import { dismiss, push, undoable } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { resolveTicket, username } from "../job/job";
@@ -455,17 +455,16 @@
     const was = page;
     return Promise.all([readTree(true), rereadPage(target)]).then(([, read]) => {
       if (pressed && read && was !== null && page?.entity_id === was.entity_id) sayRefreshed(was.version, page);
+      else if (pressed) refresh.answer(null);
     });
   }
 
-  /** What a press of *Refresh* found. A second press says it again rather than stacking a second toast. */
-  let refreshToast: number | null = null;
+  /** What a press of *Refresh* found, which the press ends in. */
   function sayRefreshed(before: DocPage["version"], now: DocPage): void {
     const version = now.version === null ? "" : `version ${now.version}`;
     const moved = now.version !== before;
     const text = moved ? `Refreshed${version === "" ? "" : `, now ${version}`}` : `Page is up to date${version === "" ? "" : `, ${version}`}`;
-    if (refreshToast !== null) dismiss(refreshToast);
-    refreshToast = push({ text });
+    refresh.answer(text);
   }
 
   $effect(() => {

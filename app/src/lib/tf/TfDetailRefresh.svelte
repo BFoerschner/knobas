@@ -62,7 +62,7 @@
   });
 
   async function syncNow(run: NonNullable<typeof sync>) {
-    await run.start();
+    await run.start(detail.source.display_name);
     if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
   }
 

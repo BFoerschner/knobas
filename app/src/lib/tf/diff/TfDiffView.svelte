@@ -63,6 +63,7 @@
   import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { reviewSubject } from "../../shell/queued-toast";
   import { pageVisible } from "../kept-pages.svelte";
   import { matchesPath, sameTarget, targetOf } from "../pr/files";
   import {
@@ -427,7 +428,7 @@
     unsent.delete(spot(open));
     open = null;
     draft = "";
-    push({ text: "Added to your review. Nothing is sent until you submit it." });
+    push({ text: "Added to your review. Nothing is sent until you submit it.", subject: reviewSubject(review.entity) });
   }
 
   const talk: DiffTalk = {

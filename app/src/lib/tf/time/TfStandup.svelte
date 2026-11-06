@@ -466,6 +466,8 @@
   }
 
   /** Where a publish's write goes, named in its toast. */
+  /** What this date's publishing is about: *Publish again* takes the last toast's place (F-360). */
+  const publishSubject = () => `standup-publish:${day}`;
   const publishSource = () => (target === null ? null : { id: target.stored.source_id, display_name: target.reading.split(" › ")[0] ?? "" });
   /** Where a sent publish shows. */
   const openThePage = {
@@ -488,10 +490,10 @@
       const write = protocol?.again ?? null;
       const page = pageId;
       const where = page === null ? undefined : openThePage;
-      if (write === null) push({ text: "Sent: publish the protocol again.", ...(where === undefined ? {} : { action: where }) });
+      if (write === null) push({ text: "Sent: publish the protocol again.", subject: publishSubject(), ...(where === undefined ? {} : { action: where }) });
       // Already held or refused, the line under the heading says why.
       else if (write.state === "pending") {
-        toastQueued("publish the protocol again", source, { write: { id: write.write_id, state: write.state }, follower: io.follower, where });
+        toastQueued("publish the protocol again", source, { write: { id: write.write_id, state: write.state }, follower: io.follower, where, subject: publishSubject() });
         followAgain();
       }
     } catch (cause) {
@@ -540,7 +542,7 @@
       failure = null;
       const queued = protocol?.publication ?? null;
       const what = target ? `publish the protocol under ${target.reading}` : "publish the protocol to Confluence";
-      toastQueued(what, publishSource(), queued === null ? {} : { write: { id: queued.write_id, state: queued.state }, follower: io.follower, where: openThePage });
+      toastQueued(what, publishSource(), queued === null ? { subject: publishSubject() } : { write: { id: queued.write_id, state: queued.state }, follower: io.follower, where: openThePage, subject: publishSubject() });
       if (chosen) void readTarget();
       followPublication();
     } catch (cause) {

@@ -104,7 +104,7 @@
   /** *Make default*: said, with the way back, since the row's only sign is a tag that moved (F-639). */
   async function makeDefault(id: string, name: string) {
     const was = settings?.default_application ?? null;
-    if (await setDefault(id)) undoable(`${name} is the default`, () => void setDefault(was));
+    if (await setDefault(id)) undoable(`${name} is the default`, () => void setDefault(was), { subject: "default-application" });
   }
 </script>
 

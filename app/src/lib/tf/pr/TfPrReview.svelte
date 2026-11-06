@@ -24,7 +24,7 @@
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import { actionPayload, missingFields } from "../../detail/view/actions";
   import { asReview, lineName, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
-  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
+  import { reviewSubject, toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { reviewChoices, type Verdict } from "./pr";
@@ -102,7 +102,7 @@
     try {
       const write = await submitWrite(payload);
       pending.settle(prId, sent, summary);
-      toastQueued(`submit review on ${name}`, source, { write });
+      toastQueued(`submit review on ${name}`, source, { write, subject: reviewSubject(prId) });
       onqueued(write, chosen.verdict);
       onclose();
     } catch (cause) {

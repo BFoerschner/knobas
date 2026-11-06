@@ -47,6 +47,16 @@ export interface QueuedToastHow {
   store?: Pick<Health, "get"> | undefined;
   /** Where the write's effect shows, offered once it has gone: *Show in runs*. Without it, a sent toast offers nothing. */
   where?: ToastAction | undefined;
+  /** What the write is about: a toast with the same subject takes the last one's place (`ToastSpec.subject`). */
+  subject?: string | undefined;
+}
+
+/** A write's follow, by the toast it says *Sent* on: a toast that took its place stops the older write's follow. */
+const following = new Map<number, () => void>();
+
+/** A review of `entity`: added to, then submitted, in one toast (F-260). */
+export function reviewSubject(entity: string): string {
+  return `review:${entity}`;
 }
 
 /**
@@ -64,7 +74,9 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
   const id = push({
     text: queuedText(what, failing),
     action: { label: "Show queue", run: openWriteQueue },
+    ...(how.subject === undefined ? {} : { subject: how.subject }),
   });
+  if (how.subject !== undefined) following.get(id)?.();
   const write = how.write;
   if (write === null || write === undefined) return id;
   if (write.state === "sent") {
@@ -78,7 +90,9 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
     over = true;
     stopFollow();
     stopWithdrawn();
+    if (following.get(id) === finish) following.delete(id);
   };
+  if (how.subject !== undefined) following.set(id, finish);
   stopWithdrawn = onWithdrawn(write.id, () => {
     finish();
     dismiss(id);

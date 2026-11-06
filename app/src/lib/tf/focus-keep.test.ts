@@ -330,3 +330,35 @@ test("a dialog closed by key with nothing to give focus back to leaves it on the
   await settle();
   expect(document.activeElement).toBe(heading);
 });
+
+test("Enter on a nav link lands on the new page's heading, so the next Tab starts on the page (F-052)", async () => {
+  const { heading } = page();
+  const nav = document.createElement("nav");
+  nav.className = "tf-nav";
+  const link = document.createElement("a");
+  link.href = "#/inbox";
+  nav.append(link);
+  document.body.prepend(nav);
+  link.focus();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await settle();
+  expect(document.activeElement).toBe(heading);
+  nav.remove();
+});
+
+test("a button whose whole group went gives focus to the heading rather than a pane's scroller", async () => {
+  const { heading } = page(0);
+  const scroller = document.createElement("section");
+  scroller.className = "tf-scroller";
+  const button = document.createElement("button");
+  button.textContent = "Go";
+  scroller.append(button);
+  heading.after(scroller);
+  button.focus();
+  await settle();
+  button.remove();
+  await settle();
+  expect(document.activeElement).toBe(heading);
+  expect(scroller.hasAttribute("tabindex")).toBe(false);
+});
