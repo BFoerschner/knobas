@@ -449,15 +449,46 @@ export function stripFor(columns: number, available: number, anchor: number | nu
 
 
 /**
+ * The strip after a walk by `↑` or `↓`, which holds still (F-556): the fold stays
+ * where it stood, so the column under the hand and the pane's edge don't move.
+ *
+ * The next level draws if it fits beside the fold as it stands. If it doesn't, `to`
+ * stops short of it, and that level waits for `→`, `Enter` or a press: the holder has
+ * its chevron, and the pane its detail.
+ *
+ * `null` when the selection's own column wouldn't be drawn in that fold, because a walk
+ * must stay in sight, and when nothing has been measured. The strip then folds as
+ * {@link stripFor} says.
+ *
+ * @param columns how many columns the layout has, the next level included.
+ * @param column the selection's own column.
+ * @param available the strip's width in pixels.
+ * @param from the first full column when the key was pressed.
+ */
+export function heldStrip(columns: number, column: number, available: number, from: number): Strip | null {
+  if (available <= 0) return null;
+  const fits = Math.max(1, Math.floor((available - from * SPINE_WIDTH) / COLUMN_WIDTH));
+  if (column < from || column >= from + fits) return null;
+  return { from, to: Math.min(columns, from + fits) };
+}
+
+/**
  * What the strip leaves that no further column could use, which the pane takes
  * (F-534, F-548) rather than a band of grey beside it. Room for a whole column
  * stays where it is: it is where the next level opens.
  *
+ * That room is counted whether or not the selection has a next level (F-556), so a
+ * row that holds nothing and one that does give the pane the same width.
+ *
  * The anchor doesn't move it: a strip is as wide wherever its window stands.
+ *
+ * @param columns how many columns are drawn.
+ * @param nextDrawn a column stands after the selection's own, or nothing is selected.
  */
-export function spareWidth(columns: number, available: number, strip: Strip): number {
+export function spareWidth(columns: number, available: number, strip: Strip, nextDrawn: boolean = true): number {
   const full = strip.to - strip.from;
-  const spare = available - full * COLUMN_WIDTH - (columns - full) * SPINE_WIDTH;
+  const left = available - full * COLUMN_WIDTH - (columns - full) * SPINE_WIDTH;
+  const spare = !nextDrawn && left >= COLUMN_WIDTH ? left - COLUMN_WIDTH : left;
   return available > 0 && spare > 0 && spare < COLUMN_WIDTH ? spare : 0;
 }
 

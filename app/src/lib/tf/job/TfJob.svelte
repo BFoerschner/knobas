@@ -87,7 +87,7 @@
   import { sectionHash, ticketHash } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
   import type { EscTarget } from "../escape";
-  import TfConnections from "./TfConnections.svelte";
+  import TfConnections, { type DrawerPlace } from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
   import TfJobAttachments from "./TfJobAttachments.svelte";
@@ -152,6 +152,8 @@
   let applyingSet = $state(false);
   /** *Manage link sets* or *Edit set* left from the drawer: coming back to this page opens it again, where the reader was. */
   let drawerOnReturn = false;
+  /** Where in the drawer *Edit set* was pressed, which it opens at again (F-557). */
+  let drawerPlace = $state.raw<DrawerPlace | null>(null);
   let savingSet = $state(false);
 
   // ---- the job's reads are the reader's (#1320) ----
@@ -698,7 +700,11 @@
       hidden={hiddenOf(inherited)}
       alsoIn={(entityId) => alsoIn(inherited, entityId)}
       {layers}
-      onclose={() => (drawer = false)}
+      place={drawerPlace}
+      onclose={() => {
+        drawer = false;
+        if (!drawerOnReturn) drawerPlace = null;
+      }}
       onunlink={unlinkEntry}
       onlinkto={() => {
         linking = true;
@@ -707,7 +713,10 @@
       onshow={(memberId) => void showAgain(memberId)}
       onapplyset={() => (applyingSet = true)}
       onsaveset={() => (savingSet = true)}
-      oneditset={() => (drawerOnReturn = true)}
+      oneditset={(place) => {
+        drawerOnReturn = true;
+        drawerPlace = place;
+      }}
     />
   {/if}
   {#if previewed !== null && previews !== null}
@@ -720,7 +729,10 @@
       read={sets.linkSets}
       {layers}
       onapply={(set) => void applySet(set)}
-      onmanage={() => (drawerOnReturn = true)}
+      onmanage={() => {
+        drawerOnReturn = true;
+        drawerPlace = null;
+      }}
       onclose={() => (applyingSet = false)}
     />
   {/if}
@@ -728,7 +740,7 @@
     <TfSaveSet
       ticket={detail.row}
       links={connected.map((entry) => entry.other)}
-      ports={{ saveLinkSet: sets.saveLinkSet, previewLinkSetRule: sets.previewLinkSetRule, getEntity: ports.getEntity }}
+      ports={{ linkSets: sets.linkSets, saveLinkSet: sets.saveLinkSet, previewLinkSetRule: sets.previewLinkSetRule, getEntity: ports.getEntity }}
       {layers}
       onsaved={savedSet}
       onclose={() => (savingSet = false)}

@@ -2060,6 +2060,7 @@ const CASES: Case[] = [
           ticket: { entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200", title: "Retry failed SEPA payouts" },
           links: [],
           ports: {
+            linkSets: () => new Promise(() => {}),
             saveLinkSet: () => new Promise(() => {}),
             previewLinkSetRule: () => deferred([]),
             getEntity: () => new Promise(() => {}),

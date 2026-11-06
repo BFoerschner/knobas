@@ -1070,6 +1070,54 @@ test("a path too deep for the window collapses its oldest columns to spines", as
   expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 });
 
+/** F-556: walking a column holds the strip still, and the level that doesn't fit waits for `→` or a press. */
+const LEAF = row({ id: "asset:a-leaf", parent_id: SITE.id, type_id: "vm", monogram: "VM", name: "a-leaf", has_children: false });
+
+test("↓ onto a holder keeps the fold, its column waits, and → opens it as ever", async () => {
+  // 500 holds two columns, and a third would fold the site to a spine.
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+
+  press("ArrowDown");
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  expect(spines()).toEqual([]);
+  expect(columns()).toHaveLength(2);
+
+  press("ArrowUp");
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  expect(spines()).toEqual([]);
+
+  press("ArrowDown");
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  press("ArrowRight");
+  await waitFor(() => expect(spines()[0]).toBe("hel1"));
+});
+
+test("a press on the holder a walk stopped on opens its column", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 500 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  const names = columns()[1]!;
+  const next = names[names.indexOf("a-leaf") + 1]!;
+  await waitFor(() => expect(marked()).toEqual(["hel1", next]));
+  expect(spines()).toEqual([]);
+
+  target.querySelector<HTMLButtonElement>("button.row[aria-current='true'].tip")!.click();
+  flushSync();
+  await waitFor(() => expect(spines()).toEqual(["hel1"]));
+  expect(columns()).toHaveLength(2);
+});
+
+test("a walk's next level that fits still draws beside the strip", async () => {
+  render(`#/asset/${LEAF.id}`, [...ESTATE, LEAF], { stripWidth: 1400 });
+  await waitFor(() => expect(marked()).toEqual(["hel1", "a-leaf"]));
+  press("ArrowDown");
+  await waitFor(() => expect(columns()).toHaveLength(3));
+  expect(spines()).toEqual([]);
+});
+
 /** A window with room for every column draws no spine at all. */
 test("a path the window holds collapses nothing", async () => {
   render("#/asset/asset:gitea-db", ESTATE, { stripWidth: 1400 });

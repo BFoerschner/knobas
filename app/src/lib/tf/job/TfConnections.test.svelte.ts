@@ -96,3 +96,53 @@ test("a row a pointer took away keeps its words, with nothing to press", () => {
   expect(held.querySelectorAll("a, button")).toHaveLength(0);
   expect(held.getAttribute("aria-hidden")).toBe("true");
 });
+
+test("Undo on what a save added puts the list back where it stood before the save (F-558)", () => {
+  const props = open();
+  const list = document.querySelector<HTMLElement>(".tf-dbody")!;
+  list.scrollTop = 120;
+  actionNamed("Save as a link set…").click();
+  props.groups = [GROUP, NEW_GROUP];
+  flushSync();
+  list.scrollTop = 575;
+  props.groups = [GROUP];
+  flushSync();
+  expect(list.scrollTop).toBe(120);
+});
+
+test("Edit set hands back where it was pressed, and the drawer opens there with focus on it (F-557)", () => {
+  const places: unknown[] = [];
+  const props = $state({
+    jobKey: "PAY-231",
+    links: [],
+    groups: [GROUP, NEW_GROUP],
+    layers: createLayers(),
+    onclose: () => {},
+    onunlink: () => {},
+    onlinkto: () => {},
+    oneditset: (place: unknown) => places.push(place),
+  });
+  view = mount(TfConnections, { target: document.body, props });
+  flushSync();
+  const list = document.querySelector<HTMLElement>(".tf-dbody")!;
+  list.scrollTop = 400;
+  const edit = document.querySelector<HTMLElement>("[data-group='set:sepa-kit'] .tf-dedit")!;
+  edit.addEventListener("click", (event) => event.preventDefault());
+  edit.click();
+  expect(places).toEqual([{ group: "set:sepa-kit", top: 400, text: "" }]);
+  unmount(view);
+
+  view = mount(TfConnections, { target: document.body, props: { ...props, place: { group: "set:sepa-kit", top: 400, text: "" } } });
+  flushSync();
+  expect(document.querySelector<HTMLElement>(".tf-dbody")!.scrollTop).toBe(400);
+  expect(document.activeElement).toBe(document.querySelector("[data-group='set:sepa-kit'] .tf-dedit"));
+});
+
+test("a place whose group has gone falls back to the filter (F-557)", () => {
+  view = mount(TfConnections, {
+    target: document.body,
+    props: { jobKey: "PAY-231", links: [], groups: [GROUP], layers: createLayers(), onclose: () => {}, onunlink: () => {}, onlinkto: () => {}, place: { group: "set:gone", top: 0, text: "" } },
+  });
+  flushSync();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Filter connections");
+});

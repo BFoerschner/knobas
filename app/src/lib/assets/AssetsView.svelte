@@ -82,7 +82,7 @@
 -->
 <script lang="ts">
   import { stateWord } from "../tf/state-word";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage, isIpcError, type SearchResponse } from "../ipc";
   import { inlineEditor } from "../tf/inline-editor";
@@ -176,6 +176,8 @@
     routeAddressOf,
     selectionIn,
     sourceOf,
+    focusedColumn,
+    heldStrip,
     spareWidth,
     stripFor,
     walk,
@@ -466,6 +468,13 @@
   let writing = $state(false);
 
   /**
+   * A walk by `↑` or `↓` (F-556): where it was going and where from, and the fold, the pane's width and the path when the
+   * key was pressed. The selection moving anywhere else ends it (the effect below), so a level change, a press on another
+   * row and an opened address fold as ever. The path stands until the pane's read lands, so nothing moves meanwhile.
+   */
+  let walked = $state.raw<{ of: string; was: string | null; from: number; spare: number; width: number; path: ColumnPath } | null>(null);
+
+  /**
    * The layout, derived from the pane's read and from nothing else.
    *
    * Not from a click: a click sets the address, the address is read back, and
@@ -473,7 +482,11 @@
    * draw the same thing as an address clicked into.
    */
   const path = $derived<ColumnPath>(
-    detail === null || detail.asset.id !== selectedId ? emptyPath() : columnPathFor(detail),
+    detail !== null && detail.asset.id === selectedId
+      ? columnPathFor(detail)
+      : walked !== null && walked.of === selectedId && failure === null
+        ? walked.path
+        : emptyPath(),
   );
 
   /**
@@ -493,6 +506,9 @@
   const insideRows = $derived((dependsOn?.assets ?? []).filter((row) => row.relation === null));
   /** Closed on each asset. The list draws only while it's open, since a window can't measure rows a closed fold hides. */
   let insideOpen = $state(false);
+  /** *Reachable via* folds from this many routes, closed on each asset as well (F-509). A big holder has six, at 732 px. */
+  const VIA_FOLDS_FROM = 6;
+  let viaOpen = $state(false);
   const otherRoutes = $derived((dependsOn?.routes ?? []).filter((route) => !detail?.reachable_via.some((via) => via.id === route.id)));
   /** That list left some out, so a line says they break too: the panel still answers for them. */
   const repeatedRoutes = $derived((dependsOn?.routes.length ?? 0) > otherRoutes.length);
@@ -629,6 +645,7 @@
       dependsFor = id;
       dependsOn = null;
       insideOpen = false;
+      viaOpen = false;
       dependsFailure = null;
     }
     if (id === null) {
@@ -757,8 +774,24 @@
   /** The anchor, if it still belongs to the path on screen. */
   const anchor = $derived(anchored !== null && anchored.of === selectedId ? anchored.at : null);
 
+  /** It ends once the selection, having got there, goes anywhere else: coming back later is not the same walk. */
+  $effect(() => {
+    const id = selectedId;
+    untrack(() => {
+      if (walked === null) return;
+      if (id === walked.of) walked.was = null;
+      else if (id !== walked.was) walked = null;
+    });
+  });
+
+  /** The walk that holds the strip still, if it's still the walk on screen in a window of the same width. */
+  const standing = $derived(walked !== null && (walked.of === selectedId || walked.was === selectedId) && walked.width === available ? walked : null);
+  const held = $derived(standing === null ? null : heldStrip(columns.length, focusedColumn(path), available, standing.from));
+
   /** Which columns are drawn in full; the rest are spines. */
-  const strip = $derived(stripFor(columns.length, available, anchor));
+  const strip = $derived(held ?? stripFor(columns.length, available, anchor));
+  /** The columns on screen: a next level that doesn't fit beside a held strip waits, and `→` still walks into it. */
+  const shown = $derived(held === null ? columns : columns.slice(0, held.to));
 
   /** The estate with nothing in it: no filter, because there is nothing to find. */
   const emptyEstate = $derived(loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0);
@@ -835,7 +868,7 @@
    * frame between the two reads.
    */
   const wireEnds = $derived<Wire[]>(
-    detail === null || detail.asset.id !== selectedId ? [] : wiresFor(detail, columns, strip),
+    detail === null || detail.asset.id !== selectedId ? [] : wiresFor(detail, shown, strip),
   );
 
   /** One wire, measured: where it lands and the curve that gets there. */
@@ -1019,6 +1052,8 @@
    */
   $effect(() => {
     void wireEnds;
+    // Opening *Reachable via* draws the rows the wires leave.
+    void viaOpen;
     measureWires();
   });
 
@@ -1026,7 +1061,9 @@
    * The room the columns can't use goes to the pane, through the CSSOM (the app's CSP refuses `style:`). The pane grows over the
    * strip's blank end, so the strip measures the same and no row moves. The wires start at the pane's edge, so they measure again.
    */
-  const paneTakes = $derived(spareWidth(columns.length, available, strip));
+  const paneTakes = $derived(
+    standing !== null && held !== null ? standing.spare : spareWidth(shown.length, available, strip, focusedColumn(path) < 0 || shown.length - 1 > focusedColumn(path)),
+  );
   $effect(() => {
     paneEl?.style.setProperty("--tf-pane-spare", `${paneTakes}px`);
     measureWires();
@@ -1151,6 +1188,10 @@
       return;
     }
     wantFocus = true;
+    // `↑` and `↓` hold the strip still, if the column they walk is on screen.
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !collapsed(Math.max(0, column == null ? focusedColumn(path) : Number(column)))) {
+      walked = { of: step.id, was: selectedId, from: strip.from, spare: paneTakes, width: available, path };
+    }
     nav.go(addressOf({ id: step.id }));
   }
 
@@ -1900,7 +1941,7 @@
           </button>
         </div>
       {:else}
-        {#each columns as column, index (index)}
+        {#each shown as column, index (index)}
           {@const chosen = selectionIn(path, index)}
           {#if collapsed(index)}
             <!--
@@ -1913,7 +1954,10 @@
             <button
               class="col spine"
               data-spine={index}
-              onclick={() => (anchored = { at: index, of: selectedId })}
+              onclick={() => {
+                walked = null;
+                anchored = { at: index, of: selectedId };
+              }}
               title="Show what {step?.name ?? 'the estate'} holds"
             >
               <span class="smg" aria-hidden="true">{step ? kindTag(step.monogram) : "··"}</span>
@@ -1957,7 +2001,10 @@
                       aria-current={chosen === row.id ? "true" : undefined}
                       data-asset={row.id}
                       tabindex={row.id === stop ? 0 : -1}
-                      onclick={() => select(row)}
+                      onclick={() => {
+                        walked = null;
+                        select(row);
+                      }}
                     >
                       <span class="mg" title={row.type_label}>{kindTag(row.monogram)}</span>
                       <span class="nm" title={row.name}><span class="lbl">{row.name}</span></span>
@@ -2464,38 +2511,45 @@
           </button>
         </section>
 
-        <section class="grp">
-          <h3 class="lab">Reachable via</h3>
-          {#if detail.reachable_via.length === 0}
-            <p class="empty">Nothing lands here.</p>
-          {:else}
-            <ul class="lst routes">
-              {#each detail.reachable_via as route (route.id)}
-                {@render routeRow(wireKey("via", route.id), route, arrives)}
-                <!--
-                  Where it lands and who offers it — the two facts that make
-                  this list readable from the arriving end. `landing` is
-                  `tree.ts`' one answer to "here, through something above, or
-                  on something inside".
-                -->
-                {#snippet arrives()}
-                  {@const landing = landingOf(detail!, route)}
-                  {#if landing.goTo}
-                    <button class="link" onclick={() => goToSource(landing.goTo)}>
-                      {landing.note}
-                    </button>
-                  {:else}
-                    <span class="faint">{landing.note}</span>
-                  {/if}
-                  <span class="faint">· exposed by</span>
-                  <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
-                    {route.asset_name}
+        <!-- Each row: where it lands and who offers it, the two facts that make this list readable from the arriving end. -->
+        {#snippet viaRows()}
+          <ul class="lst routes">
+            {#each detail!.reachable_via as route (route.id)}
+              {@render routeRow(wireKey("via", route.id), route, arrives)}
+              <!-- `landing` is `tree.ts`' one answer to "here, through something above, or on something inside". -->
+              {#snippet arrives()}
+                {@const landing = landingOf(detail!, route)}
+                {#if landing.goTo}
+                  <button class="link" onclick={() => goToSource(landing.goTo)}>
+                    {landing.note}
                   </button>
-                {/snippet}
-              {/each}
-            </ul>
-          {/if}
-        </section>
+                {:else}
+                  <span class="faint">{landing.note}</span>
+                {/if}
+                <span class="faint">· exposed by</span>
+                <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
+                  {route.asset_name}
+                </button>
+              {/snippet}
+            {/each}
+          </ul>
+        {/snippet}
+        <!-- From six routes the list waits in a fold, as *Held by* does (F-509). Its rows draw only while it's open, so a closed fold has no wires. -->
+        {#if detail.reachable_via.length >= VIA_FOLDS_FROM}
+          <details class="grp reachfold tf-set-fold" bind:open={viaOpen}>
+            <summary class="lab">Reachable via <span class="tf-count">{detail.reachable_via.length}</span></summary>
+            {#if viaOpen}{@render viaRows()}{/if}
+          </details>
+        {:else}
+          <section class="grp">
+            <h3 class="lab">Reachable via</h3>
+            {#if detail.reachable_via.length === 0}
+              <p class="empty">Nothing lands here.</p>
+            {:else}
+              {@render viaRows()}
+            {/if}
+          </section>
+        {/if}
 
         <!--
           **Depends on this** — what breaks if this asset goes down (spec
@@ -3596,16 +3650,16 @@
     margin-top: 8px;
   }
 
-  :is(.heldby, .inside) summary {
+  :is(.heldby, .reachfold, .inside) summary {
     list-style: none;
     cursor: pointer;
   }
 
-  :is(.heldby, .inside) summary::-webkit-details-marker {
+  :is(.heldby, .reachfold, .inside) summary::-webkit-details-marker {
     display: none;
   }
 
-  :is(.heldby, .inside)[open] summary {
+  :is(.heldby, .reachfold, .inside)[open] summary {
     margin-bottom: 6px;
   }
 

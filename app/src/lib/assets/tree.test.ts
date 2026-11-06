@@ -28,6 +28,7 @@ import {
   selectionIn,
   sourceOf,
   type ColumnPath,
+  heldStrip,
   stripFor,
   COLUMN_WIDTH,
   spareWidth,
@@ -451,6 +452,40 @@ test("spare width goes to the pane only when no further column would fit", () =>
   // Nothing measured yet, and a window too narrow for its one column.
   expect(spareWidth(2, 0, stripFor(2, 0, null))).toBe(0);
   expect(spareWidth(3, 40, stripFor(3, 40, null))).toBe(0);
+});
+
+/**
+ * **A walk by `↑` or `↓` holds still (F-556)**: the fold stands, and a next level that
+ * doesn't fit beside it waits rather than refolding the strip.
+ */
+test("a held strip keeps its fold, and a next level waits if it doesn't fit", () => {
+  // 1440, gitea's column, fold at the top: the leaf's five columns fit, a holder's sixth waits.
+  expect(heldStrip(5, 4, 1080, 0)).toEqual({ from: 0, to: 5 });
+  expect(heldStrip(6, 4, 1080, 0)).toEqual({ from: 0, to: 5 });
+  // Folded by a press on a holder: its next level fits, and a leaf keeps the same fold.
+  expect(heldStrip(6, 4, 1080, 2)).toEqual({ from: 2, to: 6 });
+  expect(heldStrip(5, 4, 1080, 2)).toEqual({ from: 2, to: 5 });
+  // Room beside the fold: the next level draws as ever.
+  expect(heldStrip(4, 2, 1080, 0)).toEqual({ from: 0, to: 4 });
+});
+
+test("a held strip gives way when the selection's own column wouldn't be drawn", () => {
+  expect(heldStrip(2, 0, 400, 1)).toBeNull();
+  expect(heldStrip(6, 5, 1080, 0)).toBeNull();
+  expect(heldStrip(5, 4, 0, 0)).toBeNull();
+});
+
+test("a row holding nothing gives the pane what a holder does", () => {
+  // 1241, third level: both keep room for the next column and give the pane the 17 left.
+  expect(spareWidth(3, 881, { from: 0, to: 3 }, false)).toBe(17);
+  expect(spareWidth(4, 881, { from: 0, to: 4 })).toBe(17);
+  // Fourth level: the next column doesn't fit, and a waiting holder draws what the leaf does.
+  expect(spareWidth(4, 881, { from: 0, to: 4 }, false)).toBe(17);
+  // Folded by a press: a leaf and a holder in the same fold.
+  expect(spareWidth(4, 881, { from: 2, to: 4 }, false)).toBe(173);
+  expect(spareWidth(5, 881, { from: 2, to: 5 })).toBe(173);
+  // Room for two more: no grey, because the next level opens there.
+  expect(spareWidth(2, 881, { from: 0, to: 2 }, false)).toBe(0);
 });
 
 /**

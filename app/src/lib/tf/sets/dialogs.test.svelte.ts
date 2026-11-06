@@ -79,7 +79,7 @@ test("Apply: Enter on a row with nothing to apply does nothing", async () => {
 
 const ticket: Pick<EntityRow, "entity_id" | "source_id" | "path" | "title"> = { entity_id: "jira:PAY-231", source_id: "jira", path: "PAY / PAY-200 / PAY-231", title: "Retry" };
 
-function save() {
+function save(names: string[] = []) {
   const saveLinkSet = vi.fn(async (draft: { name: string }) => ({ ...set("new", draft.name), shows_on: [] }));
   const onsaved = vi.fn();
   view = mount(TfSaveSet, {
@@ -87,7 +87,7 @@ function save() {
     props: {
       ticket,
       links: [{ kind: "repo", entity_id: "gitea:a/b", title: "a/b" }] as never,
-      ports: { saveLinkSet, previewLinkSetRule: async () => [], getEntity: async () => { throw new Error("none"); } } as never,
+      ports: { linkSets: async () => names.map((name) => set(name, name)), saveLinkSet, previewLinkSetRule: async () => [], getEntity: async () => { throw new Error("none"); } } as never,
       layers: createLayers(),
       onsaved,
       onclose: () => {},
@@ -95,6 +95,35 @@ function save() {
   });
   return { saveLinkSet, onsaved };
 }
+
+test("Save: the suggested name arrives selected, so typing replaces it (F-555)", async () => {
+  save();
+  await settle();
+  const name = target.querySelector<HTMLInputElement>("input[aria-label='Name']")!;
+  expect(document.activeElement).toBe(name);
+  expect(name.value).not.toBe("");
+  expect([name.selectionStart, name.selectionEnd]).toEqual([0, name.value.length]);
+});
+
+test("Save: a name already in use holds the primary and says so, whatever its case (F-559)", async () => {
+  const { saveLinkSet } = save(["Payout stack"]);
+  await settle();
+  const name = target.querySelector<HTMLInputElement>("input[aria-label='Name']")!;
+  const primary = [...target.querySelectorAll("button")].find((one) => one.textContent === "Save link set")!;
+  name.value = " payout STACK ";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(primary.disabled).toBe(true);
+  expect(target.textContent).toContain("A link set already has this name.");
+  name.closest(".tf-dialog")!.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  await settle();
+  expect(saveLinkSet).not.toHaveBeenCalled();
+  name.value = "Payout stack two";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(primary.disabled).toBe(false);
+  expect(target.textContent).not.toContain("A link set already has this name.");
+});
 
 test("Save: the primary and the name share a form, so Enter in the name saves", async () => {
   save();

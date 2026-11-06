@@ -18,6 +18,15 @@
   where it says one (F-036), then a chevron. A row's action stands in place of
   that state on hover and focus, as the app's row actions do.
 -->
+<script lang="ts" module>
+  /** Where in the drawer *Edit set* was pressed: the group, the list's scroll and what the filter held. */
+  export interface DrawerPlace {
+    group: string;
+    top: number;
+    text: string;
+  }
+</script>
+
 <script lang="ts">
   import { untrack } from "svelte";
 
@@ -41,6 +50,7 @@
     groups = [],
     hidden = [],
     alsoIn = () => [],
+    place = null,
     layers,
     onclose,
     onunlink,
@@ -60,6 +70,8 @@
     hidden?: HiddenRow[];
     /** The names of the sets that also hold a linked entity. */
     alsoIn?: (entityId: string) => string[];
+    /** Back from *Edit set*: where the reader was, which the drawer opens at. */
+    place?: DrawerPlace | null;
     layers: Layers;
     onclose: () => void;
     onunlink: (entry: LinkEntry) => void;
@@ -70,12 +82,14 @@
     /** *Apply a link set…* and *Save as a link set…* (#869). */
     onapplyset?: () => void;
     onsaveset?: () => void;
-    /** *Edit set* pressed: the page is about to be left, to come back to with the drawer open. */
-    oneditset?: () => void;
+    /** *Edit set* pressed: the page is about to be left, to come back to with the drawer open, where it was. */
+    oneditset?: (place: DrawerPlace) => void;
   } = $props();
 
   let field = $state<HTMLInputElement | null>(null);
-  let text = $state("");
+  // svelte-ignore state_referenced_locally
+  // Read once: the drawer opens at its place, and is the reader's after that.
+  let text = $state(place?.text ?? "");
 
   const shown = $derived(filterLinks(links, text));
 
@@ -97,13 +111,20 @@
   let awaitingGroup = false;
   // svelte-ignore state_referenced_locally
   let knownGroups = new Set(groups.map((group) => group.key));
-  /** A set saved or applied draws its group below the fold, so the list brings it into view (F-550). Focus stays on the opener, in the header that doesn't scroll. */
+  /** The group a save or an apply brought into view, and where the list stood before it. */
+  let broughtFrom: { group: string; top: number } | null = null;
+  /** A set saved or applied draws its group below the fold, so the list brings it into view (F-550). Focus stays on the opener, in the header that doesn't scroll. `Undo` takes the group away, and the list goes back (F-558). */
   $effect(() => {
     const keys = groups.map((group) => group.key);
     const fresh = keys.find((key) => !knownGroups.has(key));
     knownGroups = new Set(keys);
+    if (broughtFrom !== null && !keys.includes(broughtFrom.group)) {
+      if (body !== null) body.scrollTop = broughtFrom.top;
+      broughtFrom = null;
+    }
     if (!awaitingGroup || fresh === undefined) return;
     awaitingGroup = false;
+    broughtFrom = { group: fresh, top: body?.scrollTop ?? 0 };
     const heads = body?.querySelectorAll<HTMLElement>("[data-group]") ?? [];
     [...heads].find((head) => head.dataset.group === fresh)?.scrollIntoView?.({ block: "start" });
   });
@@ -111,7 +132,11 @@
   $effect(() => {
     const restoreTo = document.activeElement;
     const off = untrack(() => layers.add({ kind: "drawer", close: () => onclose() }));
-    field?.focus();
+    const back = untrack(() => place);
+    const edit = back === null ? null : [...(body?.querySelectorAll<HTMLElement>("[data-group]") ?? [])].find((head) => head.dataset.group === back.group)?.querySelector<HTMLElement>(".tf-dedit");
+    if (back !== null && body !== null) body.scrollTop = back.top;
+    if (edit) edit.focus({ preventScroll: true });
+    else field?.focus();
     // It draws in the shell's host, so its page hiding would leave it over the next one: a move closes it, as a menu.
     const moved = () => onclose();
     window.addEventListener("hashchange", moved);
@@ -187,7 +212,7 @@
       {@const rows = filterRows(group.rows, text)}
       <h3 data-group={group.key}>
         From {group.label}, <TfKeyed text={group.via} lead /> <span class="tf-count">{rows.length}</span>
-        {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={() => { oneditset(); onclose(); }}>Edit set</a>{/if}
+        {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={() => { oneditset({ group: group.key, top: body?.scrollTop ?? 0, text }); onclose(); }}>Edit set</a>{/if}
       </h3>
       {#each rows as row, at (row.id)}
         {@render heldRow(group.key, at, rows.some((one) => one.id === holding?.id))}

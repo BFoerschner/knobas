@@ -12,7 +12,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import { counted } from "../counted";
-  import type { EntityDetail, EntityRow, LinkEnd, LinkSetDetail, LinkSetDraft, LinkSetRule, LinkSetRuleKind, RuleTicket } from "../../ipc/entity";
+  import type { EntityDetail, EntityRow, LinkEnd, LinkSetDetail, LinkSetDraft, LinkSetRow, LinkSetRule, LinkSetRuleKind, RuleTicket } from "../../ipc/entity";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfKey from "../TfKey.svelte";
@@ -32,6 +32,7 @@
     /** The far ends of the links drawn on the ticket. */
     links: LinkEnd[];
     ports: {
+      linkSets: () => Promise<LinkSetRow[]>;
       saveLinkSet: (draft: LinkSetDraft) => Promise<LinkSetDetail>;
       previewLinkSetRule: (rule: LinkSetRule) => Promise<RuleTicket[]>;
       getEntity: (entityId: string) => Promise<EntityDetail>;
@@ -65,10 +66,22 @@
   let subtasks = $state<number | null>(null);
   let failure = $state<string | null>(null);
   let writing = $state(false);
+  /** The names in use, as they would read in the drawer's groups. A failed read says nothing, and the save then answers for itself. */
+  let taken = $state<Set<string>>(new Set());
+  let nameField = $state<HTMLInputElement | null>(null);
   const uid = $props.id();
+
+  /** A suggested name, so typing replaces it (F-555). It runs after `TfDialog` has put focus there. */
+  $effect(() => {
+    nameField?.select();
+  });
 
   $effect(() => {
     let live = true;
+    void ports.linkSets().then(
+      (rows) => live && (taken = new Set(rows.map((row) => row.name.trim().toLowerCase()))),
+      () => {},
+    );
     void ports.previewLinkSetRule({ kind: "parent", value: ticket.entity_id }).then(
       (rows) => live && (subtasks = onePerKey(rows).length),
       () => {},
@@ -91,6 +104,8 @@
   const missing = $derived.by(() => {
     if (offers.length === 0) return "Nothing to save yet.";
     if (name.trim() === "") return ticked.size === 0 ? "Name it, and tick what goes in." : "Name it first.";
+    // Two groups of one name can't be told apart in the drawer (F-559).
+    if (taken.has(name.trim().toLowerCase())) return "A link set already has this name.";
     return ticked.size === 0 ? "Tick what goes in." : null;
   });
 
@@ -139,7 +154,7 @@
     <form id="tf-ssv-{uid}" class="tf-dform" onsubmit={save}></form>
     <div class="tf-formgrid">
     <label for="tf-ssn-{uid}">Name <small class="tf-req">required</small></label>
-    <input id="tf-ssn-{uid}" class="tf-set-savename" type="text" aria-label="Name" autocomplete="off" form="tf-ssv-{uid}" bind:value={name} />
+    <input id="tf-ssn-{uid}" class="tf-set-savename" type="text" aria-label="Name" autocomplete="off" form="tf-ssv-{uid}" bind:this={nameField} bind:value={name} />
     <span>What goes in (at least one)</span>
     <div class="tf-picks tf-fwide" role="group" aria-label="What goes in">
       {#each offers as offer (offer.entity_id)}
