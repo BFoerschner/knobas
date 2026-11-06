@@ -161,6 +161,17 @@ test("a cell links to its day and says what is left; weekend columns are shaded"
   const row = [...target.querySelectorAll("tbody tr")].find((tr) => text(tr).includes("PAY-228"))!;
   const cells = [...row.querySelectorAll("td")];
   expect(cells[4]!.querySelector("a")?.getAttribute("href")).toBe("#/time/2026-08-20");
+  // A press opens the day to come back from (F-345); ⌘-click stays the browser's.
+  const cell = cells[4]!.querySelector("a")!;
+  const plain = new MouseEvent("click", { bubbles: true, cancelable: true });
+  cell.dispatchEvent(plain);
+  expect(plain.defaultPrevented).toBe(true);
+  expect(location.hash).toBe("#/time/2026-08-20");
+  location.hash = "";
+  const modified = new MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true });
+  cell.addEventListener("click", (event) => event.preventDefault(), { once: true });
+  cell.dispatchEvent(modified);
+  expect(location.hash).toBe("");
   expect(text(cells[4])).toBe("2h 40m 1h held");
   expect(cells[4]!.querySelector("svg.tf-tm-bar")).not.toBeNull();
   expect(cells[6]!.querySelector("svg")).toBeNull();

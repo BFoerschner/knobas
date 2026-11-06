@@ -50,7 +50,7 @@
   /* Now the last column: wide enough for the row's actions, which take the figures' line on hover and leave the bars
      readable, so the bar under the pointer keeps its title. Lowered from the row's middle by what puts the group's top at the figures' line. */
   .tf-monc-bars { width: 190px; }
-  .tf-mon-acts .tf-rowacts { transform: translateY(calc(-50% + 10px)); }
+  .tf-mon .tf-mon-acts .tf-rowacts { transform: translateY(calc(-50% + 10px)); }
 }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */

@@ -563,7 +563,7 @@
         class="tf-btn"
         aria-disabled={runOnHold.word !== null ? "true" : undefined}
         {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
-        onclick={() => runOn(jobBranch)}><span class="tf-keepw" data-keep="Run on {jobBranch}">{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on <span class="tf-mono">{jobBranch}</span>{/if}</span></button
+        onclick={() => runOn(jobBranch)}><span class="tf-keepw" data-keep="Run on {jobBranch}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on <span class="tf-mono">{jobBranch}</span>{/if}</span></span></button
       >
     {:else}
       <button
@@ -572,7 +572,7 @@
         aria-disabled={runOnHold.word !== null ? "true" : undefined}
         {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
         onclick={() => runOn(null)}
-        ><span class="tf-keepw" data-keep="Run on {fallback ?? 'the default branch'}">{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}{/if}</span></button
+        ><span class="tf-keepw" data-keep="Run on {fallback ?? 'the default branch'}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}{/if}</span></span></button
       >
     {/if}
     {#if onpin !== undefined}

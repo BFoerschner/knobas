@@ -510,7 +510,7 @@
           disabled={view === null}
           aria-disabled={cannotRerun !== null || rerunHold.word !== null ? "true" : undefined}
           title={cannotRerun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
-          onclick={rerun}><span class="tf-keepw" data-keep="Queued">{rerunHold.word ?? "Re-run"}</span></button
+          onclick={rerun}><span class="tf-keepw" data-keep="Queued"><span>{rerunHold.word ?? "Re-run"}</span></span></button
         >
         <button
           type="button"

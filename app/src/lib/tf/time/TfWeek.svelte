@@ -28,6 +28,7 @@
   import { columnHeading, mondayOf, weekWindows } from "../../time/week";
   import { entityAddress } from "../address";
   import { goAcross } from "../opener";
+  import { namePage } from "../page-name.svelte";
   import { heldNotes, weekView, type WeekCellView } from "./week-view";
 
   interface WeekPorts {
@@ -134,6 +135,9 @@
 
   const weekAfter = $derived(shiftDay(monday, 7));
   const after = $derived(weekAfter === thisMonday ? "#/time/week" : `#/time/week/${weekAfter}`);
+
+  // So the day it opens says *Back to Week*, not the section's name.
+  namePage(() => "Week");
 
   /**
    * A day opened from the week is opened to come back from: the two are one page by their address, so this says so,

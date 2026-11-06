@@ -1,16 +1,16 @@
 /* ---------- Builds, the pipeline page (#851): header, history chart, tabs ---------- */
 .tf-bhead { padding-bottom: 8px; }
 /* The title and the actions on one line, the line of facts under both at the header's full width, so five actions can't squeeze it (F-051, F-341). */
-.tf-fhead.tf-bhead { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; }
+.tf-fhead.tf-bhead { display: flex; flex-wrap: wrap; align-items: center; column-gap: 16px; }
 .tf-bhead > div:first-child { display: contents; }
-.tf-bhead > .tf-acts { grid-column: 2; grid-row: 1; }
-.tf-bhead h1 { grid-column: 1; grid-row: 1; min-width: 0; }
-.tf-bhead .tf-sub { grid-column: 1 / -1; grid-row: 2; max-width: 80ch; }
+/* A title too long to share its line keeps its words, and the actions go under it. */
+.tf-bhead > .tf-acts { order: 1; flex: none; margin-left: auto; }
+.tf-bhead .tf-sub { order: 2; flex-basis: 100%; max-width: 80ch; }
 /* A button whose words change while it holds: as wide as its words at rest, so what stands beside it stays put. */
 .tf-keepw { display: inline-grid; justify-items: center; white-space: nowrap; }
 .tf-keepw::before { content: attr(data-keep); height: 0; visibility: hidden; overflow: hidden; }
 .tf-bhead .tf-sub a { color: inherit; }
-.tf-bhead h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-bhead h1 { white-space: nowrap; }
 .tf-bstale { margin: 0 22px 10px; }
 .tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
 .tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
@@ -47,6 +47,7 @@
 .tf-older[hidden] { display: none; }
 .tf-runs.tf-bsettings { padding-top: 16px; }
 .tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
+.tf-bsettings > .tf-tbl + p { margin: 12px 0 0; }
 .tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: var(--t-xs); }
 .tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); }
 

@@ -290,6 +290,30 @@ test("Add to <ticket> gives an offered block to the ticket it is linked to", asy
   expect(sent.updates).toEqual([[2, at(9, 25), at(9, 40), { kind: "entity", entity_id: "jira:PAY-228" }]]);
 });
 
+test("Add to <ticket>'s toast offers Undo, which deletes the block it made, so the next read offers the stretch again (F-339)", async () => {
+  const sent = render();
+  await settle();
+  button(row("offered"), "Add to PAY-228").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(sent.deletes).toEqual([2]);
+});
+
+test("Assign to <ticket>'s Undo puts the label block's own target back (F-339)", async () => {
+  const sent = render();
+  await settle();
+  const before = sent.updates.length;
+  button(row("label"), "Assign to PAY-200").click();
+  await settle();
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(sent.updates.slice(before).map((update) => update[3].kind)).toEqual(["entity", "label"]);
+  expect(sent.deletes).toEqual([]);
+});
+
 test("Assign to <ticket> gives a label block the ticket ad_hoc_block suggests", async () => {
   const sent = render();
   await settle();
@@ -610,6 +634,10 @@ test("an open stretch offers Add to the current job, and makes a block on it ove
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:PAY-231" }]]);
   expect(toasts.items.at(-1)?.text).toBe("Made a block on PAY-231, 12:35 to 13:10");
+  // Undo takes back the block it made (F-339).
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(sent.deletes).toHaveLength(1);
 });
 
 test("without a current job an open stretch offers Assign… only", async () => {

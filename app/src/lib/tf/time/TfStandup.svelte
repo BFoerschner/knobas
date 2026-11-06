@@ -457,7 +457,8 @@
       const source = target === null ? null : { id: target.stored.source_id, display_name: target.reading.split(" › ")[0] ?? "" };
       const write = protocol?.again ?? null;
       if (write === null) push({ text: "Sent: the page has what the note says now." });
-      else {
+      // Already held or refused, the line under the heading says why.
+      else if (write.state === "pending") {
         toastQueued("publish the protocol again", source, { write: { id: write.write_id, state: write.state }, follower: io.follower });
         followAgain();
       }
@@ -784,9 +785,7 @@
       <h3>Protocol</h3>
       <span class="tf-dim tf-su-day">{protocolDay(day)}</span>
       <span class="tf-trail">
-        {#if published && publication?.page_entity_id}
-          <a class="tf-btn tf-sm tf-ghost" bind:this={pageLink} href="#/page/{encodeURIComponent(publication.page_entity_id)}">Open the published page</a>
-        {/if}
+        <!-- The press stands before the link, so the link stays put when the press goes and a second press can't land on it. -->
         {#if publication === null || going !== null || canAgain}
           <button
             class="tf-btn tf-sm tf-primary"
@@ -799,6 +798,9 @@
             <!-- The first publish asks where, so it has the ellipsis; with a target stored it acts at once. -->
             {going ?? (publication === null ? `Publish to Confluence${target === null ? "…" : ""}` : "Publish again")}
           </button>
+        {/if}
+        {#if published && publication?.page_entity_id}
+          <a class="tf-btn tf-sm tf-ghost" bind:this={pageLink} href="#/page/{encodeURIComponent(publication.page_entity_id)}">Open the published page</a>
         {/if}
       </span>
     </header>
