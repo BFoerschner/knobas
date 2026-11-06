@@ -777,7 +777,7 @@
                 <td class="tf-num"><span class="tf-rowval">{uptimeText(row)}</span></td>
                 <td class="tf-mon-acts"><div class="tf-rowend">
                   {#if down}
-                    <button type="button" class="tf-btn tf-sm tf-mon-ack" class:tf-ghost={row.entity_id in acked} aria-pressed={row.entity_id in acked} title={row.entity_id in acked ? "Acked. Press to take it back, so the alert asks again." : undefined} onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}
+                    <button type="button" class="tf-btn tf-sm tf-mon-ack" aria-pressed={row.entity_id in acked} title={row.entity_id in acked ? "Acked. Press to take it back, so the alert asks again." : undefined} onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}
                       >{row.entity_id in acked ? "Acked" : "Ack"}</button
                     >
                   {/if}
