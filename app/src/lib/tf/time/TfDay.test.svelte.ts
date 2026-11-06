@@ -672,6 +672,29 @@ test("Dismiss hides the offer at once and sends when the toast's Undo has had it
   }
 });
 
+test("a mouse's Dismiss leaves an empty row of its height until the pointer leaves it, and a key's closes at once (F-138)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    render();
+    await settle();
+    const rowsOf = () => [...target.querySelectorAll(".tf-tm-list > .tf-tm-row")];
+    const before = rowsOf().length;
+    const at = rowsOf().indexOf(row("offered"));
+    button(row("offered"), "Dismiss").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+    await settle();
+    const held = target.querySelector(".tf-tm-held")!;
+    expect(rowsOf().indexOf(held), "where it stood").toBe(at);
+    expect(held.querySelector("button"), "a second press lands on nothing").toBeNull();
+    expect(rowsOf()).toHaveLength(before);
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+    await settle();
+    expect(target.querySelector(".tf-tm-held")).toBeNull();
+    expect(rowsOf()).toHaveLength(before - 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("Undo on Dismiss puts the offer back and nothing is ever sent (F-339)", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {

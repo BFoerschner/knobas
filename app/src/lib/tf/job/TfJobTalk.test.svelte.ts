@@ -12,6 +12,7 @@ import type { EntityDetail, LinkEntry, Thread } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { drafts } from "../drafts.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -46,6 +47,7 @@ beforeEach(() => {
 
 /** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  drafts.reset();
   forgetEchoes();
   if (job) unmount(job);
   job = null;
@@ -297,6 +299,20 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(again.value).toBe("kept");
+});
+
+test("the composer's words are the ticket's own draft, across a redraw, and ⌘Enter sends them (the key table)", async () => {
+  open({});
+  await settle();
+  const box = () => target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box().value = "half a thought";
+  box().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(drafts.get(`comment:${ID}`)).toBe("half a thought");
+  box().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(drafts.has(`comment:${ID}`), "sent, the draft ends").toBe(false);
+  expect(box().value).toBe("");
 });
 
 test("a comment the source's credential cannot make draws Comment disabled saying why, and queues nothing (#2052)", async () => {

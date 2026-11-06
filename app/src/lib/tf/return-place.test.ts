@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-import { capturePlace, resetScrolls, restorePlace } from "./return-place";
+import { capturePlace, placeRestoring, resetScrolls, restorePlace } from "./return-place";
 
 /** jsdom lays nothing out, so a scroller's offset is just a number it holds. */
 function draw(html: string): { main: HTMLElement; page: HTMLElement } {
@@ -136,4 +136,18 @@ test("a new place in a kept page starts at the top of each scroller", () => {
   inner.scrollTop = 300;
   resetScrolls(main, page);
   expect([main.scrollTop, inner.scrollTop]).toEqual([0, 0]);
+});
+
+test("a return with nothing to focus lets go of focus after a first look, and a row drawn late still takes it from the heading", async () => {
+  const { main, page } = draw(`<h1 tabindex="-1">Code</h1><ul></ul>`);
+  const place = capturePlace(main, page, null, "#/ticket/x");
+  const end = restorePlace(place, page);
+  expect(placeRestoring()).toBe(true);
+  await frames();
+  expect(placeRestoring(), "the focus keeper may use the heading").toBe(false);
+  page.querySelector<HTMLElement>("h1")!.focus();
+  page.querySelector("ul")!.innerHTML = `<li><a href="#/ticket/x">x</a></li>`;
+  await frames();
+  expect(document.activeElement).toBe(page.querySelector("a"));
+  end();
 });

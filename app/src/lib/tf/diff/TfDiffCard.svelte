@@ -282,17 +282,6 @@
   /** A kept page answers no key, and comes back to the box it left. */
   const pageShown = pageVisible();
 
-  /** `Esc` with nothing typed closes the box at once: there is no field to step out of first. `⌘↩` sends it. */
-  function boxKeys(event: KeyboardEvent, words: string, close: () => void, send: () => void) {
-    if (event.key === "Escape" && words.trim() === "") {
-      event.preventDefault();
-      close();
-    } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && words.trim() !== "") {
-      event.preventDefault();
-      send();
-    }
-  }
-
   const SIGN = { context: " ", add: "+", del: "−" } as const;
   const old = $derived(file.old_path && file.old_path !== file.path ? file.old_path : null);
   /** A local change's label says how it stands (*modified, not staged*): words, so not in the path's mono. */
@@ -357,11 +346,10 @@
       <div class="tf-said tf-queued"><p><b>You</b> <TfStateChip text="queued" tone="info" /> {body}</p></div>
     {/each}
     {#if talk.isReplying(thread)}
-      <div class="tf-newc tf-reply" {@attach pageShown() && inlineEditor(() => talk.closeReply(), { back: () => replyOf(thread.id) })}>
+      <div class="tf-newc tf-reply" {@attach pageShown() && inlineEditor(() => talk.closeReply(), { back: () => replyOf(thread.id), escCloses: true, send: () => talk.replyDraft.trim() !== "" && talk.sendReply(file.path, thread) })}>
         <textarea
           value={talk.replyDraft}
           oninput={(event) => (talk.replyDraft = event.currentTarget.value)}
-          onkeydown={(event) => boxKeys(event, talk.replyDraft, () => talk.closeReply(), () => talk.sendReply(file.path, thread))}
           placeholder="Reply"
           aria-label="Reply on {file.path}, {lineName(thread.side, thread.line)}"
         ></textarea>
@@ -436,11 +424,10 @@
     {@const at = targetOf(it.line)}
     {@const name = lineName(at.side, at.line)}
     {@const label = `Comment on ${name} of ${file.path}`}
-    <div class="tf-newc" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)} {@attach keep(it.key)} {@attach pageShown() && inlineEditor(() => talk.close(), { back: () => plusOf(label) })}>
+    <div class="tf-newc" class:tf-on-new={split && it.onNew} {@attach win.row(it.key)} {@attach keep(it.key)} {@attach pageShown() && inlineEditor(() => talk.close(), { back: () => plusOf(label), escCloses: true, send: () => talk.draft.trim() !== "" && talk.add() })}>
       <textarea
         value={talk.draft}
         oninput={(event) => (talk.draft = event.currentTarget.value)}
-        onkeydown={(event) => boxKeys(event, talk.draft, () => talk.close(), () => talk.add())}
         placeholder="Comment on {name}"
         aria-label={label}
       ></textarea>

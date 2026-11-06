@@ -258,6 +258,8 @@
   /* The fill the group sits on is the row's own. */
   :is(tr, li, .tf-r):has(.tf-rowacts):hover, tr:has(.tf-rowacts):hover > td { background: var(--sheet-2); }
 }
+/* A row takes focus when the row above it left (`focus-keep.ts`), its ring inside so its neighbours don't cut it. */
+:is(tr, li, [data-row], [data-entity], .tf-rowhost, .tf-ib, .tf-r, .tf-lk)[tabindex="-1"]:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 /* A page's heading takes focus after a move by key (`focus-keep.ts`), to start the next `Tab` there. It can't be pressed, so it draws no ring. */
 .tf-main h1[tabindex="-1"]:focus { outline: none; }
 

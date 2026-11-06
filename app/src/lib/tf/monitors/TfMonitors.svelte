@@ -107,6 +107,7 @@
 </script>
 
 <script lang="ts">
+  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
   import TfStateChip from "../TfStateChip.svelte";
   import { badges } from "../badges.svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
@@ -518,8 +519,24 @@
     for (const id of ids) if (!refreshers.has(id)) refreshers.set(id, createDetailRefresh(untrack(() => ports.refresh)));
   }
 
-  type Entry = { row: MonitorRow; failed: string | null } | { row: null; failed: null };
+  type Entry = { row: MonitorRow; failed: string | null; held?: never } | { row: null; failed: null; held?: boolean };
   const FOLD_KEY = "\u0000hidden-fold";
+  const HELD_KEY = "\u0000held-row";
+  /** The row a mouse press on *Hide* sent to the fold, still holding its place under the pointer (F-138). */
+  let holding = $state.raw<{ id: string; at: number; height: number } | null>(null);
+  /** Where its empty row stands: once it has left the list, and until *Undo* brings it back. */
+  const holdAt = $derived(holding !== null && !rows.some((row) => row.entity_id === holding?.id) ? holding.at : null);
+  $effect(() => {
+    if (holding === null) return;
+    return holdUnderPointer(() => document.querySelector(".tf-mon-held"), () => (holding = null));
+  });
+  /** The listed rows, the held row's empty one among them. */
+  const withHeld = (list: Entry[]): Entry[] => {
+    if (holdAt === null) return list;
+    const next = rows[holdAt];
+    const at = next === undefined ? list.length : list.findIndex((entry) => entry.row === next);
+    return [...list.slice(0, at), { row: null, failed: null, held: true }, ...list.slice(at)];
+  };
   const withFailures = (list: readonly MonitorRow[]): Entry[] =>
     list.flatMap((row) => {
       const failed = refreshers.get(row.entity_id)?.failed ?? null;
@@ -531,7 +548,7 @@
    * summary and, while it is open, those monitors the same way.
    */
   const entries = $derived<Entry[]>([
-    ...withFailures(rows),
+    ...withHeld(withFailures(rows)),
     ...(hiddenRows.length > 0 ? [{ row: null, failed: null }] : []),
     ...(hiddenRows.length > 0 && foldOpen ? withFailures(hiddenRows) : []),
   ]);
@@ -553,6 +570,7 @@
   });
 
   function entryKey(entry: Entry): string {
+    if (entry.held) return HELD_KEY;
     if (entry.row === null) return FOLD_KEY;
     return entry.failed === null ? entry.row.entity_id : `${entry.row.entity_id}\u0000failed`;
   }
@@ -625,9 +643,11 @@
   }
 
   /** *Hide* or *Unhide*: knobas-local, so the row moves at once and the roster is read again. */
-  async function setHidden(row: MonitorRow, hidden: boolean) {
+  async function setHidden(row: MonitorRow, hidden: boolean, event?: MouseEvent) {
     if (pressing[row.entity_id]) return;
     pressing[row.entity_id] = true;
+    const box = hidden && heldByPointer(event) ? (event?.currentTarget as Element).closest("tr")?.getBoundingClientRect() : undefined;
+    if (box !== undefined) holding = { id: row.entity_id, at: rows.indexOf(row), height: box.height };
     try {
       await ports.setMonitorHidden(row.entity_id, hidden);
       if (roster !== null) roster = roster.map((each) => (each.entity_id === row.entity_id ? { ...each, hidden } : each));
@@ -800,7 +820,10 @@
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach win.room("before")}></td></tr>{/if}
           {#each win.slice(entries) as entry (entryKey(entry))}
             {@const row = entry.row}
-            {#if row === null}
+            {#if row === null && entry.held}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <tr class="tf-mon-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(HELD_KEY)} {@attach heldHeight(holding?.height ?? 0)}><td colspan="7"></td></tr>
+            {:else if row === null}
               <tr class="tf-mon-foldrow" {@attach win.row(FOLD_KEY)}>
                 <td colspan="7">
                   <!-- The summary alone, as Builds' folds: the hidden rows follow it while it is open. -->
@@ -861,7 +884,7 @@
                     class="tf-btn tf-sm tf-ghost"
                     disabled={pressing[row.entity_id] === true}
                     title={row.hidden ? "Show it on the roster and let its alerts reach the inbox again" : "Take it off the roster; its alerts stop reaching the inbox and stop notifying"}
-                    onclick={() => void setHidden(row, !row.hidden)}>{row.hidden ? "Unhide" : "Hide"}</button
+                    onclick={(event) => void setHidden(row, !row.hidden, event)}>{row.hidden ? "Unhide" : "Hide"}</button
                   >
                   {#if refresher}<TfDetailRefresh detail={subjectOf(row)} refresh={refresher} {reread} small ghost />{/if}
                   </span>

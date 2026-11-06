@@ -36,7 +36,7 @@ export interface InlineEditorOptions {
   /** A selector for what takes focus, when the first field is not it. */
   focus?: string;
   /** What ⌘Enter does; without it, the editor's form submits, or else its primary is pressed. */
-  send?: () => void;
+  send?: () => unknown;
   /** `close` keeps what was typed (`drafts.svelte.ts`), so one `Esc` closes the editor from inside a field. */
   escCloses?: boolean;
   layers?: Layers;
@@ -58,7 +58,7 @@ function sendFrom(node: HTMLElement): void {
   else form?.requestSubmit();
 }
 
-function listenForSend(node: HTMLElement, send: (() => void) | undefined): () => void {
+function listenForSend(node: HTMLElement, send: (() => unknown) | undefined): () => void {
   return on(node, "keydown", (event: KeyboardEvent) => {
     if (!isSendKey(event)) return;
     event.preventDefault();

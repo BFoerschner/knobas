@@ -73,7 +73,7 @@
     timer: Pick<Timer, "current">;
     api: StartWorkApi;
     /** `quiet`: this press's own toast says the timer runs, so the start says nothing more (F-145). */
-    onstarttimer: (entityId: string, title: string, quiet?: boolean) => void;
+    onstarttimer: (entityId: string, name: string, quiet?: boolean) => void;
     /** Why the source's credential cannot move this ticket (#2052), or `null`. */
     moveRefused?: string | null;
     /** *Cancel*, while nothing has run; left out where the steps are not a look (the ticket is already the job). */
@@ -200,7 +200,7 @@
     // With another timer running, its draft comes first, so the timer isn't running yet and the draft's answer says so.
     const atOnce = starts && timer.current === null;
     began(atOnce);
-    if (starts) onstarttimer(detail.row.entity_id, detail.row.title, atOnce);
+    if (starts) onstarttimer(detail.row.entity_id, key, atOnce);
   }
 
   /** Why the first step's *Skip* is off with a refused move: `start_work_skip` runs on, so only one step can be settled before the run. */

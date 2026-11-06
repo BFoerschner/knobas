@@ -183,6 +183,34 @@ test("with no field, a radio takes focus ahead of a button, and Enter on it pres
   target.remove();
 });
 
+test("⌘Enter presses the primary from anywhere in the dialog (the key table)", () => {
+  const behind = opener();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onprimary } });
+  flushSync();
+  const send = new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true });
+  target.querySelector("input")!.dispatchEvent(send);
+  expect(send.defaultPrevented).toBe(true);
+  expect(onprimary).toHaveBeenCalledOnce();
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test.each(["danger", "guarded", "off"] as const)("⌘Enter doesn't reach a primary that is %s", (primary) => {
+  const behind = opener();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onprimary, primary } });
+  flushSync();
+  target.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+  expect(onprimary).not.toHaveBeenCalled();
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
 test.each(["danger", "guarded", "off"] as const)("Enter on a radio doesn't reach a primary that is %s", (primary) => {
   const behind = opener();
   const onprimary = vi.fn();

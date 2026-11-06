@@ -26,7 +26,7 @@
  *
  * **A switch waits for the answer** (R-13.2): starting on another ticket while
  * one runs opens the running one's draft, and the new timer starts only after
- * *Log*, *Stop, log later* or *Discard* have stopped the old one. *Keep
+ * *Log*, *Stop, log later* or *Stop, don't log* have stopped the old one. *Keep
  * running* keeps the old ticket and drops the new start, saying so. A stop
  * with nothing to draft starts the new timer at once, so a switch never needs
  * a dialog to finish.
@@ -42,7 +42,7 @@
  */
 import type { AdHocBlock, Block, Draft, ReaderDay, TimerTarget } from "../ipc/time";
 import type { Timer } from "../shell/timer.svelte";
-import type { ToastSpec } from "../shell/toasts.svelte";
+import type { ToastSpec, undoable } from "../shell/toasts.svelte";
 import { readerDay } from "../time/day";
 import { localDay } from "../time/draft";
 import { minutesLabel } from "../time/format";
@@ -53,7 +53,7 @@ export type DraftOutcome = "logged" | "later" | "keep" | "discard";
 /** A start that waits for the running timer's draft to be answered. */
 export interface WaitingStart {
   target: TimerTarget;
-  /** What the toast calls it: `Timer running on <title>`. */
+  /** What the toast calls it, its key where it has one: `Timer running on PAY-231`. */
   title: string;
 }
 
@@ -75,6 +75,7 @@ export interface DraftFlowPorts {
   /** Open the ad-hoc block dialog: the stop was not on a ticket. */
   onadhoc: (block: Block, offer: AdHocBlock) => void;
   push: (toast: ToastSpec) => void;
+  undoable: typeof undoable;
   complain: (error: unknown) => void;
   /** *Open the day*: the time view. */
   onday: () => void;
@@ -142,18 +143,15 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
 
   /** A stop's toast: what happened to the time, and the way back to the clock. */
   function sayStopped(text: string, running: TimerTarget) {
-    ports.push({
+    ports.undoable(
       text,
-      action: {
-        label: "Undo",
-        run: () =>
-          void ports.timer
-            .start(running)
-            .then(() => ports.push({ text: "Timer running again." }))
-            .catch(ports.complain),
-      },
-      more: [{ label: "Open the day", run: ports.onday }],
-    });
+      () =>
+        void ports.timer
+          .start(running)
+          .then(() => ports.push({ text: "Timer running again." }))
+          .catch(ports.complain),
+      { more: [{ label: "Open the day", run: ports.onday }] },
+    );
   }
 
   /** What a closed block with no draft calls for: `ad_hoc_block`'s dialog, or nothing. */

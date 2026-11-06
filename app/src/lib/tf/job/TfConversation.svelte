@@ -13,7 +13,8 @@
   drawn at the end of the thread at once, muted with its echo (#1424, #2103),
   *queued* and then *sent*, until a read of the thread (the refresh after the
   write, or a run's end) holds its words. *Edit and resend* on a held or
-  refused one puts its words back in the box. A comment whose source writes
+  refused one puts its words back in the box. What is typed is the ticket's own draft (`drafts`), through
+  `Esc`, a move to another ticket and a return, and ⌘Enter sends it. A comment whose source writes
   markup (`markdown`, `jira_wiki`, #2308) is drawn with the Markdown
   component, its `!name!` images and `[^name]` links resolved against the
   ticket's attachments and drawn as the description's are (#2415). A
@@ -30,6 +31,8 @@
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { proseMarkdown } from "../../render/prose";
   import { refusedAttrs } from "../../shell/refused-writes";
+  import { drafts } from "../drafts.svelte";
+  import { sendKey } from "../inline-editor";
   import { takeAgain, type Echo } from "../queued.svelte";
   import { initials } from "../tickets/tickets";
   import { firstName, mentionRuns, since, stamp, wholeThread } from "./conversation";
@@ -75,7 +78,8 @@
     images?: AttachmentImages | null;
   } = $props();
 
-  let draft = $state("");
+  const commentKey = $derived(`comment:${entityId}`);
+  const draft = $derived(drafts.get(commentKey));
   let sending = $state(false);
   let box = $state<HTMLTextAreaElement | null>(null);
 
@@ -83,7 +87,7 @@
   $effect(() => {
     const again = takeAgain(entityId, "comment");
     if (again === null) return;
-    draft = again;
+    untrack(() => drafts.put(commentKey, again));
     box?.focus();
   });
 
@@ -116,7 +120,7 @@
     if (body === "" || sending || refused !== null) return;
     sending = true;
     try {
-      if (await oncomment(body)) draft = "";
+      if (await oncomment(body)) drafts.forget(commentKey);
     } finally {
       sending = false;
     }
@@ -166,7 +170,7 @@
     </article>
   {/each}
   <div class="tf-compose">
-    <textarea bind:this={box} bind:value={draft} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}"></textarea>
+    <textarea bind:this={box} value={draft} oninput={(event) => drafts.put(commentKey, event.currentTarget.value)} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}" {@attach sendKey(() => void send())}></textarea>
     <div class="tf-acts">
       {#if refused !== null}<span class="tf-dim tf-small">{refused}</span>{/if}
       <button type="button" class="tf-btn tf-sm tf-primary" {...refusedAttrs(refused)} disabled={draft.trim() === "" || sending} onclick={() => void send()}>Comment</button>

@@ -86,6 +86,7 @@ function rig(over: Over = {}) {
     },
     onadhoc: () => log.push("ad-hoc dialog"),
     push: (toast) => void toasts.push(toast),
+    undoable: (text, undo, spec = {}) => toasts.push({ ...spec, text, action: { label: "Undo", run: undo } }),
     complain: (error) => log.push(`complain ${String(error)}`),
     onday: () => log.push("open the day"),
   };

@@ -21,7 +21,6 @@ import {
   untilLabel,
   visible,
   fixOf,
-  shortDay,
 } from "./inbox";
 
 function item(over: Partial<InboxItem>): InboxItem {
@@ -235,12 +234,6 @@ test("a credential row says its fix once the sources are read, and opens the pro
   expect(opener(row)).toEqual({ label: "Source settings", href: "#/settings/source/kuma" });
   // Only a credential row has a fix.
   expect(fixOf(item({ category: "failed_build" }), () => "Enter token")).toBeNull();
-});
-
-test("a day in the time column's room has its weekday, and its year only when it is not this year's", () => {
-  const now = new Date(2026, 10, 6, 9);
-  expect(shortDay(new Date(2026, 10, 4, 10, 56), now)).toBe("Wed 4 Nov");
-  expect(shortDay(new Date(2025, 11, 31), now)).toBe("Wed 31 Dec 2025");
 });
 
 test("a snooze's toast names the day within a week, the date beyond", () => {

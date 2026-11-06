@@ -66,14 +66,14 @@ test("the last row hands focus to the row before it", async () => {
   expect(document.activeElement).toBe(buttonIn(before, "Hide"));
 });
 
-test("a row without the same control hands focus to its first control", async () => {
+test("a row without the same control takes focus itself, so a second Enter presses nothing it didn't aim at", async () => {
   const { row } = page();
   buttonIn(row(0), "Hide").focus();
   const next = row(1);
   buttonIn(next, "Hide").remove();
   row(0).remove();
   await settle();
-  expect(document.activeElement).toBe(next.querySelector("a"));
+  expect(document.activeElement).toBe(next);
 });
 
 test("a control replaced in its row hands focus to what stands at its place there", async () => {

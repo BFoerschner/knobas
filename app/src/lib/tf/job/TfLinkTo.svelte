@@ -6,6 +6,10 @@
   the same debounce, sequencing and selection, over the job's ports. The link
   is written by `create_link` (BUILT) and stays in knobas, which the dialog
   says in one line (R-15.2).
+
+  What it already links is listed last, marked and not a choice. Two sources can hold
+  one key (#1476), and those are two tickets: both rows then name their source, so
+  *Already linked* on one doesn't read as a mistake on the other.
 -->
 <script lang="ts">
   import { onMount, tick } from "svelte";
@@ -17,6 +21,7 @@
   import { drawn } from "../../detail/relations";
   import { JOB_LINK_RELATIONS } from "./link-relations";
   import { kindSingular } from "../../shell/kinds";
+  import { listSources } from "../../ipc/sources";
   import { keyOf } from "../../time/format";
   import type { Layers } from "../layers.svelte";
   import type { LinkTarget } from "./current.svelte";
@@ -75,6 +80,20 @@
   const hits = $derived(found.filter((hit) => !linked.includes(hit.entity_id)));
   /** What this already links to: last, named, and not a choice. */
   const taken = $derived(found.filter((hit) => linked.includes(hit.entity_id)));
+
+  /** Source id → name, once read: only rows that share a key say it, and without the read they say the id. */
+  let sourceNames = $state<Record<string, string>>({});
+  onMount(() => {
+    void listSources().then(
+      (rows) => (sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]))),
+      () => {},
+    );
+  });
+  /** `, Tidewater Jira` where another row here has this ticket's key, else nothing. */
+  const whose = (hit: SearchHit) =>
+    hit.kind === "ticket" && found.some((other) => other.entity_id !== hit.entity_id && other.kind === "ticket" && keyOf(other.entity_id) === keyOf(hit.entity_id))
+      ? `, ${sourceNames[hit.source_id] ?? hit.source_id}`
+      : "";
 
   function pick(hit: SearchHit) {
     target = hit;
@@ -157,12 +176,12 @@
           <div class="tf-fwide tf-picklist" role="listbox" aria-label="Link targets">
             {#each hits as hit, index (hit.entity_id)}
               <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(hit)}>
-                <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
+                <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">{kindSingular(hit.kind, null)}{whose(hit)}</span>
               </button>
             {/each}
             {#each taken as hit (hit.entity_id)}
               <button type="button" role="option" aria-selected="false" disabled>
-                <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">Already linked</span>
+                <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">Already linked{whose(hit)}</span>
               </button>
             {/each}
           </div>

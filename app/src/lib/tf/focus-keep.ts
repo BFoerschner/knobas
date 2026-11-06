@@ -1,10 +1,11 @@
 /**
  * **The focus keeper** (design system, The press rule): a press never drops the reader's place on the body.
  *
- * The shell installs one keeper over the page. It notes what holds focus in `.tf-main`, and when that goes away or is
+ * The shell installs one keeper over the page and the Connections drawer. It notes what holds focus there, and when that goes away or is
  * disabled and focus has nowhere else to be, it hands focus on: the same control in that row, else the same control in
- * the row that took its place (or the one before, at the end of a list), else that row's first control, else the same
- * words on the page, else the page's heading.
+ * the row that took its place (or the one before, at the end of a list), else that row itself, because a second `Enter`
+ * must repeat the press or do nothing, and never open whatever that row happens to lead with. `Tab` goes on into the row.
+ * With no such row: the same words on the page, else the page's heading.
  *
  * A move made by key with no place to return to focuses the page's heading (F-052), so the next `Tab` starts on the
  * page and not back at the top bar.
@@ -19,7 +20,9 @@
 import { placeRestoring } from "./return-place";
 
 /** What counts as a row, for finding the one that took a row's place. */
-const ROW = "tr, li, [data-row], [data-entity], .tf-rowhost, .tf-ib, .tf-r";
+const ROW = "tr, li, [data-row], [data-entity], .tf-rowhost, .tf-ib, .tf-r, .tf-lk";
+/** Where the keeper looks after focus: the page, and the drawer that floats over it. */
+const KEPT = ".tf-main, .tf-drawer";
 const CONTROL = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 /** How long a move by key waits for its page to draw a heading, in ms. */
 const WAIT_FOR_HEADING = 1500;
@@ -64,6 +67,8 @@ interface Held {
   at: number;
   key: string | null;
   parent: Element | null;
+  /** The drawer it was in: what is left of it takes focus before the page behind it does. */
+  drawer: Element | null;
 }
 
 function note(control: HTMLElement): Held {
@@ -78,6 +83,7 @@ function note(control: HTMLElement): Held {
     at: row !== null && list !== null ? [...list.children].indexOf(row) : -1,
     key: row === null ? null : rowKey(row),
     parent: control.parentElement,
+    drawer: control.closest(".tf-drawer"),
   };
 }
 
@@ -88,13 +94,15 @@ function rowAt(list: Element, at: number): Element | null {
   return [...list.children].slice(at).find((child) => rows.includes(child)) ?? rows.at(-1)!;
 }
 
-/** In `row`, the control saying `said`; `nth` when the row is the one it was in and it says something else now; else the first. */
+/** In `row`, the control saying `said`; `nth` when the row is the one it was in and it says something else now; else the row. */
 function inRow(row: Element, held: Held, sameRow: boolean): HTMLElement | null {
   const controls = controlsIn(row);
   const same = controls.find((el) => saidBy(el) === held.said);
   if (same !== undefined) return same;
   if (sameRow && controls.length > 0) return controls[Math.min(Math.max(held.nth, 0), controls.length - 1)]!;
-  return controls[0] ?? null;
+  if (controls.length === 0 || !(row instanceof HTMLElement)) return null;
+  row.tabIndex = -1;
+  return row;
 }
 
 /** The page shown in `.tf-main`. */
@@ -111,7 +119,6 @@ function headingOf(page: Element | null): HTMLElement | null {
 
 /** Where focus goes now `held` has gone. */
 function nextFor(held: Held): HTMLElement | null {
-  const page = shownPage();
   if (held.row !== null) {
     const list = held.list?.isConnected ? held.list : null;
     if (held.row.isConnected) {
@@ -142,6 +149,8 @@ function nextFor(held: Held): HTMLElement | null {
       if (near.length > 0) return near.at(-1)!;
     }
   }
+  if (held.drawer?.isConnected) return controlsIn(held.drawer)[0] ?? null;
+  const page = shownPage();
   // The same words, where only one control says them: a block the page drew anew.
   if (page !== null && held.said !== "") {
     const alike = controlsIn(page).filter((el) => saidBy(el) === held.said);
@@ -189,7 +198,7 @@ export function installFocusKeep(): () => void {
   const onfocusin = (event: Event) => {
     const target = event.target;
     // A dialog drawn inside a page gives focus back itself. What stays noted is what opened it, in case that goes with the answer.
-    if (!(target instanceof HTMLElement) || target.closest(".tf-main") === null || target.closest(".tf-modal") !== null) return;
+    if (!(target instanceof HTMLElement) || target.closest(KEPT) === null || target.closest(".tf-modal") !== null) return;
     held = note(target);
   };
   // Focus went because the reader moved it: a click on nothing, or `Esc` out of a field. Asked once the DOM work of this
@@ -208,7 +217,7 @@ export function installFocusKeep(): () => void {
   /** A press on a control is a place, even where the webview gave it no focus. */
   const onclick = (event: Event) => {
     const control = event.target instanceof Element ? event.target.closest<HTMLElement>(CONTROL) : null;
-    if (control !== null && control.closest(".tf-main") !== null && control.closest(".tf-modal") === null) held = note(control);
+    if (control !== null && control.closest(KEPT) !== null && control.closest(".tf-modal") === null) held = note(control);
   };
   const onkey = (event: KeyboardEvent) => {
     if (event.key === "Shift" || event.key === "Meta" || event.key === "Control" || event.key === "Alt") return;
@@ -221,7 +230,7 @@ export function installFocusKeep(): () => void {
     endWait();
     // A press on nothing leaves no place, whether or not anything had focus to lose.
     const target = event.target;
-    if (target instanceof Element && target.closest(".tf-main") !== null && target.closest(".tf-modal") === null && target.closest(CONTROL) === null) held = null;
+    if (target instanceof Element && target.closest(KEPT) !== null && target.closest(".tf-modal") === null && target.closest(CONTROL) === null) held = null;
     else refresh();
   };
 

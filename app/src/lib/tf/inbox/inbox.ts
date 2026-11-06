@@ -202,16 +202,9 @@ export function backLabel(item: Pick<InboxItem, "snoozed_until">): string | null
   return back && !Number.isNaN(back.getTime()) ? sentenceDay(back) : null;
 }
 
-const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** A day as `knobas_core::inbox` writes one in a reason: *Thursday 3 Sep 2026*. */
 export function sentenceDay(at: Date): string {
   return `${at.toLocaleDateString("en-GB", { weekday: "long" })} ${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}`;
-}
-
-/** The same day in the room of the time column: *Wed 4 Nov*, with its year when it is not this year's. */
-export function shortDay(at: Date, now: Date): string {
-  const day = `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]}`;
-  return at.getFullYear() === now.getFullYear() ? day : `${day} ${at.getFullYear()}`;
 }

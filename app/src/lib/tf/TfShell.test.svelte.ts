@@ -1502,7 +1502,7 @@ test("a job address chooses its ticket and lands on the ticket's page, whose Sta
   expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim()).toBe("Tickets");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-jobcard .tf-go button")].find((b) => b.textContent === "Start timer")!.click();
-  expect(started).toEqual([["jira:PAY-231", "Retry failed SEPA payouts"]]);
+  expect(started).toEqual([["jira:PAY-231", "PAY-231"]]);
 });
 
 /**

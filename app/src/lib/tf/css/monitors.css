@@ -73,3 +73,5 @@
 .tf-mon .tf-mon-at > td:last-child { box-shadow: inset -2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
 .tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
 .tf-mon-hidn { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }
+/* A row *Hide* took away holds its height under the pointer until the pointer leaves it. */
+.tf-mon tr.tf-mon-held > td { height: var(--tf-row-held); padding: 0; background: none; }

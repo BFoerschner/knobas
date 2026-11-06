@@ -17,7 +17,7 @@
   import { assetTargetId, targetReading } from "./lib/shell/timer";
   import { toastQueued } from "./lib/shell/queued-toast";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
-  import { push } from "./lib/shell/toasts.svelte";
+  import { push, undoable } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
@@ -122,6 +122,7 @@
     worklogDraft: (entityId, when) => worklogDraft(entityId, when),
     onadhoc: (block, offer) => (adHoc = { block, offer }),
     push,
+    undoable,
     complain,
     onday: () => (location.hash = "#/time"),
   });

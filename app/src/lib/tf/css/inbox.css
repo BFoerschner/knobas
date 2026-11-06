@@ -18,7 +18,7 @@
 .tf-ib:has(.tf-what a) { cursor: pointer; }
 .tf-ib:not(:has(.tf-acts :hover, .tf-ctx a:hover, .tf-isnooze:hover)):hover .tf-what a { text-decoration: underline; text-underline-offset: 2px; }
 /* The row a mouse press took away keeps its room, empty, until the pointer leaves it (F-138). */
-.tf-ib.tf-ib-held { min-height: var(--tf-ib-held); cursor: default; }
+.tf-ib.tf-ib-held { min-height: var(--tf-row-held); cursor: default; }
 .tf-ib.tf-ib-held:hover { background: none; }
 .tf-inbox-h:focus { outline: none; }
 /* There is no value column to replace here, so the words keep the group's room on their right at rest, and a long title

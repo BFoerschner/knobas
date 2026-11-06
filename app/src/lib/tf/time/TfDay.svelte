@@ -40,6 +40,7 @@
   import type { SessionPorts } from "../../launcher/session.svelte";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { heldWrite, push, undoable } from "../../shell/toasts.svelte";
+  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
@@ -462,11 +463,22 @@
     );
   }
 
+  /** The row a mouse press on *Dismiss* took away, still holding its place under the pointer (F-138). */
+  let holding = $state.raw<{ id: number; at: number; height: number } | null>(null);
+  /** Where its empty row stands. An *Undo* brings the row itself back, and that is drawn instead. */
+  const holdAt = $derived(holding !== null && held.some((hold) => hold.id === holding?.id) ? holding.at : null);
+  $effect(() => {
+    if (holdAt === null) return;
+    return holdUnderPointer(() => document.querySelector(".tf-tm-held"), () => (holding = null));
+  });
+
   /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
-  function dismiss(row: DayRow) {
+  function dismiss(row: DayRow, event: MouseEvent) {
     const block = row.block;
     if (block === null) return;
     const id = block.block.id;
+    const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-tm-row")?.getBoundingClientRect() : undefined;
+    if (box !== undefined) holding = { id, at: rows.indexOf(row), height: box.height };
     holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id));
   }
 
@@ -601,7 +613,12 @@
     </div>
   {:else}
     <div class="tf-tm-list">
-      {#each rows as row (row.key)}
+      {#snippet heldRow()}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="tf-tm-row tf-tm-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}></div>
+      {/snippet}
+      {#each rows as row, index (row.key)}
+        {#if holdAt === index}{@render heldRow()}{/if}
         {@const run = runAt.get(row.key)}
         {#if run}
           <div class="tf-tm-group">
@@ -618,6 +635,7 @@
         <div
           id="tf-tm-row-{row.key}"
           class="tf-tm-row {selected === row.key ? 'tf-on' : ''}"
+          data-row={row.key}
           data-state={row.state}
           onclick={(event) => {
             if (!(event.target as HTMLElement).closest("button")) selected = row.key;
@@ -698,7 +716,7 @@
               {:else}
                 <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
-              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={() => dismiss(row)}>Dismiss</button>
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={(event) => dismiss(row, event)}>Dismiss</button>
             {:else if row.state === "open"}
               {#if job !== null}
                 {@const to = job.entityId}
@@ -716,6 +734,7 @@
           </span>
         </div>
       {/each}
+      {#if holdAt !== null && holdAt >= rows.length}{@render heldRow()}{/if}
     </div>
   {/if}
 

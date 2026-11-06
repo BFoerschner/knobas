@@ -33,6 +33,7 @@
   import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
   import { itemHash } from "./job";
   import { filterKeys } from "../filter-keys";
+  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
 
   let {
     jobKey,
@@ -77,6 +78,17 @@
   let text = $state("");
 
   const shown = $derived(filterLinks(links, text));
+
+  /** A row a mouse press took away, its place held under the pointer until the pointer leaves it (F-138). */
+  let holding = $state.raw<{ list: string; at: number; id: string | number; height: number } | null>(null);
+  function hold(event: MouseEvent, list: string, at: number, id: string | number) {
+    const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-lk")?.getBoundingClientRect() : undefined;
+    if (box !== undefined) holding = { list, at, id, height: box.height };
+  }
+  $effect(() => {
+    if (holding === null) return;
+    return holdUnderPointer(() => document.querySelector(".tf-lk-held"), () => (holding = null));
+  });
 
   $effect(() => {
     const restoreTo = document.activeElement;
@@ -126,14 +138,21 @@
   </div>
   <div class="tf-dbody">
     <h3>Linked on <TfKey value={jobKey} lead /> <span class="tf-count">{shown.length}</span></h3>
-    {#each shown as entry (entry.link.id)}
+    {#snippet heldRow(list: string, at: number, present: boolean)}
+      {#if holding !== null && holding.list === list && holding.at === at && !present}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="tf-lk tf-lk-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding.height)}></div>
+      {/if}
+    {/snippet}
+    {#each shown as entry, at (entry.link.id)}
       {@const also = alsoIn(entry.other.entity_id)}
-      <div class="tf-lk">
+      {@render heldRow("links", at, shown.some((one) => one.link.id === holding?.id))}
+      <div class="tf-lk" data-row="link:{entry.link.id}">
         <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
           ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{kindWord(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</span></span
           >{@render stateOf(entry.other.state ?? null)}<span class="tf-chev" aria-hidden="true">›</span></a
         >
-        <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
+        <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { if (entry.link.origin === "manual") hold(event, "links", shown.indexOf(entry), entry.link.id); onunlink(entry); }} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
       </div>
     {:else}
       {#if text.trim() !== ""}
@@ -142,14 +161,16 @@
         <p class="tf-dnone">Nothing linked on the ticket itself.</p>
       {/if}
     {/each}
+    {#if shown.length > 0}{@render heldRow("links", shown.length, shown.some((one) => one.link.id === holding?.id))}{/if}
     {#each groups as group (group.key)}
       {@const rows = filterRows(group.rows, text)}
       <h3>
         From {group.label}, <TfKeyed text={group.via} lead /> <span class="tf-count">{rows.length}</span>
         {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={() => { oneditset(); onclose(); }}>Edit set</a>{/if}
       </h3>
-      {#each rows as row (row.id)}
-        <div class="tf-lk">
+      {#each rows as row, at (row.id)}
+        {@render heldRow(group.key, at, rows.some((one) => one.id === holding?.id))}
+        <div class="tf-lk" data-row="{group.key}:{row.id}">
           {#if row.href !== null}
             <a class="tf-lk-go" href={row.href} onclick={onclose}
               ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}<span class="tf-chev" aria-hidden="true">›</span></a
@@ -158,10 +179,11 @@
             <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}</div>
           {/if}
           {#if group.setId !== null}
-            <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { hold(event, group.key, rows.indexOf(row), row.id); onhide(row); }} aria-label="Hide here: {row.title}">Hide here</button>
           {/if}
         </div>
       {/each}
+      {@render heldRow(group.key, rows.length, rows.some((one) => one.id === holding?.id))}
     {/each}
     {#if hidden.length > 0}
       <h3>Hidden on <TfKey value={jobKey} lead /> <span class="tf-count">{hidden.length}</span></h3>

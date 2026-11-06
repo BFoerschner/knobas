@@ -32,7 +32,8 @@
   **`Enter` on a radio presses the footer's primary**, so a keyboard reaches a harmless
   write without tabbing past *Cancel* (the key table, F-240). A danger primary or one marked
   `data-no-enter` (*Merge*) is not reached this way, and neither is one that is off. `Enter` on
-  a tick sends nothing: it is one more thing to decide.
+  a tick sends nothing: it is one more thing to decide. **⌘Enter presses it too, from anywhere in
+  the dialog**, so every composer in a dialog sends the same way (the key table).
 
   Deliberately not a native `<dialog>`: `showModal()` puts the element in the
   top layer, where `::backdrop`, not `.tf-modal`, draws the dim. What a native
@@ -42,6 +43,7 @@
 <script lang="ts">
   import { untrack, type Snippet } from "svelte";
 
+  import { isSendKey } from "../inline-editor";
   import { layers as sharedLayers, type Layer, type Layers } from "../layers.svelte";
   import TfKeyed from "../TfKeyed.svelte";
 
@@ -129,7 +131,7 @@
     };
   });
 
-  /** `Enter` on a radio: the footer's primary, if it can be pressed and is safe to reach by a key that also means *go on*. */
+  /** `Enter` on a radio and ⌘Enter: the footer's primary, if it can be pressed and is safe to reach by a key that also means *go on*. */
   function pressPrimary() {
     const primary = dialog?.querySelector<HTMLButtonElement>("footer .tf-primary");
     if (!primary || primary.disabled || primary.getAttribute("aria-disabled") === "true") return;
@@ -146,6 +148,11 @@
       // Rung 1 of the Esc ladder, answered here: the shell must not also unwind what is behind the dialog.
       event.stopPropagation();
       onclose();
+      return;
+    }
+    if (isSendKey(event) && layers.open.at(-1) === layer) {
+      event.preventDefault();
+      pressPrimary();
       return;
     }
     if (event.key === "Enter" && event.target instanceof HTMLInputElement && (event.target.type === "radio" || event.target.type === "checkbox")) {

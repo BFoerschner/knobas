@@ -139,6 +139,8 @@ async function open(
     extra?: InboxEntry[];
     clock?: boolean;
     refused?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
+    pipelines?: () => Promise<never>;
+    sent?: boolean;
   } = {},
 ) {
   const ports = {
@@ -156,8 +158,9 @@ async function open(
       (REACH[id] ?? []).map((entity_id) => ({ entity_id, kind: "pr", step: entity_id, origin: { kind: "own" } })),
     submitWrite: async (payload: WriteOpPayload) => {
       calls.push(`write ${JSON.stringify(payload)}`);
-      return { id: 7 } as unknown as QueuedWrite;
+      return (over.sent ? { id: 7, state: "sent" } : { id: 7 }) as unknown as QueuedWrite;
     },
+    ...(over.pipelines ? { pipelines: over.pipelines } : {}),
   };
   view = mount(TfInbox, { target, context: hiddenable, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, ...(over.clock ? {} : { now: NOW }) } });
   await settle();
@@ -400,14 +403,52 @@ test("Tab goes through a row's words before its actions: the job's key comes bef
   expect(stops.indexOf("key")).toBeLessThan(stops.indexOf("action"));
 });
 
-test("after the last Wake, focus goes to the woken row, not the body (F-148)", async () => {
+test("after the last Wake, focus goes to the woken row itself, so another Enter opens nothing (F-148)", async () => {
   await open();
   const wake = button(shelfRows()[0]!, "Wake");
   wake.focus();
   wake.click();
   await tick();
   expect(shelfRows()).toHaveLength(0);
-  expect((document.activeElement as HTMLElement).closest(".tf-inbox")).not.toBeNull();
+  expect((document.activeElement as HTMLElement).matches(".tf-inbox .tf-ib")).toBe(true);
+});
+
+test("a key's press lands on the next row itself where it has no such action, so a second Enter opens nothing", async () => {
+  await open({
+    extra: [entry({ key: "alert:kuma:3", category: "alert", title: "knobas-jira", reason: "knobas-jira is down", occurred_at: at(23, 50), entity_id: null, source_id: "kuma" }, [])],
+  });
+  const row = rowOf("knobas-jira");
+  const place = rows().indexOf(row);
+  const next = (rows()[place + 1] ?? rows()[place - 1]) as HTMLElement;
+  expect(next.querySelector("[data-act=ack]"), "the next row isn't an alert").toBeNull();
+  const ack = button(row, "Ack");
+  ack.focus();
+  ack.click();
+  await settle();
+  expect(document.activeElement).toBe(next);
+});
+
+test("after a mouse's press, focus rests on the next row, not on its link", async () => {
+  await open();
+  const row = rowOf("dashboard");
+  const place = rows().indexOf(row);
+  const next = (rows()[place + 1] ?? rows()[place - 1]) as HTMLElement;
+  button(row, "Done").focus();
+  button(row, "Done").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  expect(document.activeElement).toBe(next);
+});
+
+test("Show in runs on a sent Re-run goes to the pipeline that lists the failed run", async () => {
+  await open({ pipelines: async () => [{ entity_id: "tc:Payout", recent: [{ entity_id: "tc:Payout#1187" }] }] as never, sent: true });
+  button(rowOf("Payout_Integration"), "Re-run").click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect([toast.text, toast.action?.label]).toEqual(["Sent: re-run Payout_IntegrationTests #1187.", "Show in runs"]);
+  toast.action!.run();
+  await settle();
+  expect(location.hash).toBe("#/builds/tc%3APayout");
+  location.hash = "";
 });
 
 test("Snooze offers the presets, and one moves the item to the snoozed line", async () => {

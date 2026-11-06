@@ -322,7 +322,7 @@ test("the pinned card's foot offers Start timer, and Stop and log while the time
   await settle();
   const start = [...target.querySelectorAll("button")].find((button) => button.textContent === "Start timer")!;
   start.click();
-  expect(calls.start).toEqual([[ID, "Retry failed SEPA payouts"]]);
+  expect(calls.start).toEqual([[ID, "PAY-231"]]);
   unmount(job!);
 
   const current: RunningTimer = {

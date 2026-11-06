@@ -133,7 +133,8 @@
     /** The timer verb: with a timer running, stop it into the worklog draft. */
     ontimer: (() => void) | undefined;
     /** Start the timer on this ticket, stopping another into its draft first. `quiet`: the press's own toast says it runs. */
-    onstarttimer: (entityId: string, title: string, quiet?: boolean) => void;
+    /** `name` is what its toast calls the ticket: its key, as the launcher's does. */
+    onstarttimer: (entityId: string, name: string, quiet?: boolean) => void;
     ports?: JobPorts;
     today?: () => Date;
     /** *Apply a link set…* and *Save as a link set…* (#869). */
@@ -524,7 +525,7 @@
       if (wanted.does === "steps") {
         steppedTo = true;
         stepping = true;
-      } else onstarttimer(row.entity_id, row.title);
+      } else onstarttimer(row.entity_id, keyOf(row.entity_id));
     });
   });
   /** *Cancel* on the steps: as if *Start work* had not been pressed, with focus back on it. */
@@ -549,17 +550,16 @@
   function act() {
     if (!detail || action === null) return;
     const id = detail.row.entity_id;
-    const title = detail.row.title;
     switch (action.does) {
       case "stop":
         ontimer?.();
         return;
       case "start-timer":
-        onstarttimer(id, title);
+        onstarttimer(id, keyOf(id));
         return;
       case "resume":
         chooseSaying(id);
-        onstarttimer(id, title);
+        onstarttimer(id, keyOf(id));
         return;
       case "start-work":
         steppedTo = true;
@@ -748,6 +748,7 @@
       entityId={detail.row.entity_id}
       {ports}
       {layers}
+      linked={connected.map((entry) => entry.other.entity_id)}
       onclose={() => (linking = false)}
       onlinked={() => {
         linking = false;

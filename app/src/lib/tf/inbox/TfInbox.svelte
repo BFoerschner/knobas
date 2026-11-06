@@ -16,7 +16,9 @@
   **A row leaving under a pointer holds its place (F-138).** After a mouse press takes a
   row away, it stays as an empty row of its height until the pointer leaves it, and the
   list closes up then, so a second press where the pointer rests lands on nothing. A key
-  press closes at once and moves focus to the same action on the next row.
+  press closes at once and moves focus to the same action on the next row. A second `Enter`
+  repeats what the first did or does nothing, and never opens a row: a next row with no such
+  action, or a press by mouse, leaves focus on the row itself, for `Tab` and `j` to go on from.
 
   Answers are drawn at once (#775), so a press says so in a toast that collapses
   repeats (`tally`) and takes them back with *Undo*: a snooze with a date now
@@ -45,10 +47,12 @@
     getEntity,
     jobReach,
     listContexts,
+    pipelines,
     submitWrite,
     type ContextRow,
     type EntityDetail,
     type InboxEntry,
+    type PipelineRow,
     type Reached,
   } from "../../ipc/entity";
   import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
@@ -64,12 +68,14 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { isFiltering, type FilterConfig } from "../filter/filter";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
+  import { pipelineHash } from "../builds/builds";
+  import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
   import type { SourceFacts } from "../job/job";
   import { ticketHash } from "../route";
   import { reenterWords, secretNoun } from "../settings/settings";
   import TfKey from "../TfKey.svelte";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { backLabel, expiryOf, failed, fixOf, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, shortDay, untilLabel, visible } from "./inbox";
+  import { backLabel, expiryOf, failed, fixOf, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -78,6 +84,8 @@
     getEntity: (entityId: string) => Promise<EntityDetail>;
     jobReach: (entityId: string) => Promise<Reached[]>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    /** Which pipeline a run belongs to, for *Show in runs*; the bridge's when left out. */
+    pipelines?: () => Promise<Pick<PipelineRow, "entity_id" | "recent">[]>;
     /** What the sources' credentials cannot write (#2040); the bridge's when left out. */
     refusedWrites?: RefusedWritesPort;
   }
@@ -114,11 +122,8 @@
   everyWhileShown(() => !fixedNow && shown(), 30_000, () => (clock = new Date()));
   const now = $derived(fixedNow ?? clock);
 
-  /** The time column: a clock for today and yesterday, older a day in the words the sentences date themselves in (F-116). */
-  function when(at: string): string {
-    const label = clockLabel(at, now, true);
-    return /^\d{4}-/.test(label) ? shortDay(new Date(at), now) : label;
-  }
+  /** The time column: the one ladder, with today's word left out, since a column here is only read as recent. */
+  const when = (at: string) => clockLabel(at, now, true);
 
   const filter = sessionFilter("inbox");
   // Prototype-6 opens the Inbox on *All*.
@@ -173,12 +178,12 @@
   }
 
   /**
-   * Before a press takes `entry` away. A mouse's press holds the row, and focus goes quietly to the next row's link. A key's
-   * has `detail` 0: the list closes at once, and focus goes to the same action on the next row.
+   * Before a press takes `entry` away. A mouse's press holds the row, and focus rests on the next row itself. A key's has
+   * `detail` 0: the list closes at once, and focus goes to the same action on the next row, or that row where it has none.
    */
   function leaves(entry: InboxEntry, list: "stream" | "shelf", action: string, event?: MouseEvent) {
     const among = list === "stream" ? rows : shelf;
-    const row = event !== undefined && event.detail > 0 ? (event.currentTarget as Element | null)?.closest(".tf-ib") : null;
+    const row = heldByPointer(event) ? (event?.currentTarget as Element | null)?.closest(".tf-ib") : null;
     if (row !== null && row !== undefined) {
       const box = row.getBoundingClientRect();
       holding = { entry, list, at: among.findIndex((one) => one.item.key === entry.item.key), height: box.height };
@@ -189,8 +194,7 @@
         if (held !== null && moved !== 0) scrollerOf(held)?.scrollBy(0, moved);
       });
     }
-    // Its *Wake*, not its link: a second press wakes the next one rather than leaving the page.
-    keepPlace(entry, among, row && list === "stream" ? null : action);
+    keepPlace(entry, among, row ? null : action);
   }
 
   // Held until the pointer leaves the row, the page is left, or a wheel or key takes the reader on.
@@ -200,29 +204,8 @@
       holding = null;
       return;
     }
-    const release = () => (holding = null);
-    const moved = (event: PointerEvent) => {
-      const box = document.querySelector(".tf-ib-held")?.getBoundingClientRect();
-      if (box === undefined || event.clientX < box.left || event.clientX >= box.right || event.clientY < box.top || event.clientY >= box.bottom) release();
-    };
-    window.addEventListener("pointermove", moved);
-    window.addEventListener("pointerdown", moved);
-    window.addEventListener("wheel", release, { passive: true });
-    window.addEventListener("keydown", release, true);
-    document.documentElement.addEventListener("pointerleave", release);
-    return () => {
-      window.removeEventListener("pointermove", moved);
-      window.removeEventListener("pointerdown", moved);
-      window.removeEventListener("wheel", release);
-      window.removeEventListener("keydown", release, true);
-      document.documentElement.removeEventListener("pointerleave", release);
-    };
+    return holdUnderPointer(() => document.querySelector(".tf-ib-held"), () => (holding = null));
   });
-
-  /** A held row keeps its height through the CSSOM: the app's CSP refuses `style:` in markup. */
-  const heldHeight = (height: number) => (node: HTMLElement) => {
-    node.style.setProperty("--tf-ib-held", `${height}px`);
-  };
 
   /**
    * A click on the row that made no selection follows its sentence's link (F-142). The link, the key, the buttons and the
@@ -363,6 +346,15 @@
   /** Re-runs whose `submit_write` has not answered: a double click is one press. */
   const queueing = new Set<string>();
 
+  /** *Show in runs*: the failed run's pipeline, where the new run is listed; a run no list holds opens by its own address. */
+  async function showInRuns(entry: InboxEntry) {
+    const run = entry.item.entity_id;
+    const all = await (ports.pipelines ?? pipelines)().catch(() => [] as Pick<PipelineRow, "entity_id" | "recent">[]);
+    const owner = all.find((pipeline) => pipeline.recent.some((row) => row.entity_id === run));
+    const to = owner !== undefined ? pipelineHash(owner.entity_id) : opener(entry.item)?.href;
+    if (to !== undefined) location.hash = to;
+  }
+
   async function rerun(entry: InboxEntry) {
     const entity = entry.item.entity_id;
     const form = ACTION_FORMS["rerun_build"];
@@ -376,7 +368,7 @@
       toastQueued(`${form.label.toLowerCase()} ${entry.item.title}`, {
         id: entry.item.source_id,
         display_name: source?.display_name ?? "",
-      }, { write });
+      }, { write, where: { label: "Show in runs", run: () => void showInRuns(entry) } });
       following.push(followWrite(write, { name: form.label }));
       void inbox.refresh();
     } catch (error) {
@@ -430,23 +422,25 @@
   });
 
   /**
-   * A row that leaves takes focus with it, so a keyboard's place moves on to the same action on the row that takes its
-   * place, or the one before the last, else that row's link. With no row left: the shelf's fold, then the woken row itself,
-   * then the page's heading (F-148).
+   * A row that leaves takes focus with it, so the reader's place moves on to the row that takes its place, or the one before
+   * the last: to the same action there, or else to the row itself, because a second `Enter` must not open a row nobody aimed
+   * at. `j` and `Tab` go on from a row as from anything in it. With no row left: the shelf's fold, then the woken row itself,
+   * then the page's heading (F-148). The shell's focus keeper can't stand in: it knows neither the fold nor a row as a place.
    */
   function keepPlace(entry: InboxEntry, among: readonly InboxEntry[], action: string | null) {
     const at = among.findIndex((row) => row.item.key === entry.item.key);
     const next = (among[at + 1] ?? among[at - 1])?.item.key;
     void tick().then(() => {
       if (document.activeElement !== document.body && document.activeElement !== null) return;
-      const row = next === undefined ? null : document.querySelector(`.tf-ib[data-row="${CSS.escape(next)}"]`);
-      const here = (key: string) => document.querySelector<HTMLElement>(`.tf-ib[data-row="${CSS.escape(key)}"] :is(a, button)`);
+      const rowAt = (key: string | undefined) => (key === undefined ? null : document.querySelector<HTMLElement>(`.tf-ib:not(.tf-ib-held)[data-row="${CSS.escape(key)}"]`));
+      const row = rowAt(next);
       const place =
-        row?.querySelector<HTMLElement>(`[data-act="${action}"]`) ??
-        row?.querySelector<HTMLElement>(":is(a, button)") ??
+        (action === null ? null : row?.querySelector<HTMLElement>(`[data-act="${action}"]`)) ??
+        row ??
         document.querySelector<HTMLElement>(".tf-ishelf > summary") ??
-        here(entry.item.key) ??
+        rowAt(entry.item.key) ??
         document.querySelector<HTMLElement>(".tf-inbox-h");
+      if (place?.matches(".tf-ib")) place.tabIndex = -1;
       place?.focus({ preventScroll: true });
     });
   }
@@ -547,7 +541,8 @@
       {@const item = entry.item}
       {@const fix = fixOf(item, credentialFix)}
       {#if heldKey === item.key}
-        <div class="tf-ib tf-ib-held" data-row={item.key} aria-hidden="true" {@attach win.row(item.key)} {@attach heldHeight(holding?.height ?? 0)}></div>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="tf-ib tf-ib-held" data-row={item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach win.row(item.key)} {@attach heldHeight(holding?.height ?? 0)}></div>
       {:else}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <div class="tf-ib" data-row={item.key} onclick={followRow} {@attach win.row(item.key)}>
@@ -624,7 +619,8 @@
       <div class="tf-ishelf-rows">
         {#each shelfDrawn as entry (entry.item.key)}
           {#if heldKey === entry.item.key}
-            <div class="tf-ib tf-ib-held" data-row={entry.item.key} aria-hidden="true" {@attach heldHeight(holding?.height ?? 0)}></div>
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="tf-ib tf-ib-held" data-row={entry.item.key} aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}></div>
           {:else}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="tf-ib" data-row={entry.item.key} onclick={followRow}>

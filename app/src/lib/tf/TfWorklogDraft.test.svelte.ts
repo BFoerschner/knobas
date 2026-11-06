@@ -10,6 +10,8 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import { drafts } from "./drafts.svelte";
+
 import type { Candidate, DayRecord, Draft, LoggedWork, ReaderDay, Worklog } from "../ipc/time";
 import { createLayers, type Layers } from "./layers.svelte";
 import TfWorklogDraft from "./TfWorklogDraft.svelte";
@@ -134,6 +136,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  drafts.reset();
   if (app) unmount(app);
   app = undefined;
   target.remove();
@@ -200,6 +203,36 @@ test("each button answers with its outcome", () => {
   button("Stop, log later")!.click();
   button("Stop, don't log")!.click();
   expect(outcomes).toEqual(["keep", "later", "discard"]);
+});
+
+test("an edited comment outlives Esc, for that ticket and day, until Log or an explicit discard", async () => {
+  const typed = "Wrote the retry window";
+  const edit = () => {
+    comment().value = typed;
+    comment().dispatchEvent(new Event("input", { bubbles: true }));
+    flushSync();
+  };
+  render();
+  edit();
+  comment().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  unmount(app!);
+  render();
+  expect(comment().value, "Esc keeps the words").toBe(typed);
+  button("Stop, log later")!.click();
+  unmount(app!);
+  render();
+  expect(comment().value, "so does Stop, log later").toBe(typed);
+  button("Stop, don't log")!.click();
+  unmount(app!);
+  render();
+  expect(comment().value, "Stop, don't log drops them").not.toBe(typed);
+  edit();
+  unmount(app!);
+  render({ stopped: false });
+  button("Cancel")!.click();
+  unmount(app!);
+  render({ stopped: false });
+  expect(comment().value, "Cancel is the explicit discard").not.toBe(typed);
 });
 
 test("Log sends the work for the reader's day and answers logged", async () => {

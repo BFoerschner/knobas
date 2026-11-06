@@ -147,10 +147,13 @@ function reworded(place: Place): boolean {
   return near !== null && place.said !== null && textOf(near) !== place.said.text;
 }
 
-/** Whether focus is free to take: on nothing, on the page scroller a press in empty space left it on, or left behind on a page now hidden. A dialog or a field the reader went to is not. */
+/**
+ * Whether focus is free to take: on nothing, on the page scroller a press in empty space left it on, on the heading the focus
+ * keeper puts it on while a return has nothing to focus yet, or left behind on a page now hidden. A dialog or a field the reader went to is not.
+ */
 function focusIsFree(main: Element): boolean {
   const at = document.activeElement;
-  return at === null || at === document.body || at === main || at.closest("[hidden]") !== null;
+  return at === null || at === document.body || at === main || at.matches('h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
 }
 
 const later = (run: () => void): void => {
@@ -161,10 +164,16 @@ const later = (run: () => void): void => {
 /** What ends a return's hold: the reader moving, by any means. */
 const READER_MOVES = ["wheel", "pointerdown", "keydown", "touchstart"] as const;
 
-/** Returns under way. */
+/** How many frames a return gets to find what it focuses before the focus keeper may use the heading. */
+const FIRST_LOOK = 2;
+
+/** Returns still holding focus for what they will put it on. */
 let restoring = 0;
 
-/** Whether a return is still putting a place back: focus is its to set until it is over (`focus-keep.ts`). */
+/**
+ * Whether a return is still putting a place back: focus is its to set for now (`focus-keep.ts`). One with nothing to focus
+ * lets go after a first look, so a launcher jump's `Esc` lands at once. The scroll keeps being held, and a row drawn late still takes focus from the heading.
+ */
 export function placeRestoring(): boolean {
   return restoring > 0;
 }
@@ -179,11 +188,17 @@ export function restorePlace(place: Place, page: Element): () => void {
   let over = false;
   let stayed = 0;
   let focused: HTMLElement | null = null;
+  let looks = 0;
+  let holdsFocus = true;
+  const letGo = () => {
+    if (holdsFocus) restoring -= 1;
+    holdsFocus = false;
+  };
   const started = performance.now();
   const end = () => {
     if (over) return;
     over = true;
-    restoring -= 1;
+    letGo();
     for (const type of READER_MOVES) window.removeEventListener(type, end, true);
   };
   restoring += 1;
@@ -199,6 +214,8 @@ export function restorePlace(place: Place, page: Element): () => void {
       focused = focusTarget(place, page);
       focused?.focus({ preventScroll: true });
     }
+    looks += 1;
+    if (focused === null && looks > FIRST_LOOK) letGo();
     const lasted = performance.now() - started;
     if (stayed >= STAYED && lasted > AT_LEAST && focused !== null && document.activeElement === focused) return end();
     if (stayed >= STAYED && lasted > HOLD_FOR / 2) return end();

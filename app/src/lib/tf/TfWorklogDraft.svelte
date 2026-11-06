@@ -17,8 +17,13 @@
   except that *Log* awaits `onbeforelog` (the clock stopping) before it sends.
   `Esc` and the × are the quiet answer, and a quiet answer changes nothing: a stop's
   draft goes back to the running clock (*Cancel, keep running*; Björn, 2026-11-06,
-  reversing #896's *Stop, log later*), any other is discarded. The scrim does nothing,
+  reversing #896's *Stop, log later*), any other is left. The scrim does nothing,
   as on every dialog with a footer.
+
+  **A comment the reader edited outlives the dialog** (the key table, `drafts`): for its ticket
+  and day, through `Esc`, the ×, *Cancel, keep running* and *Stop, log later*, each of which
+  leaves the time to be logged later. *Log* ends it, and so do *Stop, don't log* and a
+  plain *Cancel*, which are the explicit discards. ⌘Enter is `TfDialog`'s, and presses *Log*.
 
   A worklog the ticket's source's credential cannot make (`refused_writes`,
   #2052) draws *Log* disabled with the reason, and stops no clock for it.
@@ -39,6 +44,7 @@
     type Draft,
     type Worklog,
   } from "../ipc/time";
+  import { drafts } from "./drafts.svelte";
   import { askRefused, refusalOf, refusedAttrs, type RefusedWritesPort } from "../shell/refused-writes";
   import { clockReading, dayBounds, dayKey, dayLabel, readerDay } from "../time/day";
   import { DraftForm } from "../time/draft-form.svelte";
@@ -84,6 +90,20 @@
   // svelte-ignore state_referenced_locally
   // Read once: a draft swapped mid-life would drop the reader's ticks.
   const form = new DraftForm(draft);
+  // svelte-ignore state_referenced_locally
+  const commentKey = `worklog:${draft.entity_id}:${draft.day}`;
+  if (drafts.has(commentKey)) form.takeOver(drafts.get(commentKey));
+
+  function typed(words: string) {
+    form.takeOver(words);
+    drafts.put(commentKey, words);
+  }
+
+  /** An explicit discard: the time's answer, and the words with it. */
+  function discard() {
+    drafts.forget(commentKey);
+    onoutcome("discard");
+  }
 
   let sending = $state(false);
   let failed = $state<string | null>(null);
@@ -143,6 +163,7 @@
         (worklog) => {
           // Outside the rejection handler on purpose: the worklog exists now,
           // and a throw in the shell's toast must not read as a failed send.
+          drafts.forget(commentKey);
           onoutcome("logged");
           onlogged(worklog);
         },
@@ -218,7 +239,7 @@
           rows={Math.min(6, Math.max(3, draft.candidates.length))}
           aria-label="Worklog comment"
           value={form.comment}
-          oninput={(event) => form.takeOver(event.currentTarget.value)}
+          oninput={(event) => typed(event.currentTarget.value)}
         ></textarea>
         <p class="tf-dim tf-note">
           {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}
@@ -232,7 +253,7 @@
   {/snippet}
   {#snippet footer()}
       {#if stopped}
-        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Stop, don't log</button>
+        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={discard}>Stop, don't log</button>
         <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("later")}>
           Stop, log later
         </button>
@@ -240,7 +261,7 @@
           Cancel, keep running
         </button>
       {:else}
-        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Cancel</button>
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={discard}>Cancel</button>
       {/if}
       <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
         Log {form.reading} to <TfKey value={form.key} />
