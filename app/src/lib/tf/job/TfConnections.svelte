@@ -14,7 +14,9 @@
   shell's layer stack while open, so `Esc` closes it (rung 2), as does a click
   on the scrim; focus goes to its filter and returns to what opened it, the
   *Connections* button. Its title line is a dialog's, and a row is the shape of
-  the ticket card's rows: what it is under its name, then a chevron.
+  the ticket card's rows: what it is under its name, its state's dot and word
+  where it says one (F-036), then a chevron. A row's action stands in place of
+  that state on hover and focus, as the app's row actions do.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -25,6 +27,9 @@
   import type { Layers } from "../layers.svelte";
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
+  import { stateWord } from "../state-word";
+  import { toneClass } from "../tone";
+  import type { Tone } from "../../ipc/entity";
   import { filterLinks, filterRows, kindWord, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
   import { itemHash } from "./job";
 
@@ -84,6 +89,13 @@
   });
 </script>
 
+<!-- A row's dot and word, as the ticket card's rows draw them; held empty so the column lines up down the drawer. -->
+{#snippet stateOf(state: { text: string; tone: Tone | null } | null)}
+  <span class="tf-lk-st" class:tf-asks={state?.tone === "err" || state?.tone === "warn"}
+    >{#if state !== null}<span class="tf-dot {toneClass(state)}" aria-hidden="true"></span>{stateWord(state.text)}{/if}</span
+  >
+{/snippet}
+
 <div class="tf-drawerhost" {@attach inFloatHost}>
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -115,7 +127,7 @@
       <div class="tf-lk">
         <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
           ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{kindWord(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</span></span
-          ><span class="tf-chev" aria-hidden="true">›</span></a
+          >{@render stateOf(entry.other.state ?? null)}<span class="tf-chev" aria-hidden="true">›</span></a
         >
         <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
       </div>
@@ -136,10 +148,10 @@
         <div class="tf-lk">
           {#if row.href !== null}
             <a class="tf-lk-go" href={row.href} onclick={onclose}
-              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span><span class="tf-chev" aria-hidden="true">›</span></a
+              ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}<span class="tf-chev" aria-hidden="true">›</span></a
             >
           {:else}
-            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span></div>
+            <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}</div>
           {/if}
           {#if group.setId !== null}
             <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>

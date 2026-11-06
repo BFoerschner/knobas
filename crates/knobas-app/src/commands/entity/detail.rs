@@ -173,9 +173,18 @@ pub async fn get_entity_inner(
     // a missing entity, and the two want different words on screen.
     let entity = EntityRef::parse(entity_id).map_err(IpcError::invalid)?;
     let declarations = declared_paths(pool, registry).await?;
-    let detail = knobas_core::detail::read(pool, &declarations, &entity)
+    let mut detail = knobas_core::detail::read(pool, &declarations, &entity)
         .await?
         .ok_or_else(|| IpcError::not_found(format!("{entity} is not in the mirror")))?;
+    // The Connections drawer's dots (F-036). It only opens on a ticket, so no
+    // other kind pays for the read.
+    if detail.row.kind == "ticket" && !detail.links.is_empty() {
+        let ids = detail.links.iter().map(|entry| entry.other.entity_id.as_str());
+        let states = crate::link_sets::states_of(pool, &declarations.as_param(), ids).await?;
+        for entry in &mut detail.links {
+            entry.other.state = states.get(&entry.other.entity_id).cloned();
+        }
+    }
     Ok(EntityDetail {
         kind_info: kind_info_for(
             registry,

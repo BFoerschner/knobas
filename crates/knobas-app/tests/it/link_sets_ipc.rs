@@ -1078,3 +1078,45 @@ async fn an_item_linked_by_hand_under_one_epic_is_offered_to_its_set() {
         "a member is not offered again"
     );
 }
+
+/// F-036: a row of the Connections drawer draws what its far end says of itself.
+/// A ticket's dot is the state its source declares, read for the ticket's own
+/// detail; an entity that says nothing has no state, and so no dot.
+#[tokio::test]
+async fn a_drawer_row_says_what_its_far_end_says_of_itself() {
+    let pool = pool().await;
+    let p = project();
+    let story = issue(&pool, &p, 1, None, None).await;
+    let moving = issue(&pool, &p, 2, None, None).await;
+    let silent = thing(&pool, "page", "PSP error codes").await;
+    sqlx::query(
+        "update sync.item
+            set payload = jsonb_set(payload, '{fields,status}', '{\"name\": \"In Progress\"}')
+          where entity_id = $1",
+    )
+    .bind(&moving)
+    .execute(&pool)
+    .await
+    .unwrap();
+    link(&pool, &story, &moving).await;
+    link(&pool, &story, &silent).await;
+
+    let detail =
+        knobas_app::commands::entity::get_entity_inner(&pool, &Registry::for_process(), &story)
+            .await
+            .unwrap();
+    let state_of = |id: &str| {
+        detail
+            .links
+            .iter()
+            .find(|entry| entry.other.entity_id == id)
+            .expect("the link is on the ticket")
+            .other
+            .state
+            .clone()
+    };
+    let chip = state_of(&moving).expect("the far end declares a state");
+    assert_eq!(chip.text, "In Progress");
+    assert_eq!(chip.tone, Some(knobas_core::tone::Tone::Info));
+    assert_eq!(state_of(&silent), None);
+}

@@ -1904,7 +1904,12 @@ export type InboxShelf = "stream" | "snoozed";
 /**
  * One of a parent ticket's own links: the far end.
  */
-export type JobLink = { entity_id: string, kind: string, title: string | null, };
+export type JobLink = { entity_id: string, kind: string, title: string | null, 
+/**
+ * The state dot on its drawer row (F-036). Absent on the wire where the
+ * entity says none.
+ */
+state?: StateChip, };
 
 /**
  * What a job shows beside its own links (#867): the sets that apply, by
@@ -1937,7 +1942,12 @@ entity_kind: string | null, title: string | null,
 /**
  * Hidden on this ticket by *Hide here* (R-7.5).
  */
-hidden: boolean, };
+hidden: boolean, 
+/**
+ * The state dot on its drawer row (F-036), as the set's editor reads it.
+ * Absent on the wire where the entity says none.
+ */
+state?: StateChip, };
 
 /**
  * The parent whose own links a sub-task shows (R-7.3).
@@ -2175,7 +2185,15 @@ title: string,
  * RFC 3339 on the wire. Not a reason to hide the row: §5a keeps the entity
  * so a link never dangles, and the panel marks it instead.
  */
-deleted_at: string | null, };
+deleted_at: string | null, 
+/**
+ * The state dot on its row in the Connections drawer (F-036): what the far
+ * end's own declared state says, or an asset's health. Not read here,
+ * because [`entries_of`] binds no declarations and most of its readers
+ * draw no dot; `get_entity` fills it for a ticket. Absent on the wire
+ * otherwise, and where the far end declares no state.
+ */
+state?: StateChip, };
 
 /**
  * One link, as a detail view draws it: the record, and its other end.

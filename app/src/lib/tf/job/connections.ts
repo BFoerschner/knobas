@@ -6,7 +6,7 @@
  * link set that applies and one for the parent (#867, R-6.2), read by
  * `job_link_sets`; a set's rows hidden on this ticket go under *Hidden on KEY*.
  */
-import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow } from "../../ipc/entity";
+import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow, Tone } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 import { kindRegistry } from "../../shell/kind-registry.svelte";
 import { entityAddress } from "../address";
@@ -105,6 +105,8 @@ export interface GroupRow {
   section: string;
   /** What it is, in one word. */
   kind: string;
+  /** Its dot (F-036), where the entity says a state. */
+  state: { text: string; tone: Tone | null } | null;
 }
 
 /**
@@ -160,6 +162,7 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
         href: rowHash(member.entity_id, member.entity_kind, member.kind),
         section: sectionOf(member.kind),
         kind: kindWord(member.kind),
+        state: member.state ?? null,
       })),
   }));
   if (read.parent === null) return sets;
@@ -178,6 +181,7 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
         href: rowHash(link.entity_id, link.kind, null),
         section: sectionOf(link.kind),
         kind: kindWord(link.kind),
+        state: link.state ?? null,
       })),
     },
   ];

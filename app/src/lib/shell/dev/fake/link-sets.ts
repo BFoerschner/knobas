@@ -176,6 +176,11 @@ function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
   return { ...row, line: payload.path ?? null, state: payload.chip ?? null };
 }
 
+/** What an entity says of itself, as `states_of` reads it (F-036): the dot a member row draws. */
+export function fakeStateOf(id: string): StateChip | null {
+  return memberRow("repo", id).state;
+}
+
 /** The live items of a member kind a pattern can match, with what it reads: project, parents, name. */
 function candidates(kind: LinkSetMemberKind): { id: string; source: string; projects: string[]; under: string[]; names: string[] }[] {
   if (kind === "pipeline") {
@@ -336,6 +341,12 @@ export function fakeSetReach(ticketId: string): Reached[] {
 
 SET_REACH.push(fakeSetReach);
 
+/** A state off the wire where the entity says none, as the real read leaves it. */
+function stateField(id: string): { state?: StateChip } {
+  const state = fakeStateOf(id);
+  return state === null ? {} : { state };
+}
+
 /** `job_link_sets`: every set whose rules match, by name, with its first matching rule, and the parent. */
 export function fakeJobLinkSets(ticketId: string): JobLinkSets {
   const ticket = tickets().find((row) => row.entity_id === ticketId);
@@ -357,6 +368,7 @@ export function fakeJobLinkSets(ticketId: string): JobLinkSets {
                   entity_kind: member.kind === "pipeline" ? "build_config" : member.kind,
                   title: title(member.entity_id),
                   hidden: HIDDEN.has(`${ticketId}|${member.entity_id}`),
+                  ...stateField(member.entity_id),
                 })),
             },
           ];
@@ -368,7 +380,7 @@ export function fakeJobLinkSets(ticketId: string): JobLinkSets {
     parent: parent && {
       ticket: parent.ticket,
       title: title(parent.ticket),
-      links: parent.reached.map((row) => ({ entity_id: row.entity_id, kind: row.kind, title: title(row.entity_id) })),
+      links: parent.reached.map((row) => ({ entity_id: row.entity_id, kind: row.kind, title: title(row.entity_id), ...stateField(row.entity_id) })),
     },
   };
 }

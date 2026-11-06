@@ -9,6 +9,7 @@ import { keepSeed, onFakeReset } from "../fake-seed";
 import { CORPUS, bodyShown, fakeEpicEntry, mirrorRow } from "./corpus";
 import { docPageEnd } from "./docs";
 import { FIXTURE_ESTATE } from "./estate";
+import { fakeStateOf } from "./link-sets";
 import { keyOf } from "../../../time/format";
 import { FIXTURE_SOURCES } from "./sources";
 import { fixtureBuildEntity, runView } from "./builds";
@@ -150,7 +151,8 @@ function entryFor(id: string, link: LinkRow): LinkEntry | null {
   const otherId = link.from_id === id ? link.to_id : link.from_id;
   const other = linkEnd(otherId);
   if (!other) return null;
-  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at } };
+  const state = fakeStateOf(otherId);
+  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at, ...(state === null ? {} : { state }) } };
 }
 
 /** The tickets linked to `id`, for a page's *Work it belongs to*. */
