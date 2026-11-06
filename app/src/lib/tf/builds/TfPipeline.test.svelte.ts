@@ -239,7 +239,7 @@ test("a chained pipeline's header names its step and the chain (R-9.13)", async 
   await settle();
   const sub = target.querySelector(".tf-bhead .tf-sub")!;
   expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "TeamCity build configuration in project Payments › Payouts, builds payout-service. Triggered by VCS and Schedule. " +
+    "TeamCity build configuration, builds payout-service. Triggered by VCS and Schedule. " +
       "Step 2 of the chain Payout_Build › Payout_IntegrationTests › Payout_Deploy_Staging.",
   );
 });
@@ -250,7 +250,7 @@ test("the header says what it is in the source's word, the repository it builds 
   expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
   const sub = target.querySelector(".tf-bhead .tf-sub")!;
   expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "TeamCity build configuration in project Payments › Payouts, builds payout-service. Triggered by VCS and Schedule.",
+    "TeamCity build configuration, builds payout-service. Triggered by VCS and Schedule.",
   );
   expect(sub.querySelector("a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Atidewater%2Fpayout-service");
   expect(button("Run…")).toBeDefined();

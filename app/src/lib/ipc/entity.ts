@@ -237,6 +237,7 @@ export type {
   ReachOrigin,
   Reached,
   RefusedWrite,
+  Republication,
   RuleTicket,
   RunLog,
   RunPreset,
@@ -1166,6 +1167,16 @@ export function publishStandupProtocol(
   // Answers once the page's write is queued (#779): the publication is that
   // write, with no page yet; `standupProtocol` names it once it lands.
   return invoke<Protocol>("publish_standup_protocol", { day, target: target ?? null });
+}
+
+/**
+ * Send what the note says now to the date's page — `publish_standup_protocol_again`
+ * (F-327): an `UpdatePage` of the whole page, answered once queued. Nothing new, or
+ * one still on its way, queues nothing; a first publish that has not landed, or a
+ * page edited at the source since, is refused.
+ */
+export function publishStandupProtocolAgain(day: string): Promise<Protocol> {
+  return invoke<Protocol>("publish_standup_protocol_again", { day });
 }
 
 /** Where protocols are published, or `null` until somebody has said. */

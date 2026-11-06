@@ -10,7 +10,7 @@
  */
 import type { PipelineRow, PipelineSettings, PipelineTrigger, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
-import { ageLabel, secondsLabel } from "../../time/format";
+import { ageLabel, dayHeadingLabel, secondsLabel } from "../../time/format";
 import { signInFails } from "../../shell/health.svelte";
 import { refusalOf, type RefusedWrite, type WriteAsk } from "../../shell/refused-writes";
 import type { WriteSource } from "../../shell/queued-toast";
@@ -342,11 +342,6 @@ export function branchesOf(runs: readonly RunRow[]): string[] {
   return [...new Set(runs.map((run) => run.branch).filter((branch): branch is string => branch !== null))];
 }
 
-/** The local calendar day of an instant, `YYYY-MM-DD`. */
-function dayOf(at: Date): string {
-  return `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
-}
-
 /** One day's runs, under its heading. */
 export interface DayGroup {
   label: string;
@@ -355,17 +350,14 @@ export interface DayGroup {
 
 /**
  * The runs by the day they started (or were queued), in order: *Today*,
- * *Yesterday*, then the date. A run with no instant at all joins the group
+ * *Yesterday*, then the date (`Wed 4 Nov`). A run with no instant at all joins the group
  * before it.
  */
 export function byDay(runs: readonly RunRow[], now: Date = new Date()): DayGroup[] {
-  const today = dayOf(now);
-  const yesterday = dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
   const groups: DayGroup[] = [];
   for (const run of runs) {
     const at = run.started ?? run.updated_at;
-    const day = at === null ? (groups.at(-1)?.label ?? "Today") : dayOf(new Date(at));
-    const label = day === today ? "Today" : day === yesterday ? "Yesterday" : day;
+    const label = at === null ? (groups.at(-1)?.label ?? "Today") : dayHeadingLabel(new Date(at), now);
     const last = groups.at(-1);
     if (last && last.label === label) last.runs.push(run);
     else groups.push({ label, runs: [run] });

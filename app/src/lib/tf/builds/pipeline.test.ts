@@ -176,7 +176,7 @@ test("runs group by the local day they started, Today and Yesterday by name", ()
   expect(groups.map((g) => [g.label, g.runs.map((r) => r.entity_id.split(":").at(-1))])).toEqual([
     ["Today", ["1191", "1190"]],
     ["Yesterday", ["1189", "1188"]],
-    ["2026-08-19", ["1187"]],
+    ["Wed 19 Aug", ["1187"]],
   ]);
 });
 

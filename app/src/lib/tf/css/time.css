@@ -136,6 +136,9 @@
 .tf-tm-t a:hover { text-decoration: underline; text-underline-offset: 2px; }
 .tf-tm-c { min-width: 92px; font-variant-numeric: tabular-nums; }
 .tf-tm-c a { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: inherit; }
+/* A cell is a way into its day, and says so as the pointer comes to it (F-345). */
+.tf-tm-week td.tf-tm-c:has(> a:hover) { background: var(--rule-2); }
+.tf-tm-c a:hover b { text-decoration: underline; text-underline-offset: 2px; }
 .tf-tm-c small { font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-tm-c.tf-tm-tot { border-left: 1px solid var(--rule); }
 .tf-tm-bar { display: block; border-radius: 2px; overflow: hidden; }
@@ -168,12 +171,18 @@
 .tf .tf-su-none { margin: 0; padding: 5px 0; color: var(--ink-2); font-size: var(--t-sm); }
 .tf-su-day { font-size: var(--t-sm); }
 /* A panel heading's action sits on the right of the heading line (Controls: section heading). A ghost's word ends on the box's edge. */
-.tf-su .tf-panel > header > :is(.tf-btn, .tf-su-going) { margin-left: auto; }
+.tf-su .tf-panel > header > .tf-btn { margin-left: auto; }
 .tf-su .tf-panel > header > .tf-btn.tf-ghost { margin-right: -9px; }
+.tf-su .tf-panel > header > .tf-trail > .tf-btn.tf-ghost:last-child { margin-right: -9px; }
 /* So does a group's: *Add someone* no longer wraps alone under the pills, and the line keeps its height while the field is open. */
 .tf-su-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-h-sm); margin-bottom: 4px; }
 .tf-su-h > .tf-btn.tf-ghost { margin-right: -9px; }
 .tf-su-pub { margin: 0 0 10px; }
+/* Three lines in one grid cell, the two not showing kept for their room: *Published* becoming *Changed* moves no field (F-327). */
+.tf-su-publine { display: grid; padding: 5px 8px; border-radius: 4px; border-left: 3px solid var(--rule); background: var(--sheet-2); font-size: var(--t-sm); color: var(--ink-2); }
+.tf-su-publine > span { grid-area: 1 / 1; }
+.tf-su-publine > .tf-off { visibility: hidden; }
+.tf-su-publine.tf-su-pubchanged { border-left-color: var(--warn); color: var(--ink); }
 .tf-su-people { display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; margin-bottom: 8px; }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
 .tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }

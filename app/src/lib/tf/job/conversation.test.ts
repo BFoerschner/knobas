@@ -76,7 +76,7 @@ test("a mention is marked in both spellings, and only for the reader's account",
 test("times read as prototype-6 writes them", () => {
   expect(stamp("2026-10-15T07:35:00Z", NOW)).toBe("today 09:35");
   expect(stamp("2026-10-14T15:41:00Z", NOW)).toBe("yesterday 17:41");
-  expect(stamp("2026-08-12T07:14:00Z", NOW)).toBe("2026-08-12 09:14");
+  expect(stamp("2026-08-12T07:14:00Z", NOW)).toBe("12 Aug 09:14");
   expect(stamp(null, NOW)).toBe("");
   expect(since(VISIT, NOW)).toBe("09:00");
   expect(since("2026-10-14T15:41:00Z", NOW)).toBe("yesterday 17:41");

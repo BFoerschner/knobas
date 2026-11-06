@@ -89,7 +89,7 @@ describe("the state chip", () => {
     const at = (day: number) => ({ taken_at: new Date(2026, 9, day, 12, 40).toISOString(), state: "down" });
     const now = new Date(2026, 9, 16, 9, 0);
     expect(stateChip(row({ state: "down", samples: [at(15)] }), now).since).toBe("since yesterday 12:40");
-    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).since).toBe("since 2026-10-12 12:40");
+    expect(stateChip(row({ state: "down", samples: [at(12)] }), now).since).toBe("since Mon 12:40");
   });
 
   test("says down alone when no sample says since when", () => {

@@ -13,9 +13,10 @@
 /* Fixed whether or not a row holds *Ack*, so the columns do not move as a filter hides the last one down. The row's other
    actions stand in place of its figures on hover (Motion), or of its bars where the figures have left their columns. */
 .tf-monc-acts { width: 72px; }
-/* The chip holds the word and the time is plain text: beside it here, under it where the column narrows. Neither is cut. */
+/* The chip holds the word and the time is plain text, on its own line at every width. A pause's or resume's echo stands
+   beside the state chip, so the row holds its height as the echo comes and goes (F-337, F-349). */
 .tf-mon-state { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; }
-.tf-mon-since { font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-mon-since { flex-basis: 100%; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .tf-mon-figs { display: none; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* The heads stay under the filter bar on a long list. At 900 px and below `.tf-cbody` scrolls sideways, so it would be their scrollport and they stay put. */
 @media (min-width: 901px) {
@@ -41,15 +42,15 @@
   .tf-monc-bars { width: 122px; }
   .tf-monc-num { width: 90px; }
   .tf-monc-watch { width: 24%; }
-  .tf-mon-state { flex-direction: column; align-items: flex-start; }
 }
 /* The figures' columns go, and the figures stay: under the bars, in the row. */
 @media (max-width: 1040px) {
   .tf-mon .tf-num, .tf-monc-num { display: none; }
   .tf-mon-figs { display: block; margin-top: 2px; }
-  /* Now the last column: wide enough for the row's actions, which replace the bars and figures on hover. */
+  /* Now the last column: wide enough for the row's actions, which take the figures' line on hover and leave the bars
+     readable, so the bar under the pointer keeps its title. Lowered from the row's middle by what puts the group's top at the figures' line. */
   .tf-monc-bars { width: 190px; }
-  .tf-mon tr:hover .tf-mon-24, .tf-mon tr:has(.tf-rowacts :is(:focus-visible, [aria-expanded="true"])) .tf-mon-24 { visibility: hidden; }
+  .tf-mon-acts .tf-rowacts { transform: translateY(calc(-50% + 10px)); }
 }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 /* Figures read down their column: right-aligned, with room before the next one starts. */

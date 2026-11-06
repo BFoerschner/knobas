@@ -37,7 +37,7 @@
   import { stateWord } from "../state-word";
   import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
-  import { secondsLabel } from "../../time/format";
+  import { secondsLabel, timeLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -57,6 +57,7 @@
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { runHash, runTone, shortTime } from "./builds";
+  import { RunHold } from "./run-hold.svelte";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
@@ -356,8 +357,6 @@
 
   const adapterKind = $derived(sources.find((s) => s.id === pipeline.source_id)?.adapter_kind ?? null);
   const word = $derived(pipelineWord(adapters, adapterKind));
-  /** The project path, as the source nests it (#849), else the group. */
-  const project = $derived(pipeline.path.length > 0 ? pipeline.path.join(" › ") : (pipeline.group ?? ""));
   const repositories = $derived(settings?.repositories ?? []);
   const triggers = $derived(triggersSentence(settings));
   const chain = $derived(chainSentence(settings?.chain ?? [], pipeline.entity_id));
@@ -365,26 +364,29 @@
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
   const fallback = $derived(defaultBranch(settings));
 
+  /** *Run on <branch>* holds as what its write is doing, so a second press at once can't queue a second run (F-338). */
+  const runOnHold = new RunHold(() => id);
+
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
   function runOn(branch: string | null) {
     if (cannotRun !== null) return;
     const words = branch ?? fallback ?? "the default branch";
-    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`);
+    void runOnHold.press(() => queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`));
   }
 
   /**
    * Queue a run and draw it *queued* at the top at once (R-9.8). The toast
    * names it by the dialog's line, as prototype-6's `startRun` does.
    */
-  async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
+  async function queue(payload: WriteOpPayload, summary: string): Promise<number | null> {
     try {
       const write = await ports.submitWrite(payload);
       echoRun(pipeline, write, runBranch(payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline), { write });
-      return true;
+      return write.id;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return false;
+      return null;
     }
   }
 
@@ -398,7 +400,7 @@
 
   async function onrun(request: RunRequest) {
     dialog = null;
-    if (!(await queue(request.payload, request.summary)) || request.preset === null) return;
+    if ((await queue(request.payload, request.summary)) === null || request.preset === null) return;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
@@ -541,7 +543,7 @@
   <div>
     <h1>{pipeline.name}</h1>
     <div class="tf-sub">
-      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{project !== "" ? ` in project ${project}` : ""}{#if repositories.length > 0}, builds
+      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{#if repositories.length > 0}, builds
         {#each repositories as repository, at (at)}{#if at > 0},{" "}{/if}{#if repository.entity_id !== null}<a
               class="tf-mono"
               href={`#/repo/${encodeURIComponent(repository.entity_id)}`}>{repository.name}</a
@@ -559,16 +561,18 @@
       <button
         type="button"
         class="tf-btn"
-        {...refusedAttrs(cannotRun)}
-        onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button
+        aria-disabled={runOnHold.word !== null ? "true" : undefined}
+        {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
+        onclick={() => runOn(jobBranch)}><span class="tf-keepw" data-keep="Run on {jobBranch}">{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on <span class="tf-mono">{jobBranch}</span>{/if}</span></button
       >
     {:else}
       <button
         type="button"
         class="tf-btn"
-        {...refusedAttrs(cannotRun)}
+        aria-disabled={runOnHold.word !== null ? "true" : undefined}
+        {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
         onclick={() => runOn(null)}
-        >Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}</button
+        ><span class="tf-keepw" data-keep="Run on {fallback ?? 'the default branch'}">{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}{/if}</span></button
       >
     {/if}
     {#if onpin !== undefined}
@@ -696,7 +700,7 @@
                   waiting
                 {/if}
               </td>
-              <td class="tf-nowrap tf-dim tf-num tf-run-at"><span class="tf-rowval">{run.started !== null ? shortTime(run.started) : ""}</span></td>
+              <td class="tf-nowrap tf-dim tf-num tf-run-at"><span class="tf-rowval">{run.started !== null ? timeLabel(run.started) : ""}</span></td>
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
                   <span class="tf-rowend"><span class="tf-rowacts">

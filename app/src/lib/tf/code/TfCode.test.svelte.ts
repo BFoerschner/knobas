@@ -162,7 +162,7 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   expect(rows.map(cells)).toEqual([
     // A repository holding a merged pull request of yours is yours too (#966).
     ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
-    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in…"],
+    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "Thu 12:00", "Open in…"],
     // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
     ["tidewater/fx-rates", "Platform", "Go", "0", "not on this machine", "today 11:00", "Clone"],
   ]);
@@ -206,7 +206,7 @@ test("Pull requests are grouped in the attention read's order, then merged or cl
     ["#144", `Add payout CSV export${PAYOUT}, tom`, "Open", "", "today 10:20"],
     ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "Open", "PAY-231", "today 10:20"],
     ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "Merged", "", "today 10:20"],
-    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "2026-08-10"],
+    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "10 Aug"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
     "Filter PRs",

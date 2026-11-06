@@ -432,7 +432,7 @@ test("an open stretch is a dashed open row, and the open figure is the sum of th
   expect(squash(target.textContent)).not.toContain("Nothing tracked");
 });
 
-test("an open stretch reads Assign… in the sans face on the strip, and pressing it only selects the row (#1523)", async () => {
+test("an open stretch reads Assign… in the sans face on the strip, and pressing it opens the assign dialog (#1523, F-344)", async () => {
   Element.prototype.scrollIntoView = () => {};
   render({ stripWidth: 2000 });
   await settle();
@@ -442,7 +442,7 @@ test("an open stretch reads Assign… in the sans face on the strip, and pressin
   expect(text.getAttribute("class")).toContain("tf-tm-plain");
   (gap as SVGElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
   await settle();
-  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull();
   expect(gap.getAttribute("class")).toContain("tf-on");
 });
 

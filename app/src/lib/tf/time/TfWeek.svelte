@@ -27,6 +27,7 @@
   import { MONTHS, dayKey, shiftDay } from "../../time/day";
   import { columnHeading, mondayOf, weekWindows } from "../../time/week";
   import { entityAddress } from "../address";
+  import { goAcross } from "../opener";
   import { heldNotes, weekView, type WeekCellView } from "./week-view";
 
   interface WeekPorts {
@@ -134,6 +135,16 @@
   const weekAfter = $derived(shiftDay(monday, 7));
   const after = $derived(weekAfter === thisMonday ? "#/time/week" : `#/time/week/${weekAfter}`);
 
+  /**
+   * A day opened from the week is opened to come back from: the two are one page by their address, so this says so,
+   * and `Esc` and the bar's *Back to* return here (F-345). ⌘-click and the like stay the browser's.
+   */
+  function openDay(event: MouseEvent, day: string) {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    goAcross(`#/time/${day}`);
+  }
+
   /** The bar's three shares, as percentages of the cell's whole. */
   function shares(cell: WeekCellView): [number, number, number] {
     const whole = cell.logged + cell.held + cell.toLog;
@@ -179,7 +190,7 @@
         <tr>
           <th>Ticket or label</th>
           {#each ready.week.days as day, index (day)}
-            <th class={[index > 4 && "tf-tm-we", day === dayKey(clock) && "tf-tm-today"]} aria-current={day === dayKey(clock) ? "date" : undefined}><a href="#/time/{day}">{columnHeading(day, index)}</a></th>
+            <th class={[index > 4 && "tf-tm-we", day === dayKey(clock) && "tf-tm-today"]} aria-current={day === dayKey(clock) ? "date" : undefined}><a href="#/time/{day}" onclick={(event) => openDay(event, day)}>{columnHeading(day, index)}</a></th>
           {/each}
           <th class="tf-tm-tot">Week</th>
         </tr>
@@ -209,7 +220,7 @@
                   <span class="tf-dim">–</span>
                 {:else}
                   {@const [logged, held, toLog] = shares(cell)}
-                  <a href="#/time/{cell.day}">
+                  <a href="#/time/{cell.day}" onclick={(event) => openDay(event, cell.day)}>
                     <b>{minutesLabel(cell.tracked)}</b>
                     {#if cell.bar}
                       <svg class="tf-tm-bar" width="72" height="4" aria-hidden="true">

@@ -15,8 +15,8 @@
     fold as to the roster. Its alerts reach no inbox, so it raises no desktop
     notification and offers no *Ack*; knobas-local, Uptime Kuma goes on
     checking it. While a pause or resume is on its way its echo (*queued*, then *sent*,
-    `tf/queued.svelte.ts`, #2105) stands in the button's place until the
-    roster reads the new state.
+    `tf/queued.svelte.ts`, #2105) stands in the State cell after the state chip, because it says the state is changing,
+    and the button stays in its place, turned off, until the roster reads the new state.
   - **Assets nothing watches**: containers, services, routes, databases and VMs
     no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
     A row whose create is on its way draws its echo instead (#1959, #2105),
@@ -655,7 +655,7 @@
 
   async function toggle(row: MonitorRow, op: string) {
     const form = ROW_OPS[op];
-    if (!form || pressing[row.entity_id]) return;
+    if (!form || pressing[row.entity_id] || echoOn(row.entity_id, TOGGLE) !== null) return;
     pressing[row.entity_id] = true;
     try {
       const write = await ports.submitWrite(form.build(row.entity_id));
@@ -825,7 +825,7 @@
               {@const refresher = refreshers.get(row.entity_id)}
               <tr class:tf-mon-hid={row.hidden} class:tf-mon-at={row.entity_id === markedId} aria-current={row.entity_id === markedId ? "true" : undefined} {@attach win.row(entryKey(entry))}>
                 <td><Marked text={row.name} typed={filter.text} />{#if row.monitor_type}{" "}<span class="tf-dim tf-mon-type">{kindWord(row.monitor_type)}</span>{/if}</td>
-                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
+                <td><div class="tf-mon-state"><TfStateChip text={chip.label} {tone} />{#if toggled !== null}<!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. --><TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />{/if}{#if chip.since}<span class="tf-mon-since">{chip.since}</span>{/if}</div></td>
                 <!-- Before the bars and figures, not after them: the row's actions stand in the last column's place on hover, and this column's links have to stay in reach. -->
                 <td>
                   {#each row.assets as asset (asset.id)}
@@ -840,7 +840,7 @@
                       {#each barsOf(segments(row, now.getTime()), hourlyBars.current) as bar (bar.at)}<i class="tf-seg-{bar.state}" title={bar.title}></i>{/each}
                     </span>
                     <!-- Where the two figures' columns have gone (`monitors.css`), they stay under the bars. -->
-                    <span class="tf-mon-figs" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
+                    <span class="tf-mon-figs tf-rowval" title="Response {responseText(row.response_time_ms)}, {uptimeText(row)} up over 30 days">{responseText(row.response_time_ms)}, {uptimeText(row)}</span>
                   </div>
                 </td>
                 <td class="tf-num"><span class="tf-rowval">{responseText(row.response_time_ms)}</span></td>
@@ -851,16 +851,11 @@
                       >{row.entity_id in acked ? "Acked" : "Ack"}</button
                     >
                   {/if}
-                  {#if toggled !== null}
-                    <!-- The pause's or resume's echo (#2105): *queued*, then *sent*, until the roster reads the new state. -->
-                    <TfStateChip text={toggled.state} tone="info" class="tf-queued-mark" />
-                  {/if}
                   <span class="tf-rowacts">
-                  {#if toggled === null}
-                    {#each row.actions.filter((op) => op in ROW_OPS) as op (op)}
-                      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
-                    {/each}
-                  {/if}
+                  <!-- Unkeyed: when the read turns *Pause* into *Resume* it is one button, so focus stays on it. -->
+                  {#each row.actions.filter((op) => op in ROW_OPS) as op}
+                    <button type="button" class="tf-btn tf-sm tf-ghost" aria-disabled={toggled !== null ? "true" : undefined} title={toggled !== null ? "On its way. It settles when the roster reads the new state." : undefined} onclick={() => void toggle(row, op)}>{ROW_OPS[op]!.label}</button>
+                  {/each}
                   <button
                     type="button"
                     class="tf-btn tf-sm tf-ghost"

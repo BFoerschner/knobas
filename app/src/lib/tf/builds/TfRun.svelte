@@ -59,6 +59,7 @@
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
   import { fitLabel } from "../time/day-view";
+  import { RunHold } from "./run-hold.svelte";
   import { pipelineHash, runTone, stateWord } from "./builds";
   import {
     chipTone,
@@ -412,21 +413,24 @@
    * The page draws no queued row of its own (#853); the pipeline page draws
    * it at the top of its runs until a read holds it (#1449).
    */
-  async function queue(request: RunRequest) {
+  async function queue(request: RunRequest): Promise<number | null> {
+    let id: number;
     try {
       const write = await ports.submitWrite(request.payload);
+      id = write.id;
       echoRun(pipeline, write, runBranch(request.payload), held, ports.follower());
       toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline), { write });
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return;
+      return null;
     }
-    if (request.preset === null) return;
+    if (request.preset === null) return id;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
       push({ text: `Could not save the preset: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
+    return id;
   }
 
   /**
@@ -441,9 +445,12 @@
         ? fieldRefusals.cannotOverride
         : null),
   );
+  /** *Re-run* holds as what its write is doing for about two seconds, so a second press can't queue a second run (F-338). */
+  const rerunHold = new RunHold(() => pipelineId);
   function rerun() {
     if (rerunning === null || cannotRerun !== null) return;
-    void queue(rerunning);
+    const request = rerunning;
+    void rerunHold.press(() => queue(request));
   }
 
   let dialog = $state(false);
@@ -501,9 +508,9 @@
           type="button"
           class="tf-btn tf-primary"
           disabled={view === null}
-          aria-disabled={cannotRerun !== null ? "true" : undefined}
+          aria-disabled={cannotRerun !== null || rerunHold.word !== null ? "true" : undefined}
           title={cannotRerun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
-          onclick={rerun}>Re-run</button
+          onclick={rerun}><span class="tf-keepw" data-keep="Queued">{rerunHold.word ?? "Re-run"}</span></button
         >
         <button
           type="button"

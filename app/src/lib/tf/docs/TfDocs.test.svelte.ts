@@ -297,7 +297,7 @@ test("the header: breadcrumb, who edited when, version, reading time and labels"
     ["Ops home", "#/page/confluence%3A1"],
   ]);
   const meta = target.querySelector(".tf-rd-meta")!.textContent!;
-  expect(meta).toContain("Tomasz Wójcik edited 2026-07-02");
+  expect(meta).toContain("Tomasz Wójcik edited 2 Jul");
   expect(meta).toContain("version 31");
   expect(meta).toContain("1 min read");
   expect([...target.querySelectorAll(".tf-rd-meta .tf-chip")].map((c) => c.textContent)).toEqual(["ops", "on-call"]);
@@ -970,8 +970,8 @@ test("the words in the address search every space and list the hits; the picker 
   expect(hits[0]!.querySelector(".tf-sn")?.textContent).toBe("Ledger: The ledger");
   expect(hits[0]!.querySelector(".tf-sn mark")?.textContent).toBe("ledger");
   expect(hits[1]!.querySelector(".tf-sn b")?.textContent).toBe("Comment by Priya:");
-  expect(hits[0]!.querySelector(".tf-n")?.textContent).toBe("2 matches, Tomasz, 2026-07-02");
-  expect(hits[1]!.querySelector(".tf-n")?.textContent).toBe("1 match, you, 2026-07-02");
+  expect(hits[0]!.querySelector(".tf-n")?.textContent).toBe("2 matches, Tomasz, 2 Jul");
+  expect(hits[1]!.querySelector(".tf-n")?.textContent).toBe("1 match, you, 2 Jul");
   expect(target.querySelector("nav[aria-label='Docs'] details")).toBeNull();
 
   const picker = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
@@ -1600,14 +1600,14 @@ test("the meta line names who created the page: version 1's entry, else the edit
   const meta = () => [...target.querySelectorAll(".tf-rd-meta > *")].map((m) => m.textContent?.trim());
   await drawPage(RICH);
   expect(meta()).toEqual([
-    "Tomasz Wójcik edited 2026-07-02",
-    "Created by you, 2026-01-02",
+    "Tomasz Wójcik edited 2 Jul",
+    "Created by you, 2 Jan",
     "version 31",
     "1 min read",
     "opson-call",
   ]);
   await drawPage({ ...PAGE, version: 1 });
-  expect(meta()).toContain("Created by Tomasz, 2026-07-02");
+  expect(meta()).toContain("Created by Tomasz, 2 Jul");
   await drawPage(PAGE);
   expect(meta().filter((m) => m?.startsWith("Created"))).toEqual([]);
 });

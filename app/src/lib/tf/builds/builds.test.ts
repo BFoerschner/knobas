@@ -14,7 +14,6 @@ import {
   isRunning,
   keptPipelines,
   latestTime,
-  railTime,
   pipelineHash,
   pipelineOf,
   runHash,
@@ -97,7 +96,7 @@ test("the latest time reads as prototype-6 writes it: a time today, yesterday an
   const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
   expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
   expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
-  expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("2026-08-19");
+  expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("Wed 09:00");
   expect(latestTime(pipeline("B", []), now)).toBe("");
   // A queued run has not started: its time is when the source last touched it.
   const waiting = run({ started: null, finished: null, updated_at: new Date(2026, 7, 22, 14, 20).toISOString() });
@@ -208,12 +207,12 @@ test("with This job on, a bare #/builds selects the job's failing pipeline, else
   expect(pipelineOf(list, [], [])?.name).toBe("Elsewhere");
 });
 
-test("on a narrow rail the time goes short: the clock today, the weekday this past week, else the date", () => {
+test("the rail's time climbs the one ladder at every width (F-049): the clock today, yesterday, the weekday this past week, else the date", () => {
   const now = new Date(2026, 7, 22, 15, 0);
   const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
-  expect(railTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
-  expect(railTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("Fri 16:20");
-  expect(railTime(at(new Date(2026, 7, 16, 9, 0)), now)).toBe("Sun 09:00");
-  expect(railTime(at(new Date(2026, 7, 15, 9, 0)), now)).toBe("15 Aug");
-  expect(railTime(pipeline("B", []), now)).toBe("");
+  expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
+  expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
+  expect(latestTime(at(new Date(2026, 7, 16, 9, 0)), now)).toBe("Sun 09:00");
+  expect(latestTime(at(new Date(2026, 7, 15, 9, 0)), now)).toBe("15 Aug");
+  expect(latestTime(pipeline("B", []), now)).toBe("");
 });

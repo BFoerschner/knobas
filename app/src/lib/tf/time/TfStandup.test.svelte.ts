@@ -137,6 +137,12 @@ function open(
     mirrored?: boolean;
     /** What `refused_writes` answers (#2053, #2052); nothing refused when omitted. */
     refused?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
+    /** The read's `changed_since`, `page_moved` and `again` (F-327). */
+    changed?: boolean;
+    moved?: boolean;
+    again?: Protocol["again"];
+    /** *Publish again* is refused with this sentence. */
+    againFails?: string;
   } = {},
 ) {
   const calls: {
@@ -150,9 +156,12 @@ function open(
     digests: string[];
     reads: number;
     writes: number;
+    /** Every *Publish again*. */
+    again: number;
   } = {
     reads: 0,
     writes: 0,
+    again: 0,
     saved: [],
     published: [],
     copied: [],
@@ -172,12 +181,18 @@ function open(
   let body = BODY;
   let release = () => {};
   const stalled = new Promise<void>((done) => (release = done));
+  const standing: Pick<Protocol, "changed_since" | "page_moved" | "again"> = {
+    changed_since: over.changed ?? false,
+    page_moved: over.moved ?? false,
+    again: over.again ?? null,
+  };
   const protocol = (publication: Protocol["publication"] = over.publication ?? null): Protocol => ({
     day: DAY,
     note_id: "note:p",
     page_title: DAY,
     publication,
     owed_tickets: mirror.held ? [] : (over.owed ?? []),
+    ...standing,
   });
   view = mount(TfStandup, {
     target,
@@ -221,6 +236,13 @@ function open(
           calls.published.push(chosen);
           return protocol({ write_id: 5, state: "pending", detail: null, page_entity_id: null, linked: false });
         },
+        publishStandupProtocolAgain: async () => {
+          calls.again += 1;
+          if (over.againFails) throw { code: "invalid", message: over.againFails, source_id: null };
+          standing.changed_since = false;
+          standing.again = { write_id: 7, state: "pending", detail: null };
+          return protocol();
+        },
         listProjects: async () => [{ source_id: "jira", key: "OPS", name: "Operations" }],
         createActionItemTicket: async (...args: unknown[]) => {
           calls.tickets.push(args);
@@ -249,7 +271,7 @@ function open(
       } as never,
     },
   });
-  return { calls, hears, mirror, emit, release: () => release(), stored: () => body };
+  return { calls, hears, mirror, emit, standing, release: () => release(), stored: () => body };
 }
 
 const text = () => target.textContent?.replace(/\s+/g, " ") ?? "";
@@ -375,7 +397,12 @@ test("Publish goes to the stored page without asking, after saving", async () =>
   await settle();
   expect(calls.saved.length).toBe(1);
   expect(calls.published).toEqual([undefined]);
-  expect(text()).toContain("Publishing");
+  // One button in one place: it says what its write is doing, and a second press lands on it.
+  const press = button("Queued");
+  expect(press.getAttribute("aria-disabled")).toBe("true");
+  press.click();
+  await settle();
+  expect(calls.published).toEqual([undefined]);
 });
 
 test("Publish under a page the credential cannot add pages to is drawn disabled saying why, and publishes nothing (#2053)", async () => {
@@ -423,16 +450,119 @@ test("a published protocol links its page", async () => {
   expect(link?.getAttribute("href")).toBe("#/page/wiki%3A901");
 });
 
-test("once published it says where changes go, and a change says the page doesn't have it", async () => {
-  open({ publication: { write_id: 5, state: "sent", detail: null, page_entity_id: "wiki:901", linked: true } });
-  await settle();
-  expect(target.querySelector(".tf-su-pub")?.textContent).toContain("stays in this note");
-  expect(target.querySelector(".tf-su-foot")?.textContent).toContain("New protocols publish under");
+const PUBLISHED: Protocol["publication"] = { write_id: 5, state: "sent", detail: null, page_entity_id: "wiki:901", linked: true };
+const pubLine = () => target.querySelector(".tf-su-publine span:not(.tf-off)")?.textContent?.trim();
+const typeNote = async (words: string) => {
   const box = target.querySelector<HTMLTextAreaElement>(".tf-su-pn textarea")!;
-  box.value = "Something new";
+  box.value = words;
   box.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
-  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("The page keeps the earlier version");
+};
+
+test("once published it says so, and a change offers Publish again in the same box (F-327)", async () => {
+  const { standing } = open({ publication: PUBLISHED });
+  await settle();
+  expect(pubLine()).toContain("Published.");
+  expect(button("Publish again")).toBeUndefined();
+  expect(target.querySelector(".tf-su-foot")?.textContent).toContain("New protocols publish under");
+  const box = target.querySelector(".tf-su-publine");
+  standing.changed_since = true;
+  await typeNote("Something new");
+  expect(pubLine()).toContain("Changed since it was published");
+  expect(target.querySelector(".tf-su-publine"), "the same box: nothing moves under the caret").toBe(box);
+  expect(target.querySelectorAll(".tf-su-publine > span")).toHaveLength(3);
+  expect(button("Publish again").getAttribute("aria-disabled")).toBeNull();
+});
+
+test("the read says the note moved on, so it survives leaving the tab and coming back (F-327)", async () => {
+  open({ publication: PUBLISHED, changed: true });
+  await settle();
+  expect(pubLine()).toContain("Changed since it was published");
+  expect(button("Publish again")).toBeDefined();
+});
+
+test("words typed and taken back read as the page again, once the save says so (F-327)", async () => {
+  const { standing } = open({ publication: PUBLISHED });
+  await settle();
+  standing.changed_since = false;
+  await typeNote("Back as it was");
+  await vi.advanceTimersByTimeAsync(1);
+  await settle();
+  expect(pubLine()).toContain("Published.");
+  expect(button("Publish again")).toBeUndefined();
+});
+
+test("Publish again saves, sends once, holds as Queued, and pressed again does nothing (F-327)", async () => {
+  const { calls, hears, standing } = open({ publication: PUBLISHED, changed: true });
+  await settle();
+  const press = button("Publish again");
+  press.focus();
+  press.click();
+  await settle();
+  expect(calls.saved.length).toBe(1);
+  expect(calls.again).toBe(1);
+  expect(toasts.items.at(-1)?.text).toBe("Queued: publish the protocol again.");
+  expect(button("Queued"), "the same button, so focus stays on it").toBe(press);
+  expect(document.activeElement).toBe(press);
+  press.click();
+  await settle();
+  expect(calls.again).toBe(1);
+  // It lands: the press has nothing left to do, and focus goes to the page it made.
+  standing.again = null;
+  hears.get(7)?.(undefined);
+  await settle();
+  expect(button("Queued")).toBeUndefined();
+  expect(pubLine()).toContain("Published.");
+  expect(document.activeElement?.textContent?.trim()).toBe("Open the published page");
+});
+
+test("a page edited in the source since says so, and offers no Publish again (F-327)", async () => {
+  open({ publication: PUBLISHED, changed: true, moved: true });
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Edited in Confluence since it was published");
+  expect(button("Publish again")).toBeUndefined();
+  expect([...target.querySelectorAll("a")].some((found) => found.textContent?.trim() === "Open the published page")).toBe(true);
+});
+
+test("a refused Publish again says why and may be pressed again (F-327)", async () => {
+  open({ publication: PUBLISHED, changed: true, again: { write_id: 7, state: "refused", detail: "version is out of date" } });
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Confluence refused it: version is out of date");
+  expect(button("Publish again").getAttribute("aria-disabled")).toBeNull();
+  expect(button("Show queue")).toBeDefined();
+});
+
+test("a held Publish again says so, and holds the press (F-327)", async () => {
+  open({ publication: PUBLISHED, again: { write_id: 7, state: "held", detail: "the page moved" } });
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Held in the queue: the page moved");
+  expect(button("Held in the queue").getAttribute("aria-disabled")).toBe("true");
+});
+
+test("a press that fails says why and reads the page's standing again (F-327)", async () => {
+  const { calls, standing } = open({ publication: PUBLISHED, changed: true, againFails: "The page was edited in the source" });
+  await settle();
+  standing.page_moved = true;
+  button("Publish again").click();
+  await settle();
+  expect(calls.again).toBe(1);
+  expect(target.querySelector(".tf-tm-fail")?.textContent).toContain("The page was edited in the source");
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Edited in Confluence");
+});
+
+test("someone pressed off and on again keeps their place among the notes (F-348)", async () => {
+  open();
+  await settle();
+  const notes = () => [...target.querySelectorAll(".tf-su-pn > span")].map((name) => name.textContent);
+  const before = notes();
+  expect(before.length).toBeGreaterThan(1);
+  const first = [...target.querySelectorAll<HTMLButtonElement>(".tf-su-people [aria-pressed]")][0]!;
+  first.click();
+  await settle();
+  expect(notes()).toEqual(before.slice(1));
+  first.click();
+  await settle();
+  expect(notes()).toEqual(before);
 });
 
 test("Publish's toast says it queued, which stays true once the page lands", async () => {

@@ -809,13 +809,26 @@ test("the Log tab draws the log read again, and the steps bar follows it", async
 
 // -- a run queued here shows on the pipeline page (#1449) -----------------------
 
+test("Re-run holds as what its write is doing, and a second press queues nothing (F-338)", async () => {
+  const drawn = draw();
+  await settle();
+  const press = button("Re-run")!;
+  press.click();
+  await settle();
+  expect(press.textContent?.trim()).toBe("Queued");
+  expect(press.getAttribute("aria-disabled")).toBe("true");
+  press.click();
+  await settle();
+  expect(drawn.writes).toHaveLength(1);
+});
+
 test("Re-run leaves the run queued on its pipeline, from the newest run held, and draws no queued row here", async () => {
   draw();
   await settle();
   button("Re-run")!.click();
   await settle();
   expect(echoesOn(PIPE, QUEUED_RUN)).toMatchObject([{ write: 9, kind: QUEUED_RUN, text: FEATURE, base: "teamcity:build:1188", state: "queued" }]);
-  expect(target.textContent).not.toMatch(/queued/i);
+  expect(target.querySelector(".tf-runbody")?.textContent).not.toMatch(/queued/i);
 });
 
 test("Run in Run again with changes… leaves the run queued on its pipeline too, the default branch as none", async () => {

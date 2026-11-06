@@ -3283,7 +3283,23 @@ publication: Publication | null,
  * #1966) rather than offering *Create ticket* again; the read links
  * each one whose ticket the mirror now holds, and names it no more.
  */
-owed_tickets: Array<ActionItemTicket>, };
+owed_tickets: Array<ActionItemTicket>, 
+/**
+ * Whether the note says something the page was not last sent (F-327):
+ * [`to_storage`] of its body against the newest body the queue carried to
+ * the page. `false` with no publication.
+ */
+changed_since: boolean, 
+/**
+ * Whether the mirror holds the page at a later version than knobas last
+ * wrote, so somebody edited it at the source since (F-327). *Publish
+ * again* would replace their edit, so it is refused while this is true.
+ */
+page_moved: boolean, 
+/**
+ * The newest *Publish again*, while it has not landed (F-327).
+ */
+again: Republication | null, };
 
 /**
  * What became of a date's publication, as far as knobas can tell.
@@ -3434,6 +3450,24 @@ export type RefusedWrite = { entity: string, op: string,
  * The [`WriteAsk::field`] refused, or `None` for the write itself.
  */
 field?: string, reason: string, };
+
+/**
+ * A *Publish again* that has not landed (F-327): the newest `UpdatePage` on the
+ * date's page, pending, held or refused. A sent one is simply the page.
+ */
+export type Republication = { 
+/**
+ * The write queue row that carries it.
+ */
+write_id: number, 
+/**
+ * The queue's own word for where the write stands.
+ */
+state: WriteState, 
+/**
+ * The queue's or the source's sentence. Untrusted source text.
+ */
+detail: string | null, };
 
 /**
  * A ticket a rule or a set applies to.

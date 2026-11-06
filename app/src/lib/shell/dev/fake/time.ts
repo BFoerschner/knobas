@@ -170,6 +170,8 @@ function fakeHorizon(): string {
 function fakeTime(params: URLSearchParams): Handlers {
   const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   let nextBlock = 501;
+  /** Offers a person took, as they were: the block deleting one brings back. */
+  const offered = new Map<number, FakeBlock>();
   let nextWorklog = 71;
   // The day's blocks are always there (#827); PAY-231's 09:40 to 11:50 is
   // also what a stop's draft adds up.
@@ -276,6 +278,7 @@ function fakeTime(params: URLSearchParams): Handlers {
     // The Day tab's edits (#827): in memory, so a click visibly does something.
     update_block: (args) => {
       const block = editable(args["id"]);
+      if (block.kind === "passive") offered.set(block.id, { ...block });
       Object.assign(block, {
         started_at: String(args["startedAt"]),
         ended_at: String(args["endedAt"]),
@@ -301,6 +304,12 @@ function fakeTime(params: URLSearchParams): Handlers {
     delete_block: (args) => {
       const block = editable(args["id"]);
       blocks = blocks.filter((candidate) => candidate !== block);
+      // An offer taken and then deleted is offered again, as the backend's next read derives it.
+      const was = offered.get(block.id);
+      if (was !== undefined) {
+        offered.delete(block.id);
+        blocks = [...blocks, was];
+      }
       return null;
     },
     // *Dismiss* (#900): only an offer, and it stays gone.

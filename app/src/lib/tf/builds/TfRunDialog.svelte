@@ -177,7 +177,10 @@
     return cannotOverride !== null ? field.default : (values[field.name] ?? "");
   }
   const shownBranch = $derived(branch.trim() || fallback || "the default branch");
-  const summary = $derived(summaryOf(shownBranch, overrides));
+  const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
+  /** The footer's word for a run with no overrides is *Start from*'s, so the two lines can't disagree. */
+  const startWord = $derived(start === "from" ? (from?.number != null ? fromLabel : "this run’s settings") : pickedPreset !== null ? `preset ${pickedPreset.name}` : "defaults");
+  const summary = $derived(summaryOf(shownBranch, overrides, startWord));
 
   // -- the branch combobox -----------------------------------------------------
 
@@ -218,7 +221,6 @@
   const title = $derived(
     from !== null ? `Run ${pipeline.name} again, from ${from.number !== null ? `#${from.number}` : "this run"}` : `Run ${pipeline.name}`,
   );
-  const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
 
   function run() {
     const options = { clean_checkout: clean, first_in_queue: firstInQueue };

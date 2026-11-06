@@ -30,7 +30,7 @@
   `#/build/<run>` finds the run's pipeline and moves to that address.
 -->
 <script lang="ts" module>
-  import { MediaQuery, SvelteMap } from "svelte/reactivity";
+  import { SvelteMap } from "svelte/reactivity";
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { stateWord } from "../state-word";
@@ -97,7 +97,6 @@
     pipelineHash,
     pipelineOf,
     pinnedOf,
-    railTime,
     reasonsById,
     reasonsLine,
     runHash,
@@ -321,7 +320,6 @@
 
 
   /** A 240 px rail: the time goes short and moves to the ticks' line, so the name has the row (`builds.css`). Stacked, the rail is wide again. */
-  const narrowRail = new MediaQuery("(min-width: 901px) and (max-width: 1240px)");
 
   /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
   let railOpen = $state(false);
@@ -351,7 +349,7 @@
     {@attach win.row(key)}
   >
     <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)} title={pipeline.name}>{pipeline.name}</span>
-    <span class="tf-pi-when" title={latestTime(pipeline)}>{narrowRail.current ? railTime(pipeline) : latestTime(pipeline)}</span>
+    <span class="tf-pi-when" title={latestTime(pipeline)}>{latestTime(pipeline)}</span>
     <span
       class="tf-strip"
       role="img"

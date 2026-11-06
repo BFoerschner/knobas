@@ -252,7 +252,9 @@
 
   /** Six pixels of padding at each end of a block, as `x="6"` starts the text. */
   const LABEL_PAD = 12;
-  function stripLabel(row: DayRow, widthPct: number): string | null {
+  function stripLabel(row: DayRow, at: { left: number; width: number }): string | null {
+    // The now line stands in front: a block it crosses keeps its label to the line's left, so the line cuts no word (F-344).
+    const widthPct = nowAt !== null && nowAt > at.left && nowAt < at.left + at.width ? nowAt - at.left : at.width;
     const room = (widthPct / 100) * stripPx - LABEL_PAD;
     if (room <= 0) return null;
     if (row.target === null) return fitLabel("Assign…", room, measurer(true));
@@ -263,6 +265,8 @@
   function select(row: DayRow) {
     selected = row.key;
     document.getElementById(`tf-tm-row-${row.key}`)?.scrollIntoView({ block: "nearest" });
+    // *Assign…* is what the block says, so a press does it (F-344); `open` is declared with the writes below.
+    if (row.target === null) open({ mode: "assign", row });
   }
 
   const STRIP_CLASS: Record<DayRow["state"], string> = {
@@ -312,9 +316,11 @@
   >(null);
   let refusal = $state<string | null>(null);
 
-  async function write(action: () => Promise<unknown>, said: string): Promise<boolean> {
+  /** `undo` takes the write back: given, the toast offers it, as *Delete block*'s does (F-339). */
+  async function write<T>(action: () => Promise<T>, said: string, undo?: (done: T) => Promise<unknown>): Promise<boolean> {
+    let done: T;
     try {
-      await action();
+      done = await action();
     } catch (error) {
       refusal = ipcErrorMessage(error);
       if (dialog === null) push({ text: refusal, tone: "err" });
@@ -322,7 +328,19 @@
     }
     dialog = null;
     refusal = null;
-    push({ text: said });
+    push({
+      text: said,
+      ...(undo === undefined
+        ? {}
+        : {
+            action: {
+              label: "Undo",
+              run: () => {
+                undo(done).then(reread, (error: unknown) => push({ text: ipcErrorMessage(error), tone: "err" }));
+              },
+            },
+          }),
+    });
     await reread();
     return true;
   }
@@ -338,11 +356,19 @@
 
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
 
-  /** *Add to <ticket>* on an offered block, *Assign to <ticket>* on a label block: neither logs anything. */
+  /**
+   * *Add to <ticket>* on an offered block, *Assign to <ticket>* on a label block: neither logs anything. *Undo* puts a
+   * label block's own target back. An offer became a block the reader owns, so *Undo* deletes that, and the next read
+   * offers the stretch again from what knobas saw.
+   */
   function giveTo(row: DayRow, entityId: string, said: string) {
     const block = row.block;
     if (block === null) return;
-    void write(() => io.updateBlock(block.block.id, row.from, row.to, entity(entityId)), said);
+    void write(
+      () => io.updateBlock(block.block.id, row.from, row.to, entity(entityId)),
+      said,
+      () => (row.state === "offered" ? io.deleteBlock(block.block.id) : io.updateBlock(block.block.id, row.from, row.to, block.block.target)),
+    );
   }
 
   /**
@@ -357,13 +383,19 @@
       for (const row of run.rows) {
         if (row.block !== null) await io.updateBlock(row.block.block.id, row.from, row.to, to);
       }
-    }, `Added ${durationOf(run)} to ${keyOf(run.entityId)}`);
+    }, `Added ${durationOf(run)} to ${keyOf(run.entityId)}`, async () => {
+      for (const row of run.rows) if (row.block !== null) await io.deleteBlock(row.block.block.id);
+    });
     if (!done) await reread();
   }
 
   /** *Add to <job>* on an open row (#1027): a block on the job over exactly the stretch. */
   function addOpen(row: DayRow, entityId: string, said: string) {
-    void write(() => io.createBlock(row.from, row.to, entity(entityId)), said);
+    void write(
+      () => io.createBlock(row.from, row.to, entity(entityId)),
+      said,
+      (made) => io.deleteBlock(made.block.id),
+    );
   }
 
   function extendToNow(row: DayRow) {
@@ -519,7 +551,7 @@
     {/each}
     {#each rows as row (row.key)}
       {@const at = place(key, frame, row.from, row.to)}
-      {@const label = stripLabel(row, at.width)}
+      {@const label = stripLabel(row, at)}
       <svg
         class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
         x="{at.left}%"

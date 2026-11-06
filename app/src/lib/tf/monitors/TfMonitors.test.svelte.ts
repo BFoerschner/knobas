@@ -716,13 +716,19 @@ test("a pause and a resume each draw a row echo queued, then sent, gone once the
   });
   await draw([], null, stand);
   const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
-  const echo = (name: string) => row(name).querySelector(".tf-mon-acts .tf-chip")?.textContent ?? null;
+  // In the State cell, after the state chip, because it says the state is changing (F-337, F-349).
+  const echo = (name: string) => row(name).querySelector(".tf-mon-state .tf-queued-mark")?.textContent ?? null;
   button(row("payouts /health"), "Pause")!.click();
   await settle();
   button(row("yard-planner"), "Resume")!.click();
   await settle();
   expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Queued", "Queued"]);
-  expect(button(row("payouts /health"), "Pause")).toBeUndefined();
+  // The button stays where it was, turned off, and a second press is nothing.
+  const pause = button(row("payouts /health"), "Pause")!;
+  expect(pause.getAttribute("aria-disabled")).toBe("true");
+  pause.click();
+  await settle();
+  expect(writes.filter((write) => "PauseMonitor" in write)).toHaveLength(1);
 
   heard.get(30)!(undefined);
   heard.get(31)!(undefined);
@@ -789,7 +795,7 @@ test("Refresh reads the monitor from its source, then the roster again over what
   await settle();
   heard.get(40)!(undefined);
   await settle();
-  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")?.textContent).toBe("Sent");
+  expect(rowNamed("payouts /health").querySelector(".tf-mon-state .tf-queued-mark")?.textContent).toBe("Sent");
   const before = reads;
 
   const refresh = rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
