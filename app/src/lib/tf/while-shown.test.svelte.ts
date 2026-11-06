@@ -98,6 +98,24 @@ test("the shell's scroller and a scroller inside go back to where they were when
   main.remove();
 });
 
+test("keepScroll leaves a page's rail where it was on a move inside the shown page, which isn't a hide", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const rail = scroller(document.createElement("nav"));
+  anchor.append(rail);
+  main.append(anchor);
+  document.body.append(main);
+  // As the page host does: each address hands the page a new entry, with `visible` the same.
+  const entry = $state({ value: { visible: true, address: "#/builds/lint" } });
+  run(() => keepScroll(() => anchor, () => entry.value.visible, () => entry.value.address));
+  rail.scrollTop = 600;
+  entry.value = { visible: true, address: "#/build/lint/904" };
+  flushSync();
+  expect(rail.scrollTop).toBe(600);
+  main.remove();
+});
+
 test("keepScroll sets a page back only at the address it was left at; another address starts at the top (F-454, F-067)", () => {
   const main = scroller(document.createElement("div"));
   main.className = "tf-main";
