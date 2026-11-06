@@ -9,6 +9,7 @@ import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, 
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
@@ -169,6 +170,62 @@ test("#/docs is the Docs home: it opens no page, records no visit, and offers th
   expect(target.querySelector("h1")?.textContent).toBe("Docs");
   expect(target.querySelector(".tf-dh section[aria-label='Continue reading'] a")?.getAttribute("href")).toBe("#/page/confluence%3A2");
   expect(target.querySelector(".tf-rd-crumbrow"), "a section's own page has no breadcrumb").toBeNull();
+});
+
+test("while the tree's read is out, nothing is offered that it could contradict: no All spaces (0), no scope, and both columns wait (F-403)", async () => {
+  let answer: (read: DocsTree) => void = () => {};
+  const io = ports({ docsTree: vi.fn(() => new Promise<DocsTree>((resolve) => (answer = resolve))) });
+  const props = $state({ ready: true, rest: [] as string[], job: "PAY-231", ports: io });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  const rail = target.querySelector(".tf-rd-tree")!;
+  expect(rail.querySelector("select")).toBeNull();
+  expect(rail.querySelector(".tf-seg")).toBeNull();
+  expect(rail.querySelector(".tf-skel")).not.toBeNull();
+  expect(rail.textContent).not.toContain("All spaces");
+  expect(target.querySelector(".tf-dh [aria-label='Reading Docs']")).not.toBeNull();
+  answer(TREE);
+  await settle();
+  expect(rail.querySelector("select")).not.toBeNull();
+  expect(rail.querySelector(".tf-seg")).not.toBeNull();
+  expect(rail.querySelector(".tf-skel")).toBeNull();
+});
+
+test("with nothing held, the rail offers no This job to narrow, even with it on, and says what the home says (F-426)", async () => {
+  sessionFilter("docs").scope = "job";
+  const empty: DocsTree = { ...TREE, spaces: [], last_read: null, for_you: [] };
+  view = mount(TfDocs, { target, props: { ready: true, rest: [], job: "PAY-231", ports: ports({ docsTree: vi.fn(async () => empty) }), linkPorts: linkPorts() as never } });
+  await settle();
+  const rail = target.querySelector(".tf-rd-tree")!;
+  expect(rail.querySelector(".tf-seg")).toBeNull();
+  expect(rail.textContent).not.toContain("Nothing in Docs is on");
+  expect(rail.querySelector(".tf-dl-note")?.textContent).toBe("No wiki source is set up yet.");
+  sessionFilter("docs").scope = "all";
+});
+
+test("back on the home, Continue reading is read after the visit is in, so it names the page just read (F-413)", async () => {
+  let visited: (value: null) => void = () => {};
+  const reads: DocsTree[] = [TREE];
+  const docsTree = vi.fn(async () => reads.at(-1)!);
+  const visitEntity = vi.fn(() => new Promise<null>((resolve) => (visited = resolve)));
+  const io = ports({ docsTree, visitEntity: visitEntity as never, docsPage: vi.fn(async () => OTHER) });
+  const props = $state({ ready: true, rest: ["confluence:1"], job: null, ports: io });
+  view = mount(TfDocs, { target, props });
+  await settle();
+  expect(visitEntity).toHaveBeenCalledWith("confluence:1");
+  const before = docsTree.mock.calls.length;
+
+  props.rest = [];
+  await settle();
+  // The visit is still on its way: a read now would say the page before it.
+  expect(docsTree.mock.calls.length).toBe(before);
+
+  reads.push({ ...TREE, last_read: "confluence:1" });
+  visited(null);
+  await settle();
+  expect(docsTree.mock.calls.length).toBe(before + 1);
+  const row = target.querySelector(".tf-dh section[aria-label='Continue reading'] a");
+  expect(row?.getAttribute("href")).toBe("#/page/confluence%3A1");
 });
 
 test("the home follows from a page: what was open goes, and coming back to the page reads it again", async () => {
@@ -786,6 +843,119 @@ test("Docs draws no search field and leaves / to the shell, which opens the laun
   expect(slash.defaultPrevented, "the shell's TfShell test witnesses what / opens").toBe(false);
 });
 
+test("a search that found pages says how many in the main column, and its first hit takes focus (F-418)", async () => {
+  await draw([], ports({ docsSearch: vi.fn(async () => HITS) }));
+  search("ledger");
+  await settle();
+  await settle();
+  expect(target.querySelector(".tf-dh-found")?.textContent?.replace(/\s+/g, " ").trim()).toBe("2 pages match ledger, listed on the left.");
+  expect(target.querySelector(".tf-dh-found + .tf-dh-body"), "above the lists, where the empty answer sits").not.toBeNull();
+  const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
+  expect(document.activeElement).toBe(hits[0]);
+
+  // The arrows walk them, and stop at either end.
+  hits[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  expect(document.activeElement).toBe(hits[1]);
+  hits[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  expect(document.activeElement).toBe(hits[1]);
+  hits[1]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+  expect(document.activeElement).toBe(hits[0]);
+});
+
+test("a search leaves a field the reader went to alone, and coming back from a hit moves no focus (F-418)", async () => {
+  await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
+  const field = document.createElement("input");
+  document.body.append(field);
+  field.focus();
+  search("ledger");
+  await settle();
+  await settle();
+  expect(document.activeElement).toBe(field);
+  field.remove();
+
+  target.querySelector<HTMLAnchorElement>("a.tf-dl-hit")!.click();
+  shown!.rest = ["confluence:2"];
+  await settle();
+  (document.activeElement as HTMLElement | null)?.blur();
+  shown!.rest = ["search", "ledger"];
+  await settle();
+  await settle();
+  expect(document.activeElement).toBe(document.body);
+  location.hash = "";
+});
+
+test("below 900 px the line offers the drawer its hits are in, and closing it gives focus to the bar (F-418)", async () => {
+  windowWidth(800);
+  await draw([], ports({ docsSearch: vi.fn(async () => HITS) }));
+  search("ledger");
+  await settle();
+  await settle();
+  const line = target.querySelector(".tf-dh-found")!;
+  expect(line.textContent?.replace(/\s+/g, " ").trim()).toBe("2 pages match ledger. Show them");
+  expect(target.querySelector(".tf-rd-drawer")).not.toBeNull();
+  expect(document.activeElement).toBe(target.querySelector("a.tf-dl-hit"));
+  target.querySelector<HTMLElement>(".tf-rd-backdrop")!.click();
+  await settle();
+  expect(target.querySelector(".tf-rd-drawer")).toBeNull();
+  expect(document.activeElement).toBe(target.querySelector(".tf-railbar button"));
+  line.querySelector("button")!.click();
+  await settle();
+  expect(target.querySelector(".tf-rd-drawer")).not.toBeNull();
+});
+
+test("an outline entry scrolls to its section on the page already open, pressed twice too; the section stays marked until the reader moves (F-423)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const entries = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-toc a")];
+  const heading = target.querySelector<HTMLElement>("h2[id='s-1']")!;
+  const scrolled = vi.fn();
+  heading.scrollIntoView = scrolled;
+  entries()[0]!.click();
+  await settle();
+  expect(scrolled).toHaveBeenCalled();
+  scrolled.mockClear();
+  // The same entry again: the address does not change, and it scrolls all the same.
+  entries()[0]!.click();
+  await settle();
+  expect(scrolled).toHaveBeenCalled();
+  expect(entries()[0]!.classList.contains("tf-on")).toBe(true);
+  // The reader's own key lets the outline follow the scrolling again.
+  target.querySelector(".tf-rd-main")!.dispatchEvent(new KeyboardEvent("keydown", { key: "PageDown", bubbles: true }));
+  await settle();
+  expect(entries()[0]!.classList.contains("tf-on")).toBe(false);
+  location.hash = "";
+});
+
+test("the outline's line is a third of the way down the column: a heading above it is the section you are in (F-423)", async () => {
+  const twoSections: DocPage = {
+    ...PAGE,
+    blocks: [
+      { type: "heading", level: 2, text: [text("Ledger")] },
+      { type: "paragraph", text: [text("One.")] },
+      { type: "heading", level: 2, text: [text("Escalation")] },
+      { type: "paragraph", text: [text("Two.")] },
+    ],
+  };
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => twoSections) }));
+  const main = target.querySelector<HTMLElement>(".tf-rd-main")!;
+  Object.defineProperty(main, "clientHeight", { configurable: true, value: 600 });
+  Object.defineProperty(main, "scrollHeight", { configurable: true, value: 4000 });
+  Object.defineProperty(main, "scrollTop", { configurable: true, value: 100 });
+  const headings = [...target.querySelectorAll<HTMLElement>("h2[id^='s-']")];
+  expect(headings.length).toBeGreaterThan(1);
+  const place = (h: HTMLElement, top: number) => (h.getBoundingClientRect = () => ({ top }) as DOMRect);
+  place(headings[0]!, -300);
+  place(headings[1]!, 190);
+  for (const later of headings.slice(2)) place(later, 900);
+  main.dispatchEvent(new Event("scroll"));
+  await settle();
+  const on = () => target.querySelector(".tf-toc a.tf-on")?.getAttribute("href");
+  expect(on()).toBe(`#/page/confluence%3A2/${headings[1]!.id.slice(2)}`);
+  place(headings[1]!, 210);
+  main.dispatchEvent(new Event("scroll"));
+  await settle();
+  expect(on()).toBe(`#/page/confluence%3A2/${headings[0]!.id.slice(2)}`);
+});
+
 test("the words in the address search every space and list the hits; the picker narrows them to a space (#2425)", async () => {
   const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
   search("ledger");
@@ -796,7 +966,7 @@ test("the words in the address search every space and list the hits; the picker 
   expect(target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!.value).toBe("*");
   expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("2 pages in all spaces");
   const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
-  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["Operations › Ops home", "Operations › top level"]);
+  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["Operations › Ops home", "Operations"]);
   expect(hits[0]!.querySelector(".tf-sn")?.textContent).toBe("Ledger: The ledger");
   expect(hits[0]!.querySelector(".tf-sn mark")?.textContent).toBe("ledger");
   expect(hits[1]!.querySelector(".tf-sn b")?.textContent).toBe("Comment by Priya:");
@@ -1333,6 +1503,10 @@ const LINKED: DocPage["backlinks"] = [
 const TREE_ELSEWHERE: DocsTree = { ...TREE, spaces: [...TREE.spaces, { source_id: "wiki", key: "TEAM", name: "Not this one", pages: [] }] };
 
 const article = () => target.querySelector(".tf-rd-page")!;
+const LONG_LINKED: DocPage["backlinks"] = [
+  ...LINKED.filter((l) => l.space_key === null || l.space_key === "ENG"),
+  ...[1, 2, 3, 4, 5].map((n) => ({ entity_id: `confluence:7${n}`, title: `Runbook ${n}`, space_key: "OPS" })),
+];
 const linkedHeading = () => [...article().querySelectorAll("h3")].find((h) => h.textContent?.startsWith("Linked from"));
 const groups = () =>
   [...article().querySelectorAll("details")].map((d) => ({
@@ -1356,19 +1530,33 @@ test("the page foot: Work it belongs to, then Linked from by space, after the bo
   expect(job.getAttribute("href")).toBe("#/ticket/jira%3AOPS-77");
   expect(job.closest("li")!.textContent).toBe("OPS-77 On-call runbook outdatedTo do");
 
-  expect(groups()).toEqual([
-    { summary: "Engineering1", open: false, pages: [["Payout design", "#/page/confluence%3A5"]] },
-    {
-      summary: "Operations2",
-      open: false,
-      pages: [
-        ["Alerting", "#/page/confluence%3A12"],
-        ["Runbook index", "#/page/confluence%3A11"],
-      ],
-    },
-    { summary: "TEAM1", open: false, pages: [["Team charter", "#/page/confluence%3A14"]] },
-    { summary: "Other pages1", open: false, pages: [["Scratch notes", "#/page/confluence%3A13"]] },
+  // A short list is listed outright, each row saying its space, so reaching one takes no click (F-424).
+  expect(groups()).toEqual([]);
+  expect([...linkedHeading()!.parentElement!.querySelectorAll("li")].map((li) => li.textContent)).toEqual([
+    "Payout designEngineering",
+    "AlertingOperations",
+    "Runbook indexOperations",
+    "Team charterTEAM",
+    "Scratch notes",
   ]);
+  expect(linkedHeading()!.parentElement!.querySelector("li a")?.getAttribute("href")).toBe("#/page/confluence%3A5");
+});
+
+test("Linked from with one page, or one space, says no space beside its rows; the heading has said what there is (F-424)", async () => {
+  await drawPage({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key === "OPS") });
+  expect(linkedHeading()?.textContent).toBe("Linked from 2 pages");
+  expect([...linkedHeading()!.parentElement!.querySelectorAll("li")].map((li) => li.textContent)).toEqual(["Alerting", "Runbook index"]);
+});
+
+test("past six, Linked from goes by space, each a closed fold (#2080, F-424)", async () => {
+  await drawPage({ ...RICH, backlinks: LONG_LINKED }, { docsTree: vi.fn(async () => TREE_ELSEWHERE) });
+  expect(linkedHeading()?.textContent).toBe("Linked from 7 pages");
+  expect(groups().map((g) => [g.summary, g.open])).toEqual([
+    ["Engineering1", false],
+    ["Operations5", false],
+    ["Other pages1", false],
+  ]);
+  expect(groups()[0]!.pages).toEqual([["Payout design", "#/page/confluence%3A5"]]);
 });
 
 test("the page foot leaves out what is empty: no work, no backlinks, no Other pages (#2080)", async () => {
@@ -1377,9 +1565,10 @@ test("the page foot leaves out what is empty: no work, no backlinks, no Other pa
   expect(linkedHeading()).toBeUndefined();
   expect(article().querySelector("details")).toBeNull();
 
-  await drawPage({ ...PAGE, backlinks: LINKED.filter((l) => l.space_key !== null) });
-  expect(linkedHeading()?.textContent).toBe("Linked from 4 pages");
-  expect(groups().map((g) => g.summary)).toEqual(["Engineering1", "Operations2", "TEAM1"]);
+  await drawPage({ ...PAGE, backlinks: LONG_LINKED.filter((l) => l.space_key !== null) });
+  expect(linkedHeading()?.textContent).toBe("Linked from 6 pages");
+  expect(article().querySelector("details")).toBeNull();
+  expect([...linkedHeading()!.parentElement!.querySelectorAll("li")].some((li) => li.textContent?.startsWith("Scratch notes"))).toBe(false);
 });
 
 test("Linked from says 50+ when the backend's 50 arrive, and the count below that (#2080)", async () => {
@@ -1394,7 +1583,7 @@ test("Linked from says 50+ when the backend's 50 arrive, and the count below tha
 });
 
 test("every Linked from group is closed again when another page opens (#2080)", async () => {
-  const docsPage = vi.fn(async (id: string) => ({ ...(id === "confluence:1" ? OTHER : PAGE), backlinks: LINKED }));
+  const docsPage = vi.fn(async (id: string) => ({ ...(id === "confluence:1" ? OTHER : PAGE), backlinks: LONG_LINKED }));
   const props = $state({ ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage }) });
   view = mount(TfDocs, { target, props });
   await settle();
@@ -1403,7 +1592,7 @@ test("every Linked from group is closed again when another page opens (#2080)", 
   props.rest = ["confluence:1"];
   await settle();
   expect(target.querySelector("h1")?.textContent).toBe("Ops home");
-  expect(groups().map((g) => g.open)).toEqual([false, false, false, false]);
+  expect(groups().map((g) => g.open)).toEqual([false, false, false]);
 });
 
 test("the meta line names who created the page: version 1's entry, else the editor of a first version, else nobody (#2080)", async () => {
@@ -2475,6 +2664,24 @@ test("a sync run's re-read that fails before Docs drew anything shows the error 
 
 // ---- the echo's one lifecycle: queued, sent, gone on the refresh's read (#2102) ----
 
+test("a comment on its way counts in the heading, and its toast says Sent when its row does (F-428)", async () => {
+  toasts.items = [];
+  const { follower, sent } = heldFollower();
+  const io = ports({ docsPage: vi.fn(async () => RICH), submitWrite: vi.fn(async () => ({ ...QUEUED, id: 44 })) });
+  await draw(["confluence:2"], io, follower);
+  const count = () => target.querySelector(".tf-cmts h2 .tf-count")?.textContent;
+  const before = Number(count());
+  await sendComment("Done.");
+  expect(count()).toBe(String(before + 1));
+  expect(toasts.items.at(-1)?.text).toBe(`Queued: comment on ${RICH.title}.`);
+  expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
+  sent(44);
+  expect(queuedComments()).toEqual(["MA You Sent Done."]);
+  expect(toasts.items.at(-1)?.text).toBe(`Sent: comment on ${RICH.title}.`);
+  expect(toasts.items.at(-1)?.action).toBeUndefined();
+  toasts.items = [];
+});
+
 /** A follower the test speaks for, as in the held-write test above. */
 function heldFollower() {
   const hears = new Map<number, Hear>();
@@ -2674,10 +2881,36 @@ test("a refresh that failed keeps the page and says why under the meta line (#21
   await draw(["confluence:2"], io);
   refreshButton()!.click();
   await settle();
-  expect(docBanners()).toEqual(["Couldn't refresh: 502 Bad Gateway. Refresh to try again."]);
+  expect(docBanners()).toEqual(["Couldn't refresh: 502 Bad Gateway. Try again"]);
   expect(target.querySelector(".tf-refresh-failed")?.previousElementSibling?.classList.contains("tf-rd-meta")).toBe(true);
   expect(io.docsPage).toHaveBeenCalledTimes(1);
   expect(target.querySelector("h1")?.textContent).toBe("On-call handbook");
+});
+
+test("the failed line's own Try again refreshes, and focus lands on what stands there after (F-421)", async () => {
+  let answer: () => { outcome: "failed"; reason: string } | { outcome: "refreshed" } = () => ({ outcome: "failed", reason: "502 Bad Gateway" });
+  const r = refreshProbe({ answer: async () => answer() });
+  const io = ports({ getEntity: vi.fn(async () => pageDetail()), refresh: r.ports });
+  await draw(["confluence:2"], io);
+  refreshButton()!.click();
+  await settle();
+  const again = () => target.querySelector<HTMLButtonElement>(".tf-refresh-failed button");
+  expect(again()?.textContent).toBe("Try again");
+
+  // It fails again: a new Try again, with focus on it.
+  again()!.focus();
+  again()!.click();
+  await settle();
+  await settle();
+  expect(document.activeElement).toBe(again());
+
+  answer = () => ({ outcome: "refreshed" });
+  again()!.click();
+  await settle();
+  await settle();
+  expect(again()).toBeNull();
+  expect(io.docsPage).toHaveBeenCalledTimes(2);
+  expect(document.activeElement).toBe(refreshButton());
 });
 
 test("a page whose adapter does not read one page offers Sync now, and the run's end reads the page again (#2136)", async () => {

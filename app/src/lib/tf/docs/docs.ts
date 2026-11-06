@@ -110,9 +110,22 @@ export function continueReading(tree: DocsTree): JobPage | null {
   return space === undefined || page === undefined ? null : { entity_id: id, title: page.title, where: whereOf(space, page) };
 }
 
-/** A space's pages at the top of its tree: what its tile on the Docs home lists first. */
-export function topPages(space: DocSpace): DocNode[] {
-  return space.pages.filter((p) => p.parent === null);
+/**
+ * A space's pages as its tile on the Docs home takes them: the top of its tree, then the level below and so on, so a
+ * space whose top holds one index page still fills its tile from what is under it. A page whose parent the space does
+ * not hold comes last.
+ */
+export function pagesByLevel(space: DocSpace): DocNode[] {
+  const under = childrenByParent(space);
+  const out: DocNode[] = [];
+  const seen = new Set<string>();
+  for (let level = under.get(null) ?? []; level.length > 0; ) {
+    const fresh = level.filter((p) => !seen.has(p.entity_id));
+    for (const page of fresh) seen.add(page.entity_id);
+    out.push(...fresh);
+    level = fresh.flatMap((p) => under.get(p.entity_id) ?? []);
+  }
+  return [...out, ...space.pages.filter((p) => !seen.has(p.entity_id))];
 }
 
 /** The space holding a page, if the tree has it. */
@@ -371,6 +384,9 @@ export function createdBy(page: DocPage): { who: string; at: string | null } | n
  */
 const BACKLINK_LIMIT = 50;
 
+/** Up to this many backlinks are listed outright; past it, by space, each a closed fold (F-424). */
+export const LINKED_FLAT = 6;
+
 /** *Linked from*'s heading: the number of backlinks, `50+` at the backend's limit (#2080). */
 export function linkedFromHeading(count: number): string {
   if (count >= BACKLINK_LIMIT) return `Linked from ${BACKLINK_LIMIT}+ pages`;
@@ -593,10 +609,17 @@ export function hitsLine(total: number, scope: string): string {
   return `${total} page${total === 1 ? "" : "s"} in ${scope}`;
 }
 
-/** Where a hit sits, its space by name as the crumb has it where the search spans spaces: *Engineering › Payments*. */
+/**
+ * A page's place as the crumb has it, the one way Docs words it: the space by name, then the pages above it, or only
+ * the space for a page at the top of it: *Engineering › Payments*, *Payments team*. Empty when nothing is known.
+ */
+export function pagePlace(space: { key: string; name: string | null } | null, path: string | null): string {
+  return [space === null ? null : (space.name ?? space.key), path].filter(Boolean).join(" › ");
+}
+
+/** Where a hit sits: {@link pagePlace}, and within one space's search without that space, so only the pages above it, if any. */
 export function hitWhere(hit: Pick<DocHit, "space" | "path">, spanning: boolean): string {
-  const where = hit.path ?? "top level";
-  return spanning && hit.space ? `${hit.space.name ?? hit.space.key} › ${where}` : where;
+  return pagePlace(spanning ? hit.space : null, hit.path);
 }
 
 /** What a snippet opens with: its section, or *Comment by Priya*. */
@@ -669,7 +692,7 @@ export function reachedPages(reach: readonly Reached[], tree: DocsTree): Set<str
   return new Set(tree.spaces.flatMap((s) => s.pages.filter((p) => ids.has(p.entity_id)).map((p) => p.entity_id)));
 }
 
-/** A page's place as the crumb has it: its space's name, then its ancestors' titles from the top. */
+/** A page's {@link pagePlace}, its ancestors' titles from the top. */
 function whereOf(space: DocSpace, page: DocNode): string {
   const byId = new Map(space.pages.map((p) => [p.entity_id, p]));
   const path: string[] = [];
@@ -681,7 +704,7 @@ function whereOf(space: DocSpace, page: DocNode): string {
     path.unshift(node.title);
     up = node.parent;
   }
-  return [space.name ?? space.key, ...path].join(" › ");
+  return pagePlace(space, path.join(" › "));
 }
 
 /**

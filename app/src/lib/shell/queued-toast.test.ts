@@ -8,7 +8,7 @@ import { beforeEach, expect, test } from "vitest";
 
 import type { AuthState, CredentialHealth } from "../ipc/sources";
 import { createHealth } from "./health.svelte";
-import { toastQueued, toastStarted } from "./queued-toast";
+import { toastQueued, toastSent, toastStarted } from "./queued-toast";
 import { toasts } from "./toasts.svelte";
 import { writeQueuePanel } from "./write-queue.svelte";
 
@@ -27,6 +27,16 @@ function storeWith(state: AuthState | null) {
 beforeEach(() => {
   toasts.items.length = 0;
   writeQueuePanel.open = false;
+});
+
+test("a queued toast says Sent in place once its write went, and offers no queue that no longer holds it", () => {
+  const id = toastQueued("comment on Payout design", TEAMCITY, storeWith(null));
+  toastSent(id, "comment on Payout design");
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]!.text).toBe("Sent: comment on Payout design.");
+  expect(toasts.items[0]!.action).toBeUndefined();
+  toastSent(id + 1, "nothing");
+  expect(toasts.items).toHaveLength(1);
 });
 
 test("a healthy source's write says what was queued, and Show queue opens the queue", () => {

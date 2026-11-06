@@ -44,6 +44,16 @@
   } = $props();
 
   const stems = $derived(found.needles.map(stem));
+
+  /** The arrow keys walk the hits, as the launcher's did before it handed over to this list. */
+  function onhitkey(event: KeyboardEvent): void {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    const row = event.currentTarget as HTMLElement;
+    const next = event.key === "ArrowDown" ? row.nextElementSibling : row.previousElementSibling;
+    if (!(next instanceof HTMLElement) || !next.classList.contains("tf-dl-hit")) return;
+    event.preventDefault();
+    next.focus();
+  }
 </script>
 
 <div class="tf-dl-meta" title="The search took {Math.max(1, found.took_ms)} ms">
@@ -53,16 +63,18 @@
 </div>
 {#each found.hits as hit (hit.entity_id)}
   {@const label = snippetLabel(hit.snippet)}
+  {@const where = hitWhere(hit, kept !== "space")}
   <a
     class="tf-dl-hit"
     href={pageHash(hit.entity_id)}
     aria-current={hit.entity_id === current ? "true" : undefined}
     onclick={() => onpick(hit.entity_id)}
+    onkeydown={onhitkey}
   >
     <span class="tf-t"
       ><TfMarked text={hit.title} {stems} /></span
     >
-    <span class="tf-pth">{hitWhere(hit, kept !== "space")}</span>
+    {#if where !== ""}<span class="tf-pth">{where}</span>{/if}
     <span class="tf-sn"
       >{#if label}<b>{label}</b>{" "}{/if}{#each hit.snippet.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark
           >{:else}{seg.text}{/if}{/each}</span

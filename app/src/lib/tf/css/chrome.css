@@ -193,6 +193,8 @@
 .tf-btn:hover { border-color: var(--ink-2); }
 /* An empty state's words are `--ink-2`, and its one action should not inherit that and read as disabled. */
 .tf-empty .tf-btn { color: var(--ink); }
+/* The view's *Sync now* is a header's button, and under an empty state's sentence it is a page body's: small (F-425). */
+.tf-empty .tf-btn.tf-syncnow { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }
 .tf-btn.tf-primary { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
 /* After `.tf-btn:hover` at equal weight, so the primary needs a hover of its own. A disabled one does not answer. */
 .tf-btn.tf-primary:not([disabled], [aria-disabled="true"]):hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }

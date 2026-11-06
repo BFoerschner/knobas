@@ -106,6 +106,43 @@ test("each space is a tile: its one link is its name, which opens the space, and
   expect(tiles[1]!.querySelectorAll("a[href^='#/docs/space']")).toHaveLength(1);
 });
 
+test("a short top fills its tile from the level below, so an index page does not stand alone in a box (F-407)", () => {
+  const space = {
+    source_id: "confluence",
+    key: "ADR",
+    name: "Architecture decisions",
+    pages: [
+      { entity_id: "c:i", title: "ADR index", parent: null },
+      ...[1, 2, 3, 4].map((n) => ({ entity_id: `c:${n}`, title: `ADR ${n}`, parent: "c:i" })),
+    ],
+  };
+  draw({ tree: { spaces: [space], last_read: null, for_you: [] } });
+  expect([...target.querySelectorAll(".tf-dh-space .tf-dh-row")].map((row) => row.textContent)).toEqual(["ADR index", "ADR 1", "ADR 2", "ADR 3"]);
+});
+
+test("the tiles head themselves: no Spaces heading says what the sub line already does (F-422)", () => {
+  draw({ tree: TREE });
+  expect(target.querySelector("section[aria-label='Spaces'] h2")).toBeNull();
+  expect(target.querySelector(".tf-sub")?.textContent).toContain("2 spaces");
+});
+
+test("with This job on, a job's row says what else the page is, which its own panel would have said (F-419)", () => {
+  const groups = [
+    {
+      reason: "Linked to PAY-231",
+      pages: [
+        { entity_id: "confluence:2", title: "On-call handbook", where: "Operations › Ops home" },
+        { entity_id: "confluence:e1", title: "Top 1", where: "Engineering" },
+      ],
+    },
+  ];
+  draw({ tree: TREE, job: "PAY-231", groups, jobFirst: true });
+  const rows = [...section("Pages on PAY-231")!.querySelectorAll(".tf-why")].map((why) => why.textContent);
+  expect(rows).toEqual(["Operations › Ops home, read last", "Engineering, mentions you"]);
+  expect(section("Continue reading")).toBeNull();
+  expect(section("For you")?.textContent).toContain("Nothing else mentions you");
+});
+
 test("a space with every page listed offers no link to more", () => {
   const space = { source_id: "confluence", key: "S", name: null, pages: [{ entity_id: "c:1", title: "One", parent: null }] };
   draw({ tree: { spaces: [space], last_read: null, for_you: [] } });
@@ -152,6 +189,8 @@ test("an empty tree with no wiki source sends you to Sources", () => {
   const empty = target.querySelector(".tf-empty")!;
   expect(empty.textContent).toContain("none is set up yet");
   expect(empty.querySelector("a")?.getAttribute("href")).toBe("#/settings/sources");
+  // A page body's button, as Tickets' same sentence has it (F-425).
+  expect(empty.querySelector("a")?.className).toBe("tf-btn tf-sm");
   expect(target.querySelector(".tf-fhead .tf-sub")).toBeNull();
 });
 
@@ -172,7 +211,7 @@ test("a page is listed once: a tile skips what the panels hold and keeps its who
   draw({ tree });
   const tile = target.querySelector(".tf-dh-space")!;
   expect(tile.querySelectorAll(".tf-dh-row")).toHaveLength(0);
-  expect(tile.textContent).toContain("Its top pages are listed above.");
+  expect(tile.textContent).toContain("Its pages are listed above.");
   expect(tile.querySelector(".tf-count")?.textContent).toBe("1");
   expect(tile.textContent).not.toContain("No pages yet");
 });

@@ -2,6 +2,7 @@
 .tf-rd { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
+.tf-dl-head:not(:has(*)) { display: none; }
 .tf-dl-head select {
   font: 500 var(--t-sm) var(--sans); height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px;
   background: var(--field); color: var(--ink); width: 100%;
@@ -65,8 +66,10 @@
 .tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
-/* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136). */
-.tf-rd-page > .tf-banner { margin: 10px 0 0; }
+/* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136), set apart from what follows like the page's other blocks. */
+.tf-rd-page > .tf-banner { margin: 10px 0 12px; border-bottom: 0; border-radius: 4px; }
+/* Its button is a button, not more of the failure: it does not take the line's red. */
+.tf-refresh-failed .tf-btn { flex: none; margin-left: auto; color: var(--ink); }
 .tf-rd-more { display: inline-flex; }
 .tf-menu.tf-rd-m button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
 .tf-rd-moresync { display: contents; }
@@ -209,7 +212,8 @@
   min-width: 26px; height: 26px; color: inherit;
 }
 .tf-findbar .tf-findx { margin-left: auto; }
-.tf mark.tf-cur { outline: 2px solid var(--card-ink); }
+/* `--ink`, not the card's: the ring stands on the page's ground in either theme, and in dark `--card-ink` is as dark as that ground. */
+.tf mark.tf-cur { outline: 2px solid var(--ink); }
 /*
   No taller than the window, with a scroll of its own, so a long outline's last section is in reach
   at any scroll (#2091): the window less the shell's top bar and status bar (about 76px) and a margin.
@@ -251,6 +255,8 @@
 .tf-rd-foot a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .tf-rd-foot .tf-s { font-size: var(--t-xs); margin-left: 6px; }
 .tf-doc .tf-rd-linked ul { padding: 0 0 4px 32px; }
+/* Listed outright (`LINKED_FLAT`), the list takes *Work it belongs to*'s indent, above it. */
+.tf-doc .tf-rd-linked > ul { padding: 0 0 0 18px; }
 .tf-rd-linked summary {
   list-style: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 6px 2px 2px;
   border-radius: 3px; font-size: var(--t-xs);
@@ -300,13 +306,13 @@
 .tf .tf-dh-rest { border-top: 1px solid var(--rule-2); font-size: var(--t-xs); }
 /* The one *Sync now* of an empty home, under its sentence (chrome.css starts a Sync now on its column's edge). */
 .tf-dh .tf-empty .tf-syncnow { align-self: center; }
-/* A search's empty answer, above the home's lists. */
+/* A search's empty answer, above the home's lists, and with hits the line that says how many. */
 .tf-dh-answer { padding: 18px 22px 22px; }
-.tf-dh-answer b { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.tf-dh-found { margin: 0; padding: 0 22px 14px; font-size: var(--t-md); color: var(--ink-2); }
+:is(.tf-dh-answer, .tf-dh-found) b { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
 /* The crumb bar above the home's and a space's centred column: its path starts on the column's edge, its hint ends where every page's does. */
 .tf-dh-crumb .tf-crumbs { padding-left: max(22px, calc((100cqw - 980px) / 2 + 22px)); }
 @media (max-width: 900px) { .tf-dh-crumb .tf-crumbs { padding-left: 16px; } }
-.tf-dh-h { margin: 8px 0 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
 .tf-dh-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 /* The tile's one link is its head row: its name, its count and the chevron a ticket card's rows have. */
 .tf-dh-spacelink { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; border-radius: 3px; }
@@ -322,7 +328,7 @@
 .tf-dh-d1 { padding-left: 28px; } .tf-dh-d2 { padding-left: 44px; } .tf-dh-d3 { padding-left: 60px; } .tf-dh-d4 { padding-left: 76px; }
 .tf-dh-wait { padding: 8px 22px; }
 .tf-fhead .tf-rd-pages svg { width: 15px; height: 15px; }
-@media (max-width: 900px) { .tf-dh-body { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }
+@media (max-width: 900px) { .tf-dh-body, .tf-dh-found { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }
 /* The outline folded (`readerFit`, docs/docs.ts): the sheet's own width decides, not the window's (#2081). */
 .tf-rd-sheet.tf-rd-solo { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 1240px) {

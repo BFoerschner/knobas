@@ -17,9 +17,11 @@
   import { drawn } from "../../detail/relations";
   import { JOB_LINK_RELATIONS } from "./link-relations";
   import { kindSingular } from "../../shell/kinds";
+  import { keyOf } from "../../time/format";
   import type { Layers } from "../layers.svelte";
   import type { LinkTarget } from "./current.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfKey from "../TfKey.svelte";
   import TfTick from "../TfTick.svelte";
 
   let {
@@ -124,7 +126,7 @@
         <span id="tf-lk-to-{uid}">Link to</span>
         <div class="tf-onrow" role="group" aria-labelledby="tf-lk-to-{uid}">
           <span class="tf-chosen"
-            ><TfTick /><span class="tf-chosent" class:tf-mono={codeTitle(target.kind)} title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
+            ><TfTick />{#if target.kind === "ticket"}<TfKey value={keyOf(target.entity_id)} lead />{/if}<span class="tf-chosent" class:tf-mono={codeTitle(target.kind)} title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
           >
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
         </div>
@@ -148,7 +150,7 @@
           <div class="tf-fwide tf-picklist" role="listbox" aria-label="Link targets">
             {#each hits as hit, index (hit.entity_id)}
               <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(hit)}>
-                <span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
+                <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
               </button>
             {/each}
           </div>

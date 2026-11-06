@@ -77,6 +77,15 @@ export function push(spec: ToastSpec): number {
   return id;
 }
 
+/** Change what a live toast says, in place and on its time: the write it named has moved on. Gone already, nothing happens. */
+export function amend(id: number, spec: Pick<ToastSpec, "text" | "action">): void {
+  const toast = toasts.items.find((item) => item.id === id);
+  if (toast === undefined) return;
+  toast.text = spec.text;
+  if (spec.action === undefined) delete toast.action;
+  else toast.action = spec.action;
+}
+
 /** The pointer or focus is on a toast: its time stops, so an *Undo* being reached for stays (F-621). */
 export function hold(id: number, why: ToastHold): void {
   const timer = timers.get(id);

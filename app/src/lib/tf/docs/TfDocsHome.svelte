@@ -6,12 +6,13 @@
   pages that mention you), the pages the job reaches, and every space with its
   top pages. It reads nothing of its own and opens no page, so it records no
   visit: `TfDocs.svelte` hands it the tree. A search's address draws it too, with
-  the search's empty answer above the lists (`notice`).
+  the search's answer above the lists (`notice`): how many pages match, or none.
 
   Three other states stand where the lists would: the first read, a tree that
   could not be read, and a tree with nothing in it, which says whether a source
   is missing (*Open Settings › Sources*) or has not synced yet (*Sync now*, centred
-  under that sentence and the only one on the page).
+  under that sentence and the only one on the page). Each state's one action is a page
+  body's small button, as every empty state's is.
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
@@ -21,7 +22,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { sourceRoles, WIKI } from "../roles.svelte";
-  import { continueReading, forYouWhy, pageHash, spaceHash, spaceId, topPages, type JobPageGroup } from "./docs";
+  import { continueReading, forYouWhy, pageHash, pagesByLevel, spaceHash, spaceId, type JobPageGroup } from "./docs";
 
   let {
     tree,
@@ -57,9 +58,17 @@
   const total = $derived(tree?.spaces.reduce((n, space) => n + space.pages.length, 0) ?? 0);
   const last = $derived(tree === null ? null : continueReading(tree));
   const forYou = $derived(tree?.for_you ?? []);
-  /** A page's why under the job's heading: the job is the heading, so only another reason is said. */
-  function whyOnJob(reason: string, where: string): string {
-    return reason === `Linked to ${job}` ? where : `${reason}, ${where}`;
+  /**
+   * A page's why under the job's heading: the job is the heading, so only another reason is said. With *This job* on,
+   * this panel holds the page read last and those that mention you, so its line says so, as those panels' lines do.
+   */
+  function whyOnJob(entityId: string, reason: string, where: string): string {
+    return [
+      ...(reason === `Linked to ${job}` ? [] : [reason]),
+      where,
+      ...(entityId === last?.entity_id ? ["read last"] : []),
+      ...(forYou.some((item) => item.entity_id === entityId) ? ["mentions you"] : []),
+    ].join(", ");
   }
   const allJobPages = $derived(groups.flatMap((group) => group.pages.map((page) => ({ ...page, reason: group.reason }))));
   /** A page is listed once on the home, in the first panel that shows it, and says why it is there. */
@@ -77,8 +86,8 @@
       ...(job === null ? [] : jobRows.map((page) => page.entity_id)),
     ]),
   );
-  /** A space's tile: its top pages the panels do not hold, so a tile's four may not be its literal first four. */
-  const tileRows = (space: DocSpace) => topPages(space).filter((page) => !inPanels.has(page.entity_id)).slice(0, TOP_PAGES);
+  /** A space's tile: its first pages by level that the panels do not hold, so a short top fills from the level below. */
+  const tileRows = (space: DocSpace) => pagesByLevel(space).filter((page) => !inPanels.has(page.entity_id)).slice(0, TOP_PAGES);
   /** Whether some source that is turned on fills the wiki role: what an empty tree is waiting for. */
   const hasSource = $derived(sourceRoles.syncs(WIKI));
   /** An empty tree says what would fill it in its own block, which holds the one *Sync now*. */
@@ -98,7 +107,7 @@
         {#each jobRows as page (page.entity_id)}
           <a class="tf-dh-row" href={pageHash(page.entity_id)}>
             <span class="tf-dh-t">{page.title}</span>
-            <span class="tf-why"><TfKeyed text={whyOnJob(page.reason, page.where)} /></span>
+            <span class="tf-why"><TfKeyed text={whyOnJob(page.entity_id, page.reason, page.where)} /></span>
           </a>
         {/each}
         {#if jobPages.length > jobRows.length}
@@ -125,7 +134,7 @@
   {#if failed !== null && tree === null}
     <div class="tf-empty">
       <p>Could not read Docs: {failed}</p>
-      <button type="button" class="tf-btn" onclick={onretry}>Try again</button>
+      <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
     </div>
   {:else if tree === null}
     <div class="tf-skel tf-skel-lines tf-dh-wait" aria-label="Reading Docs" role="status">
@@ -138,7 +147,7 @@
         {#if sync}{@render sync()}{/if}
       {:else}
         <p>Docs reads pages from a wiki source such as Confluence, and none is set up yet.</p>
-        <a class="tf-btn tf-primary" href="#/settings/sources">Open Settings › Sources</a>
+        <a class="tf-btn tf-sm" href="#/settings/sources">Open Settings › Sources</a>
       {/if}
     </div>
   {:else}
@@ -177,7 +186,6 @@
       </div>
       {#if !jobFirst}{@render jobList()}{/if}
       <section aria-label="Spaces">
-        <h2 class="tf-dh-h">Spaces</h2>
         <div class="tf-dh-spaces">
           {#each tree.spaces as space (spaceId(space))}
             {@const rows = tileRows(space)}
@@ -191,7 +199,7 @@
                 </a>
               </header>
               {#if rows.length === 0}
-                <p class="tf-dh-none">{space.pages.length === 0 ? "No pages yet." : "Its top pages are listed above."}</p>
+                <p class="tf-dh-none">{space.pages.length === 0 ? "No pages yet." : "Its pages are listed above."}</p>
               {:else}
                 <div class="tf-dh-rows">
                   {#each rows as page (page.entity_id)}

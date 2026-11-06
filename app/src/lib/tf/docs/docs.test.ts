@@ -11,7 +11,8 @@ import {
   continueReading,
   pageToOpen,
   spaceAt,
-  topPages,
+  pagePlace,
+  pagesByLevel,
   placeOf,
   readingMinutes,
   sectionsOf,
@@ -75,10 +76,22 @@ test("Continue reading is the page read last and where it sits, while the tree h
   expect(continueReading({ ...TREE, last_read: "confluence:gone" })).toBeNull();
 });
 
-test("a space's top pages are the ones with no parent", () => {
-  const space = TREE.spaces[0]!;
-  expect(topPages(space).every((page) => page.parent === null)).toBe(true);
-  expect(topPages(space).length).toBeGreaterThan(0);
+test("a space's pages by level: the top of its tree, then each level below, then a page whose parent it does not hold (F-407)", () => {
+  const page = (id: string, parent: string | null) => ({ entity_id: id, title: id, parent });
+  const space = {
+    source_id: "c",
+    key: "ADR",
+    name: null,
+    pages: [page("deep", "one"), page("one", "index"), page("lost", "gone"), page("index", null), page("two", "index")],
+  };
+  expect(pagesByLevel(space).map((p) => p.entity_id)).toEqual(["index", "one", "two", "deep", "lost"]);
+});
+
+test("a page's place is one function: the space by name, then what is above it, and a page at the top of a space says only the space (F-410)", () => {
+  expect(pagePlace({ key: "ENG", name: "Engineering" }, "Payments")).toBe("Engineering › Payments");
+  expect(pagePlace({ key: "TEAM", name: "Payments team" }, null)).toBe("Payments team");
+  expect(pagePlace({ key: "ENG", name: null }, "Payments")).toBe("ENG › Payments");
+  expect(pagePlace(null, null)).toBe("");
 });
 
 test("a space's address names the space, and opens no page: the space has a page of its own", () => {
@@ -253,7 +266,8 @@ test("the hit's words: the header line, the snippet's place and the last line", 
   expect(hitsLine(5, "all spaces")).toBe("5 pages in all spaces");
   expect(hitsLine(1, "Engineering")).toBe("1 page in Engineering");
   expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: "Payments" }, true)).toBe("Engineering › Payments");
-  expect(hitWhere({ space: { key: "ENG", name: null }, path: null }, true)).toBe("ENG › top level");
+  expect(hitWhere({ space: { key: "ENG", name: null }, path: null }, true)).toBe("ENG");
+  expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: null }, false)).toBe("");
   expect(hitWhere({ space: { key: "ENG", name: "Engineering" }, path: "Payments" }, false)).toBe("Payments");
   expect(snippetLabel({ section: "Backoff policy", comment_by: null, segments: [] })).toBe("Backoff policy:");
   expect(snippetLabel({ section: null, comment_by: "Priya Nair", segments: [] })).toBe("Comment by Priya:");

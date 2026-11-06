@@ -5,7 +5,8 @@
   when the reader turned its source off. Two banners, because the remedies
   differ: nothing undoes a withdrawal (a *Refresh* that finds the item again
   does), and re-enabling the source undoes the other. Both show when both hold.
-  Under them, a failed *Refresh*'s line (#2107), the detail kept as it was.
+  Under them, a failed *Refresh*'s line (#2107), the detail kept as it was: with
+  `onretry` it holds its own *Try again*, and otherwise it points at the header's button.
 -->
 <script lang="ts">
   import type { EntityDetail } from "../ipc/entity";
@@ -14,10 +15,13 @@
   let {
     detail,
     failed = null,
+    onretry,
   }: {
     detail: EntityDetail;
     /** The last refresh's failure line, `Couldn't refresh: <reason>`. */
     failed?: string | null;
+    /** Refresh again, from the failed line itself. */
+    onretry?: (() => void) | undefined;
   } = $props();
 </script>
 
@@ -32,5 +36,12 @@
   </div>
 {/if}
 {#if failed !== null}
-  <div class="tf-banner tf-err tf-refresh-failed" role="alert">{failed.replace("the source", detail.source.display_name)}. Refresh to try again.</div>
+  <div class="tf-banner tf-err tf-refresh-failed" role="alert">
+    {#if onretry}
+      <span>{failed.replace("the source", detail.source.display_name)}.</span>
+      <button type="button" class="tf-btn tf-sm" onclick={onretry}>Try again</button>
+    {:else}
+      {failed.replace("the source", detail.source.display_name)}. Refresh to try again.
+    {/if}
+  </div>
 {/if}

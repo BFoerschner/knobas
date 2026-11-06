@@ -612,7 +612,7 @@ The job of this view is that nobody has to open Confluence. Search comes first, 
 
   The rest of the page's context sits at the **page foot**, after the body and before the comments, in this order, each left out when empty:
   - *Work it belongs to*, the tickets the page references or is linked to, with key, title and status, as an open list;
-  - *Linked from*, the page's backlinks, grouped by space. Each space is a fold, closed every time a page opens, showing the space key, its name and its count, and opening to a list of pages. The heading counts the pages, "50+" when the reader's limit of 50 is reached;
+  - *Linked from*, the page's backlinks, grouped by space. Each space is a fold, closed every time a page opens, showing the space key, its name and its count, and opening to a list of pages (amended 2026-11-06: up to six are listed outright, with no fold; the design system, *Layout*). The heading counts the pages, "50+" when the reader's limit of 50 is reached;
   - *Attachments*, once built.
 
   The page's history is the last edit and *Created by* in the meta line (R-10.10); there is no History section.

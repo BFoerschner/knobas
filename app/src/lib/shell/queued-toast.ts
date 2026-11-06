@@ -16,7 +16,7 @@
  */
 import type { SourceSummary } from "../ipc/sources";
 import { health, signInFails, type Health } from "./health.svelte";
-import { push } from "./toasts.svelte";
+import { amend, push } from "./toasts.svelte";
 import { openWriteQueue } from "./write-queue.svelte";
 
 /** The source a write goes to: its id, to read its credential, and its name, to say it. */
@@ -41,14 +41,22 @@ function withSignIn(text: string, failing: string | null): string {
  * Raise the toast for a write just queued to `source`, in the button's words
  * (`what`, without a closing full stop). `null` or `undefined` for a page
  * that cannot name the source (a detail read before it carried one): the
- * toast then says what was queued and nothing about sign-in.
+ * toast then says what was queued and nothing about sign-in. Returns the toast's id.
  */
-export function toastQueued(what: string, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): void {
+export function toastQueued(what: string, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): number {
   const failing = failingName(source, store);
-  push({
+  return push({
     text: queuedText(what, failing),
     action: { label: "Show queue", run: openWriteQueue },
   });
+}
+
+/**
+ * The write toast {@link toastQueued} raised has gone: it says so where it stands, and the queue it offered no longer
+ * holds it. Docs' rows move from *Queued* to *Sent* within a second, so a toast left on *Queued* read as a contradiction.
+ */
+export function toastSent(id: number, what: string): void {
+  amend(id, { text: `Sent: ${what}.` });
 }
 
 /**

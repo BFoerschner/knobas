@@ -12,8 +12,8 @@
   draws no search field (#2425): `/` opens the launcher on `#d`, whose
   *Search Docs for …* row opens `#/docs/search/<words>`, a search over every
   space; a label chip searches for itself. A search's address opens no page: the
-  home stays in the main column until a hit is opened, and says so there when no
-  page matches. *New page* is at the
+  home stays in the main column until a hit is opened, and says there how many
+  pages match, or that none does; arriving, the first hit takes focus. *New page* is at the
   bottom. Below 900px (`READER_DRAWER`, through `MediaQuery`) it is a drawer
   over the page (#2084, R-10.9): *Pages* at the start of the breadcrumb row
   and a label chip open it; `Esc` (it is a `drawer` layer), the backdrop
@@ -91,7 +91,7 @@
   import { writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
-  import { toastQueued, type WriteSource } from "../../shell/queued-toast";
+  import { toastQueued, toastSent, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -122,6 +122,7 @@
   import TfDocsHome from "./TfDocsHome.svelte";
   import TfDocTree from "./TfDocTree.svelte";
   import TfKeyed from "../TfKeyed.svelte";
+  import { counted } from "../counted";
   import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
@@ -261,6 +262,8 @@
   /** The search's words (#860): the address's (#2425) or a label chip's. */
   let query = $state("");
   let found = $state<DocsHits | null>(null);
+  /** The words `found` answers, which an earlier search's list may not be until the new one is in. */
+  let foundFor = $state<string | null>(null);
   let searchError = $state<string | null>(null);
   /** What the find bar marks: the needles a hit was opened with. */
   let find = $state("");
@@ -268,7 +271,9 @@
 
   // ---- *This job* (#863) ----
   const filter = sessionFilter("docs");
-  const jobOn = $derived(job !== null && filter.scope === "job");
+  /** The read answered, and with no space: there is nothing to narrow, so *This job* is not offered and does not hold. */
+  const nothingHeld = $derived(tree !== null && tree.spaces.length === 0);
+  const jobOn = $derived(job !== null && filter.scope === "job" && !nothingHeld);
   /** What the job's ticket reaches, `null` until the read answers. */
   let reach = $state<Reached[] | null>(null);
   /** The titles of the first steps a page is reached through, for *Via …*. */
@@ -319,11 +324,13 @@
   );
 
   const place = $derived(placeOf(rest));
-  // *Continue reading* is the tree's: back on the home, it is read again, so it names the page read last.
+  /** The last visit on its way: a read of the tree that overtook it would name the page before it. */
+  let visited: Promise<unknown> = Promise.resolve();
+  // *Continue reading* is the tree's: back on the home, it is read again once the visit is in, so it names the page read last.
   let wasHome = false;
   $effect(() => {
     const now = place.kind === "home";
-    if (now && !wasHome && ready && untrack(() => tree) !== null) untrack(() => void readTree(true));
+    if (now && !wasHome && ready && untrack(() => tree) !== null) untrack(() => void visited.then(() => readTree(true)));
     wasHome = now;
   });
   const target = $derived(tree === null ? null : pageToOpen(place));
@@ -371,7 +378,7 @@
         page = answer;
         me = answer.me;
         pageError = null;
-        if (opens) void io.visitEntity(id).catch(() => {});
+        if (opens) visited = io.visitEntity(id).catch(() => {});
       },
       (cause: unknown) => {
         if (mine === pageAsked && (!quiet || page?.entity_id !== id)) {
@@ -410,6 +417,15 @@
         if (mine === detailAsked && !quiet) detail = null;
       },
     );
+  }
+
+  /** *Try again* in the failed line: that line goes while it asks, so focus lands on what stands in its place after. */
+  async function refreshAgain(): Promise<void> {
+    if (detail === null) return;
+    await refresh.refresh(detail, reread);
+    await tick();
+    if (document.activeElement !== document.body) return;
+    (article?.querySelector<HTMLElement>(".tf-refresh-failed button") ?? article?.querySelector<HTMLElement>(".tf-refresh"))?.focus();
   }
 
   /**
@@ -504,6 +520,7 @@
         (answer) => {
           if (mine !== asked) return;
           found = answer;
+          foundFor = text;
           searchError = null;
         },
         (cause: unknown) => {
@@ -559,6 +576,8 @@
     if (place.kind !== "search") return;
     const words = place.words;
     untrack(() => {
+      // Coming back from a hit is no arrival: the way back puts focus on the hit that was opened.
+      arriving = query !== words;
       query = words;
       find = "";
       picked = "*";
@@ -614,6 +633,8 @@
 
   /** A search's address that found nothing, or could not ask: the main column says so, where a page would be. */
   const answerHere = $derived(place.kind === "search" && (searchError !== null || hits?.hits.length === 0));
+  /** A search's address that found pages: they are in the rail, and the main column says how many, so it does not read as nothing happened. */
+  const hitsHere = $derived(place.kind === "search" && foundFor === place.words && (hits?.hits.length ?? 0) > 0);
 
   function searchLabel(label: string, chip: HTMLElement): void {
     query = label;
@@ -655,15 +676,26 @@
     opener = null;
   });
 
+  /** A search's address just arrived at, whose first hit takes focus once the list is in: after the launcher, focus is on nothing. */
+  let arriving = false;
+  /** Whether the reader went somewhere of their own while the search was asked: a field or a dialog keeps its focus. */
+  const focusTaken = () => document.activeElement?.closest("input, textarea, select, [role='dialog']") != null;
+
   // Below 900 px a search's hits are in the closed drawer: a search that found some opens it, once per address.
   let drewHitsFor: string | null = null;
   $effect(() => {
     const words = place.kind === "search" ? place.words : null;
-    const some = (hits?.hits.length ?? 0) > 0;
     if (words === null) drewHitsFor = null;
-    if (words === null || !some || !drawerBand.current || drewHitsFor === words) return;
+    if (words === null || !hitsHere || drewHitsFor === words) return;
     drewHitsFor = words;
-    untrack(() => openDrawer(null));
+    untrack(() => {
+      if (drawerBand.current) openDrawer(main?.querySelector(".tf-railbar button") ?? null);
+      if (!arriving) return;
+      arriving = false;
+      void tick().then(() => {
+        if (!focusTaken()) treeNav?.querySelector<HTMLElement>("a.tf-dl-hit")?.focus();
+      });
+    });
   });
 
   // Open, the drawer is a layer of the shell's, so `Esc` closes it wherever focus is (rung 2).
@@ -796,7 +828,8 @@
   let active = $state<number | null>(null);
   function follow(): void {
     if (!main || !article) return;
-    const top = main.getBoundingClientRect().top + 90;
+    // A section is the one you are in once its heading is in the column's top third, with its body in view under it.
+    const top = main.getBoundingClientRect().top + main.clientHeight / 3;
     let now: number | null = null;
     let last: number | null = null;
     for (const h of article.querySelectorAll<HTMLElement>("h2[id^='s-']")) {
@@ -814,6 +847,30 @@
     if (place.kind === "page" && place.section !== null) pickedSection = place.section;
   });
   const marked = $derived(pickedSection ?? active);
+
+  /** Scroll to section `number`, where the page is drawn. */
+  function toSection(number: number): void {
+    void tick().then(() => article?.querySelector(`#s-${number}`)?.scrollIntoView?.());
+  }
+
+  // An outline entry changes the address on the page already open: nothing is read again, so the scroll is here.
+  // By the section's number, so another route's draw of the same address does not undo where the reader scrolled to.
+  const sectionHere = $derived(place.kind === "page" ? place.section : null);
+  $effect(() => {
+    if (sectionHere !== null) toSection(sectionHere);
+  });
+
+  /** An entry pressed: the one the address already names changes no address, so it scrolls from here too. */
+  function pickSection(number: number): void {
+    pickedSection = number;
+    toSection(number);
+  }
+
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+  /** The reader moves the page by hand: the outline follows the scrolling again. */
+  function releaseSection(event: KeyboardEvent): void {
+    if (SCROLL_KEYS.has(event.key)) pickedSection = null;
+  }
 
   // ---- actions ----
   let linking = $state(false);
@@ -973,8 +1030,10 @@
       const name = heading ? inlineWords(heading.text) : "";
       const id = p.entity_id;
       const kind = sectionKind(section);
+      const sent = toastWrite(`edit section “${name}” of ${p.title}`, sourceOf(p), write);
       echoWrite(id, kind, text, {
         write,
+        onsent: sent,
         base: String(p.version),
         surface: DOCS,
         source: p.source_id,
@@ -987,12 +1046,19 @@
         },
         follower,
       });
-      toastQueued(`edit section “${name}” of ${p.title}`, sourceOf(p));
       return true;
     } catch (cause) {
       push({ text: `Could not queue the edit: ${ipcErrorMessage(cause)}`, tone: "err" });
       return false;
     }
+  }
+
+  /** The toast for a Docs write just queued, and what turns it into *Sent* once the write went, as the row's word does. */
+  function toastWrite(what: string, source: WriteSource | null, write: { state?: string }): () => void {
+    const toast = toastQueued(what, source);
+    const sent = () => toastSent(toast, what);
+    if (write.state === "sent") sent();
+    return sent;
   }
 
   async function sendComment(p: DocPage): Promise<void> {
@@ -1002,8 +1068,10 @@
       const body = comment;
       const id = p.entity_id;
       const write = await io.submitWrite({ Comment: { entity: id, body } });
+      const sent = toastWrite(`comment on ${p.title}`, sourceOf(p), write);
       echoWrite(id, "comment", body, {
         write,
+        onsent: sent,
         many: true,
         surface: DOCS,
         source: p.source_id,
@@ -1016,7 +1084,6 @@
         },
         follower,
       });
-      toastQueued(`comment on ${p.title}`, sourceOf(p));
       comment = "";
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -1037,8 +1104,10 @@
       }
       const write = await io.docsCreatePage(next, ticket);
       const title = next.title.trim();
+      const sent = toastWrite(`create page ${title}`, under ? sourceOf(under) : null, write);
       echoWrite(next.parent, "page", title, {
         write,
+        onsent: sent,
         many: true,
         surface: DOCS,
         ...(under ? { source: under.source_id } : {}),
@@ -1051,7 +1120,6 @@
         },
         follower,
       });
-      toastQueued(`create page ${title}`, under ? sourceOf(under) : null);
       return true;
     } catch (cause) {
       push({ text: `Could not queue the page: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -1073,7 +1141,7 @@
     onclick={ondrawerclick}
   >
     <div class="tf-dl-head">
-      {#if job !== null}
+      {#if job !== null && tree !== null && !nothingHeld}
         <TfScope
           scopes={[{ id: "job", label: "This job", count: jobIds?.size ?? null, title: `The pages ${job} reaches` }, { id: "all", label: "All" }]}
           scope={jobOn ? "job" : "all"}
@@ -1110,7 +1178,7 @@
             onpick={openHit}
           />
         {/if}
-      {:else if jobOn}
+      {:else if jobOn && tree !== null}
         {#each jobGroups as group (group.reason)}
           <div class="tf-dl-for">
             <h4><TfKeyed text={group.reason} /></h4>
@@ -1182,7 +1250,7 @@
     <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
   {/if}
 
-  <TfScroller class="tf-rd-main" bind:ref={main} onscroll={follow} onwheel={() => (pickedSection = null)}>
+  <TfScroller class="tf-rd-main" bind:ref={main} onscroll={follow} onwheel={() => (pickedSection = null)} onpointerdown={(event) => { if (event.target === event.currentTarget) pickedSection = null; }} onkeydown={releaseSection}>
     <!-- The one fold bar below 900 px. The tree it opens is a drawer, because the page does not reflow under it. -->
     {#if drawerBand.current}
       <TfRailBar
@@ -1214,7 +1282,7 @@
         groups={jobGroups}
         jobFirst={jobOn}
         {sync}
-        notice={answerHere ? searchAnswer : undefined}
+        notice={answerHere || hitsHere ? searchAnswer : undefined}
         onretry={() => void readTree(false)}
       />
     {:else if spaceHere !== undefined}
@@ -1326,10 +1394,10 @@
               </span>
             {/if}
           </div>
-          {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+          {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} onretry={() => void refreshAgain()} />{/if}
           {#if outlineFolds}
             {#key p.entity_id}
-              <TfDocOutline page={p} {stems} active={marked} folded />
+              <TfDocOutline page={p} {stems} active={marked} folded onpick={pickSection} />
             {/key}
           {/if}
           <div class="tf-doc">
@@ -1354,7 +1422,7 @@
               <TfDocFoot page={p} spaces={tree.spaces} />
             {/key}
             <div class="tf-cmts">
-              <h2>Comments {#if p.comments.length > 0}<span class="tf-count">{p.comments.length}</span>{/if}</h2>
+              <h2>Comments {#if p.comments.length + queuedComments.length > 0}<span class="tf-count">{p.comments.length + queuedComments.length}</span>{/if}</h2>
               {#each p.comments as c, i (i)}
                 {@const mine = c.author !== null && p.me.includes(c.author)}
                 <div class="tf-msg">
@@ -1406,7 +1474,7 @@
           </div>
         </article>
         {#if !outlineFolds}
-          <TfDocOutline page={p} {stems} active={marked} folded={false} />
+          <TfDocOutline page={p} {stems} active={marked} folded={false} onpick={pickSection} />
         {/if}
       </div>
     {/if}
@@ -1414,6 +1482,12 @@
 </div>
 
 {#snippet searchAnswer()}
+  {#if hitsHere && !answerHere}
+    {@const total = hits?.total ?? 0}
+    <p class="tf-dh-found" role="status">
+      {counted(total, "page", "pages")} {total === 1 ? "matches" : "match"} <b>{query.trim()}</b>{#if drawerBand.current}. <button type="button" class="tf-linkish" onclick={(event) => openTree(event.currentTarget)}>Show them</button>{:else}, listed on the left.{/if}
+    </p>
+  {:else}
   <div class="tf-empty tf-dh-answer">
     {#if searchError !== null}
       <p>Could not search: {searchError}</p>
@@ -1426,6 +1500,7 @@
       <button type="button" class="tf-btn tf-sm" onclick={clearSearch}>Clear search</button>
     {/if}
   </div>
+  {/if}
 {/snippet}
 
 {#if linking && page !== null && linkPorts}

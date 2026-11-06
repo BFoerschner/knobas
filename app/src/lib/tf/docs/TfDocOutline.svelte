@@ -17,6 +17,7 @@
     stems,
     active,
     folded,
+    onpick,
   }: {
     page: DocPage;
     stems: string[];
@@ -24,6 +25,8 @@
     active: number | null;
     /** Drawn as the fold above the page rather than as the margin. */
     folded: boolean;
+    /** An entry was pressed, the one the address already names too, which changes no address. */
+    onpick?: ((section: number) => void) | undefined;
   } = $props();
 
   const outline = $derived(sectionsOf(page.blocks).filter((s) => s.heading !== null));
@@ -35,7 +38,7 @@
   <nav class="tf-toc">
     {#each outline as section (section.number)}
       {@const n = counts.get(section.number)}
-      <a href={pageHash(page.entity_id, section.number)} class:tf-on={active === section.number}
+      <a href={pageHash(page.entity_id, section.number)} class:tf-on={active === section.number} onclick={() => onpick?.(section.number)}
         >{inlineWords(section.heading?.text ?? [])}{#if n}<span class="tf-hits">{n}</span>{/if}</a
       >
     {/each}

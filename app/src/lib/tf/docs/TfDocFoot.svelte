@@ -1,7 +1,9 @@
 <!--
   The page foot (#2080, R-10.15), after the body and before the comments:
-  *Work it belongs to*, each ticket with its status now, then *Linked from*,
-  the backlinks by space, each space a fold that starts closed. Either is
+  *Work it belongs to*, each ticket with its status now, then *Linked from*:
+  up to `LINKED_FLAT` backlinks are listed outright, each saying its space
+  where they come from more than one, so reaching a single link takes no click.
+  Past that they go by space, each space a fold that starts closed. Either is
   left out when it has nothing in it. Attachments go here once built.
 
   Nothing remembers an open fold: Docs draws the foot afresh for every page
@@ -12,7 +14,7 @@
   import { entityAddress } from "../address";
   import { stateWord } from "../state-word";
   import TfKey from "../TfKey.svelte";
-  import { backlinkGroups, linkedFromHeading, pageHash } from "./docs";
+  import { backlinkGroups, LINKED_FLAT, linkedFromHeading, pageHash } from "./docs";
 
   let { page, spaces }: { page: DocPage; spaces: readonly DocSpace[] } = $props();
 
@@ -35,7 +37,19 @@
 {#if page.backlinks.length > 0}
   <section class="tf-rd-foot tf-rd-linked">
     <h3>{linkedFromHeading(page.backlinks.length)}</h3>
-    {#each groups as group (group.key)}
+    {#if page.backlinks.length <= LINKED_FLAT}
+      <ul>
+        {#each groups as group (group.key)}
+          {#each group.links as link (link.entity_id)}
+            <li>
+              <a href={pageHash(link.entity_id)}>{link.title}</a
+              >{#if groups.length > 1 && group.key !== null}<span class="tf-s">{group.name ?? group.key}</span>{/if}
+            </li>
+          {/each}
+        {/each}
+      </ul>
+    {:else}
+      {#each groups as group (group.key)}
       <details>
         <summary
           >{#if group.key === null}Other pages{:else}<b>{group.name ?? group.key}</b>{/if}<span
@@ -48,6 +62,7 @@
           {/each}
         </ul>
       </details>
-    {/each}
+      {/each}
+    {/if}
   </section>
 {/if}
