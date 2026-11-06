@@ -35,23 +35,22 @@
     onadd: () => void;
   } = $props();
 
-  /** Each source *Sync all* would start is running already, so a press would add nothing (F-630). */
-  const allRunning = $derived.by(() => {
-    const on = sources.filter((source) => source.enabled);
-    return on.length > 0 && on.every((source) => statuses[source.id]?.running === true);
-  });
+  /** What *Sync all* starts. `trigger_all` skips a source only a person can make answer, which is what `signInFails` reads. */
+  const runnable = $derived(sources.filter((source) => source.enabled && !signInFails(health.get(source.id)?.state)));
 
-  /** What really started: a source whose sign-in fails has a run, and it won't read anything until the sign-in works. */
+  /** Each source *Sync all* would start is running already, so a press would add nothing (F-630). */
+  const allRunning = $derived(runnable.length > 0 && runnable.every((source) => statuses[source.id]?.running === true));
+
+  /** What started, and who didn't: `runs` already leaves out a source whose sign-in fails, because it gets no run. */
   function startedText(runs: number): string {
     const stuck = sources.filter((source) => source.enabled && signInFails(health.get(source.id)?.state)).map((source) => source.display_name || source.id);
-    const going = Math.max(0, runs - stuck.length);
-    const syncing = stuck.length === 0 ? `Syncing ${going} source${going === 1 ? "" : "s"}.` : `Syncing ${going} of ${runs} sources.`;
+    const syncing = `Syncing ${runs} source${runs === 1 ? "" : "s"}.`;
     return stuck.length === 0 ? syncing : `${syncing} ${new Intl.ListFormat("en").format(stuck)} can't sign in.`;
   }
 
   async function syncAll() {
     if (allRunning) return;
-    const ids = sources.filter((source) => source.enabled).map((source) => source.id);
+    const ids = runnable.map((source) => source.id);
     onstarted(ids);
     // One for each press: its answer takes this toast's place when its runs end (F-652).
     const run = createAllSync(ports, async () => {

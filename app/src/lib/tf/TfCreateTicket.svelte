@@ -10,7 +10,9 @@
   asked about every project drawn) stays pickable, and picked draws *Create
   ticket* disabled with the reason above it: another project may take it.
 
-  It arrives on *Title* (F-453), so typing doesn't move the project, and shift-`Tab` reaches *Type* and *Project*.
+  It arrives on what it waits on. A failed run fills the title in and asks only for a project, so it arrives on *Project*, and typing
+  there is choosing one: nothing is filed until *Create ticket*, and the field shows what was chosen. With a project chosen or no title,
+  it arrives on *Title* (F-453), so typing doesn't move the project, and shift-`Tab` reaches *Type* and *Project*.
 
   A surface that names a `draftKey` keeps what was changed through `Esc` and ×, as *New page* does (F-647). *Cancel* is the
   explicit discard, and filing ends the draft too.
@@ -54,6 +56,8 @@
   let editing = $state<TicketDraft>(
     untrack(() => ({ ...draft, ...(draftKey !== undefined && drafts.has(draftKey) ? (JSON.parse(drafts.get(draftKey)) as TicketDraft) : {}) })),
   );
+  /** Read once: choosing a project mustn't change where a field that went away would hand focus. */
+  const arriveOnProject = untrack(() => editing.project === null && editing.title.trim() !== "");
 
   // Only what differs from what the dialog opened with is a draft, so one opened and left holds nothing back.
   $effect(() => {
@@ -84,6 +88,7 @@
       <select
         id="tf-ct-project-{uid}"
         aria-label="Project the ticket goes in"
+        data-arrive={arriveOnProject ? "" : undefined}
         value={editing.project ?? ""}
         onchange={(event) => (editing.project = event.currentTarget.value || null)}
       >

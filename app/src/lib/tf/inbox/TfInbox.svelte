@@ -472,8 +472,13 @@
     });
   }
 
-  /** The box a pointer's pick was made in. What stood under the float is about to be under a still pointer, and a second press must land on nothing. */
-  let spent = $state.raw<DOMRect | null>(null);
+  /** How far a double press's second press can drift from its first, in px. */
+  const SPENT_REACH = 6;
+  /**
+   * The spot a pointer's pick was made at. What stood under the float is about to be under a still pointer, and a second press
+   * must land on nothing. Only the spot: the next rows' actions stand under the rest of the float, and a press aimed at one must land.
+   */
+  let spent = $state.raw<{ left: number; top: number; width: number; height: number } | null>(null);
   $effect(() => {
     if (spent === null) return;
     if (!shown()) {
@@ -484,7 +489,7 @@
   });
 
   function snooze(entry: InboxEntry, at: Date, event?: MouseEvent) {
-    if (heldByPointer(event)) spent = (event?.currentTarget as Element).closest(".tf-isnooze")?.getBoundingClientRect() ?? null;
+    if (event !== undefined && heldByPointer(event)) spent = { left: event.clientX - SPENT_REACH, top: event.clientY - SPENT_REACH, width: SPENT_REACH * 2, height: SPENT_REACH * 2 };
     snoozing = null;
     leaves(entry, "stream", "snooze", event);
     snoozeToast({ entry, until: untilLabel(at, now) });

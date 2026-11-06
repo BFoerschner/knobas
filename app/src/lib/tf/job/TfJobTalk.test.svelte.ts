@@ -286,6 +286,8 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   await settle();
   expect(calls.writes).toEqual([{ Comment: { entity: ID, body: "Priya, can you decide the SLA?" } }]);
   expect(box.value).toBe("");
+  // *Comment* goes off with its draft: focus goes to the box, as ⌘Enter leaves it there (F-266).
+  expect(document.activeElement).toBe(box);
   expect(toasts.items.map((t) => t.text)).toContain("Queued: comment on PAY-231.");
 
   job && unmount(job);

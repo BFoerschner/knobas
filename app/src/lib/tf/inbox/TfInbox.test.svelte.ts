@@ -714,6 +714,14 @@ test("a pointer's pick leaves an empty box under the pointer until it moves, so 
   expect(document.querySelector(".tf-isnooze-spent")).toBeNull();
 });
 
+test("a pointer's pick guards only its spot, so a press on the next row's action under the float lands (F-154, F-159)", async () => {
+  const row = await openPicker();
+  button(row, "Tomorrow").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, clientX: 400, clientY: 300 }));
+  await settle();
+  const spent = document.querySelector<HTMLElement>(".tf-isnooze-spent")!;
+  expect([spent.style.left, spent.style.top, spent.style.width, spent.style.height]).toEqual(["394px", "294px", "12px", "12px"]);
+});
+
 test("a pointer's pick holds its row too, so a row held above it keeps its index (F-159)", async () => {
   const row = await openPicker();
   const key = (row as HTMLElement).dataset["row"];

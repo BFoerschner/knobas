@@ -655,10 +655,14 @@
   const draft = $derived(prId === null ? "" : drafts.get(`comment:${prId}`));
   let sending = $state(false);
   let composer = $state<HTMLTextAreaElement | null>(null);
-  /** A second press with a still pointer lands on *Comment*, disabled by now, whose press gives focus to what holds it: it goes back to the box. */
+  /**
+   * A second press with a still pointer lands on *Comment*, disabled by now, whose press gives focus to what holds it: it goes
+   * back to the box. Only with the pointer on *Comment*, because `Esc` steps out to the same holder, and that step must land.
+   */
   let sentAt = 0;
   function keepInComposer(event: FocusEvent) {
-    if (event.target === event.currentTarget && Date.now() - sentAt < BY_POINTER_MS) composer?.focus({ preventScroll: true });
+    const holder = event.currentTarget as HTMLElement;
+    if (event.target === holder && Date.now() - sentAt < BY_POINTER_MS && holder.querySelector("button:hover") !== null) composer?.focus({ preventScroll: true });
   }
 
   async function send() {

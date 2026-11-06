@@ -1325,6 +1325,8 @@
     const body = drafts.get(commentKey(p.entity_id));
     if (body.trim() === "" || commenting || refusal("comment") !== null) return;
     commenting = true;
+    // *Comment* goes off with its draft, so focus stays in the box, whichever way this was sent (F-266).
+    composer?.focus({ preventScroll: true });
     try {
       const id = p.entity_id;
       const write = await io.submitWrite({ Comment: { entity: id, body } });

@@ -1697,6 +1697,8 @@ test("a comment goes through the queue; copy link and the actions a source does 
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "Done." } });
+  // *Comment* goes off with its draft: focus goes to the box, as ⌘Enter leaves it there (F-266).
+  expect(document.activeElement).toBe(box);
   button("More")!.click();
   await settle();
   button("Copy link")!.click();

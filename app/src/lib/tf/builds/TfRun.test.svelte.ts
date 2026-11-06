@@ -919,6 +919,8 @@ test("Create ticket opens the dialog prefilled from the failing test, its assert
   const options = [...document.querySelectorAll<HTMLOptionElement>(".tf-dialog select[aria-label='Project the ticket goes in'] option")];
   expect(options.map((o) => o.textContent)).toEqual(["Choose…", "Payments", "Web"]);
   expect(dialogButton("Create ticket")!.disabled).toBe(true);
+  // The title is filled in, so it arrives on the one field it waits on.
+  expect(document.activeElement).toBe(document.querySelector(".tf-dialog select[aria-label='Project the ticket goes in']"));
 });
 
 test("filing queues a CreateTicket in the picked project, linked to the run, and the problem block says it is queued", async () => {
@@ -1352,6 +1354,24 @@ test("a tab a run doesn't have says so, marks no tab, and offers Overview", asyn
   expect(target.querySelector(".tf-nohere a")?.textContent).toBe("Overview");
   expect(target.querySelector('.tf-tabs [aria-current="page"]')).toBeNull();
   expect(target.querySelector('[aria-label="Artifacts"].tf-panel')).toBeNull();
+});
+
+test("Create ticket with its project chosen arrives on Title, a restored draft included (F-453)", async () => {
+  draw();
+  await settle();
+  button("Create ticket…")!.click();
+  await settle();
+  const select = document.querySelector<HTMLSelectElement>(".tf-dialog select[aria-label='Project the ticket goes in']")!;
+  select.value = select.options[1]!.value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  document.querySelector<HTMLButtonElement>(".tf-dialog .tf-dclose")!.click();
+  await settle();
+  button("Create ticket…")!.click();
+  await settle();
+  expect(document.activeElement).toBe(document.querySelector(".tf-dialog input[aria-label='Ticket title']"));
+  dialogButton("Cancel")!.click();
+  await settle();
 });
 
 test("what was typed in Create ticket outlives Esc and ×, and Cancel ends it (F-647)", async () => {

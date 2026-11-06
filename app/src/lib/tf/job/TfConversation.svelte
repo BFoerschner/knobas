@@ -119,6 +119,8 @@
     const body = draft.trim();
     if (body === "" || sending || refused !== null) return;
     sending = true;
+    // *Comment* goes off with its draft, so focus stays in the box, whichever way this was sent (F-266).
+    box?.focus({ preventScroll: true });
     try {
       if (await oncomment(body)) drafts.forget(commentKey);
     } finally {

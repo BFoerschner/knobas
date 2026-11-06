@@ -1112,6 +1112,37 @@ test("Sync all ends in one toast, in its start's place, once every run has (F-65
   toasts.items = [];
 });
 
+test("Sync all counts the runs it started, because a source whose sign-in fails gets none, and leaves that source out of what's going", async () => {
+  toasts.items = [];
+  const { p, send } = syncEvents({ syncAll: vi.fn(() => Promise.resolve([1])) });
+  const { health } = await open(["sources"], p);
+  health.patch(healthOf("teamcity", "unauthorized"));
+  await settle();
+  button("Sync all").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Syncing 1 source. TeamCity can't sign in."]);
+  expect(button("Sync all").getAttribute("aria-disabled")).toBe("true");
+  send({ source_id: "jira", run_id: 1, last_outcome: "ok", last_changed: true });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced jira"]); // No role list here, so the source's id stands for its name.
+  expect(button("Sync all").getAttribute("aria-disabled")).toBeNull();
+  toasts.items = [];
+});
+
+test("Sync all with every source's sign-in failing starts nothing and stays pressable", async () => {
+  toasts.items = [];
+  const { p } = syncEvents({ syncAll: vi.fn(() => Promise.resolve([])) });
+  const { health } = await open(["sources"], p);
+  health.patch(healthOf("jira", "unauthorized"));
+  health.patch(healthOf("teamcity", "unauthorized"));
+  await settle();
+  button("Sync all").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Nothing to sync"]);
+  expect(button("Sync all").getAttribute("aria-disabled")).toBeNull();
+  toasts.items = [];
+});
+
 /** The credential row's line, and the Re-enter dialog's note under it. */
 async function storedLines(secretsInMemory: boolean): Promise<{ row: string; note: string }> {
   await open(["source", "teamcity"], ports({ appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: secretsInMemory })) }));
