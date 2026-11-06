@@ -327,15 +327,19 @@ select i.source_id                            as source_id,
 /// * **Why 256, not the walk's 64.** Equal keys share posting lists of about 220
 ///   rows, a sixth of a page, and a backward scan reads each one from its low end
 ///   (`_bt_readpage`). So the live rows at the very end of the range can sit behind
-///   the first 220 rows it reads. Fewer than that can miss them, as 64 did for 40
-///   live rows after 1,000 withdrawn. The budget is only spent on withdrawn rows:
-///   the look stops at the first live one.
+///   the first 220 rows it reads. Fewer than that can miss them: over 750 run lengths
+///   the last row written sat up to 221 rows in, past a budget of 64 in 71% of them,
+///   128 in 41%, 200 in 9% and 222 in none. `tests/it/coverage_plans.rs` holds 64 and
+///   not the rest, since a budget too small only costs this one shape a slower read.
+///   The budget is only spent on withdrawn rows: the look stops at the first live one.
 /// * **No grouped join behind the look,** which is what #2504 proposed. It reads
 ///   every child row of the source and has nothing to stop it at the first live one,
 ///   so it would read a source's whole range to answer for one with a short run of
 ///   withdrawn rows at each end. Nor is it cheaper where it has to read them all. Over
-///   46,668 withdrawn rows the read from the head took 40 to 43 ms, a plain grouped
-///   join 48, one that looks each entity up once 98, and one from the live items 306.
+///   46,668 withdrawn rows the read from the head took 40 to 44 ms and a plain grouped
+///   join 45 to 48, and the forms that look each entity up once or start from the live
+///   items took more. Over the benchmark's sources the plain join took 33 ms against
+///   0.04.
 /// * **Each `limit` is inside a subquery of its `exists`.** Once `sync.item_parent`
 ///   has statistics the planner turns a correlated `exists` into a hash semi-join
 ///   that reads every child-arm row, every item and every entity to answer four
