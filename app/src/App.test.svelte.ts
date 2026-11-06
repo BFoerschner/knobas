@@ -815,7 +815,7 @@ test("a note captured in the other window is asked for here when the capture say
     () => target.querySelector(".tf a[aria-current='page'][href='#/settings/notes']") !== null,
     "Settings never opened on Notes and capture",
   );
-  expect(target.textContent).not.toContain("knobas has no page at this address.");
+  expect(target.textContent).not.toContain("knobas has no such page.");
 });
 
 /** #1504: while notes are shown, *Open in knobas* lands on the note's own page. */
@@ -853,12 +853,12 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   // A ticket opens its ticket page (spec #2227), not its job.
   location.hash = "#/entity/mock:PAY-231";
   await until(() => location.hash === "#/ticket/mock%3APAY-231", `#/entity/… stayed ${location.hash}`);
-  expect(target.textContent).not.toContain("knobas has no page at this address.");
+  expect(target.textContent).not.toContain("knobas has no such page.");
 
   // An id the mirror does not know keeps its address and says so.
   location.hash = "#/entity/mock:NOPE-1";
   await until(
-    () => target.textContent?.includes("knobas has no page at this address.") ?? false,
+    () => target.textContent?.includes("knobas has no such page.") ?? false,
     `an unknown #/entity/… read ${target.textContent}`,
   );
   expect(location.hash).toBe("#/entity/mock:NOPE-1");
@@ -897,7 +897,7 @@ test("an inbox item arriving while the window is unfocused reaches the notify co
       () => window.location.hash === "#/pr/gitea%3Aacme%2Fpayouts%23144",
       "the click never moved the window",
     );
-    expect(target.textContent, "the click landed on a dead end").not.toContain("knobas has no page at this address.");
+    expect(target.textContent, "the click landed on a dead end").not.toContain("knobas has no such page.");
   } finally {
     unfocused.mockRestore();
   }
@@ -976,7 +976,7 @@ test("a stop opens the draft over the running clock, and Keep running leaves it 
   expect(timerStops, "the clock stopped before the reader answered").toBe(0);
   expect(target.querySelector(".tf-timer:not(.tf-off)"), "the chip read No timer behind the draft").not.toBeNull();
   const keep = [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find(
-    (button) => button.textContent?.trim() === "Keep running",
+    (button) => button.textContent?.trim() === "Cancel, keep running",
   );
   keep!.click();
   await until(() => target.querySelector(".tf-dialog") === null, "Keep running never closed the draft");
@@ -1250,7 +1250,9 @@ test("/ on Tickets opens the launcher with the section's filter, and ⌘K after 
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true }));
   flushSync();
   const box = () => target.querySelector<HTMLInputElement>(".tf-launch input");
-  await until(() => box()?.value === "#t ", "the launcher never opened on #t");
+  const seed = () => target.querySelector(".tf-ln-seed")?.textContent?.trim();
+  // The query holds `#t `; the box draws it as a chip named for the section.
+  await until(() => box()?.value === "" && seed() === "Tickets", "the launcher never opened on the Tickets chip");
   target.querySelector<HTMLButtonElement>('.tf-ln-q button[aria-label="Close"]')!.click();
   flushSync();
   await until(() => box() === null, "the launcher never closed");
@@ -1258,6 +1260,7 @@ test("/ on Tickets opens the launcher with the section's filter, and ⌘K after 
   flushSync();
   await until(() => box() !== null, "⌘K never opened the launcher");
   expect(box()!.value).toBe("");
+  expect(seed(), "⌘K opens with no section's chip").toBeUndefined();
 });
 
 test("launcher-hotkey: ⌘K lands on the launcher's query box", async () => {
