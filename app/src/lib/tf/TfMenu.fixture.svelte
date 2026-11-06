@@ -4,11 +4,13 @@
   import TfDialog from "./settings/TfDialog.svelte";
   import TfMenu from "./TfMenu.svelte";
 
-  let { layers, host = false, ready = true }: { layers: Layers; host?: boolean; ready?: boolean } = $props();
+  let { layers, host = false, ready = true, inDialog = false }: { layers: Layers; host?: boolean; ready?: boolean; inDialog?: boolean } = $props();
 
   let open = $state(false);
   let asking = $state(false);
   let face = $state<HTMLButtonElement | null>(null);
+  let innerOpen = $state(false);
+  let innerFace = $state<HTMLButtonElement | null>(null);
 </script>
 
 <div class="wrap">
@@ -21,6 +23,17 @@
   </TfMenu>
 </div>
 {#if host}<div class="tf-floats"></div>{/if}
+{#if inDialog}
+  <TfDialog title="Holds a menu" {layers} onclose={() => {}}>
+    {#snippet body()}
+      <input aria-label="Before" />
+      <button type="button" class="inner" aria-expanded={innerOpen} bind:this={innerFace} onclick={() => (innerOpen = !innerOpen)}>Inner</button>
+      <TfMenu bind:open={innerOpen} opener={innerFace} label="Inner things" {layers}>
+        <button type="button" role="menuitem" onclick={() => (innerOpen = false)}>Only</button>
+      </TfMenu>
+    {/snippet}
+  </TfDialog>
+{/if}
 {#if asking}
   <TfDialog title="Asked" {layers} onclose={() => (asking = false)}>
     {#snippet body()}<input aria-label="Field" />{/snippet}

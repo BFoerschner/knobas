@@ -40,8 +40,8 @@
 /* The import dialog's width (a dialog of its own width passes `className` to TfDialog). */
 .tf-dialog.tf-dwide { width: min(820px, calc(100vw - 32px)); }
 .tf-dialog .tf-body { padding: 14px 18px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
-/* The body scrolls; nothing in it is squeezed to fit a short window. */
-.tf-dialog .tf-body > * { flex: none; }
+/* The body scrolls; nothing in it is squeezed to fit a short window. The launcher's body is not the scroller: its list is. */
+.tf-dialog:not(.tf-launch) .tf-body > * { flex: none; }
 .tf-dialog footer {
   padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: var(--control-gap); justify-content: flex-end;
   background: var(--sheet-2);

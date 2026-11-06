@@ -9,7 +9,7 @@ let target: HTMLElement;
 let app: Record<string, unknown>;
 const layers = createLayers();
 
-async function draw(props: { host?: boolean; ready?: boolean } = {}) {
+async function draw(props: { host?: boolean; ready?: boolean; inDialog?: boolean } = {}) {
   target = document.createElement("div");
   document.body.append(target);
   app = mount(Fixture, { target, props: { layers, ...props } });
@@ -149,4 +149,23 @@ test("not ready: focus waits on the menu, whose keys still work", async () => {
   key("Escape");
   expect(menu()).toBeNull();
   expect(document.activeElement).toBe(face());
+});
+
+test("opened from a dialog, Esc and Tab close the menu alone and focus stays in the dialog", async () => {
+  await draw({ host: true, inDialog: true });
+  const inner = target.querySelector<HTMLButtonElement>(".inner")!;
+  const dialog = target.querySelector(".tf-dialog")!;
+  expect(layers.open).toHaveLength(1);
+  for (const name of ["Escape", "Tab"]) {
+    inner.click();
+    flushSync();
+    await tick();
+    expect(menu()!.parentElement?.className, "over the dialog, in the host").toBe("tf-floats");
+    expect(layers.open, name).toHaveLength(2);
+    key(name);
+    expect(menu(), name).toBeNull();
+    expect(layers.open, `${name}: the dialog stays`).toHaveLength(1);
+    expect(document.activeElement, name).toBe(inner);
+    expect(dialog.isConnected, name).toBe(true);
+  }
 });

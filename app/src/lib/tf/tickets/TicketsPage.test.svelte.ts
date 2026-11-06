@@ -994,6 +994,17 @@ test("a view whose text the grammar cannot read opens as text with a line naming
   expect(target.querySelector(".tf-views .tf-vw-row .tf-count")).toBeNull();
 });
 
+test("Save as a view stands in the header, and only while a filter is on: with none there is nothing to save", async () => {
+  const h = harness([], [view("pay", "Payments (PAY)", "Projects", 0, { query: "project:PAY" })]);
+  await open(h, null, "pay");
+  const offered = () => [...target.querySelectorAll(".tf-board-head .tf-acts button")].some((b) => b.textContent === "Save as a view…");
+  expect(offered()).toBe(false);
+  type(field(), "r");
+  await settle();
+  expect(offered()).toBe(true);
+  expect(target.querySelector(".tf-fbar")!.textContent).not.toContain("Save as a view");
+});
+
 test("Save as a view saves the view's text plus the chips, dropdowns and words, with how the tickets show", async () => {
   const h = harness([], [view("pay", "Payments (PAY)", "Projects", 0, { query: "project:PAY" })]);
   await open(h, null, "pay");
