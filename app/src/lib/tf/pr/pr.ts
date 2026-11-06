@@ -411,7 +411,7 @@ const ACTS: Readonly<Record<string, string>> = {
  * otherwise rewritten, because an echo's `text` can be a reader's reply or a source's label. A source's own action keeps its button's words.
  */
 export function chipAct(echo: { kind: string; text: string }): string | null {
-  if (echo.kind === "review") return REVIEW_SENT[echo.text as Verdict]?.act ?? null;
+  if (echo.kind === "review") return Object.hasOwn(REVIEW_SENT, echo.text) ? REVIEW_SENT[echo.text as Verdict].act : null;
   if (echo.kind.startsWith(SOURCE_ACTION)) return echo.text;
   return Object.hasOwn(ACTS, echo.kind) ? (ACTS[echo.kind] ?? null) : null;
 }
