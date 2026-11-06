@@ -330,7 +330,7 @@
     {@const belongs = index.jobOf(item)}
     {@const belongsId = index.jobIdOf(item)}
     <div class="tf-ctx">
-      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}{#if item.detail}{" · "}{item.detail}{/if}
+      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}{#if item.detail}{" · "}<span class="tf-ctx-more">{item.detail}</span>{/if}
     </div>
   {/snippet}
   <div class="tf-inbox" {@attach win.list}>
