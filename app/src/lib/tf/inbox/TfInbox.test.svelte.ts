@@ -506,6 +506,7 @@ test("an empty stream says so", async () => {
         snoozeInboxItem: async () => {},
         completeInboxItem: async () => {},
         ackAlert: async () => {},
+        unackAlert: async () => {},
         listen: async () => () => {},
       }),
       ports: {

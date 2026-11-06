@@ -123,6 +123,7 @@ function inboxPorts(overrides: Partial<Parameters<typeof createInbox>[0] & objec
     snoozeInboxItem: async () => {},
     completeInboxItem: async () => {},
     ackAlert: async () => {},
+    unackAlert: async () => {},
     listen: listener().listen,
     ...overrides,
   };

@@ -1546,6 +1546,7 @@ const CASES: Case[] = [
             snoozeInboxItem: () => deferred(undefined),
             completeInboxItem: () => deferred(undefined),
             ackAlert: () => deferred(undefined),
+            unackAlert: () => deferred(undefined),
             listen: () => deferred(() => {}),
           }),
           ports: {
@@ -1965,6 +1966,7 @@ const CASES: Case[] = [
             unmonitoredAssets: () => deferred([]),
             openAlerts: () => deferred([]),
             ackAlert: () => deferred({} as never),
+            unackAlert: () => deferred({} as never),
             setMonitorHidden: () => deferred(false),
             submitWrite: () => deferred({ id: 1 } as never),
             getAsset: () => deferred({} as never),
