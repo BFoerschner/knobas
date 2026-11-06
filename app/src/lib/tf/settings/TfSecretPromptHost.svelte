@@ -28,11 +28,15 @@
 
   function close() {
     const back = secretPrompt.returnTo;
+    // Asked now: signing in can take the link away, as the status bar's goes once the source is well.
+    const onThePage = back?.closest(".tf-main") !== null;
     secretPrompt.source = null;
     secretPrompt.returnTo = null;
     // `TfDialog` puts focus back on what held it on opening; a link a mouse pressed need not have held it.
     queueMicrotask(() => {
       if (back?.isConnected) back.focus({ preventScroll: true });
+      // A link on the page is the keeper's (`focus-keep.ts`), which notes only the page. The status bar's has nothing else.
+      else if (back && !onThePage) document.querySelector<HTMLElement>(".tf-main")?.focus({ preventScroll: true });
     });
   }
 

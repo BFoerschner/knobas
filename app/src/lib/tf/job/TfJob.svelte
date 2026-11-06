@@ -67,7 +67,7 @@
   import { inTextField } from "../../shell/keys";
   import { toastQueued } from "../../shell/queued-toast";
   import type { Timer } from "../../shell/timer.svelte";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
   import { alsoIn, hiddenOf, linkedOn, groupsOf, LINK_CAME_FROM, type GroupRow } from "./connections";
   import { blockerEntries, footAction, segmentKey, isMine, keyOf, offersStartWork, username, type FrameKinds } from "./job";
@@ -338,20 +338,14 @@
     savingSet = false;
     drawer = false;
     if (detail) reader.rereadReach(detail.row.entity_id);
-    push({
-      text: savedToast(set),
-      action: {
-        label: "Undo",
-        run: () => {
-          const id = detail?.row.entity_id;
-          void sets
-            .deleteLinkSet(set.id)
-            .then(() => {
-              if (id !== undefined) reader.rereadReach(id);
-            })
-            .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" }));
-        },
-      },
+    undoable(savedToast(set), () => {
+      const id = detail?.row.entity_id;
+      void sets
+        .deleteLinkSet(set.id)
+        .then(() => {
+          if (id !== undefined) reader.rereadReach(id);
+        })
+        .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" }));
     });
   }
 

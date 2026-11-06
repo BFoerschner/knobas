@@ -102,7 +102,7 @@ function chain(): string[] | null {
   const strip = target.querySelector('[aria-label="Actions on the selected result"]');
   if (strip === null) return null;
   const labels = [...strip.querySelectorAll(".tf-ln-nm")].map((row) => row.textContent?.trim() ?? "");
-  return labels.filter((label) => !label.startsWith("Show a set on "));
+  return labels.filter((label) => label !== "Apply a link set…");
 }
 
 /** A ticket's actions after the pair: the timer, the job, the key. */
@@ -170,6 +170,8 @@ test("starting the timer on a ticket makes it the chosen job: #/job draws it, an
   await search("PAY-231");
   press("Tab");
   expect(chain()).toEqual(TICKET_OWN);
+  // *Start timer*, under *Work on this* (F-637).
+  press("ArrowDown");
   press("Enter");
   await until(() => jobOnScreen() === "PAY-231", "#/job never drew the ticket the timer started on");
   expect(location.hash, "#/job stays the home address").toBe("#/job");

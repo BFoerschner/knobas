@@ -18,7 +18,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { LinkSetHint, LinkSetRow } from "../../ipc/entity";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
   import type { EscTarget } from "../escape";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfWaiting from "../TfWaiting.svelte";
@@ -125,7 +125,7 @@
       const draft = draftOf(set);
       draft.members.push({ kind: offer.member.kind, entity_id: offer.member.entity_id });
       await ports.saveLinkSet(draft);
-      push({ text: `Added ${offer.title} to ${offer.set_name}`, action: { label: "Undo", run: () => void takeBack(offer) } });
+      undoable(`Added ${offer.title} to ${offer.set_name}`, () => void takeBack(offer));
       await reread();
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
