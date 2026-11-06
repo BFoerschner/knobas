@@ -919,3 +919,20 @@ test("taking an ack back takes its toast's Undo with it", async () => {
   await settle();
   expect(toasts.items.some((t) => t.text.startsWith("Acked in knobas"))).toBe(false);
 });
+
+test("the page shown again reads the sources again, so a token entered in Settings takes the band away", async () => {
+  let health = "missing_secret";
+  const stand = ports({
+    listSources: async () => [{ ...sourceFacts("kuma", { display_name: "Uptime Kuma" }), id: "kuma", health: { state: health, checked_at: "2026-08-22T08:00:00Z" }, auth_kind: "ApiToken" } as never],
+    syncStatus: async () => [],
+  });
+  const props = $state({ ready: true, rest: [] as string[], job: "PAY-231" as string | null, ports: stand, now: NOW, syncRevision: 0 });
+  view = mount(TfMonitors, { target, props });
+  await settle();
+  expect(target.querySelector(".tf-stale")).not.toBeNull();
+  health = "ok";
+  props.syncRevision = 1;
+  await settle();
+  expect(target.querySelector(".tf-stale")).toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).toContain("synced");
+});
