@@ -79,7 +79,7 @@
   import { recolours } from "./settings/state-colours";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { onReady } from "./on-ready.svelte";
-  import { goBackTo, goWithoutOpener, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
+  import { goBackTo, goWithoutOpener, leftName, NOT_OPENED, openerOf, samePage, stamped, stampOf, takeTold, type Opened, type Told, type Trip } from "./opener";
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { PAGES } from "./pages";
@@ -307,7 +307,7 @@
     if (how === "launched") return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip: null, visit: isTopPage(parseTfHash(now)), prev: hash };
     const trip = tripAt(now);
     if (how === null && samePage(hash, now)) return { opener: here.opener, trip, visit: here.visit, prev: hash };
-    return { opener: openerOf(hash, openerName(route, shownPage.name), here), trip, visit: how === "visit", prev: hash };
+    return { opener: openerOf(hash, leftName() ?? openerName(route, shownPage.name), here), trip, visit: how === "visit", prev: hash };
   }
 
   /** What a press to `now` keeps narrowed: Sub-tasks is the bare list's, so a saved view ends it, as *All tickets* does. */

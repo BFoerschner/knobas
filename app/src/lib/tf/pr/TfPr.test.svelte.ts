@@ -743,6 +743,8 @@ test("line comments waiting add Submit review… (N pending), which sends them w
     "Request changesBlocks the merge until you approve",
   ]);
   expect(dialog.querySelector(".tf-pane-h")!.textContent).toBe("2 line comments go with it");
+  // One block across the dialog, so the second comment doesn't drop under the label column (F-258).
+  expect(dialog.querySelector(".tf-prr-lines.tf-fwide")!.querySelectorAll(".tf-prr-line")).toHaveLength(2);
   // Nothing is picked first (the enabled rule); Approve with a summary sends both comments.
   expect(dialog.querySelector<HTMLInputElement>(".tf-radio input:checked")).toBeNull();
   expect(dialogButton("Submit review").disabled).toBe(true);

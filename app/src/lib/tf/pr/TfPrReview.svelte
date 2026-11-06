@@ -135,10 +135,13 @@
         {/each}
       </fieldset>
       {#if drafts.length > 0}
-        <div class="tf-pane-h">{drafts.length} line {drafts.length === 1 ? "comment goes" : "comments go"} with it</div>
-        {#each drafts as d (d.id)}
-          <div class="tf-dim tf-prr-line"><span class="tf-mono">{d.path}</span>, {lineName(d.side, d.line)}: {d.body}</div>
-        {/each}
+        <!-- One block across the dialog: in the grid's two columns the first comment sat in the value column and the next under the label (F-258). -->
+        <div class="tf-fwide tf-prr-lines">
+          <div class="tf-pane-h">{drafts.length} line {drafts.length === 1 ? "comment goes" : "comments go"} with it</div>
+          {#each drafts as d (d.id)}
+            <div class="tf-dim tf-prr-line"><span class="tf-mono">{d.path}</span>, {lineName(d.side, d.line)}: {d.body}</div>
+          {/each}
+        </div>
       {/if}
     </form>
   {/snippet}

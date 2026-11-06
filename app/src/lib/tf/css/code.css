@@ -416,6 +416,8 @@
 
 /* A diff that names no range (#2310): context does not expand, said above it. */
 .tf-cnote { color: var(--ink-2); font-size: var(--t-sm); margin: 0 0 8px; }
+/* Compare, reached by the header's *New pull request*: which branch it chose, above the form (F-063). */
+.tf-cstart { color: var(--ink-2); font-size: var(--t-sm); margin: 0 0 8px; overflow-wrap: anywhere; }
 
 /* A pull request's commit picker (#2273; mockups/code-area/diff.html, state "range"): *Commits <choice> base…head ▾*. */
 .tf-pickbar { display: flex; align-items: center; gap: 8px; padding: 0 0 8px; }

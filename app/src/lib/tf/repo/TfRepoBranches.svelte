@@ -15,6 +15,10 @@
   and why a delete is held back, are its view's actions, never a reading of
   its facts (ADR-0020 rule 4).
 
+  A pull request this session sent from a branch stands in its *Pull request*
+  cell, *Queued* then *Sent*, and its *New pull request* goes, until the
+  branch's view holds it (F-257).
+
   *Delete…* opens prototype-6's `openDeleteBranch` and queues `DeleteBranch`
   against the branch. A branch made or deleted this session is drawn at once
   with its echo (`tf/queued.svelte.ts`, #2105), *queued* and then *sent*,
@@ -34,6 +38,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
+  import { goAcross } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
@@ -42,7 +47,9 @@
   import {
     DELETED,
     MADE,
+    MADE_PR,
     REPO_BRANCHES,
+    REPO_PRS,
     branchStanding,
     compareHash,
     sourceName,
@@ -96,6 +103,12 @@
   $effect(() => {
     const id = repoId;
     return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
+  });
+
+  // A pull request sent from here lands on the repository's *Pull requests*: its refresh brings the branch's standing with it.
+  $effect(() => {
+    const id = repoId;
+    return untrack(() => watchEchoes(REPO_PRS, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
 
   // A refresh of the page reads the listing again, over what the tab drew (#2135).
@@ -154,6 +167,9 @@
 
   /** A branch's row, or the note a cut listing ends on (no id, no line). */
   const isNote = (row: ViewRow) => row.entity_id === null && row.meta === null && row.chip !== "default";
+
+  /** Where each pull request this session sent stands, by the branch it proposes, until the branch's view holds it (F-257). */
+  const prSent = $derived(new Map(echoesOn(repoId, MADE_PR).flatMap((echo) => (echo.base === null ? [] : [[echo.base, echo.state] as const]))));
 
   /** Branches this session queued that the listing does not hold yet, by name, with their echo's word. */
   const made = $derived(new Map(echoesOn(repoId, MADE).map((echo) => [echo.text, echo.state])));
@@ -252,13 +268,18 @@
           <td
             >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
-                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
+                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<TfStateChip text={prSent.get(row.name)} tone="info" />{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
           <td>{row.mine ? "you" : (row.author ?? "")}</td>
           <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
           <td class="tf-nowrap tf-racts"
-            ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
-                  >New pull request</a
+            ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr && !prSent.has(row.name)}<a
+                  class="tf-btn tf-sm"
+                  href={compareHash(repoId, row.name)}
+                  onclick={(event) => {
+                    event.preventDefault();
+                    goAcross(compareHash(repoId, row.name), "Branches");
+                  }}>New pull request</a
                 >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"

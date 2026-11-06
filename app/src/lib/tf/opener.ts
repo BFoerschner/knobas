@@ -85,12 +85,13 @@ const KEY = "knobasOpened";
 /** How an address change was made, when it is not a plain in-app link's. */
 export type Told = "unopened" | "replace" | "back" | "across" | "visit" | "launched";
 
-/** The next address change the shell is told about. */
-let told: { hash: string; how: Told } | null = null;
+/** The next address change the shell is told about, and what to call the place it left where the page's own name is not it. */
+let told: { hash: string; how: Told; left?: string | undefined } | null = null;
+let toldLeft: string | undefined;
 
-function goTold(hash: string, how: Told): void {
+function goTold(hash: string, how: Told, left?: string): void {
   location.hash = hash;
-  told = { hash: location.hash, how };
+  told = { hash: location.hash, how, left };
 }
 
 /** Go to `hash` as a new entry with no opener: a deep link, a nav entry, an `Esc` step to a parent. */
@@ -107,9 +108,11 @@ export function goBackTo(hash: string): void {
  * A jump to another place on this page, which is an opening though the address
  * is the same page's: a link from one asset to another across the tree, as a walk
  * through its columns is not. `Esc` comes back to where the reader was reading.
+ * `left` names that place when the page's name would not say it: a press from a repository's
+ * Branches to its Compare is *Back to Branches*, not the repository they are both on.
  */
-export function goAcross(hash: string): void {
-  goTold(hash, "across");
+export function goAcross(hash: string, left?: string): void {
+  goTold(hash, "across", left);
 }
 
 /**
@@ -136,12 +139,15 @@ export function replaceAddress(hash: string): void {
   told = { hash: location.hash, how: "replace" };
 }
 
-/** How the address change to `hash` was made, if it was told; forgotten once asked. */
+/** How the address change to `hash` was made, if it was told, and the name given for the place left; forgotten once asked. */
 export function takeTold(hash: string): Told | null {
   const was = told;
   told = null;
+  toldLeft = was !== null && was.hash === hash ? was.left : undefined;
   return was !== null && was.hash === hash ? was.how : null;
 }
+/** The name {@link goAcross} gave the place it left, for the change {@link takeTold} just answered about. */
+export const leftName = (): string | undefined => toldLeft;
 
 /** The stamp in a history state, or `null` when the entry has none yet. */
 export function stampOf(state: unknown): Opened | null {

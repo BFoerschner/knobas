@@ -23,6 +23,7 @@
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
   import { tick, untrack } from "svelte";
   import type { EchoListen } from "../queued.svelte";
+  import { goAcross } from "../opener";
   import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
@@ -121,7 +122,13 @@
 {#if rows !== null && rows.length === 0 && sent.length === 0}
   <div class="tf-empty">
     <p>This repository has no pull requests yet.</p>
-    {#if newPr !== null}<a class="tf-btn tf-sm" href={newPr}>New pull request</a>{/if}
+    {#if newPr !== null}<a
+        class="tf-btn tf-sm"
+        href={newPr}
+        onclick={(event) => {
+          event.preventDefault();
+          goAcross(newPr, "Pull requests");
+        }}>New pull request</a>{/if}
   </div>
 {:else if shown.length === 0 && sent.length === 0}
   <TfNoMatch noun="pull requests" {filter} />
@@ -129,7 +136,7 @@
   <!-- Code's row and Code's columns: one list of pull requests, drawn one way. -->
   <table class="tf-tbl tf-rprs tf-cprs">
     <tbody>
-      {#each sent as echo (echo.text)}
+      {#each sent as echo (echo.write ?? echo.text)}
         <tr class="tf-rsent">
           <td class="tf-prno"></td>
           <td><span class="tf-rowt" tabindex="-1" {@attach arrive}>{echo.text}</span></td>

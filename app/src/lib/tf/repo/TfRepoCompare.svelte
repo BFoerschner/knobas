@@ -16,6 +16,10 @@
   - **A pull request already open** from the branch is the source's overview's
     row: *Into* and *From* stay, so another branch can be picked, and one line
     with *Open PR #N* stands where the rest of the form would.
+  - **A pull request this session sent** from the branch (F-257): the same,
+    with the line saying so and the way to its row, so a second press can't
+    send it again. A write that won't go drops its echo, and the form is back
+    with what was typed.
   - **One branch**: nothing to compare, so one empty state with *New branch…*.
   - **What it changes**: the diff from *Into* to *From* (#2271), the
     repository's `compare:<into>...<from>` section, drawn by the one diff
@@ -46,7 +50,7 @@
   import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
-  import { echoWrite } from "../queued.svelte";
+  import { echoWrite, echoesOn, watchEchoes } from "../queued.svelte";
   import { placeRestoring } from "../return-place";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
@@ -77,9 +81,10 @@
     refreshed = 0,
     branchRefused = null,
     shown = true,
+    guessed = null,
     onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -95,6 +100,8 @@
     branchRefused?: string | null;
     /** Whether this tab is the one shown: arriving on it, *Title* takes focus if nothing else has it. */
     shown?: boolean;
+    /** The branch the header's *New pull request* chose for the reader, and why, which the page says above the form (F-063). */
+    guessed?: { branch: string; why: string } | null;
     /** Opens *New branch…*, which is what a repository of one branch can do here. */
     onNewBranch?: () => void;
   } = $props();
@@ -180,6 +187,28 @@
     },
   );
 
+  /**
+   * The pull request this session sent from this branch, until the source's view holds it (F-257). Not while its own press is
+   * leaving: the form stays as the tab hides, so *Pull requests* can take focus from it for the row it landed on (F-242).
+   */
+  const sentFrom = $derived(head === null || busy ? undefined : echoesOn(repoId, MADE_PR).find((echo) => echo.base === head));
+  $effect(() => {
+    if (!shown) busy = false;
+  });
+  // Its landing reads the branch again, so the line it leaves is the source's own *Open PR*, not the form.
+  $effect(() =>
+    untrack(() =>
+      watchEchoes(
+        REPO_PRS,
+        () => {
+          const id = listedId;
+          if (id !== null) void readStanding(id, () => listedId === id, true);
+        },
+        { listen: ports.listen },
+      ),
+    ),
+  );
+
   /** The branch's standing; `again` keeps what the page drew when a read fails. */
   function readStanding(id: string, alive: () => boolean, again = false): Promise<unknown> {
     return ports.entityView(id, null).then(
@@ -258,7 +287,7 @@
   );
   /** Why the source draws the pull request disabled (#2030): its words, on the button. */
   const refused = $derived(standing?.prBlocked ?? null);
-  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);
+  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null && sentFrom === undefined);
   /** What the primary waits for, in words beside it (design system, the enabled rule). */
   const needs = $derived(same ? "Into and From are the same branch, so there is nothing to compare." : (refused ?? (title.trim() === "" ? "Give it a title." : null)));
   const commits = $derived(standing?.commits ?? []);
@@ -317,8 +346,7 @@
       // The press lands on the tab that shows it, so the toast has nowhere to offer.
       toastQueued(`open PR ${words}`, source, { write });
       // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
-      echoWrite(repoId, MADE_PR, words, { write, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
-      busy = false;
+      echoWrite(repoId, MADE_PR, words, { write, base: head, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
       location.hash = prs;
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -346,7 +374,10 @@
 {:else}
 <div class="tf-compare">
   <div>
-    <h2 class="tf-cgroup-h">{standing?.pr ? "Compare" : "New pull request"}</h2>
+    <h2 class="tf-cgroup-h">{standing?.pr || sentFrom !== undefined ? "Compare" : "New pull request"}</h2>
+    {#if guessed !== null && guessed.branch === head && !standing?.pr && sentFrom === undefined}
+      <p class="tf-cstart">Starting from <span class="tf-mono">{guessed.branch}</span>, {guessed.why}.</p>
+    {/if}
     <form
       class="tf-panel tf-cform"
       {@attach holdArrivingEnter}
@@ -369,7 +400,7 @@
         >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
-        {#if !standing?.pr}
+        {#if !standing?.pr && sentFrom === undefined}
           <label for="tf-cmp-title">Title</label>
           <input id="tf-cmp-title" type="text" autocomplete="off" bind:this={titleField} bind:value={title} {@attach escThroughUntouched} />
           <label for="tf-cmp-body">Description</label>
@@ -383,6 +414,9 @@
       <div class="tf-cgo">
         {#if same && standing?.pr}
           <p class="tf-dwhy" role="status">{needs}</p>
+        {:else if sentFrom !== undefined && !standing?.pr}
+          <span class="tf-cexists">A pull request from this branch is on its way: {sentFrom.text}.</span>
+          <a class="tf-btn tf-sm" href={repoHash(repoId, "prs")}>Show in Pull requests</a>
         {:else if standing?.pr}
           <span class="tf-cexists">PR {standing.pr.number ?? ""} is already open from this branch.</span>
           {#if standing.pr.entityId !== null}

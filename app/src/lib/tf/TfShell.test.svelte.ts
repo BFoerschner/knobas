@@ -675,6 +675,24 @@ test("a jump across the tree is an opening, a walk is not: Esc comes back to the
   expect(location.hash).toBe(TICKET);
 });
 
+test("a press from a repository's tab to another of its tabs is an opening named for that tab, and Esc comes back to it (F-259, F-065)", async () => {
+  const REPO = "#/repo/mock%3Atidewater%2Fpayout-service";
+  start({ nav: windowNav });
+  await at("#/code");
+  await at(`${REPO}/branches`);
+  const opener = escHint();
+  // A press on the tab row is no opening: the page's opener stays.
+  await at(`${REPO}/commits`);
+  expect(escHint()).toBe(opener);
+  goAcross(`${REPO}/compare/spike%2Fsepa-instant`, "Commits");
+  await settle();
+  expect(escHint()).toBe("Back to Commits Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(`${REPO}/commits`);
+  expect(escHint()).toBe(opener);
+});
+
 test("a nav entry returns to the tab the section was left on, opened by nothing, so Esc stays", async () => {
   start({ nav: windowNav });
   await at("#/code/prs");

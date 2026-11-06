@@ -832,6 +832,8 @@ test("a branch holding a key offers Link the PR to <key> in knobas, ticked; it a
   unmount(view!);
   view = null;
 
+  forgetEchoes();
+
   // Unticked, the pull request is not linked.
   await draw(COMPARE("fix/PAY-231-README"), "PAY-231");
   target.querySelector<HTMLInputElement>(".tf-compare input[type=checkbox]")!.click();
@@ -839,6 +841,101 @@ test("a branch holding a key offers Link the PR to <key> in knobas, ticked; it a
   button("Create pull request", target)!.click();
   await settle();
   expect(links).toEqual(["gitea:PAY-231", null]);
+});
+
+// -- A pull request sent from a branch (F-257): nothing offers that branch again, and two with one title both draw. ----
+
+async function createFromSpike(words: string) {
+  await draw(COMPARE("spike/sepa-instant"));
+  type(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!, words);
+  button("Create pull request", target)!.click();
+  await settle();
+  unmount(view!);
+  view = null;
+}
+
+test("once sent, Compare on that branch says so with the way to its row, and offers no second Create", async () => {
+  await createFromSpike("Instant SEPA spike");
+  await draw(COMPARE("spike/sepa-instant"));
+  expect(text(target.querySelector(".tf-compare .tf-cexists"))).toBe("A pull request from this branch is on its way: Instant SEPA spike.");
+  expect(button("Show in Pull requests", target)!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/prs");
+  expect(button("Create pull request", target)).toBeUndefined();
+  expect(target.querySelector("#tf-cmp-title")).toBeNull();
+  // Another branch is still a form.
+  unmount(view!);
+  view = null;
+  await draw(COMPARE("release/1.9"));
+  expect(button("Create pull request", target)).toBeDefined();
+});
+
+test("once sent, the branch's Pull request cell says where it is, and its New pull request goes", async () => {
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  const spike = () => [...target.querySelectorAll("table.tf-rbranches tbody tr")].find((tr) => text(tr).startsWith("spike/sepa-instant"))!;
+  expect(text(spike().children[2]!)).toBe("none");
+  expect(button("New pull request", spike())).toBeDefined();
+  unmount(view!);
+  view = null;
+  await createFromSpike("Instant SEPA spike");
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  expect(text(spike().children[2]!)).toBe("Queued");
+  expect(button("New pull request", spike())).toBeUndefined();
+  // Other branches keep theirs.
+  const locked = [...target.querySelectorAll("table.tf-rbranches tbody tr")].find((tr) => text(tr).startsWith("release/1.9"))!;
+  expect(button("New pull request", locked)).toBeDefined();
+});
+
+test("the header's New pull request skips a branch one was sent from", async () => {
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  const header = () => button("New pull request", target.querySelector(".tf-fhead")!)!.getAttribute("href");
+  expect(header()).toContain("compare/spike%2Fsepa-instant");
+  unmount(view!);
+  view = null;
+  await createFromSpike("Instant SEPA spike");
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  expect(header()).not.toContain("spike");
+});
+
+test("two sent with one title are two rows, and the tab stays drawn (F-257)", async () => {
+  let n = 40;
+  const io = ports({
+    submitWrite: async (payload: WriteOpPayload) => {
+      writes.push(payload);
+      return { id: ++n, state: "pending" } as never;
+    },
+  });
+  for (const branch of ["spike/sepa-instant", "release/1.9"]) {
+    view = mount(TfRepo, { target, props: { ready: true, rest: COMPARE(branch), job: null, ports: io } });
+    await settle();
+    type(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!, "Same words");
+    button("Create pull request", target)!.click();
+    await settle();
+    unmount(view);
+    view = null;
+  }
+  view = mount(TfRepo, { target, props: { ready: true, rest: ["gitea:tidewater/payout-service", "prs"], job: null, ports: io } });
+  await settle();
+  expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Same wordsQueued", "Same wordsQueued"]);
+  expect(target.querySelector(".tf-rprs")).not.toBeNull();
+});
+
+// -- *New pull request* is an opening (F-259, F-065): the shell's half is in TfShell.test, and this is the press. ----
+
+test("the header's press says which branch it chose above the form, the reader's own choice says nothing (F-063)", async () => {
+  const line = () => text(target.querySelector(".tf-compare .tf-cstart"));
+  const props = $state({ ready: true, rest: [REPO, "branches"], job: null as string | null, ports: ports(), now: NOW });
+  view = mount(TfRepo, { target, props });
+  await settle();
+  const press = button("New pull request", target.querySelector(".tf-fhead")!)!;
+  expect(press.getAttribute("href")).toContain("spike");
+  press.click();
+  props.rest = COMPARE("spike/sepa-instant");
+  await settle();
+  expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/spike%2Fsepa-instant");
+  expect(line()).toBe("Starting from spike/sepa-instant, the newest branch with nothing open.");
+  // Another From is the reader's own: the line goes.
+  props.rest = COMPARE("release/1.9");
+  await settle();
+  expect(line()).toBe("");
 });
 
 test("a branch with no key in the mirror offers no link", async () => {

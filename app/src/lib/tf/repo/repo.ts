@@ -56,7 +56,7 @@ export function headLine(
  * file until the source holds a newer blob.
  */
 export const MADE = "branch";
-/** A pull request this session queued, on the repository's entity with its title as the text (F-242). */
+/** A pull request this session queued, on the repository's entity with its title as the text (F-242) and the branch it proposes as its `base` (F-257). */
 export const MADE_PR = "pull request";
 /** The surface those echoes are tagged with, so the repository's *Pull requests* reads again for them. */
 export const REPO_PRS = "repo-prs";
