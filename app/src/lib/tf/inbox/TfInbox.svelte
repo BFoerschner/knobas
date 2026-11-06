@@ -11,7 +11,8 @@
   Answers are drawn at once (#775), so a press says so in a toast that collapses
   repeats (`tally`) and takes them back with *Undo*: a snooze with a date now
   brings an item back from the shelf or from *Done*, because the backend's snooze
-  clears `done_at`. An ack has no way back, and its toast says what it left open.
+  clears `done_at`. An ack is knobas' own too: its toast says what it left open,
+  and *Undo* takes it back (`unack_alert`), so the alert asks again.
   An answer that fails says so in a toast too, where the reader is looking.
   A long inbox draws only the rows near the viewport (`shell/windowed.svelte.ts`, #2209).
 
@@ -244,12 +245,18 @@
     void inbox.snooze(entry.item.key, new Date(), saysFailure(what, "bring back", () => bringBack(entry)));
   }
 
-  const ackToast = tally<null>((held) => ({
+  /** *Undo* on an ack: the alert asks again, and the re-read brings its row back. */
+  function unack(entry: InboxEntry) {
+    void inbox.unack(entry.item.key, saysFailure(named(entry.item), "take back the ack on", () => unack(entry)));
+  }
+
+  const ackToast = tally<InboxEntry>((held) => ({
     text: held.length === 1 ? "Acked. The alert stays open until the monitor recovers." : `${held.length} alerts acked. They stay open until their monitors recover.`,
+    action: { label: "Undo", run: () => held.forEach(unack) },
   }));
 
   function ack(entry: InboxEntry) {
-    ackToast(null);
+    ackToast(entry);
     void inbox.ack(entry.item.key, saysFailure(named(entry.item), "ack", () => ack(entry)));
   }
 

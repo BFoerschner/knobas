@@ -7,7 +7,7 @@
     roster sorted down, slow, paused, up. Each row: the monitor and its
     type, the state chip, the 24-hour bar, the response, the 30-day uptime,
     what it **Watches** (the asset's name and type, linking to the asset),
-    *Ack* on a down monitor, *Pause* or *Resume* where the source offers
+    *Ack* on a down monitor, which *Acked* or the toast's *Undo* takes back, *Pause* or *Resume* where the source offers
     it, and *Hide*. A hidden monitor leaves the roster for the fold at its
     end (*N hidden monitors*, closed until the reader opens it, or open by
     itself when it holds every match), where it is drawn dimmed with a
@@ -76,6 +76,8 @@
     unmonitoredAssets: () => Promise<UnmonitoredAsset[]>;
     openAlerts: () => Promise<OpenAlert[]>;
     ackAlert: (monitorId: string) => Promise<OpenAlert>;
+    /** *Acked* pressed, or *Undo* on the ack's toast. */
+    unackAlert: (monitorId: string) => Promise<OpenAlert>;
     setMonitorHidden: (monitorId: string, hidden: boolean) => Promise<boolean>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     getAsset: (assetId: string) => Promise<AssetDetail>;
@@ -105,6 +107,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import {
     ackAlert,
+    unackAlert,
     editAsset,
     editRoute,
     getAsset,
@@ -161,6 +164,7 @@
       unmonitoredAssets: () => unmonitoredAssets(),
       openAlerts: () => openAlerts(),
       ackAlert: (monitorId) => ackAlert(monitorId),
+      unackAlert: (monitorId) => unackAlert(monitorId),
       setMonitorHidden: (monitorId, hidden) => setMonitorHidden(monitorId, hidden),
       submitWrite: (payload) => submitWrite(payload),
       getAsset: (assetId) => getAsset(assetId),
@@ -533,7 +537,22 @@
     try {
       const alert = await ports.ackAlert(row.entity_id);
       acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
-      push({ text: "Acked in knobas. The alert stays open until the monitor recovers." });
+      push({ text: "Acked in knobas. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row) } });
+    } catch (error) {
+      push({ text: ipcErrorMessage(error), tone: "err" });
+    } finally {
+      delete pressing[row.entity_id];
+    }
+  }
+
+  /** *Acked* pressed, or *Undo* on the ack's toast: the alert asks again, in the inbox too. */
+  async function unack(row: MonitorRow) {
+    if (pressing[row.entity_id]) return;
+    pressing[row.entity_id] = true;
+    try {
+      await ports.unackAlert(row.entity_id);
+      delete acked[row.entity_id];
+      push({ text: `${row.name} is asking again, in the Inbox too.` });
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     } finally {
@@ -758,7 +777,7 @@
                 <td class="tf-num"><span class="tf-rowval">{uptimeText(row)}</span></td>
                 <td class="tf-mon-acts"><div class="tf-rowend">
                   {#if down}
-                    <button type="button" class="tf-btn tf-sm tf-mon-ack" disabled={row.entity_id in acked} title={row.entity_id in acked ? `Acked ${acked[row.entity_id]}` : undefined} onclick={() => void ack(row)}
+                    <button type="button" class="tf-btn tf-sm tf-mon-ack" class:tf-ghost={row.entity_id in acked} aria-pressed={row.entity_id in acked} title={row.entity_id in acked ? "Acked. Press to take it back, so the alert asks again." : undefined} onclick={() => void (row.entity_id in acked ? unack(row) : ack(row))}
                       >{row.entity_id in acked ? "Acked" : "Ack"}</button
                     >
                   {/if}

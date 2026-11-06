@@ -366,7 +366,7 @@ export class SheetMode {
     if (!at) return;
     const { subject, relation } = at;
     const { io, session, focus, close, navigate } = this.#host;
-    const settled = (work: () => Promise<unknown>, said: () => string) => void this.#settled(work, said);
+    const settled = (work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>) => void this.#settled(work, said, undo);
     switch (does.kind) {
       case "go":
         close();
@@ -376,7 +376,7 @@ export class SheetMode {
       case "write":
         return settled(() => io.submitWrite(does.payload), () => does.said);
       case "ack":
-        return settled(() => io.ackAlert(does.monitorId), () => does.said);
+        return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId));
       case "link": {
         const job = this.#host.job;
         if (!job || subject.kind !== "entity") return;
@@ -469,18 +469,23 @@ export class SheetMode {
           return settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
         }
         if (does.op === "ack") {
-          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.");
+          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.", () => io.inboxUnack(item.key));
         }
         return settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
       }
     }
   }
 
+  /** *Undo* on a toast: its own failure is said too, since nothing else is looking. */
+  #undone(undo: () => Promise<unknown>): void {
+    undo().catch((cause: unknown) => push({ text: ipcErrorMessage(cause), tone: "err" }));
+  }
+
   /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
-  async #settled(work: () => Promise<unknown>, said: () => string): Promise<void> {
+  async #settled(work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>): Promise<void> {
     try {
       await work();
-      push({ text: said() });
+      push({ text: said(), ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo) } }) });
       this.#host.close();
     } catch (cause) {
       push({ text: ipcErrorMessage(cause), tone: "err" });

@@ -1033,6 +1033,26 @@ pub async fn ack_alert<R: tauri::Runtime>(
     Ok(written.value)
 }
 
+/// Take an ack back (*Undo* on the ack's toast, the *Acked* button): the alert
+/// asks again. `assets::unack_alert` argues the writes.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before the database is up,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) when that monitor has no open
+/// alert, and [`Internal`](crate::IpcErrorCode::Internal) if a write fails.
+#[tauri::command]
+pub async fn unack_alert<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    monitor_id: String,
+) -> Result<OpenAlert, IpcError> {
+    let pool = lifecycle.pool()?;
+    let written = assets::unack_alert(&pool, &monitor_id).await?;
+    announce(&app, written.activity);
+    Ok(written.value)
+}
+
 /// Hide one monitor from the Monitors tab, or show it again; answers whether
 /// it is hidden now. A hidden monitor's alerts reach no inbox, so it raises no
 /// desktop notification. `assets::set_monitor_hidden` argues the rest.
@@ -1191,6 +1211,7 @@ mod tests {
             ("produce_estate_file", "landUnder"),
             ("set_monitoring_settings", "settings"),
             ("ack_alert", "monitorId"),
+            ("unack_alert", "monitorId"),
             ("set_monitor_hidden", "monitorId"),
             ("set_monitor_hidden", "hidden"),
         ] {

@@ -211,9 +211,9 @@ export function handlers(params: URLSearchParams): Handlers {
 
   return {
     inbox_items: (args) => {
+      // On the read and not off the list: *Undo* on an ack brings the row back.
       const acked = ackedNow();
-      live = live.filter((candidate) => !acked(candidate));
-      return (args["shelf"] as InboxShelf) === "snoozed" ? later.slice() : live.slice();
+      return (args["shelf"] as InboxShelf) === "snoozed" ? later.slice() : live.filter((candidate) => !acked(candidate));
     },
     inbox_count: () => {
       const acked = ackedNow();

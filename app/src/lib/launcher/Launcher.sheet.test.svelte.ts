@@ -145,11 +145,13 @@ function mountIt(props: Record<string, unknown> = {}) {
     createLink: vi.fn(async () => ({})),
     submitWrite: vi.fn(async () => ({})),
     ackAlert: vi.fn(async () => ({})),
+    unackAlert: vi.fn(async () => ({})),
     copyText: vi.fn(async () => {}),
     openCheckout: vi.fn(async () => ["code", "/src/svc"]),
     repoOf: vi.fn(async () => "gitea:acme/svc"),
     clone: vi.fn(async () => {}),
     inboxAck: vi.fn(async () => {}),
+    inboxUnack: vi.fn(async () => {}),
     inboxDone: vi.fn(async () => {}),
     branches: vi.fn(async (_repoId: string) => BRANCHES),
     // No sets unless a test gives some: the table's other rows stay as they were.
@@ -185,12 +187,14 @@ function mountIt(props: Record<string, unknown> = {}) {
         createLink: calls.createLink,
         submitWrite: calls.submitWrite,
         ackAlert: calls.ackAlert,
+        unackAlert: calls.unackAlert,
         copyText: calls.copyText,
         openCheckout: calls.openCheckout,
         checkoutSettings: async () => APPS,
         repoOf: calls.repoOf,
         clone: calls.clone,
         inboxAck: calls.inboxAck,
+        inboxUnack: calls.inboxUnack,
         inboxDone: calls.inboxDone,
         branches: calls.branches,
         linkSets: calls.linkSets,
@@ -514,6 +518,11 @@ test("a monitor is acknowledged", async () => {
   await settle();
   expect(calls.ackAlert).toHaveBeenCalledWith("kuma:7");
   expect(lastToast()).toBe("Acknowledged payout-api");
+  const undo = toasts.items.at(-1)!.action!;
+  expect(undo.label).toBe("Undo");
+  undo.run();
+  await settle();
+  expect(calls.unackAlert).toHaveBeenCalledWith("kuma:7");
 });
 
 test("Copy title and Copy key put the text on the clipboard", async () => {

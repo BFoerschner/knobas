@@ -3149,8 +3149,8 @@ const ALERT_TO_ACK: &str = "select a.id, a.state, a.opened_at, a.acked_at,
 ///   alert rule already excludes acked alerts, so the item is gone the moment
 ///   the column is written and no `knobas.inbox_state` row is needed to remove
 ///   it. The row is what keeps *done* meaning one thing across all six
-///   categories -- it is what a later un-ack would have to clear, and what the
-///   activity line's `item_key` refers to.
+///   categories -- it is what [`unack_alert`] clears, and what the activity
+///   line's `item_key` refers to.
 /// * **one history line per watched asset**, `user` and [`ACKED`]. On the
 ///   asset and not on the monitor, because the monitor is a mirrored item and
 ///   an ack is a knobas act about somebody's own machine; a monitor watching
@@ -3251,6 +3251,98 @@ pub async fn ack_alert(
             state,
             opened_at,
             acked_at: Some(acked_at),
+            assets,
+        },
+        activity,
+    })
+}
+
+/// Take an ack back: the alert asks again, as if nobody had seen it.
+///
+/// [`ack_alert`]'s three writes undone in one transaction. `acked_at` is
+/// cleared, the [`knobas_core::inbox::reopen_with`] row goes so the rule's item
+/// is back on the stream, and each watched asset gets one history line.
+///
+/// **Knobas-local, like the ack.** Uptime Kuma has no ack, so nothing is
+/// written to a source and a press takes it back whole.
+///
+/// **The line is an `edited`, not a verb of its own**, in the `field`, `from`
+/// and `to` every `edited` carries, so the history panel draws *alert on jira:
+/// acked → not acked* with no new word to teach it, and a build from before
+/// this command draws it the same. The `acked` line stays: the log is
+/// append-only, and somebody did see it.
+///
+/// **Not acked is one answer**, as acking twice is: an alert with no `acked_at`
+/// comes back as itself and writes nothing. A snooze the ack replaced does not
+/// come back: `complete_with` cleared it, so the item returns to the stream.
+///
+/// # Errors
+///
+/// [`IpcError::not_found`] when the monitor has no open alert, which is what
+/// taking back an ack on a monitor that has since recovered gets.
+pub async fn unack_alert(pool: &PgPool, monitor_id: &str) -> Result<Written<OpenAlert>, IpcError> {
+    let mut tx = pool.begin().await?;
+    let Some(row) = sqlx::query(ALERT_TO_ACK)
+        .bind(monitor_id)
+        .fetch_optional(&mut *tx)
+        .await?
+    else {
+        return Err(IpcError::not_found(format!(
+            "no open alert on {monitor_id:?} -- it may have recovered"
+        )));
+    };
+    let id: i64 = row.try_get("id")?;
+    let state: AlertState = row.try_get("state")?;
+    let monitor_name: String = row.try_get("monitor_name")?;
+    let opened_at: chrono::DateTime<chrono::Utc> = row.try_get("opened_at")?;
+    let acked: Option<chrono::DateTime<chrono::Utc>> = row.try_get("acked_at")?;
+
+    let assets = watched_assets(&mut *tx, &[monitor_id.to_owned()])
+        .await?
+        .remove(monitor_id)
+        .unwrap_or_default();
+
+    let mut activity = Vec::new();
+    if acked.is_some() {
+        sqlx::query("update knobas.monitor_alert set acked_at = null where id = $1")
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        let key = format!(
+            "{}:{monitor_id}",
+            knobas_core::inbox::Category::Alert.as_str()
+        );
+        knobas_core::inbox::reopen_with(&mut *tx, &key).await?;
+        for asset in &assets {
+            let entity = EntityRef::parse(&asset.id).map_err(IpcError::internal)?;
+            activity.push(
+                knobas_core::activity::record_with(
+                    &mut *tx,
+                    ACTOR,
+                    "edited",
+                    Some(&entity),
+                    serde_json::json!({
+                        "field": format!("alert on {monitor_name}"),
+                        "from": "acked",
+                        "to": "not acked",
+                        "item_key": key,
+                        "monitor": monitor_id,
+                    }),
+                )
+                .await?,
+            );
+        }
+    }
+    tx.commit().await?;
+
+    Ok(Written {
+        value: OpenAlert {
+            id,
+            monitor_id: monitor_id.to_owned(),
+            monitor_name,
+            state,
+            opened_at,
+            acked_at: None,
             assets,
         },
         activity,

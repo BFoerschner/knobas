@@ -92,6 +92,7 @@ let writes: WriteOpPayload[];
 let edits: [string, AssetEdit[]][];
 let routeEdits: [string, RouteEdit[]][];
 let acks: string[];
+let unacks: string[];
 /** Each `set_monitor_hidden` the page made: the monitor, and hidden or not. */
 let hides: [string, boolean][];
 /** The write follows the page holds, by write id: a test tells each what the queue says. */
@@ -109,6 +110,7 @@ beforeEach(() => {
   edits = [];
   routeEdits = [];
   acks = [];
+  unacks = [];
   hides = [];
   forgetFilters();
   heard = new Map();
@@ -134,6 +136,10 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
     openAlerts: async () => [],
     ackAlert: async (id) => {
       acks.push(id);
+      return {} as never;
+    },
+    unackAlert: async (id) => {
+      unacks.push(id);
       return {} as never;
     },
     setMonitorHidden: async (id, hidden) => {
@@ -244,19 +250,19 @@ test("Ack is on a down monitor only, acks it by the monitor, and reads Acked", a
   button(down!, "Ack")!.click();
   await settle();
   expect(acks).toEqual(["kuma:2"]);
-  expect(button(down!, "Acked")?.disabled).toBe(true);
+  expect(button(down!, "Acked")?.getAttribute("aria-pressed")).toBe("true");
   expect(toasts.items.map((t) => t.text)).toContain("Acked in knobas. The alert stays open until the monitor recovers.");
 });
 
 const alertOf = (monitor_id: string, acked_at: string | null): OpenAlert =>
   ({ id: 1, monitor_id, monitor_name: "flows-stage", state: "down", opened_at: "2026-10-16T12:00:00Z", acked_at }) as OpenAlert;
 
-test("a down row whose open alert is acked reads a disabled Acked on first draw, and Ack when it is not", async () => {
+test("a down row whose open alert is acked reads a pressed Acked on first draw, and Ack when it is not", async () => {
   await draw([], "PAY-231", ports({ openAlerts: async () => [alertOf("kuma:2", "2026-10-16T13:00:00Z")] }));
   const down = rows()[0]!;
   expect(button(down, "Ack")).toBeUndefined();
-  expect(button(down, "Acked")?.disabled).toBe(true);
-  expect(button(down, "Acked")?.title).toContain("2026-10-16");
+  expect(button(down, "Acked")?.getAttribute("aria-pressed")).toBe("true");
+  expect(button(down, "Acked")?.title).toContain("take it back");
   unmount(view!);
   view = null;
   await draw([], "PAY-231", ports({ openAlerts: async () => [alertOf("kuma:2", null)] }));
@@ -276,12 +282,33 @@ test("an ack survives leaving the page: a remount over the now-acked alert still
   await draw([], "PAY-231", stand);
   button(rows()[0]!, "Ack")!.click();
   await settle();
-  expect(button(rows()[0]!, "Acked")?.disabled).toBe(true);
+  expect(button(rows()[0]!, "Acked")).toBeDefined();
   unmount(view!);
   view = null;
   await draw([], "PAY-231", stand);
-  expect(button(rows()[0]!, "Acked")?.disabled).toBe(true);
+  expect(button(rows()[0]!, "Acked")).toBeDefined();
   expect(button(rows()[0]!, "Ack")).toBeUndefined();
+});
+
+test("Undo on the ack's toast takes it back, and so does pressing Acked", async () => {
+  await draw([]);
+  const down = rows()[0]!;
+  button(down, "Ack")!.click();
+  await settle();
+  const toast = toasts.items.find((t) => t.text.startsWith("Acked in knobas"))!;
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(unacks).toEqual(["kuma:2"]);
+  expect(button(rows()[0]!, "Ack")).toBeDefined();
+  expect(toasts.items.at(-1)!.text).toContain("is asking again");
+
+  button(rows()[0]!, "Ack")!.click();
+  await settle();
+  button(rows()[0]!, "Acked")!.click();
+  await settle();
+  expect(unacks).toEqual(["kuma:2", "kuma:2"]);
+  expect(button(rows()[0]!, "Acked")).toBeUndefined();
 });
 
 test("Pause and Resume queue the source's op for that monitor", async () => {

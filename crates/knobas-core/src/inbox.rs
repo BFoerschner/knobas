@@ -1186,6 +1186,27 @@ where
     Ok(())
 }
 
+/// Forget an answer: no snooze and no *done*, so the item is what its rule says.
+///
+/// Deletes the row rather than nulling its columns: a row that decides nothing
+/// may not exist (`inbox_state_decision_chk`, migration `0009`). #446's ack is
+/// [`complete_with`]'s caller, and taking an ack back is this one's, in that
+/// write's transaction for the same reason.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn reopen_with<'e, E>(executor: E, key: &str) -> Result<(), CoreError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query("delete from knobas.inbox_state where item_key = $1")
+        .bind(key)
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

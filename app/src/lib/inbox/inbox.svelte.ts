@@ -29,7 +29,7 @@
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
-import { ackAlert as realAck } from "../ipc/assets";
+import { ackAlert as realAck, unackAlert as realUnack } from "../ipc/assets";
 import {
   completeInboxItem as realComplete,
   inboxCount as realCount,
@@ -58,6 +58,8 @@ export interface InboxPorts {
    * is in the inbox now".
    */
   ackAlert: (monitorId: string) => Promise<void>;
+  /** *Undo* on an ack: the alert asks again, so the re-read brings the row back. */
+  unackAlert: (monitorId: string) => Promise<void>;
   listen: (event: string, handler: () => void) => Promise<() => void>;
 }
 
@@ -107,6 +109,8 @@ export interface Inbox {
    * component.
    */
   ack(itemKey: string, refused?: Refused): Promise<void>;
+  /** Take an ack back: the alert asks again, and the re-read brings its row back. */
+  unack(itemKey: string, refused?: Refused): Promise<void>;
   /**
    * Subscribe to the two signals the inbox moves on. Returns the teardown;
    * calling `start` twice is harmless.
@@ -151,6 +155,9 @@ export function createInbox(ports?: InboxPorts): Inbox {
     completeInboxItem: (itemKey) => realComplete(itemKey),
     ackAlert: async (monitorId) => {
       await realAck(monitorId);
+    },
+    unackAlert: async (monitorId) => {
+      await realUnack(monitorId);
     },
     listen: (event, handler) => tauriListen(event, () => handler()),
   };
@@ -303,6 +310,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       ),
     complete: (itemKey, refused) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey), refused),
     ack: (itemKey, refused) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey)), refused),
+    unack: (itemKey, refused) => act(() => {}, () => io.unackAlert(subjectOf(itemKey)), refused),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*

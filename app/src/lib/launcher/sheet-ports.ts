@@ -3,7 +3,7 @@
  * session's ports are: production passes nothing and gets the app's own
  * commands, the ones the pages already send; a test passes fakes.
  */
-import { ackAlert } from "../ipc/assets";
+import { ackAlert, unackAlert } from "../ipc/assets";
 import {
   checkoutSettings,
   createLink,
@@ -26,6 +26,7 @@ export interface SheetPorts {
   createLink: (fromId: string, toId: string, relation: string) => Promise<unknown>;
   submitWrite: (payload: WriteOpPayload) => Promise<unknown>;
   ackAlert: (monitorId: string) => Promise<unknown>;
+  unackAlert: (monitorId: string) => Promise<unknown>;
   copyText: (text: string) => Promise<void>;
   /** `open_checkout`: answers the argument vector it started. */
   openCheckout: (entityId: string, at: OpenAt) => Promise<string[]>;
@@ -36,6 +37,7 @@ export interface SheetPorts {
   clone: (repo: { entityId: string; title: string }) => Promise<void>;
   /** The Inbox page's own writes on a line (`inbox.svelte.ts`). */
   inboxAck: (key: string) => Promise<void>;
+  inboxUnack: (key: string) => Promise<void>;
   inboxDone: (key: string) => Promise<void>;
   /** The flows' (#2427): *Snooze…* through the Inbox page's store, so its stream and shelf follow. */
   inboxSnooze: (key: string, until: Date) => Promise<void>;
@@ -55,6 +57,7 @@ export const realSheetPorts: SheetPorts = {
   createLink: (fromId, toId, relation) => createLink(fromId, toId, relation),
   submitWrite: (payload) => submitWrite(payload),
   ackAlert: (monitorId) => ackAlert(monitorId),
+  unackAlert: (monitorId) => unackAlert(monitorId),
   copyText: (text) => navigator.clipboard.writeText(text),
   openCheckout: (entityId, at) => openCheckout(entityId, at),
   checkoutSettings: () => checkoutSettings(),
@@ -83,6 +86,7 @@ export const realSheetPorts: SheetPorts = {
     await clones.start({ entityId: repo.entityId, name: repoName(repo.title), repoUrl: checkout.repo_url, root: checkout.clones_root });
   },
   inboxAck: (key) => inbox.ack(key),
+  inboxUnack: (key) => inbox.unack(key),
   inboxDone: (key) => inbox.complete(key),
   inboxSnooze: (key, until) => inbox.snooze(key, until),
   linkSets: () => linkSets(),

@@ -88,6 +88,7 @@ function store(extra: InboxEntry[] = []): Inbox {
   let stream = [...STREAM, ...extra];
   let snoozed = SNOOZED.slice();
   let done: InboxEntry[] = [];
+  let acked: InboxEntry[] = [];
   return createInbox({
     inboxItems: async (shelf) => (shelf === "snoozed" ? snoozed.slice() : stream.slice()),
     inboxCount: async () => stream.length,
@@ -111,7 +112,13 @@ function store(extra: InboxEntry[] = []): Inbox {
     },
     ackAlert: async (monitor) => {
       calls.push(`ack ${monitor}`);
+      acked = [...acked, ...stream.filter((row) => row.item.key === `alert:${monitor}`)];
       stream = stream.filter((row) => row.item.key !== `alert:${monitor}`);
+    },
+    unackAlert: async (monitor) => {
+      calls.push(`unack ${monitor}`);
+      stream = [...stream, ...acked.filter((row) => row.item.key === `alert:${monitor}`)];
+      acked = acked.filter((row) => row.item.key !== `alert:${monitor}`);
     },
     listen: async () => () => {},
   });
@@ -279,6 +286,18 @@ test("Ack acks the monitor's alert and the row leaves", async () => {
   expect(calls).toEqual(["ack kuma:flows"]);
   expect(toasts.items.map((toast) => toast.text)).toContain("Acked. The alert stays open until the monitor recovers.");
   expect(rows().some((row) => row.textContent?.includes("flows-stage"))).toBe(false);
+});
+
+test("Undo on an ack's toast takes it back, and the re-read brings the row back", async () => {
+  await open();
+  button(rowOf("flows-stage"), "Ack").click();
+  await settle();
+  const toast = toasts.items.find((each) => each.text.startsWith("Acked."))!;
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(calls).toEqual(["ack kuma:flows", "unack kuma:flows"]);
+  expect(rows().some((row) => row.textContent?.includes("flows-stage"))).toBe(true);
 });
 
 test("Done completes the item", async () => {

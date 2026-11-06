@@ -372,7 +372,7 @@ One reading of one [monitor](#monitor) at one poll: its state, its response time
 _Avoid_: heartbeat (Uptime Kuma's word, and the app's own beat), datapoint, metric
 
 **Alert**:
-A [monitor](#monitor)'s transition to down or warn, open until the monitor returns to up; at most one open per monitor. A [sample](#sample) reading `pending` or `maintenance` neither opens nor closes one. Every open alert shows in Monitors, in the Tree and in the launcher's *Open alerts on my jobs* list; it reaches the [inbox](#inbox) only when some unarchived [context](#context) holds the affected asset, directly or through an ancestor, and never while its monitor is hidden on [Monitors](#monitors). **Ack** is knobas-local and clears the inbox item while the alert stays open; the inbox is the only surface an ack clears.
+A [monitor](#monitor)'s transition to down or warn, open until the monitor returns to up; at most one open per monitor. A [sample](#sample) reading `pending` or `maintenance` neither opens nor closes one. Every open alert shows in Monitors, in the Tree and in the launcher's *Open alerts on my jobs* list; it reaches the [inbox](#inbox) only when some unarchived [context](#context) holds the affected asset, directly or through an ancestor, and never while its monitor is hidden on [Monitors](#monitors). **Ack** is knobas-local and clears the inbox item while the alert stays open; the inbox is the only surface an ack clears. It can be taken back: the alert asks again, in the inbox too.
 _Avoid_: incident, notification (bare), problem (the rolled-up count on a closed branch)
 
 ## Export
