@@ -79,7 +79,7 @@ test("a command step added here is saved whole with its name, command and timeou
   type("Step name", "Upper");
   type("Step command", "tr a-z A-Z");
   type("Step timeout", "4");
-  button("Save step").click();
+  button("Add step").click();
   await settle();
   expect(s.stepSaves).toEqual([[{ id: null, name: "Upper", command: "tr a-z A-Z", timeout_secs: 4 }]]);
   expect(cells(".tf-rnd-steps")).toEqual([["Upper", "tr a-z A-Z", "4s"]]);

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { boundedNumber, databaseWords, lastBackupWords, scheduleWords, shareTicks } from "./sections";
+import { boundedNumber, databaseWords, lastBackupWords, scheduleWords, shareTicks, clampNote } from "./sections";
 
 const NOW = new Date(2026, 9, 15, 14, 30);
 
@@ -59,4 +59,11 @@ test("a number field never sends NaN, and stays in its range", () => {
 test("the database line: its size and how many items it holds", () => {
   expect(databaseWords({ db_bytes: 1.2 * 1024 ** 3, item_count: 18400 })).toBe("1.2 GB, 18 400 items");
   expect(databaseWords({ db_bytes: 2048, item_count: 1 })).toBe("2 KB, 1 item");
+});
+
+test("clampNote names what was typed and what the field holds, and says nothing of a value in range (F-613)", () => {
+  expect(clampNote("9999", 0, 15, 15)).toBe("Takes 0 to 15, so 9999 became 15.");
+  expect(clampNote("0", 1, 365, 1)).toBe("Takes 1 to 365, so 0 became 1.");
+  expect(clampNote("", 1, 365, 14)).toBe("Takes 1 to 365, so this stays 14.");
+  expect(clampNote("7", 1, 365, 7)).toBeNull();
 });

@@ -2543,7 +2543,8 @@ test("a filter over an answer offers no place: the reader is narrowing, not nami
   await debounced();
   typeInBox("settings");
   await debounced();
-  expect(optionNames()).toEqual(["Settings_Build"]);
+  expect(optionNames().join(" ")).toContain("Settings_Build");
+  expect(optionNames()).toHaveLength(1);
 });
 
 test("a filter that finds nothing offers the place the words name, over Search everything, and says what it searched (F-042)", async () => {

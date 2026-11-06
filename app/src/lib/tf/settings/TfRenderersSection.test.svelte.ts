@@ -96,7 +96,7 @@ test("a renderer added here is saved whole, in the registry at once, and runs in
   type("Markdown fence languages", "Cat");
   type("Writes", "html");
   type("Timeout", "3");
-  button("Save").click();
+  button("Add renderer").click();
   await settle();
 
   expect(sent).toEqual([
@@ -131,7 +131,7 @@ test("a renderer that draws diffs says so in its form, and an edit keeps it (#22
   expect(box().checked).toBe(false);
   box().click();
   flushSync();
-  button("Save").click();
+  button("Add renderer").click();
   await settle();
   expect(sent.at(-1)?.[0]?.diff).toBe(true);
   expect(renderersFor({ path: "a.page", binary: false })[0]?.diff).toBe(true);
@@ -139,7 +139,7 @@ test("a renderer that draws diffs says so in its form, and an edit keeps it (#22
   button("Edit…").click();
   flushSync();
   expect(box().checked).toBe(true);
-  button("Save").click();
+  button("Save renderer").click();
   await settle();
   expect(sent.at(-1)?.[0]?.diff).toBe(true);
 });
@@ -187,11 +187,52 @@ test("a command the backend refuses is said beside the form, which stays open", 
   flushSync();
   type("Name", "Bad");
   type("Command", "cat 'x");
-  button("Save").click();
+  button("Add renderer").click();
   await settle();
 
   expect(target.querySelector("[role=alert]")?.textContent).toContain("never closed");
   expect(target.querySelector("#tf-rnd-name")).not.toBeNull();
+});
+
+test("Add a renderer… is a dialog: focus in, the missing line, Esc out with focus back (F-618)", async () => {
+  const { ports, sent } = backend();
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  const opener = button("Add a renderer…");
+  opener.focus();
+  opener.click();
+  await settle();
+
+  const dialog = target.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog.querySelector("h2")?.textContent).toBe("Add a renderer");
+  expect(document.activeElement?.id).toBe("tf-rnd-name");
+  expect([...dialog.querySelectorAll(".tf-req")]).toHaveLength(2);
+  expect(button("Add renderer").disabled).toBe(true);
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("Still needs the name and the command.");
+
+  type("Name", "Cat");
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("Still needs the command.");
+  type("Command", "cat");
+  expect(dialog.querySelector(".tf-dwhy")).toBeNull();
+  type("Timeout", "999");
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("The timeout takes 1 to 120 seconds.");
+  expect(sent).toEqual([]);
+
+  document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(opener);
+});
+
+test("Run waits for a sample, and says so", async () => {
+  const { ports } = backend([{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  expect(button("Run").disabled).toBe(true);
+  expect(button("Run").parentElement?.querySelector(".tf-dwhy")?.textContent).toBe("Paste some sample text first.");
+  type("Sample", "hello");
+  expect(button("Run").disabled).toBe(false);
+  expect(button("Run").parentElement?.querySelector(".tf-dwhy")).toBeNull();
 });
 
 // -- Default renderers (#2263) ---------------------------------------------------

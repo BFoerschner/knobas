@@ -31,6 +31,7 @@
 -->
 <script lang="ts">
   import { tick } from "svelte";
+  import type { Attachment } from "svelte/attachments";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { AdapterPreview, AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
@@ -39,7 +40,7 @@
   import { defaultValues, validate } from "../../sources/schema-form";
   import type { Layers } from "../layers.svelte";
   import type { SettingsPorts } from "./ports";
-  import { AUTH_LABEL, defaultIntervalFor, fillFound, SOURCE_ID_PATTERN } from "../../sources/new-source";
+  import { AUTH_LABEL, defaultIntervalFor, fillFound, freeSourceId, SOURCE_ID_PATTERN } from "../../sources/new-source";
   import { pageFields } from "./source-config";
   import { reach } from "./adapter-preview";
   import TfAdapterFacts from "./TfAdapterFacts.svelte";
@@ -49,11 +50,14 @@
   let {
     ports,
     layers,
+    taken = [],
     onclose,
     onsaved,
   }: {
     ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "previewInstallAdapter" | "installAdapter">;
     layers: Layers;
+    /** The ids in use: the form offers a free one and says so as a taken one is typed, not after the test and the add (F-624). */
+    taken?: readonly string[];
     onclose: () => void;
     onsaved: (source: SourceSummary) => void;
   } = $props();
@@ -118,6 +122,7 @@
   const idError = $derived.by(() => {
     if (id === "") return "An id is required.";
     if (!SOURCE_ID_PATTERN.test(id)) return "Lower-case letters, digits and hyphens, starting with a letter.";
+    if (taken.includes(id)) return `A source called ${id} already exists.`;
     return null;
   });
 
@@ -146,7 +151,8 @@
       ...(secret === "" ? [`the ${secretWord.toLowerCase()}`] : []),
     ];
     if (needs.length > 0) return `Still needs ${needs.length > 1 ? `${needs.slice(0, -1).join(", ")} and ${needs.at(-1)}` : needs[0]}.`;
-    if (idError !== null || accountHalf || config.error !== null) return "Fix what is marked above.";
+    if (idError !== null) return id === "" ? "Still needs an id." : "Fix the Id.";
+    if (accountHalf || config.error !== null) return "Fix what is marked above.";
     return "Test the connection first.";
   });
 
@@ -157,7 +163,7 @@
 
   function choose(adapter: SourceDescriptor) {
     chosen = adapter;
-    id = adapter.adapter_kind;
+    id = freeSourceId(adapter.adapter_kind, taken);
     displayName = adapter.name;
     // The config belongs to the adapter that declared it; nothing carries over.
     configValues = defaultValues(config.fields);
@@ -166,11 +172,38 @@
     tested = null;
   }
 
-  /** A refusal's note: the backend's reason opens with knobas' own word, so only that is capitalised. */
-  function refused(cause: unknown) {
+  /** A backend's reason opens with knobas' own word, so only that is capitalised. */
+  function sentence(cause: unknown): string {
     const reason = ipcErrorMessage(cause);
-    installNote = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
+    return reason.charAt(0).toUpperCase() + reason.slice(1);
   }
+
+  /** A refusal's note. */
+  function refused(cause: unknown) {
+    installNote = { ok: false, text: sentence(cause) };
+  }
+
+  /** Whether the radios are being walked by key: an arrow picks as it moves, and focus must stay there to go on. */
+  let walking = false;
+
+  /**
+   * A pick opens the form below the list, which a short window would leave half cut (F-624). A pointer's pick goes on to
+   * the first field; a key's stays on the radios and brings the field into view.
+   */
+  function reveal() {
+    const stay = walking;
+    walking = false;
+    void tick().then(() => {
+      const field = form?.querySelector<HTMLElement>("#tf-add-address");
+      if (!stay) field?.focus({ preventScroll: true });
+      field?.scrollIntoView?.({ block: stay ? "nearest" : "center" });
+    });
+  }
+
+  /** The dialog's answer is at the end of its body, out of sight in a short window. */
+  const inView: Attachment<HTMLElement> = (node) => {
+    node.scrollIntoView?.({ block: "nearest" });
+  };
 
   /** *Install…*: every check, nothing written; a release that passes is asked about. */
   async function check() {
@@ -258,7 +291,7 @@
       onsaved(source);
     } catch (cause) {
       // The dialog stays open with the draft: a name collision is not a reason to retype it.
-      saveError = ipcErrorMessage(cause);
+      saveError = sentence(cause);
     } finally {
       saving = false;
     }
@@ -271,10 +304,18 @@
     {#if adaptersError !== null}
       <p class="tf-fail">Could not read the adapters: {adaptersError}</p>
     {:else if adapters !== null}
-      <div class="tf-radio" role="radiogroup" aria-label="What is it?" bind:this={radios}>
+      <div
+        class="tf-radio"
+        role="radiogroup"
+        aria-label="What is it?"
+        tabindex="-1"
+        bind:this={radios}
+        onkeydown={() => (walking = true)}
+        onpointerdown={() => (walking = false)}
+      >
         {#each adapters as adapter (adapter.id)}
           <label>
-            <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => choose(adapter)} />
+            <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => { choose(adapter); reveal(); }} />
             <span>{adapter.name}<small>{kindsHeld(adapter)}</small></span>
           </label>
         {/each}
@@ -341,7 +382,7 @@
         <label for="tf-add-name">Name</label>
         <input id="tf-add-name" type="text" autocomplete="off" bind:value={displayName} />
         <label for="tf-add-id">Id</label>
-        <input id="tf-add-id" type="text" autocomplete="off" aria-describedby="tf-add-id-note" bind:value={id} />
+        <input id="tf-add-id" type="text" autocomplete="off" aria-invalid={idError !== null ? "true" : undefined} aria-describedby="tf-add-id-note" bind:value={id} />
       </div>
       <p class="tf-dlg-note {idError ? 'tf-stg-errt' : ''}" id="tf-add-id-note">
         {idError ?? "Permanent: everything from this source is named with it."}
@@ -350,13 +391,13 @@
       {#if report !== null}
         {@const note = noteAfterFill(connectionNote(report), filled)}
         <!-- Text: `error` is a line an upstream server wrote. -->
-        <p class="tf-dlg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
+        <p class="tf-dlg-note {report.ok ? '' : 'tf-stg-errt'}" role="status" {@attach inView}>
           {connectionLine(report)}{note ? `. ${note}` : ""}
         </p>
       {:else}
         <p class="tf-dlg-note">Test connection fills in what it can find, such as your user and the field ids.</p>
       {/if}
-      {#if saveError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{saveError}</p>{/if}
+      {#if saveError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert" {@attach inView}>{saveError}</p>{/if}
     {/if}
   {/snippet}
   {#snippet footer()}

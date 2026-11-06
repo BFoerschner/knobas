@@ -8,7 +8,7 @@
   import type { MonitoringSettings } from "../../ipc/assets";
   import { push } from "../../shell/toasts.svelte";
   import type { SectionPorts } from "./ports";
-  import { boundedNumber } from "./sections";
+  import { boundedNumber, clampNote } from "./sections";
 
   let { ports }: { ports: Pick<SectionPorts, "monitoringSettings" | "setMonitoringSettings"> } = $props();
 
@@ -34,9 +34,7 @@
     const [min, max] = BOUNDS[field];
     const value = boundedNumber(input.value, min, max, stored[field]);
     // A value out of range is brought into it, and that is said rather than done silently.
-    const typed = Number.parseInt(input.value, 10);
-    const inRange = typed >= min && typed <= max;
-    refused = { ...refused, [field]: inRange ? undefined : `Takes ${min} to ${max}, so this is ${value}.` };
+    refused = { ...refused, [field]: clampNote(input.value, min, max, value) ?? undefined };
     if (value === stored[field]) {
       input.value = String(value);
       return;

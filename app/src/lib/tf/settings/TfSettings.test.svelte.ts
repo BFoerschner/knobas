@@ -8,6 +8,7 @@
 import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { sourceDrafts } from "./source-drafts.svelte";
 
 import type { TicketViewRow } from "../../ipc/search";
 import type {
@@ -33,6 +34,7 @@ let view: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
   location.hash = "";
+  sourceDrafts.reset();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -307,11 +309,11 @@ test("Sources lists each source with its state, address, holdings and last sync"
 
 test("Save sends what changed in the connection through update_source", async () => {
   const { p } = await open(["source", "jira"]);
-  expect(button("Save").disabled).toBe(true);
+  expect(button("Save connection").disabled).toBe(true);
 
   type("#tf-src-address", "https://jira2.tidewater.example");
   type("#tf-src-user", "mlindqvist");
-  button("Save").click();
+  button("Save connection").click();
   await settle();
 
   expect(p.updateSource).toHaveBeenCalledWith("jira", {
@@ -348,10 +350,10 @@ test("a source's page edits its adapter's config, drawn from the schema, and sen
   expect(syncs.querySelector("#tf-src-cfg-jql_filter")).not.toBeNull();
   expect(syncs.querySelector("#tf-src-cfg-username")).toBeNull();
   expect(field("projects").value).toBe("TW\nOPS");
-  expect(sectionButton("What it syncs", "Save").disabled).toBe(true);
+  expect(sectionButton("What it syncs", "Save sync settings").disabled).toBe(true);
 
   type("#tf-src-cfg-jql_filter", "project = TW AND updated >= -30d");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
 
   expect(p.updateSource).toHaveBeenCalledWith("jira", {
@@ -362,7 +364,7 @@ test("a source's page edits its adapter's config, drawn from the schema, and sen
 test("Sync WEB too opens the source's page with the project added, for the reader to save (#879)", async () => {
   const { p } = await open(["source", "jira", "add", "projects", "WEB"]);
   expect(field("projects").value).toBe("TW\nOPS\nWEB");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
   expect(p.updateSource).toHaveBeenCalledWith("jira", { config: { username: "mara", projects: ["TW", "OPS", "WEB"] } });
 });
@@ -386,7 +388,7 @@ test("the added project is in view, with a note beside Save until it is saved (#
     expect(scrolled).toEqual([section("What it syncs").querySelector(".tf-stg-acts"), field("projects")]);
     expect(addedNote()).toBe("WEB added, not saved yet");
 
-    sectionButton("What it syncs", "Save").click();
+    sectionButton("What it syncs", "Save sync settings").click();
     await settle();
     expect(p.updateSource).toHaveBeenCalledWith("jira", {
       config: { username: "mara", projects: ["PAY", "OPS", "CUS", "TRK", "WEB"] },
@@ -401,9 +403,10 @@ test("editing the added field takes the note away; a page opened without an addi
   await open(["source", "jira", "add", "projects", "WEB"]);
   expect(addedNote()).toBe("WEB added, not saved yet");
   type("#tf-src-cfg-projects", "TW\nOPS\nWEB\nCUS");
-  expect(addedNote()).toBeNull();
+  expect(addedNote()).toBe("Not saved");
   unmount(view!);
   view = null;
+  sourceDrafts.reset();
 
   await open(["source", "jira"]);
   expect(addedNote()).toBeNull();
@@ -414,7 +417,7 @@ test("editing the added field takes the note away; a page opened without an addi
 test("a project the source already syncs is not added twice", async () => {
   await open(["source", "jira", "add", "projects", "OPS"]);
   expect(field("projects").value).toBe("TW\nOPS");
-  expect(sectionButton("What it syncs", "Save").disabled).toBe(true);
+  expect(sectionButton("What it syncs", "Save sync settings").disabled).toBe(true);
 });
 
 test("a Jira source's page shows the two field ids, or says none is set (#1021)", async () => {
@@ -436,7 +439,7 @@ test("saving keeps a field id the sync recorded after the page was read, beside 
   expect(field("sprint_field").value).toBe("");
 
   type("#tf-src-cfg-epic_link_field", "customfield_10108");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
     config: {
@@ -449,7 +452,7 @@ test("saving keeps a field id the sync recorded after the page was read, beside 
 
   // The Connection's Save reads the stored config again too.
   type("#tf-src-user", "mlindqvist");
-  sectionButton("Connection", "Save").click();
+  sectionButton("Connection", "Save connection").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
     config: { username: "mlindqvist", projects: ["TW", "OPS"], sprint_field: "customfield_10107" },
@@ -460,7 +463,7 @@ test("clearing an id the reader typed removes it, so the next sync can record on
   const jira = summary("jira", "Jira", "ok", { config: { username: "mara", sprint_field: "customfield_1" } });
   const { p } = await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([jira, SOURCES[1]!])) }));
   type("#tf-src-cfg-sprint_field", "");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", { config: { username: "mara" } });
 });
@@ -526,7 +529,8 @@ test("Add a source: the generated form, Test connection's fills, then one add_so
 
   // Generated from the chosen adapter's schema: no per-adapter branch.
   expect(dialog().querySelector("#tf-add-cfg-projects")).not.toBeNull();
-  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("jira");
+  // The adapter's kind is taken here, so the form offers the next free id and starts with nothing to fix (F-624).
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("jira-2");
   expect(dialogButton("Add source").disabled).toBe(true);
 
   type("#tf-add-id", "jira-2");
@@ -1133,7 +1137,7 @@ test("Add a source: a failed save keeps the dialog open with its reason and the 
   await settle();
 
   expect(p.addSource).toHaveBeenCalledTimes(1);
-  expect(dialog().querySelector('[role="alert"]')!.textContent).toContain("a source with id jira already exists");
+  expect(dialog().querySelector('[role="alert"]')!.textContent).toContain("A source with id jira already exists");
   // A dialog that closed on failure would throw the whole draft away.
   expect(dialog().querySelector<HTMLInputElement>("#tf-add-address")!.value).toBe("https://jira2.tidewater.example");
   expect(dialog().querySelector<HTMLInputElement>("#tf-add-secret")!.value).toBe("s3cret");
@@ -2079,11 +2083,129 @@ test("Sources and a source's page put their actions on the title line, in the he
   expect(loneRows()).toBe(0);
 });
 
-test("a source that is gone offers All sources on the title line", async () => {
+test("a source that is gone draws the one nothing-here state, as a section that isn't does (F-613)", async () => {
   await open(["source", "nowhere"]);
-  expect(target.querySelector(".tf-stg-h h1")?.textContent).toBe("nowhere");
-  expect([...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent)).toEqual(["All sources"]);
-  expect(loneRows()).toBe(0);
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("Settings has no such source. It may have been removed.");
+  expect([...target.querySelectorAll<HTMLElement>(".tf-nohere .tf-btn")].map((b) => b.textContent)).toEqual(["Sources"]);
+  expect(target.querySelector(".tf-stg-nav")).not.toBeNull();
+});
+
+// -- A source's draft (F-617) ------------------------------------------------------
+
+const leave = () => {
+  unmount(view!);
+  view = null;
+};
+
+test("what is typed on a source's page is there on return, marked Not saved, and the list says so", async () => {
+  await open(["source", "jira"]);
+  expect(section("Connection").querySelector(".tf-stg-pend")).toBeNull();
+  type("#tf-src-address", "https://new.example");
+  expect(section("Connection").querySelector(".tf-stg-pend")?.textContent).toBe("Not saved");
+  leave();
+
+  await open([]);
+  const row = [...target.querySelectorAll<HTMLElement>(".tf-stg-src")];
+  expect(row.filter((one) => one.textContent?.includes("Changes not saved"))).toHaveLength(1);
+  leave();
+
+  await open(["source", "jira"]);
+  expect(target.querySelector<HTMLInputElement>("#tf-src-address")!.value).toBe("https://new.example");
+  expect(section("Connection").querySelector(".tf-stg-pend")?.textContent).toBe("Not saved");
+  expect(button("Save connection").disabled).toBe(false);
+});
+
+test("a saved draft is gone: no note on the page, none in the list", async () => {
+  const { p } = await open(["source", "jira"]);
+  type("#tf-src-address", "https://new.example");
+  button("Save connection").click();
+  await settle();
+  expect(p.updateSource).toHaveBeenCalled();
+  expect(sourceDrafts.has("jira")).toBe(false);
+});
+
+test("Reset puts the connection back, focus on its first field, and Undo brings the words back", async () => {
+  await open(["source", "jira"]);
+  const stored = target.querySelector<HTMLInputElement>("#tf-src-address")!.value;
+  type("#tf-src-address", "https://new.example");
+  section("Connection").querySelector<HTMLButtonElement>('[aria-label="Reset the connection"]')!.click();
+  await settle();
+  expect(target.querySelector<HTMLInputElement>("#tf-src-address")!.value).toBe(stored);
+  expect(document.activeElement?.id).toBe("tf-src-address");
+  expect(section("Connection").querySelector(".tf-stg-pend")).toBeNull();
+  expect(sourceDrafts.has("jira")).toBe(false);
+
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(target.querySelector<HTMLInputElement>("#tf-src-address")!.value).toBe("https://new.example");
+  expect(sourceDrafts.has("jira")).toBe(true);
+});
+
+test("an unsaved config field comes back over what is stored, and a value the sync recorded meanwhile still shows", async () => {
+  await open(["source", "jira"]);
+  type("#tf-src-cfg-epic_link_field", "customfield_10108");
+  expect(addedNote()).toBe("Not saved");
+  leave();
+
+  const recorded = summary("jira", "Jira", "ok", { config: { username: "mara", projects: ["TW", "OPS"], sprint_field: "customfield_10107" } });
+  await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([recorded, SOURCES[1]!])) }));
+  expect(field("epic_link_field").value).toBe("customfield_10108");
+  expect(field("sprint_field").value).toBe("customfield_10107");
+  expect(addedNote()).toBe("Not saved");
+
+  section("What it syncs").querySelector<HTMLButtonElement>('[aria-label="Reset the sync settings"]')!.click();
+  await settle();
+  expect(field("epic_link_field").value).toBe("");
+  expect(sourceDrafts.has("jira")).toBe(false);
+});
+
+test("the Section fold is a panel: Esc's first press only folds it, and focus returns to its bar (F-619)", async () => {
+  const layers = createLayers();
+  view = mount(TfSettings, {
+    target,
+    context,
+    props: { rest: ["source", "jira"], job: null, ready: true, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+  });
+  await settle();
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(layers.open).toEqual([]);
+  expect(document.activeElement).toBe(bar);
+});
+
+test("Add a source: a taken id is said as it is typed and marks its field (F-624)", async () => {
+  await open([]);
+  button("Add a source…").click();
+  await settle();
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  const id = dialog().querySelector<HTMLInputElement>("#tf-add-id")!;
+  expect(id.getAttribute("aria-invalid")).toBeNull();
+  type("#tf-add-id", "jira");
+  expect(id.getAttribute("aria-invalid")).toBe("true");
+  expect(dialog().querySelector("#tf-add-id-note")?.textContent?.trim()).toBe("A source called jira already exists.");
+});
+
+test("Add a source: a pointer's pick goes on to the address, a key's stays on the radios (F-624)", async () => {
+  await open([]);
+  button("Add a source…").click();
+  await settle();
+  const radios = () => [...dialog().querySelectorAll<HTMLInputElement>(".tf-radio input")];
+  radios()[0]!.click();
+  await settle();
+  expect(document.activeElement?.id).toBe("tf-add-address");
+
+  radios()[0]!.focus();
+  radios()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  radios()[1]?.click();
+  await settle();
+  expect(document.activeElement?.id).not.toBe("tf-add-address");
 });
 
 test("Installed adapters: Check for updates is small on the heading line; a row's actions are small and trail it", async () => {

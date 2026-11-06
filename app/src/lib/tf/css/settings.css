@@ -31,6 +31,8 @@
 }
 .tf-stg-row:has(.tf-stg-sw, textarea) { align-items: start; }
 .tf-stg-row:has(textarea) > .tf-stg-l { padding-top: 6px; }
+/* A textarea is as tall as its rows, here and on a source's list fields (#1404): the one field height in forms.css is for a line of text, and it is last in the sheet, so this names the class twice. */
+.tf .tf-stg-body textarea.tf-stg-in.tf-stg-in { height: auto; padding-block: 5px; }
 /* Where the section's column is too narrow for both, the label goes above its control: a control keeps its whole width. */
 @container (max-width: 720px) {
   .tf-stg-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
@@ -96,7 +98,7 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-run p { font: 400 var(--t-sm)/1.5 var(--mono); font-variant-ligatures: none; color: var(--ink-2); }
 /* Why a number typed here was not what got stored (F-613), on its own line under the field. */
 .tf-stg-why { flex-basis: 100%; font-size: var(--t-xs); color: var(--err); }
-.tf-stg-c [aria-invalid="true"] { border-color: var(--err); }
+.tf-stg-c [aria-invalid="true"], .tf-formgrid #tf-add-id[aria-invalid="true"] { border-color: var(--err); }
 .tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
 /* a value the address added to the config, beside its Save until saved (#1404) */
 .tf-stg-pend { align-self: center; font-size: var(--t-sm); color: var(--ink-2); }
@@ -111,8 +113,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-det code { display: block; margin-top: 4px; font: 400 var(--t-xs)/1.45 var(--mono); font-variant-ligatures: none; }
 /* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
 .tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
-.tf-sf-grid { align-items: start; }
-.tf-sf-grid > label { padding-top: 5px; }
+/* A label shares its field's first line, however much help runs under the field; named at this weight because `.tf-formgrid` centres. */
+.tf-formgrid.tf-sf-grid { align-items: start; }
+.tf-sf-grid > label { padding-top: 7px; }
 .tf-sf-area { resize: vertical; min-height: 54px; line-height: 1.45; font: inherit; }
 .tf .tf-sf-mono { font-family: var(--mono); font-variant-ligatures: none; font-size: var(--t-sm); }
 .tf-sf-help { font-size: var(--t-xs); color: var(--ink-2); line-height: 1.4; }
@@ -136,6 +139,9 @@ select.tf-stg-in { padding-inline-start: 4px; }
   font-size: var(--t-md); width: min(420px, 100%);
 }
 
+/* Renderers' dialogs: a timeout is a short field with its unit beside it, wherever it stands (Forms, F-026). */
+.tf-rnd-secs { display: flex; align-items: center; gap: 8px; }
+.tf .tf-formgrid input.tf-rnd-secn { width: 90px; flex: none; }
 .tf-stg-test { margin-top: 12px; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
 
 /* ---------- Appearance › State colours (#2466): six columns of state-word chips ---------- */

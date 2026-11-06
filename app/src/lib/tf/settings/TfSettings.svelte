@@ -213,7 +213,7 @@
 
 <div class="tf-full tf-stgpage">
   <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, ...(sourceId === null ? [{ name: crumbName }] : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }])]} {back} />
-  <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} />
+  <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} {layers} />
   <div class="tf-stg" class:tf-rail-shut={!railOpen}>
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
     <nav
@@ -298,11 +298,8 @@
           onchanged={() => void loadAdapters()}
         />
       {:else if current === null}
-        <header class="tf-stg-h tf-stg-hline">
-          <h1>{sourceId}</h1>
-          <div class="tf-acts"><a class="tf-btn" href="#/settings">All sources</a></div>
-        </header>
-        <p class="tf-stg-p">There is no source called {sourceId}. It may have been removed.</p>
+        <header class="tf-stg-h"><h1>Settings</h1></header>
+        <TfNothingHere message="Settings has no such source. It may have been removed." href={settingsHash("sources")} action="Sources" />
       {:else}
         {#key current.id}
           <TfSourcePage
@@ -335,6 +332,7 @@
   <TfAddSource
     {ports}
     {layers}
+    taken={(sources ?? []).map((source) => source.id)}
     onclose={closeAdd}
     onsaved={() => {
       closeAdd();

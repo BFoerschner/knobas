@@ -6,7 +6,8 @@
   on stdout) and a timeout; a pipeline's *Add step* menu lists it under *Your commands*. A named pipeline is a name
   and its steps, edited with the file viewer's bar; the default renderers table above names it per file pattern,
   by id, so editing it here changes every pattern that uses it. Each list is saved whole, and the backend's answer
-  is held in the app's copy (`render/pipelines.svelte.ts`) the file viewer reads.
+  is held in the app's copy (`render/pipelines.svelte.ts`) the file viewer reads. Each is added and edited in `TfDialog`
+  (F-618), as a renderer is.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -19,6 +20,8 @@
   import { secondsLabel } from "../../time/format";
   import { putBack, removalToast } from "./removed";
   import TfFilePipeline from "../render/TfFilePipeline.svelte";
+  import TfDialog from "./TfDialog.svelte";
+  import { needsWords, secondsWhy } from "./form-words";
 
   let { pipelines, stepCommands, defaults }: { pipelines: NamedPipelines; stepCommands: CommandSteps; defaults: RendererDefaults } = $props();
 
@@ -45,6 +48,10 @@
   let editingStep = $state<number | "new" | null>(null);
   let stepForm = $state({ name: "", command: "", timeout: "10" });
   let stepRefusal = $state<string | null>(null);
+  let savingStep = $state(false);
+  const stepWhy = $derived(
+    needsWords([...(stepForm.name.trim() === "" ? ["the step's name"] : []), ...(stepForm.command.trim() === "" ? ["the command"] : [])]) ?? secondsWhy(stepForm.timeout),
+  );
 
   const stepDraft = (s: CommandStep): CommandStepDraft => ({ id: s.id, name: s.name, command: s.command, timeout_secs: s.timeout_secs });
 
@@ -67,7 +74,7 @@
   }
 
   async function saveStep() {
-    if (editingStep === null) return;
+    if (editingStep === null || stepWhy !== null || savingStep) return;
     const timeout = Number.parseInt(stepForm.timeout, 10);
     const draft: CommandStepDraft = {
       id: editingStep === "new" ? null : stepCommands.list[editingStep]!.id,
@@ -78,13 +85,20 @@
     const list = stepCommands.list.map(stepDraft);
     if (editingStep === "new") list.push(draft);
     else list[editingStep] = draft;
-    if (await storeSteps(list)) editingStep = null;
+    savingStep = true;
+    if (await storeSteps(list)) {
+      push({ text: `${editingStep === "new" ? "Added" : "Saved"} ${stepForm.name.trim()}` });
+      editingStep = null;
+    }
+    savingStep = false;
   }
 
   // Named pipelines.
   let editingPipe = $state<number | "new" | null>(null);
   let pipeForm = $state<{ name: string; steps: PipeStep[] }>({ name: "", steps: [] });
   let pipeRefusal = $state<string | null>(null);
+  let savingPipe = $state(false);
+  const pipeWhy = $derived(needsWords([...(pipeForm.name.trim() === "" ? ["a name"] : []), ...(pipeForm.steps.length === 0 ? ["a step"] : [])]));
 
   const pipeDraft = (p: NamedPipeline): NamedPipelineDraft => ({ id: p.id, name: p.name, steps: p.steps });
   /** The patterns whose default names pipeline `id`. */
@@ -109,7 +123,7 @@
   }
 
   async function savePipe() {
-    if (editingPipe === null) return;
+    if (editingPipe === null || pipeWhy !== null || savingPipe) return;
     const draft: NamedPipelineDraft = {
       id: editingPipe === "new" ? null : pipelines.list[editingPipe]!.id,
       name: pipeForm.name,
@@ -118,7 +132,12 @@
     const list = pipelines.list.map(pipeDraft);
     if (editingPipe === "new") list.push(draft);
     else list[editingPipe] = draft;
-    if (await storePipes(list)) editingPipe = null;
+    savingPipe = true;
+    if (await storePipes(list)) {
+      push({ text: `${editingPipe === "new" ? "Added" : "Saved"} ${pipeForm.name.trim()}` });
+      editingPipe = null;
+    }
+    savingPipe = false;
   }
 
   /** A file name the bar's menu reads extensions from: the first pattern that uses the pipeline, as a name. */
@@ -157,32 +176,42 @@
       </tbody>
     </table>
   {/if}
-  {#if editingStep === null}
-    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editStep("new")}>Add a command step…</button></div>
-    {#if stepRefusal !== null}<p class="tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
-  {:else}
-    <div class="tf-stg-sec">
-      <h2>{editingStep === "new" ? "New command step" : `Edit ${stepCommands.list[editingStep]?.name ?? ""}`}</h2>
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-pst-name">Step name</label>
-        <div class="tf-stg-c"><input id="tf-pst-name" class="tf-stg-in" bind:value={stepForm.name} placeholder="Decode protobuf" /></div>
-      </div>
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-pst-cmd">Step command<small>Quotes group words. No shell: <span class="tf-mono">|</span> and <span class="tf-mono">$VAR</span> are plain text.</small></label>
-        <div class="tf-stg-c"><input id="tf-pst-cmd" class="tf-stg-in tf-mono" bind:value={stepForm.command} placeholder="protoc --decode_raw" /></div>
-      </div>
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-pst-time">Step timeout<small>1 to 120 seconds; the command is stopped after it.</small></label>
-        <div class="tf-stg-c tf-stg-inl"><input id="tf-pst-time" type="number" min="1" max="120" class="tf-stg-in tf-stg-n70" bind:value={stepForm.timeout} /><span>seconds</span></div>
-      </div>
-      {#if stepRefusal !== null}<p class="tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
-      <div class="tf-stg-acts">
-        <button class="tf-btn tf-sm tf-primary" onclick={() => void saveStep()}>Save step</button>
-        <button class="tf-btn tf-sm tf-ghost" onclick={() => (editingStep = null)}>Cancel</button>
-      </div>
-    </div>
-  {/if}
+  <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editStep("new")}>Add a command step…</button></div>
+  {#if stepRefusal !== null && editingStep === null}<p class="tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
 </div>
+
+{#if editingStep !== null}
+  <TfDialog title={editingStep === "new" ? "Add a command step" : `Edit ${stepCommands.list[editingStep]?.name ?? ""}`} why={stepWhy} onclose={() => (editingStep = null)}>
+    {#snippet body()}
+      <form
+        class="tf-formgrid tf-sf-grid"
+        id="tf-pst-form"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void saveStep();
+        }}
+      >
+        <label for="tf-pst-name">Step name <small class="tf-req">required</small></label>
+        <input id="tf-pst-name" aria-label="Step name" autocomplete="off" required bind:value={stepForm.name} placeholder="Decode protobuf" />
+        <label for="tf-pst-cmd">Step command <small class="tf-req">required</small></label>
+        <div class="tf-sf-c">
+          <input id="tf-pst-cmd" aria-label="Step command" class="tf-mono" autocomplete="off" spellcheck="false" required bind:value={stepForm.command} placeholder="protoc --decode_raw" />
+          <small class="tf-sf-help">Quotes group words. No shell: <span class="tf-mono">|</span> and <span class="tf-mono">$VAR</span> are plain text.</small>
+        </div>
+        <label for="tf-pst-time">Step timeout</label>
+        <div class="tf-sf-c">
+          <div class="tf-rnd-secs"><input id="tf-pst-time" class="tf-rnd-secn" type="number" min="1" max="120" bind:value={stepForm.timeout} /><span>seconds</span></div>
+          <small class="tf-sf-help">1 to 120; the command is stopped after it.</small>
+        </div>
+      </form>
+      {#if stepRefusal !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{stepRefusal}</p>{/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (editingStep = null)}>Cancel</button>
+      <button class="tf-btn tf-primary" type="submit" form="tf-pst-form" disabled={stepWhy !== null || savingStep}>{editingStep === "new" ? "Add step" : "Save step"}</button>
+    {/snippet}
+  </TfDialog>
+{/if}
 
 <div class="tf-stg-sec">
   <h2>Pipelines</h2>
@@ -212,29 +241,38 @@
       </tbody>
     </table>
   {/if}
-  {#if editingPipe === null}
-    <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editPipe("new")}>Add a pipeline…</button></div>
-    {#if pipeRefusal !== null}<p class="tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
-  {:else}
-    <div class="tf-stg-sec">
-      <h2>{editingPipe === "new" ? "New pipeline" : `Edit ${pipelines.list[editingPipe]?.name ?? ""}`}</h2>
-      <div class="tf-stg-row">
-        <label class="tf-stg-l" for="tf-ppl-name">Pipeline name</label>
-        <div class="tf-stg-c"><input id="tf-ppl-name" class="tf-stg-in" bind:value={pipeForm.name} placeholder="Gzipped JSON" /></div>
-      </div>
+  <div class="tf-stg-acts tf-stg-gap"><button class="tf-btn tf-sm" onclick={() => editPipe("new")}>Add a pipeline…</button></div>
+  {#if pipeRefusal !== null && editingPipe === null}<p class="tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
+</div>
+
+{#if editingPipe !== null}
+  {@const opened = editingPipe}
+  <TfDialog className="tf-dwide" title={opened === "new" ? "Add a pipeline" : `Edit ${pipelines.list[opened]?.name ?? ""}`} why={pipeWhy} onclose={() => (editingPipe = null)}>
+    {#snippet body()}
+      <form
+        class="tf-formgrid"
+        id="tf-ppl-form"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void savePipe();
+        }}
+      >
+        <label for="tf-ppl-name">Pipeline name <small class="tf-req">required</small></label>
+        <input id="tf-ppl-name" aria-label="Pipeline name" autocomplete="off" required bind:value={pipeForm.name} placeholder="Gzipped JSON" />
+      </form>
       <TfFilePipeline
         steps={pipeForm.steps}
-        path={sampleName(editingPipe)}
+        path={sampleName(opened)}
         shownAs="Renderer"
         commands={stepCommands.list}
         onchange={(next) => (pipeForm.steps = next)}
-        onreset={() => editPipe(editingPipe ?? "new")}
+        onreset={() => editPipe(opened)}
       />
-      {#if pipeRefusal !== null}<p class="tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
-      <div class="tf-stg-acts">
-        <button class="tf-btn tf-sm tf-primary" onclick={() => void savePipe()}>Save pipeline</button>
-        <button class="tf-btn tf-sm tf-ghost" onclick={() => (editingPipe = null)}>Cancel</button>
-      </div>
-    </div>
-  {/if}
-</div>
+      {#if pipeRefusal !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{pipeRefusal}</p>{/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (editingPipe = null)}>Cancel</button>
+      <button class="tf-btn tf-primary" type="submit" form="tf-ppl-form" disabled={pipeWhy !== null || savingPipe}>{opened === "new" ? "Add pipeline" : "Save pipeline"}</button>
+    {/snippet}
+  </TfDialog>
+{/if}

@@ -6,8 +6,10 @@
   knobas has no file picker and `restore_backup` takes an archive in the
   backup folder, so *Restore from a file…* and *Import…* open a dialog that
   lists the archives in that folder: backups for the one, share exports for
-  the other. The list is a pick, the first file picked, and the footer's
-  primary restores it (#2343), as Apply-set's does (#2289). Both restore only into a knobas that holds no data yet, which the
+  the other. The list is a pick and the footer's primary restores it (#2343), as
+  Apply-set's does (#2289). Newest first and nothing picked: restoring replaces
+  what is stored now, and what removes data is never preselected (Björn, 2026-11-06,
+  which reverses #2343's first file picked). Both restore only into a knobas that holds no data yet, which the
   dialog says, since a merge with a preview is not built.
 
   Every write re-reads, because an export also prunes past `keep`;
@@ -21,6 +23,8 @@
   `open_backup_folder` command picks the running profile's (#1704).
 -->
 <script lang="ts">
+  import type { Attachment } from "svelte/attachments";
+
   import { pageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage } from "../../ipc";
@@ -30,7 +34,7 @@
   import { formatBytes } from "../../sources/diagnostics";
   import type { Layers } from "../layers.svelte";
   import type { SectionPorts } from "./ports";
-  import { boundedNumber, lastBackupWords, scheduleWords, shareTicks } from "./sections";
+  import { boundedNumber, clampNote, lastBackupWords, scheduleWords, shareTicks } from "./sections";
   import TfDialog from "./TfDialog.svelte";
 
   let {
@@ -217,8 +221,18 @@
 
   const uid = $props.id();
   let pickedFile = $state<string | null>(null);
-  /** The archive the primary restores: the one picked while the folder still lists it, else the first listed (#2343). */
-  const chosen = $derived(reading ? null : (listed.find((archive) => archive.file === pickedFile) ?? listed[0] ?? null));
+  /** The archive the primary restores: the one picked, while the folder still lists it. */
+  const chosen = $derived(reading ? null : (listed.find((archive) => archive.file === pickedFile) ?? null));
+  /**
+   * The list arrives after the dialog opens, so focus goes in when it does (Dialogs, arrival focus): on the × a reader's
+   * `Space` would close it. On the newest file, unpicked, so that `Space` is the one press that picks it.
+   */
+  const firstPickFocus: Attachment<HTMLElement> = (node) => {
+    node.querySelector<HTMLElement>("input")?.focus({ preventScroll: true });
+  };
+
+  /** Why *Keep* holds something other than what was typed (F-613). */
+  let keepWhy = $state<string | null>(null);
 </script>
 
 <header class="tf-stg-h tf-stg-hline">
@@ -267,13 +281,17 @@
         max="365"
         class="tf-stg-in tf-stg-n70"
         value={current.schedule.keep}
+        aria-invalid={keepWhy !== null ? "true" : undefined}
+        aria-describedby={keepWhy !== null ? "tf-bak-keep-why" : undefined}
         onchange={(event) => {
           const keep = boundedNumber(event.currentTarget.value, 1, 365, current.schedule.keep);
+          keepWhy = clampNote(event.currentTarget.value, 1, 365, keep);
           event.currentTarget.value = String(keep);
           if (keep !== current.schedule.keep) void saveSchedule({ ...current.schedule, keep });
         }}
       />
       <span>backups</span>
+      {#if keepWhy !== null}<small class="tf-stg-why" id="tf-bak-keep-why" role="alert">{keepWhy}</small>{/if}
     </div>
   </div>
   <div class="tf-stg-sec">
@@ -312,7 +330,7 @@
         {:else if listed.length === 0}
           <p class="tf-stg-note">{choosing === "share" ? "No share exports there yet." : "No backups there yet."}</p>
         {:else}
-          <div class="tf-picks tf-stg-gap" role="radiogroup" aria-label={choosing === "share" ? "Share exports" : "Backups"}>
+          <div class="tf-picks tf-stg-gap" role="radiogroup" aria-label={choosing === "share" ? "Share exports" : "Backups"} {@attach firstPickFocus}>
             {#each listed as archive (archive.file)}
               <label class="tf-pickrow">
                 <input

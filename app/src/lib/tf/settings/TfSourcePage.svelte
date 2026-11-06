@@ -34,6 +34,10 @@
     unreachable run's transport error sits behind *Details* (#1478).
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
+  - **A draft** (F-617, `source-drafts.svelte.ts`): what is typed in Connection and
+    in the adapter's config stays per source for the session, across a leave and a
+    return, with *Not saved* and *Reset* beside that section's *Save*. *Every* and
+    *Syncing* save as they change, so they are never part of one.
 
   The user is the config's `username`, the convention every adapter follows
   (`settings.ts`'s `IDENTITY_FIELD`), and the row is drawn only for an
@@ -61,6 +65,7 @@
   import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
+  import { sourceDrafts } from "./source-drafts.svelte";
   import { configChanges, formValues, pageFields, withAdded, withChanges } from "./source-config";
   import TfSchemaForm from "./TfSchemaForm.svelte";
   import { WIKI } from "../roles.svelte";
@@ -194,14 +199,45 @@
   // ---- Connection: what is typed, against what is stored ----
   // Read once: the page is keyed on the source, so a list re-read under the
   // reader's typing does not wipe it.
+  // What was typed here before and not saved comes back as it was left (F-617).
   // svelte-ignore state_referenced_locally
-  let address = $state(source.base_url);
+  const kept = sourceDrafts.get(source.id)?.connection;
   // svelte-ignore state_referenced_locally
-  let user = $state(userOf(source.config));
+  let address = $state(kept?.address ?? source.base_url);
+  // svelte-ignore state_referenced_locally
+  let user = $state(kept?.user ?? userOf(source.config));
   const addressChanged = $derived(address.trim() !== source.base_url);
   const userChanged = $derived(showsUser && user.trim() !== userOf(source.config));
   const dirty = $derived(addressChanged || userChanged);
   let saving = $state(false);
+
+  // Written whatever the adapter says: until `list_adapters` answers `userChanged` is false, and that isn't a reset.
+  $effect(() => {
+    const edited = addressChanged || user.trim() !== userOf(source.config);
+    const draft = edited ? { address, user } : null;
+    untrack(() => sourceDrafts.put(source.id, "connection", draft));
+  });
+
+  /** *Reset*: back to what is stored, with *Undo*, since what was typed may be long. */
+  function resetConnection() {
+    const was = { address, user };
+    address = source.base_url;
+    user = userOf(source.config);
+    report = null;
+    push({
+      text: `${name}'s connection is back to what is saved`,
+      action: {
+        label: "Undo",
+        run: () => {
+          // Into the store too: the toast outlives the page if the reader has left.
+          sourceDrafts.put(source.id, "connection", was);
+          address = was.address;
+          user = was.user;
+        },
+      },
+    });
+    void tick().then(() => document.getElementById("tf-src-address")?.focus());
+  }
 
   /**
    * The config as stored now, read again at the moment of saving: the sync
@@ -239,8 +275,15 @@
         });
       }
       return next;
-    }, "Saved");
+    }, `Saved ${name}'s connection`);
     if (saved !== null) report = null;
+  }
+
+  /** `Enter` in a Connection field saves it, as `Enter` in a dialog's field sends. */
+  function saveOnEnter(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    void save();
   }
 
   // ---- What it syncs: the adapter's own config, generated (#904) ----
@@ -288,12 +331,12 @@
     return JSON.stringify(value ?? null);
   }
 
-  /** Put a stored config in the form, as both what it shows and what it was read from. */
+  /** Put a stored config in the form, as both what it shows and what it was read from, with what the reader left unsaved over it. */
   function readForm(fields: typeof config.fields, stored: unknown) {
-    configValues = formValues(fields, stored);
-    configLoaded = validate(fields, configValues).config;
+    const values = formValues(fields, stored);
+    configLoaded = validate(fields, values).config;
     // A value the address adds (#879) is the reader's edit, offered unsaved.
-    const read = configValues;
+    const read = { ...values, ...sourceDrafts.get(source.id)?.config };
     configValues = withAdded(fields, read, add);
     if (add && configValues !== read) {
       added = { ...add, snapshot: snapshotOf(configValues[add.field]) };
@@ -310,11 +353,45 @@
     }
   }
 
+  // What the reader changed, by field, so a value the sync records meanwhile still shows (F-617, #1021). Not while no
+  // field is drawn: until the adapter answers nothing reads as changed, and that isn't a reset either.
+  $effect(() => {
+    if (config.fields.length === 0) return;
+    const changed = Object.keys(configChanged);
+    const draft = changed.length === 0 ? null : Object.fromEntries(changed.map((key) => [key, $state.snapshot(configValues[key])]));
+    untrack(() => sourceDrafts.put(source.id, "config", draft));
+  });
+
   async function saveConfig() {
     if (!configDirty || !configValid || saving) return;
     const changes = { ...configChanged };
-    const saved = await update(async () => ({ config: withChanges(await storedConfig(), changes) }), "Saved");
-    if (saved !== null) readForm(config.fields, saved.config);
+    const saved = await update(async () => ({ config: withChanges(await storedConfig(), changes) }), `Saved what ${name} syncs`);
+    if (saved !== null) {
+      sourceDrafts.put(source.id, "config", null);
+      readForm(config.fields, saved.config);
+    }
+  }
+
+  /** *Reset*: the form back to what is stored, with *Undo*. */
+  function resetConfig() {
+    const was = $state.snapshot(sourceDrafts.get(source.id)?.config) ?? {};
+    const read = formValues(config.fields, source.config);
+    sourceDrafts.put(source.id, "config", null);
+    configLoaded = validate(config.fields, read).config;
+    configValues = read;
+    added = null;
+    push({
+      text: `What ${name} syncs is back to what is saved`,
+      action: {
+        label: "Undo",
+        run: () => {
+          sourceDrafts.put(source.id, "config", was);
+          configValues = { ...configValues, ...was };
+        },
+      },
+    });
+    const first = config.fields[0];
+    if (first) void tick().then(() => document.getElementById(`tf-src-cfg-${first.key}`)?.focus());
   }
 
   // ---- Test connection: what is stored, never what is typed ----
@@ -519,6 +596,7 @@
     removing = false;
     try {
       await ports.deleteSource(source.id, purge);
+      sourceDrafts.forget(source.id);
       push({ text: `Removed ${name}` });
       onremoved();
     } catch (cause) {
@@ -568,12 +646,12 @@
   <h2>Connection</h2>
   <div class="tf-stg-row">
     <label class="tf-stg-l" for="tf-src-address">Address</label>
-    <div class="tf-stg-c"><input id="tf-src-address" type="text" class="tf-stg-in" bind:value={address} /></div>
+    <div class="tf-stg-c"><input id="tf-src-address" type="text" class="tf-stg-in" bind:value={address} onkeydown={saveOnEnter} /></div>
   </div>
   {#if showsUser}
     <div class="tf-stg-row">
       <label class="tf-stg-l" for="tf-src-user">User</label>
-      <div class="tf-stg-c"><input id="tf-src-user" type="text" class="tf-stg-in" bind:value={user} /></div>
+      <div class="tf-stg-c"><input id="tf-src-user" type="text" class="tf-stg-in" bind:value={user} onkeydown={saveOnEnter} /></div>
     </div>
   {/if}
   {#if source.auth_kind !== null}
@@ -605,7 +683,11 @@
   {/if}
   <div class="tf-stg-acts">
     <button class="tf-btn tf-sm" disabled={testing} onclick={() => void test()}>Test connection</button>
-    <button class="tf-btn tf-sm tf-primary" disabled={!dirty || saving} onclick={() => void save()}>Save</button>
+    <button class="tf-btn tf-sm tf-primary" disabled={!dirty || saving} onclick={() => void save()}>Save connection</button>
+    {#if dirty}
+      <span class="tf-stg-pend" role="status">Not saved</span>
+      <button class="tf-btn tf-sm tf-ghost" aria-label="Reset the connection" onclick={resetConnection}>Reset</button>
+    {/if}
   </div>
 </section>
 
@@ -664,9 +746,12 @@
     />
     <div class="tf-stg-acts" bind:this={configActs}>
       <button class="tf-btn tf-sm tf-primary" disabled={!configDirty || !configValid || saving} onclick={() => void saveConfig()}
-        >Save</button
+        >Save sync settings</button
       >
-      {#if addedNote !== null}<span class="tf-stg-pend" role="status">{addedNote}</span>{/if}
+      {#if configDirty}
+        <span class="tf-stg-pend" role="status">{addedNote ?? "Not saved"}</span>
+        <button class="tf-btn tf-sm tf-ghost" aria-label="Reset the sync settings" onclick={resetConfig}>Reset</button>
+      {/if}
     </div>
   {/if}
 </section>

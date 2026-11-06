@@ -10,7 +10,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { KEPT_PAGES_MAX, KEPT_PAGES_MIN, keptPages, type KeptPagesSetting } from "../kept-pages.svelte";
   import type { SectionPorts } from "./ports";
-  import { boundedNumber } from "./sections";
+  import { boundedNumber, clampNote } from "./sections";
 
   let {
     ports,
@@ -23,6 +23,8 @@
 
   /** `null` until the read answers. */
   let stored = $state<number | null>(null);
+  /** Why the field holds something other than what was typed (F-613). */
+  let why = $state<string | null>(null);
 
   $effect(() => {
     void ports
@@ -37,6 +39,7 @@
   async function save(input: HTMLInputElement) {
     if (stored === null) return;
     const value = boundedNumber(input.value, KEPT_PAGES_MIN, KEPT_PAGES_MAX, stored);
+    why = clampNote(input.value, KEPT_PAGES_MIN, KEPT_PAGES_MAX, value);
     if (value !== stored) {
       try {
         stored = await ports.setPagesKeptOpen(value);
@@ -66,9 +69,12 @@
         max={KEPT_PAGES_MAX}
         class="tf-stg-in tf-stg-n70"
         value={stored}
+        aria-invalid={why !== null ? "true" : undefined}
+        aria-describedby={why !== null ? "tf-perf-kept-why" : undefined}
         onchange={(event) => void save(event.currentTarget)}
       />
       <span>pages</span>
+      {#if why !== null}<small class="tf-stg-why" id="tf-perf-kept-why" role="alert">{why}</small>{/if}
     </div>
   </div>
 {/if}

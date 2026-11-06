@@ -520,6 +520,8 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   button("Restore from a file…").click();
   await settle();
   expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas"]);
+  pickFor("knobas-20261015-020000.knobas").click();
+  flushSync();
   button("Restore").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenCalledWith("knobas-20261015-020000.knobas");
@@ -529,6 +531,8 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   await settle();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Import a share export");
   expect(listedFiles()).toEqual(["knobas-share-20261012-101500.knobas"]);
+  pickFor("knobas-share-20261012-101500.knobas").click();
+  flushSync();
   button("Import").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenLastCalledWith("knobas-share-20261012-101500.knobas");
@@ -579,6 +583,8 @@ test("a restore puts the sources it brought in the health store the status bar f
   expect(store.all).toEqual([]);
   button("Restore from a file…").click();
   await settle();
+  target.querySelector<HTMLInputElement>('[role="dialog"] [role="radiogroup"] input')!.click();
+  flushSync();
   button("Restore").click();
   await settle();
   expect(store.all.map((row) => row.source_id)).toEqual(["jira"]);
@@ -596,6 +602,8 @@ test("a restore into a knobas that holds data is refused: the dialog stays and s
   expect(p.restoreBackup).not.toHaveBeenCalled();
   // The toast store is the app's one, so count only what this press adds.
   const before = toasts.items.length;
+  target.querySelector<HTMLInputElement>('[role="dialog"] [role="radiogroup"] input')!.click();
+  flushSync();
   button("Restore").click();
   await settle();
   expect(p.restoreBackup).toHaveBeenCalledOnce();
@@ -838,13 +846,15 @@ test("Standup's Change… and Backup's Restore from a file… draw Cancel as a g
 const pickFor = (file: string) =>
   target.querySelector<HTMLInputElement>(`[role="dialog"] [role="radiogroup"] input[type="radio"][value="${file}"]`)!;
 
-test("Restore from a file… is a pick and a footer primary: the first file is picked, another can be (#2343)", async () => {
+test("Restore from a file… is a pick and a footer primary, newest first with nothing picked: restoring replaces what is stored (Björn, 2026-11-06, reversing #2343's first pick)", async () => {
   const p = await open("backup", sectionPorts({ backupStatus: vi.fn(() => Promise.resolve(statusWith("knobas-20261014-020000.knobas", false))) }));
   button("Restore from a file…").click();
   await settle();
   expect(target.querySelector('[role="dialog"] [role="radiogroup"]')?.getAttribute("aria-label")).toBe("Backups");
   expect(listedFiles()).toEqual(["knobas-20261015-020000.knobas", "knobas-20261014-020000.knobas"]);
-  expect(pickFor("knobas-20261015-020000.knobas").checked).toBe(true);
+  expect(listedFiles().map((file) => pickFor(file).checked)).toEqual([false, false]);
+  expect(button("Restore").disabled).toBe(true);
+  expect(target.querySelector('[role="dialog"] .tf-dwhy')?.textContent).toBe("Pick a file.");
   expect(
     [...target.querySelectorAll('[role="dialog"] button')].filter((b) => b.textContent!.trim() === "Restore"),
     "one Restore, the footer's, none per row",

@@ -342,6 +342,7 @@ const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
+const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
@@ -736,6 +737,14 @@ const CASES: Case[] = [
     source: "lib/tf/TfMenu.svelte",
     open: (target) => ({ app: mount(TfMenuFixture, { target, props: { layers: createLayers() } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>(".face")?.click(),
+  },
+  {
+    /** The fold bar: an open fold is a panel on the layer stack (F-619). */
+    name: "TfRailBar",
+    source: "lib/tf/TfRailBar.svelte",
+    open: (target) => ({
+      app: mount(TfRailBar, { target, props: { label: "Section", value: "Sources", open: true, controls: "rail", onpress: () => {}, onclose: () => {}, layers: createLayers() } }),
+    }),
   },
   {
     /** A ticket view's ⋯ menu (#812): its outside-click listener lives while it is open. */

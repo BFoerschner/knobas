@@ -79,6 +79,16 @@ export function boundedNumber(value: string, min: number, max: number, fallback:
   return Math.min(max, Math.max(min, parsed));
 }
 
+/**
+ * Why a number field holds something other than what was typed, naming both, since what stands in the field is a valid
+ * value (F-613); `null` when it holds what was typed.
+ */
+export function clampNote(typed: string, min: number, max: number, value: number): string | null {
+  const parsed = Number.parseInt(typed, 10);
+  if (Number.isNaN(parsed)) return `Takes ${min} to ${max}, so this stays ${value}.`;
+  return parsed >= min && parsed <= max ? null : `Takes ${min} to ${max}, so ${parsed} became ${value}.`;
+}
+
 /** Prototype-6 groups thousands with a space: *18 400*. */
 const grouped = (n: number) => n.toLocaleString("en-GB").replace(/,/g, " ");
 
