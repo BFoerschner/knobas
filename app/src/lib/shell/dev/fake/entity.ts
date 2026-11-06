@@ -335,7 +335,7 @@ function fakeLabels(value: unknown): Pick<EntityDetail, "labels"> {
 }
 
 /** The card's Reporter and Logged facts (#2403) from the mock's flat record: the worklog summed per author, by author. */
-function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "created" | "time_spent_seconds" | "logged_by"> {
+function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "reporter" | "reporter_name" | "created" | "time_spent_seconds" | "logged_by"> {
   const reporter = fakeText(payload["reporter"]);
   const created = fakeText(payload["created"]);
   const spent = payload["time_spent_seconds"];
@@ -346,6 +346,7 @@ function fakeLogged(payload: Record<string, unknown>): Pick<EntityDetail, "repor
   }
   return {
     ...(reporter === null ? {} : { reporter }),
+    ...(fakePersonName(reporter) === null ? {} : { reporter_name: fakePersonName(reporter)! }),
     ...(created === null ? {} : { created }),
     ...(typeof spent === "number" ? { time_spent_seconds: spent } : {}),
     ...(entries === null ? {} : { logged_by: [...byAuthor].sort(([a], [b]) => a.localeCompare(b)).map(([author, seconds]) => ({ author, seconds })) }),

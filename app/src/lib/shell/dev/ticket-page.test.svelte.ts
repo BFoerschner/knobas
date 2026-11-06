@@ -544,7 +544,7 @@ test("PAY-231's card: the key with its copy button, the status chip, then Epic, 
   expect(facts(page).map(([label]) => label)).toEqual(["Epic", "Reporter", "Assignee", "Type", "Priority", "Labels", "Logged"]);
   expect(facts(page)[1]).toEqual(["Reporter", "LH Lena Hoffmann"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me"), "somebody else's report is not in full ink").toBe(false);
-  expect(facts(page)[2]![1]).toBe("MA mara (you)");
+  expect(facts(page)[2]![1]).toBe("ML Mara Lindqvist (you)");
   expect(avatar(page, "Assignee")?.classList.contains("tf-me"), "my own ticket's avatar is in full ink").toBe(true);
   expect(facts(page).slice(3)).toEqual([
     ["Type", "Story"],
@@ -609,7 +609,7 @@ test("a ticket with no estimate draws the time alone and no meter; my own report
   await until(() => facts(page).some(([label]) => label === "Logged"), `the facts read ${JSON.stringify(facts(page))}`);
   expect(facts(page).find(([label]) => label === "Logged")).toEqual(["Logged", "3h 40m"]);
   expect(meter(page)).toBeNull();
-  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "MA mara (you)"]);
+  expect(facts(page).find(([label]) => label === "Reporter")).toEqual(["Reporter", "ML Mara Lindqvist (you)"]);
   expect(avatar(page, "Reporter")?.classList.contains("tf-me")).toBe(true);
 });
 
@@ -637,7 +637,7 @@ test("OPS-77's card draws no row its source leaves empty: no Epic, no Reporter, 
   const page = await pageOf("OPS-77");
   await until(() => facts(page).length > 0, "no facts drawn");
   expect(facts(page)).toEqual([
-    ["Assignee", "PR priya"],
+    ["Assignee", "PN Priya Nair"],
     ["Priority", "Low"],
     ["Labels", "on-call"],
   ]);
