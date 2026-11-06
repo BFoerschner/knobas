@@ -348,8 +348,8 @@ const NOWHERE: Step = { go: "nowhere" };
  * @param path the layout, from {@link columnPathFor}.
  * @param columns what each column holds, aligned with `path.parents`.
  */
-export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step {
-  const focused = focusedColumn(path);
+export function walk(key: string, path: ColumnPath, columns: AssetRow[][], from: number = focusedColumn(path)): Step {
+  const focused = from;
 
   if (key === "ArrowDown" || key === "ArrowUp") {
     const column = Math.max(0, focused);
@@ -367,9 +367,11 @@ export function walk(key: string, path: ColumnPath, columns: AssetRow[][]): Step
 
   if (key === "ArrowRight" || key === "Enter") {
     // `focused + 1` reads the same on a bare tree, where the cursor is in
-    // front of the top column and the column "under the selection" is it.
+    // front of the top column and the column "under the selection" is it. From a
+    // column `Tab` reached, the next column's own step of the path comes first.
     const rows = columns[focused + 1] ?? [];
-    const first = rows[0];
+    const onward = selectionIn(path, focused + 1);
+    const first = rows.find((row) => row.id === onward) ?? rows[0];
     if (first === undefined) return NOWHERE;
     return { go: "asset", id: first.id };
   }

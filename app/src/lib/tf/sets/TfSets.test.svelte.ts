@@ -201,7 +201,7 @@ test("the filter keeps sets by name or member, and by what they apply by", async
   expect(text("tbody .tf-set-name")).toEqual(["Payout stack"]);
 });
 
-test("the sub-task switch is R-7.3's, and New link set saves a set and opens it", async () => {
+test("the sub-task switch is R-7.3's, and New link set opens a set with nothing saved yet", async () => {
   await draw([]);
   const toggle = target.querySelector<HTMLInputElement>(".tf-toggle input")!;
   expect(toggle.checked).toBe(true);
@@ -210,8 +210,8 @@ test("the sub-task switch is R-7.3's, and New link set saves a set and opens it"
   expect(inherit).toEqual([false]);
   button("New link set").click();
   await settle();
-  expect(saved).toEqual([{ id: null, name: "New link set", description: "", members: [], patterns: [], rules: [] }]);
-  expect(location.hash).toBe("#/sets/new-link-set");
+  expect(saved, "leaving now leaves no row behind").toEqual([]);
+  expect(location.hash).toBe("#/sets/~new");
 });
 
 test("the editor draws a panel per kind, the rules with live counts and the tickets it shows on", async () => {
@@ -322,7 +322,7 @@ test("a rule waiting for its value says so, Add a rule says why it waits, and Es
   expect(button("Add a rule").title).toBe("Choose what the rule above applies to first");
   expect(text(".tf-rule-n").at(-1)).toBe("Choose what it applies to.");
   expect([...target.querySelectorAll(".tf-rule")].at(-1)!.querySelector(".tf-x")?.textContent).toBe("Cancel");
-  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
   layers.open[0]!.close();
   await settle();
   expect(layers.open).toEqual([]);
@@ -394,7 +394,10 @@ test("a query the backend refuses says why, and Add pattern waits", async () => 
   target.querySelector("article[aria-label='Pages']")!.querySelectorAll<HTMLButtonElement>(".tf-set-add button")[0]!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
-  expect(dialog.querySelector("select[aria-label='Space']")).not.toBeNull();
+  const space = dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  space.value = space.options[1]!.value;
+  space.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
   const under = dialog.querySelector<HTMLInputElement>("input[aria-label='Under page']")!;
   under.value = "bogus";
   under.dispatchEvent(new Event("input", { bubbles: true }));
@@ -549,4 +552,102 @@ test("Not now puts the hint away for the session and shows the next one", async 
 test("an id nobody holds says so", async () => {
   await draw(["gone"]);
   expect(target.querySelector(".tf-empty")?.textContent).toContain("This link set does not exist.");
+});
+
+/** F-527: nothing is made until the first change, so leaving at once leaves no empty row. */
+test("a new set saves nothing until its first change, and that change moves the address in place", async () => {
+  await draw(["~new"]);
+  expect(saved).toEqual([]);
+  expect(button("Delete…"), "nothing to delete yet").toBeUndefined();
+  const name = target.querySelector<HTMLElement>(".tf-set-title")!;
+  expect(document.activeElement, "the name takes focus, to type over").toBe(name);
+
+  name.textContent = "Deploy kit";
+  name.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+  name.blur();
+  await settle();
+  expect(saved).toHaveLength(1);
+  expect(saved[0]).toMatchObject({ id: null, name: "Deploy kit" });
+  expect(button("Delete…")).toBeDefined();
+});
+
+test("saving a name keeps focus in the field the reader moved to", async () => {
+  await draw(["payout-stack"]);
+  const name = target.querySelector<HTMLElement>(".tf-set-title")!;
+  const description = target.querySelector<HTMLElement>(".tf-set-desc")!;
+  name.focus();
+  name.textContent = "Payout stack two";
+  description.focus();
+  await settle();
+  expect(saved.at(-1)?.name).toBe("Payout stack two");
+  expect(document.activeElement).toBe(description);
+  expect(target.querySelector(".tf-set-desc")).toBe(description);
+});
+
+/** F-521: a press that disables *Add a rule* takes focus on to what it asks for, and comes back. */
+test("Add a rule takes focus to the rule's value, and Esc brings it back to the button", async () => {
+  await draw(["payout-stack"]);
+  button("Add a rule").focus();
+  button("Add a rule").click();
+  await settle();
+  const value = [...target.querySelectorAll<HTMLSelectElement>("select[aria-label='Applies to which']")].at(-1)!;
+  expect(document.activeElement).toBe(value);
+
+  value.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await settle();
+  expect(target.querySelectorAll(".tf-rule")).toHaveLength(2);
+  expect(document.activeElement).toBe(button("Add a rule"));
+  expect(layers.open).toEqual([]);
+});
+
+test("changing a waiting rule's kind offers that kind's values", async () => {
+  await draw(["payout-stack"]);
+  button("Add a rule").click();
+  await settle();
+  const kind = [...target.querySelectorAll<HTMLSelectElement>("select[aria-label='Rule']")].at(-1)!;
+  kind.value = "project";
+  kind.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  const value = [...target.querySelectorAll<HTMLSelectElement>("select[aria-label='Applies to which']")].at(-1)!;
+  expect([...value.options].map((option) => option.value)).toContain("jira:OPS");
+});
+
+/** F-521: a *Remove* takes its row, and focus goes to the row that took its place, else the way to add one. */
+test("removing a member moves focus to the next row, then to the panel's Add…", async () => {
+  await draw(["payout-stack"]);
+  const panel = target.querySelector("article[aria-label='Repositories']")!;
+  const first = panel.querySelector<HTMLButtonElement>("button[aria-label='Remove tidewater/payout-service']")!;
+  first.focus();
+  first.click();
+  await settle();
+  await settle();
+  const second = panel.querySelector<HTMLButtonElement>("button[aria-label='Remove tidewater/psp-client']")!;
+  expect(document.activeElement).toBe(second);
+  second.click();
+  await settle();
+  await settle();
+  expect(document.activeElement?.textContent).toBe("Add…");
+});
+
+/** F-528: pages wait for a space as pipelines wait for a project, and it says *space* wherever it says it. */
+test("a page pattern waits for a space, and reads space where it stood as project", async () => {
+  await draw(["payout-stack"]);
+  target.querySelector("article[aria-label='Pages']")!.querySelectorAll<HTMLButtonElement>(".tf-set-add button")[0]!.click();
+  await settle();
+  const dialog = document.querySelector(".tf-dialog")!;
+  const space = dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  expect(space.value).toBe("");
+  expect(button("Add pattern").disabled).toBe(true);
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("Pick a space.");
+  expect(dialog.querySelector(".tf-pat-query")).toBeNull();
+
+  space.value = "Payouts";
+  space.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(button("Add pattern").disabled).toBe(false);
+  expect(dialog.querySelector(".tf-pat-query")?.textContent).toBe("Pattern: space:Payouts");
+
+  button("Add pattern").click();
+  await settle();
+  expect(saved.at(-1)?.patterns.at(-1), "the stored query stays the backend's").toEqual({ kind: "page", query: "project:Payouts" });
 });

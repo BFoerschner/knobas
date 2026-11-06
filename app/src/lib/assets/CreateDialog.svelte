@@ -89,7 +89,7 @@
   }
 </script>
 
-<TfDialog why={name.trim() === "" ? "Name it first." : typeId === "" ? "Choose a type first." : null}
+<TfDialog why={name.trim() === "" ? (typeId === "" ? "Name it, and choose a type." : "Name it first.") : typeId === "" ? "Choose a type." : null}
   closeButton
   title="New asset"
   subtitle={at.parent === null ? "At the top of the estate" : `In ${at.parent.name}`}
@@ -115,6 +115,7 @@
           bind:value={typeId}
           onkeydown={onfieldkeydown}
         >
+          {#if typeId === ""}<option value="" disabled>Choose a type…</option>{/if}
           <!--
             Two groups rather than two lists: the conventions are an ordering,
             and a reader who wants something else finds it in the same control

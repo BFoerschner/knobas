@@ -6,7 +6,8 @@
   ticket, every ticket under its epic with today's count, every sub-task with
   today's count, or every ticket in its project. *Save link set* writes a new
   set through `save_link_set` and hands it back with its one rule; it waits for
-  a name and a tick, and a line beside it says which is missing.
+  a name and a tick, and a line beside it says which is missing. `Enter` in the
+  name or on a picked rule saves when it can.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -107,7 +108,16 @@
     ticked = next;
   }
 
-  async function save() {
+  /** `Enter` on a rule: focus only gets to one by a press, so it is not the arrival `TfDialog` guards against. */
+  function ruleKey(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    event.stopPropagation();
+    void save();
+  }
+
+  async function save(event?: SubmitEvent) {
+    event?.preventDefault();
     if (writing || missing !== null) return;
     writing = true;
     failure = null;
@@ -126,9 +136,10 @@
 <TfDialog why={missing} {onclose} {layers}>
   {#snippet title()}Save <TfKey value={key} />’s connections as a link set{/snippet}
   {#snippet body()}
+    <form id="tf-ssv-{uid}" class="tf-dform" onsubmit={save}></form>
     <div class="tf-formgrid">
     <label for="tf-ssn-{uid}">Name <small class="tf-req">required</small></label>
-    <input id="tf-ssn-{uid}" class="tf-set-savename" type="text" aria-label="Name" autocomplete="off" bind:value={name} />
+    <input id="tf-ssn-{uid}" class="tf-set-savename" type="text" aria-label="Name" autocomplete="off" form="tf-ssv-{uid}" bind:value={name} />
     <span>What goes in (at least one)</span>
     <div class="tf-picks tf-fwide" role="group" aria-label="What goes in">
       {#each offers as offer (offer.entity_id)}
@@ -146,7 +157,8 @@
     </div>
     <p class="tf-dim tf-small">PRs, branches and commits belong to this one ticket, so they are not offered.</p>
     <span>Apply it to</span>
-    <div class="tf-radio" role="radiogroup" aria-label="Apply it to">
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="tf-radio" role="radiogroup" aria-label="Apply it to" onkeydown={ruleKey}>
       <label><input type="radio" name="tf-ssr" value="manual" bind:group={applyTo} /> <span>Only <TfKey value={key} /></span></label>
       {#if epic !== null}
         <label
@@ -175,6 +187,6 @@
   {/snippet}
   {#snippet footer()}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" disabled={writing || missing !== null} onclick={() => void save()}>Save link set</button>
+    <button type="submit" class="tf-btn tf-primary" form="tf-ssv-{uid}" disabled={writing || missing !== null}>Save link set</button>
   {/snippet}
 </TfDialog>

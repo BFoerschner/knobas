@@ -5,8 +5,11 @@
   to the ticket says so and can't be picked. Nothing is picked on arrival, so a
   press can't apply an alphabetical accident, and a line beside the primary says
   so. Typing picks the first set the filter leaves until another is picked, so
-  `Enter` in the filter still applies the top match (#2289). *Apply* hands the
-  set back: the job saves it with a by-hand rule and toasts the count with *Undo*.
+  `Enter` in the filter still applies the top match (#2289). `↓` goes from the
+  filter into the list, picking as it lands, and `Enter` on a picked row applies it:
+  the dialog's rule that `Enter` on a radio sends nothing guards an arrival, and
+  focus only gets here by a press. *Apply* hands the set back: the job saves it
+  with a by-hand rule and toasts the count with *Undo*.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -16,6 +19,7 @@
   import type { Layers } from "../layers.svelte";
   import { goVisiting } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
+  import { intoList, withinList } from "../sets/list-keys";
   import { contentLines } from "../sets/sets";
   import TfKey from "../TfKey.svelte";
 
@@ -86,6 +90,18 @@
     event.preventDefault();
     if (chosen !== null) onapply(chosen);
   }
+
+  let filterEl = $state<HTMLInputElement | null>(null);
+  let listEl = $state<HTMLElement | null>(null);
+
+  function rowKey(event: KeyboardEvent) {
+    withinList(event, listEl, filterEl);
+    if (event.key !== "Enter" || chosen === null) return;
+    // Before `TfDialog` reads it.
+    event.preventDefault();
+    event.stopPropagation();
+    onapply(chosen);
+  }
 </script>
 
 <TfDialog why={missing} {onclose} {layers}>
@@ -95,7 +111,7 @@
     <label class="tf-fsearch tf-wide"
       ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
         ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-      ><input bind:value={typed} form="tf-aps-{uid}" placeholder="Filter link sets" aria-label="Filter link sets" /></label
+      ><input bind:this={filterEl} bind:value={typed} form="tf-aps-{uid}" placeholder="Filter link sets" aria-label="Filter link sets" onkeydown={(event) => intoList(event, listEl)} /></label
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the link sets: {failed}</p>
@@ -106,7 +122,8 @@
     {:else if shown.length === 0}
       <p class="tf-dim tf-picks-more">No link set matches “{typed.trim()}”.</p>
     {/if}
-    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="radiogroup" aria-label="Link sets">
+    <!-- svelte-ignore a11y_interactive_supports_focus -->
+    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="radiogroup" aria-label="Link sets" bind:this={listEl} onkeydown={rowKey}>
       {#each shown as set (set.id)}
         {@const on = applied.has(set.id)}
         <label class="tf-pickrow" class:tf-in={on}>

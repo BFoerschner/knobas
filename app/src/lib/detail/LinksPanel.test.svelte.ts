@@ -61,17 +61,15 @@ function render(links: LinkEntry[]) {
   document.body.append(target);
   const onopen = vi.fn();
   const onunlink = vi.fn();
-  const onlink = vi.fn();
   const app = mount(LinksPanel, {
     target,
-    props: { entityId: VIEWED, links, onopen, onunlink, onlink },
+    props: { entityId: VIEWED, links, onopen, onunlink },
   });
   flushSync();
   return {
     target,
     onopen,
     onunlink,
-    onlink,
     /** The panel's text with runs of whitespace collapsed (see `Detail.test`). */
     text: () => (target.textContent ?? "").replace(/\s+/g, " "),
     buttons: (label: string) =>
@@ -201,26 +199,19 @@ test("a note is displayed, and a link without one draws no empty line", () => {
 });
 
 /**
- * Story 25. The M1 caveat said writing was impossible; it is not, and an empty
- * state that explains why you cannot act is worse than one that offers the
- * action.
+ * Story 25. The M1 caveat said writing was impossible; it is not. The way to link
+ * is the pane's own *Link to…*, so the panel says it is empty and adds no second one.
  */
-test("the empty state invites linking and carries no read-only caveat", () => {
+test("the empty state says so, offers no second way to link and carries no read-only caveat", () => {
   const screen = render([]);
 
-  expect(screen.text()).toContain("Nothing linked yet");
-  expect(screen.text()).toContain("Link this to");
+  expect(screen.text()).toContain("Linked items 0 Nothing linked yet");
   // The caveat is gone from the text *and* from the markup: it lived in a
   // `title` attribute, where `textContent` would never have seen it.
   expect(screen.text()).not.toContain("does not yet write");
   expect(screen.target.innerHTML).not.toContain("M2");
 
-  // ...and the invitation is an action, not only a sentence.
-  const invitation = screen.buttons("Link to");
-  expect(invitation.length).toBeGreaterThan(0);
-  invitation[invitation.length - 1]!.click();
-  flushSync();
-  expect(screen.onlink).toHaveBeenCalled();
+  expect(screen.buttons("Link to")).toHaveLength(0);
 
   screen.done();
 });
@@ -269,7 +260,7 @@ test("a hand-drawn link draws no reason line", () => {
  * #2238 / #2292: the panel is a page body, so its actions are the Controls'
  * small button.
  */
-test("every action is a small Controls button, in a row and in the empty state", () => {
+test("every action is a small Controls button, and the empty state has none", () => {
   const filled = render([entry({ id: "one" })]);
   expect(
     [...filled.target.querySelectorAll<HTMLButtonElement>("button.tf-btn")].map((button) => [
@@ -277,15 +268,11 @@ test("every action is a small Controls button, in a row and in the empty state",
       [...button.classList].filter((name) => name.startsWith("tf-")).join(" "),
     ]),
   ).toEqual([
-    ["Link to…", "tf-btn tf-sm"],
     ["Unlink", "tf-btn tf-sm"],
   ]);
   filled.done();
 
   const empty = render([]);
-  expect(empty.buttons("Link to").map((button) => button.className.split(" ").filter((name) => name.startsWith("tf-")).join(" "))).toEqual([
-    "tf-btn tf-sm",
-    "tf-btn tf-sm",
-  ]);
+  expect(empty.target.querySelectorAll("button")).toHaveLength(0);
   empty.done();
 });

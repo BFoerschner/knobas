@@ -8,6 +8,7 @@
 import { counted } from "../counted";
 import { keyOf } from "../job/job";
 import type {
+  LinkSetDetail,
   LinkSetDraft,
   LinkSetHint,
   LinkSetMemberKind,
@@ -26,6 +27,21 @@ export function assetLine(line: string, names: Readonly<Record<string, string>>)
   const [type = "", ...rest] = line.split(", ");
   const word = names[type] ?? (type.charAt(0).toUpperCase() + type.slice(1)).replaceAll("_", " ");
   return [word, ...rest].join(", ");
+}
+
+/**
+ * Where *New link set* opens: a set nothing has been saved for yet. A slug has no
+ * `~`, so no real set can be called this. The first change saves it (`TfSetEditor`),
+ * and leaving before one leaves no row behind (F-527).
+ */
+export const NEW_SET = "~new";
+
+/** The name a set has until the reader gives it one. */
+export const NEW_SET_NAME = "New link set";
+
+/** What the editor draws at {@link NEW_SET}: `id` is empty until the first save answers with one. */
+export function blankSet(): LinkSetDetail {
+  return { id: "", name: NEW_SET_NAME, description: "", members: [], patterns: [], rules: [], shows_on: [], tickets: 0, mine: 0 };
 }
 
 /** The editor's panels, in prototype-6's order (R-7.7). */
@@ -192,6 +208,14 @@ export function patternQuery(kind: LinkSetMemberKind, project: string, text: str
   if (kind === "pipeline") parts.push(`name:${grammarValue(typed || "*")}`);
   else if (typed) parts.push(`under:${grammarValue(typed)}`);
   return parts.join(" ");
+}
+
+/**
+ * A pattern as the reader reads it: a page's `project:` is the *Space* its dialog
+ * asked for, one word for one thing. The stored query stays as the backend reads it.
+ */
+export function patternShown(kind: LinkSetMemberKind, query: string): string {
+  return kind === "page" ? query.replace(/(^|\s)project:/, "$1space:") : query;
 }
 
 /**

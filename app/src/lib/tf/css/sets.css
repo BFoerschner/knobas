@@ -11,8 +11,10 @@
 .tf-sets-tbl .tf-sets-now { white-space: nowrap; }
 /* The columns are fixed, so a long description can't take Applies to's room: the rules are what wrap badly. */
 .tf-sets-tbl { table-layout: fixed; }
-.tf-sets-tbl th:nth-child(1) { width: 30%; }
-.tf-sets-tbl th:nth-child(2) { width: 22%; }
+.tf-sets-tbl th:nth-child(1) { width: 28%; }
+.tf-sets-tbl th:nth-child(2) { width: 26%; }
+/* A count stays with its word: *What is in it* wraps between kinds, never leaving *monitor* alone. */
+.tf-sets-item { white-space: nowrap; }
 .tf-sets-tbl th:nth-child(4) { width: 124px; }
 .tf-toggle { display: flex; gap: 12px; align-items: center; padding: 12px 14px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; font-size: var(--t-sm); }
 .tf-toggle input { width: 18px; height: 18px; accent-color: var(--ink); }
@@ -23,9 +25,10 @@
 .tf-hint-card { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 10px 14px; border: 1px dashed var(--ink-2); border-radius: 6px; background: var(--sheet); font-size: var(--t-sm); }
 .tf-hint-card b { font-weight: 600; }
 .tf-set-desc:empty::before { content: attr(data-placeholder); color: var(--ink-2); }
-/* The title and the description are edited in place: the pointer finds them by a rule under the words. */
-.tf-set-title, .tf-set-desc { border-radius: 3px; cursor: text; }
-.tf-set-title:hover, .tf-set-desc:hover { box-shadow: 0 1px 0 var(--ink-2); }
+/* The title and the description are edited in place, so pointing at them draws a field's outline. An underline read as a link. */
+.tf-set-title, .tf-set-desc { border-radius: 3px; cursor: text; outline: 1px solid transparent; outline-offset: 2px; }
+.tf-set-title:hover, .tf-set-desc:hover { outline-color: var(--ink-2); }
+.tf-set-title:focus, .tf-set-desc:focus { outline: 2px solid var(--focus); background: var(--field); }
 .tf-set-desc { width: fit-content; max-width: 100%; min-width: 24ch; }
 .tf-cbody.tf-set { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-set-panels, .tf-set .tf-side { display: flex; flex-direction: column; gap: 14px; }

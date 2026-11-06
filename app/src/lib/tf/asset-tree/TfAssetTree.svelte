@@ -68,6 +68,7 @@
   {/if}
   {#if reached.marks !== undefined && reached.list.length > 0}
     <p class="tf-at-reach">
+      <span class="tf-at-mark" aria-hidden="true"></span>
       <TfKey value={reached.marks.key} /> reaches {reached.list.length} {reached.list.length === 1 ? "asset" : "assets"}:
       {#each reached.list as asset, at (asset.id)}{at > 0 ? ", " : ""}<a href="#/asset/{encodeURIComponent(asset.id)}">{asset.name}</a>{/each}
     </p>

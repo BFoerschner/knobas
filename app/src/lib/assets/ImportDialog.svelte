@@ -106,6 +106,8 @@
   named, above the preview.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { ipcErrorMessage, isIpcError } from "../ipc";
   import { IMPORT_PRODUCERS } from "../ipc/assets";
   import type {
@@ -222,7 +224,12 @@
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
   function stand(path: AssetRow[]) {
     crumb = path;
+    walked = true;
   }
+
+  /** A walk asked for this read, so focus goes on to the level it draws. */
+  let walked = false;
+  let levelEl = $state<HTMLElement | null>(null);
 
   /**
    * The level the picker is standing on, re-read whenever it moves.
@@ -237,6 +244,8 @@
     void columnRead(() => tree(parent), {
       ok: (answer) => {
         rows = answer;
+        if (walked) void tick().then(() => (levelEl?.querySelector<HTMLElement>(".into") ?? levelEl?.closest(".fld")?.querySelector<HTMLElement>(".crumbed:last-of-type"))?.focus());
+        walked = false;
       },
       fail: (cause) => {
         rows = [];
@@ -451,7 +460,7 @@
                 </button>
               {/each}
             </nav>
-            <ul class="lst pick">
+            <ul class="lst pick" bind:this={levelEl}>
               {#each rows as row (row.id)}
                 <li>
                   <button class="into" onclick={() => stand([...crumb, row])}>

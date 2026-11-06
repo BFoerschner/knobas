@@ -2,7 +2,8 @@
   The *Add…* picker of one set editor panel (#866, R-7.7), prototype-6's
   `openPicker`: a filterable multi-select over every item of that kind, where
   an item already in the set is ticked, disabled and says *already in*. *Add*
-  hands the picked ids back; the editor saves the set.
+  hands the picked ids back; the editor saves the set. `↓` goes from the filter
+  into the list and the arrows walk it, and `Enter` in the filter adds what is picked.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -10,6 +11,7 @@
   import { matchesAll } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import { intoList, withinList } from "./list-keys";
   import type { Candidate } from "./ports";
   import { KIND_LABEL } from "./sets";
 
@@ -60,18 +62,24 @@
     picked = on ? [...picked, id] : picked.filter((held) => held !== id);
   }
 
-  function add() {
+  function add(event?: SubmitEvent) {
+    event?.preventDefault();
     const chosen = (all ?? []).filter((row) => picked.includes(row.entity_id));
     if (chosen.length > 0) onadd(chosen);
   }
+
+  const uid = $props.id();
+  let filterEl = $state<HTMLInputElement | null>(null);
+  let listEl = $state<HTMLElement | null>(null);
 </script>
 
 <TfDialog why={picked.length === 0 ? "Tick what to add." : null} title="Add {noun} to {setName}" {onclose}>
   {#snippet body()}
+    <form id="tf-pick-{uid}" class="tf-dform" onsubmit={add}></form>
     <label class="tf-fsearch tf-wide"
       ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
         ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
-      ><input bind:value={typed} placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" /></label
+      ><input bind:this={filterEl} bind:value={typed} form="tf-pick-{uid}" placeholder="Filter {all?.length ?? ''} {noun}" aria-label="Filter" onkeydown={(event) => intoList(event, listEl)} /></label
     >
     {#if failed !== null}
       <p class="tf-ifail">Could not read the {noun}: {failed}</p>
@@ -83,7 +91,8 @@
     {:else if all !== null && shown.length === 0}
       <p class="tf-dim tf-picks-more">No {noun} match “{typed.trim()}”.</p>
     {/if}
-    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="group" aria-label={KIND_LABEL[kind]}>
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="tf-picks" class:tf-hidden-empty={shown.length === 0} role="group" aria-label={KIND_LABEL[kind]} bind:this={listEl} onkeydown={(event) => withinList(event, listEl, filterEl)}>
       {#each shown.slice(0, DRAWN) as row (row.entity_id)}
         {@const held = have.has(row.entity_id)}
         <label class:tf-in={held}
@@ -104,6 +113,6 @@
   {#snippet footer()}
     {#if picked.length > 0}<span class="tf-dim tf-picked">{picked.length} picked</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" disabled={picked.length === 0} onclick={add}>Add</button>
+    <button type="submit" class="tf-btn tf-primary" form="tf-pick-{uid}" disabled={picked.length === 0}>Add</button>
   {/snippet}
 </TfDialog>

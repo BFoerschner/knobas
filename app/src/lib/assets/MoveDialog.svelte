@@ -24,6 +24,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
+  import { levelKeys } from "./level-keys";
   import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type { assetTree, AssetRow, moveAsset } from "../ipc/assets";
@@ -139,6 +140,7 @@
           <span class="sep" aria-hidden="true">/</span>
           <button
             class="link"
+            title={step.name}
             disabled={index === crumb.length - 1}
             onclick={() => stand(crumb.slice(0, index + 1))}
           >
@@ -148,7 +150,10 @@
       </p>
 
       <div class="lvl">
-        <ul class="opts" aria-label="Where to move it">
+        <!-- The list is the one `Tab` stop, and where the dialog arrives: a press there walks it, and none of its keys sends anything. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <ul class="opts" aria-label="Where to move it" tabindex="0" onkeydown={levelKeys}>
           {#each rows as row (row.id)}
             <li>
               <!--
@@ -164,7 +169,7 @@
                   <span class="faint">this asset</span>
                 </button>
               {:else}
-                <button class="opt" title="Open {row.name}" onclick={() => into(row)}>
+                <button class="opt" title="Open {row.name}" tabindex="-1" onclick={() => into(row)}>
                   <span class="mg">{kindTag(row.monogram)}</span>
                   <span class="nm">{row.name}</span>
                   {#if row.has_children}
@@ -200,14 +205,31 @@
     gap: 10px;
   }
 
+  /* One line whatever the depth: the names above give way and keep their titles, and the level you stand on stays whole. */
   .crumb {
     display: flex;
-    flex-wrap: wrap;
     align-items: baseline;
     gap: 4px;
     margin: 0;
     font-size: var(--t-xs);
     color: var(--muted);
+  }
+
+  .crumb button {
+    flex: 0 1 auto;
+    min-width: 2ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .crumb button:last-of-type {
+    flex: none;
+    max-width: 70%;
+  }
+
+  .crumb .sep {
+    flex: none;
   }
 
   .crumb button:disabled {

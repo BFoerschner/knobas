@@ -11,10 +11,11 @@
 
   A route lands on an asset, and an asset is a tree of unknown depth — so the
   picker is `MoveDialog`'s: one read per level, `assetTree(parentId)`, standing
-  where the route is exposed because that is where its target usually is. What
-  differs is that choosing and walking are the same click here: clicking a row
-  makes it the target *and* opens what it holds, so landing on a container two
-  levels down is two clicks and no mode.
+  where the route is exposed because that is where its target usually is: inside
+  the asset, or among its neighbours when it holds nothing. What differs is that
+  choosing and walking are the same click here: clicking a row makes it the target
+  *and* opens what it holds, so landing on a container two levels down is two
+  clicks and no mode. A row that holds nothing is only picked, and the list stays.
 
   **Landing on nothing is a first-class choice**, not an empty field: an
   endpoint that lands on nothing knobas knows is a route the model holds on
@@ -45,6 +46,7 @@
 <script lang="ts">
   import { tick } from "svelte";
 
+  import { levelKeys } from "./level-keys";
   import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type {
@@ -138,10 +140,11 @@
 
   // svelte-ignore state_referenced_locally
   // The picker opens where the route is exposed, which is where its target
-  // usually is — `MoveDialog`'s reason for seeding these two together.
-  let crumb = $state<AssetRow[]>([...heldBy, asset]);
+  // usually is — `MoveDialog`'s reason for seeding these two together. An asset
+  // that holds nothing has no list to open on, so it opens on its neighbours.
+  let crumb = $state<AssetRow[]>(asset.has_children ? [...heldBy, asset] : [...heldBy]);
   // svelte-ignore state_referenced_locally
-  let at = $state<string | null>(asset.id);
+  let at = $state<string | null>(asset.has_children ? asset.id : (heldBy.at(-1)?.id ?? null));
   let rows = $state<AssetRow[]>([]);
   let loaded = $state(false);
   let failure = $state<string | null>(null);
@@ -186,8 +189,17 @@
   /** One click: this row is the target, and what it holds is the next level. */
   function choose(row: AssetRow) {
     target = { id: row.id, name: row.name };
-    stand([...crumb, row]);
+    if (row.has_children) stand([...crumb, row]);
   }
+
+  /** Back to no target. The button goes with it, so focus goes on to the list it was about. */
+  function clear() {
+    target = null;
+    void tick().then(() => walk?.querySelector<HTMLElement>(".opt[tabindex='0']")?.focus());
+  }
+
+  /** `Tab`'s one stop on the level: the row that is the target, else the first. */
+  const stop = $derived(rows.some((row) => row.id === target?.id) ? target?.id : rows[0]?.id);
 
   function onfieldkeydown(event: KeyboardEvent) {
     if (event.key !== "Enter") return;
@@ -341,9 +353,9 @@
         <p class="lands">
           {#if target}
             <span class="tf-chosen"><TfTick /><span class="tf-chosent">{target.name}</span></span>
-            <button class="link" onclick={() => (target = null)}>Clear</button>
+            <button class="tf-btn tf-sm tf-ghost" onclick={clear}>Clear</button>
           {:else}
-            <span class="faint">Nothing: an endpoint knobas has no asset for</span>
+            <span class="faint">No asset yet. Leave it for an endpoint knobas has no asset for.</span>
           {/if}
         </p>
 
@@ -355,6 +367,7 @@
             <span class="sep" aria-hidden="true">/</span>
             <button
               class="link"
+              title={step.name}
               disabled={index === crumb.length - 1}
               onclick={() => stand(crumb.slice(0, index + 1))}
             >
@@ -364,13 +377,15 @@
         </p>
 
         <div class="lvl" bind:this={walk}>
-          <ul class="opts" aria-label="Where it lands">
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <ul class="opts" aria-label="Where it lands" onkeydown={levelKeys}>
             {#each rows as row (row.id)}
               <li>
                 <button
                   class="opt"
                   class:on={target?.id === row.id}
                   title="Land on {row.name}"
+                  tabindex={row.id === stop ? 0 : -1}
                   onclick={() => choose(row)}
                 >
                   <span class="mg">{kindTag(row.monogram)}</span>
@@ -384,7 +399,7 @@
             {/each}
           </ul>
           {#if loaded && rows.length === 0}
-            <p class="empty">Nothing here.</p>
+            <p class="empty">No assets at this level.</p>
           {/if}
         </div>
       </div>
@@ -513,14 +528,31 @@
     font-size: var(--t-sm);
   }
 
+  /* One line whatever the depth: the names above give way and keep their titles, and the level you stand on stays whole. */
   .crumb {
     display: flex;
-    flex-wrap: wrap;
     align-items: baseline;
     gap: 4px;
     margin: 0 0 6px;
     font-size: var(--t-xs);
     color: var(--muted);
+  }
+
+  .crumb button {
+    flex: 0 1 auto;
+    min-width: 2ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .crumb button:last-of-type {
+    flex: none;
+    max-width: 70%;
+  }
+
+  .crumb .sep {
+    flex: none;
   }
 
   .crumb button:disabled {

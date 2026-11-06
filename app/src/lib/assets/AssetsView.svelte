@@ -82,11 +82,10 @@
 -->
 <script lang="ts">
   import { stateWord } from "../tf/state-word";
-  import { tick, untrack } from "svelte";
+  import { tick } from "svelte";
 
   import { ipcErrorMessage, isIpcError, type SearchResponse } from "../ipc";
-  import { layers } from "../tf/layers.svelte";
-  import TfKey from "../tf/TfKey.svelte";
+  import { inlineEditor } from "../tf/inline-editor";
   import TfNothingHere from "../tf/TfNothingHere.svelte";
   import {
     applyEstateImport as realApplyEstateImport,
@@ -158,6 +157,8 @@
     parseProperty,
     PROPERTY_KINDS,
     propertyEdit,
+    proseParts,
+    readsWide,
   } from "./editing";
   import {
     addressOf,
@@ -741,6 +742,13 @@
   /** Which columns are drawn in full; the rest are spines. */
   const strip = $derived(stripFor(columns.length, available, anchor));
 
+  /** The estate with nothing in it: no filter, because there is nothing to find. */
+  const emptyEstate = $derived(loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0);
+
+  const uid = $props.id();
+  /** The open alerts' fold, the reader's: a selection changes nothing. */
+  let alertsOpen = $state(false);
+
   /** Is this column collapsed? */
   function collapsed(column: number): boolean {
     return column < strip.from || column >= strip.to;
@@ -1089,13 +1097,27 @@
     const from = event.target;
     if (from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null) return;
 
-    const step = walk(event.key, path, columns);
+    // `Tab` stops once per column, so the walk starts from the column the row with focus is in.
+    const row = from instanceof Element ? from.closest<HTMLElement>("button.row[data-asset]") : null;
+    const column = row?.closest("ol.col")?.getAttribute("data-col");
+    const step = column === null || column === undefined ? walk(event.key, path, columns) : walk(event.key, path, columns, Number(column));
     event.preventDefault();
     event.stopPropagation();
-    if (step.go === "asset") {
+    // `Enter` on a row `Tab` reached is what a click on it does, and so is `→` on one the path doesn't run through.
+    const here = row?.dataset["asset"];
+    if (here !== undefined && here !== selectedId && (event.key === "Enter" || (event.key === "ArrowRight" && row?.getAttribute("aria-current") === null))) {
       wantFocus = true;
-      nav.go(addressOf({ id: step.id }));
+      nav.go(addressOf({ id: here }));
+      return;
     }
+    if (step.go !== "asset") return;
+    // The address is already there, from a column `Tab` reached: only focus has anywhere to go.
+    if (step.id === selectedId) {
+      tree?.querySelector<HTMLElement>(`.cols button.row[data-asset=${CSS.escape(step.id)}]`)?.focus();
+      return;
+    }
+    wantFocus = true;
+    nav.go(addressOf({ id: step.id }));
   }
 
   // -- the search box (story 30) -------------------------------------------
@@ -1307,37 +1329,29 @@
     return kindFor(property, detail === null ? undefined : schemaOf(detail.asset.type_id));
   }
 
-  /**
-   * An inline editor is open: put it away, and give focus back to what opened it.
-   *
-   * A row of the pane that is gone by then is found again by its `data-reopen`.
-   */
+  /** Put the open inline editor away. `paneEditor` gives focus back. */
   function closeInline() {
-    const reopen = renaming ? "rename" : editingKey !== null ? `prop:${editingKey}` : adding ? "add" : null;
     renaming = false;
     editingKey = null;
     adding = false;
-    if (reopen === null) return;
-    void tick().then(() => paneEl?.querySelector<HTMLElement>(`[data-reopen="${CSS.escape(reopen)}"]`)?.focus());
   }
 
-  /** An editor is on the layer stack while it is open, so `Esc` closes it first whatever has focus (the return contract). */
-  const inlineOpen = $derived(renaming || editingKey !== null || adding);
-  $effect(() => {
-    if (!inlineOpen) return;
-    return untrack(() => layers.add({ kind: "dialog", close: closeInline }));
-  });
-
-  /** Focus a field the moment it is drawn, what it holds selected, so typing replaces it. */
-  function takeFocus(field: HTMLInputElement) {
-    field.focus({ preventScroll: true });
-    field.select();
-    bring(field);
-  }
-
-  /** The whole of a form in view when it opens at the pane's bottom edge. */
-  function bringIn(form: HTMLElement) {
-    void tick().then(() => bring(form));
+  /**
+   * An editor drawn in the pane (`inlineEditor`): on the layer stack while it is open, so `Esc` closes it first whatever
+   * has focus, its first field taking focus with what it holds selected, so typing replaces it (a long value's box has the
+   * caret at its end: it is there to be changed, not replaced), and focus back on what
+   * opened it, found by its `data-reopen` because a row of the pane is redrawn by then. The whole form comes into view
+   * when it opens at the pane's bottom edge.
+   */
+  function paneEditor(reopen: string) {
+    return (form: HTMLElement) => {
+      const off = inlineEditor(closeInline, {
+        back: () => paneEl?.querySelector<HTMLElement>(`[data-reopen="${CSS.escape(reopen)}"]`) ?? null,
+      })(form);
+      form.querySelector<HTMLInputElement>("input")?.select();
+      void tick().then(() => bring(form));
+      return off;
+    };
   }
 
   /**
@@ -1413,7 +1427,11 @@
 
   async function saveName() {
     const current = detail;
-    if (current === null) return;
+    if (current === null || nameDraft.trim() === "") return;
+    if (nameDraft.trim() === current.asset.name) {
+      closeInline();
+      return;
+    }
     const done = await write(() =>
       io.editAsset(current.asset.id, [{ field: "name", value: nameDraft }]),
     );
@@ -1687,10 +1705,9 @@
     Ack, the cards and the "Not monitored" roster are #446's and #449's; this
     is the list and the count, which is what #444 owes.
   -->
-  {#if alerts.count > 0}
+  {#snippet openAlerts()}
     <!-- Folded to start with and the reader's after that: a selection changes nothing, so a click moves no row. The count stays in view. -->
-    <details class="alerts" aria-label="Open alerts">
-      <summary><h2>Open alerts <span class="tf-count tf-err">{alerts.count}</span></h2></summary>
+    <section class="alerts" id="tf-alerts-{uid}" aria-label="Open alerts" hidden={!alertsOpen}>
       <ul>
         {#each alerts.open as alert (alert.id)}
           {#if alert.assets.length === 0}
@@ -1704,14 +1721,15 @@
             {#each alert.assets as watched (watched.id)}
               <li>
                 <span class="st {alert.state}" aria-hidden="true"></span>
+                <!-- Its path is in the title: the row's next step is the asset, whose path the columns draw. -->
                 <button
                   class="go"
+                  title={watched.path ?? "Top level"}
                   onclick={() =>
                     jump(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
                 >
                   <span class="mn">{alert.monitor_name}</span>
                   <span class="nm">{watched.name}</span>
-                  <span class="pth faint">{watched.path ?? "top level"}</span>
                 </button>
                 <!--
                   Acked is drawn and not hidden: #446's ack clears the *inbox*
@@ -1719,7 +1737,7 @@
                   would say the estate was well.
                 -->
                 {#if alert.acked_at}
-                  <span class="ak faint">acked</span>
+                  <span class="ak faint">{stateWord("acked")}</span>
                 {/if}
                 <span class="wh faint">{ago(alert.opened_at, now())}</span>
               </li>
@@ -1727,8 +1745,8 @@
           {/if}
         {/each}
       </ul>
-    </details>
-  {/if}
+    </section>
+  {/snippet}
 
   <!--
     The estate's search (story 30), on a strip of its own between the room bar
@@ -1739,7 +1757,9 @@
     sliver. A row of its own also keeps the box clear of the path it is about
     to open, since the offers overlay the columns and nothing else.
   -->
+  {#if !emptyEstate || alerts.count > 0}
   <div class="find tf-fbar">
+    {#if !emptyEstate}
     <label class="tf-fsearch">
       <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
         ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
@@ -1759,6 +1779,7 @@
         <button type="button" class="tf-fclear" aria-label="Clear the search" onclick={() => typed("")}>✕</button>
       {/if}
     </label>
+    {/if}
     {#if query.trim() !== ""}
       <ol class="res">
         {#each matches as match, index (match.id)}
@@ -1785,7 +1806,15 @@
         {/if}
       </ol>
     {/if}
+    <!-- The band's end, as a filter bar's count: one band above the columns, whether there are alerts or not, so the columns start at one height. -->
+    {#if alerts.count > 0}
+      <button type="button" class="tf-btn tf-sm tf-ghost fold" class:open={alertsOpen} aria-expanded={alertsOpen} aria-controls="tf-alerts-{uid}" onclick={() => (alertsOpen = !alertsOpen)}>
+        Open alerts <span class="tf-count tf-err">{alerts.count}</span>
+      </button>
+    {/if}
   </div>
+  {/if}
+  {#if alerts.count > 0}{@render openAlerts()}{/if}
 
   <div class="tree" bind:this={tree}>
     <div class="cols" bind:this={stripEl}>
@@ -1796,7 +1825,7 @@
           <p class="empty fail">{failure}</p>
           <button class="tf-btn" onclick={() => (revision += 1)}>Try again</button>
         </div>
-      {:else if loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0}
+      {:else if emptyEstate}
         <!--
           The estate with nothing in it, which is what a fresh install has
           until the import (#439) or a hand-created asset. It says so in its
@@ -1833,6 +1862,9 @@
             </button>
           {:else}
             {@const win = windowOf(index)}
+            {@const drawn = win.slice(column)}
+            <!-- One tab stop per column, the path's row or else the first drawn: the arrows walk the rest. -->
+            {@const stop = drawn.some((row) => row.id === chosen) ? chosen : drawn[0]?.id}
             <div class="colw">
               <!--
                 Story 34: a plus on **every** column header, so creating at that
@@ -1857,7 +1889,7 @@
               </header>
               <ol class="col" data-col={index} {@attach win.list}>
                 {#if win.before > 0}<li class="tf-wgap" aria-hidden="true" {@attach win.room("before")}></li>{/if}
-                {#each win.slice(column) as row (row.id)}
+                {#each drawn as row (row.id)}
                   {@const badge = problemBadge(row)}
                   {@const work = workBadge(row)}
                   <li {@attach win.row(row.id)}>
@@ -1865,15 +1897,16 @@
                       class="row {chosen === row.id ? 'on' : ''} {row.id === selectedId ? 'tip' : ''}"
                       aria-current={chosen === row.id ? "true" : undefined}
                       data-asset={row.id}
-                      title={addressOf(row)}
+                      tabindex={row.id === stop ? 0 : -1}
                       onclick={() => select(row)}
                     >
                       <span class="mg" title={row.type_label}>{kindTag(row.monogram)}</span>
-                      <span class="nm" title={marks === undefined ? undefined : row.name}><span class="lbl">{row.name}</span></span>
+                      <span class="nm" title={row.name}><span class="lbl">{row.name}</span></span>
+                      <!-- A mark and not the ticket's chip: the line under the bar names the ticket, and a chip took a 220 px row's name. -->
                       {#if marks?.assets.has(row.id)}
-                        <TfKey chip value={marks.key} class="tf-chip-job" />
+                        <span class="mark" title="{marks.key} reaches this asset" role="img" aria-label="{marks.key} reaches this asset"></span>
                       {:else if marks?.holders.has(row.id)}
-                        <span class="holds" title="Holds an asset {marks.key} reaches" aria-label="Holds an asset {marks.key} reaches"></span>
+                        <span class="holds" title="Holds an asset {marks.key} reaches" role="img" aria-label="Holds an asset {marks.key} reaches"></span>
                       {/if}
                       {#if work !== null}
                         <!--
@@ -1955,34 +1988,37 @@
         <header class="pane-h">
           <span class="mg" title={detail.asset.type_label}>{kindTag(detail.asset.monogram)}</span>
           {#if renaming}
-            <input
-              class="inp"
-              type="text"
-              aria-label="Name"
-              autocomplete="off"
-              value={nameDraft}
-              {@attach takeFocus}
-              oninput={(event) => (nameDraft = event.currentTarget.value)}
-              onkeydown={(event) => {
-                if (event.key === "Enter") void saveName();
-                if (event.key === "Escape") cancelEditor(event, closeInline);
-              }}
-            />
-            <div class="ed-f">
-              <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
-              <button class="tf-btn tf-sm tf-primary" disabled={writing} onclick={() => void saveName()}>
-                Save
-              </button>
+            <div class="ed" {@attach paneEditor("rename")}>
+              <input
+                class="inp"
+                type="text"
+                aria-label="Name"
+                autocomplete="off"
+                value={nameDraft}
+                oninput={(event) => (nameDraft = event.currentTarget.value)}
+                onkeydown={(event) => {
+                  if (event.key === "Enter") {
+                    // Not left to go on: focus is back on *Rename…* by the time the press would land there, and it would open again.
+                    event.preventDefault();
+                    void saveName();
+                  }
+                  if (event.key === "Escape") cancelEditor(event, closeInline);
+                }}
+              />
+              <div class="ed-f">
+                {#if nameDraft.trim() === ""}<p class="tf-dwhy" role="status">Name it first.</p>{/if}
+                <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
+                <button class="tf-btn tf-sm tf-primary" disabled={writing || nameDraft.trim() === ""} onclick={() => void saveName()}>
+                  Save
+                </button>
+              </div>
             </div>
           {:else}
-            <h2>{detail.asset.name}</h2>
+            <!-- Where it sits is in the title: the columns draw the path. -->
+            <h2 title={heldByPath(detail).join(" / ")}>{detail.asset.name}</h2>
             <span class="kind tf-chip">{detail.asset.type_label}</span>
           {/if}
         </header>
-
-        <p class="crumb" title="Where this asset sits in the estate">
-          {heldByPath(detail).join(" / ")}
-        </p>
 
         <!--
           What the asset *has*, as against what is stored on it. Environment
@@ -2031,7 +2067,7 @@
                     under a health of "down" is a line that never says
                     anything.
                   -->
-                  <span class="src faint">own status {detail.asset.status}</span>
+                  <span class="src faint">Own status {stateWord(detail.asset.status)}</span>
                 {/if}
               </dd>
             </div>
@@ -2075,10 +2111,34 @@
           {#if detail.properties.some((property) => property.custom)}<p class="faint legend">* added here, not from its type</p>{/if}
           <dl class="props">
             {#each detail.properties as property (property.key)}
-              <div class="prop {property.custom ? 'own' : ''}">
+              {@const wide = readsWide(property)}
+              <div class="prop {property.custom ? 'own' : ''}" class:wide>
                 <dt>{property.label}</dt>
                 <dd>
-                  {#if editingKey === property.key}
+                  {#if editingKey === property.key && wide}
+                    <!-- Long words edit in a box that shows them all, caret at the end: `Enter` saves, as the other fields do, and `Shift+Enter` breaks the line. -->
+                    <div class="ed" {@attach paneEditor(`prop:${property.key}`)}>
+                      <textarea
+                        class="inp"
+                        rows={Math.min(14, Math.ceil(draft.length / 40) + 1)}
+                        aria-label={property.label}
+                        autocomplete="off"
+                        value={draft}
+                        oninput={(event) => (draft = event.currentTarget.value)}
+                        onkeydown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            void saveProperty(property);
+                          }
+                          if (event.key === "Escape") cancelEditor(event, closeInline);
+                        }}
+                      ></textarea>
+                      <div class="ed-f">
+                        <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
+                        <button class="tf-btn tf-sm tf-primary" disabled={writing} onclick={() => void saveProperty(property)}>Save</button>
+                      </div>
+                    </div>
+                  {:else if editingKey === property.key}
                     <!--
                       The kind decides the control, and the kind of a
                       *declared but unfilled* property can only come from the
@@ -2086,28 +2146,32 @@
                       `oninput` rather than `bind:value`: Svelte refuses a
                       two-way binding on an input whose `type` is dynamic.
                     -->
-                    <input
-                      class="inp"
-                      type={inputTypeFor(kindOf(property))}
-                      aria-label={property.label}
-                      autocomplete="off"
-                      value={draft}
-                      {@attach takeFocus}
-                      oninput={(event) => (draft = event.currentTarget.value)}
-                      onkeydown={(event) => {
-                        if (event.key === "Enter") void saveProperty(property);
-                        if (event.key === "Escape") cancelEditor(event, closeInline);
-                      }}
-                    />
-                    <div class="ed-f">
-                      <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
-                      <button
-                        class="tf-btn tf-sm tf-primary"
-                        disabled={writing}
-                        onclick={() => void saveProperty(property)}
-                      >
-                        Save
-                      </button>
+                    <div class="ed" {@attach paneEditor(`prop:${property.key}`)}>
+                      <input
+                        class="inp"
+                        type={inputTypeFor(kindOf(property))}
+                        aria-label={property.label}
+                        autocomplete="off"
+                        value={draft}
+                        oninput={(event) => (draft = event.currentTarget.value)}
+                        onkeydown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveProperty(property);
+                          }
+                          if (event.key === "Escape") cancelEditor(event, closeInline);
+                        }}
+                      />
+                      <div class="ed-f">
+                        <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
+                        <button
+                          class="tf-btn tf-sm tf-primary"
+                          disabled={writing}
+                          onclick={() => void saveProperty(property)}
+                        >
+                          Save
+                        </button>
+                      </div>
                     </div>
                   {:else}
                     <!--
@@ -2123,7 +2187,7 @@
                       data-reopen="prop:{property.key}"
                       onclick={() => beginEdit(property)}
                     >
-                      {reading(property)}
+                      {#if wide}{#each proseParts(reading(property)) as part, at (at)}{#if part.code}<code>{part.text}</code>{:else}{part.text}{/if}{/each}{:else}{reading(property)}{/if}
                     </button>
                   {/if}
                 </dd>
@@ -2153,7 +2217,7 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="add"
-              {@attach bringIn}
+              {@attach paneEditor("add")}
               onkeydown={(event) => {
                 if (event.key === "Escape") cancelEditor(event, closeInline);
               }}
@@ -2165,7 +2229,6 @@
                 autocomplete="off"
                 placeholder="Key: backup window"
                 bind:value={newKey}
-                {@attach takeFocus}
               />
               <!-- The kinds are enumerated once, in `editing.ts`. -->
               <select class="inp" aria-label="New property kind" bind:value={newKind}>
@@ -2182,12 +2245,15 @@
                 value={newValue}
                 oninput={(event) => (newValue = event.currentTarget.value)}
                 onkeydown={(event) => {
-                  if (event.key === "Enter") void addProperty();
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void addProperty();
+                  }
                 }}
               />
               <div class="add-f">
                 {#if newKey.trim() === "" || newValue.trim() === ""}
-                  <span class="faint why">{newKey.trim() === "" ? (newValue.trim() === "" ? "Needs a key and a value." : "Needs a key.") : "Needs a value."}</span>
+                  <p class="tf-dwhy" role="status">{newKey.trim() === "" ? (newValue.trim() === "" ? "Needs a key and a value." : "Needs a key.") : "Needs a value."}</p>
                 {/if}
                 <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
                 <button
@@ -2272,7 +2338,7 @@
             <span class="rname">
               <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
               {#if route.visibility === "public"}
-                <span class="vis tf-chip">public</span>
+                <span class="vis tf-chip">Public</span>
               {/if}
             </span>
             <button
@@ -2284,7 +2350,7 @@
             </button>
             <span class="rto">{@render where()}</span>
             {#each route.properties as property (property.key)}
-              <span class="rprop faint">{property.label} {reading(property)}</span>
+              <span class="rprop faint">{property.label} {#each proseParts(reading(property)) as part, at (at)}{#if part.code}<code>{part.text}</code>{:else}{part.text}{/if}{/each}</span>
             {/each}
           </li>
         {/snippet}
@@ -2476,7 +2542,7 @@
                   {#if watch.tombstoned}
                     <span class="faint">Paused or gone from Kuma</span>
                   {:else if watch.state !== null}
-                    <span class="hl {watch.state}">{watch.state}</span>
+                    <span class="hl {watch.state}">{stateWord(watch.state)}</span>
                   {:else}
                     <span class="faint">no reading</span>
                   {/if}
@@ -2568,10 +2634,6 @@
             links={detail.links}
             onopen={jump}
             onunlink={(entry) => void removeLink(entry)}
-            onlink={() => {
-              linking = true;
-              writeFailure = null;
-            }}
           />
         </section>
 
@@ -2949,58 +3011,40 @@
     white-space: nowrap;
   }
 
-  /* The open-alert strip (#444): a band above the search, on the page's gutter. */
-  .alerts {
+  /* The open-alert fold (#444) stands at the filter band's end, and its list opens under the band, on the page's gutter. */
+  .fold {
+    margin-left: auto;
     flex: none;
-    padding: 6px 22px;
-    background: var(--sheet);
-    border-top: 1px solid var(--rule);
-  }
-
-  .alerts summary {
-    cursor: pointer;
-    list-style: none;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .alerts summary::-webkit-details-marker {
-    display: none;
   }
 
   /* One drawn chevron, as every fold has. */
-  .alerts summary::before {
+  .fold::before {
     content: "";
     flex: none;
     width: 6px;
     height: 6px;
-    margin: 0 2px 1px 2px;
-    color: var(--ink-2);
+    margin: 0 2px 1px 0;
     border: solid currentColor;
     border-width: 0 1.5px 1.5px 0;
     transform: rotate(-45deg);
   }
 
-  .alerts[open] summary::before {
+  .fold.open::before {
     transform: rotate(45deg);
   }
 
-  .alerts h2 {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin: 0;
-    font-size: var(--t-xs);
-    font-weight: 600;
-    color: var(--ink-2);
+  .alerts {
+    flex: none;
+    padding: 6px 22px;
+    background: var(--sheet);
+    border-bottom: 1px solid var(--rule);
   }
 
   .alerts ul {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    margin: 4px 0 0;
+    margin: 0;
     padding: 0;
     list-style: none;
     /* Six rows, then it scrolls: an estate with twenty broken monitors must
@@ -3060,7 +3104,6 @@
   }
 
   .alerts .nm,
-  .alerts .pth,
   .alerts .ak,
   .alerts .wh {
     font-size: var(--t-xs);
@@ -3083,10 +3126,6 @@
     position: relative;
     flex: none;
     border-top: 1px solid var(--rule);
-  }
-
-  .alerts + .find {
-    border-top-color: var(--rule-2);
   }
 
   .find .tf-fsearch {
@@ -3261,14 +3300,22 @@
     border-color: currentColor;
   }
 
-  /* What holds a ticket's marked asset: enough to walk towards it. */
+  /* An asset a ticket reaches is the solid mark, which the line under the bar starts with too; what holds one is its ring, enough to walk towards it. */
+  .row .mark,
   .row .holds {
     flex: none;
     width: 7px;
     height: 7px;
     border-radius: 50%;
+  }
+
+  .row .mark {
     background: currentColor;
-    opacity: 0.55;
+  }
+
+  .row .holds {
+    border: 1.5px solid currentColor;
+    opacity: 0.7;
   }
 
   .row .nm {
@@ -3389,18 +3436,24 @@
     min-width: 0;
   }
 
+  .ed {
+    display: contents;
+  }
+
   .ed-f {
     display: flex;
     flex: 1 1 100%;
+    align-items: center;
     justify-content: flex-end;
     gap: var(--control-gap);
   }
 
-  .crumb {
-    font-size: var(--t-xs);
-    color: var(--ink-2);
-    margin: 0 0 14px;
-    overflow-wrap: anywhere;
+  .ed-f .tf-dwhy {
+    margin-right: auto;
+  }
+
+  .pane-h + .grp {
+    margin-top: 10px;
   }
 
   .grp {
@@ -3410,7 +3463,7 @@
   }
 
   .acts + .grp,
-  .crumb + .grp {
+  .pane-h + .grp {
     border-top: 0;
     padding-top: 0;
   }
@@ -3606,9 +3659,14 @@
     background: var(--err);
   }
 
+  /* No state, so no dot: a grey one reads as a state of its own. */
   .prop .hl.none {
     color: var(--ink-2);
     flex: none;
+  }
+
+  .hl.none::before {
+    content: none;
   }
 
   /* The value reads as the value it is until it is hovered: a pane of boxes
@@ -3626,6 +3684,22 @@
     cursor: text;
   }
 
+  /* A long value has the pane's width, under its label, and breaks at spaces: a 190 px column cut *ssh://knob / as-wsl* in two. */
+  .prop.wide {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 1px;
+  }
+
+  .prop.wide dd,
+  .prop.wide dd .val {
+    overflow-wrap: break-word;
+  }
+
+  .prop.wide dd .val code {
+    font: var(--t-xs) var(--mono);
+    font-variant-ligatures: none;
+  }
+
   .prop dd .val.code {
     font-family: var(--mono);
     font-size: var(--t-xs);
@@ -3638,7 +3712,7 @@
     background: var(--sheet-2);
   }
 
-  .prop dd:has(> .inp) {
+  .prop dd:has(> .ed) {
     flex-wrap: wrap;
   }
 
@@ -3677,9 +3751,8 @@
   }
 
   /* What Add waits for, beside it (design system, Disabled). */
-  .add .why {
+  .add .tf-dwhy {
     margin-right: auto;
-    font-size: var(--t-xs);
   }
 
   .ask {
@@ -3731,12 +3804,25 @@
     text-underline-offset: 2px;
   }
 
-  .routes .rto,
+  /* A property reads as one sentence, its name then its value, with its code values among the words. */
   .routes .rprop {
+    display: block;
+  }
+
+  .routes .rprop code {
+    font: var(--t-xs) var(--mono);
+    font-variant-ligatures: none;
+  }
+
+  .routes .rto {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 4px;
+  }
+
+  .routes .rto,
+  .routes .rprop {
     font-size: var(--t-xs);
     /* A real route property can be a command line (until #634 the estate's
        tunnel routes carried a whole `ssh -N -L ...`), which wraps at no space

@@ -9,7 +9,8 @@
     pages *Add a pattern…* (`TfSetPattern.svelte`, #868).
   - *Applies to*: one row per rule with a kind dropdown, a value dropdown, a
     live ticket count (`preview_link_set_rule`) and *Remove*, plus *Add a
-    rule*. A rule waiting for its value says so and closes first on `Esc`.
+    rule*. A rule waiting for its value says so, takes focus on its value and
+    closes first on `Esc`, back to what opened it (`inlineEditor`).
   - *Shows on N tickets now*: how many are yours, and the keys as links to
     their jobs (yours in yellow), the first 40 then "and N more".
 
@@ -17,10 +18,13 @@
   answered, as prototype-6 has no Save button: a set is live, and every job it
   applies to reads the change on its next read. A *Remove* acts at once, so it
   toasts with *Undo*, and removals in a row collapse into one toast (the
-  removal rule).
+  removal rule). Focus moves to the row that took its place.
+
+  At `NEW_SET` nothing is saved yet: the first change makes the set, and the
+  address moves to it in place. Leaving before that leaves no row behind.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import type { MonitorRow } from "../../ipc/assets";
@@ -35,8 +39,9 @@
   } from "../../ipc/entity";
   import { push, tally } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
-  import { layers } from "../layers.svelte";
   import { entityAddress } from "../address";
+  import { inlineEditor } from "../inline-editor";
+  import { replaceAddress } from "../opener";
   import type { EscTarget } from "../escape";
   import TfDialog from "../settings/TfDialog.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
@@ -46,7 +51,7 @@
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { counted } from "../counted";
-  import { assetLine, itemsOf, KIND_LABEL, MEMBER_KINDS, onePerKey, PATTERN_KINDS, putBack, RULE_KINDS, SHOWN_KEYS, type Removed } from "./sets";
+  import { assetLine, blankSet, itemsOf, KIND_LABEL, MEMBER_KINDS, NEW_SET, NEW_SET_NAME, onePerKey, PATTERN_KINDS, patternShown, putBack, RULE_KINDS, SHOWN_KEYS, type Removed } from "./sets";
   import { toneClass } from "../tone";
   import { kindWord, stateChip } from "../monitors/monitors";
   import { stateWord } from "../state-word";
@@ -104,16 +109,21 @@
     let live = true;
     failed = null;
     missing = false;
-    ports.linkSet(wanted).then(
-      (detail) => {
-        if (live) set = detail;
-      },
-      (error: unknown) => {
-        if (!live) return;
-        if ((error as { code?: string } | null)?.code === "not_found") missing = true;
-        else failed = ipcErrorMessage(error);
-      },
-    );
+    if (wanted === NEW_SET) {
+      set = blankSet();
+    } else if (wanted !== untrack(() => set?.id)) {
+      // A set this editor has just made is already drawn from what its save answered: a read here could only land late.
+      ports.linkSet(wanted).then(
+        (detail) => {
+          if (live) set = detail;
+        },
+        (error: unknown) => {
+          if (!live) return;
+          if ((error as { code?: string } | null)?.code === "not_found") missing = true;
+          else failed = ipcErrorMessage(error);
+        },
+      );
+    }
     ports.ruleChoices().then(
       (read) => {
         if (live) choices = read;
@@ -160,11 +170,20 @@
   function save(change: (draft: LinkSetDraft) => void, toast?: string, saved?: () => void): Promise<void> {
     const target = set?.id;
     saves = saves.then(async () => {
-      if (!set || set.id !== target) return;
+      // A change asked for before the first save answered goes onto the set that save made.
+      if (!set || (target !== "" && set.id !== target)) return;
       const draft = draftOf(set);
+      if (set.id === "") draft.id = null;
       change(draft);
       try {
-        set = await ports.saveLinkSet(draft);
+        const answer = await ports.saveLinkSet(draft);
+        if (set.id === "") {
+          titleFor = answer.id;
+          set = answer;
+          replaceAddress(`#/sets/${encodeURIComponent(answer.id)}`);
+        } else {
+          set = answer;
+        }
         if (toast) push({ text: toast });
         saved?.();
       } catch (error) {
@@ -175,25 +194,48 @@
   }
 
   function rename(event: FocusEvent, field: "name" | "description") {
-    const text = (event.currentTarget as HTMLElement).textContent.trim();
-    if (!set || text === set[field]) return;
-    if (field === "name" && text === "") {
-      (event.currentTarget as HTMLElement).textContent = set.name;
+    const el = event.currentTarget as HTMLElement;
+    const text = el.textContent.trim();
+    if (!set) return;
+    // What the field draws is what the set holds, whitespace and a refused empty name gone.
+    if (text === set[field] || (field === "name" && text === "")) {
+      el.textContent = set[field];
       return;
     }
-    void save((draft) => (draft[field] = text));
+    void save((draft) => (draft[field] = text)).then(() => {
+      if (document.activeElement !== el && set) el.textContent = set[field];
+    });
   }
 
-  /** A set just made has the name the button gave it: its name is selected on arrival, to type over. */
-  function selectIfNew(el: HTMLElement) {
-    if (el.textContent?.trim() !== "New link set") return;
+  /**
+   * A field edited in place draws what the set holds, and is not redrawn: redrawing the header on a save took focus from
+   * the field the reader had just tabbed to. While one has focus its words are the reader's.
+   */
+  function holds(read: () => string) {
+    return (el: HTMLElement) => {
+      const words = read();
+      if (document.activeElement !== el && el.textContent !== words) el.textContent = words;
+    };
+  }
+
+  let title = $state<HTMLElement | null>(null);
+  /** The set the title last took focus for: its first save moves the address and is no new arrival. */
+  let titleFor: string | null = null;
+
+  /** A set with the name the button gave it: its name is selected on arrival, to type over. */
+  $effect(() => {
+    const el = title;
+    const current = set;
+    if (el === null || current === null || titleFor === current.id) return;
+    titleFor = current.id;
+    if (current.name !== NEW_SET_NAME) return;
     el.focus();
     const range = document.createRange();
     range.selectNodeContents(el);
     const selection = getSelection();
     selection?.removeAllRanges();
     selection?.addRange(range);
-  }
+  });
 
   function enterLeaves(event: KeyboardEvent) {
     if (event.key === "Escape" && set) {
@@ -261,15 +303,19 @@
   }
 
   function rekind(at: number, kind: LinkSetRuleKind) {
-    const rule = set?.rules[at];
-    if (!rule || rule.kind === kind) return;
+    if (set?.rules[at]?.kind === kind) {
+      // Back to what it holds: nothing is waiting any more.
+      if (pending?.at === at) pending = null;
+      return;
+    }
     pending = { at, kind };
   }
 
+  /** The row stays through the save, so a value picked keeps its place and focus stays on it. */
   function choose(at: number, kind: LinkSetRuleKind, value: string) {
     if (!value) return;
     const replacing = pending?.at === at && at < (set?.rules.length ?? 0);
-    pending = null;
+    settled = true;
     void save((draft) => {
       const rule = { kind, value };
       if (draft.rules.some((held) => held.kind === kind && held.value === value)) {
@@ -278,18 +324,44 @@
       }
       if (at < draft.rules.length) draft.rules.splice(at, 1, rule);
       else draft.rules.push(rule);
+    }).then(() => {
+      if (pending?.at === at) pending = null;
     });
   }
 
   function addRule() {
+    settled = false;
     pending = { at: set?.rules.length ?? 0, kind: "epic" };
   }
 
-  /** A rule waiting for its value is an inline editor: `Esc` puts it away first, wherever focus is. */
-  $effect(() => {
-    if (pending === null) return;
-    return untrack(() => layers.add({ kind: "dialog", close: () => (pending = null) }));
-  });
+  /** Whether the waiting rule ended with a value, which keeps focus where it is. */
+  let settled = false;
+  let rulesEl = $state<HTMLElement | null>(null);
+
+  /** Where focus goes when a rule stops waiting: its value if it took one, its kind if the row stays, else *Add a rule*. */
+  function ruleBack(at: number): HTMLElement | null {
+    const row = rulesEl?.querySelector<HTMLElement>(`[data-rule="${at}"]`);
+    return row?.querySelector<HTMLElement>(settled ? "select[aria-label='Applies to which']" : "select[aria-label='Rule']") ?? rulesEl?.querySelector<HTMLElement>("[data-add-rule]") ?? null;
+  }
+
+  /**
+   * A rule waiting for its value is an inline editor: focus goes to the value, and `Esc` puts it away first, wherever focus is.
+   * In one of its dropdowns one press does it: a blur first, as a text field has, would ask twice.
+   */
+  const waitingRule = (at: number) =>
+    inlineEditor(() => cancelRule(), { focus: "select[aria-label='Applies to which']", back: () => ruleBack(at) });
+
+  function cancelRule() {
+    settled = false;
+    pending = null;
+  }
+
+  function ruleKey(event: KeyboardEvent, waiting: boolean) {
+    if (!waiting || event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    cancelRule();
+  }
 
   /**
    * Take one thing out of the set, at once, with *Undo* on the toast. A second
@@ -310,36 +382,59 @@
     },
   }));
 
-  function removeOne(gone: Removed, named: string, change: (draft: LinkSetDraft) => void) {
-    void save(change, undefined, () => removedToast({ gone, named }));
+  /**
+   * Focus after a *Remove* took its row: the next row's *Remove*, else the row before's, else the panel's way of adding one.
+   * So a run of removals is a run of presses, and `Tab` carries on from where the reader was.
+   */
+  function refocusAfter(pressed: HTMLElement | null): () => void {
+    const holder = pressed?.closest<HTMLElement>(".tf-members, .tf-panel") ?? null;
+    if (pressed === null || holder === null) return () => {};
+    const at = [...holder.querySelectorAll<HTMLElement>(".tf-x")].indexOf(pressed);
+    const panel = holder.closest<HTMLElement>(".tf-panel") ?? holder;
+    return () => {
+      void tick().then(() => {
+        const active = document.activeElement;
+        if (active !== null && active !== document.body && active !== pressed && active.isConnected) return;
+        const rows = [...holder.querySelectorAll<HTMLElement>(".tf-x")];
+        (rows[at] ?? rows[at - 1] ?? panel.querySelector<HTMLElement>(".tf-set-add .tf-btn:last-child, [data-add-rule]"))?.focus({ preventScroll: true });
+      });
+    };
   }
 
-  function dropMember(at: number, named: string) {
+  function removeOne(gone: Removed, named: string, change: (draft: LinkSetDraft) => void, pressed: HTMLElement | null) {
+    const refocus = refocusAfter(pressed);
+    void save(change, undefined, () => {
+      removedToast({ gone, named });
+      refocus();
+    });
+  }
+
+  function dropMember(at: number, named: string, pressed: HTMLElement | null) {
     const item = set?.members[at];
     if (!item) return;
     const { kind, entity_id } = item;
     removeOne({ list: "members", at, item: { kind, entity_id } }, named, (draft) => {
       draft.members = draft.members.filter((held) => held.entity_id !== entity_id);
-    });
+    }, pressed);
   }
 
-  function dropPattern(at: number) {
+  function dropPattern(at: number, pressed: HTMLElement | null) {
     const item = set?.patterns[at];
     if (!item) return;
     const { kind, query } = item;
     removeOne({ list: "patterns", at, item: { kind, query } }, "a pattern", (draft) => {
       draft.patterns = draft.patterns.filter((held) => !(held.kind === kind && held.query === query));
-    });
+    }, pressed);
   }
 
-  function dropRule(at: number) {
-    if (pending?.at === at) pending = null;
+  function dropRule(at: number, pressed: HTMLElement | null) {
+    if (pending?.at === at) cancelRule();
     const item = set?.rules[at];
     if (!item) return;
     const { kind, value } = item;
     removeOne({ list: "rules", at, item: { kind, value } }, "a rule", (draft) => {
       draft.rules = draft.rules.filter((held) => !(held.kind === kind && held.value === value));
-    });
+    }, pressed);
   }
 
   /** The rows *Applies to* draws: the stored rules, one re-kinded or added waiting for its value. */
@@ -357,7 +452,7 @@
   const have = $derived(new Set(set?.members.map((member) => member.entity_id) ?? []));
 </script>
 
-<TfCrumbs parts={[{ name: "Link sets", href: "#/sets" }, { name: set?.name ?? "Link set" }]} {back} />
+<TfCrumbs parts={[{ name: "Link sets", href: "#/sets" }, { name: id === NEW_SET ? NEW_SET_NAME : (set?.name ?? "Link set") }]} {back} />
 {#if missing}
   <TfNothingHere message="This link set does not exist. It may have been deleted." href="#/sets" action="All link sets" />
 {:else if failed !== null}
@@ -369,35 +464,37 @@
   <div class="tf-cbody"><TfWaiting phase={waitPhase({ drawn: false, reading: true, failed: false })} shape="lines" count={8}><span></span></TfWaiting></div>
 {:else}
   <header class="tf-fhead">
-    {#key `${set.id}|${set.name}|${set.description}`}
     <div>
+      <!-- svelte-ignore a11y_missing_content -- `holds` writes its words. -->
       <h1>
         <span
           class="tf-set-title"
-          contenteditable="true"
+          contenteditable="plaintext-only"
           spellcheck="false"
           role="textbox"
           tabindex="0"
           aria-label="Name"
           title="Click to rename"
-          {@attach selectIfNew}
+          bind:this={title}
+          {@attach holds(() => set?.name ?? "")}
           onblur={(event) => rename(event, "name")}
-          onkeydown={enterLeaves}>{set.name}</span
+          onkeydown={enterLeaves}></span
         >
       </h1>
       <div
         class="tf-sub tf-set-desc"
-        contenteditable="true"
+        contenteditable="plaintext-only"
         role="textbox"
         tabindex="0"
         aria-label="Description"
         data-placeholder="Describe what this set is for."
+        {@attach holds(() => set?.description ?? "")}
         onblur={(event) => rename(event, "description")}
         onkeydown={enterLeaves}
-      >{set.description}</div>
+      ></div>
     </div>
-    {/key}
-    <div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => (deleting = true)}>Delete…</button></div>
+    <!-- Nothing is saved yet, so there is nothing to delete. -->
+    {#if set.id !== ""}<div class="tf-acts"><button type="button" class="tf-btn tf-danger" onclick={() => (deleting = true)}>Delete…</button></div>{/if}
   </header>
   <div class="tf-cbody tf-set">
     <div class="tf-set-panels">
@@ -420,7 +517,7 @@
             {#each patterns as pattern (pattern.at)}
               <div class="tf-member tf-pattern">
                 <details class="tf-set-fold">
-                  <summary>Pattern: <code>{pattern.query}</code> <span class="tf-dim">({counted(pattern.count, "match", "matches")} now)</span></summary>
+                  <summary>Pattern: <code>{patternShown(kind, pattern.query)}</code> <span class="tf-dim">({counted(pattern.count, "match", "matches")} now)</span></summary>
                   <ul>
                     {#each pattern.matches as row (row.entity_id)}<li><a href={entityAddress(kind, row.entity_id)}>{row.title ?? keyOf(row.entity_id)}</a></li>{/each}
                     {#if pattern.count > pattern.matches.length}<li class="tf-dim">and {pattern.count - pattern.matches.length} more</li>{/if}
@@ -429,8 +526,8 @@
                 <button
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"
-                  aria-label="Remove the pattern {pattern.query}"
-                  onclick={() => dropPattern(pattern.at)}>Remove</button
+                  aria-label="Remove the pattern {patternShown(kind, pattern.query)}"
+                  onclick={(event) => dropPattern(pattern.at, event.currentTarget)}>Remove</button
                 >
               </div>
             {/each}
@@ -445,7 +542,7 @@
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"
                   aria-label="Remove {member.title ?? member.entity_id}"
-                  onclick={() => dropMember(set?.members.findIndex((held) => held.entity_id === member.entity_id) ?? -1, member.title ?? keyOf(member.entity_id))}
+                  onclick={(event) => dropMember(set?.members.findIndex((held) => held.entity_id === member.entity_id) ?? -1, member.title ?? keyOf(member.entity_id), event.currentTarget)}
                   >Remove</button
                 >
               </div>
@@ -456,11 +553,12 @@
       {/each}
     </div>
     <aside class="tf-side">
-      <div class="tf-panel">
+      <div class="tf-panel" bind:this={rulesEl}>
         <header><h3>Applies to</h3></header>
         {#each ruleRows as rule (rule.at)}
           {@const count = rule.waiting ? undefined : counts[countKey(rule)]}
-          <div class="tf-rule">
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="tf-rule" data-rule={rule.at} onkeydown={(event) => ruleKey(event, rule.waiting)} {@attach rule.waiting ? waitingRule(rule.at) : null}>
             <select aria-label="Rule" value={rule.kind} onchange={(event) => rekind(rule.at, event.currentTarget.value as LinkSetRuleKind)}>
               {#each RULE_KINDS as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}
             </select>
@@ -469,9 +567,9 @@
               {#each options(rule.kind, rule.value) as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
             </select>
             <div class="tf-rule-foot">
-              {#if rule.waiting}<span class="tf-dim tf-rule-n">Choose what it applies to.</span>
+              {#if rule.waiting}<span class="tf-dim tf-rule-n">{options(rule.kind, rule.value).length === 0 ? "Nothing to choose here yet. Try another kind." : "Choose what it applies to."}</span>
               {:else if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
-              <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => dropRule(rule.at)}>{rule.at >= set.rules.length ? "Cancel" : "Remove"}</button>
+              <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => dropRule(rule.at, event.currentTarget)}>{rule.at >= set.rules.length ? "Cancel" : "Remove"}</button>
             </div>
           </div>
         {:else}
@@ -481,6 +579,7 @@
           <button
             type="button"
             class="tf-btn tf-sm"
+            data-add-rule
             disabled={pending !== null}
             title={pending !== null ? "Choose what the rule above applies to first" : undefined}
             onclick={addRule}>Add a rule</button

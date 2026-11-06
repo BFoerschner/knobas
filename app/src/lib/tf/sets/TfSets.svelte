@@ -8,7 +8,10 @@
   (`TfSetEditor.svelte`), which this page draws in its place. With no sets the
   empty block holds the one *New link set*, and there is nothing to filter.
 
-  Over `link_sets`, `save_link_set` (*New link set*, the hint's *Add to …*),
+  *New link set* opens an editor with nothing saved yet (`NEW_SET`): the first
+  change saves it, so leaving at once leaves no empty row.
+
+  Over `link_sets`, `save_link_set` (the hint's *Add to …*),
   `link_set_hints` (#870, R-7.10's card), `parent_links` and
   `set_parent_links`. Sets stay in knobas: nothing here writes to a source.
 -->
@@ -28,7 +31,7 @@
   import { draftOf } from "./apply";
   import { firstHint, notNow } from "./hints.svelte";
   import { defaultPorts, type SetPorts } from "./ports";
-  import { APPLIES_BY, contentLines, hintTickets, keyWords, ruleWords, visibleSets } from "./sets";
+  import { APPLIES_BY, contentLines, hintTickets, keyWords, NEW_SET, ruleWords, visibleSets } from "./sets";
   import TfKey from "../TfKey.svelte";
   import TfSetEditor from "./TfSetEditor.svelte";
 
@@ -54,7 +57,6 @@
   /** Moves on *Try again*, which the read below follows. */
   let attempt = $state(0);
   let inherit = $state<boolean | null>(null);
-  let creating = $state(false);
   /** R-7.10's hints (#870); the card draws the first one not put away. */
   let hints = $state<LinkSetHint[]>([]);
   let adding = $state(false);
@@ -110,17 +112,8 @@
     }
   }
 
-  async function newSet() {
-    if (creating) return;
-    creating = true;
-    try {
-      const made = await ports.saveLinkSet({ id: null, name: "New link set", description: "", members: [], patterns: [], rules: [] });
-      location.hash = `#/sets/${encodeURIComponent(made.id)}`;
-    } catch (error) {
-      push({ text: ipcErrorMessage(error), tone: "err" });
-    } finally {
-      creating = false;
-    }
+  function newSet() {
+    location.hash = `#/sets/${NEW_SET}`;
   }
 
   /** *Add to …*: the set saved whole with the item added, then the list and the hints read again. */
@@ -166,7 +159,7 @@
     </div>
     {#if sets !== null && sets.length > 0}
       <div class="tf-acts">
-        <button type="button" class="tf-btn tf-primary" disabled={creating} onclick={() => void newSet()}>New link set</button>
+        <button type="button" class="tf-btn tf-primary" onclick={newSet}>New link set</button>
       </div>
     {/if}
   </header>
@@ -206,7 +199,7 @@
                   ><a class="tf-set-name" href="#/sets/{encodeURIComponent(set.id)}"><Marked text={set.name} typed={filter.text} /></a
                   >{#if set.description}<span class="tf-sub">{set.description}</span>{/if}</td
                 >
-                <td>{#if set.members.length + set.patterns.length > 0}{contentLines(set).join(", ")}{:else}<span class="tf-dim">nothing yet</span>{/if}</td>
+                <td>{#if set.members.length + set.patterns.length > 0}{@const lines = contentLines(set)}{#each lines as line, at (line)}<span class="tf-sets-item">{line}{at < lines.length - 1 ? "," : ""}</span>{" "}{/each}{:else}<span class="tf-dim">nothing yet</span>{/if}</td>
                 <td>
                   {#each set.rules as rule, at (at)}<span class="tf-sets-rule">{#each ruleWords(rule) as word, w (w)}{#if word.key}<TfKey value={word.text} />{:else}{word.text}{/if}{/each}</span>{:else}<span class="tf-dim"
                       >nothing yet</span
@@ -220,7 +213,7 @@
       {:else if sets.length === 0}
         <div class="tf-empty">
           <p>No link sets yet. A set names the repos, pipelines, pages, assets and monitors a kind of work needs, once.</p>
-          <button type="button" class="tf-btn tf-primary" disabled={creating} onclick={() => void newSet()}>New link set</button>
+          <button type="button" class="tf-btn tf-primary" onclick={newSet}>New link set</button>
         </div>
       {:else}
         <TfNoMatch noun="link sets" {filter} />

@@ -24,6 +24,7 @@ import {
   landingOf,
   problemBadge,
   routeAddressOf,
+  focusedColumn,
   selectionIn,
   sourceOf,
   type ColumnPath,
@@ -746,4 +747,18 @@ test("a Depends on this row's path drops the steps it shares with the selected a
   expect(pathBelow(detail, "estate / engine / gitea / db")).toBe("db");
   expect(pathBelow(detail, "elsewhere / box")).toBe("elsewhere / box");
   expect(pathBelow(detail, null)).toBeNull();
+});
+
+/**
+ * `Tab` stops once per column, so a press can come from a column above the deepest: it walks the column it was pressed in.
+ */
+test("the walk starts from the column it is told, not only the deepest", () => {
+  const path = atVm();
+  const deepest = focusedColumn(path);
+  expect(deepest).toBeGreaterThan(0);
+  const up = deepest - 1;
+  const here = LISTS[up]!;
+  const next = here[here.findIndex((row) => row.id === selectionIn(path, up)) + 1];
+  if (next !== undefined) expect(walk("ArrowDown", path, LISTS, up)).toEqual({ go: "asset", id: next.id });
+  expect(walk("ArrowRight", path, LISTS, up)).toEqual({ go: "asset", id: selectionIn(path, deepest) });
 });

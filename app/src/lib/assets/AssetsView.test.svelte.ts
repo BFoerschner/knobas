@@ -409,6 +409,7 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
       // real state (nothing laid out yet) and is what every test that is not
       // about the collapse leaves it in.
       ...(over.stripWidth === undefined ? {} : { stripWidth: () => over.stripWidth ?? 0 }),
+      ...(over.marks === undefined ? {} : { marks: over.marks }),
       ports: {
         // #429's type table. This file is about the *read*, and nothing here
         // creates -- but the view asks for the table on mount, so a port left
@@ -474,6 +475,8 @@ interface Over {
   stripWidth?: number;
   /** A search answer of the test's own, for the shapes `matchesFor` cannot make. */
   answer?: SearchResponse;
+  /** What a ticket's *Assets* row marks. */
+  marks?: { assets: ReadonlySet<string>; holders: ReadonlySet<string>; key: string };
 }
 
 /**
@@ -589,6 +592,11 @@ function text(): string {
   return (target.textContent ?? "").replace(/\s+/g, " ").trim();
 }
 
+/** Where the pane says its asset sits: its heading's title, since the columns draw the path. */
+function panePath(): string {
+  return target.querySelector(".pane-h h2")?.getAttribute("title") ?? "";
+}
+
 /** Each column's row labels, left to right. */
 function columns(): string[][] {
   return [...target.querySelectorAll("ol.col")].map((column) =>
@@ -687,8 +695,9 @@ test("an asset's address draws its whole path and its pane", async () => {
   expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]);
 
   const pane = text();
-  // The held-by line ends at the asset: it is *where this thing is*.
-  expect(pane).toContain("hel1 / vm-db-01 / postgres");
+  // The path is the columns', so the pane's heading only holds it in its title (*where this thing is*).
+  expect(panePath()).toContain("hel1 / vm-db-01 / postgres");
+  expect(pane).not.toContain("hel1 / vm-db-01 / postgres");
   expect(pane).toContain("Image postgres:18");
   // Declared and unfilled: an em dash, never the word "null".
   expect(pane).toContain("Ports —");
@@ -727,7 +736,7 @@ test("selecting an asset that holds something opens the next column", async () =
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["postgres"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-db-01", null]);
-  expect(text()).toContain("hel1 / vm-db-01");
+  expect(panePath()).toContain("hel1 / vm-db-01");
 });
 
 /**
@@ -752,13 +761,13 @@ test("an empty estate is told apart from a read that has not landed", async () =
  */
 test("a deep link to an asset that is gone says so instead of showing the last one", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(panePath()).toContain("hel1 / vm-db-01 / postgres"));
 
   nav.go("#/asset/asset:nobody");
   flushSync();
 
   await waitFor(() => expect(text()).toContain("knobas does not hold this asset."));
-  expect(text()).not.toContain("hel1 / vm-db-01 / postgres");
+  expect(panePath()).not.toContain("hel1 / vm-db-01 / postgres");
   expect(columns()).toEqual([]);
 });
 
@@ -774,7 +783,7 @@ test("a deep link to an asset that is gone says so instead of showing the last o
  */
 test("an inherited value names the ancestor it came from and links to it", async () => {
   const { nav } = render("#/asset/asset:postgres");
-  await waitFor(() => expect(text()).toContain("hel1 / vm-db-01 / postgres"));
+  await waitFor(() => expect(panePath()).toContain("hel1 / vm-db-01 / postgres"));
 
   const pane = text();
   expect(pane).toContain("Environment prod inherited from hel1");
@@ -814,7 +823,7 @@ test("a value set on the asset itself says so and offers no link", async () => {
   expect(target.querySelectorAll("aside.pane button.src")).toHaveLength(0);
   // The site is rated by nobody and still reads `warn`, because the container
   // two levels down is — that is the rollup, in the pane.
-  expect(text()).toContain("Health Warning own status none");
+  expect(text()).toContain("Health Warning Own status None");
 });
 
 /**
@@ -940,7 +949,7 @@ test("the arrows and enter walk three levels, and the pane follows", async () =>
 
   press("Enter");
   await waitFor(() => expect(marked()).toEqual(["hel1", "vm-db-01", "postgres"]));
-  expect(text()).toContain("hel1 / vm-db-01 / postgres");
+  expect(panePath()).toContain("hel1 / vm-db-01 / postgres");
   // The container holds nothing: `Enter` on it opens no column and moves
   // nothing, rather than selecting out of an empty one.
   press("Enter");
@@ -1048,7 +1057,7 @@ test("a path too deep for the window collapses its oldest columns to spines", as
   await waitFor(() => expect(spines()).toEqual(["hel1"]));
   expect(columns()).toEqual([["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]);
   expect(marked()).toEqual(["vm-app-02", "gitea", "gitea-db"]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 
   target.querySelector<HTMLButtonElement>("button.spine")?.click();
   flushSync();
@@ -1058,7 +1067,7 @@ test("a path too deep for the window collapses its oldest columns to spines", as
   // selected in it.
   await waitFor(() => expect(spines()).toEqual(["gitea-db"]));
   expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"]]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 });
 
 /** A window with room for every column draws no spine at all. */
@@ -1096,7 +1105,7 @@ test("typing a name opens the path to the first match and selects it", async () 
     expect(columns()).toEqual([["hel1"], ["vm-app-02", "vm-db-01"], ["gitea"], ["gitea-db"]]),
   );
   expect(marked()).toEqual(["hel1", "vm-app-02", "gitea", "gitea-db"]);
-  expect(text()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
+  expect(panePath()).toContain("hel1 / vm-app-02 / gitea / gitea-db");
 });
 
 /**
@@ -1224,7 +1233,7 @@ test("the pane draws what an asset exposes and what reaches it", async () => {
   expect(exposing).toContain("Gitea");
   expect(exposing).toContain("http://127.0.0.1:3000/");
   // A public route says so; an internal one is the unmarked default.
-  expect(exposing).toContain("public");
+  expect(exposing).toContain("Public");
   expect(exposing).toContain("Traefik dashboard");
   expect(exposing).toContain("lands on nothing knobas knows");
   // A route's properties are the reader's own and are drawn as they are.
@@ -1518,7 +1527,7 @@ test("the pane lists the monitors watching the asset, with their state", async (
     (row.textContent ?? "").replace(/\s+/g, " ").trim(),
   );
   expect(rows).toEqual([
-    "postgres-check down Open in Kuma",
+    "postgres-check Down Open in Kuma",
     "postgres-slow-query Paused or gone from Kuma",
     "postgres-wal no reading Open in Kuma",
   ]);
@@ -1635,4 +1644,50 @@ test("a pane that holds thousands draws the Holds lines near the viewport (#2210
   const holds = [...target.querySelectorAll("aside.pane section.grp")].find((group) => group.querySelector("h3")?.textContent?.trim() === "Holds")!;
   expect(holds.querySelectorAll("li").length).toBeGreaterThan(5);
   expect(holds.querySelectorAll("li").length).toBeLessThan(100);
+});
+
+/**
+ * **One tab stop per column** (F-530): `Tab` reaches a column by the row on the path, or its first, and the arrows walk from
+ * the column the press was made in. Every row a stop was 27 presses from the crumb to the pane.
+ */
+test("a column has one tab stop, and the arrows walk the column they are pressed in", async () => {
+  const { nav } = render(`#/asset/${CONTAINER.id}`);
+  await waitFor(() => expect(marked().at(-1)).toBe("postgres"));
+
+  const stops = [...target.querySelectorAll("ol.col")].map((column) => column.querySelectorAll('button.row[tabindex="0"]').length);
+  expect(stops.every((count) => count === 1)).toBe(true);
+  const stop = target.querySelector<HTMLButtonElement>('ol.col[data-col="1"] button.row[tabindex="0"]')!;
+  expect(stop.getAttribute("aria-current")).toBe("true");
+
+  // `↓` on the VMs' column moves in that column, whatever is selected deeper.
+  stop.focus();
+  press("ArrowUp", stop);
+  await waitFor(() => expect(nav.route.view === "assets" && nav.route.assetId).toBe("asset:vm-app-02"));
+});
+
+test("Enter on a row Tab reached selects that row, and so does → on one with nothing selected in its column", async () => {
+  const { nav } = render("#/assets/tree");
+  await waitFor(() => expect(columns()).toEqual([["hel1"]]));
+  const first = target.querySelector<HTMLButtonElement>('ol.col[data-col="0"] button.row[tabindex="0"]')!;
+  first.focus();
+  press("ArrowRight", first);
+  await waitFor(() => expect(nav.route.view === "assets" && nav.route.assetId).toBe(SITE.id));
+
+  await waitFor(() => expect(marked().at(0)).toBe("hel1"));
+  const vm = target.querySelector<HTMLButtonElement>('ol.col[data-col="1"] button.row[tabindex="0"]')!;
+  press("Enter", vm);
+  await waitFor(() => expect(nav.route.view === "assets" && nav.route.assetId).toBe(vm.dataset["asset"]));
+});
+
+test("the pane's heading holds the path in its title, and a mark keeps a row's name whole", async () => {
+  render(`#/asset/${CONTAINER.id}`, ESTATE, { marks: { assets: new Set([CONTAINER.id]), holders: new Set([VM.id]), key: "PAY-231" } });
+  await waitFor(() => expect(marked().at(-1)).toBe("postgres"));
+
+  expect(panePath()).toBe("hel1 / vm-db-01 / postgres");
+  expect(target.querySelector(".pane .crumb")).toBeNull();
+  // A small mark and not the ticket's chip: the line under the bar names the ticket.
+  const row = target.querySelector(`button.row[data-asset="${CONTAINER.id}"]`)!;
+  expect(row.querySelector(".mark")?.getAttribute("aria-label")).toBe("PAY-231 reaches this asset");
+  expect(row.querySelector(".tf-chip")).toBeNull();
+  expect(target.querySelector(`button.row[data-asset="${VM.id}"] .holds`)).not.toBeNull();
 });
