@@ -212,7 +212,7 @@ Neighbouring buttons are `var(--control-gap)` apart, in headers, rows, dialog fo
 
 ### Header
 
-The title block on the left and `.tf-acts` on the right, top-aligned, while both fit. What fits decides this, not the window's width. The block is the title and its subline together and asks for at least 360 px, so a long subline wraps inside it and stays with the title it describes. When the actions don't fit beside that they wrap as one group under the block: title, meta, actions. A group never wraps a button at a time, and a subline can't run under the actions on one row. Amended 2026-11-06, reversing Round 10's subline under the actions. The actions come in this order:
+The title block on the left and `.tf-acts` on the right, top-aligned, while both fit. What fits decides this, not the window's width. The block is the title and its subline together and asks for at least 360 px, so a long subline wraps inside it and stays with the title it describes. When the actions don't fit beside that they wrap as one group under the block: title, meta, actions. A group never wraps a button at a time, and a subline can't run under the actions on one row. Amended 2026-11-06, reversing Round 10's subline under the actions. A page's tab strip holds one height across its tabs, so a tab that doesn't offer an action keeps that action's room unseen and out of the Tab order, as Compare does for *New pull request* and the branch picker. The actions come in this order:
 
 1. the primary;
 2. the other actions;

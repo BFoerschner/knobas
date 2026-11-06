@@ -525,12 +525,15 @@ test("an address that names no commit draws the nothing-here block under the tab
   expect(target.querySelector(".tf-cgroup-h")).toBeNull();
 });
 
-test("the branch selector is not on Compare, whose Into and From already say it (F-230)", async () => {
+test("the branch selector holds its room unseen on Compare, whose Into and From already say it (F-230, F-249)", async () => {
   await draw([REPO, "compare"]);
-  expect(target.querySelector("select[aria-label=Branch]")).toBeNull();
+  const held = () => target.querySelector<HTMLElement>("select[aria-label=Branch]")!.closest<HTMLElement>(".tf-repohold")!;
+  expect(held().classList.contains("tf-held")).toBe(true);
+  expect(held().inert).toBe(true);
   expect(target.querySelector("#tf-cmp-from")).not.toBeNull();
   await draw([REPO, "commits"]);
-  expect(target.querySelector("select[aria-label=Branch]")).not.toBeNull();
+  expect(held().classList.contains("tf-held")).toBe(false);
+  expect(held().inert).toBe(false);
 });
 
 test("Pull requests lists this repository's, with a state filter", async () => {
@@ -1194,9 +1197,11 @@ test("an address with a tab the repository does not have says so under its heade
   expect(target.querySelector(".tf-cbody")).toBeNull();
 });
 
-test("Compare's header does not offer New pull request again: the form below is it", async () => {
+test("Compare's header does not offer New pull request again, though it holds its room: the form below is it", async () => {
   await draw([REPO, "compare"]);
-  expect([...target.querySelectorAll(".tf-fhead .tf-acts .tf-btn")].map(text)).not.toContain("New pull request");
+  const reachable = [...target.querySelectorAll(".tf-fhead .tf-acts .tf-btn")].filter((node) => node.closest(".tf-held") === null);
+  expect(reachable.map(text)).not.toContain("New pull request");
+  expect(target.querySelector(".tf-held .tf-btn")?.textContent).toContain("New pull request");
 });
 
 test("Pull requests draws Code's row: the title over its author, the state, and when it last moved", async () => {

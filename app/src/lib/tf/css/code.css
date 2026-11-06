@@ -32,6 +32,9 @@
 .tf-bsel select:focus-visible { outline: none; }
 .tf-bsel:focus-within { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tf-bsel:has(select:disabled) { opacity: .55; }
+/* *New pull request* and the branch picker sit in the header's row as its own items. On Compare they hold their room unseen, so the tabs under the header hold still (F-249). */
+.tf-repohold { display: contents; }
+.tf-repohold.tf-held { visibility: hidden; }
 /* A repository's title never breaks inside its name. */
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */

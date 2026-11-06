@@ -574,16 +574,14 @@
       </div>
       <!-- #2238's order, as the mockup (#2252) draws it: the primary, the others, Open in, Refresh last. -->
       <div class="tf-acts">
-        <!-- Compare is this form, with a primary of its own, so its header does not offer it again. -->
-        {#if tab === "compare"}
-          <!-- Nothing to propose here. -->
-        {:else if oneBranch}
-          <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
-        {:else if proposed !== null}
-          <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
-        {/if}
-        <!-- Compare has *Into* and *From*: a third branch control there would be a second way to set one of them. -->
-        {#if tab !== "compare"}
+        <!-- Compare is this form, with a primary and *Into* and *From* of its own, so these would say it twice. They keep their room,
+             hidden and out of the Tab order, because a shorter row lets the tabs under it jump between tabs (F-249). -->
+        <span class="tf-repohold" class:tf-held={tab === "compare"} inert={tab === "compare"}>
+          {#if oneBranch}
+            <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
+          {:else if proposed !== null}
+            <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
+          {/if}
           <label class="tf-bsel"
             ><svg viewBox="0 0 16 16" aria-hidden="true"
               ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
@@ -595,7 +593,7 @@
               {/each}
             </select></label
           >
-        {/if}
+        </span>
         <button
           type="button"
           class="tf-btn"
