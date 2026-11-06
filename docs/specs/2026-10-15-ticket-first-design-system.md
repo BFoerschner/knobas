@@ -6,6 +6,8 @@ Acceptance for UI work is this file, the `#/controls` specimen (see [Controls](#
 
 It replaces `requirements.md` §16, which is a short version of the same content.
 
+**How it feels wins.** When a rule here and how the app feels to use disagree, how it feels wins, and the rule gets amended (Björn, 2026-11-06).
+
 ## What the design is
 
 knobas is a work tool for one developer who has a dozen tools open behind it. The page is quiet: slate paper, hairline rules, dark ink, no decoration. One thing is loud, and that's the yellow card. It marks the ticket you are on, wherever that ticket appears. The job key sits on it in a very narrow, very heavy Archivo at 64 px. That key is the identity of the app, and everything else stays out of its way.
