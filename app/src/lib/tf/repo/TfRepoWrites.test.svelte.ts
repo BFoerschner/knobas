@@ -895,6 +895,35 @@ test("the header's New pull request skips a branch one was sent from", async () 
   expect(header()).not.toContain("spike");
 });
 
+test("a sent pull request the source refuses gives the form back, with what was typed (F-257)", async () => {
+  const queue = echoFollower();
+  followed.follower = queue.follower;
+  let n = 0;
+  const stand = ports({
+    submitWrite: async (payload: WriteOpPayload) => {
+      writes.push(payload);
+      return { id: ++n, state: "pending" } as never;
+    },
+  });
+  // The shell keeps the page mounted, and its tabs with it, and hands it each address.
+  const props = $state({ ready: true, rest: COMPARE("spike/sepa-instant"), job: null as string | null, ports: stand, now: NOW });
+  view = mount(TfRepo, { target, props });
+  await settle();
+  type(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!, "My own words");
+  button("Create pull request", target)!.click();
+  await settle();
+  props.rest = [REPO, "prs"];
+  await settle();
+  props.rest = COMPARE("spike/sepa-instant");
+  await settle();
+  expect(button("Create pull request", target)).toBeUndefined();
+  expect(text(target.querySelector(".tf-compare .tf-cexists"))).toBe("A pull request from this branch is on its way: My own words.");
+  queue.hear(1, { id: 1, state: "refused", detail: "403 Forbidden" });
+  await settle();
+  expect(button("Create pull request", target)).toBeDefined();
+  expect(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!.value).toBe("My own words");
+});
+
 test("two sent with one title are two rows, and the tab stays drawn (F-257)", async () => {
   let n = 40;
   const io = ports({
