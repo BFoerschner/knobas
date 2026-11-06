@@ -79,8 +79,9 @@
 }
 .tf-ln-lab { font-weight: 600; }
 
-/* A selected line is an ink bar on --sheet-2, whatever draws it. */
-.tf .tf-ln-opt:hover, .tf .tf-ln-res:hover { background: var(--sheet-2); }
+/* A selected line is an ink bar on --sheet-2, whatever draws it. A row takes the selection when the pointer really moves (`aim.ts`),
+   so a row has no hover tint of its own: under a still pointer it read as a second selection (F-642). Only what can't be selected has one. */
+.tf .tf-ln-miss .tf-ln-opt:hover, .tf .tf-ln-err + .tf-ln-opt:hover { background: var(--sheet-2); }
 .tf .tf-ln-opt.tf-ln-on, .tf .tf-ln-res.tf-ln-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
 
 /* A line with a name and what it does: the palette, the board's Retry, a suggestion, a sheet's action. */
@@ -110,7 +111,9 @@
   font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap;
 }
 .tf .tf-ln-opt:has(> .tf-ln-chord) { grid-template-columns: minmax(var(--ln-name), max-content) minmax(0, 1fr) auto; }
-.tf .tf-ln-res:has(> .tf-ln-chord) { grid-template-columns: var(--ln-tag) var(--ln-key) minmax(0, 1fr) auto; }
+.tf .tf-ln-res:has(> .tf-ln-chord), .tf .tf-ln-res:has(> .tf-ln-src) { grid-template-columns: var(--ln-tag) var(--ln-key) minmax(0, 1fr) auto; }
+/* The source's name on a row whose key another row has (#1476, F-636): quiet, at the row's end, and never pushing the title out. */
+.tf-ln-res > .tf-ln-src { max-width: 170px; font-size: var(--t-sm); color: var(--ink-2); }
 
 /* The key panel (#2429): what the keys bind, the keys large as they are pressed, the buttons, the hint. */
 .tf-ln-bind { display: grid; gap: 14px; justify-items: center; padding: 22px 18px 18px; text-align: center; }
@@ -140,7 +143,7 @@
   display: grid; grid-template-columns: var(--ln-tag) var(--ln-key) minmax(0, 1fr); gap: var(--ln-gap); align-items: center; width: 100%;
   text-align: left; min-height: 38px; padding: 6px 18px; font-size: var(--t-md); color: var(--ink);
 }
-.tf-ln-res > :is(.tf-ln-mg, .tf-ln-k, .tf-ln-t, .tf-ln-chord) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tf-ln-res > :is(.tf-ln-mg, .tf-ln-k, .tf-ln-t, .tf-ln-chord, .tf-ln-src) { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tf-ln-mg {
   display: inline-flex; align-items: center; justify-content: center; height: 20px; border: 1px solid var(--rule);
   border-radius: 3px; font-size: var(--t-2xs); font-weight: 600; letter-spacing: .04em; color: var(--ink-2); flex: none;

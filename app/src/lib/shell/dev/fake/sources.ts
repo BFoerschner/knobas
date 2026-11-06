@@ -609,6 +609,19 @@ function syncRole(args: Record<string, unknown>): { source_id: string; run_id: n
   return runs;
 }
 
+/** `sync_all`: every enabled source runs, for long enough to look at. `?fake-sync-held` keeps them going, as for `sync_role`. */
+function syncAll(): number[] {
+  const on = FIXTURE_SOURCES.filter((source) => source.enabled);
+  const runs = on.map((source, index) => ({ source, run_id: 91 + index }));
+  for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), running: true, run_id });
+  if (!new URLSearchParams(location.search).has("fake-sync-held")) {
+    setTimeout(() => {
+      for (const { source, run_id } of runs) bridge?.emit("sync:state", { ...fakeStatus(source), run_id });
+    }, 4000);
+  }
+  return runs.map((run) => run.run_id);
+}
+
 /**
  * Reads `?fake-sources-healthy` before the bridge is installed: no source needs
  * the reader. The README's screenshots (`docs/screenshots/shots.txt`) ask for it,
@@ -649,7 +662,8 @@ export function handlers(): Handlers {
     // No fixture source is running (`fakeStatus`), so there is no run to join
     // and the channel hears nothing, as on an idle source (#1384).
     watch_sync: () => null,
-    sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
+    // As the scheduler does: a running `sync:state` before it answers, and its end a moment later (F-645).
+    sync_all: () => syncAll(),
     sync_role: (args) => syncRole(args),
     reindex_fts: () => null,
     delete_source: () => null,

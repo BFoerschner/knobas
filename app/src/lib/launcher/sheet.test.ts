@@ -82,6 +82,8 @@ test("no application configured: no Open in row", () => {
 test("a branch opens in each application; a pipeline runs; a monitor is acknowledged", () => {
   expect(ids(entity("branch", "gitea:acme/svc@main"))).toEqual(["link", "open-code", "open-idea", "fav", "copy"]);
   const run = sheetActions(entity("pipeline", "teamcity:Pay_Build"), CTX).find((a) => a.id === "run");
+  // The run it starts can be reached from its toast, as a page's *Re-run* can (F-644).
+  expect(run?.does).toMatchObject({ where: { label: "Show in runs" } });
   expect(run?.does).toMatchObject({ kind: "write", payload: { TriggerBuild: { entity: "teamcity:Pay_Build" } } });
   const ack = sheetActions(entity("monitor", "kuma:7"), CTX).find((a) => a.id === "ack");
   expect(ack?.does).toMatchObject({ kind: "ack", monitorId: "kuma:7" });

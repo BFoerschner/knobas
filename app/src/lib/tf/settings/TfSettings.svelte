@@ -31,6 +31,7 @@
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
+  import { sourceDrafts } from "./source-drafts.svelte";
   import { SETTINGS_SECTIONS, settingsHash, settingsKnows, settingsPlace, sourceState } from "./settings";
   import TfNothingHere from "../TfNothingHere.svelte";
     import TfSourcePage from "./TfSourcePage.svelte";
@@ -193,6 +194,8 @@
     health.patch(next.health);
   }
 
+  /** What was typed on a source's page and left there (F-635): the rail says so from any section. */
+  const anyDraft = $derived(sources?.some((source) => sourceDrafts.has(source.id)) ?? false);
   const anyFailing = $derived(
     (sources ?? []).some((source) => sourceState(source, health.get(source.id), null).failed),
   );
@@ -229,6 +232,8 @@
           {label}
           {#if key === "sources" && anyFailing}
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
+          {:else if key === "sources" && anyDraft}
+            <span class="tf-dot tf-warn" role="img" aria-label="A source has changes not saved" title="A source has changes not saved"></span>
           {/if}
         </a>
       {/each}

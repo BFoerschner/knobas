@@ -23,6 +23,7 @@
     selected,
     optionId,
     chordOf = () => null,
+    sourceOf = () => null,
     within = null,
     filtered = false,
     now,
@@ -39,6 +40,8 @@
     optionId: (index: number) => string;
     /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
     chordOf?: (row: LauncherRow) => string | null;
+    /** The source a row names, where its key repeats in the list (#1476); none when omitted. */
+    sourceOf?: (row: LauncherRow) => string | null;
     /** The section whose filter the box is on, which an empty answer's line names. */
     within?: string | null;
     /** Whether filters narrowed the search, so an empty answer is no claim about everything. */
@@ -136,6 +139,7 @@
         mono={cells.mono}
         title={cells.title}
         chord={chordOf(row)}
+        source={sourceOf(row)}
         id={optionId(index)}
         selected={index === selected}
         onopen={() => onopen(row)}

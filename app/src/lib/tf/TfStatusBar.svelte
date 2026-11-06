@@ -9,7 +9,8 @@
 
   It never scrolls and never draws past its right edge (#1410). The healthy
   readings share one run that shrinks first: two are named, more are one rollup
-  (`healthyRollup`), and its title carries every reading's words. A failed
+  (`healthyRollup`), and its title carries every reading's words, though a run
+  in flight keeps its place so the bar and the Sources rows agree. A failed
   credential gives up its words next, never its *Re-enter password*, and the
   queue control never shrinks.
 
@@ -41,7 +42,7 @@
 <footer class="tf-status">
   <a class="tf-sources" href="#/settings">Sources</a>
   {#if healthy.length > 0}
-    <span class="tf-healthy" title={healthy.map((reading) => reading.text).join(" · ")}>
+    <span class="tf-healthy" class:tf-syncing={healthy.some((reading) => reading.tone === "info")} title={healthy.map((reading) => reading.text).join(" · ")}>
       {#if rollup !== null}<span class={`tf-read tf-${rollup.tone}`}>{rollup.text}</span>{#if rollup.rest !== null}<span>, {rollup.rest}</span>{/if}
       {:else}{#each healthy as reading (reading.id)}<span class={`tf-read tf-${reading.tone}`}>{reading.text}</span>{/each}{/if}
     </span>

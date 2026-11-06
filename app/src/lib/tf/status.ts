@@ -79,10 +79,12 @@ export function sourceReadings(
 
 /**
  * The healthy readings as one line, past the two the bar has room to name:
- * *5 synced, oldest 4 min ago, 1 syncing*. The oldest sync is the one
- * age worth keeping, because it says whether anything has gone stale. `text`
- * is the part that has to fit and `rest` what may drop out of sight. `null`
- * for two or fewer, which the bar names one by one.
+ * *5 synced, oldest 4 min ago*. The oldest sync is the one age worth keeping,
+ * because it says whether anything has gone stale. While a run goes it leads,
+ * *Syncing 5 sources…* (F-645), since what is happening now is what the bar is
+ * looked at for and the page's rows say the same. `text` is the part that has
+ * to fit and `rest` what may drop out of sight. `null` for two or fewer, which
+ * the bar names one by one.
  */
 export function healthyRollup(healthy: readonly SourceReading[], now: Date = new Date()): { text: string; rest: string | null; tone: ReadingTone } | null {
   if (healthy.length <= 2) return null;
@@ -91,13 +93,15 @@ export function healthyRollup(healthy: readonly SourceReading[], now: Date = new
   const oldest = synced.map((reading) => reading.syncedAt).filter((at) => at !== null).sort()[0];
   const looks = having("warn").length;
   // What must stay: how many synced, and anything that wants the reader. The rest may drop out of sight.
+  const going = having("info").length;
+  const count = synced.length === 1 ? [`1 synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} synced`] : [];
   const first = [
-    ...(synced.length === 1 ? [`1 synced ${ago(oldest, now)}`] : synced.length > 1 ? [`${synced.length} synced`] : []),
+    ...(going > 0 ? [`Syncing ${going} source${going === 1 ? "" : "s"}…`] : count),
     ...(looks > 0 ? [`${looks} need${looks === 1 ? "s" : ""} a look`] : []),
   ];
   const second = [
+    ...(going > 0 ? count : []),
     ...(synced.length > 1 ? [`oldest ${ago(oldest, now)}`] : []),
-    ...(having("info").length > 0 ? [`${having("info").length} syncing`] : []),
     ...(having("muted").length > 0 ? [`${having("muted").length} not synced yet`] : []),
   ];
   const lines = first.length > 0 ? [first.join(", "), ...second] : second;

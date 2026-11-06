@@ -95,7 +95,7 @@
             <span class="tf-stg-exp {EXPIRY_CLASS[expiry.tone]}">Credential {expiry.text}</span>
           {/if}
           <!-- What was typed on its page and left there (F-617): said here too, or it is easy to forget. -->
-          {#if sourceDrafts.has(source.id)}<span class="tf-stg-exp">Changes not saved</span>{/if}
+          {#if sourceDrafts.has(source.id)}<span class="tf-stg-exp tf-stg-warnt">Changes not saved</span>{/if}
         </span>
         <span class="tf-stg-go" aria-hidden="true">›</span>
       </a>

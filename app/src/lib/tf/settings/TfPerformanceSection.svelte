@@ -1,7 +1,8 @@
 <!--
   Settings › Performance (#2247, spec #2234 step 3): *Pages kept open*, over
-  `pages_kept_open` and `set_pages_kept_open`. The field saves when it is
-  left, and what the backend stored goes to the page host at once
+  `pages_kept_open` and `set_pages_kept_open`. The field saves on `Enter` or
+  when it is left, says *Saved*, and `Esc` puts the stored value back
+  (`saved-field.svelte.ts`). What the backend stored goes to the page host at once
   (`kept-pages.svelte.ts`), so a lower number drops the surplus hidden pages
   with no restart.
 -->
@@ -10,6 +11,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { KEPT_PAGES_MAX, KEPT_PAGES_MIN, keptPages, type KeptPagesSetting } from "../kept-pages.svelte";
   import type { SectionPorts } from "./ports";
+  import { SavedWord, savedField } from "./saved-field.svelte";
   import { boundedNumber, clampNote } from "./sections";
 
   let {
@@ -36,19 +38,25 @@
       .catch((cause) => push({ text: `Could not read Pages kept open: ${ipcErrorMessage(cause)}`, tone: "err" }));
   });
 
-  async function save(input: HTMLInputElement) {
-    if (stored === null) return;
+  const said = new SavedWord();
+
+  /** Whether a new value was stored. */
+  async function save(input: HTMLInputElement): Promise<boolean> {
+    if (stored === null) return false;
+    let done = false;
     const value = boundedNumber(input.value, KEPT_PAGES_MIN, KEPT_PAGES_MAX, stored);
     why = clampNote(input.value, KEPT_PAGES_MIN, KEPT_PAGES_MAX, value);
     if (value !== stored) {
       try {
         stored = await ports.setPagesKeptOpen(value);
         kept.set(stored);
+        done = true;
       } catch (cause) {
         push({ text: `Could not save: ${ipcErrorMessage(cause)}`, tone: "err" });
       }
     }
     input.value = String(stored);
+    return done;
   }
 </script>
 
@@ -71,9 +79,10 @@
         value={stored}
         aria-invalid={why !== null ? "true" : undefined}
         aria-describedby={why !== null ? "tf-perf-kept-why" : undefined}
-        onchange={(event) => void save(event.currentTarget)}
+        {@attach savedField({ saved: () => String(stored ?? ""), save, word: said, restored: () => (why = null) })}
       />
       <span>pages</span>
+      <small class="tf-stg-saved" role="status">{said.shown ? "Saved" : ""}</small>
       {#if why !== null}<small class="tf-stg-why" id="tf-perf-kept-why" role="alert">{why}</small>{/if}
     </div>
   </div>

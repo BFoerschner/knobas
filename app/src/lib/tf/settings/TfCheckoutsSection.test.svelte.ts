@@ -127,6 +127,18 @@ test("Make default saves the list with the new default, and Change… sets the c
   expect(text(target.querySelector(".tf-stg-row"))).toContain("~/src");
 });
 
+test("Make default says so, with Undo back to the one before (F-639)", async () => {
+  await draw();
+  const was = stored.default_application;
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Fork is the default");
+  toast.action!.run();
+  await settle();
+  expect(saved.at(-1)![1]).toBe(was);
+});
+
 test("the section says the default is listed first and runs on Enter, and Make default keeps the row order (#1443)", async () => {
   await draw();
   expect(text(target.querySelector(".tf-stg-p"))).toContain("The default is listed first in Open in… and runs on Enter.");

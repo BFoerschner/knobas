@@ -31,6 +31,7 @@ import { entityAddress } from "../tf/address";
 import { actionPayload, initialValues } from "../detail/view/actions";
 import { snoozePresets } from "../inbox/inbox.svelte";
 import { expiryOf, opener, rowActions, untilLabel } from "../tf/inbox/inbox";
+import { tabHash } from "../tf/builds/pipeline";
 import { prHash } from "../tf/pr/pr";
 import { compareHash, repoHash } from "../tf/repo/repo";
 import { draftOf, withHandRule } from "../tf/sets/apply";
@@ -77,7 +78,7 @@ export type SheetEffect =
   | { kind: "timer" }
   /** A write queued to the source; `said` is the toast. */
   /** `said` is what its toast queues, as `toastQueued` takes it. */
-  | { kind: "write"; payload: WriteOpPayload; said: string }
+  | { kind: "write"; payload: WriteOpPayload; said: string; where?: { label: string; hash: string } }
   | { kind: "ack"; monitorId: string; said: string }
   | { kind: "copy"; text: string; said: string }
   /** `open_checkout` with one application from Settings › Checkouts. */
@@ -316,7 +317,7 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
         id: "run",
         label: "Run",
         detail: "Queued as a write to the source",
-        does: { kind: "write", payload: { TriggerBuild: { entity: id } }, said: `run ${title}` },
+        does: { kind: "write", payload: { TriggerBuild: { entity: id } }, said: `run ${title}`, where: { label: "Show in runs", hash: tabHash(id, "runs") } },
       });
       break;
     case "monitor":

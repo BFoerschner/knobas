@@ -22,6 +22,7 @@
     selected,
     optionId,
     chordOf = () => null,
+    sourceOf = () => null,
     onopen,
     onhover,
   }: {
@@ -32,6 +33,8 @@
     optionId: (index: number) => string;
     /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
     chordOf?: (row: LauncherRow) => string | null;
+    /** The source a row names, where its key repeats in the list (#1476); none when omitted. */
+    sourceOf?: (row: LauncherRow) => string | null;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
@@ -57,6 +60,7 @@
       mono={cells.mono}
       title={cells.title}
       chord={chordOf(row)}
+      source={sourceOf(row)}
       id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}

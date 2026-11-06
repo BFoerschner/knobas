@@ -377,7 +377,7 @@ export class SheetMode {
       case "copy":
         return settled(() => io.copyText(does.text), () => does.said);
       case "write":
-        return void this.#queued(() => io.submitWrite(does.payload), does.said, subject.kind === "entity" ? subject.sourceId : null);
+        return void this.#queued(() => io.submitWrite(does.payload), does.said, subject.kind === "entity" ? subject.sourceId : null, does.where);
       case "ack":
         return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId), subject.kind === "entity" ? subject.title : undefined);
       case "link": {
@@ -493,8 +493,13 @@ export class SheetMode {
     return { text: ipcErrorMessage(cause), tone: "err" };
   }
 
+  /** A write or a read is out: a second press before it answers sends nothing (F-340's trip, by key). */
+  #sending = false;
+
   /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
   async #settled(work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string): Promise<void> {
+    if (this.#sending) return;
+    this.#sending = true;
     try {
       await work();
       push({ text: said(), ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo, name) } }) });
@@ -502,17 +507,27 @@ export class SheetMode {
     } catch (cause) {
       push(this.#refusal(cause, name));
       this.#host.focus();
+    } finally {
+      this.#sending = false;
     }
   }
 
   /** A write: the one queued toast every page raises, which says *Sent* in place once it has gone, and the launcher closed. */
-  async #queued(work: () => Promise<QueuedWrite>, what: string, source: string | null): Promise<void> {
+  async #queued(work: () => Promise<QueuedWrite>, what: string, source: string | null, where?: { label: string; hash: string }): Promise<void> {
+    if (this.#sending) return;
+    this.#sending = true;
+    const { navigate } = this.#host;
     try {
-      toastQueued(what, source === null ? null : { id: source, display_name: "" }, { write: await work() });
+      toastQueued(what, source === null ? null : { id: source, display_name: "" }, {
+        write: await work(),
+        ...(where === undefined ? {} : { where: { label: where.label, run: () => navigate(where.hash) } }),
+      });
       this.#host.close();
     } catch (cause) {
       push(this.#refusal(cause));
       this.#host.focus();
+    } finally {
+      this.#sending = false;
     }
   }
 

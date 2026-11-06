@@ -509,6 +509,17 @@ test("a pipeline runs, queued as a write", async () => {
   expect(calls.submitWrite).toHaveBeenCalledWith({ TriggerBuild: { entity: "teamcity:Pay_Build" } });
 });
 
+test("a second Enter while a write is out sends nothing", async () => {
+  const calls = mountIt();
+  await settle();
+  await sheetOn("pipeline");
+  narrow("run");
+  press("Enter");
+  press("Enter");
+  await settle();
+  expect(calls.submitWrite).toHaveBeenCalledTimes(1);
+});
+
 test("a monitor is acknowledged", async () => {
   const calls = mountIt();
   await settle();

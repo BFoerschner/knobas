@@ -57,6 +57,12 @@
   Backspace on the empty box step back one step, and from the first back to
   the actions; the row stays pinned throughout.
 
+  ## Twins (#1476)
+
+  Two sources can hold one key, and those are two tickets. A row whose key another
+  row in the list has names its source at its end (`twinTickets`), as *Link to…*
+  does; no other row does.
+
   ## Keys (#2429)
 
   ⌘B on a selected action, or *Assign key…* on a saved list, opens the key
@@ -86,7 +92,7 @@
     search as defaultSearch,
     EVENTS,
   } from "../ipc";
-  import type { CredentialHealth, KindStateColours } from "../ipc/sources";
+  import { listSources, type CredentialHealth, type KindStateColours } from "../ipc/sources";
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import { entityAddress } from "../tf/address";
@@ -107,7 +113,7 @@
   import { SheetMode } from "./sheet-mode.svelte";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
   import { type LauncherAction, filterActions, navigationActions, placeActions } from "./actions";
-  import { type InboxPreview, type LauncherRow, holdsAnswer, narrowed, stepOf, walk } from "./rows";
+  import { type InboxPreview, type LauncherRow, holdsAnswer, narrowed, rowItem, stepOf, twinTickets, walk } from "./rows";
   import { modeName, seedKinds, seedName } from "./section";
   import { pastedUrl } from "./url";
   import { opener } from "../tf/inbox/inbox";
@@ -411,6 +417,35 @@
    */
   let naming = $state<string | null>(null);
 
+  /**
+   * Whether *Titles* or *Everything* changes what the box answers: the board (as the choice to type under) and a search.
+   * In the sheet, `>`, `?`, a paste and the prompts it changes nothing, so the chip and ⌘D's hint are gone there and ⌘D
+   * does nothing but keep the webview's bookmark away (F-643).
+   */
+  const scopeAnswers = $derived(!overlay && naming === null && !sheet.current && (session.mode === "board" || session.mode === "results"));
+
+  /** The tickets in this list whose key another ticket here holds (#1476): they say their source, and nothing else does. */
+  const twins = $derived(twinTickets(session.rows.flatMap((row) => rowItem(row) ?? [])));
+  /** Source id → name, read when a twin is drawn; until it answers a row says the id, which is a true name. */
+  let sourceNames = $state<Record<string, string>>({});
+  $effect(() => {
+    if (!open || twins.size === 0) return;
+    let live = true;
+    listSources().then(
+      (rows) => {
+        if (live) sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+  function sourceOf(row: LauncherRow): string | null {
+    const item = rowItem(row);
+    return item !== null && twins.has(item.entity_id) ? (sourceNames[item.source_id] || item.source_id) : null;
+  }
+
   /** Whether Tab has something to open on the selected row: the footer says so only then. */
   const tabOpens = $derived(!overlay && naming === null && !sheet.current && sheet.opensOn(session.current));
 
@@ -682,10 +717,39 @@
     if (open && before === null) before = { el: document.activeElement, hash: location.hash };
   });
 
+  /** When `Enter` was last pressed in the box. */
+  let enterAt = Number.NEGATIVE_INFINITY;
+
+  /**
+   * The second of two quick presses must not fall through the closed box (F-340's trip): focus went back to what held it
+   * and the pointer rests over the page, so it would open a ticket card nobody aimed at. Only a real press counts, and only
+   * for the moment a double press takes.
+   */
+  function holdTheSecondPress() {
+    const byEnter = performance.now() - enterAt < 2000;
+    const stop = () => {
+      window.removeEventListener("keydown", onpress, true);
+      window.removeEventListener("click", onpress, true);
+      clearTimeout(timer);
+    };
+    const onpress = (event: Event) => {
+      if (!event.isTrusted) return;
+      if (event instanceof KeyboardEvent ? byEnter && event.key === "Enter" : true) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      stop();
+    };
+    window.addEventListener("keydown", onpress, true);
+    window.addEventListener("click", onpress, true);
+    const timer = setTimeout(stop, 400);
+  }
+
   function close() {
     const was = before;
     before = null;
     open = false;
+    holdTheSecondPress();
     session.dispose();
     onclose();
     void tick().then(() => {
@@ -883,12 +947,13 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    if (event.key === "Enter") enterAt = performance.now();
     // The key panel takes every key first: its chords are what is being bound.
     if (sheet.current?.panel) return sheet.current.panel.press(event);
     if (isBoxChord(event, "d")) {
       // Before the webview's own ⌘D (a bookmark) and anything else the box does.
       event.preventDefault();
-      toggleScope();
+      if (scopeAnswers) toggleScope();
       return;
     }
     if (naming !== null) {
@@ -1022,7 +1087,7 @@
       ...enter,
       ...(tabOpens ? ([["Tab", "actions", "Actions on the selected result"]] as [string, string, string][]) : []),
       ["Esc", boxWords === "" ? "close" : "clear the words"],
-      ["⌘D", scope.titles ? "everything" : "titles only"],
+      ...(scopeAnswers ? ([["⌘D", scope.titles ? "everything" : "titles only"]] as [string, string][]) : []),
       ["⌘?", "help"],
     ];
   });
@@ -1097,16 +1162,18 @@
         >
           {#snippet trailing()}
             <!-- A pill toggle (Controls): its words are the mode in force; ⌘D and the footer name the other. -->
-            <span class="tf-fchips tf-ln-scope">
-              <button
-                type="button"
-                title={scope.titles ? "Titles and keys only. ⌘D searches everything" : "Bodies too. ⌘D searches titles only"}
-                onclick={() => {
-                  toggleScope();
-                  box?.focus();
-                }}>{scope.titles ? "Titles" : "Everything"}</button
-              >
-            </span>
+            {#if scopeAnswers}
+              <span class="tf-fchips tf-ln-scope">
+                <button
+                  type="button"
+                  title={scope.titles ? "Titles and keys only. ⌘D searches everything" : "Bodies too. ⌘D searches titles only"}
+                  onclick={() => {
+                    toggleScope();
+                    box?.focus();
+                  }}>{scope.titles ? "Titles" : "Everything"}</button
+                >
+              </span>
+            {/if}
           {/snippet}
         </QueryBox>
       </div>
@@ -1142,7 +1209,7 @@
       {#if sheet.current}
         {@const current = sheet.current}
         <!-- The row the sheet acts on, lifted under the box; the box keeps the search words aside. -->
-        <Pinned row={current.row} id={`${uid}-pinned`} {now} />
+        <Pinned row={current.row} id={`${uid}-pinned`} {now} source={sourceOf(current.row)} />
         {#if current.renaming !== null}
           <p class="tf-ln-none">Type the new name in the box. Enter keeps it, Esc leaves the name as it was.</p>
         {:else if current.panel}
@@ -1201,6 +1268,7 @@
               home={session.home}
               rows={session.rows}
               chordOf={listChord}
+              {sourceOf}
               selected={session.selected}
               {optionId}
               onopen={activate}
@@ -1244,6 +1312,7 @@
             response={session.response}
             rows={session.rows}
             chordOf={listChord}
+            {sourceOf}
             within={seedLabel}
             filtered={narrowed(session.raw, session.response.interpreted.text)}
             selected={session.selected}

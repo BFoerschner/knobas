@@ -112,17 +112,28 @@ export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
   { id: "alert", label: "A monitor goes down" },
 ];
 
-/** Keyboard: requirements §14, in prototype-6's words. Fixed in this version. */
+/** Keyboard: requirements §14, in prototype-6's words, and what has joined since (F-062, F-633). */
 export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: string])[] = [
-  ["⌘K", "Anywhere", "Search everything, from an empty box"],
+  ["⌘K", "Anywhere", "Search, from an empty box"],
   ["⌘T", "Anywhere", "Stop or start the timer"],
   ["⌘,", "Anywhere", "Settings"],
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
   ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
   ["/ ⌘/", "Anywhere; / outside a field", "Search this section: the launcher with its filter"],
   ["Esc", "Anywhere", "Back one step: dialog, drawer, filter, view, job"],
-  ["J K ↑ ↓", "Tickets", "Move the selection"],
+  ["⌘D", "Search box", "Titles only, or everything"],
+  ["Tab", "Search box", "The actions on the selected result"],
+  ["⌘S", "Search box", "Save the search as a list"],
+  ["⌘?", "Search box", "The filters, and the keys it answers"],
+  ["⌘B", "Search box, on an action", "Bind a key of your own to it"],
+  ["⌘Enter", "A composer or a dialog", "Send, or press its primary button"],
+  ["J K ↑ ↓", "Tickets and the Inbox", "Move the selection"],
   ["Enter", "Tickets", "Open the job"],
   ["L", "Job", "Connections"],
+  ["J K", "A diff", "Next and previous file"],
+  ["N P", "A diff", "Next and previous change"],
+  ["V", "A diff", "Mark the file viewed"],
+  ["C", "A diff", "Comment on the line"],
+  ["S", "A diff", "Split or unified"],
   ["Enter, Shift Enter", "Build log search", "Next and previous match"],
 ];

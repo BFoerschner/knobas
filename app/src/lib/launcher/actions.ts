@@ -114,13 +114,13 @@ export function matchingPlaces(places: readonly LauncherAction[], typed: string,
   return [...named, ...places.filter((place) => !named.includes(place) && startsAWord(place.detail.toLowerCase(), words))];
 }
 
-/** The actions matching `text`, in the order they were declared. */
+/**
+ * The actions matching `text`: by name, then by what they hold, as {@link matchingPlaces} ranks them (F-058), so `>builds`
+ * selects *Builds* and not *Inbox*, whose line mentions failed builds. Each half in the order it was declared.
+ */
 export function filterActions(actions: LauncherAction[], text: string): LauncherAction[] {
   const needle = text.trim().toLowerCase();
   if (!needle) return actions;
-  return actions.filter(
-    (action) =>
-      action.label.toLowerCase().includes(needle) ||
-      action.detail.toLowerCase().includes(needle),
-  );
+  const named = actions.filter((action) => action.label.toLowerCase().includes(needle));
+  return [...named, ...actions.filter((action) => !named.includes(action) && action.detail.toLowerCase().includes(needle))];
 }

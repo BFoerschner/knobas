@@ -39,6 +39,8 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
+  import { listSources } from "../../ipc/sources";
+  import { twinTickets } from "../../launcher/rows";
   import { Session, type SessionPorts } from "../../launcher/session.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Layers } from "../layers.svelte";
@@ -81,6 +83,7 @@
   interface Ticket {
     entityId: string;
     title: string;
+    sourceId?: string;
   }
 
   // svelte-ignore state_referenced_locally
@@ -113,9 +116,15 @@
     session.rows.flatMap((row): Ticket[] => {
       const item = row.kind === "hit" ? row.hit : row.kind === "recent" ? row.row : null;
       if (item === null || item.kind !== "ticket") return [];
-      return [{ entityId: item.entity_id, title: item.title }];
+      return [{ entityId: item.entity_id, title: item.title, sourceId: item.source_id }];
     }),
   );
+
+  /** Two sources can hold one key (#1476, F-059), and those are two tickets: only such a row says its source. */
+  const twins = $derived(twinTickets(choices.map((choice) => ({ kind: "ticket", entity_id: choice.entityId }))));
+  /** Source id → name, once read; without the read a row says the id, as *Link to…* does. */
+  let sourceNames = $state<Record<string, string>>({});
+  const whose = (ticket: Ticket) => (ticket.sourceId !== undefined && twins.has(ticket.entityId) ? (sourceNames[ticket.sourceId] || ticket.sourceId) : null);
 
   const TITLE = { edit: "Edit the block", assign: "Assign the time", add: "Add a block" } as const;
   const SAVE = { edit: "Save", assign: "Assign", add: "Add" } as const;
@@ -131,6 +140,10 @@
   onMount(() => {
     field?.focus();
     void session.loadHome();
+    void listSources().then(
+      (rows) => (sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]))),
+      () => {},
+    );
     return () => session.dispose();
   });
 
@@ -238,8 +251,10 @@
               <div class="tf-pane-h" id="tf-tm-pick-{uid}">{session.raw.trim() === "" ? "Recent tickets, pick one" : "Pick a ticket"}</div>
               <div class="tf-picklist" role="listbox" aria-labelledby="tf-tm-pick-{uid}">
                 {#each choices as choice, index (choice.entityId)}
+                  {@const source = whose(choice)}
                   <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(choice)}>
                     <span><span class="tf-mono">{keyOf(choice.entityId)}</span> {choice.title}</span>
+                    {#if source !== null}<span class="tf-dim">{source}</span>{/if}
                   </button>
                 {/each}
               </div>

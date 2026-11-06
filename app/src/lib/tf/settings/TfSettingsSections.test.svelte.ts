@@ -352,6 +352,27 @@ test("Monitoring: a field left with a new value saves both settings", async () =
   expect(p.setMonitoringSettings).toHaveBeenCalledWith({ sample_retention_days: 30, response_time_warn_ms: 1500 });
 });
 
+test("A typed value: Esc restores it and keeps focus, Enter saves once and says so (F-641)", async () => {
+  const p = await open("monitoring");
+  const slow = target.querySelector<HTMLInputElement>("#tf-mon-slow")!;
+  slow.focus();
+  slow.value = "20009";
+  slow.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  expect(slow.value).toBe("2000");
+  expect(document.activeElement).toBe(slow);
+  slow.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setMonitoringSettings).not.toHaveBeenCalled();
+
+  slow.value = "1500";
+  slow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  slow.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  await settle();
+  expect(p.setMonitoringSettings).toHaveBeenCalledTimes(1);
+  expect(slow.closest(".tf-stg-c")?.querySelector(".tf-stg-saved")?.textContent).toBe("Saved");
+});
+
 test("Backup: the last backup, the schedule and keep, and Back up now", async () => {
   const p = await open("backup");
   expect(rowValue("Last backup")).toBe(`today 02:00, 48 MB, in ${DIR}`);
@@ -723,12 +744,15 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(11);
+  expect(rows).toHaveLength(22);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
-    "Search everything, from an empty box",
+    "Search, from an empty box",
   ]);
+  const said = rows.map((row) => row.querySelector("td")?.textContent?.trim());
+  for (const key of ["⌘D", "Tab", "⌘?", "⌘B", "⌘Enter", "J K", "N P", "V", "C", "S"]) expect(said, "F-062, F-633").toContain(key);
+  expect(target.querySelector(".tf-stg-h p")?.textContent).toContain("binds a key of your own");
   expect([...rows[5]!.querySelectorAll("td")].map((td) => td.textContent?.trim()), "the section's search, #2425").toEqual([
     "/ ⌘/",
     "Anywhere; / outside a field",
@@ -745,7 +769,7 @@ test("Keyboard lists the fixed shortcuts", async () => {
     "A detail or a role view",
     "Refresh, or Sync now",
   ]);
-  expect([...rows[10]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
+  expect([...rows.at(-1)!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
 });
 
 test("Logs and database: size, items and version; the folder and the re-index", async () => {

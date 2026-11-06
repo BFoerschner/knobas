@@ -99,13 +99,13 @@ test("two healthy sources are named; past that they are one line that keeps the 
 test("the rollup says what is not synced, and its dot takes the worst of what it counts", () => {
   const synced = healthy("ok", "2026-08-22T14:28:00Z");
   expect(healthyRollup([synced, healthy("info"), healthy("muted")], NOW)).toEqual({
-    text: "1 synced 4 min ago",
-    rest: "1 syncing, 1 not synced yet",
+    text: "Syncing 1 source…",
+    rest: "1 synced 4 min ago, 1 not synced yet",
     tone: "info",
   });
   expect(healthyRollup([healthy("info"), healthy("warn"), healthy("muted")], NOW)).toEqual({
-    text: "1 needs a look",
-    rest: "1 syncing, 1 not synced yet",
+    text: "Syncing 1 source…, 1 needs a look",
+    rest: "1 not synced yet",
     tone: "warn",
   });
   expect(healthyRollup([healthy("muted"), healthy("muted"), healthy("muted")], NOW)).toEqual({

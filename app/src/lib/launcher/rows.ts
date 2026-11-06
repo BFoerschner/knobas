@@ -14,6 +14,7 @@ import type { LauncherHome, ResultGroup, SearchHit, SearchResponse } from "../ip
 import type { EntityRow, InboxItem } from "../ipc/entity";
 import { type LauncherAction, matchingPlaces } from "./actions";
 import type { SyntaxEntry } from "./syntax";
+import { keyOf } from "../time/format";
 
 /**
  * The shell's live inbox (#1418): the count the top bar reads and the stream's
@@ -169,6 +170,25 @@ export function narrowed(raw: string, words: string): boolean {
 /** The *Go to* rows over an answer: by name, and by what a place holds where nothing else answered. */
 function placeRows(places: readonly LauncherAction[], words: string, nothingElse: boolean): LauncherRow[] {
   return matchingPlaces(places, words, nothingElse).map((action) => ({ kind: "action", id: `action:${action.id}`, action }));
+}
+
+/**
+ * The tickets in `items` whose key another ticket there holds (#1476): two sources, one key, and those are two tickets.
+ * Only these rows name their source. A favourite that is also recent is one ticket, drawn twice, and is no twin.
+ */
+export function twinTickets(items: readonly { kind: string; entity_id: string }[]): ReadonlySet<string> {
+  const byKey = new Map<string, Set<string>>();
+  for (const item of items) {
+    if (item.kind !== "ticket") continue;
+    const key = keyOf(item.entity_id);
+    byKey.set(key, (byKey.get(key) ?? new Set()).add(item.entity_id));
+  }
+  return new Set([...byKey.values()].filter((ids) => ids.size > 1).flatMap((ids) => [...ids]));
+}
+
+/** What a row stands for in the mirror: a hit, a recent item or a favourite. */
+export function rowItem(row: LauncherRow): { kind: string; entity_id: string; source_id: string } | null {
+  return row.kind === "hit" ? row.hit : row.kind === "recent" || row.kind === "favourite" ? row.row : null;
 }
 
 /** Whether `rows` hold an answer, as against only the rows that lead elsewhere (*Go to*, *Search everything*). */

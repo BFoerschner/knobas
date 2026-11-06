@@ -26,6 +26,7 @@
     mono = false,
     title,
     chord = null,
+    source = null,
     id,
     selected,
     onopen,
@@ -43,6 +44,8 @@
     title: string;
     /** The chord bound to the row (#2429): a saved list's, which opens it from anywhere. */
     chord?: string | null;
+    /** The source's name, where another row in the list has this row's key (#1476): two tickets, not one drawn twice. */
+    source?: string | null;
     /** The option's element id, which the listbox names while it is active (#1411). */
     id: string;
     selected: boolean;
@@ -63,5 +66,6 @@
   <span class="tf-ln-mg" data-tone={tone ?? undefined} title={kindName} aria-label={kindName}>{kindTag(monogram)}</span>
   <span class="tf-ln-k" class:tf-ln-mono={mono}>{cell}</span>
   <span class="tf-ln-t">{title}</span>
+  {#if source}<span class="tf-ln-src" title={source}>{source}</span>{/if}
   {#if chord}<kbd class="tf-ln-chord" title="Its key">{chord}</kbd>{/if}
 </button>

@@ -42,7 +42,9 @@
 
 /* The status bar's healthy line goes once it can't hold its first words beside a failure. */
 @media (max-width: 1150px) {
-  .tf-status:has(.tf-bad) > .tf-healthy { display: none; }
+  /* A run in flight stays (F-645), and a failure's words give way to it: the bar and Settings › Sources agree. */
+  .tf-status:has(.tf-bad) > .tf-healthy:not(.tf-syncing) { display: none; }
+  .tf-status > .tf-healthy.tf-syncing { min-width: 130px; }
 }
 
 /* Reduced motion stops everything above: the pulse, the toast's rise, every transition. */

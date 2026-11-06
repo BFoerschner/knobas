@@ -100,8 +100,10 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-why { flex-basis: 100%; font-size: var(--t-xs); color: var(--err); }
 .tf-stg-c [aria-invalid="true"], .tf-formgrid #tf-add-id[aria-invalid="true"] { border-color: var(--err); }
 .tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
-/* a value the address added to the config, beside its Save until saved (#1404) */
-.tf-stg-pend { align-self: center; font-size: var(--t-sm); color: var(--ink-2); }
+/* What is typed and not saved, beside its Save until saved (#1404, F-635): the warn tone a running-out credential has. */
+.tf-stg-pend { align-self: center; font-size: var(--t-sm); color: var(--warn); }
+/* A typed value's answer, for about two seconds (`saved-field.svelte.ts`). */
+.tf-stg-saved { font-size: var(--t-sm); color: var(--ink-2); }
 /* a sync run's result (#1478): wraps anywhere, as the boot screen's error does, so a
    request URL cannot widen the table; an unreachable run's transport error sits behind Details */
 .tf-stg-res { overflow-wrap: anywhere; }
@@ -125,6 +127,11 @@ select.tf-stg-in { padding-inline-start: 4px; }
 .tf-stg-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 4px; }
 .tf-stg-checks .tf-ck { font-size: var(--t-md); }
 .tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: var(--t-md); }
+/* Open in…: a press moves the *Default* tag and the button, and no column moves for it (F-639). */
+.tf-tbl.tf-stg-apps { table-layout: fixed; }
+.tf-stg-apps th:nth-child(1) { width: 200px; }
+.tf-stg-apps th:nth-child(4) { width: 124px; }
+.tf-stg-apps .tf-chip { white-space: nowrap; }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
 /* A command or path in a table wraps rather than push the row's action out of the column, and the action keeps one line. */

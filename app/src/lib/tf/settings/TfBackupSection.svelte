@@ -34,6 +34,7 @@
   import { formatBytes } from "../../sources/diagnostics";
   import type { Layers } from "../layers.svelte";
   import type { SectionPorts } from "./ports";
+  import { SavedWord, savedField } from "./saved-field.svelte";
   import { boundedNumber, clampNote, lastBackupWords, scheduleWords, shareTicks } from "./sections";
   import TfDialog from "./TfDialog.svelte";
 
@@ -158,14 +159,31 @@
       .catch(() => (savedTones = false));
   });
 
-  async function saveSchedule(next: BackupSchedule) {
+  /** Whether the schedule was stored. */
+  async function saveSchedule(next: BackupSchedule): Promise<boolean> {
     try {
       const saved = await ports.setBackupSchedule(next);
       // Read after the write, so newer than any read still in flight.
       await read(() => Promise.resolve(saved), { ok: (current) => (status = current), fail: () => {} });
+      return true;
     } catch (cause) {
       push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return false;
     }
+  }
+
+  /** *Keep*: a typed value (`saved-field.svelte.ts`). Answers whether a new value was stored. */
+  async function saveKeep(input: HTMLInputElement): Promise<boolean> {
+    const schedule = status?.schedule;
+    if (!schedule) return false;
+    const keep = boundedNumber(input.value, 1, 365, schedule.keep);
+    keepWhy = clampNote(input.value, 1, 365, keep);
+    input.value = String(keep);
+    if (keep === schedule.keep) return false;
+    const done = await saveSchedule({ ...schedule, keep });
+    // A refusal says so in its toast, and the field goes back to what is stored.
+    if (!done) input.value = String(schedule.keep);
+    return done;
   }
 
   async function backUpNow() {
@@ -233,6 +251,7 @@
 
   /** Why *Keep* holds something other than what was typed (F-613). */
   let keepWhy = $state<string | null>(null);
+  const keepSaid = new SavedWord();
 </script>
 
 <header class="tf-stg-h tf-stg-hline">
@@ -283,14 +302,10 @@
         value={current.schedule.keep}
         aria-invalid={keepWhy !== null ? "true" : undefined}
         aria-describedby={keepWhy !== null ? "tf-bak-keep-why" : undefined}
-        onchange={(event) => {
-          const keep = boundedNumber(event.currentTarget.value, 1, 365, current.schedule.keep);
-          keepWhy = clampNote(event.currentTarget.value, 1, 365, keep);
-          event.currentTarget.value = String(keep);
-          if (keep !== current.schedule.keep) void saveSchedule({ ...current.schedule, keep });
-        }}
+        {@attach savedField({ saved: () => String(status?.schedule.keep ?? ""), save: saveKeep, word: keepSaid, restored: () => (keepWhy = null) })}
       />
       <span>backups</span>
+      <small class="tf-stg-saved" role="status">{keepSaid.shown ? "Saved" : ""}</small>
       {#if keepWhy !== null}<small class="tf-stg-why" id="tf-bak-keep-why" role="alert">{keepWhy}</small>{/if}
     </div>
   </div>

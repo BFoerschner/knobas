@@ -10,9 +10,10 @@
     the expiry the source reported (#1499); an adapter that takes a
     second credential (Uptime Kuma) has an *Account* row. *Test connection*
     tests what is stored and says what it found.
-  - **What it syncs**: the schedule and the pause switch, each saved as it
-    changes, through `update_source`; then the adapter's own config,
-    generated from its `config_schema` (#904): for Jira, projects or a JQL
+  - **Schedule**: *Every* and the pause switch, each saved as it changes, through
+    `update_source`, in a group of their own (F-627): *Save sync settings* never covers them.
+  - **What it syncs**: the adapter's own config, generated from its
+    `config_schema` (#904), behind that *Save*: for Jira, projects or a JQL
     query, and the Sprint and Epic Link field ids the sync records (#1021).
     Every config save reads the stored config again and lays only the
     reader's changes over it (`source-config.ts`), so an id the sync recorded
@@ -653,7 +654,7 @@
 </section>
 
 <section class="tf-stg-sec">
-  <h2>What it syncs</h2>
+  <h2>Schedule</h2>
   <div class="tf-stg-row">
     <label class="tf-stg-l" for="tf-src-every">Every</label>
     <div class="tf-stg-c">
@@ -694,9 +695,14 @@
           )}><i></i></button>
     </div>
   </div>
+</section>
+
+{#if config.error !== null || config.fields.length > 0}
+<section class="tf-stg-sec">
+  <h2>What it syncs</h2>
   {#if config.error !== null}
     <p class="tf-stg-note tf-stg-errt">{config.error}</p>
-  {:else if config.fields.length > 0}
+  {:else}
     <TfSchemaForm
       fields={config.fields}
       values={configValues}
@@ -716,6 +722,7 @@
     </div>
   {/if}
 </section>
+{/if}
 
 {#if wiki}
   <section class="tf-stg-sec">

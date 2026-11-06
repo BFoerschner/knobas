@@ -16,7 +16,7 @@
     setClonesRoot,
     type PullRequestWorktree,
   } from "../../ipc/entity";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
   import TfAppsManage from "../openin/TfAppsManage.svelte";
@@ -88,13 +88,23 @@
     }
   }
 
-  async function makeDefault(id: string) {
-    if (settings === null) return;
+  /** Whether the list went in with `id` as its default; a refusal says so itself. */
+  async function setDefault(id: string | null): Promise<boolean> {
+    const list = apps.settings?.applications;
+    if (!list) return false;
     try {
-      await apps.save(settings.applications, id);
+      await apps.save(list, id);
+      return true;
     } catch (cause) {
       push({ text: `Could not save the default: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return false;
     }
+  }
+
+  /** *Make default*: said, with the way back, since the row's only sign is a tag that moved (F-639). */
+  async function makeDefault(id: string, name: string) {
+    const was = settings?.default_application ?? null;
+    if (await setDefault(id)) undoable(`${name} is the default`, () => void setDefault(was));
   }
 </script>
 
@@ -143,7 +153,7 @@
             <td class="tf-small">{#if app.file_command}<span class="tf-mono">{app.file_command}</span>{:else}<span class="tf-dim">opens the checkout</span>{/if}</td>
             <td class="tf-right">
               {#if app.id !== settings.default_application}
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => void makeDefault(app.id)}>Make default</button>
+                <button class="tf-btn tf-sm tf-ghost" onclick={() => void makeDefault(app.id, app.name)}>Make default</button>
               {/if}
             </td>
           </tr>

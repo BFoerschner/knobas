@@ -2746,6 +2746,34 @@ function cells() {
   );
 }
 
+test("a ticket whose key another row holds says its source, and the others don't (#1476, F-636)", async () => {
+  const twin = {
+    groups: [
+      {
+        kind: "ticket",
+        label: "Ticket",
+        plural: "Tickets",
+        monogram: "TK",
+        total: 3,
+        hits: [
+          hit({ entity_id: "jira:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", source_id: "jira" }),
+          hit({ entity_id: "mock:PAY-231", kind: "ticket", title: "Retry failed SEPA payouts", source_id: "mock" }),
+          hit({ entity_id: "jira:PAY-228", kind: "ticket", title: "Ledger", source_id: "jira" }),
+        ],
+      },
+    ],
+    total: 3,
+  };
+  open({ ports: { search: async () => response(twin), launcherHome: async () => HOME } });
+  await settle();
+  await search("pay");
+  expect(cells()).toEqual([
+    ["Tk", "PAY-231", "Retry failed SEPA payouts", "jira"],
+    ["Tk", "PAY-231", "Retry failed SEPA payouts", "mock"],
+    ["Tk", "PAY-228", "Ledger"],
+  ]);
+});
+
 test("a result row is three cells, the key cell following the kind's rule", async () => {
   open({ ports: { search: async () => response(EVERY_KIND), launcherHome: async () => HOME } });
   await settle();

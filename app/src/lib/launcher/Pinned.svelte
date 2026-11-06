@@ -12,7 +12,7 @@
   import { cellsOf } from "./cells";
   import type { LauncherRow } from "./rows";
 
-  let { row, id, now }: { row: LauncherRow; id: string; now?: Date | undefined } = $props();
+  let { row, id, now, source = null }: { row: LauncherRow; id: string; now?: Date | undefined; source?: string | null } = $props();
 
   const face = $derived.by(() => {
     if (row.kind === "inbox") {
@@ -37,6 +37,6 @@
 
 {#if face}
   <div class="tf-ln-pinned" role="listbox" aria-label="The row the actions act on">
-    <Row {...face} {id} selected={false} onopen={() => {}} onhover={() => {}} />
+    <Row {...face} {source} {id} selected={false} onopen={() => {}} onhover={() => {}} />
   </div>
 {/if}

@@ -104,6 +104,14 @@ test("typing after > narrows the menu", () => {
   ]);
 });
 
+test("a name ranks above what a place holds, so > and a plain word agree (F-058)", () => {
+  const labels = (text: string) => filterActions(navigationActions(), text).map((action) => action.label);
+  expect(labels("builds")[0]).toBe("Builds");
+  expect(labels("builds")).toContain("Inbox");
+  expect(labels("time").slice(0, 2)).toEqual(["Time", "Settings › Time"]);
+  expect(labels("time")).toContain("Monitors");
+});
+
 const PLACES = placeActions();
 const names = (typed: string, andDetails = false) => matchingPlaces(PLACES, typed, andDetails).map((place) => place.label);
 
