@@ -39,6 +39,7 @@
   import { PressHold } from "../press-hold.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { inlineEditor } from "../inline-editor";
+  import { snoozeFloat, spentAt } from "./snooze-float";
   import { clockLabel } from "../../time/format";
   import { flushSync, onDestroy, onMount, tick } from "svelte";
 
@@ -195,7 +196,8 @@
         if (held !== null && moved !== 0) scrollerOf(held)?.scrollBy(0, moved);
       });
     }
-    keepPlace(entry, among, row ? null : action);
+    // By `detail`, not by `row`: a pick from the Snooze float is a pointer's press with no row around it.
+    keepPlace(entry, among, heldByPointer(event) ? null : action);
   }
 
   // Held until the pointer leaves the row, the page is left, or a wheel or key takes the reader on.
@@ -446,10 +448,23 @@
         document.querySelector<HTMLElement>(".tf-inbox-h");
       if (place?.matches(".tf-ib")) place.tabIndex = -1;
       place?.focus({ preventScroll: true });
+      if (action !== null) place?.scrollIntoView?.({ block: "nearest" });
     });
   }
 
+  /** The box a pointer's pick was made in. What stood under the float is about to be under a still pointer, and a second press must land on nothing. */
+  let spent = $state.raw<DOMRect | null>(null);
+  $effect(() => {
+    if (spent === null) return;
+    if (!shown()) {
+      spent = null;
+      return;
+    }
+    return holdUnderPointer(() => document.querySelector(".tf-isnooze-spent"), () => (spent = null));
+  });
+
   function snooze(entry: InboxEntry, at: Date, event?: MouseEvent) {
+    if (heldByPointer(event)) spent = (event?.currentTarget as Element).closest(".tf-isnooze")?.getBoundingClientRect() ?? null;
     snoozing = null;
     leaves(entry, "stream", "snooze", event);
     snoozeToast({ entry, until: untilLabel(at, now) });
@@ -483,7 +498,12 @@
   function wake(entry: InboxEntry, event?: MouseEvent) {
     leaves(entry, "shelf", "wake", event);
     wakeToast(entry);
-    void inbox.snooze(entry.item.key, new Date(), saysFailure(named(entry.item), "wake", () => wake(entry)));
+    void inbox.snooze(entry.item.key, new Date(), saysFailure(named(entry.item), "wake", () => wake(entry))).then(async () => {
+      // A key's landing has to be seen, and the woken row has just taken room above the shelf and carried it down (F-148).
+      if (heldByPointer(event)) return;
+      await tick();
+      if (document.activeElement !== document.body) document.activeElement?.scrollIntoView?.({ block: "nearest" });
+    });
   }
 
   /** A date the picker produced, at 09:00 local, as the presets are. *Snooze* with no date goes to the field and says what it wants (F-148). */
@@ -584,28 +604,31 @@
             class="tf-isnooze"
             role="group"
             aria-label="Snooze until"
+            {@attach snoozeFloat(() => document.querySelector<HTMLElement>(`[data-snooze="${CSS.escape(item.key)}"]`), () => (snoozing = null))}
             {@attach inlineEditor(() => (snoozing = null), {
               focus: "button",
+              escCloses: true,
               back: () => document.querySelector<HTMLElement>(`[data-snooze="${CSS.escape(item.key)}"]`),
             })}
           >
             {#each snoozePresets(now, expiryOf(item)) as preset (preset.label)}
-              <button type="button" class="tf-btn tf-sm" onclick={(event) => snooze(entry, preset.at, event)}>{preset.label}</button>
+              <button type="button" class="tf-btn tf-sm tf-ghost" onclick={(event) => snooze(entry, preset.at, event)}>{preset.label}</button>
             {/each}
-            <input
-              type="date"
-              aria-label="Snooze until a date"
-              min={tomorrowValue(now)}
-              bind:value={pickedValue}
-              onkeydown={(event) => {
-                if (event.key === "Enter") fromPicker(entry);
-              }}
-            />
-            <button type="button" class="tf-btn tf-sm" onclick={(event) => fromPicker(entry, event)}>Snooze</button>
+            <div class="tf-isnooze-day">
+              <input
+                type="date"
+                aria-label="Snooze until a date"
+                min={tomorrowValue(now)}
+                bind:value={pickedValue}
+                onkeydown={(event) => {
+                  if (event.key === "Enter") fromPicker(entry);
+                }}
+              />
+              <button type="button" class="tf-btn tf-sm" onclick={(event) => fromPicker(entry, event)}>Snooze</button>
+            </div>
             {#if (askedDay || pickedValue !== "") && pickedMorning(pickedValue, now) === null}
               <span class="tf-dim">Pick a day after today</span>
             {/if}
-            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (snoozing = null)}>Cancel</button>
           </div>
         {/if}
       </div>
@@ -641,3 +664,8 @@
     </details>
   {/if}
 </div>
+
+{#if spent !== null}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="tf-isnooze-spent" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach spentAt(spent)}></div>
+{/if}

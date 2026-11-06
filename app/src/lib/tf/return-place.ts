@@ -121,13 +121,16 @@ function inRow(pressed: Element, to: string): HTMLElement | null {
   return row?.querySelector<HTMLElement>(FOCUSABLE) ?? null;
 }
 
+/** The card or row of the ticket the place opened, if it is drawn. */
+function ticketRow(place: Place, page: Element): HTMLElement | undefined {
+  const ticket = ticketOf(place.to);
+  return ticket === null ? undefined : [...page.querySelectorAll<HTMLElement>("[data-entity]")].find((el) => el.dataset["entity"] === ticket);
+}
+
 /** What takes focus in `page` on the way back, or `null` while nothing on it does. */
 function focusTarget(place: Place, page: Element): HTMLElement | null {
-  const ticket = ticketOf(place.to);
-  if (ticket !== null) {
-    const card = [...page.querySelectorAll<HTMLElement>("[data-entity]")].find((el) => el.dataset["entity"] === ticket);
-    if (card !== undefined) return card;
-  }
+  const card = ticketRow(place, page);
+  if (card !== undefined) return card;
   const pressed = place.pressed !== null && place.pressed.isConnected && !reworded(place) ? inRow(place.pressed, place.to) : null;
   if (pressed !== null) return pressed;
   // Redrawn: the same words among the links to where it opened, else any link there, else the same words anywhere.
@@ -210,7 +213,9 @@ export function restorePlace(place: Place, page: Element): () => void {
     stayed = set ? stayed + 1 : 0;
     // Tried on each frame while focus is free: a row just shown may not take it yet, and a redraw may take it away.
     // A pane may reuse what took it for something else once its read lands, which is not what was pressed.
-    if (focusIsFree(main) || (focused !== null && document.activeElement === focused && place.said !== null && textOf(focused) !== place.said.text)) {
+    // A windowed list draws its rows a frame late, and until then the last press stood in for the ticket's own row (F-152).
+    const stale = focused !== null && document.activeElement === focused && ((place.said !== null && textOf(focused) !== place.said.text) || (ticketRow(place, page) ?? focused) !== focused);
+    if (focusIsFree(main) || stale) {
       focused = focusTarget(place, page);
       focused?.focus({ preventScroll: true });
     }

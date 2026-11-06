@@ -74,7 +74,10 @@ export interface DraftFlowPorts {
   worklogDraft: (entityId: string, when: ReaderDay) => Promise<Draft | null>;
   /** Open the ad-hoc block dialog: the stop was not on a ticket. */
   onadhoc: (block: Block, offer: AdHocBlock) => void;
-  push: (toast: ToastSpec) => void;
+  /** Raises a toast, and says which so {@link dismiss} can take it down. */
+  push: (toast: ToastSpec) => number | void;
+  /** Takes down a toast that has stopped being true: *Timer running on PAY-231*, once the timer stops (F-140). */
+  dismiss?: (id: number) => void;
   undoable: typeof undoable;
   complain: (error: unknown) => void;
   /** *Open the day*: the time view. */
@@ -125,7 +128,17 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
    */
   let resume: TimerTarget | null = null;
 
-  const timing = (title: string) => ports.push({ text: `Timer running on ${title}` });
+  /** The toast that says the timer runs, while it stands. */
+  let runningToast: number | void = undefined;
+  function sayRunning(text: string) {
+    runningToast = ports.push({ text });
+  }
+  const timing = (title: string) => sayRunning(`Timer running on ${title}`);
+  /** The clock is stopping, so a toast saying it runs would stand above the one saying it stopped. */
+  function retireRunning() {
+    if (typeof runningToast === "number") ports.dismiss?.(runningToast);
+    runningToast = undefined;
+  }
 
   /** What a draft's time is called in a toast. A stretch under a minute reads as *The time*: *0m* would say it was lost. */
   const timeOf = (draft: Draft) => (draft.seconds >= 60 ? minutesLabel(Math.floor(draft.seconds / 60)) : "The time");
@@ -148,7 +161,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       () =>
         void ports.timer
           .start(running)
-          .then(() => ports.push({ text: "Timer running again." }))
+          .then(() => sayRunning("Timer running again."))
           .catch(ports.complain),
       { more: [{ label: "Open the day", run: ports.onday }] },
     );
@@ -191,6 +204,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
           return;
         }
       }
+      retireRunning();
       await offerAdHoc(await ports.timer.stop(), after);
     } catch (error) {
       ports.complain(error);
@@ -274,6 +288,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
         return;
       }
       inFlight += 1;
+      if (was.running !== null) retireRunning();
       void (was.running === null || stopped ? Promise.resolve() : ports.timer.stop())
         .then(() => {
           // A log has its own toast, and with no clock under it the draft was only a look: *Cancel* has nothing to say.

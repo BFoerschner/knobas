@@ -639,6 +639,59 @@ test("Snooze with no day picked goes to the date field and says what it wants (F
   expect(snoozeCalls()).toEqual([]);
 });
 
+test("a pointer's pick leaves an empty box under the pointer until it moves, so a second press lands on nothing (F-154)", async () => {
+  const row = await openPicker();
+  button(row, "Tomorrow").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  const spent = document.querySelector(".tf-isnooze-spent")!;
+  expect(spent.querySelector("button")).toBeNull();
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+  await settle();
+  expect(document.querySelector(".tf-isnooze-spent")).toBeNull();
+});
+
+test("a key's pick leaves no box: focus has moved on with it (F-154)", async () => {
+  const row = await openPicker();
+  button(row, "Tomorrow").click();
+  await settle();
+  expect(document.querySelector(".tf-isnooze-spent")).toBeNull();
+});
+
+test("↓ walks the Snooze choices, and Tab past the last closes them (F-154)", async () => {
+  const row = await openPicker();
+  const float = row.querySelector(".tf-isnooze")!;
+  const keydown = (key: string) => document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  expect(document.activeElement?.textContent).toBe("Tomorrow");
+  keydown("ArrowDown");
+  expect(document.activeElement?.textContent).toBe("Next Monday");
+  button(float, "Snooze").focus();
+  keydown("Tab");
+  flushSync();
+  expect(row.querySelector(".tf-isnooze")).toBeNull();
+});
+
+test("a press elsewhere or another address closes the Snooze choices, and a press on Snooze… is its own toggle (F-154)", async () => {
+  const row = await openPicker();
+  document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  flushSync();
+  expect(row.querySelector(".tf-isnooze")).toBeNull();
+
+  button(row, "Snooze…").click();
+  flushSync();
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  flushSync();
+  expect(row.querySelector(".tf-isnooze")).toBeNull();
+
+  button(row, "Snooze…").click();
+  flushSync();
+  button(row, "Snooze…").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+  flushSync();
+  expect(row.querySelector(".tf-isnooze"), "the press's own click closes it").not.toBeNull();
+  button(row, "Snooze…").click();
+  flushSync();
+  expect(row.querySelector(".tf-isnooze")).toBeNull();
+});
+
 test("Enter in the date field commits a future date once (#1437)", async () => {
   const row = await openPicker();
   typeDate(row, "2026-08-25");

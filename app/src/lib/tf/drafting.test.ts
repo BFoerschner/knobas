@@ -46,6 +46,8 @@ interface Over {
   offer?: AdHocBlock | null;
   running?: TimerTarget | null;
   since?: string;
+  /** Toasts answer with an id, as the real stack does. */
+  ids?: boolean;
 }
 
 /** A clock and a backend that answer like the real ones, with a log of what was asked. */
@@ -54,6 +56,7 @@ function rig(over: Over = {}) {
   const asked: ReaderDay[] = [];
   const adHocAsked: ReaderDay[] = [];
   const toasts: ToastSpec[] = [];
+  const dismissed: number[] = [];
   const since = over.since ?? "2026-09-03T09:00:00Z";
   let running: RunningTimer | null =
     over.running === null ? null : { target: over.running ?? PAY, started_at: since, last_heartbeat: since };
@@ -85,12 +88,16 @@ function rig(over: Over = {}) {
       return Promise.resolve(over.draft === undefined ? DRAFT : over.draft);
     },
     onadhoc: () => log.push("ad-hoc dialog"),
-    push: (toast) => void toasts.push(toast),
+    push: (toast) => {
+      const count = toasts.push(toast);
+      return over.ids ? count : undefined;
+    },
+    dismiss: (id) => void dismissed.push(id),
     undoable: (text, undo, spec = {}) => toasts.push({ ...spec, text, action: { label: "Undo", run: undo } }),
     complain: (error) => log.push(`complain ${String(error)}`),
     onday: () => log.push("open the day"),
   };
-  return { flow: createDraftFlow(ports), log, asked, adHocAsked, toasts, running: () => running };
+  return { flow: createDraftFlow(ports), log, asked, adHocAsked, toasts, dismissed, running: () => running };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -202,6 +209,20 @@ test("Stop, don't log stops the clock and writes nothing", async () => {
   // The stop makes a block, so the time is not dropped, and the toast says so (F-140).
   expect(toasts[0]?.text).toMatch(/^Timer stopped, nothing logged\. .* stays in the day\.$/);
   expect(toasts[0]?.action?.label).toBe("Undo");
+});
+
+test("a stop takes down the toast saying the timer runs, so it can't stand above the one saying it stopped (F-140)", async () => {
+  const { flow, toasts, dismissed } = rig({ running: null, ids: true });
+  await flow.switchTo(PAY, "PAY-231");
+  await settle();
+  expect(toasts.at(-1)?.text).toBe("Timer running on PAY-231");
+  flow.stop();
+  await settle();
+  expect(dismissed, "the draft is open and the clock still runs").toEqual([]);
+  flow.settle("discard");
+  await settle();
+  expect(dismissed).toEqual([1]);
+  expect(toasts.at(-1)?.text).toMatch(/^Timer stopped, nothing logged/);
 });
 
 test("Undo on a stop starts the clock again on the ticket", async () => {

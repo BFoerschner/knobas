@@ -26,6 +26,8 @@
   import { everyWhileShown } from "../while-shown.svelte";
   import { keyOf, minutesLabel } from "../../time/format";
 
+  import { onDestroy } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import {
     adHocBlock as realAdHocBlock,
@@ -39,7 +41,8 @@
   import { launcherHome as realLauncherHome, search as realSearch } from "../../ipc/search";
   import type { SessionPorts } from "../../launcher/session.svelte";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
-  import { heldWrite, push, undoable } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
+  import { forgetSent, holdBlock, isHeld } from "./held-blocks.svelte";
   import { heldByPointer, heldHeight, holdUnderPointer } from "../row-hold";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
@@ -138,8 +141,9 @@
       if (mine !== issued) return;
       loaded = answer;
       failure = null;
-      // A delete that has been sent is in this answer now, or refused and back.
-      held = held.filter((hold) => !hold.sent);
+      // A delete that has been sent is in this answer now, or refused and back. A Day already left says nothing: its answer
+      // isn't the one on screen, so the Day that took its place could draw the block again from a read older than the write.
+      if (!left) forgetSent();
     } catch (cause) {
       if (mine !== issued) return;
       failure = ipcErrorMessage(cause);
@@ -150,12 +154,9 @@
   // a block, and the day has to read it back.
   const runningSince = $derived(timer.current?.started_at ?? null);
 
-  /**
-   * Blocks *Delete block* took and has not written yet (#1429): off the day at
-   * once, sent when the toast's *Undo* has had its time. `sent` once the write
-   * has landed, so the next read, which no longer has the block, lets it go.
-   */
-  let held = $state<{ id: number; sent: boolean }[]>([]);
+  /** This Day has gone, and its read is no longer the one on screen. */
+  let left = false;
+  onDestroy(() => (left = true));
   $effect(() => {
     revision;
     runningSince;
@@ -168,7 +169,7 @@
       ? []
       : dayRows({
           day: key,
-          blocks: ready.blocks.filter((entry) => !held.some((hold) => hold.id === entry.block.id)),
+          blocks: ready.blocks.filter((entry) => !isHeld(entry.block.id)),
           offers: ready.offers,
           open: ready.open,
           running: timer.current,
@@ -435,38 +436,10 @@
     );
   }
 
-  /**
-   * A write with no reverse command (`dismiss_block`) or one a block's marks can't come back from (`delete_block`): the
-   * block leaves the day at once and the write is held for the toast's life, then sent; *Undo* cancels a write that never
-   * happened, so the block keeps its id, its context and its worklog mark (the #835 pattern, F-339). The toast outlives
-   * the view, so leaving the day loses nothing; closing the window inside those seconds does, and the block is simply
-   * there next time.
-   */
-  function holdBlock(id: number, text: string, send: () => Promise<void>) {
-    held = [...held, { id, sent: false }];
-    const release = () => (held = held.filter((hold) => hold.id !== id));
-    heldWrite(
-      text,
-      () => {
-        void send()
-          .then(
-            () => (held = held.map((hold) => (hold.id === id ? { ...hold, sent: true } : hold))),
-            (error: unknown) => {
-              release();
-              push({ text: ipcErrorMessage(error), tone: "err" });
-            },
-          )
-          .then(reread);
-      },
-      release,
-      { ms: UNDO_MS },
-    );
-  }
-
   /** The row a mouse press on *Dismiss* took away, still holding its place under the pointer (F-138). */
   let holding = $state.raw<{ id: number; at: number; height: number } | null>(null);
   /** Where its empty row stands. An *Undo* brings the row itself back, and that is drawn instead. */
-  const holdAt = $derived(holding !== null && held.some((hold) => hold.id === holding?.id) ? holding.at : null);
+  const holdAt = $derived(holding !== null && isHeld(holding.id) ? holding.at : null);
   $effect(() => {
     if (holdAt === null) return;
     return holdUnderPointer(() => document.querySelector(".tf-tm-rowheld"), () => (holding = null));
@@ -479,7 +452,7 @@
     const id = block.block.id;
     const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-tm-row")?.getBoundingClientRect() : undefined;
     if (box !== undefined) holding = { id, at: rows.indexOf(row), height: box.height };
-    holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id));
+    holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id), reread, UNDO_MS);
   }
 
   /** *Delete block* (#1429). */
@@ -489,7 +462,7 @@
     const id = current.row.block.block.id;
     dialog = null;
     refusal = null;
-    holdBlock(id, "Deleted the block", () => io.deleteBlock(id));
+    holdBlock(id, "Deleted the block", () => io.deleteBlock(id), reread, UNDO_MS);
   }
 
   function open(next: NonNullable<typeof dialog>) {

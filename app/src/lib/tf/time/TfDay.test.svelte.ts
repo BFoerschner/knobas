@@ -695,6 +695,42 @@ test("a mouse's Dismiss leaves an empty row of its height until the pointer leav
   }
 });
 
+test("a Dismiss survives leaving the Day during its toast: the row stays hidden, Undo brings it back, and the write still goes (F-356)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    // To Week and back: a new Day, whose read still has the block, while the toast stands.
+    const again = () => {
+      unmount(view!);
+      view = undefined;
+      return render();
+    };
+    render();
+    await settle();
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    again();
+    await settle();
+    expect(rows(), "hidden under its toast").not.toContain("offered");
+
+    toasts.items.at(-1)!.action!.run();
+    await settle();
+    expect(rows(), "Undo reaches the new Day").toContain("offered");
+
+    const pressedOn = again();
+    await settle();
+    button(row("offered"), "Dismiss").click();
+    await settle();
+    again();
+    await settle();
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(pressedOn.dismissals, "the write still goes").toEqual([2]);
+    expect(rows(), "not drawn again from a read older than the write").not.toContain("offered");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("Undo on Dismiss puts the offer back and nothing is ever sent (F-339)", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {

@@ -245,10 +245,12 @@
     history.replaceState(stamped(history.state, { ...had, trip }), "");
   });
   // Arriving narrowed, the press's own control has gone or is hidden: focus takes the page's heading, so Tab starts here (F-148).
+  // A mouse's press left focus on its link, in a page now hidden, which the browser only drops at the next frame.
   $effect(() => {
     if (subtasksOf === null || !pageShown()) return;
     void tick().then(() => {
-      if (document.activeElement !== document.body && document.activeElement !== null) return;
+      const at = document.activeElement;
+      if (at !== document.body && at !== null && at.closest("[hidden]") === null) return;
       shownHeading()?.focus({ preventScroll: true });
     });
   });

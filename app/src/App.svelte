@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { goLaunched, goWithoutOpener } from "./lib/tf/opener";
+  import { goLaunched, goVisiting, goWithoutOpener } from "./lib/tf/opener";
   import { askForSecret, reenterSourceOf } from "./lib/tf/settings/secret-prompt.svelte";
   import { listen } from "@tauri-apps/api/event";
 
@@ -17,7 +17,7 @@
   import { assetTargetId, targetReading } from "./lib/shell/timer";
   import { toastQueued } from "./lib/shell/queued-toast";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
-  import { push, undoable } from "./lib/shell/toasts.svelte";
+  import { dismiss, push, undoable } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
@@ -122,9 +122,13 @@
     worklogDraft: (entityId, when) => worklogDraft(entityId, when),
     onadhoc: (block, offer) => (adHoc = { block, offer }),
     push,
+    dismiss,
     undoable,
     complain,
-    onday: () => (location.hash = "#/time"),
+    // A top page opened from somewhere to come back from: *Back to* and `Esc` return to where the stop was (F-140).
+    onday: () => {
+      if (location.hash !== "#/time") goVisiting("#/time");
+    },
   });
 
   /**

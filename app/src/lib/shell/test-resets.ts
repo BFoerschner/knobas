@@ -36,6 +36,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
   "tf/settings/secret-prompt.svelte.ts#secretPrompt": async () => (await import("../tf/settings/secret-prompt.svelte")).resetSecretPrompt(),
   "tf/drafts.svelte.ts#typed": async () => (await import("../tf/drafts.svelte")).drafts.reset(),
+  // The blocks a press hid for its toast's life (F-356): each test starts with none.
+  "tf/time/held-blocks.svelte.ts#held": async () => (await import("../tf/time/held-blocks.svelte")).resetHeldBlocks(),
   "tf/docs/docs.ts#reading": async () => (await import("../tf/docs/docs")).forgetReading(),
   // What was typed on a source's page and not saved (F-617): each test starts with none.
   "tf/settings/source-drafts.svelte.ts#sourceDrafts": async () => (await import("../tf/settings/source-drafts.svelte")).sourceDrafts.reset(),

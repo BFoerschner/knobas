@@ -48,6 +48,17 @@ test("focus goes to the row's link to where it opened, not to the part pressed",
   expect(document.activeElement?.id).toBe("own");
 });
 
+test("a windowed list's row drawn a frame late takes focus from the press that stood in for it (F-152)", async () => {
+  const { main, page } = draw(`<button id="list">List</button><table><tbody></tbody></table>`);
+  const place = capturePlace(main, page, page.querySelector("#list"), "#/ticket/mock%3APAY-228");
+  const end = restorePlace(place, page);
+  expect(document.activeElement?.id).toBe("list");
+  page.querySelector("tbody")!.innerHTML = `<tr id="row" data-entity="mock:PAY-228" tabindex="0"><td>PAY-228</td></tr>`;
+  await frames();
+  expect(document.activeElement?.id).toBe("row");
+  end();
+});
+
 test("a row redrawn while away is found by the address it opened", () => {
   const { main, page } = draw(`<ul><li><a id="old" href="#/pr/1">PR</a></li></ul>`);
   const place = capturePlace(main, page, page.querySelector("#old"), "#/pr/1");

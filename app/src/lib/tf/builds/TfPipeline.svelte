@@ -683,8 +683,11 @@
                 {/if}
                 {#if run.state !== null && !isStartedHere(run)}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
               </td>
-              <td class="tf-mono tf-run-br" title={run.branch ?? undefined}
-                >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</td
+              <!-- A flex row, so the name takes the ellipsis: it is the chip that ties a run to the job, and an inline chip after the name is the first thing cut (F-357). -->
+              <td class="tf-mono tf-run-br"
+                ><span class="tf-run-brin"
+                  >{#if run.branch !== null}<span class="tf-run-brname" title={run.branch}><Marked text={run.branch} typed={filter.text} /></span>{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</span
+                ></td
               >
               <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-run-tests"
