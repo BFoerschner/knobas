@@ -29,6 +29,9 @@
  * - (k) `*` is the subject of a rule that sets a width, a height, `overflow` or `position`: a shared layout rule names
  *   what it lays out;
  * - (l) `role="menu"` appears outside `TfMenu.svelte`: a menu is `TfMenu`;
+ * - (m) a component draws the missing line by hand inside a `TfDialog` (it is `TfDialog`'s `why`), outside one in any
+ *   markup but `<p class="tf-dwhy" role="status">`, or says *(needed)* (a needed field is a `.tf-req` *required*);
+ * - (n) a `TfDialog`'s footer has a primary disabled for more than a send in flight, and the dialog passes no `why`;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -54,7 +57,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j" | "k" | "l";
+type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -289,8 +292,58 @@ function markupClasses(text: string): Set<string> {
 
 /** The one component that may draw a `role="menu"` (rule l). */
 const MENU_COMPONENT = "lib/tf/TfMenu.svelte";
+/** The one component that draws a dialog's missing line (rule m). */
+const DIALOG_COMPONENT = "lib/tf/settings/TfDialog.svelte";
 /** What a shared layout rule may not set on `*` (rule k). */
 const LAYOUT = /^(?:(?:min-|max-)?(?:width|height)|overflow(?:-[xy])?|position)$/;
+
+/** Where the tag at `start` ends: its first `>` outside any `{…}`, so an arrow function in an attribute doesn't end it. */
+function tagEnd(markup: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < markup.length; i++) {
+    if (markup[i] === "{") depth++;
+    else if (markup[i] === "}") depth--;
+    else if (markup[i] === ">" && depth === 0) return i;
+  }
+  return markup.length;
+}
+
+/** What may disable a dialog's primary with no line: a send in flight, which its label or the dialog already shows. */
+const IN_FLIGHT = /^!?(?:(?:queue\.)?(?:busy|flushing)|sending|writing|saving|deleting|publishing|signingIn|testing)$/;
+
+/** The `disabled={…}` of each primary in `block`, as written. */
+function disabledPrimaries(block: string): string[] {
+  return [...block.matchAll(/<button\b/g)].flatMap((m) => {
+    const tag = block.slice(m.index, tagEnd(block, m.index));
+    if (!/\btf-primary\b/.test(tag) || /\bclass:tf-primary\b/.test(tag)) return [];
+    const at = tag.search(/(?<![\w-])disabled=\{/);
+    if (at === -1) return [];
+    let depth = 0;
+    for (let i = at + "disabled=".length; i < tag.length; i++) {
+      if (tag[i] === "{") depth++;
+      else if (tag[i] === "}" && --depth === 0) return [tag.slice(at + "disabled={".length, i)];
+    }
+    return [];
+  });
+}
+
+/** Rules (m) and (n): the missing line is `TfDialog`'s, and a disabled primary has one. */
+function missingLine(file: string, markup: string, add: (v: Violation) => void): void {
+  if (/\(needed\)/.test(markup)) add({ rule: "m", file, key: "(needed)", detail: "says (needed); a needed field is a `.tf-req` *required* in its label" });
+  const blocks = [...markup.matchAll(/<TfDialog\b[\s\S]*?<\/TfDialog>/g)].map((m) => m[0]);
+  for (const block of blocks) {
+    if (/\btf-dwhy\b/.test(block)) add({ rule: "m", file, key: "tf-dwhy in a dialog", detail: "draws the missing line by hand; it is `TfDialog`'s `why`" });
+    const passes = /\bwhy=/.test(block.slice(0, tagEnd(block, 0)));
+    for (const expr of disabledPrimaries(block)) {
+      const inFlight = expr.split("||").every((part) => IN_FLIGHT.test(part.trim()));
+      if (!inFlight && !passes) add({ rule: "n", file, key: expr, detail: `a primary is disabled={${expr}} and its dialog passes no \`why\`` });
+    }
+  }
+  const outside = blocks.reduce((rest, block) => rest.replace(block, ""), markup);
+  for (const [tag] of outside.matchAll(/<[a-z]+\b[^>]*\btf-dwhy\b[^>]*>/g)) {
+    if (tag !== '<p class="tf-dwhy" role="status">') add({ rule: "m", file, key: tag, detail: 'the missing line has one markup, `<p class="tf-dwhy" role="status">`' });
+  }
+}
 
 /** Every breach of rules (a), (b) and (c) under `root`, one per (rule, file, key). */
 function scan(root: string): Violation[] {
@@ -351,6 +404,7 @@ function scan(root: string): Violation[] {
       if (file !== MENU_COMPONENT && /\brole=["']menu["']/.test(markup)) {
         add({ rule: "l", file, key: 'role="menu"', detail: "draws a menu by hand; a menu is `TfMenu`, which draws in the float host" });
       }
+      if (file !== DIALOG_COMPONENT) missingLine(file, markup, add);
     }
   }
   return [...found.values()];
@@ -384,7 +438,7 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
     if (!/^\d+\.txt$/.test(entry.list)) {
       failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
-    } else if (!/^[abcfghijkl]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+    } else if (!/^[abcfghijklmn]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
       failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g|h|i|j|k|l> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
@@ -473,6 +527,33 @@ test("(l) a `role=\"menu\"` outside `TfMenu` fails; `TfMenu`'s own and a word ab
       "lib/tf/x/TfX.svelte": '<!-- a `role="menu"` is TfMenu -->\n<button role="menuitem">x</button>',
     }),
   ).toEqual([]);
+});
+
+/** The rules a component alone breaches. */
+const rulesFor = (file: string, markup: string): string[] => planted({ [file]: markup }).map((failure) => failure.slice(1, 2));
+
+test("(m) a hand-drawn missing line in a dialog, a second markup and *(needed)* fail; the page's one markup and `TfDialog`'s own pass", () => {
+  const dialog = (footer: string, open = "<TfDialog>") => `${open}{#snippet footer()}${footer}{/snippet}</TfDialog>`;
+  const m = (markup: string, file = "lib/x/Y.svelte") => {
+    expect(rulesFor(file, markup).filter((rule) => rule === "m").length, markup).toBeGreaterThan(0);
+  };
+  m(dialog('<p class="tf-dwhy" role="status">Name it first.</p><button class="tf-btn tf-primary">Add</button>'));
+  m('<span class="tf-dwhy">Name it first.</span>');
+  m("<label>Name (needed)</label>");
+  expect(rulesFor("lib/x/Y.svelte", '<p class="tf-dwhy" role="status">Name it first.</p>')).toEqual([]);
+  expect(rulesFor("lib/tf/settings/TfDialog.svelte", dialog('<p class="tf-dwhy" role="status">{why}</p>'))).toEqual([]);
+});
+
+test("(n) a dialog's primary disabled for more than a send needs `why`; a send in flight does not, nor a primary that can't be disabled", () => {
+  const dialog = (open: string, disabled: string) =>
+    `${open}{#snippet footer()}<button class="tf-btn tf-primary" onclick={() => { go(); }} disabled={${disabled}}>Add</button>{/snippet}</TfDialog>`;
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "!ready"))).toEqual(["n"]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", 'writing || name === ""'))).toEqual(["n"]);
+  expect(rulesFor("lib/x/Y.svelte", dialog('<TfDialog why={ready ? null : "Name it."}>', "!ready"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "writing"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "sending || queue.busy"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", '<TfDialog>{#snippet footer()}<button class="tf-btn tf-primary">Add</button>{/snippet}</TfDialog>')).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", '<button class="tf-btn tf-primary" disabled={!ready}>Add</button>')).toEqual([]);
 });
 
 test("(a) a control sized outside the controls stylesheet fails, and the same rule in it passes", () => {

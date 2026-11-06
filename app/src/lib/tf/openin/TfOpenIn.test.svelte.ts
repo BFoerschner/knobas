@@ -506,7 +506,7 @@ test("Manage applications: the radio picks the default, ↑ moves one up, Edit�
   expect(edit.querySelector<HTMLInputElement>("#tf-app-name")!.value).toBe("VS Code");
   // #2289: the extra actions on the far left, *Remove* drawn as a destructive start; then ghost Cancel, then the primary.
   expect([...edit.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b).replace(/ on .*/, " on …"), b.className])).toEqual([
-    ["Remove", "tf-btn tf-ghost tf-danger"],
+    ["Remove", "tf-btn tf-ghost tf-danger tf-first"],
     ["Try it on …", "tf-btn tf-first"],
     ["Cancel", "tf-btn tf-ghost"],
     ["Save", "tf-btn tf-primary"],

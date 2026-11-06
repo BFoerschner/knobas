@@ -89,7 +89,7 @@
   }
 </script>
 
-<TfDialog
+<TfDialog why={name.trim() === "" ? "Name it first." : typeId === "" ? "Choose a type first." : null}
   closeButton
   title="New asset"
   subtitle={at.parent === null ? "At the top of the estate" : `In ${at.parent.name}`}
@@ -148,7 +148,6 @@
   {/snippet}
 
   {#snippet footer()}
-    {#if name.trim() === ""}<p class="tf-dwhy" role="status">Name it first.</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"

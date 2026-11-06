@@ -20,6 +20,7 @@
   import type { Layers } from "../layers.svelte";
   import type { LinkTarget } from "./current.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfTick from "../TfTick.svelte";
 
   let {
     jobKey,
@@ -60,12 +61,15 @@
   let keyed = $state(false);
   const uid = $props.id();
   let field = $state<HTMLInputElement | null>(null);
+  let primary = $state<HTMLButtonElement | null>(null);
 
   const hits = $derived(session.rows.flatMap((row) => (row.kind === "hit" && row.hit.entity_id !== entityId ? [row.hit] : [])));
 
   function pick(hit: SearchHit) {
     target = hit;
     failure = null;
+    // The box that held focus is gone, and the pick made the primary ready.
+    void tick().then(() => primary?.focus());
   }
 
   function change() {
@@ -111,15 +115,14 @@
   }
 </script>
 
-<TfDialog title="Link {jobKey}" {onclose} {layers}>
+<TfDialog why={target ? null : "Pick what to link it to."} title="Link {jobKey}" {onclose} {layers}>
   {#snippet body()}
     <div class="tf-formgrid">
       {#if target}
         <span id="tf-lk-to-{uid}">Link to</span>
         <div class="tf-onrow" role="group" aria-labelledby="tf-lk-to-{uid}">
           <span class="tf-chosen"
-            ><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" /></svg
-            ><span class="tf-chosent" title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
+            ><TfTick /><span class="tf-chosent" title={target.title}>{target.title}</span><span class="tf-dim">{kindSingular(target.kind, null)}</span></span
           >
           <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
         </div>
@@ -162,8 +165,7 @@
     <p class="tf-dim tf-small">Links stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    {#if !target}<p class="tf-dwhy" role="status">Pick what to link it to.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" disabled={!target || writing} onclick={() => void link()}>Link</button>
+    <button type="button" class="tf-btn tf-primary" bind:this={primary} disabled={!target || writing} onclick={() => void link()}>Link</button>
   {/snippet}
 </TfDialog>

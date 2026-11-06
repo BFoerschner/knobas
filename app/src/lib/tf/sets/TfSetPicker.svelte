@@ -66,7 +66,7 @@
   }
 </script>
 
-<TfDialog title="Add {noun} to {setName}" {onclose}>
+<TfDialog why={picked.length === 0 ? "Tick what to add." : null} title="Add {noun} to {setName}" {onclose}>
   {#snippet body()}
     <label class="tf-fsearch tf-wide"
       ><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
@@ -102,7 +102,7 @@
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    {#if picked.length === 0}<p class="tf-dwhy" role="status">Tick what to add.</p>{:else}<span class="tf-dim tf-picked">{picked.length} picked</span>{/if}
+    {#if picked.length > 0}<span class="tf-dim tf-picked">{picked.length} picked</span>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={picked.length === 0} onclick={add}>Add</button>
   {/snippet}

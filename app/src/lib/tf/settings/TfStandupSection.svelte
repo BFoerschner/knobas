@@ -113,7 +113,7 @@
 {/if}
 
 {#if picking}
-  <TfDialog title="Publish standups under" onclose={() => (picking = false)} {layers}>
+  <TfDialog why={sources.length === 0 ? "Needs a source that holds pages." : chosen === null ? "Choose a page first." : null} title="Publish standups under" onclose={() => (picking = false)} {layers}>
     {#snippet body()}
       <p class="tf-dsub">Changing this moves where the next page lands. Pages already published stay where they are.</p>
       {#if sources.length === 0}<p class="tf-dsub"><a class="tf-dlink" href="#/settings/sources" onclick={() => (picking = false)}>Add a source that holds pages</a></p>{/if}
@@ -128,11 +128,6 @@
       </div>
     {/snippet}
     {#snippet footer()}
-      {#if sources.length === 0}
-        <p class="tf-dwhy" role="status">Needs a source that holds pages.</p>
-      {:else if chosen === null}
-        <p class="tf-dwhy" role="status">Choose a page first.</p>
-      {/if}
       <button class="tf-btn tf-ghost" onclick={() => (picking = false)}>Cancel</button>
       <button class="tf-btn tf-primary" disabled={saving || chosen === null || sources.length === 0} onclick={() => void save()}>Save</button>
     {/snippet}

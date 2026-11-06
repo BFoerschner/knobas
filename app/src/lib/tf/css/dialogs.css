@@ -46,10 +46,17 @@
   padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: var(--control-gap); justify-content: flex-end;
   background: var(--sheet-2);
 }
-.tf-dialog footer .tf-first { margin-right: auto; }
+/* The footer reads extras, the missing line, Cancel, the primary. `TfDialog` draws the line before the caller's buttons,
+   so the order sets where it stands. Two extras stand together, and the free room is after the last. */
+.tf-dialog footer .tf-first { order: -2; margin-right: auto; }
+.tf-dialog footer .tf-first:has(+ .tf-first) { margin-right: 0; }
+/* A crowded footer (four buttons and a line) breaks between its parts, so the line stays one line and no button is squeezed. */
+.tf-dialog footer:has(> .tf-dwhy) { flex-wrap: wrap; }
 /* The enabled rule (Controls, *Disabled*): what a disabled primary is waiting for, in words beside the buttons. */
 .tf-dwhy { margin: 0; font-size: var(--t-xs); line-height: 1.3; color: var(--ink-2); }
-.tf-dialog footer .tf-dwhy { flex: 0 1 auto; min-width: 0; margin-left: auto; align-self: center; text-align: right; }
+.tf-dialog footer .tf-dwhy { order: -1; flex: 0 1 auto; min-width: 0; margin-left: auto; align-self: center; text-align: right; }
+/* On a settings row of buttons, beside them. */
+.tf-stg-acts .tf-dwhy { align-self: center; }
 /* A radio's line under its name takes a step of the scale, not the browser's `smaller`. */
 .tf-radio small { font-size: var(--t-xs); }
 /* A needed field says so in words, in its label. */
@@ -110,6 +117,8 @@
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--field); color: var(--ink);
 }
 .tf-formgrid :is(input:not([type="checkbox"], [type="radio"]), select) { width: 100%; }
+/* A time field is short wherever it stands (F-026): a clock doesn't fill a column. */
+.tf-formgrid input[type="time"] { width: 112px; justify-self: start; }
 .tf-formgrid textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink); font: inherit; width: 100%; resize: vertical; }
 .tf-formgrid fieldset { border: 0; padding: 0; margin: 0; }
 /* A field's label: one size and tone in every dialog. A code value as a label (a build parameter's name) is mono. */

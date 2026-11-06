@@ -265,7 +265,7 @@
   }
 </script>
 
-<TfDialog title="Add a source" {layers} {onclose}>
+<TfDialog why={missing} title="Add a source" {layers} {onclose}>
   {#snippet body()}
     <div class="tf-pane-h">What is it?</div>
     {#if adaptersError !== null}
@@ -361,7 +361,6 @@
   {/snippet}
   {#snippet footer()}
     <button class="tf-btn tf-first" disabled={!ready || testing} onclick={() => void test()}>Test connection</button>
-    {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
   {/snippet}

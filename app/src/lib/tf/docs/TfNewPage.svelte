@@ -98,7 +98,7 @@
   }
 </script>
 
-<TfDialog title="New page" {onclose} {layers} className="tf-np-dialog">
+<TfDialog why={title.trim() === "" ? "Give the page a title." : under === "" ? "Choose where it goes." : null} title="New page" {onclose} {layers} className="tf-np-dialog">
   {#snippet body()}
     <div class="tf-formgrid">
       <span>Space</span>
@@ -130,7 +130,6 @@
     <p class="tf-dlg-note">Created in {sourceName} through the write queue. Tables and macros need {sourceName} for now.</p>
   {/snippet}
   {#snippet footer()}
-    {#if title.trim() === ""}<p class="tf-dwhy" role="status">Give the page a title.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       type="button"

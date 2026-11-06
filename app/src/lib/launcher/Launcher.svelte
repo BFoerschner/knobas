@@ -1038,6 +1038,7 @@
     title="Search and actions"
     className={deep ? "tf-launch tf-launch-deep" : "tf-launch"}
     onclose={close}
+    scrimCloses
     footer={footerKeys.length > 0 || saveShown ? keysAndSave : undefined}
   >
     {#snippet body()}

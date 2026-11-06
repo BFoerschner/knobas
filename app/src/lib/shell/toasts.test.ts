@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { dismiss, push, reset, toasts } from "./toasts.svelte";
+import { dismiss, hold, push, release, reset, toasts } from "./toasts.svelte";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -78,4 +78,45 @@ test("a reset leaves no dismiss timer armed", () => {
   expect(vi.getTimerCount()).toBe(2);
   reset();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+/** F-621: an *Undo* being reached for stays. */
+test("a held toast stays past its time, and its time runs on once nothing holds it", () => {
+  const id = push({ text: "Removed the row", ms: 6500 });
+  vi.advanceTimersByTime(4000);
+
+  hold(id, "hover");
+  vi.advanceTimersByTime(60_000);
+  expect(toasts.items).toHaveLength(1);
+
+  hold(id, "focus");
+  release(id, "hover");
+  vi.advanceTimersByTime(60_000);
+  expect(toasts.items, "focus still holds it").toHaveLength(1);
+
+  release(id, "focus");
+  vi.advanceTimersByTime(2499);
+  expect(toasts.items, "what it had left").toHaveLength(1);
+  vi.advanceTimersByTime(1);
+  expect(toasts.items).toEqual([]);
+});
+
+test("a toast held at the end of its time keeps enough to reach back for", () => {
+  const id = push({ text: "Removed the row", ms: 1000 });
+  vi.advanceTimersByTime(999);
+  hold(id, "hover");
+  release(id, "hover");
+  vi.advanceTimersByTime(1999);
+  expect(toasts.items).toHaveLength(1);
+  vi.advanceTimersByTime(1);
+  expect(toasts.items).toEqual([]);
+});
+
+test("a hold on a toast that has gone does nothing", () => {
+  const id = push({ text: "gone" });
+  dismiss(id);
+  expect(() => {
+    hold(id, "hover");
+    release(id, "hover");
+  }).not.toThrow();
 });

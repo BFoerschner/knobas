@@ -738,7 +738,7 @@
 </div>
 
 {#if dialog}
-  <TfDialog title="Where do standup protocols go?" {layers} onclose={() => (dialog = null)}>
+  <TfDialog why={dialog!.chosen === null && !publishing ? "Choose a page first." : null} title="Where do standup protocols go?" {layers} onclose={() => (dialog = null)}>
     {#snippet body()}
       <PublishTargetPicker
         sources={dialog!.sources}

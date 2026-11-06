@@ -219,7 +219,7 @@
 {/if}
 
 {#if editing}
-  <TfDialog title="Capture shortcut" onclose={() => (editing = false)} {layers}>
+  <TfDialog why={saving ? null : typed === "" ? (view?.accelerator != null ? "Type a shortcut, or press Clear." : "Type a shortcut.") : typed === (view?.accelerator ?? "") ? "This is the shortcut already." : null} title="Change the capture shortcut" onclose={() => (editing = false)} {layers}>
     {#snippet body()}
       <p class="tf-dsub">
         Written the way <code>CmdOrCtrl+Shift+N</code> is: modifiers (<code>CmdOrCtrl</code>, <code>Shift</code>,
@@ -254,7 +254,7 @@
 {/if}
 
 {#if moving}
-  <TfDialog title="Move notes to Confluence" onclose={() => (moving = false)} {layers}>
+  <TfDialog why={sending || chosen !== null ? null : "Choose a page first."} title="Move notes to Confluence" onclose={() => (moving = false)} {layers}>
     {#snippet body()}
       <p class="tf-dsub">Each note becomes a page under the one you pick. Your notes stay in knobas.</p>
       <div class="tf-stg-pick">

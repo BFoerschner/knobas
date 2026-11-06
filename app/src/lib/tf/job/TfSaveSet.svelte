@@ -123,7 +123,7 @@
   }
 </script>
 
-<TfDialog {onclose} {layers}>
+<TfDialog why={missing} {onclose} {layers}>
   {#snippet title()}Save <TfKey value={key} />’s connections as a link set{/snippet}
   {#snippet body()}
     <div class="tf-formgrid">
@@ -174,7 +174,6 @@
     </div>
   {/snippet}
   {#snippet footer()}
-    {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={writing || missing !== null} onclick={() => void save()}>Save link set</button>
   {/snippet}

@@ -196,7 +196,7 @@
   }
 </script>
 
-<TfDialog title={editing ? "Edit an application" : "Add an application"} onclose={dismiss} {layers} className="tf-app-dialog">
+<TfDialog why={busy ? null : name.trim() === "" ? (command.trim() === "" ? "Name it, and give its command." : "Name it first.") : command.trim() === "" ? "Give its command." : null} title={editing ? "Edit an application" : "Add an application"} onclose={dismiss} {layers} className="tf-app-dialog">
   {#snippet body()}
     <form
       class="tf-formgrid"
@@ -206,9 +206,9 @@
         save();
       }}
     >
-      <label for="tf-app-name">Name</label>
+      <label for="tf-app-name">Name <small class="tf-req">required</small></label>
       <input id="tf-app-name" type="text" autocomplete="off" placeholder="MyGitViewer" bind:value={name} />
-      <label for="tf-app-command">Command</label>
+      <label for="tf-app-command">Command <small class="tf-req">required</small></label>
       <input
         id="tf-app-command"
         class="tf-mono"
@@ -294,7 +294,7 @@
   {/snippet}
   {#snippet footer()}
     {#if editing}
-      <button type="button" class="tf-btn tf-ghost tf-danger" class:tf-first={sample === null} disabled={busy} onclick={remove}
+      <button type="button" class="tf-btn tf-ghost tf-danger tf-first" disabled={busy} onclick={remove}
         >Remove</button
       >
     {/if}

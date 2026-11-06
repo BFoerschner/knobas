@@ -777,6 +777,30 @@ test("Run… opens the dialog on the job's branch with each parameter typed by i
   expect(first.querySelector(".tf-run-no")?.textContent).toContain("queued");
 });
 
+/** F-041: the combo box's rung is its list. With none drawn, one `Esc` goes on to the dialog. */
+test("Esc in the branch combobox closes its list first, and with no list drawn it goes on to the dialog", async () => {
+  draw();
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  const branch = field<HTMLInputElement>("Branch");
+  const esc = () => {
+    const press = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    branch.dispatchEvent(press);
+    flushSync();
+  };
+  branch.dispatchEvent(new FocusEvent("focus"));
+  flushSync();
+  expect(dialog()!.querySelector('[role="listbox"]')).not.toBeNull();
+  esc();
+  expect(dialog()!.querySelector('[role="listbox"]')).toBeNull();
+
+  type(branch, "nothing-like-this");
+  expect(dialog()!.querySelector('[role="listbox"]'), "open, with nothing to draw").toBeNull();
+  esc();
+  expect(dialog()).toBeNull();
+});
+
 test("the branch combobox: type-ahead with the default and the job's branch marked, arrows and Enter pick; the default runs as no branch", async () => {
   const drawn = draw();
   await settle();

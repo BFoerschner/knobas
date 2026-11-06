@@ -752,7 +752,7 @@
 </section>
 
 {#if reentering}
-  <TfDialog title="{noneStored ? 'Enter' : 'Re-enter'} the {name} {word.toLowerCase()}" {layers} onclose={closeReenter}>
+  <TfDialog why={!canSignIn && !signingIn && !half ? `Type the ${word.toLowerCase()} to sign in.` : null} title="{noneStored ? 'Enter' : 'Re-enter'} the {name} {word.toLowerCase()}" {layers} onclose={closeReenter}>
     {#snippet body()}
       <form
         class="tf-formgrid"
@@ -780,7 +780,6 @@
       </p>
     {/snippet}
     {#snippet footer()}
-      {#if !canSignIn && !signingIn && !half}<p class="tf-dwhy" role="status">Type the {word.toLowerCase()} to sign in.</p>{/if}
       <button class="tf-btn tf-ghost" onclick={closeReenter}>Cancel</button>
       <button class="tf-btn tf-primary" type="submit" form="tf-reenter" disabled={!canSignIn}>Sign in</button>
     {/snippet}

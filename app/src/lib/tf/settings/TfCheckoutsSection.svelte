@@ -182,7 +182,7 @@
 {/if}
 
 {#if editingRoot}
-  <TfDialog title="Change the clones root" {layers} onclose={() => (editingRoot = false)}>
+  <TfDialog why={rootUnchanged ? "This is the root already." : null} title="Change the clones root" {layers} onclose={() => (editingRoot = false)}>
     {#snippet body()}
       <form
         class="tf-formgrid"
@@ -199,7 +199,6 @@
       {#if rootError !== null}<div class="tf-banner tf-err tf-dbanner" role="alert">{rootError}</div>{/if}
     {/snippet}
     {#snippet footer()}
-      {#if rootUnchanged}<p class="tf-dwhy" role="status">This is the root already.</p>{/if}
       <button type="button" class="tf-btn tf-ghost" onclick={() => (editingRoot = false)}>Cancel</button>
       <button type="submit" class="tf-btn tf-primary" form="tf-stg-root" disabled={rootUnchanged || savingRoot}>Save</button>
     {/snippet}

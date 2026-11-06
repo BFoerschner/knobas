@@ -131,7 +131,7 @@
   }
 </script>
 
-<TfDialog closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
+<TfDialog why={writing ? null : name.trim() === "" ? "Name it first." : url.trim() === "" ? "Say what to check." : target === null ? "Needs a source that can create monitors." : null} closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
   {#snippet body()}
     <div class="tf-formgrid form">
         <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
@@ -188,7 +188,6 @@
   {/snippet}
 
   {#snippet footer()}
-    {#if name.trim() === "" || url.trim() === ""}<p class="tf-dwhy" role="status">{name.trim() === "" ? "Name it first." : "Say what to check."}</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={!ready} onclick={() => void submit()}>
       {writing ? "Queueing…" : "Create"}

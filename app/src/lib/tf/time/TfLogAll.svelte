@@ -180,7 +180,7 @@
   }
 </script>
 
-<TfDialog
+<TfDialog why={rows !== null && rows.length > 0 && ticked.length === 0 && !sending ? "Tick what to log." : null}
   title="Log all"
   subtitle="One worklog per day and ticket, from the blocks you tracked and have not logged."
   className="tf-tm-logall"

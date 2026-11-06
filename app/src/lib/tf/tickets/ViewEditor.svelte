@@ -356,7 +356,7 @@
   }
 </script>
 
-<TfDialog {title} className="tf-vw-dialog" {onclose}>
+<TfDialog why={named ? null : "Give the view a name."} {title} className="tf-vw-dialog" {onclose}>
   {#snippet body()}
     <div class="tf-vw-body">
       <form
@@ -390,7 +390,7 @@
         <section class="tf-vw-sec">
           <div class="tf-vw-two">
             <label>
-              <span>Name</span>
+              <span>Name <small class="tf-req">required</small></span>
               <input
                 type="text"
                 class="tf-vw-name-in"
@@ -691,7 +691,7 @@
   {/snippet}
   {#snippet footer()}
     {#if editing && ondelete && fixedSource === null}
-      <button type="button" class="tf-btn tf-ghost tf-danger" onclick={ondelete}>Delete view</button>
+      <button type="button" class="tf-btn tf-ghost tf-danger tf-first" onclick={ondelete}>Delete view</button>
     {/if}
     <span class="tf-first tf-dim tf-vw-store"
       >{fixedSource !== null

@@ -27,6 +27,8 @@
     onclose: () => void;
   } = $props();
 
+  const uid = $props.id();
+
   /** How many matches the list draws. */
   const DRAWN = 150;
 
@@ -73,27 +75,27 @@
   }
 </script>
 
-<TfDialog title="Add a pattern to {setName}" {onclose}>
+<TfDialog why={!chosen ? "Pick a project or type a name." : failed !== null || answer?.refusal ? "Change it: knobas can’t read this pattern." : null} title="Add a pattern to {setName}" {onclose}>
   {#snippet body()}
     <p class="tf-dim tf-pat-intro">
       A pattern is a saved filter. It picks up new {pipelines ? "pipelines" : "pages"} as they appear, without editing the set.
     </p>
     <div class="tf-formgrid">
       {#if pipelines}
-        <span>Project</span>
-        <select aria-label="Project" bind:value={project}>
+        <label for="tf-pat-project-{uid}">Project</label>
+        <select id="tf-pat-project-{uid}" aria-label="Project" bind:value={project}>
           <option value="">Any</option>
           {#each projects as row (`${row.source_id}|${row.key}`)}<option value={row.key}>{projectLabel(row)}</option>{/each}
         </select>
-        <span>Name matches</span>
-        <input type="text" aria-label="Name matches" bind:value={typed} placeholder="e.g. Payout_*" />
+        <label for="tf-pat-typed-{uid}">Name matches</label>
+        <input id="tf-pat-typed-{uid}" type="text" aria-label="Name matches" bind:value={typed} placeholder="e.g. Payout_*" />
       {:else}
-        <span>Space</span>
-        <select aria-label="Space" bind:value={project}>
+        <label for="tf-pat-project-{uid}">Space</label>
+        <select id="tf-pat-project-{uid}" aria-label="Space" bind:value={project}>
           {#each projects as row (`${row.source_id}|${row.key}`)}<option value={row.key}>{projectLabel(row)}</option>{/each}
         </select>
-        <span>Under page</span>
-        <input type="text" aria-label="Under page" bind:value={typed} placeholder="e.g. Runbooks (empty for the whole space)" />
+        <label for="tf-pat-typed-{uid}">Under page</label>
+        <input id="tf-pat-typed-{uid}" type="text" aria-label="Under page" bind:value={typed} placeholder="e.g. Runbooks (empty for the whole space)" />
       {/if}
     </div>
     {#if failed !== null}
@@ -116,7 +118,6 @@
     <p class="tf-dim tf-stays">Link sets stay in knobas and are never written to a source.</p>
   {/snippet}
   {#snippet footer()}
-    {#if !chosen}<p class="tf-dwhy" role="status">Pick a project or type a name.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" disabled={!addable} onclick={() => onadd(query)}>Add pattern</button>
   {/snippet}

@@ -70,7 +70,14 @@
 /* The dialogs' radios are drawn, not the platform's, whose unselected one sinks into a dark sheet. */
 :is(.tf-radio, .tf-picks) input[type="radio"] { appearance: none; flex: none; width: 14px; height: 14px; margin: 0; padding: 0; border: 1.5px solid var(--ink-2); border-radius: 50%; background: var(--field); align-self: center; }
 .tf-radio input[type="radio"] { align-self: flex-start; margin-top: 3px; }
-:is(.tf-radio, .tf-picks) input[type="radio"]:checked { border-color: var(--ink); background: var(--ink); box-shadow: inset 0 0 0 2.5px var(--field); }
+/* A pick is drawn one way (Forms): the radio turns into the tick, and what holds it takes an ink ring. The clip also takes
+   the radio's own focus ring, so the row draws it. */
+:is(.tf-radio, .tf-picks) input[type="radio"]:checked {
+  border: 0; border-radius: 0; background: var(--ink);
+  clip-path: polygon(8.6% 54.3%, 18.6% 44.3%, 39.3% 65%, 78.6% 18.6%, 90% 27.9%, 40% 85.7%);
+}
+.tf-picks .tf-pickrow:has(input:checked) { box-shadow: inset 0 0 0 1px var(--ink); }
+:is(.tf-radio label, .tf-picks .tf-pickrow):has(input[type="radio"]:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
 :is(.tf-radio, .tf-picks) input[type="radio"]:disabled { border-color: var(--rule); }
 /* A file's name takes what is left and is cut, never pushed sideways; its size keeps a fixed column. */
 .tf-picks { overflow-x: hidden; }

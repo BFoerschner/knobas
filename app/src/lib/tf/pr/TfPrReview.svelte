@@ -112,7 +112,7 @@
   }
 </script>
 
-<TfDialog title="Submit your review of {name}" {onclose} className="tf-pr-dialog">
+<TfDialog why={busy ? null : needs} title="Submit your review of {name}" {onclose} className="tf-pr-dialog">
   {#snippet body()}
     <form
       id="tf-prr-{uid}"
@@ -143,7 +143,6 @@
     </form>
   {/snippet}
   {#snippet footer()}
-    {#if needs !== null}<p class="tf-dwhy" role="status">{needs}</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-prr-{uid}" disabled={busy || missing.length > 0}>Submit review</button>
   {/snippet}

@@ -54,6 +54,12 @@
   let busy = $state(false);
 
   const missing = $derived(missingFields(action, values));
+  /** What the primary waits for, by the labels the reader sees. */
+  const stillNeeded = $derived.by(() => {
+    if (missing.length === 0) return null;
+    const names = action.fields.filter((field) => missing.includes(field.name)).map((field) => field.label);
+    return `Still needs ${names.join(" and ")}.`;
+  });
 
   async function send() {
     if (busy || missing.length > 0) return;
@@ -79,7 +85,7 @@
   }
 </script>
 
-<TfDialog {title} {onclose} className="tf-pr-dialog">
+<TfDialog why={busy ? null : stillNeeded} {title} {onclose} className="tf-pr-dialog">
   {#snippet body()}
     <form
       id="tf-pra-{uid}"
@@ -93,10 +99,10 @@
       {#each action.fields as field (field.name)}
         {@const id = `tf-pra-${uid}-${field.name}`}
         {#if field.kind.type === "text"}
-          <label for={id}>{field.label}</label>
+          <label for={id}>{field.label}{#if field.required}{" "}<small class="tf-req">required</small>{/if}</label>
           <input {id} type="text" aria-label={field.label} autocomplete="off" placeholder={field.placeholder ?? undefined} bind:value={values[field.name]} />
         {:else if field.kind.type === "long_text"}
-          <label for={id}>{field.label}</label>
+          <label for={id}>{field.label}{#if field.required}{" "}<small class="tf-req">required</small>{/if}</label>
           <textarea {id} rows="6" aria-label={field.label} placeholder={field.placeholder ?? undefined} bind:value={values[field.name]}></textarea>
         {:else if field.kind.type === "choice"}
           <fieldset class="tf-radio">

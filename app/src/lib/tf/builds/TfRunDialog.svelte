@@ -204,7 +204,7 @@
     } else if (event.key === "Enter" && open && shown[active] !== undefined) {
       choose(shown[active]!.name);
       event.preventDefault();
-    } else if (event.key === "Escape" && open) {
+    } else if (event.key === "Escape" && open && shown.length > 0) {
       // The list closes first; the dialog stays.
       open = false;
       event.stopPropagation();

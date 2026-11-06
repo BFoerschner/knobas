@@ -1270,7 +1270,7 @@ test("Delete view in the editor deletes it, with Undo in the toast", async () =>
   [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   // #2289: an extra action that starts a destructive one, drawn by the Controls classes alone.
-  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger");
+  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger tf-first");
   inDialog("Delete view").click();
   await settle();
   expect(dialog()).toBeNull();

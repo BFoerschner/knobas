@@ -288,11 +288,12 @@
       <button class="tf-btn tf-sm tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
       <button class="tf-btn tf-sm tf-ghost" onclick={() => choose("share")}>Import…</button>
       <button class="tf-btn tf-sm tf-ghost" onclick={() => void openFolder()}>Open the backup folder</button>
+      {#if nothingTicked}<p class="tf-dwhy" role="status">Tick what goes in the export.</p>{/if}
     </div>
   </div>
 
   {#if choosing !== null}
-    <TfDialog
+    <TfDialog why={busy || reading || chosen !== null ? null : listed.length === 0 ? "Put a file in the folder first." : "Pick a file."}
       title={choosing === "share" ? "Import a share export" : "Restore from a file"}
       onclose={() => (choosing = null)}
       {layers}

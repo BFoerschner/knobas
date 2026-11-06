@@ -22,6 +22,8 @@
   lands in the dialog.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type { assetTree, AssetRow, moveAsset } from "../ipc/assets";
@@ -60,6 +62,9 @@
   let writing = $state(false);
   /** Nothing has come back yet — told apart from a level holding nothing. */
   let loaded = $state(false);
+  let picker = $state<HTMLElement | null>(null);
+  /** A walk asked for this read, so focus goes on to the level it draws. */
+  let walked = false;
 
   const columnRead = latestRead<AssetRow[]>();
 
@@ -82,6 +87,8 @@
         rows = answer;
         failure = null;
         loaded = true;
+        if (walked) void tick().then(() => picker?.querySelector<HTMLElement>(".opt:not(:disabled)")?.focus());
+        walked = false;
       },
       fail: (cause) => {
         rows = [];
@@ -98,6 +105,7 @@
 
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
   function stand(path: AssetRow[]) {
+    walked = true;
     crumb = path;
     at = path.at(-1)?.id ?? null;
     failure = null;
@@ -120,9 +128,9 @@
   }
 </script>
 
-<TfDialog title="Move {asset.name}" {onclose}>
+<TfDialog why={alreadyHere ? "Open the place it should go." : null} title="Move {asset.name}" {onclose}>
   {#snippet body()}
-    <div class="picker">
+    <div class="picker" bind:this={picker}>
       <p class="crumb">
         <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
           Estate
@@ -179,7 +187,6 @@
   {/snippet}
 
   {#snippet footer()}
-    {#if alreadyHere}<p class="tf-dwhy" role="status">Open the place it should go.</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={writing || alreadyHere} title={alreadyHere ? `${asset.name} is already here` : undefined} onclick={() => void submit()}>
       {writing ? "Moving…" : alreadyHere ? "Already here" : `Move into ${here}`}

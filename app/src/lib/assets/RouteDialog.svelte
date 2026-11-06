@@ -43,6 +43,8 @@
   instead*, so a reader who empties a field means the key to go.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type {
@@ -59,6 +61,7 @@
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
   import TfDialog from "../tf/settings/TfDialog.svelte";
+  import TfTick from "../tf/TfTick.svelte";
   import { inputTypeFor, parseProperty, propertyEdit, PROPERTY_KINDS } from "./editing";
 
   let {
@@ -147,6 +150,9 @@
   let confirming = $state(false);
 
   const columnRead = latestRead<AssetRow[]>();
+  let walk = $state<HTMLElement | null>(null);
+  /** A walk asked for this read, so focus goes on to the level it draws. */
+  let walked = false;
 
   const editing = $derived(route !== null);
   /** Unique per instance, so two stacked dialogs cannot share a field id. */
@@ -158,6 +164,8 @@
       ok: (answer) => {
         rows = answer;
         loaded = true;
+        if (walked) void tick().then(() => walk?.querySelector<HTMLElement>(".opt")?.focus());
+        walked = false;
       },
       fail: (cause) => {
         rows = [];
@@ -169,6 +177,7 @@
 
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
   function stand(path: AssetRow[]) {
+    walked = true;
     crumb = path;
     at = path.at(-1)?.id ?? null;
     failure = null;
@@ -287,7 +296,7 @@
   }
 </script>
 
-<TfDialog closeButton title={route === null ? `Add a route to ${asset.name}` : `Edit route ${route.name}`} subtitle={route === null ? null : `On ${asset.name}`} {onclose}>
+<TfDialog why={name.trim() === "" ? (url.trim() === "" ? "Name it, and say where it answers." : "Name it first.") : url.trim() === "" ? "Say where it answers." : null} closeButton title={route === null ? `Add a route to ${asset.name}` : `Edit route ${route.name}`} subtitle={route === null ? null : `On ${asset.name}`} {onclose}>
   {#snippet body()}
     <div class="tf-formgrid form">
         <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
@@ -331,7 +340,7 @@
       <div class="tf-fwide wide">
         <p class="lands">
           {#if target}
-            <span class="nm">{target.name}</span>
+            <span class="tf-chosen"><TfTick /><span class="tf-chosent">{target.name}</span></span>
             <button class="link" onclick={() => (target = null)}>Clear</button>
           {:else}
             <span class="faint">Nothing: an endpoint knobas has no asset for</span>
@@ -354,7 +363,7 @@
           {/each}
         </p>
 
-        <div class="lvl">
+        <div class="lvl" bind:this={walk}>
           <ul class="opts" aria-label="Where it lands">
             {#each rows as row (row.id)}
               <li>
@@ -366,6 +375,7 @@
                 >
                   <span class="mg">{kindTag(row.monogram)}</span>
                   <span class="nm">{row.name}</span>
+                  {#if target?.id === row.id}<TfTick />{/if}
                   {#if row.has_children}
                     <span class="chev" aria-hidden="true">›</span>
                   {/if}
@@ -439,7 +449,6 @@
     {#if editing}
       <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => (confirming = true)}>Delete route…</button>
     {/if}
-    {#if name.trim() === "" || url.trim() === ""}<p class="tf-dwhy" role="status">{name.trim() === "" ? (url.trim() === "" ? "Name it, and say where it answers." : "Name it first.") : "Say where it answers."}</p>{/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
       class="tf-btn tf-primary"
@@ -498,14 +507,10 @@
 
   .lands {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
     margin: 0 0 6px;
     font-size: var(--t-sm);
-  }
-
-  .lands .nm {
-    color: var(--text);
   }
 
   .crumb {
@@ -555,8 +560,7 @@
   }
 
   .opt.on {
-    background: var(--raised);
-    box-shadow: inset 2px 0 0 var(--link);
+    box-shadow: inset 0 0 0 1px var(--ink);
   }
 
   .opt .nm {

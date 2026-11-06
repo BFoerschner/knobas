@@ -177,7 +177,7 @@
 {#snippet heading()}Log time to <span class="tf-mono">{form.key}</span>{/snippet}
 
 <!-- `Esc` and the backdrop leave quietly, through `TfDialog`'s `onclose`. -->
-<TfDialog title={heading} subtitle={title} onclose={leave} {layers}>
+<TfDialog why={form.seconds <= 0 ? "Nothing to log yet: enter the minutes." : null} title={heading} subtitle={title} onclose={leave} {layers}>
   {#snippet body()}
       <div class="tf-formgrid">
         <label for="tf-log-from">From</label>
@@ -217,7 +217,6 @@
           oninput={(event) => form.takeOver(event.currentTarget.value)}
         ></textarea>
       </div>
-      {#if form.seconds <= 0}<p class="tf-dim tf-note">Nothing to log yet: enter the minutes.</p>{/if}
       <p class="tf-dim tf-note">
         Goes to {sourceName(draft.entity_id)} through the write queue.
         {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}

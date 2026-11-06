@@ -69,6 +69,15 @@
   let busy = $state(false);
 
   const diff = $derived(lineDiff(path, before, after));
+  /** What the primary waits for, in words beside it (design system, Disabled). */
+  const missing = $derived.by(() => {
+    if (busy) return null;
+    if (message.trim() === "") return "Write a commit message.";
+    if (target === "same") return refusal === null ? null : "This branch refuses it: commit to a new branch.";
+    if (newBranch.trim() === "") return "Name the new branch.";
+    return newBranch.trim() === branch ? `Name a branch other than ${branch}.` : null;
+  });
+
   const ready = $derived(
     message.trim() !== "" &&
       (target === "same" ? refusal === null : newBranch.trim() !== "" && newBranch.trim() !== branch) &&
@@ -105,12 +114,12 @@
   }
 </script>
 
-<TfDialog {onclose} className="tf-cf-dialog">
+<TfDialog why={missing} {onclose} className="tf-cf-dialog">
   {#snippet title()}Commit <span class="tf-mono">{path}</span>{/snippet}
   {#snippet body()}
     <TfDiffView files={[diff]} list={false} />
     <div class="tf-formgrid">
-      <label for="tf-cf-msg">Message</label>
+      <label for="tf-cf-msg">Message <small class="tf-req">required</small></label>
       <input id="tf-cf-msg" type="text" autocomplete="off" bind:value={message} />
     </div>
     <div class="tf-radio" role="radiogroup" aria-label="Where the commit goes">

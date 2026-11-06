@@ -66,8 +66,11 @@
   );
   /** What the primary waits for, in words beside it (design system, Disabled). */
   const missing = $derived.by(() => {
-    if (chosen !== null || sets === null || sets.length === 0) return null;
-    if (shown.length === 0) return null;
+    if (chosen !== null) return null;
+    if (failed !== null) return "The link sets could not be read.";
+    if (sets === null) return null;
+    if (sets.length === 0) return "No link sets yet.";
+    if (shown.length === 0) return "No link set matches.";
     return shown.every((set) => applied.has(set.id)) ? "These already apply." : "Pick a link set.";
   });
 
@@ -77,7 +80,7 @@
   }
 </script>
 
-<TfDialog {onclose} {layers}>
+<TfDialog why={missing} {onclose} {layers}>
   {#snippet title()}Apply a link set to <TfKey value={jobKey} />{/snippet}
   {#snippet body()}
     <form id="tf-aps-{uid}" class="tf-dform" onsubmit={apply}></form>
@@ -119,7 +122,6 @@
   {/snippet}
   {#snippet footer()}
     <a class="tf-btn tf-first" href="#/sets" onclick={onclose}>Manage link sets</a>
-    {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-aps-{uid}" disabled={chosen === null}
       >{chosen === null ? "Apply" : `Apply ${chosen.name}`}</button

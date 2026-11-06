@@ -141,7 +141,6 @@
 .tf-facts dt { color: var(--ink-2); }
 .tf-facts dd { margin: 0; }
 .tf-pane-h { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 0 0 6px; }
-.tf .tf-small { font-size: var(--t-sm); }
 .tf-go { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; }
 .tf-go .tf-btn { justify-content: center; }
 .tf-go small { color: var(--ink-2); text-align: center; }

@@ -40,6 +40,8 @@
     onfile: (draft: TicketDraft & { project: string }) => void;
   } = $props();
 
+  const uid = $props.id();
+
   let editing = $state<TicketDraft>(untrack(() => ({ ...draft })));
 
   let refused = $state<RefusedWrite[]>([]);
@@ -49,12 +51,13 @@
   const cannot = $derived(refusalOf(refused, editing.project, "create_ticket"));
 </script>
 
-<TfDialog title="Create a ticket" {layers} {onclose}>
+<TfDialog why={editing.project === null ? "Choose a project." : editing.type.trim() === "" ? "Say what type it is." : editing.title.trim() === "" ? "Give it a title." : null} title="Create a ticket" {layers} {onclose}>
   {#snippet body()}
     {#if !words}<p class="tf-dlg-note">{editing.title}</p>{/if}
     <div class="tf-formgrid">
-      <span>Project</span>
+      <label for="tf-ct-project-{uid}">Project <small class="tf-req">required</small></label>
       <select
+        id="tf-ct-project-{uid}"
         aria-label="Project the ticket goes in"
         value={editing.project ?? ""}
         onchange={(event) => (editing.project = event.currentTarget.value || null)}
@@ -64,32 +67,36 @@
           <option value={projectEntity(project)}>{project.name ?? project.key}</option>
         {/each}
       </select>
-      <span>Type</span>
+      <label for="tf-ct-type-{uid}">Type <small class="tf-req">required</small></label>
       <input
+        id="tf-ct-type-{uid}"
         type="text"
         aria-label="Ticket type"
         value={editing.type}
         oninput={(event) => (editing.type = event.currentTarget.value)}
       />
       {#if words}
-        <span>Title</span>
+        <label for="tf-ct-title-{uid}">Title <small class="tf-req">required</small></label>
         <input
+          id="tf-ct-title-{uid}"
           type="text"
           aria-label="Ticket title"
           value={editing.title}
           oninput={(event) => (editing.title = event.currentTarget.value)}
         />
       {/if}
+      {#if words}
+        <label for="tf-ct-body-{uid}">Description</label>
+        <textarea
+          id="tf-ct-body-{uid}"
+          aria-label="Ticket description"
+          rows="8"
+          value={editing.body}
+          oninput={(event) => (editing.body = event.currentTarget.value)}
+        ></textarea>
+      {/if}
     </div>
     {#if cannot !== null}<p class="tf-dlg-note tf-fail">{cannot}</p>{/if}
-    {#if words}
-      <textarea
-        aria-label="Ticket description"
-        rows="8"
-        value={editing.body}
-        oninput={(event) => (editing.body = event.currentTarget.value)}
-      ></textarea>
-    {/if}
   {/snippet}
   {#snippet footer()}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>

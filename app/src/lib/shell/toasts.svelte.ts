@@ -36,11 +36,28 @@ export interface ToastItem extends ToastSpec {
 
 /** Long enough to read a sentence, short enough not to stack up. */
 const DEFAULT_MS = 6500;
+/** What a toast keeps once the pointer or focus has left it: enough to reach back for *Undo*. */
+const AFTER_HOLD_MS = 2000;
 
 let nextId = 0;
 
-/** The armed auto-dismiss timer of each live toast, by id. */
-const timers = new Map<number, ReturnType<typeof setTimeout>>();
+/** What keeps a toast on screen past its time. */
+export type ToastHold = "hover" | "focus";
+
+/** A live toast's auto-dismiss: armed, or stopped with what it had left while something holds it. */
+interface ToastTimer {
+  handle: ReturnType<typeof setTimeout> | null;
+  /** When an armed timer fires; once stopped, what was left of it. */
+  ends: number;
+  left: number;
+  holds: Set<ToastHold>;
+}
+
+const timers = new Map<number, ToastTimer>();
+
+function arm(id: number, ms: number): ReturnType<typeof setTimeout> {
+  return setTimeout(() => dismiss(id), ms);
+}
 
 /**
  * The live stack, oldest first.
@@ -56,11 +73,30 @@ export function push(spec: ToastSpec): number {
   const id = ++nextId;
   toasts.items.push({ ...spec, id });
   const ms = spec.ms ?? DEFAULT_MS;
-  timers.set(
-    id,
-    setTimeout(() => dismiss(id), ms),
-  );
+  timers.set(id, { handle: arm(id, ms), ends: Date.now() + ms, left: ms, holds: new Set() });
   return id;
+}
+
+/** The pointer or focus is on a toast: its time stops, so an *Undo* being reached for stays (F-621). */
+export function hold(id: number, why: ToastHold): void {
+  const timer = timers.get(id);
+  if (timer === undefined) return;
+  timer.holds.add(why);
+  if (timer.handle === null) return;
+  clearTimeout(timer.handle);
+  timer.handle = null;
+  timer.left = Math.max(0, timer.ends - Date.now());
+}
+
+/** It left. With nothing else holding the toast, its time runs again, and never for less than it takes to reach back. */
+export function release(id: number, why: ToastHold): void {
+  const timer = timers.get(id);
+  if (timer === undefined) return;
+  timer.holds.delete(why);
+  if (timer.holds.size > 0 || timer.handle !== null) return;
+  const ms = Math.max(timer.left, AFTER_HOLD_MS);
+  timer.handle = arm(id, ms);
+  timer.ends = Date.now() + ms;
 }
 
 /**
@@ -69,7 +105,7 @@ export function push(spec: ToastSpec): number {
  * somehow survives could never remove a later toast (#1762).
  */
 export function reset(): void {
-  for (const timer of timers.values()) clearTimeout(timer);
+  for (const timer of timers.values()) if (timer.handle !== null) clearTimeout(timer.handle);
   timers.clear();
   toasts.items = [];
 }
@@ -79,7 +115,8 @@ export function reset(): void {
  * for a toast the reader has already closed by hand.
  */
 export function dismiss(id: number): void {
-  clearTimeout(timers.get(id));
+  const timer = timers.get(id);
+  if (timer !== undefined && timer.handle !== null) clearTimeout(timer.handle);
   timers.delete(id);
   toasts.items = toasts.items.filter((toast) => toast.id !== id);
 }

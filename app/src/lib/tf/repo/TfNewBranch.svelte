@@ -83,7 +83,7 @@
   }
 </script>
 
-<TfDialog {onclose}>
+<TfDialog why={busy ? null : name.trim() === "" ? "Name the branch." : name.trim().endsWith("/") ? "A branch name can’t end in /." : start === "" ? "Choose where it starts." : null} {onclose}>
   {#snippet title()}New branch in <span class="tf-mono">{repoName}</span>{/snippet}
   {#snippet body()}
     <form
@@ -94,7 +94,7 @@
         void create();
       }}
     >
-      <label for="tf-nb-name">Name</label>
+      <label for="tf-nb-name">Name <small class="tf-req">required</small></label>
       <input id="tf-nb-name" class="tf-mono" type="text" autocomplete="off" spellcheck="false" bind:value={name} />
       <label for="tf-nb-from">From</label>
       <select id="tf-nb-from" class="tf-mono" bind:value={start}>
@@ -107,7 +107,6 @@
     </form>
   {/snippet}
   {#snippet footer()}
-    {#if name.trim() === ""}<p class="tf-dwhy" role="status">Name the branch.</p>{/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-newbranch" disabled={!ready}>Create branch</button>
   {/snippet}

@@ -43,6 +43,7 @@
   import { targetReading } from "../../shell/timer";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import TfTick from "../TfTick.svelte";
 
   let {
     mode,
@@ -126,6 +127,7 @@
 
   const uid = $props.id();
   let field = $state<HTMLInputElement | null>(null);
+  let primary = $state<HTMLButtonElement | null>(null);
   onMount(() => {
     field?.focus();
     void session.loadHome();
@@ -134,6 +136,8 @@
 
   function pick(ticket: Ticket) {
     form.picked = ticket;
+    // The box that held focus is gone, and the pick made the primary ready.
+    void tick().then(() => primary?.focus());
   }
 
   function change() {
@@ -179,7 +183,7 @@
 </script>
 
 <!-- The form is the body; the footer's submit reaches it through `form=`, as `TfApplySet`'s does. -->
-<TfDialog title={TITLE[mode]} subtitle={mode === "assign" ? span : null} {onclose} {layers}>
+<TfDialog why={missing} title={TITLE[mode]} subtitle={mode === "assign" ? span : null} {onclose} {layers}>
   {#snippet body()}
   <form id="tf-tm-form-{uid}" class="tf-dform" onsubmit={submit}>
       <div class="tf-formgrid">
@@ -210,8 +214,7 @@
               />
             {:else if form.picked !== null}
               <span class="tf-chosen"
-                ><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5 6.5 12 13 4.5" /></svg
-                ><span class="tf-chosent" title="{keyOf(form.picked.entityId)} {form.picked.title}"><span class="tf-mono">{keyOf(form.picked.entityId)}</span>
+                ><TfTick /><span class="tf-chosent" title="{keyOf(form.picked.entityId)} {form.picked.title}"><span class="tf-mono">{keyOf(form.picked.entityId)}</span>
                 {form.picked.title}</span></span
               >
               <button type="button" class="tf-btn tf-sm tf-ghost" onclick={change}>Change</button>
@@ -253,8 +256,7 @@
       {#if mode === "edit"}
         <button type="button" class="tf-btn tf-ghost tf-danger tf-first" onclick={ondelete}>Delete block</button>
       {/if}
-      {#if missing !== null}<p class="tf-dwhy" role="status">{missing}</p>{/if}
       <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-      <button type="submit" class="tf-btn tf-primary" form="tf-tm-form-{uid}" disabled={!ready}>{SAVE[mode]}</button>
+      <button type="submit" class="tf-btn tf-primary" form="tf-tm-form-{uid}" bind:this={primary} disabled={!ready}>{SAVE[mode]}</button>
   {/snippet}
 </TfDialog>

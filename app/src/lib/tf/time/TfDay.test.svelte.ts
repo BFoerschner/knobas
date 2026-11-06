@@ -507,6 +507,9 @@ test("the picker marks no row until the arrow keys move, the footer says what As
   flushSync();
   expect(target.querySelector(".tf-dialog footer .tf-dwhy")).toBeNull();
   expect(target.querySelector(".tf-chosen svg")).not.toBeNull();
+  // F-030: the box is gone, and focus goes on to the press the pick made ready rather than to the body.
+  await settle();
+  expect(document.activeElement).toBe(button(target, "Assign"));
 });
 
 test("Assign… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {

@@ -22,7 +22,7 @@
   never unwinds two ladders.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
 
   import type { SearchHit } from "../ipc/search";
   import { launcherHome, search } from "../ipc/search";
@@ -64,6 +64,7 @@
   /** What the last attempt refused with, shown in the dialog rather than as a toast. */
   let failure = $state<string | null>(null);
   let writing = $state(false);
+  let primary = $state<HTMLButtonElement | null>(null);
 
   /** Unique per instance, so two stacked dialogs cannot share a list id. */
   const listId = `relations-${Math.random().toString(36).slice(2, 9)}`;
@@ -83,6 +84,8 @@
     target = hit;
     failure = null;
     session.set("");
+    // The box that held focus is gone, and the pick made the primary ready.
+    void tick().then(() => primary?.focus());
   }
 
   /**
@@ -149,11 +152,11 @@
   }
 </script>
 
-<TfDialog title="Link {fromTitle}" {onclose}>
+<TfDialog why={target ? null : "Pick what to link it to."} title="Link {fromTitle}" {onclose}>
   {#snippet body()}
     <div class="fields">
       <div class="fld">
-        <label class="l" for="{listId}-target">What to link to</label>
+        <label class="l" for="{listId}-target">What to link to <small class="tf-req">required</small></label>
         {#if target}
           <div class="picked">
             <Monogram text={monogramOf(target.kind)} label={labelOf(target.kind)} />
@@ -262,7 +265,7 @@
 
   {#snippet footer()}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button class="tf-btn tf-primary" disabled={!target || writing} onclick={() => void submit()}>
+    <button class="tf-btn tf-primary" bind:this={primary} disabled={!target || writing} onclick={() => void submit()}>
       {writing ? "Linking…" : "Link"}
     </button>
   {/snippet}
@@ -271,7 +274,7 @@
 <style>
   .fields {
     display: grid;
-    gap: 12px;
+    gap: 8px;
   }
 
   /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
