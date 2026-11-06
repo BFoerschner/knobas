@@ -218,3 +218,17 @@ test("a return to a place keeps focus its own until it is over", async () => {
   expect(document.activeElement).not.toBe(heading);
   end();
 });
+
+test("a dialog closed by key with nothing to give focus back to leaves it on the page's heading", async () => {
+  const { heading } = page();
+  const modal = document.createElement("div");
+  modal.className = "tf-modal";
+  modal.innerHTML = "<button>Close</button>";
+  document.body.append(modal);
+  await settle();
+  modal.querySelector("button")!.focus();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+  modal.remove();
+  await settle();
+  expect(document.activeElement).toBe(heading);
+});

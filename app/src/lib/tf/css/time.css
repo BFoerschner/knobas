@@ -68,8 +68,8 @@
 }
 .tf-tm-row:last-child { border-bottom: 0; }
 .tf-tm-row:hover { background: var(--sheet-2); }
-.tf-tm-row.tf-tm-held { min-height: var(--tf-row-held); cursor: default; }
-.tf-tm-row.tf-tm-held:hover { background: none; }
+.tf-tm-row.tf-tm-rowheld { min-height: var(--tf-row-held); cursor: default; }
+.tf-tm-row.tf-tm-rowheld:hover { background: none; }
 .tf-tm-row.tf-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
 .tf-tm-when { font-size: var(--t-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); display: flex; flex-direction: column; }
 .tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
@@ -176,6 +176,9 @@
 .tf-su .tf-panel > header > .tf-btn { margin-left: auto; }
 .tf-su .tf-panel > header > .tf-btn.tf-ghost { margin-right: -9px; }
 .tf-su .tf-panel > header > .tf-trail > .tf-btn.tf-ghost:last-child { margin-right: -9px; }
+/* A press held under the pointer keeps the row's end, with the link beside it, until the pointer leaves. */
+.tf-su .tf-panel > header > .tf-trail.tf-su-held > .tf-btn.tf-ghost:last-child { margin-right: 0; order: -1; }
+.tf-su .tf-panel > header > .tf-trail.tf-su-held > .tf-btn.tf-primary { justify-content: center; }
 /* So does a group's: *Add someone* no longer wraps alone under the pills, and the line keeps its height while the field is open. */
 .tf-su-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-h-sm); margin-bottom: 4px; }
 .tf-su-h > .tf-btn.tf-ghost { margin-right: -9px; }

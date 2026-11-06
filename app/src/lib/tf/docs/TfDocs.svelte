@@ -1590,7 +1590,7 @@
                 <p class="tf-dl-note">No comments yet.</p>
               {/if}
               {#if p.writes.includes("comment")}
-                <div class="tf-compose">
+                <div class="tf-compose" tabindex="-1">
                   <textarea
                     bind:this={composer}
                     value={comment}

@@ -16,7 +16,7 @@ import {
   submitWrite,
 } from "../ipc/entity";
 import type { CheckoutSettings, EntityFilter, LinkSetDraft, LinkSetRow, OpenAt, ViewAction } from "../ipc/entity";
-import type { WriteOpPayload } from "../ipc/sources";
+import type { QueuedWrite, WriteOpPayload } from "../ipc/sources";
 import { inbox } from "../inbox/inbox.svelte";
 import { clones } from "../tf/openin/clones.svelte";
 import { repoName } from "../tf/openin/openin";
@@ -24,7 +24,7 @@ import { branchOptions, readAllRows, repoOfRow } from "../tf/repo/repo";
 
 export interface SheetPorts {
   createLink: (fromId: string, toId: string, relation: string) => Promise<unknown>;
-  submitWrite: (payload: WriteOpPayload) => Promise<unknown>;
+  submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   ackAlert: (monitorId: string) => Promise<unknown>;
   unackAlert: (monitorId: string) => Promise<unknown>;
   copyText: (text: string) => Promise<void>;

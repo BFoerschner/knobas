@@ -169,7 +169,7 @@
       </div>
     </article>
   {/each}
-  <div class="tf-compose">
+  <div class="tf-compose" tabindex="-1">
     <textarea bind:this={box} value={draft} oninput={(event) => drafts.put(commentKey, event.currentTarget.value)} rows="1" placeholder="Comment on {jobKey}" aria-label="Comment on {jobKey}" {@attach sendKey(() => void send())}></textarea>
     <div class="tf-acts">
       {#if refused !== null}<span class="tf-dim tf-small">{refused}</span>{/if}

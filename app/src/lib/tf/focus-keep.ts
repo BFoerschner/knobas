@@ -8,7 +8,7 @@
  * With no such row: the same words on the page, else the page's heading.
  *
  * A move made by key with no place to return to focuses the page's heading (F-052), so the next `Tab` starts on the
- * page and not back at the top bar.
+ * page and not back at the top bar. So does a dialog or the launcher closed by key with nothing to give focus back to.
  *
  * It stays out of the way of what knows better: an open dialog owns focus and gives it back itself, and a return to a
  * place is `return-place.ts`'s. A page that puts focus somewhere itself, on the same press, has got there first, because
@@ -184,7 +184,12 @@ export function installFocusKeep(): () => void {
     const up = dialogUp();
     const closed = wasUp && !up;
     wasUp = up;
-    if (held === null || up || placeRestoring() || !focusFree(held.control)) return;
+    if (up || placeRestoring()) return;
+    if (held === null) {
+      if (closed && byKey && focusFree()) headingOf(shownPage())?.focus({ preventScroll: true });
+      return;
+    }
+    if (!focusFree(held.control)) return;
     const gone = fell(held);
     if (!gone && !closed) return;
     const next = gone ? nextFor(held) : held.control;
@@ -192,7 +197,7 @@ export function installFocusKeep(): () => void {
     next?.focus({ preventScroll: true });
   };
   const soon = () => {
-    if (held !== null && checking === null) checking = later(check);
+    if (checking === null) checking = later(check);
   };
 
   const onfocusin = (event: Event) => {

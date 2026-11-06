@@ -114,7 +114,7 @@ function mountIt(backend = keyBackend()) {
       ports: { search: async (query: SearchQuery) => response(query.raw), launcherHome: async () => HOME },
       sheetPorts: {
         createLink: calls.createLink,
-        submitWrite: calls.submitWrite,
+        submitWrite: calls.submitWrite as never,
         copyText: vi.fn(async () => {}),
         openCheckout: calls.openCheckout,
         checkoutSettings: calls.checkoutSettings,

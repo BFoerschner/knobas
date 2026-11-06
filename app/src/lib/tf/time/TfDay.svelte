@@ -469,7 +469,7 @@
   const holdAt = $derived(holding !== null && held.some((hold) => hold.id === holding?.id) ? holding.at : null);
   $effect(() => {
     if (holdAt === null) return;
-    return holdUnderPointer(() => document.querySelector(".tf-tm-held"), () => (holding = null));
+    return holdUnderPointer(() => document.querySelector(".tf-tm-rowheld"), () => (holding = null));
   });
 
   /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
@@ -615,7 +615,7 @@
     <div class="tf-tm-list">
       {#snippet heldRow()}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="tf-tm-row tf-tm-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}></div>
+        <div class="tf-tm-row tf-tm-rowheld" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding?.height ?? 0)}></div>
       {/snippet}
       {#each rows as row, index (row.key)}
         {#if holdAt === index}{@render heldRow()}{/if}

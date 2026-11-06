@@ -55,6 +55,8 @@ export interface PrLine {
   idle: boolean;
   /** Who opened it, as the source spells the account, or `null` before `code_facts` answers or on a miss. */
   author: string | null;
+  /** The reader wrote it: the row says *you*, and the filter still finds the account's name. */
+  mine: boolean;
 }
 
 /** Whether a group is *Mine*: asking your review, or yours. */
@@ -99,6 +101,7 @@ function line(row: EntityRow, group: PrGroup | null, now: Date, open: boolean, f
     number: prNumber(row.entity_id),
     idle: open && !Number.isNaN(at) && now.getTime() - at > IDLE_MS,
     author: facts.get(row.entity_id)?.author ?? null,
+    mine: facts.get(row.entity_id)?.mine ?? false,
   };
 }
 

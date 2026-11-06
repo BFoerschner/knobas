@@ -76,6 +76,7 @@ export type SheetEffect =
   | { kind: "link" }
   | { kind: "timer" }
   /** A write queued to the source; `said` is the toast. */
+  /** `said` is what its toast queues, as `toastQueued` takes it. */
   | { kind: "write"; payload: WriteOpPayload; said: string }
   | { kind: "ack"; monitorId: string; said: string }
   | { kind: "copy"; text: string; said: string }
@@ -294,7 +295,7 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
         id: "approve",
         label: "Approve",
         detail: "Queued as a write to the source",
-        does: { kind: "write", payload: { Approve: { entity: id, body: "" } }, said: `Approval queued for ${title}` },
+        does: { kind: "write", payload: { Approve: { entity: id, body: "" } }, said: `approve ${title}` },
       });
       if (ctx.merge) actions.push(mergeAction(id, title, ctx.merge));
       break;
@@ -315,7 +316,7 @@ function entityActions(subject: Extract<SheetSubject, { kind: "entity" }>, ctx: 
         id: "run",
         label: "Run",
         detail: "Queued as a write to the source",
-        does: { kind: "write", payload: { TriggerBuild: { entity: id } }, said: `Run queued for ${title}` },
+        does: { kind: "write", payload: { TriggerBuild: { entity: id } }, said: `run ${title}` },
       });
       break;
     case "monitor":
@@ -432,7 +433,7 @@ function mergeAction(id: string, title: string, declared: ViewAction): SheetActi
       finish: ([style]) => {
         const payload = actionPayload(declared, id, { ...initialValues(declared), style: style ?? "merge" });
         if (payload === null) return { kind: "refused", said: `The source takes no merge of ${title} from here.` };
-        return { kind: "write", payload, said: `Merge queued for ${title}` };
+        return { kind: "write", payload, said: `merge ${title}` };
       },
     },
   };

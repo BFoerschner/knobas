@@ -77,7 +77,7 @@
   font-family: var(--sans); font-size: var(--t-xs); font-weight: 400; opacity: 0; margin-left: 10px;
   vertical-align: 4px; display: inline-flex; gap: 4px;
 }
-.tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:focus-within { opacity: 1; }
+.tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:has(:focus-visible) { opacity: 1; }
 .tf-doc h2 .tf-tools a, .tf-doc h2 .tf-tools button {
   border: 1px solid var(--rule); background: var(--sheet); border-radius: 3px; padding: 1px 7px;
   color: var(--ink-2); text-decoration: none; font: inherit; cursor: pointer;

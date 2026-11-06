@@ -38,9 +38,9 @@
 /* The row itself does not open, so its name is a link with its underline (Layout). */
 .tf-member-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 0 1 auto; color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-member .tf-x, .tf-rule .tf-x { margin-left: auto; }
-/* A row's *Remove* fades in on hover and on focus within the row (Motion). */
+/* A row's *Remove* fades in on hover and on keyboard focus within the row (Motion). */
 .tf-member .tf-x { flex: none; opacity: 0; transition: opacity .1s ease-out; }
-.tf-member:is(:hover, :focus-within) .tf-x { opacity: 1; }
+.tf-member:is(:hover, :has(:focus-visible)) .tf-x { opacity: 1; }
 /* A rule is its two choices on one line, then its count and *Remove*. Whatever the value says, the two keep their columns. */
 .tf-rule { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 6px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-rule-none { display: block; }

@@ -682,13 +682,13 @@ test("a mouse's Dismiss leaves an empty row of its height until the pointer leav
     const at = rowsOf().indexOf(row("offered"));
     button(row("offered"), "Dismiss").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
     await settle();
-    const held = target.querySelector(".tf-tm-held")!;
+    const held = target.querySelector(".tf-tm-rowheld")!;
     expect(rowsOf().indexOf(held), "where it stood").toBe(at);
     expect(held.querySelector("button"), "a second press lands on nothing").toBeNull();
     expect(rowsOf()).toHaveLength(before);
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
     await settle();
-    expect(target.querySelector(".tf-tm-held")).toBeNull();
+    expect(target.querySelector(".tf-tm-rowheld")).toBeNull();
     expect(rowsOf()).toHaveLength(before - 1);
   } finally {
     vi.useRealTimers();

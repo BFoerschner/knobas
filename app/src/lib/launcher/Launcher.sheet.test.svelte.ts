@@ -185,7 +185,7 @@ function mountIt(props: Record<string, unknown> = {}) {
       },
       sheetPorts: {
         createLink: calls.createLink,
-        submitWrite: calls.submitWrite,
+        submitWrite: calls.submitWrite as never,
         ackAlert: calls.ackAlert,
         unackAlert: calls.unackAlert,
         copyText: calls.copyText,
@@ -439,7 +439,7 @@ test("a pull request: the files, the conversation, Approve queued as a write", a
   press("Enter");
   await settle();
   expect(calls.submitWrite).toHaveBeenCalledWith({ Approve: { entity: "gitea:acme/svc#142", body: "" } });
-  expect(lastToast()).toBe("Approval queued for Backoff");
+  expect(lastToast()).toBe("Queued: approve Backoff.");
 });
 
 test("Review the files and Conversation go to the pull request's tabs", async () => {
@@ -879,7 +879,7 @@ test("Merge… follows the source's declared merge: picks the style and queues t
     // No tick to untick here, so the branch stays: nothing that removes data is preselected (F-028).
     MergePullRequest: { entity: "gitea:acme/svc#142", style: "squash", delete_branch: false, message: "Backoff (#142)" },
   });
-  expect(lastToast()).toBe("Merge queued for Backoff");
+  expect(lastToast()).toBe("Queued: merge Backoff.");
 });
 
 test("Merge… the source draws disabled shows its reason and writes nothing; no declared merge, no row", async () => {

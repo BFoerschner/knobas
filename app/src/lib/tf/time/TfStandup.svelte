@@ -77,6 +77,7 @@
   import { listAdapters as realListAdapters, listSources as realListSources, type QueuedWrite } from "../../ipc/sources";
   import { toastStopped, unconfirmedTeller, willNotGo, writeFollower, type WriteFollower } from "../../shell/follow-write";
   import { toastQueued } from "../../shell/queued-toast";
+  import { heldByPointer, holdUnderPointer } from "../row-hold";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
@@ -439,11 +440,42 @@
     if (mine === reads) take(answer);
   }
 
-  function pressed() {
+  /**
+   * A mouse's first publish: the press stays under the pointer as *Sent* once the page exists, until the pointer leaves it. The
+   * link can then stand beside it, so a second press where the pointer rests can't open the page nobody aimed at (F-138's rule).
+   */
+  let pressHeld = $state(false);
+  $effect(() => {
+    if (!pressHeld) return;
+    return holdUnderPointer(() => press, () => {
+      const had = document.activeElement === press;
+      press?.style.removeProperty("min-width");
+      pressHeld = false;
+      if (had) void tick().then(() => (press === null || !press.isConnected) && pageLink?.focus({ preventScroll: true }));
+    });
+  });
+
+  function pressed(event: MouseEvent) {
     if (publishing) return;
+    if (publication === null && heldByPointer(event)) {
+      pressHeld = true;
+      // *Queued* and *Sent* are shorter than *Publish to Confluence*: the box stays under the pointer as it was pressed.
+      const box = event.currentTarget as HTMLElement;
+      box.style.setProperty("min-width", `${box.getBoundingClientRect().width}px`);
+    }
     if (publication === null) void publish();
     else if (canAgain && againRefusal === null) void publishAgain();
   }
+
+  /** Where a publish's write goes, named in its toast. */
+  const publishSource = () => (target === null ? null : { id: target.stored.source_id, display_name: target.reading.split(" › ")[0] ?? "" });
+  /** Where a sent publish shows. */
+  const openThePage = {
+    label: "Open the page",
+    run: () => {
+      if (pageId !== null) location.hash = `#/page/${encodeURIComponent(pageId)}`;
+    },
+  };
 
   /** *Publish again* (F-327): what the note says now, onto the page. A press beside a write still going queues nothing. */
   async function publishAgain() {
@@ -454,10 +486,10 @@
       reads += 1;
       take(await io.publishStandupProtocolAgain(day));
       failure = null;
-      const source = target === null ? null : { id: target.stored.source_id, display_name: target.reading.split(" › ")[0] ?? "" };
+      const source = publishSource();
       const write = protocol?.again ?? null;
       const page = pageId;
-      const where = page === null ? undefined : { label: "Open the page", run: () => (location.hash = `#/page/${encodeURIComponent(page)}`) };
+      const where = page === null ? undefined : openThePage;
       if (write === null) push({ text: "Sent: publish the protocol again.", ...(where === undefined ? {} : { action: where }) });
       // Already held or refused, the line under the heading says why.
       else if (write.state === "pending") {
@@ -508,7 +540,9 @@
       take(await io.publishStandupProtocol(day, chosen));
       dialog = null;
       failure = null;
-      push({ text: target ? `Queued for Confluence, under ${target.reading}` : "Queued for Confluence" });
+      const queued = protocol?.publication ?? null;
+      const what = target ? `publish the protocol under ${target.reading}` : "publish the protocol to Confluence";
+      toastQueued(what, publishSource(), queued === null ? {} : { write: { id: queued.write_id, state: queued.state }, follower: io.follower, where: openThePage });
       if (chosen) void readTarget();
       followPublication();
     } catch (cause) {
@@ -786,19 +820,19 @@
     <header>
       <h3>Protocol</h3>
       <span class="tf-dim tf-su-day">{protocolDay(day)}</span>
-      <span class="tf-trail">
+      <span class="tf-trail" class:tf-su-held={pressHeld}>
         <!-- The press stands before the link, so the link stays put when the press goes and a second press can't land on it. -->
-        {#if publication === null || going !== null || canAgain}
+        {#if publication === null || going !== null || canAgain || pressHeld}
           <button
             class="tf-btn tf-sm tf-primary"
             bind:this={press}
             disabled={publication === null && (!loaded || protocol === null)}
-            aria-disabled={going !== null || (publication === null && publishing) ? "true" : undefined}
+            aria-disabled={going !== null || pressHeld || (publication === null && publishing) ? "true" : undefined}
             {...going === null ? refusedAttrs(publication === null ? publishRefusal : againRefusal) : {}}
             onclick={pressed}
           >
             <!-- The first publish asks where, so it has the ellipsis; with a target stored it acts at once. -->
-            {going ?? (publication === null ? `Publish to Confluence${target === null ? "…" : ""}` : "Publish again")}
+            {going ?? (pressHeld && published ? "Sent" : publication === null ? `Publish to Confluence${target === null ? "…" : ""}` : "Publish again")}
           </button>
         {/if}
         {#if published && publication?.page_entity_id}

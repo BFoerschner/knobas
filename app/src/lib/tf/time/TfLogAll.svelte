@@ -39,6 +39,7 @@
   } from "../../ipc/time";
   import { askRefused, refusalOf, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
   import { readerDay } from "../../time/day";
@@ -173,7 +174,7 @@
       sending = false;
     }
     if (made.length > 0) {
-      push({ text: `Queued ${made.length} worklog${made.length === 1 ? "" : "s"}${goesTo(made)}` });
+      push({ text: `Queued ${made.length} worklog${made.length === 1 ? "" : "s"}${goesTo(made)}`, action: { label: "Show queue", run: openWriteQueue } });
     }
     if (refused !== null) push({ text: refused, tone: "err" });
     ondone(made, refused);

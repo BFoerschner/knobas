@@ -16,6 +16,8 @@ import { ipcErrorMessage, isIpcError } from "../ipc";
 import type { LinkSetRow, ViewAction } from "../ipc/entity";
 import { drawn } from "../detail/relations";
 import { linkFailureMessage } from "../detail/links";
+import type { QueuedWrite } from "../ipc/sources";
+import { toastQueued } from "../shell/queued-toast";
 import { push } from "../shell/toasts.svelte";
 import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
 import { argvText, menuOrder } from "../tf/openin/openin";
@@ -375,7 +377,7 @@ export class SheetMode {
       case "copy":
         return settled(() => io.copyText(does.text), () => does.said);
       case "write":
-        return settled(() => io.submitWrite(does.payload), () => does.said);
+        return void this.#queued(() => io.submitWrite(does.payload), does.said, subject.kind === "entity" ? subject.sourceId : null);
       case "ack":
         return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId), subject.kind === "entity" ? subject.title : undefined);
       case "link": {
@@ -467,7 +469,7 @@ export class SheetMode {
         if (subject.kind !== "inbox") return;
         const { item } = subject;
         if (does.op === "rerun") {
-          return settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
+          return void this.#queued(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), `re-run ${item.title}`, item.source_id);
         }
         if (does.op === "ack") {
           return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.", () => io.inboxUnack(item.key), item.title);
@@ -499,6 +501,17 @@ export class SheetMode {
       this.#host.close();
     } catch (cause) {
       push(this.#refusal(cause, name));
+      this.#host.focus();
+    }
+  }
+
+  /** A write: the one queued toast every page raises, which says *Sent* in place once it has gone, and the launcher closed. */
+  async #queued(work: () => Promise<QueuedWrite>, what: string, source: string | null): Promise<void> {
+    try {
+      toastQueued(what, source === null ? null : { id: source, display_name: "" }, { write: await work() });
+      this.#host.close();
+    } catch (cause) {
+      push(this.#refusal(cause));
       this.#host.focus();
     }
   }

@@ -97,7 +97,8 @@
   import { isMine, itemHash, keyOf, username } from "../job/job";
   import { commitLine } from "../repo/file-tree";
   import { commitHash, readAllRows, repoHash, repoOfRow } from "../repo/repo";
-  import { inlineEditor } from "../inline-editor";
+  import { drafts } from "../drafts.svelte";
+  import { inlineEditor, sendKey } from "../inline-editor";
   import { pageVisible } from "../kept-pages.svelte";
   import { stateWord } from "../state-word";
   import type { EscTarget } from "../escape";
@@ -541,7 +542,7 @@
   $effect(() => {
     if (prId === null) return;
     const again = takeAgain(prId, "comment");
-    if (again !== null) draft = again;
+    if (again !== null) drafts.put(`comment:${prId}`, again);
   });
 
   /** Echo a write queued as `verb`, followed under `name`. */
@@ -611,7 +612,8 @@
     if (write.action.disabled === null && heldBy(write.key) === null) shown = write;
   }
 
-  let draft = $state("");
+  /** The composer's words are this pull request's own draft, through `Esc`, a move to another and a return (the key table). */
+  const draft = $derived(prId === null ? "" : drafts.get(`comment:${prId}`));
   let sending = $state(false);
 
   async function send() {
@@ -637,7 +639,7 @@
         follower,
       });
       toastQueued(`comment on ${name}`, source, { write });
-      draft = "";
+      drafts.forget(`comment:${id}`);
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
@@ -842,17 +844,13 @@
                 <div class="tf-empty">No comments yet.</div>
               {/if}
               {#if comment !== null}
-                <div class="tf-compose">
+                <div class="tf-compose" tabindex="-1">
                   <textarea
-                    bind:value={draft}
+                    value={draft}
+                    oninput={(event) => prId !== null && drafts.put(`comment:${prId}`, event.currentTarget.value)}
                     placeholder="Comment on {name}"
                     aria-label="Comment on {name}"
-                    onkeydown={(event) => {
-                      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                        event.preventDefault();
-                        void send();
-                      }
-                    }}
+                    {@attach sendKey(() => void send())}
                   ></textarea>
                   <div class="tf-acts">
                     <button

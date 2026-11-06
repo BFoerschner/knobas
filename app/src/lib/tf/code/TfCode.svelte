@@ -526,14 +526,14 @@
       <table class="tf-tbl tf-cprs">
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
-          {#each win.slice(kept) as { row, number, idle, author } (row.entity_id)}
+          {#each win.slice(kept) as { row, number, idle, author, mine } (row.entity_id)}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
               <td class="tf-prno"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
                 ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
                   >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
-                    >{/if}{#if author}{row.path ? ", " : ""}<Marked text={author} typed={prFilter.text} />{/if}{#if idle}{row.path ||
+                    >{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked text={author} typed={prFilter.text} />{/if}{/if}{#if idle}{row.path ||
                     author
                       ? ", "
                       : ""}idle for more than 5 days{/if}</span

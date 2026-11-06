@@ -22,6 +22,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { CaptureShortcut, PublishTarget } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources, type PublishableSource } from "../../standup/protocol";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -105,7 +106,7 @@
     try {
       const queued = await ports.moveNotes(chosen.parent);
       moving = false;
-      push({ text: `Queued ${pageCount(queued.length)} in Confluence. Your notes stay in knobas.` });
+      push({ text: `Queued ${pageCount(queued.length)} in Confluence. Your notes stay in knobas.`, action: { label: "Show queue", run: openWriteQueue } });
     } catch (cause) {
       push({ text: `Could not move the notes: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {

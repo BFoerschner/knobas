@@ -648,7 +648,12 @@
     else if (step.do === "clear-filter" && field instanceof HTMLInputElement) {
       field.value = "";
       field.dispatchEvent(new Event("input", { bubbles: true }));
-    } else if (step.do === "blur") field?.blur();
+    } else if (step.do === "blur") {
+      // A composer that is always on its page has nothing to close: `Esc` steps out to the composer itself, so the next `Tab` is back in it and focus isn't lost.
+      const composer = field?.closest<HTMLElement>(".tf-compose");
+      field?.blur();
+      composer?.focus({ preventScroll: true });
+    }
     else if (step.do === "go") leave(step.hash, step.opened);
   }
 

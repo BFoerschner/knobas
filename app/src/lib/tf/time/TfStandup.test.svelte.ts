@@ -565,12 +565,12 @@ test("someone pressed off and on again keeps their place among the notes (F-348)
   expect(notes()).toEqual(before);
 });
 
-test("Publish's toast says it queued, which stays true once the page lands", async () => {
+test("Publish's toast is the queued write's, which says Sent in place once it has gone", async () => {
   open();
   await settle();
   button("Publish to Confluence").click();
   await settle();
-  expect(toasts.items.at(-1)?.text).toMatch(/^Queued for Confluence/);
+  expect(toasts.items.at(-1)?.text).toMatch(/^Queued: publish the protocol under Confluence/);
 });
 
 test("Enter adds and leaves the field open for the next, and Enter on the empty field gives focus back to the button", async () => {

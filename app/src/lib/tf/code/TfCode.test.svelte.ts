@@ -204,8 +204,8 @@ test("Pull requests are grouped in the attention read's order, then merged or cl
   const rows = [...target.querySelectorAll("tbody tr")].map(cells);
   expect(rows).toEqual([
     ["#144", `Add payout CSV export${PAYOUT}, tom`, "Open", "", "today 10:20"],
-    ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "Open", "PAY-231", "today 10:20"],
-    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "Merged", "", "today 10:20"],
+    ["#142", `SEPA retry with exponential backoff${PAYOUT}, you`, "Open", "PAY-231", "today 10:20"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, you", "Merged", "", "today 10:20"],
     ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "10 Aug"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
