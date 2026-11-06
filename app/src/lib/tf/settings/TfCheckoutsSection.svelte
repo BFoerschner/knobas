@@ -193,7 +193,7 @@
         }}
       >
         <label for="tf-stg-root-in">Clones root</label>
-        <input id="tf-stg-root-in" class="tf-mono" type="text" autocomplete="off" spellcheck="false" bind:value={typed} />
+        <input id="tf-stg-root-in" aria-label="Clones root" class="tf-mono" type="text" autocomplete="off" spellcheck="false" bind:value={typed} />
       </form>
       <p class="tf-dsub">knobas finds clones here and clones new ones into it. Clones already made stay where they are. Empty means none is set.</p>
       {#if rootError !== null}<div class="tf-banner tf-err tf-dbanner" role="alert">{rootError}</div>{/if}

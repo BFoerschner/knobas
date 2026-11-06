@@ -73,7 +73,7 @@ readonly NOTE_PAGE_LINE='A note, read-only in this release.'  # note/TfNote.svel
 readonly CAPTURED_FROM='Captured from'                    # detail/relations.ts, capitalised by TfNote.svelte
 readonly COMMENT_BOX='Comment on PAY-231'                # job/TfConversation.svelte, the reading column's compose box (#2399)
 readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's nav
-readonly TICKETS_FILTER='Filter by key, summary, epic or person'  # tickets/TicketsPage.svelte
+readonly TICKETS_FILTER='Filter tickets'  # tickets/TicketsPage.svelte
 # The preview's button, worded by the ticket's state (`tickets.ts`'
 # `previewAction`); each is a link to the ticket's page, which draws the job
 # page either way (spec #2396): *Open ticket* only reads, the others choose it.

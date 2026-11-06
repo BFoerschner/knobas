@@ -312,7 +312,7 @@
     {#if chosen !== null}
       <div class="tf-formgrid" bind:this={form}>
         <label for="tf-add-address">Address <small class="tf-req">required</small></label>
-        <input id="tf-add-address" type="text" placeholder="https://" autocomplete="off" required bind:value={baseUrl} />
+        <input id="tf-add-address" aria-label="Address" type="text" placeholder="https://" autocomplete="off" required bind:value={baseUrl} />
       </div>
       {#if config.error !== null}
         <p class="tf-fail">{config.error}</p>
@@ -331,7 +331,7 @@
       {/if}
       <div class="tf-formgrid">
         <label for="tf-add-secret">{secretWord} <small class="tf-req">required</small></label>
-        <input id="tf-add-secret" type="password" autocomplete="off" required bind:value={secret} />
+        <input id="tf-add-secret" aria-label={secretWord} type="password" autocomplete="off" required bind:value={secret} />
         {#if chosen.accepts_account}
           <label for="tf-add-account-user">Account</label>
           <input id="tf-add-account-user" type="text" autocomplete="off" placeholder="Username (optional)" bind:value={accountUser} />
