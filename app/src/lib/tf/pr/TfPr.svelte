@@ -114,6 +114,7 @@
     overviewParts,
     prHash,
     railChecks,
+    checkReading,
     readiness,
     readPrRoute,
     readyLines,
@@ -799,7 +800,7 @@
                           ><span class="tf-dot tf-{row.tone ?? 'muted'}"></span>
                           {#if run !== null}<a href={run}>{row.title}</a>{:else}{row.title}{/if}{#if rail.some((check) => check.row === row && check.required)}{" "}<span class="tf-prreq">Required</span>{/if}</td
                         >
-                        <td>{[row.chip === null ? null : stateWord(row.chip), row.meta].filter((bit) => bit !== null && bit !== "").join(", ")}</td>
+                        <td>{checkReading(row)}</td>
                       </tr>
                     {/each}
                   </tbody>

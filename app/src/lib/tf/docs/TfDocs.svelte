@@ -93,10 +93,10 @@
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
-  import { push, undoable } from "../../shell/toasts.svelte";
+  import { dismiss, push, undoable } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { resolveTicket } from "../job/job";
+  import { resolveTicket, username } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
@@ -262,7 +262,7 @@
   // says (spec #2227). One name, here, because a read answering after the crumb drew would otherwise clear the crumb's.
   namePage(() => page?.title ?? spaceHere?.name ?? spaceHere?.key ?? (place.kind === "search" ? "Search" : null));
   let pageError = $state<string | null>(null);
-  /** The reader's own accounts, as the last page read names them: only a page's read says, and a hit's line says *you* by them. */
+  /** The reader's own accounts, as the last page read names them; until a page is read, as the sources' settings do, so a hit's line says *you* from the start (F-428). */
   let me = $state<string[]>([]);
   /** The page could not be opened because no such page is held. */
   let pageMissing = $state(false);
@@ -387,24 +387,27 @@
    * Read page `id`. Opening it records the visit; a `quiet` read (a sync
    * run's, #2072) records none, and one that fails leaves the page as drawn.
    * A quiet read that dropped the opening read before `id` was drawn opens it
-   * in that read's place: visit and error as an opening read.
+   * in that read's place: visit and error as an opening read. Answers whether
+   * what it read is what is drawn now.
    */
-  function readPage(id: string, quiet: boolean): Promise<void> {
+  function readPage(id: string, quiet: boolean): Promise<boolean> {
     const mine = ++pageAsked;
     return io.docsPage(id).then(
       (answer) => {
-        if (mine !== pageAsked) return;
+        if (mine !== pageAsked) return false;
         const opens = !quiet || page?.entity_id !== id;
         page = answer;
         me = answer.me;
         pageError = null;
         if (opens) visited = io.visitEntity(id).catch(() => {});
+        return true;
       },
       (cause: unknown) => {
         if (mine === pageAsked && (!quiet || page?.entity_id !== id)) {
           pageError = ipcErrorMessage(cause);
           pageMissing = isIpcError(cause) && cause.code === "not_found";
         }
+        return false;
       },
     );
   }
@@ -414,9 +417,9 @@
    * refresh: no visit, and nothing once the reader has opened another page
    * (#2072, #2136).
    */
-  function rereadPage(id: string | null): Promise<void> {
-    if (id === null || id !== target) return Promise.resolve();
-    return Promise.all([readPage(id, true), readDetail(id, true)]).then(() => {});
+  function rereadPage(id: string | null): Promise<boolean> {
+    if (id === null || id !== target) return Promise.resolve(false);
+    return Promise.all([readPage(id, true), readDetail(id, true)]).then(([read]) => read);
   }
 
   // ---- *Refresh* (#2136, #2107) ----
@@ -443,10 +446,26 @@
   /**
    * A refresh's re-read: the tree, the open page and its row, each over what
    * Docs drew (#2072's quiet reads), so the picked space, the search, an open
-   * section editor and the composer keep what they hold.
+   * section editor and the composer keep what they hold. A press of *Refresh*
+   * gets its answer here, because nothing on the page need change (F-445); a
+   * run's end reads the same way and has its own word in the button.
    */
   function reread(): Promise<void> {
-    return Promise.all([readTree(true), rereadPage(target)]).then(() => {});
+    const pressed = refresh.reading;
+    const was = page;
+    return Promise.all([readTree(true), rereadPage(target)]).then(([, read]) => {
+      if (pressed && read && was !== null && page?.entity_id === was.entity_id) sayRefreshed(was.version, page);
+    });
+  }
+
+  /** What a press of *Refresh* found. A second press says it again rather than stacking a second toast. */
+  let refreshToast: number | null = null;
+  function sayRefreshed(before: DocPage["version"], now: DocPage): void {
+    const version = now.version === null ? "" : `version ${now.version}`;
+    const moved = now.version !== before;
+    const text = moved ? `Refreshed${version === "" ? "" : `, now ${version}`}` : `Page is up to date${version === "" ? "" : `, ${version}`}`;
+    if (refreshToast !== null) dismiss(refreshToast);
+    refreshToast = push({ text });
   }
 
   $effect(() => {
@@ -549,6 +568,23 @@
     }
     const timer = setTimeout(ask, pause);
     return () => clearTimeout(timer);
+  });
+
+  // A search before any page is read: nothing has named the reader yet, and a hit would change from a name to *you* once opened.
+  let meAsked = false;
+  $effect(() => {
+    const sources = linkPorts?.listSources;
+    if (!searching || meAsked || sources === undefined || me.length > 0) return;
+    meAsked = true;
+    untrack(() =>
+      void sources().then(
+        (rows) => {
+          const names = rows.flatMap((row) => username(row) ?? []);
+          if (me.length === 0 && names.length > 0) me = names;
+        },
+        () => {},
+      ),
+    );
   });
 
   /** The hits as read, kept to the job's pages while *This job* is on. */
@@ -1066,21 +1102,31 @@
     );
   }
 
-  /** The foot's *Unlink*: a link drawn by hand goes at once, with *Undo*, as the ticket's drawer has it. */
+  /** A press of *Unlink* still on its way, so a second press withdraws and toasts nothing twice. */
+  let unlinking = false;
+
+  /**
+   * The foot's *Unlink*: a link drawn by hand goes at once, with *Undo*, as the ticket's drawer has it. The page read
+   * again says what the toast says: a page whose text still names the ticket keeps it listed, and says why (F-447).
+   */
   async function unlinkWork(pageId: string, link: LinkEntry["link"]): Promise<void> {
-    if (!linkPorts) return;
+    if (!linkPorts || unlinking) return;
+    unlinking = true;
     const ports = linkPorts;
     try {
       await ports.unlink(link.id);
-      undoable("Unlinked in knobas only.", () =>
+      await rereadPage(pageId);
+      const kept = page?.entity_id === pageId ? page.work.find((work) => !work.linked && (work.entity_id === link.to_id || work.entity_id === link.from_id)) : undefined;
+      undoable(kept === undefined ? "Unlinked in knobas only." : `Link removed. The page still names ${kept.key}, so it stays listed.`, () =>
         void ports
           .createLink(link.from_id, link.to_id, link.relation, link.note ?? undefined)
           .then(() => rereadPage(pageId))
           .catch((cause: unknown) => push({ text: `Could not link it again: ${ipcErrorMessage(cause)}`, tone: "err" })),
       );
-      await rereadPage(pageId);
     } catch (cause) {
       push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      unlinking = false;
     }
   }
 
@@ -1521,7 +1567,7 @@
               <!-- The labels wrap as one group, so none is left alone on a line. -->
               <span class="tf-rd-labels">
                 {#each p.labels as label (label)}
-                  <button type="button" class="tf-chip" title="Search for {label}" onclick={(event) => searchLabel(label, event.currentTarget)}
+                  <button type="button" class="tf-lab" title="Search for {label}" onclick={(event) => searchLabel(label, event.currentTarget)}
                     >{label}</button>
                 {/each}
               </span>

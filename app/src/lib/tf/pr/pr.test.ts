@@ -6,7 +6,9 @@
 import { expect, test } from "vitest";
 
 import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
+import { stampLabel } from "../../time/format";
 import {
+  checkReading,
   checksLine,
   conversationOf,
   headerOf,
@@ -226,9 +228,9 @@ test("the checks line: every check passing, else each one that is not, the loude
 
 test("the conversation is one message per facts block: who, when, the review's verdict, then the words", () => {
   expect(conversationOf(VIEW)).toEqual([
-    { who: "jonas", at: "2026-08-22 09:30", verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
-    { who: "mara", at: "2026-08-22 10:20", verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
-    { who: "priya", at: "2026-08-22 11:00", verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
+    { who: "jonas", at: stampLabel("2026-08-22T09:30:00"), verdict: { text: "changes requested", tone: "warn" }, body: "Should the jitter be bounded?", markdown: true },
+    { who: "mara", at: stampLabel("2026-08-22T10:20:00"), verdict: null, body: "Bounded to ±10 % in c90d11.", markdown: true },
+    { who: "priya", at: stampLabel("2026-08-22T11:00:00"), verdict: { text: "approved", tone: "ok" }, body: "", markdown: false },
   ]);
   expect(conversationOf(null)).toEqual([]);
 });
@@ -394,4 +396,13 @@ test("conflicts: none, or the base it conflicts with; nothing while the source h
   expect(conflictsOf(RAIL(null))).toEqual({ conflicts: false, text: "No conflicts with main" });
   expect(conflictsOf(overviewOf(fact("Conflicts", "conflicts with main", "warn")))).toEqual({ conflicts: true, text: "Conflicts with main" });
   expect(conflictsOf(overviewOf(fact("State", "open", "info")))).toBeNull();
+});
+
+test("a check that counts its tests reads as Builds says it, failed first, and the counts stand for the state (F-010)", () => {
+  const row = (chip: string | null, meta: string | null): ViewRow => ({ entity_id: null, title: "x", meta, tone: null, chip, url: null });
+  expect(checkReading(row("failure", "41 passed, 1 failed · 2 h ago"))).toBe("1 failed, 41 passed · 2 h ago");
+  expect(checkReading(row("success", "42 passed, 0 failed"))).toBe("42 passed");
+  expect(checkReading(row("pending", "step 3 of 5 · 6 min ago"))).toBe("Pending, step 3 of 5 · 6 min ago");
+  expect(checkReading(row("success", null))).toBe("Passed");
+  expect(checkReading(row(null, "7 min ago"))).toBe("7 min ago");
 });

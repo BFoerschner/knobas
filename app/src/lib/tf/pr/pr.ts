@@ -12,6 +12,7 @@
  * it wrote them.
  */
 import type { SourceView, Tone, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../ipc/entity";
+import { viewStamp } from "../../time/format";
 import { stateWord } from "../state-word";
 
 /** The page's tabs, in prototype-6's order; *Files changed* is #842's. */
@@ -166,6 +167,20 @@ export interface ReadyLine {
 /** The opening letter raised: the line starts a sentence knobas draws. */
 function opening(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const RUN_COUNTS = /^(\d+) passed, (\d+) failed/;
+
+/**
+ * A row's second cell in the Checks table: its state as the chips word it, then the source's line. Where that line
+ * counts tests it is said as Builds says it, failed first, and the counts stand for the state, so a run never reads
+ * *Failed, 41 passed, 1 failed* here and *1 failed, 41 passed* there (F-010).
+ */
+export function checkReading(row: ViewRow): string {
+  const meta = row.meta ?? "";
+  const counts = RUN_COUNTS.exec(meta);
+  if (counts !== null) return `${counts[2] === "0" ? "" : `${counts[2]} failed, `}${counts[1]} passed${meta.slice(counts[0].length)}`;
+  return [row.chip === null ? "" : stateWord(row.chip), meta].filter((bit) => bit !== "").join(", ");
 }
 
 const LOUDNESS: Tone[] = ["err", "warn", "info", "muted", "ok"];
@@ -438,7 +453,7 @@ export function conversationParts(view: SourceView | null): (Line | { message: P
       parts.push({
         message: {
           who: said.label,
-          at: said.value,
+          at: viewStamp(said.value),
           verdict: review ? { text: review.value, tone: review.tone } : null,
           body: "",
           markdown: false,

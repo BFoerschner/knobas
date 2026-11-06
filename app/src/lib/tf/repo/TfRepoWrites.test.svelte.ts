@@ -347,8 +347,8 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   const rows = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(rows).toEqual([
     ["main Default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", ""],
-    ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 Open", "mara", "c90d11e4a7 · 3 hours ago", "Delete…"],
-    ["spike/sepa-instant", "2 ahead, 9 behind", "none", "mara", "9a1b2c3d4e · 9 days ago", "New pull request Delete…"],
+    ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 Open", "you", "c90d11e4a7 · 3 hours ago", "Delete…"],
+    ["spike/sepa-instant", "2 ahead, 9 behind", "none", "you", "9a1b2c3d4e · 9 days ago", "New pull request Delete…"],
     ["chore/bump-tokio", "Merged", "none", "jonas", "77aa00bb11 · 5 days ago", "Delete…"],
     ["release/1.9", "1 ahead, 0 behind", "none", "", "1111111111 · 20 days ago", "New pull request Delete…"],
   ]);

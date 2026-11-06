@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "vitest";
 
-import { ageLabel, clockLabel, dayHeadingLabel, keyOf, minutesLabel, secondsLabel, stampLabel, timeLabel } from "./format";
+import { ageLabel, clockLabel, dayHeadingLabel, keyOf, minutesLabel, secondsLabel, stampLabel, timeLabel, utcDateWords, viewDate, viewStamp } from "./format";
 import { minutesOf } from "./week";
 
 describe("minutesLabel: Day, Week, Log all, the launcher board, the draft button", () => {
@@ -137,4 +137,30 @@ test("keyOf is the key half of an entity id, and the whole string when there is 
   expect(keyOf("jira:PAY-231")).toBe("PAY-231");
   expect(keyOf("confluence:ENG:SEPA payout")).toBe("ENG:SEPA payout");
   expect(keyOf("PAY-231")).toBe("PAY-231");
+});
+
+describe("a date a view writes (F-049, F-221)", () => {
+  const now = new Date("2026-08-22T14:32:00Z");
+
+  test.each([
+    ["2026-08-21", "21 Aug"],
+    ["mara · 2026-08-21", "mara · 21 Aug"],
+    ["41 passed, 1 failed · 2026-08-21", "41 passed, 1 failed · 21 Aug"],
+    ["2025-12-30", "30 Dec 2025"],
+    ["5 h ago", "5 h ago"],
+    ["just now", "just now"],
+    ["release-2026-08-21-rc", "release-2026-08-21-rc"],
+    ["2026-13-45", "2026-13-45"],
+  ])("%s reads %s", (meta, want) => expect(viewDate(meta, now)).toBe(want));
+
+  test("the date is UTC's on either side of midnight", () => {
+    expect(utcDateWords(new Date("2026-08-21T23:59:00Z"), now)).toBe("21 Aug");
+    expect(utcDateWords(new Date("2026-08-22T00:01:00Z"), now)).toBe("22 Aug");
+  });
+
+  test("a time to the minute climbs the ladder, and anything else stays as written", () => {
+    expect(viewStamp("2026-08-12 09:14", now)).toBe("12 Aug 09:14");
+    expect(viewStamp("2026-08-12 09:14 +00:00", now)).toBe(stampLabel("2026-08-12T09:14:00+00:00", now));
+    expect(viewStamp("commented by jonas", now)).toBe("commented by jonas");
+  });
 });

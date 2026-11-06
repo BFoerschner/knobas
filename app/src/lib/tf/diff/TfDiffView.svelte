@@ -60,7 +60,7 @@
   import { flushSync, onMount, untrack, type Snippet } from "svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { inTextField } from "../../shell/keys";
-  import { ago } from "../../shell/time";
+  import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { pageVisible } from "../kept-pages.svelte";
@@ -669,7 +669,7 @@
   {#each comments as comment, n (n)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
+      <p title={agoStamp(comment.at)}><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
       <TfMarkdown text={comment.body} {render} />
     </div>
   {/each}

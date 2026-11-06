@@ -301,7 +301,7 @@ test("the header: breadcrumb, who edited when, version, reading time and labels"
   expect(meta).toContain("Tomasz Wójcik edited 2 Jul");
   expect(meta).toContain("version 31");
   expect(meta).toContain("1 min read");
-  expect([...target.querySelectorAll(".tf-rd-meta .tf-chip")].map((c) => c.textContent)).toEqual(["ops", "on-call"]);
+  expect([...target.querySelectorAll(".tf-rd-meta .tf-lab")].map((c) => c.textContent)).toEqual(["ops", "on-call"]);
 });
 
 test("on a page of the second source holding ENG, the breadcrumb's space link opens that source's ENG (#1455)", async () => {
@@ -1044,7 +1044,7 @@ test("a search from the home keeps the home and opens no page, and no hit says s
 test("beside an open page the rail itself explains no hit; Clear brings the tree back and stays on the page (#2425)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), docsSearch: vi.fn(async () => ({ ...HITS, total: 0, hits: [] })) }));
   // A label chip searches without leaving the page.
-  target.querySelector<HTMLButtonElement>(".tf-rd-meta button.tf-chip")!.click();
+  target.querySelector<HTMLButtonElement>(".tf-rd-meta button.tf-lab")!.click();
   await settle();
   expect(target.querySelector(".tf-rd-page")).not.toBeNull();
   expect(target.querySelector(".tf-dh-answer")).toBeNull();
@@ -1441,7 +1441,7 @@ test("at any width Docs leaves / alone: it is the shell's, and opens the launche
 test("below 900px a label chip opens the drawer with the label in the search; Esc gives the chip focus back (#2084)", async () => {
   windowWidth(800);
   const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
-  const chip = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-chip")].find((c) => c.textContent === "on-call")!;
+  const chip = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-lab")].find((c) => c.textContent === "on-call")!;
   chip.focus();
   chip.click();
   await settle();
@@ -1462,7 +1462,7 @@ test("at 900px and wider a label chip searches for itself in the tree's column, 
   const layers = createLayers();
   view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: ports(), layers } });
   await settle();
-  const chip = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-chip")].find((c) => c.textContent === "ops")!;
+  const chip = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-meta .tf-lab")].find((c) => c.textContent === "ops")!;
   chip.focus();
   chip.click();
   await settle();
@@ -3183,4 +3183,192 @@ test("For you opens a page at its mention, and on that page the row is marked an
   const row = target.querySelector<HTMLAnchorElement>(".tf-dl-for a")!;
   expect(row.getAttribute("href")).toBe("#/page/confluence%3A2/mention");
   expect(row.getAttribute("aria-current")).toBe("true");
+});
+
+// ---- what a press answers, and where words go (Round 13) ----
+
+test("Unlink on a page whose text still names the ticket says so, and says it once for two presses (F-447)", async () => {
+  const links = linkPorts();
+  const on = { link: { id: "link-7", from_id: "confluence:2", to_id: "jira:OPS-77", relation: "documents", origin: "manual", note: null }, other: { entity_id: "jira:OPS-77", deleted_at: null, title: "x", kind: "ticket" } };
+  const row = (linked: boolean) => ({ ...RICH, work: [{ entity_id: "jira:OPS-77", key: "OPS-77", title: "x", status: null, linked }] });
+  let linked = true;
+  vi.mocked(links.unlink).mockImplementation(async () => void (linked = false));
+  const io = ports({ docsPage: vi.fn(async () => row(linked)), getEntity: vi.fn(async () => pageDetail({ links: linked ? ([on] as never) : [] })) });
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: io, linkPorts: links as never } });
+  await settle();
+  const press = target.querySelector<HTMLButtonElement>(".tf-rd-unlink")!;
+  press.click();
+  press.click();
+  await settle();
+  expect(links.unlink).toHaveBeenCalledTimes(1);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Link removed. The page still names OPS-77, so it stays listed."]);
+  expect(toasts.items[0]!.action?.label).toBe("Undo");
+  expect(target.querySelector(".tf-rd-unlink"), "nothing left here to unlink").toBeNull();
+});
+
+test("Refresh answers a press: up to date with the version, or the version it moved to, and two presses leave one toast (F-445)", async () => {
+  const r = refreshProbe();
+  let version = 14;
+  const io = ports({ docsPage: vi.fn(async () => ({ ...RICH, version })), getEntity: vi.fn(async () => pageDetail()), refresh: r.ports });
+  await draw(["confluence:2"], io);
+  refreshButton()!.click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Page is up to date, version 14"]);
+  refreshButton()!.click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Page is up to date, version 14"]);
+  version = 15;
+  refreshButton()!.click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Refreshed, now version 15"]);
+});
+
+test("Refresh that could not read the page again claims nothing (F-445)", async () => {
+  const r = refreshProbe();
+  const docsPage = vi.fn(async (): Promise<DocPage> => RICH);
+  await draw(["confluence:2"], ports({ docsPage, getEntity: vi.fn(async () => pageDetail()), refresh: r.ports }));
+  docsPage.mockRejectedValueOnce({ code: "internal", message: "no" });
+  refreshButton()!.click();
+  await settle();
+  expect(toasts.items).toEqual([]);
+});
+
+const newPageField = <T extends HTMLElement>(label: string) => document.querySelector<T>(`[role='dialog'] [aria-label='${label}']`)!;
+function typeInto(label: string, words: string): void {
+  const field = newPageField<HTMLInputElement>(label);
+  field.value = words;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+}
+const dialogButton = (name: string) => [...document.querySelectorAll<HTMLElement>("[role='dialog'] button")].find((b) => (b.getAttribute("aria-label") ?? b.textContent?.trim()) === name);
+
+test("New page's Esc and × keep the words and the place they were written for; only Cancel and a queued page end them (F-442)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const reopen = async () => {
+    button("New page here…")!.click();
+    await settle();
+  };
+  await reopen();
+  typeInto("Title", "Rota");
+  typeInto("Page text", "## Who");
+  const under = newPageField<HTMLSelectElement>("Under");
+  under.value = "confluence:1";
+  under.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  document.querySelector<HTMLElement>("[role='dialog'] input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await settle();
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+
+  await reopen();
+  expect(newPageField<HTMLInputElement>("Title").value).toBe("Rota");
+  expect(newPageField<HTMLTextAreaElement>("Page text").value).toBe("## Who");
+  expect(newPageField<HTMLSelectElement>("Under").value, "the words come back under the parent they were written for").toBe("confluence:1");
+
+  document.querySelector<HTMLElement>("[role='dialog'] .tf-dclose")!.click();
+  await settle();
+  await reopen();
+  expect(newPageField<HTMLInputElement>("Title").value, "× is Esc").toBe("Rota");
+
+  dialogButton("Cancel")!.click();
+  await settle();
+  await reopen();
+  expect(newPageField<HTMLInputElement>("Title").value).toBe("");
+  expect(newPageField<HTMLSelectElement>("Under").value).toBe("confluence:2");
+});
+
+test("a queued New page leaves no draft behind (F-442)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("New page here…")!.click();
+  await settle();
+  typeInto("Title", "Rota");
+  await settle();
+  dialogButton("Create page")!.click();
+  await settle();
+  button("New page here…")!.click();
+  await settle();
+  expect(newPageField<HTMLInputElement>("Title").value).toBe("");
+});
+
+const DEEP: DocsTree = {
+  ...TREE,
+  spaces: [
+    {
+      source_id: "confluence",
+      key: "OPS",
+      name: "Operations",
+      pages: [
+        { entity_id: "confluence:1", title: "Ops home", parent: null },
+        { entity_id: "confluence:2", title: "On-call handbook", parent: "confluence:1" },
+        { entity_id: "confluence:3", title: "Runbooks", parent: "confluence:1" },
+        { entity_id: "confluence:4", title: "Restart", parent: "confluence:3" },
+        { entity_id: "confluence:5", title: "Glossary", parent: null },
+      ],
+    },
+  ],
+};
+
+test("the page tree is one Tab stop: the open page's row, with the arrows walking what is shown (F-444)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), docsTree: vi.fn(async () => DEEP) }));
+  const tree = target.querySelector<HTMLElement>(".tf-dl-tree")!;
+  const row = (name: string) => [...tree.querySelectorAll<HTMLAnchorElement>("a")].find((a) => a.textContent?.trim() === name)!;
+  const stops = () => [...tree.querySelectorAll<HTMLElement>("a, summary")].filter((at) => at.tabIndex === 0).map((at) => at.textContent?.trim());
+  const press = (at: HTMLElement, key: string) => {
+    const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+    at.dispatchEvent(event);
+    return event;
+  };
+  const opened = async (fold: HTMLElement) => {
+    fold.closest("details")!.dispatchEvent(new Event("toggle"));
+    await settle();
+  };
+
+  expect(stops()).toEqual(["On-call handbook"]);
+  row("On-call handbook").focus();
+  expect(press(document.activeElement as HTMLElement, "ArrowDown").defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(row("Runbooks"));
+  expect(stops(), "the stop follows focus").toEqual(["Runbooks"]);
+
+  // → opens the fold and stays; → again steps in; ← steps out; ← closes.
+  press(row("Runbooks"), "ArrowRight");
+  await opened(row("Runbooks"));
+  expect(row("Runbooks").closest("details")!.open).toBe(true);
+  expect(row("Runbooks").getAttribute("aria-expanded")).toBe("true");
+  expect(document.activeElement).toBe(row("Runbooks"));
+  press(row("Runbooks"), "ArrowRight");
+  expect(document.activeElement).toBe(row("Restart"));
+  press(row("Restart"), "ArrowLeft");
+  expect(document.activeElement).toBe(row("Runbooks"));
+  press(row("Runbooks"), "ArrowLeft");
+  await opened(row("Runbooks"));
+  expect(row("Runbooks").closest("details")!.open).toBe(false);
+  expect(document.activeElement).toBe(row("Runbooks"));
+
+  // A closed fold's rows are skipped, and the walk stops at its ends.
+  press(row("Runbooks"), "ArrowDown");
+  expect(document.activeElement).toBe(row("Glossary"));
+  press(row("Glossary"), "ArrowDown");
+  expect(document.activeElement).toBe(row("Glossary"));
+  press(row("Glossary"), "Home");
+  expect(document.activeElement).toBe(row("Ops home"));
+  press(row("Ops home"), "End");
+  expect(document.activeElement).toBe(row("Glossary"));
+
+  // A key with a modifier is someone else's.
+  const held = new KeyboardEvent("keydown", { key: "ArrowUp", metaKey: true, bubbles: true, cancelable: true });
+  row("Glossary").dispatchEvent(held);
+  expect(held.defaultPrevented).toBe(false);
+
+  // Gone from the tree, the stop is the open page's row again.
+  row("Glossary").blur();
+  expect(stops()).toEqual(["On-call handbook"]);
+});
+
+test("a search before any page is read says you from the sources' settings, so opening a hit changes nothing (F-428)", async () => {
+  const links = linkPorts();
+  vi.mocked(links.listSources).mockResolvedValue([{ id: "confluence", config: { username: "mara" } }] as never);
+  const hit = { ...HITS.hits[0]!, editor: "mara", editor_name: "Mara Lindqvist", matches: 1 };
+  const io = ports({ docsSearch: vi.fn(async () => ({ ...HITS, hits: [hit] })) });
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["search", "ledger"], job: null, ports: io, linkPorts: links as never } });
+  await settle();
+  await vi.waitFor(() => expect(target.querySelector(".tf-dl-hit .tf-n")?.textContent).toContain(", you,"));
+  expect(io.docsPage, "a search still opens no page").not.toHaveBeenCalled();
 });

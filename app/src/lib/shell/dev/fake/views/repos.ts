@@ -17,7 +17,7 @@
  */
 import type { DiffFile, PipeRun, PipeStep, RefusedWrite, SourceView, TreeEntry, ViewAction, ViewRow, WriteAsk } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/diff/line-diff";
-import { ago } from "../../../time";
+import { ago, agoStamp } from "../../../time";
 import { CODE_FACTS, CORPUS, FAKE_IDENTITY, SYNCED_AT } from "../corpus";
 import { fakePdf, HOSTILE_PDF, SCAN_PDF, SPEC_PDF, type FakePage } from "../../../../render/pdf-fixture";
 
@@ -475,8 +475,8 @@ function listing(files: Record<string, string>, dir: string): TreeEntry[] {
   ];
 }
 
-/** An age in the words the adapters write (`knobas_source::view::ago`), against the fixture's clock. */
-const age = (at: string) => ago(at, new Date(SYNCED_AT));
+/** An age in the words the adapters write (`knobas_source::view::ago`), against the fixture's clock: an ISO date past a day, which the read turns into words. */
+const age = (at: string) => (agoStamp(at, new Date(SYNCED_AT)) ?? ago(at, new Date(SYNCED_AT)));
 
 /** A commit row, the same in every list, as the adapter's `commit_row` is. */
 export function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {

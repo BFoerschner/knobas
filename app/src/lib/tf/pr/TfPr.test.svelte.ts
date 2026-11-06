@@ -22,6 +22,7 @@ import type { WriteOpPayload } from "../../ipc/sources";
 import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { stampLabel } from "../../time/format";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
@@ -308,7 +309,7 @@ test("Overview: each check with its state, the one the mirror holds opening its 
   await draw([PR]);
   const checks = [...target.querySelectorAll(".tf-prchecks tr")];
   expect(checks.map(cells)).toEqual([
-    "Payout_IntegrationTests #1187 | Failed, 41 passed, 1 failed",
+    "Payout_IntegrationTests #1187 | 1 failed, 41 passed",
     "Payout_Lint #904 | Passed",
   ]);
   expect(checks[0]!.querySelector(".tf-dot")!.classList.contains("tf-err")).toBe(true);
@@ -526,7 +527,7 @@ test("a source action the source draws disabled says why and opens nothing", asy
 test("Conversation: each entry's who, when and verdict, then a comment queued and drawn at once", async () => {
   await draw([PR, "conversation"]);
   const messages = () => [...target.querySelectorAll(".tf-convo .tf-msg")].map((m) => m.textContent?.replace(/\s+/g, " ").trim());
-  expect(messages()).toEqual(["JO jonas2026-08-22 09:30 Commented Should the jitter be bounded?", "MA You2026-08-22 10:20 Bounded to ±10 %."]);
+  expect(messages()).toEqual([`JO jonas${stampLabel("2026-08-22T09:30:00")} Commented Should the jitter be bounded?`, `MA You${stampLabel("2026-08-22T10:20:00")} Bounded to ±10 %.`]);
   const box = target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
   expect(box.placeholder).toBe("Comment on PR #142");
   // In the page body, so small (#2238 Controls).
@@ -561,7 +562,7 @@ test("Conversation opens on the source's line where it cannot read the comments,
   await draw([PR, "conversation"], ports({ pr }));
   const convo = [...target.querySelectorAll(".tf-convo > *")].map((node) => node.textContent?.replace(/\s+/g, " ").trim());
   expect(convo[0]).toBe(UNREAD);
-  expect(convo[1]).toBe("PR priya.nair2026-08-22 09:30 Approved");
+  expect(convo[1]).toBe(`PR priya.nair${stampLabel("2026-08-22T09:30:00")} Approved`);
   expect(target.querySelector(".tf-convo .tf-prline")!.classList.contains("tf-dim")).toBe(true);
 });
 

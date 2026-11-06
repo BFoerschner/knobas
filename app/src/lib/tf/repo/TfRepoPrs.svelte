@@ -67,7 +67,7 @@
   $effect(() => untrack(() => watchEchoes(REPO_PRS, () => reread(), { listen: ports.listen })));
 
   let jobs = $state<OpenJob[]>([]);
-  /** Each pull request's author, once `code_facts` answered; a failed read leaves the line off. */
+  /** Each pull request's author, once `code_facts` answered, as Code's rows say it: *you* for the reader's own. A failed read leaves the line off. */
   let authors = $state.raw<ReadonlyMap<string, string>>(new Map());
 
   $effect(() => {
@@ -76,7 +76,7 @@
     let live = true;
     ports.codeFacts(ids).then(
       (facts) => {
-        if (live) authors = new Map(facts.flatMap((fact) => (fact.author ? [[fact.entity_id, fact.author] as const] : [])));
+        if (live) authors = new Map(facts.flatMap((fact) => (fact.author ? [[fact.entity_id, fact.mine ? "you" : fact.author] as const] : [])));
       },
       () => {},
     );

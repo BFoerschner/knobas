@@ -8,6 +8,9 @@
   space by parent and finds the folds holding the open page once per read,
   and every fold below shares both; a closed fold draws nothing under it
   until it is opened, so the rows drawn are the rows shown.
+
+  **One `Tab` stop** (F-444, `tree-keys.ts`): the open page's row, else the first. ↑ and ↓ walk the rows shown, → opens a
+  fold and then steps into it, ← closes it and then steps out, as the search hits above and the launcher walk.
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
@@ -16,6 +19,7 @@
   import type { DocNode, DocSpace } from "../../ipc/entity";
   import { echoesOn } from "../queued.svelte";
   import { childrenByParent, foldsHolding, pageHash } from "./docs";
+  import { treeKeys } from "./tree-keys";
 
   let {
     space,
@@ -53,6 +57,7 @@
   }
 </script>
 
+{#snippet rows()}
 {#each nodes as node (node.entity_id)}
   {@const queued = echoesOn(node.entity_id, "page")}
   {@const starts = queued.length > 0 || holding.has(node.entity_id)}
@@ -76,3 +81,11 @@
     <a class="tf-dl-leaf" title={node.title} href={pageHash(node.entity_id)} aria-current={node.entity_id === current ? "true" : undefined}>{node.title}</a>
   {/if}
 {/each}
+{/snippet}
+
+<!-- The top call holds the keys: the folds below it draw into the same list. -->
+{#if under === undefined}
+  <div class="tf-dl-tree" {@attach treeKeys}>{@render rows()}</div>
+{:else}
+  {@render rows()}
+{/if}

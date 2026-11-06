@@ -11,6 +11,10 @@
   space the source's credential may not add pages to draws *Create page*
   disabled with the reason. With no title *Create page* is disabled, and the line beside it says so (design system,
   the enabled rule).
+
+  **The words outlive the dialog** (the key table, F-442): `Esc` and × close it and keep what was typed, under the
+  space and page it was opened on, with the *Space* and *Under* chosen since, so the words never come back under another
+  parent than they were written for. *Cancel* and a queued page are what end a draft.
 -->
 <script lang="ts">
   import type { DocsTree, NewPage } from "../../ipc/entity";
@@ -18,7 +22,9 @@
   import type { Layers } from "../layers.svelte";
   import TfKey from "../TfKey.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
+  import { drafts } from "../drafts.svelte";
   import { firstPage, spaceId } from "./docs";
+  import { untrack } from "svelte";
 
   let {
     tree,
@@ -51,15 +57,32 @@
     refusedWrites?: RefusedWritesPort | undefined;
   } = $props();
 
+  interface Held {
+    space: string;
+    under: string;
+    title: string;
+    text: string;
+  }
+
   // svelte-ignore state_referenced_locally
-  let picked = $state(initialSpace ?? (tree.spaces[0] ? spaceId(tree.spaces[0]) : ""));
+  const draftKey = `new-page:${initialSpace ?? ""}:${initialParent ?? ""}`;
+  /** What `Esc` or × left here. *Edit and resend* brings its own words, which win. A space that has gone since gives its place back. */
+  function heldDraft(): Held | null {
+    if (initialTitle !== "" || initialText !== "" || !drafts.has(draftKey)) return null;
+    const held = JSON.parse(drafts.get(draftKey)) as Held;
+    return tree.spaces.some((s) => spaceId(s) === held.space) ? held : { ...held, space: initialSpace ?? "", under: initialParent ?? "" };
+  }
+  const held = untrack(heldDraft);
+
+  // svelte-ignore state_referenced_locally
+  let picked = $state(held?.space || initialSpace || (tree.spaces[0] ? spaceId(tree.spaces[0]) : ""));
   const space = $derived(tree.spaces.find((s) => spaceId(s) === picked));
   // svelte-ignore state_referenced_locally
-  let under = $state(initialParent ?? "");
+  let under = $state(held?.under ?? initialParent ?? "");
   // svelte-ignore state_referenced_locally
-  let title = $state(initialTitle);
+  let title = $state(held?.title ?? initialTitle);
   // svelte-ignore state_referenced_locally
-  let text = $state(initialText);
+  let text = $state(held?.text ?? initialText);
   let link = $state(true);
   let sending = $state(false);
 
@@ -67,6 +90,18 @@
   $effect(() => {
     if (space && !space.pages.some((p) => p.entity_id === under)) under = firstPage(space)?.entity_id ?? "";
   });
+
+  // Blank words are no draft, so a dialog opened and left holds nothing back.
+  $effect(() => {
+    const words = title.trim() === "" && text.trim() === "" ? "" : JSON.stringify({ space: picked, under, title, text } satisfies Held);
+    untrack(() => drafts.put(draftKey, words));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discard(): void {
+    drafts.forget(draftKey);
+    onclose();
+  }
 
   /** A page's place in its space, prototype-6's `path › title`. */
   function label(id: string): string {
@@ -91,7 +126,7 @@
     if (sending || under === "" || refusal !== null) return;
     sending = true;
     try {
-      if (await oncreate({ parent: under, title, text }, job !== null && link)) onclose();
+      if (await oncreate({ parent: under, title, text }, job !== null && link)) discard();
     } finally {
       sending = false;
     }
@@ -130,7 +165,7 @@
     <p class="tf-dlg-note">Created in {sourceName} through the write queue. Tables and macros need {sourceName} for now.</p>
   {/snippet}
   {#snippet footer()}
-    <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button type="button" class="tf-btn tf-ghost" onclick={discard}>Cancel</button>
     <button
       type="button"
       class="tf-btn tf-primary"

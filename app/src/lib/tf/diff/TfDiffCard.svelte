@@ -66,7 +66,7 @@
   import type { DiffMode, RenderedPlan, Side, SideGot } from "./rendered";
   import TfDiffRendered from "./TfDiffRendered.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
-  import { ago } from "../../shell/time";
+  import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { placeThreads, targetOf } from "../pr/files";
   import { changedWords, DIFF_CEILING, EXPAND_STEP as STEP, keyOf, splitRows, unifiedRows, type DrawnFile, type DrawnLine, type Expanded, type Gap } from "./diff";
@@ -319,7 +319,7 @@
   {#each comments as c, k (k)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p><b>{c.author}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
+      <p title={agoStamp(c.at)}><b>{c.author}</b>{c.at ? ` ${ago(c.at)}` : ""}</p>
       <TfMarkdown text={c.body} {render} />
     </div>
   {/each}

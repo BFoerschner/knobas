@@ -28,6 +28,8 @@
 /* A page with nothing under it keeps the chevron's column, so a level's titles start on one edge: 14 px is the chevron's 6 + its margins. */
 .tf-rd-tree a.tf-dl-leaf { padding-left: 22px; }
 .tf-rd-tree .tf-fold-in { padding-left: 12px; }
+/* Only what holds the tree's keys: the rows stay the column's. */
+.tf-dl-tree { display: contents; }
 /* A page queued under its parent (#1424): muted, with no link, until the tree holds it. */
 .tf-rd-tree .tf-dl-queued { display: block; padding: 3px 8px; color: var(--muted); font-style: italic; }
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
@@ -63,7 +65,8 @@
 /* Where *Link to <job>* stood once the page is on the job: nothing to press, as tall as the buttons beside it. */
 .tf-rd-on { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control-h); padding-right: 6px; color: var(--ink-2); white-space: nowrap; }
 .tf-rd-on .tf-key { color: var(--ink); }
-.tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+/* The one label size reaches its buttons through `.tf button { font: inherit }`. */
+.tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: var(--t-xs); }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
 /* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136), set apart from what follows like the page's other blocks. */
@@ -192,8 +195,8 @@
 .tf-dl-for .tf-why { display: block; font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-rd-tree a[aria-current="true"] .tf-why { color: inherit; }
 /* A tag sits on paper, where `--muted-bg` vanishes in light: a sheet with a rule shows in both themes. */
-.tf-rd-meta button.tf-chip { border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); font-family: inherit; cursor: pointer; }
-.tf-rd-meta button.tf-chip:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-rd-meta button.tf-lab { background: var(--sheet); font-family: inherit; cursor: pointer; }
+.tf-rd-meta button.tf-lab:hover { border-color: var(--ink-2); color: var(--ink); }
 .tf-dl-head .tf-seg button { white-space: nowrap; }
 @media (max-width: 1240px) { .tf-dl-head .tf-jobk { display: none; } }
 /* 38px high: the sticky outline sits that far down while it is open (.tf-rd-outline, #2081). */

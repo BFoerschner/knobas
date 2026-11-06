@@ -9,6 +9,7 @@
  * which bundle a function's arguments rather than mirror a Rust type.
  */
 import { invoke } from "@tauri-apps/api/core";
+import { viewDate } from "../time/format";
 import type {
   ActionItemTicket,
   ArtifactEntry,
@@ -766,7 +767,22 @@ export function reachableTransitions(entityId: string): Promise<string[]> {
  * `unreachable` or `internal` as {@link reachableTransitions} does.
  */
 export function entityView(entityId: string, section: string | null = null): Promise<SourceView | null> {
-  return invoke<SourceView | null>("entity_view", { entityId, section });
+  return invoke<SourceView | null>("entity_view", { entityId, section }).then(withDateWords);
+}
+
+/** A view's rows with their meta in the one date form, read here so every list and its filter say the same (`viewDate`). */
+function withDateWords(view: SourceView | null): SourceView | null {
+  if (view === null) return null;
+  const now = new Date();
+  return {
+    ...view,
+    sections: view.sections.map((section) => ({
+      ...section,
+      blocks: section.blocks.map((block) =>
+        block.type === "entities" ? { ...block, rows: block.rows.map((row) => (row.meta === null ? row : { ...row, meta: viewDate(row.meta, now) })) } : block,
+      ),
+    })),
+  };
 }
 
 /** What `entity_file_bytes` answers: an `ArrayBuffer` from the bridge, a `Uint8Array` from the dev fake. */
