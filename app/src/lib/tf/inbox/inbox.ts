@@ -6,7 +6,7 @@
  * A row is an `inbox_items` entry. The view holds both shelves whole (the
  * inbox store reads them), so the filter runs in the browser (R-2.3's first
  * mode). Nothing here reads a payload: the sentence is the backend's own
- * `reason` and `title`.
+ * `title` and `reason`, subject first (F-115), and `detail` its second reading.
  */
 import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
 import { itemHash } from "../job/job";
@@ -53,32 +53,39 @@ export function kindOf(category: InboxCategory): string {
 }
 
 /**
- * The item as one phrase, lower case as the backend writes it: the reason,
- * then the item after a colon, unless the reason already names it (a
- * credential expiry's reason names its source).
+ * The item as one phrase, its subject first (F-115): the title, then why it is
+ * here after a colon (*Payout CSV export: jonas asked for your review*), or the
+ * reason alone where it already names the subject (*knobas-jira is down*, *The
+ * Tidewater Jira credential expires on…*).
  */
 export function phrase(item: Pick<InboxItem, "reason" | "title">): string {
   const reason = item.reason.trim();
   const title = item.title.trim();
   if (title === "" || reason.toLowerCase().includes(title.toLowerCase())) return reason;
-  return `${reason}: ${title}`;
+  return `${title}: ${reason}`;
 }
 
 /**
- * Categories whose reason starts with a source's word: the reviewer's account
- * (`jonas asked for your review`) or the asset's path. Those are drawn as the
- * source spells them; only the backend's own opening words are capitalised.
+ * The categories whose phrase opens on knobas' own words (`the <source>
+ * credential…`, `no credential…`). Every other opens on a source's name for the
+ * subject, which is drawn as the source spells it.
  */
-const SOURCE_FIRST: readonly InboxCategory[] = ["review_request", "alert"];
-
-/** The backend's stand-in for a review request with no author (`knobas_core::inbox`): knobas' own word. */
-const NO_AUTHOR = "somebody ";
+const OWN_WORDS_FIRST: readonly InboxCategory[] = ["credential_expiry", "failed_sign_in"];
 
 /** The row's sentence: {@link phrase}, capitalised where the first word is knobas' own. */
 export function sentence(item: Pick<InboxItem, "category" | "reason" | "title">): string {
   const text = phrase(item);
-  if (SOURCE_FIRST.includes(item.category) && !text.startsWith(NO_AUTHOR)) return text;
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  return OWN_WORDS_FIRST.includes(item.category) ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+/**
+ * What a toast calls the item: its subject alone, since a toast already says
+ * what happened to it (*Done: Payout dashboard latency*), or the sentence where
+ * the reason names the subject.
+ */
+export function named(item: Pick<InboxItem, "category" | "reason" | "title">): string {
+  const title = item.title.trim();
+  return title === "" || item.reason.toLowerCase().includes(title.toLowerCase()) ? sentence(item) : title;
 }
 
 /** A failure is drawn with an err dot (a failed build, a monitor down, a refused sign-in). */

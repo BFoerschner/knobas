@@ -856,17 +856,19 @@ async fn a_failed_build_with_no_status_text_says_only_that_it_failed() {
     .await;
 
     let items = stream(pool).await;
-    let reason = |id: &str| {
+    let said = |id: &str| {
         items
             .iter()
             .find(|i| i.key == format!("failed_build:{id}"))
-            .map(|i| i.reason.clone())
+            .map(|i| (i.reason.clone(), i.title.clone(), i.detail.clone()))
+            .expect("the build is on the stream")
     };
-    assert_eq!(
-        reason(&told).as_deref(),
-        Some("this build failed: 3 tests failed")
-    );
-    assert_eq!(reason(&silent).as_deref(), Some("this build failed"));
+    let (reason, title, detail) = said(&told);
+    assert_eq!(reason, format!("{title} failed"), "the subject leads (F-115)");
+    assert_eq!(detail.as_deref(), Some("3 tests failed"));
+    let (reason, title, detail) = said(&silent);
+    assert_eq!(reason, format!("{title} failed"));
+    assert_eq!(detail, None, "no status text is no second reading");
 }
 
 /// Story 4, second arm: a build CI triggered on my pull request finds me
@@ -1994,8 +1996,13 @@ async fn an_alert_names_its_monitor_and_the_path_of_the_asset_it_watches() {
     );
     assert_eq!(item.kind.as_deref(), Some("asset"));
     assert_eq!(
-        item.reason, "hel / hel1 is warn",
-        "the reason is the asset's whole path and the trouble it is in"
+        item.reason, "hel1 is slow",
+        "the reason leads with the asset and says the trouble it is in, in the chips' word"
+    );
+    assert_eq!(
+        item.detail.as_deref(),
+        Some("hel"),
+        "the path above the asset is still reachable"
     );
     assert_eq!(item.occurred_at, days_ago(1));
     assert_eq!(item.web_url, None);

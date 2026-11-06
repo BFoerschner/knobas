@@ -15,6 +15,7 @@ import {
   kindOf,
   opener,
   rowActions,
+  named,
   sentence,
   backLabel,
   untilLabel,
@@ -42,23 +43,26 @@ function entry(over: Partial<InboxItem>, actions: string[] = []): InboxEntry {
 }
 
 describe("a row's sentence", () => {
-  test("is the backend's reason, capitalised, then the item", () => {
+  test("leads with its subject, then why it is here (F-115)", () => {
     expect(sentence(item({ category: "new_assignment", reason: "assigned to you", title: "Payout dashboard latency" }))).toBe(
-      "Assigned to you: Payout dashboard latency",
+      "Payout dashboard latency: assigned to you",
     );
+    expect(sentence(item({}))).toBe("Idempotent retry window: jonas asked for your review");
+    expect(sentence(item({ reason: "somebody asked for your review" }))).toBe("Idempotent retry window: somebody asked for your review");
   });
 
   test("keeps a source's word as the source spells it", () => {
-    expect(sentence(item({}))).toBe("jonas asked for your review: Idempotent retry window");
-    expect(sentence(item({ category: "alert", reason: "knobas test estate / knobas-jira is down", title: "jira" }))).toBe(
-      "knobas test estate / knobas-jira is down",
-    );
+    expect(sentence(item({ category: "alert", reason: "knobas-jira is down", title: "jira" }))).toBe("knobas-jira is down");
+    expect(sentence(item({ category: "failed_build", reason: "x #1 failed", title: "x #1" }))).toBe("x #1 failed");
   });
 
-  test("capitalises the backend's stand-in for a review with no author", () => {
-    expect(sentence(item({ reason: "somebody asked for your review" }))).toBe(
-      "Somebody asked for your review: Idempotent retry window",
-    );
+  test("a monitor named apart from its asset leads, and the asset says the trouble", () => {
+    expect(sentence(item({ category: "alert", reason: "knobas-jira is down", title: "HTTP health" }))).toBe("HTTP health: knobas-jira is down");
+  });
+
+  test("a toast names the subject alone, or the sentence where the reason holds it", () => {
+    expect(named(item({ category: "new_assignment", reason: "assigned to you", title: "Payout dashboard latency" }))).toBe("Payout dashboard latency");
+    expect(named(item({ category: "alert", reason: "knobas-jira is down", title: "jira" }))).toBe("knobas-jira is down");
   });
 
   test("is the reason alone when the reason already names the item", () => {

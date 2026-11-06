@@ -737,6 +737,15 @@ test("an alert says nothing until its own category is switched on", async () => 
   expect(on.calls.sent.map((notification) => notification.body)).toEqual(["hel / hel1 is down"]);
 });
 
+/** What the row's second line holds still reaches the notification (F-115): a path, a build's status. */
+test("a notification says the reason, then the item's detail", async () => {
+  const on = bench();
+  await on.primed(["alert"]);
+  const entry = alertEntry();
+  on.store.saw([{ ...entry, item: { ...entry.item, reason: "hel1 is down", detail: "hel" } }]);
+  expect(on.calls.sent.map((notification) => notification.body)).toEqual(["hel1 is down: hel"]);
+});
+
 /**
  * **One desktop notification per alert, and neither the ack nor the recovery
  * is another one** (stories 62 and 64).

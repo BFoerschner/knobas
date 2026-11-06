@@ -195,7 +195,7 @@ function inboxRows(response: SearchResponse, inbox: InboxPreview | null, titles:
   if (!inbox || !response.interpreted.filters.kinds.includes("inbox")) return [];
   const words = response.interpreted.text.toLowerCase().split(/\s+/u).filter(Boolean);
   const holds = (item: InboxItem) => {
-    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.category.replaceAll("_", " ")}`).toLowerCase();
+    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.detail ?? ""} ${item.category.replaceAll("_", " ")}`).toLowerCase();
     return words.every((word) => text.includes(word));
   };
   return inbox.items

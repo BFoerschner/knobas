@@ -15,10 +15,11 @@
  * **Where this diverges from prototype-6 and the mock adapter:**
  *
  * - Each `reason` is in the backend's own words (`knobas_core::inbox`: "jonas
- *   asked for your review", "you are mentioned here", "this build failed: …",
- *   "assigned to you", "<asset path> is down", "the <source> credential
- *   expires on …"), not prototype-6's richer sentences, which no rule writes
- *   (#834): the screenshot shows what the app will say.
+ *   asked for your review", "you are mentioned here", "<build> failed",
+ *   "assigned to you", "<asset> is down", "the <source> credential expires on
+ *   …"), with `detail` the second reading (a build's status, an asset's path),
+ *   not prototype-6's richer sentences, which no rule writes (#834): the
+ *   screenshot shows what the app will say.
  * - The rows use entities the fixture holds (`corpus.ts`, `job-reach.ts`), so
  *   the build and the pull request are ones PAY-231 reaches.
  * - The alert is on `kuma:3`, the fixture's one unacked open alert
@@ -78,6 +79,7 @@ function entry(
   reason: string,
   minutes: number,
   actions: string[],
+  detail?: string,
 ): InboxEntry {
   return {
     item: {
@@ -90,6 +92,7 @@ function entry(
       // name a ticket differently from the board beside it.
       title: CORPUS.find((row) => row.entity_id === entity_id)?.title ?? title,
       reason,
+      ...(detail === undefined ? {} : { detail }),
       occurred_at: ago(minutes),
       web_url: null,
       snoozed_until: null,
@@ -124,11 +127,11 @@ function prototype(): InboxEntry[] {
     entry("review_request:mock:payout-service#150", "review_request", "mock", "mock:payout-service#150", "pr",
       "Payout CSV export", "jonas asked for your review", 10, ["approve", "comment"]),
     entry("alert:kuma:3", "alert", "kuma", "asset:knobas-jira", "asset",
-      "jira", "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL) / knobas-jira is down", 80, []),
+      "jira", "knobas-jira is down", 80, [], "knobas test estate / DESKTOP-QUUAHUB / Ubuntu 26.04 (WSL 2) / Docker engine (WSL)"),
     entry("mention:confluence:sepa", "mention", "confluence", "confluence:sepa", "page",
       "SEPA retry design", "you are mentioned here", 115, ["comment"]),
     entry("failed_build:teamcity:build:Payout_IntegrationTests-1187", "failed_build", "teamcity", "teamcity:build:Payout_IntegrationTests-1187", "build",
-      "Payout_IntegrationTests #1187", "this build failed: Tests failed: 3 (3 new), passed: 212", 226, ["rerun_build"]),
+      "Payout_IntegrationTests #1187", "Payout_IntegrationTests #1187 failed", 226, ["rerun_build"], "Tests failed: 3 (3 new), passed: 212"),
     entry("mention:mock:payout-service#142", "mention", "mock", "mock:payout-service#142", "pr",
       "Idempotent retry window", "you are mentioned here", 260, ["comment"]),
     entry("new_assignment:mock:PAY-240", "new_assignment", "mock", "mock:PAY-240", "ticket",
@@ -180,13 +183,13 @@ function bulkItems(n: number): InboxEntry[] {
         made.push(entry(`mention:mock:BULK-${i}`, "mention", "mock", `mock:BULK-${i}`, "ticket", `Bulk ticket ${i}`, "you are mentioned here", minutes, ["comment"]));
         break;
       case 2:
-        made.push(entry(`failed_build:teamcity:build:Bulk-${i}`, "failed_build", "teamcity", `teamcity:build:Bulk-${i}`, "build", `Bulk #${i}`, "this build failed: Tests failed: 1", minutes, ["rerun_build"]));
+        made.push(entry(`failed_build:teamcity:build:Bulk-${i}`, "failed_build", "teamcity", `teamcity:build:Bulk-${i}`, "build", `Bulk #${i}`, `Bulk #${i} failed`, minutes, ["rerun_build"], "Tests failed: 1"));
         break;
       case 3:
         made.push(entry(`new_assignment:mock:BULK-${i}`, "new_assignment", "mock", `mock:BULK-${i}`, "ticket", `Bulk ticket ${i}`, "assigned to you", minutes, []));
         break;
       default:
-        made.push(entry(`alert:kuma:bulk-${i}`, "alert", "kuma", `asset:bulk-${i}`, "asset", `bulk-${i}`, `bulk host ${i} is down`, minutes, []));
+        made.push(entry(`alert:kuma:bulk-${i}`, "alert", "kuma", `asset:bulk-${i}`, "asset", `bulk-${i}`, `bulk-${i} is down`, minutes, [], "bulk host"));
     }
   }
   return made;

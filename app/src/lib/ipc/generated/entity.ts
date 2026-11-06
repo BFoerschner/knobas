@@ -1852,8 +1852,20 @@ title: string,
  * be shown is not shippable.
  *
  * Also raw text.
+ *
+ * **It leads with the subject or stays short (F-115).** Where the reason
+ * names the subject, the subject is its first word (*knobas-jira is down*,
+ * *Payout_IntegrationTests #1187 failed*); what would bury it goes in
+ * [`detail`](Self::detail).
  */
 reason: string, 
+/**
+ * What the row says after the subject, on its second line: an alert's
+ * asset path above the asset, a failed build's own status text. Reachable
+ * without leading the row (F-115). Raw text; absent on the wire where a
+ * rule has none.
+ */
+detail?: string, 
 /**
  * When the item last moved. The stream's ordering, and what *done* is
  * measured against.

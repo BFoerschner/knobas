@@ -2,9 +2,10 @@
   The Inbox (#834, R-12.1 to R-12.3): `#/inbox`.
 
   The filter bar (*This job / All*, the kind chips; its search is the launcher's `#i`, #2425), then a row per item
-  newest first: the time, the item as one sentence (an err dot for a failure),
-  its actions, and a second line with its kind and the job it belongs to as a
-  link. The snoozed shelf is a fold under the list, its rows in the list's shape,
+  newest first: the time, the item as one sentence, its subject first (an err
+  dot for a failure), its actions, and a second line with its kind, the job it
+  belongs to as a link, and what the sentence leaves out (an alert's path, a
+  build's status). The snoozed shelf is a fold under the list, its rows in the list's shape,
   each saying when it comes back, with *Wake*.
 
   Answers are drawn at once (#775), so a press says so in a toast that collapses
@@ -55,7 +56,7 @@
   import { reenterWords, secretNoun } from "../settings/settings";
   import TfKey from "../TfKey.svelte";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { backLabel, expiryOf, failed, KIND_CHIPS, kindOf, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
+  import { backLabel, expiryOf, failed, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -239,7 +240,7 @@
 
   /** Back in the stream: a snooze until now, which clears a snooze and a *Done* alike. */
   function bringBack(entry: InboxEntry) {
-    const what = sentence(entry.item);
+    const what = named(entry.item);
     void inbox.snooze(entry.item.key, new Date(), saysFailure(what, "bring back", () => bringBack(entry)));
   }
 
@@ -249,7 +250,7 @@
 
   function ack(entry: InboxEntry) {
     ackToast(null);
-    void inbox.ack(entry.item.key, saysFailure(sentence(entry.item), "ack", () => ack(entry)));
+    void inbox.ack(entry.item.key, saysFailure(named(entry.item), "ack", () => ack(entry)));
   }
 
   const snoozeToast = tally<{ entry: InboxEntry; until: string }>((held) => {
@@ -264,22 +265,22 @@
   function snooze(entry: InboxEntry, at: Date) {
     snoozing = null;
     snoozeToast({ entry, until: untilLabel(at, now) });
-    void inbox.snooze(entry.item.key, at, saysFailure(sentence(entry.item), "snooze", () => snooze(entry, at)));
+    void inbox.snooze(entry.item.key, at, saysFailure(named(entry.item), "snooze", () => snooze(entry, at)));
   }
 
   const doneToast = tally<InboxEntry>((held) => ({
-    text: held.length === 1 ? `Done: ${sentence(held[0]!.item)}` : `${held.length} items done`,
+    text: held.length === 1 ? `Done: ${named(held[0]!.item)}` : `${held.length} items done`,
     action: { label: "Undo", run: () => held.forEach(bringBack) },
   }));
 
   function done(entry: InboxEntry) {
     doneToast(entry);
-    void inbox.complete(entry.item.key, saysFailure(sentence(entry.item), "finish", () => done(entry)));
+    void inbox.complete(entry.item.key, saysFailure(named(entry.item), "finish", () => done(entry)));
   }
 
   /** *Wake*: back in the stream now. */
   function wake(entry: InboxEntry) {
-    void inbox.snooze(entry.item.key, new Date(), saysFailure(sentence(entry.item), "wake", () => wake(entry)));
+    void inbox.snooze(entry.item.key, new Date(), saysFailure(named(entry.item), "wake", () => wake(entry)));
   }
 
   /** A date the picker produced, at 09:00 local, as the presets are. */
@@ -322,7 +323,7 @@
     {@const belongs = index.jobOf(item)}
     {@const belongsId = index.jobIdOf(item)}
     <div class="tf-ctx">
-      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}
+      {kindOf(item.category)}{#if belongs !== null}, job <TfKey value={belongs} href={ticketHash(belongsId ?? belongs)} />{:else}, no job{/if}{#if back !== null}, back {back}{/if}{#if item.detail}{" · "}{item.detail}{/if}
     </div>
   {/snippet}
   <div class="tf-inbox" {@attach win.list}>

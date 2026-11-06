@@ -42,9 +42,9 @@ function entry(over: Partial<InboxItem>, actions: string[] = []): InboxEntry {
 const STREAM = [
   entry({ key: "review_request:gitea:payouts#142" }, ["approve", "comment"]),
   entry({ key: "alert:kuma:flows", category: "alert", source_id: "kuma", entity_id: "asset:gitea", kind: "asset",
-    title: "flows-stage", reason: "Testenv / gitea is down", occurred_at: at(12, 40) }),
+    title: "flows-stage", reason: "gitea is down", detail: "Testenv", occurred_at: at(12, 40) }),
   entry({ key: "failed_build:tc:Payout#1187", category: "failed_build", source_id: "tc", entity_id: "tc:Payout#1187",
-    kind: "build", title: "Payout_IntegrationTests #1187", reason: "this build failed: Tests failed: 3", occurred_at: at(10, 14) }, ["rerun_build"]),
+    kind: "build", title: "Payout_IntegrationTests #1187", reason: "Payout_IntegrationTests #1187 failed", detail: "Tests failed: 3", occurred_at: at(10, 14) }, ["rerun_build"]),
   entry({ key: "new_assignment:jira:PAY-240", category: "new_assignment", source_id: "jira", entity_id: "jira:PAY-240",
     kind: "ticket", title: "Payout dashboard latency", reason: "assigned to you", occurred_at: at(16, 30, 21) }),
 ];
@@ -175,12 +175,12 @@ function rowOf(words: string): Element {
 test("each row is a time, a sentence, its actions and its kind and job", async () => {
   await open({ job: "PAY-231" });
   expect(whats()).toEqual([
-    "jonas asked for your review: Idempotent retry window",
-    "Testenv / gitea is down: flows-stage",
-    "This build failed: Tests failed: 3: Payout_IntegrationTests #1187",
-    "Assigned to you: Payout dashboard latency",
+    "Idempotent retry window: jonas asked for your review",
+    "flows-stage: gitea is down",
+    "Payout_IntegrationTests #1187 failed",
+    "Payout dashboard latency: assigned to you",
   ]);
-  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231", "Build, job PAY-231", "Assignment, job PAY-240"]);
+  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231 · Testenv", "Build, job PAY-231 · Tests failed: 3", "Assignment, job PAY-240"]);
   expect(rows().map((row) => text(row.querySelector("time")))).toEqual(["13:50", "12:40", "10:14", "yesterday 16:30"]);
   expect(rows().map((row) => row.querySelector(".tf-dot.tf-err") !== null)).toEqual([false, true, true, false]);
   expect(rows().map((row) => [...row.querySelectorAll(".tf-acts > *")].map((each) => text(each)).join(" "))).toEqual([
@@ -212,7 +212,7 @@ test("All is the first scope shown; This job keeps what the job reaches", async 
   expect(rows()).toHaveLength(4);
   (scopes[0] as HTMLButtonElement).click();
   flushSync();
-  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231", "Build, job PAY-231"]);
+  expect(ctxs()).toEqual(["Review, job PAY-231", "Monitor, job PAY-231 · Testenv", "Build, job PAY-231 · Tests failed: 3"]);
 });
 
 test("a kind chip keeps that kind", async () => {
@@ -220,7 +220,7 @@ test("a kind chip keeps that kind", async () => {
   const chip = [...target.querySelectorAll(".tf-fchips button")].find((b) => b.textContent === "Build") as HTMLButtonElement;
   chip.click();
   flushSync();
-  expect(ctxs()).toEqual(["Build, job PAY-231"]);
+  expect(ctxs()).toEqual(["Build, job PAY-231 · Tests failed: 3"]);
 });
 
 test("the Inbox draws no search field and leaves / to the shell, which opens the launcher on #i (#2425)", async () => {
@@ -333,10 +333,10 @@ test("rapid Done is one toast, and its Undo brings them all back", async () => {
 test("a tally starts again once its toast has gone", async () => {
   await open();
   button(rowOf("dashboard"), "Done").click();
-  expect(toasts.items.map((toast) => toast.text)).toEqual(["Done: Assigned to you: Payout dashboard latency"]);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Done: Payout dashboard latency"]);
   dismiss(toasts.items[0]!.id);
   button(rowOf("Idempotent"), "Done").click();
-  expect(toasts.items.map((toast) => toast.text)).toEqual(["Done: jonas asked for your review: Idempotent retry window"]);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Done: Idempotent retry window"]);
 });
 
 test("a Wake that fails says so in a toast with a way to try again, and draws no line above the list", async () => {
@@ -361,7 +361,7 @@ test("an item that left at its source says so in words, not its key", async () =
   await open();
   button(rowOf("dashboard"), "Done").click();
   await settle();
-  expect(toasts.items.at(-1)!.text).toBe("Assigned to you: Payout dashboard latency has already left the inbox. It was resolved at its source.");
+  expect(toasts.items.at(-1)!.text).toBe("Payout dashboard latency has already left the inbox. It was resolved at its source.");
   expect(target.textContent).not.toContain("no inbox item");
 });
 
