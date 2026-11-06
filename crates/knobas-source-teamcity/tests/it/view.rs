@@ -301,8 +301,9 @@ async fn the_overview_says_where_it_lives_whether_it_is_paused_and_how_it_has_be
     let failed = &rows[1];
     let meta = failed.meta.as_deref().expect("a row has a meta line");
     assert!(
-        meta.starts_with("feature/PAY-231-sepa-retry · 4m 18s · ") && meta.ends_with(" ago"),
-        "branch · duration · age: {meta}"
+        meta.starts_with("feature/PAY-231-sepa-retry · 4m 18s · ")
+            && (meta.ends_with(" ago") || meta.ends_with(" just now") || is_a_date(meta)),
+        "branch · duration · age, in the shell's words (F-221): {meta}"
     );
     assert!(
         rows[3]
@@ -701,4 +702,10 @@ async fn a_configuration_id_that_is_not_one_is_refused_unsent() {
             .expect("recorded")
             .is_empty()
     );
+}
+
+/// Whether a meta line ends on a date, as an age past a day does (`knobas_source::view::ago`).
+fn is_a_date(meta: &str) -> bool {
+    let last = meta.rsplit(" · ").next().unwrap_or_default();
+    chrono::NaiveDate::parse_from_str(last, "%Y-%m-%d").is_ok()
 }
