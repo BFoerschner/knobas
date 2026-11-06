@@ -15,7 +15,7 @@ import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
 import { drafts } from "../drafts.svelte";
-import { forgetReading, READER_DRAWER, readingAt, SEARCH_PAUSE_MS } from "./docs";
+import { forgetReading, OUTLINE_ROOM, READER_DRAWER, READING_MIN, readingAt, SEARCH_PAUSE_MS } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -442,7 +442,7 @@ test("the body: a live ticket chip, my mention in yellow, a page link, code with
   expect(doc.querySelector(".tf-macro")?.textContent).toContain(
     "This part is a Confluence roadmap macro, which knobas does not draw.",
   );
-  expect(doc.querySelector("h2#s-1 a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
+  expect(doc.querySelector("h2#s-1 button")?.getAttribute("aria-label")).toBe("Copy link to this section");
 });
 
 test("a task list draws each item's state, nested too, beside an ordinary list, and nothing in it ticks a task (spec #2432, story 23)", async () => {
@@ -2114,7 +2114,37 @@ test("with nothing synced, the home's one Sync now is under its sentence, and it
   expect(target.querySelector("nav[aria-label='Docs'] .tf-dl-note")?.textContent).toBe("No wiki source is set up yet.");
 });
 
-test("where the row does not fit even with the outline folded, Sync now moves into More and Refresh keeps its name; room brings it back (F-406)", async () => {
+test("with no Refresh page, where the row does not fit even with the outline folded, Sync now moves into More; room brings it back (F-406)", async () => {
+  sheetWidth(1100);
+  view = mount(TfDocs, {
+    target,
+    props: {
+      ready: true,
+      rest: ["confluence:2"],
+      job: null,
+      ports: ports({ docsPage: vi.fn(async () => RICH), getEntity: vi.fn(async () => Promise.reject(new Error("no row"))), refresh: refreshProbe().ports }),
+      sync: syncSnippet,
+    },
+  });
+  await settle();
+  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
+  // New page here, More, Open in and Sync now, at 100 px each with no gap in jsdom.
+  sheetResize(399);
+  await settle();
+  expect(headActs()!.querySelector(".tf-syncnow")).toBeNull();
+  button("More")!.click();
+  await settle();
+  const item = target.querySelector<HTMLElement>(".tf-rd-more .tf-menu .tf-syncnow")!;
+  expect(item.getAttribute("role")).toBe("menuitem");
+  item.click();
+  await settle();
+  expect(target.querySelector(".tf-rd-more .tf-menu")).toBeNull();
+  sheetResize(400);
+  await settle();
+  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
+});
+
+test("beside Refresh page, Sync now is in More at any width, and takes no room from the outline (F-448)", async () => {
   sheetWidth(1100);
   view = mount(TfDocs, {
     target,
@@ -2127,12 +2157,8 @@ test("where the row does not fit even with the outline folded, Sync now moves in
     },
   });
   await settle();
-  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
-  // New page here, More, Open in, Refresh and Sync now, at 100 px each with no gap in jsdom.
-  sheetResize(499);
-  await settle();
   expect(headActs()!.querySelector(".tf-syncnow")).toBeNull();
-  expect(refreshButton()?.textContent?.replace(/\s+/g, " ").trim()).toBe("Refresh page");
+  expect(actions().at(-1)).toBe("Refresh page");
   button("More")!.click();
   await settle();
   const item = target.querySelector<HTMLElement>(".tf-rd-more .tf-menu .tf-syncnow")!;
@@ -2140,9 +2166,11 @@ test("where the row does not fit even with the outline folded, Sync now moves in
   item.click();
   await settle();
   expect(target.querySelector(".tf-rd-more .tf-menu")).toBeNull();
-  sheetResize(500);
+  // New page here, More, Open in and Refresh, at 100 px each with no gap in jsdom. The reading minimum decides the fold, not Sync now.
+  sheetResize(OUTLINE_ROOM + READING_MIN);
   await settle();
-  expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
+  expect(target.querySelector(".tf-rd-solo")).toBeNull();
+  expect(actions().at(-1)).toBe("Refresh page");
 });
 
 test("a page already linked to the job says so where Link to <job> was, and pressing Link to <job> gets there (F-405)", async () => {
@@ -2293,6 +2321,71 @@ test("Save section draws the queued text in place of the old, marked queued, unt
   expect(section().querySelector(".tf-sec-queued")).toBeNull();
   expect(section().querySelector("h2 .tf-queued-mark")).toBeNull();
   expect(squash(section())).toContain("@Mara");
+});
+
+test("a page queued under a closed fold opens the folds around it, and they stay open once it lands, with Open on its toast (F-449)", async () => {
+  toasts.items = [];
+  const deep: DocsTree = {
+    ...TREE,
+    spaces: [
+      {
+        source_id: "confluence",
+        key: "OPS",
+        name: "Operations",
+        pages: [
+          { entity_id: "confluence:1", title: "Ops home", parent: null },
+          { entity_id: "confluence:2", title: "On-call handbook", parent: "confluence:1" },
+          { entity_id: "confluence:20", title: "Runbooks", parent: null },
+          { entity_id: "confluence:21", title: "Rota", parent: "confluence:20" },
+        ],
+      },
+    ],
+  };
+  let tree = deep;
+  const io = ports({ docsPage: vi.fn(async () => RICH), docsTree: vi.fn(async () => tree), getEntity: vi.fn(async () => pageDetail()), refresh: refreshProbe().ports });
+  await draw(["confluence:2"], io);
+  button("New page here…")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  const under = dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")!;
+  under.value = "confluence:21";
+  under.dispatchEvent(new Event("change", { bubbles: true }));
+  fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, "Rota notes");
+  await settle();
+  [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!.click();
+  await settle();
+  expect(queuedPages().map(squash)).toEqual(["Rota notes Queued"]);
+  expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
+
+  // The read that holds the page: the row is a link, its fold still open, and the toast can open it.
+  const before = toasts.items.at(-1)!.id;
+  tree = { ...deep, spaces: [{ ...deep.spaces[0]!, pages: [...deep.spaces[0]!.pages, { entity_id: "confluence:22", title: "Rota notes", parent: "confluence:21" }] }] };
+  refreshButton()!.click();
+  await settle();
+  await settle();
+  expect(queuedPages()).toEqual([]);
+  expect(target.querySelector("nav[aria-label='Docs'] a[href='#/page/confluence%3A22']")).not.toBeNull();
+  expect(toasts.items.some((toast) => toast.id === before)).toBe(false);
+  const said = toasts.items.find((toast) => toast.text === "Created page Rota notes.")!;
+  said.action!.run();
+  expect(location.hash).toBe("#/page/confluence%3A22");
+});
+
+test("a page queued into another space turns the rail to that space, so its row is seen (F-449)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("New page here…")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  const space = dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  space.value = [...space.options].find((option) => option.textContent === "Engineering")!.value;
+  space.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, "Eng notes");
+  await settle();
+  [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!.click();
+  await settle();
+  expect(queuedPages().map(squash)).toEqual(["Eng notes Queued"]);
+  expect(target.querySelector<HTMLSelectElement>("nav[aria-label='Docs'] select[aria-label='Space']")!.selectedOptions[0]!.textContent).toContain("Engineering");
 });
 
 test("Edit section while a save is queued starts from the queued text", async () => {
@@ -2942,7 +3035,7 @@ test("a page whose adapter does not read one page offers Sync now, and the run's
   expect(getEntity).toHaveBeenCalledTimes(2);
 });
 
-test("the view's Sync now ends the header after Refresh, and gives way to the page's own Sync now: one per header (#2287, #2286)", async () => {
+test("Refresh page ends the header with the view's Sync now in More, and the page's own Sync now is the only one: one per header (#2287, F-448)", async () => {
   const mountWith = async (refreshes: boolean) => {
     const getEntity = vi.fn(async () => pageDetail({ refreshes }));
     const io = ports({ docsPage: vi.fn(async () => RICH), getEntity, refresh: refreshProbe().ports });
@@ -2950,8 +3043,8 @@ test("the view's Sync now ends the header after Refresh, and gives way to the pa
     await settle();
   };
   await mountWith(true);
-  expect(actions().slice(-2)).toEqual(["Refresh page", "Sync now"]);
-  expect(syncNow()).toHaveLength(1);
+  expect(actions().at(-1)).toBe("Refresh page");
+  expect(syncNow()).toEqual([]);
 
   unmount(view!);
   view = null;
@@ -3175,14 +3268,41 @@ test("Continue reading goes back to where the page was left; opening it another 
   forgetReading();
 });
 
-test("For you opens a page at its mention, and on that page the row is marked and still answers (F-431, F-441)", async () => {
+test("For you opens a page at its mention, and on that page the row stays plain beside the tree's and still answers (F-431, F-441, F-451)", async () => {
   const mentioned = { ...RICH, entity_id: "confluence:2", comments: [{ id: "c1", author: "priya", author_name: "Priya", at: null, blocks: [{ type: "paragraph", text: [{ type: "mention", user: "me", name: "Me", me: true }] }] }] } as unknown as DocPage;
   const tree = { ...TREE, for_you: [{ entity_id: "confluence:2", title: "On-call handbook", space_key: "OPS", by_name: "Priya Nair" }] };
   await draw(["confluence:2", "mention"], ports({ docsPage: vi.fn(async () => mentioned), docsTree: vi.fn(async () => tree) }));
   expect(target.querySelector(".tf-msg.tf-mention")).not.toBeNull();
   const row = target.querySelector<HTMLAnchorElement>(".tf-dl-for a")!;
   expect(row.getAttribute("href")).toBe("#/page/confluence%3A2/mention");
-  expect(row.getAttribute("aria-current")).toBe("true");
+  expect(row.hasAttribute("aria-current")).toBe(false);
+  expect(target.querySelectorAll("nav[aria-label='Docs'] [aria-current='true']")).toHaveLength(1);
+  expect(target.querySelector("nav[aria-label='Docs'] .tf-dl-tree [aria-current='true']")?.textContent).toBe("On-call handbook");
+});
+
+test("a section's # copies its link and names the section, and stays where it is, twice over (F-450)", async () => {
+  toasts.items = [];
+  const copy = vi.fn(async () => {});
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), copy }));
+  const hash = location.hash;
+  const press = () => target.querySelector<HTMLButtonElement>("h2#s-1 button[aria-label='Copy link to this section']")!;
+  press().click();
+  await settle();
+  press().click();
+  await settle();
+  expect(copy).toHaveBeenCalledTimes(2);
+  expect(copy).toHaveBeenLastCalledWith(`#/page/confluence%3A2/1\n${RICH.web_url}`);
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Copied link to Ledger"]);
+  expect(location.hash).toBe(hash);
+});
+
+test("a section's # that cannot copy says so (F-450)", async () => {
+  toasts.items = [];
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH), copy: vi.fn(async () => Promise.reject(new Error("denied"))) }));
+  target.querySelector<HTMLButtonElement>("h2#s-1 button")!.click();
+  await settle();
+  expect(toasts.items.at(-1)?.tone).toBe("err");
+  expect(toasts.items.at(-1)?.text).toContain("Could not copy");
 });
 
 // ---- what a press answers, and where words go (Round 13) ----

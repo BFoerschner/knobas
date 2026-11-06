@@ -38,10 +38,14 @@
   display: grid; grid-template-columns: minmax(0, 1fr) 268px; column-gap: 56px; align-items: start;
   padding: 22px clamp(16px, 3vw, 48px) 90px;
 }
-/* The page: nothing in it is capped in width (#2081). */
+/* The page runs the sheet's width beside the outline (#2081). With the outline folded, its body stops at `.tf-rd-solo`'s measure, at the end of this file. */
 .tf-rd-page { min-width: 0; }
-/* The breadcrumb row. Its left end is the title's, its right end every page's. */
-.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+/* The breadcrumb row. Its left end is the title's, its right end every page's. It stays at the top of the page's scroll, under the find bar while that is open (F-443). */
+.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; position: sticky; top: 0; z-index: 2; }
+.tf-findbar ~ .tf-rd-crumbrow { top: 40px; }
+/* What a scroll to a heading or a press of Tab has to clear: the pinned row, and the find bar above it. */
+.tf-rd-main:has(.tf-rd-crumbrow) { scroll-padding-top: 38px; }
+.tf-rd-main:has(.tf-findbar):has(.tf-rd-crumbrow) { scroll-padding-top: 78px; }
 .tf-rd-pages svg { width: 15px; height: 15px; }
 .tf-rd-crumb { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: var(--t-sm); color: var(--ink); min-width: 0; }
 /* The path starts on the title's edge. *Back to* ends where it does on every page. */
@@ -75,13 +79,14 @@
 .tf-menu.tf-rd-m button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
 .tf-rd-moresync { display: contents; }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
-.tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }
+/* 24 px under the scroller's padding, so a heading clears a crumb row that took two lines. */
+.tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 24px; }
 .tf-doc h2 .tf-tools {
   font-family: var(--sans); font-size: var(--t-xs); font-weight: 400; opacity: 0; margin-left: 10px;
   vertical-align: 4px; display: inline-flex; gap: 4px;
 }
 .tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:has(:focus-visible) { opacity: 1; }
-.tf-doc h2 .tf-tools a, .tf-doc h2 .tf-tools button {
+.tf-doc h2 .tf-tools button {
   border: 1px solid var(--rule); background: var(--sheet); border-radius: 3px; padding: 1px 7px;
   color: var(--ink-2); text-decoration: none; font: inherit; cursor: pointer;
 }
@@ -199,7 +204,7 @@
 .tf-rd-meta button.tf-lab:hover { border-color: var(--ink-2); color: var(--ink); }
 .tf-dl-head .tf-seg button { white-space: nowrap; }
 @media (max-width: 1240px) { .tf-dl-head .tf-jobk { display: none; } }
-/* 38px high: the sticky outline sits that far down while it is open (.tf-rd-outline, #2081). */
+/* 40 px high: the crumb row and the sticky outline sit that far lower while it is open (.tf-rd-outline, #2081). */
 .tf-findbar {
   position: sticky; top: 0; z-index: 3; display: flex; gap: 8px; align-items: center; background: var(--sheet-2);
   color: var(--ink); padding: 6px 16px; font-size: var(--t-sm);
@@ -227,13 +232,14 @@
 /*
   No taller than the window, with a scroll of its own, so a long outline's last section is in reach
   at any scroll (#2091): the window less the shell's top bar and status bar (about 76px) and a margin.
+  It sticks where it starts, under the 38 px crumb row and the sheet's 22 px, so its heading never moves as the page scrolls.
 */
 .tf-rd-outline {
-  position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm);
-  max-height: calc(100vh - 96px); overflow-y: auto;
+  position: sticky; top: 60px; padding-top: 30px; font-size: var(--t-sm);
+  max-height: calc(100vh - 156px); overflow-y: auto;
 }
 /* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
-.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; max-height: calc(100vh - 134px); }
+.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 100px; max-height: calc(100vh - 196px); }
 .tf .tf-rd-outline h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
@@ -302,7 +308,6 @@
 .tf-dh .tf-panel > header { padding-bottom: 8px; }
 .tf-dh .tf-panel > header .tf-dh-also { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-dh .tf-panel > header .tf-count { margin-left: auto; }
-.tf-dh .tf-panel > header .tf-dh-also + .tf-count { margin-left: 0; }
 .tf-dh-rows { display: flex; flex-direction: column; overflow: hidden; border-radius: 0 0 6px 6px; }
 .tf-dh-row { display: block; padding: 8px 12px; border-top: 1px solid var(--rule-2); text-decoration: none; }
 .tf-dh-row:first-child { border-top: 0; }
@@ -339,8 +344,10 @@
 .tf-dh-wait { padding: 8px 22px; }
 .tf-fhead .tf-rd-pages svg { width: 15px; height: 15px; }
 @media (max-width: 900px) { .tf-dh-body, .tf-dh-found { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }
-/* The outline folded (`readerFit`, docs/docs.ts): the sheet's own width decides, not the window's (#2081). */
+/* The outline folded (`readerFit`, docs/docs.ts): the sheet's own width decides, not the window's (#2081).
+   The body and the fold above it stop at 730 px, what the column is beside the outline at 1440, so a line stays about 80 characters (F-432). */
 .tf-rd-sheet.tf-rd-solo { grid-template-columns: minmax(0, 1fr); }
+.tf-rd-solo :is(.tf-doc, .tf-rd-fold) { max-width: 730px; }
 @media (max-width: 1240px) {
   .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
 }

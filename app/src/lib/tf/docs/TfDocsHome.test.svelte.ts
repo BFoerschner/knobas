@@ -216,7 +216,7 @@ test("a page is listed once: a tile skips what the panels hold and keeps its who
   expect(tile.textContent).not.toContain("No pages yet");
 });
 
-test("the job's badge counts the job's pages whole, and says what another panel holds", () => {
+test("the job's heading says in words how many pages it has and how many another panel holds (F-446)", () => {
   const groups = [
     {
       reason: "Linked to PAY-231",
@@ -228,8 +228,8 @@ test("the job's badge counts the job's pages whole, and says what another panel 
   ];
   draw({ tree: TREE, job: "PAY-231", groups });
   const job = section("Pages on PAY-231")!;
-  expect(job.querySelector(".tf-count")?.textContent).toBe("2");
-  expect(job.querySelector(".tf-dh-also")?.textContent).toBe("1 listed above");
+  expect(job.querySelector(".tf-count")).toBeNull();
+  expect(job.querySelector(".tf-dh-also")?.textContent).toBe("2 pages, 1 listed above");
   expect([...job.querySelectorAll(".tf-dh-row .tf-dh-t")].map((row) => row.textContent)).toEqual(["Top 3"]);
   expect(section("Continue reading")?.textContent).toContain("on this job");
 });

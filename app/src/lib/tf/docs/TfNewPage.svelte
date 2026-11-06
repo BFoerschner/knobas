@@ -5,7 +5,8 @@
   It goes through the write queue (`docs_create_page`).
 
   *Under* has no *Top of the space*: `CreatePage` writes under a mirrored
-  page, so the space's first page is the default when no page is given.
+  page, so the space's first page is the default when no page is given. Its
+  options are in order of their path (F-452).
 
   *Under* is asked `refused_writes` as it changes (#2053): a parent whose
   space the source's credential may not add pages to draws *Create page*
@@ -23,7 +24,7 @@
   import TfKey from "../TfKey.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { drafts } from "../drafts.svelte";
-  import { firstPage, spaceId } from "./docs";
+  import { firstPage, pagesByPath, spaceId } from "./docs";
   import { untrack } from "svelte";
 
   let {
@@ -103,20 +104,8 @@
     onclose();
   }
 
-  /** A page's place in its space, prototype-6's `path › title`. */
-  function label(id: string): string {
-    const pages = space?.pages ?? [];
-    const names: string[] = [];
-    const seen = new Set<string>();
-    let at = pages.find((p) => p.entity_id === id);
-    while (at && !seen.has(at.entity_id)) {
-      seen.add(at.entity_id);
-      names.unshift(at.title);
-      const up = at.parent;
-      at = up === null ? undefined : pages.find((p) => p.entity_id === up);
-    }
-    return names.join(" › ");
-  }
+  /** The space's pages by their place in it, prototype-6's `path › title`, so a folder's pages stand together. */
+  const places = $derived(space === undefined ? [] : pagesByPath(space));
 
   let refused = $state<RefusedWrite[]>([]);
   $effect(() => askInto(under === "" ? [] : [{ entity: under, op: "create_page" }], refusedWrites, (answer) => (refused = answer)));
@@ -144,8 +133,8 @@
       </select>
       <span>Under</span>
       <select aria-label="Under" bind:value={under}>
-        {#each space?.pages ?? [] as p (p.entity_id)}
-          <option value={p.entity_id}>{label(p.entity_id)}</option>
+        {#each places as p (p.entity_id)}
+          <option value={p.entity_id}>{p.label}</option>
         {/each}
       </select>
       <span>Title <small class="tf-req">required</small></span>

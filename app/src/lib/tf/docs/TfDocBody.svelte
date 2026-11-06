@@ -2,7 +2,7 @@
   A page body by section (#859, #862; R-10.11, R-10.13). Section 0 is what
   comes before the first heading; each heading opens the next, numbered as
   prototype-6 numbers them, with its anchor (`#/page/<id>/<n>`) and, on hover,
-  *Edit section*.
+  `#`, which copies the section's link (F-450, because the app shows no address), and *Edit section*.
 
   *Edit section* turns a text-only section into a text box with *Save
   section* and *Cancel*; the backend says which sections are text-only
@@ -30,7 +30,7 @@
   import TfDocInlines from "./TfDocInlines.svelte";
   import { refusedAttrs } from "../../shell/refused-writes";
   import { echoOn, takeAgain } from "../queued.svelte";
-  import { pageHash, refusalReason, sectionKind, sectionsOf } from "./docs";
+  import { inlineWords, refusalReason, sectionKind, sectionsOf } from "./docs";
 
   let {
     blocks,
@@ -43,6 +43,7 @@
     stems = [],
     onopen,
     oncopy,
+    oncopylink,
     onsave,
   }: {
     blocks: DocBlock[];
@@ -58,6 +59,8 @@
     stems?: string[];
     onopen: (url: string) => void;
     oncopy: (code: string) => void;
+    /** The heading's `#`: copy section `number`'s link, and say which section it was. */
+    oncopylink?: ((number: number, heading: string) => void) | undefined;
     /** Queue the edit; `true` once it is queued. */
     onsave: (section: number, text: string) => Promise<boolean>;
   } = $props();
@@ -127,7 +130,7 @@
   }
 
   /** The heading's *Edit section…*, drawn again once the editor has closed. */
-  const backToEdit = () => (openedOn === null ? null : (document.getElementById(`s-${openedOn}`)?.querySelector<HTMLElement>(".tf-tools button") ?? null));
+  const backToEdit = () => (openedOn === null ? null : (document.getElementById(`s-${openedOn}`)?.querySelector<HTMLElement>(".tf-tools .tf-sec-open") ?? null));
 
   async function save(number: number) {
     // An editor can be open when the refusal lands: opened before the answer,
@@ -157,12 +160,14 @@
         {#if queued !== null}<TfStateChip text={queuedState(section.number)} tone="info" class="tf-queued-mark" />{/if}
         {#if editing !== section.number && drafts.has(draftKey(section.number))}<TfStateChip text="draft" tone="info" class="tf-queued-mark" />{/if}
         <span class="tf-tools">
-          <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
+          {#if oncopylink}
+            <button type="button" title="Copy link to this section" aria-label="Copy link to this section" onclick={() => oncopylink(section.number, inlineWords(section.heading?.text ?? []))}>#</button>
+          {/if}
           {#if editable && said}
             {#if said.refusal === null}
-              <button type="button" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section…</button>
+              <button type="button" class="tf-sec-open" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section…</button>
             {:else}
-              <button type="button" disabled title={refusalReason(said.refusal, sourceName)}>Edit section…</button>
+              <button type="button" class="tf-sec-open" disabled title={refusalReason(said.refusal, sourceName)}>Edit section…</button>
             {/if}
           {/if}
         </span>

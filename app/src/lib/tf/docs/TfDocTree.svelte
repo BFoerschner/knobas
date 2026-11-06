@@ -2,7 +2,8 @@
   A space's page tree (#859, R-10.2): folders fold, a folder's title is itself
   a link, and the fold holding the open page starts open. Recurses into each
   folder by importing itself. A page queued under a page (#1424) is a muted
-  row drawn *queued*, then *sent* (#2102), with no link at the end of its parent's fold, which it opens.
+  row drawn *queued*, then *sent* (#2102), with no link at the end of its parent's fold, which it opens,
+  and the folds around that one (F-449).
 
   Drawn at a real space's size (#2200, 4,000 pages): the top call indexes the
   space by parent and finds the folds holding the open page once per read,
@@ -28,6 +29,7 @@
     under,
     held,
     opened,
+    reveal = [],
   }: {
     space: DocSpace;
     parent?: string | null;
@@ -38,10 +40,12 @@
     held?: Set<string>;
     /** The folds the reader opened, so they draw what is under them. */
     opened?: SvelteSet<string>;
+    /** Pages a page was queued under: the folds holding them start open too, so its row, and the page once it lands, are in view (F-449). */
+    reveal?: string[];
   } = $props();
 
   const index = $derived(under ?? childrenByParent(space));
-  const holding = $derived(held ?? foldsHolding(space, current));
+  const holding = $derived(held ?? new Set([current, ...reveal].flatMap((id) => [...foldsHolding(space, id)])));
   const own = new SvelteSet<string>();
   const open = $derived(opened ?? own);
   const nodes = $derived(index.get(parent) ?? []);

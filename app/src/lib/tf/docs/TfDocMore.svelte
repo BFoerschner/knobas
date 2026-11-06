@@ -1,8 +1,8 @@
 <!--
   The reader's *More ▾* (#2082, R-10.10): in the header's actions before "Open in" (#2286),
   holding what a reader reaches for less: *Link to…*, *Copy link* and *Export as Markdown*. Without them the
-  header's actions run to a second line in the reading column. The view's *Sync now* joins them where the header has no
-  room for it (`readerFit`): the same button, which is why it comes as the frame's snippet.
+  header's actions run to a second line in the reading column. The view's *Sync now* joins them beside a page's own
+  *Refresh page*, and where the header has no room for it (`readerFit`): the same button, which is why it comes as the frame's snippet.
 
   `TfMenu` draws it.
 -->
@@ -22,7 +22,7 @@
     oncopy: () => void;
     /** *Export as Markdown*, for a page that can be read here. */
     onexport?: (() => void) | undefined;
-    /** The view's *Sync now*, where the header has no room for it. */
+    /** The view's *Sync now*, beside *Refresh page* or where the header has no room for it. */
     sync?: Snippet | undefined;
   } = $props();
 

@@ -19,15 +19,17 @@
   and a label chip open it; `Esc` (it is a `drawer` layer), the backdrop
   and a page picked in it close it, and focus goes back to what opened it.
 
-  **Right**, the page in the reading face, nothing in it capped in width
-  (#2081, R-10.9): the breadcrumb, the title, who edited it when, who created it (#2080), the
+  **Right**, the page in the reading face, as wide as the sheet beside the outline
+  (#2081, R-10.9), its body stopping at about 730 px once the outline folds (F-432): the breadcrumb, pinned
+  to the top of the scroll (F-443), the title, who edited it when, who created it (#2080), the
   version, the reading time and the labels (each searches for itself). The
   title line is the canonical header (#2286): on its right the actions with
   *More ▾* (#2082), "Open in <source>" as a ghost, the page's *Refresh* or
   *Sync now* (#2136: `TfDetailRefresh` over `get_entity` of the page), and last
   the view's *Sync now* (the role frame's `sync`, #2106), left out while the
-  page's own button is a *Sync now* (one per header, #2287), and in *More* where
-  the row has no room for it (`readerFit`). The withdrawn, turned-off and
+  page's own button is a *Sync now* (one per header, #2287), and in *More* beside
+  *Refresh page*, whose meaning is too near (F-448, amending #2287), and where the
+  row has no room for it (`readerFit`). The withdrawn, turned-off and
   failed-refresh banners sit under the meta line, then the blocks by section (*Edit section*),
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
@@ -57,7 +59,8 @@
   write is sent, and gone on the read that shows it, which the end of every
   run and a refresh naming the write or its page bring. Held or refused, the echo goes and a toast offers *Edit and
   resend*, which opens the section editor, the composer or *New page* again
-  with what was typed.
+  with what was typed. A queued page's row opens the folds around it and shows the
+  space it went to, and the read that holds the page says so on a toast with *Open* (F-449).
 -->
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
@@ -477,6 +480,7 @@
     if (!ready) return;
     pageError = null;
     detail = null;
+    revealed = [];
     // No page to open: what was open goes, or the home would draw under its header.
     if (id === null) {
       page = null;
@@ -927,7 +931,7 @@
     const items = [...headActs.children] as HTMLElement[];
     const drawn = items.find((item) => item.classList.contains("tf-syncnow"));
     if (drawn) syncRoom = drawn.offsetWidth + gap;
-    else if (!syncInMore) syncRoom = 0;
+    else if (!syncInMore || beside) syncRoom = 0;
     const row = items.reduce((sum, item) => sum + item.offsetWidth, 0) + gap * Math.max(0, items.length - 1) + (drawn ? 0 : syncRoom);
     const fit = readerFit(room, row, syncRoom);
     outlineFolds = fit.outlineFolds;
@@ -947,8 +951,10 @@
     return () => seen.disconnect();
   });
 
+  /** Beside a page's own *Refresh page*, the view's *Sync now* is always in *More*: the two mean nearly the same (F-448). */
+  const beside = $derived(sync !== undefined && detail !== null && refresh.offer(detail) === "refresh");
   /** The view's *Sync now* for *More*: never beside a page whose own button is one (#2287). */
-  const syncForMore = $derived(syncInMore && (detail === null || refresh.offer(detail) !== "sync") ? sync : undefined);
+  const syncForMore = $derived((syncInMore || beside) && (detail === null || refresh.offer(detail) !== "sync") ? sync : undefined);
 
   // ---- the outline follows the scrolling ----
   let active = $state<number | null>(null);
@@ -1101,6 +1107,16 @@
     );
   }
 
+  /** The heading's `#`: the address is not on screen in the app, so the link goes to the clipboard, and the toast names the section (F-450). */
+  async function copySection(p: DocPage, section: number, heading: string): Promise<void> {
+    try {
+      await io.copy(copyLinkText(p, section));
+      push({ text: `Copied link to ${heading}` });
+    } catch (cause) {
+      push({ text: `Could not copy: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
   /** A press of *Unlink* still on its way, so a second press withdraws and toasts nothing twice. */
   let unlinking = false;
 
@@ -1134,14 +1150,55 @@
   /** The surface Docs' echoes are tagged with, for `watchEchoes`. */
   const DOCS = "docs";
 
-  /** A tree read drops each queued page it holds: a page of that title under that parent. */
+  /** What a queued page's *Sent* row sits under. The tree keeps those folds open until another page opens, so the row is seen, and the page once it lands (F-449). */
+  let revealed = $state<string[]>([]);
+  /** The toast each *Create page* raised, by parent and title, which the read that holds the page takes the place of. */
+  const pageToasts = new Map<string, number>();
+  const pageKey = (parent: string, title: string) => `${parent} ${title}`;
+
+  /** A tree read drops each queued page it holds: a page of that title under that parent. Now it exists, it can be opened. */
   function settlePages(read: DocsTree): void {
-    const under = new Map<string, Set<string>>();
+    const under = new Map<string, Map<string, string>>();
     for (const node of read.spaces.flatMap((s) => s.pages)) {
       if (node.parent === null) continue;
-      under.set(node.parent, (under.get(node.parent) ?? new Set()).add(node.title.trim()));
+      under.set(node.parent, (under.get(node.parent) ?? new Map<string, string>()).set(node.title.trim(), node.entity_id));
     }
-    for (const [parent, titles] of under) settleEchoes(parent, (echo) => echo.kind === "page" && titles.has(echo.text.trim()));
+    for (const [parent, titles] of under) {
+      for (const echo of echoesOn(parent, "page")) {
+        const id = titles.get(echo.text.trim());
+        if (id !== undefined) sayCreated(parent, echo.text.trim(), id);
+      }
+      settleEchoes(parent, (echo) => echo.kind === "page" && titles.has(echo.text.trim()));
+    }
+  }
+
+  /** The new page is in the tree: *Open* is offered only from here, because until now there is nothing to open. */
+  function sayCreated(parent: string, title: string, id: string): void {
+    const key = pageKey(parent, title);
+    const raised = pageToasts.get(key);
+    pageToasts.delete(key);
+    // In place of the *Sent* toast. Dismissed rather than amended, because that toast's own follow can still say *Sent* over it.
+    if (raised !== undefined) dismiss(raised);
+    push({
+      text: `Created page ${title}.`,
+      action: {
+        label: "Open",
+        run: () => {
+          location.hash = pageHash(id);
+        },
+      },
+    });
+  }
+
+  /** The *Sent* row in view: the folds around it open, and the rail on its space, unless the rail is showing a search or the job's pages. */
+  function showQueuedPage(parent: string, title: string): void {
+    revealed = [...revealed, parent];
+    const space = tree === null ? undefined : spaceOfPage(tree, parent);
+    if (space !== undefined && shownSpace !== undefined && space !== shownSpace && !jobOn && !searching) picked = spaceId(space);
+    void tick().then(() => {
+      const rows = [...(treeNav?.querySelectorAll(".tf-dl-queued") ?? [])];
+      rows.find((row) => row.textContent?.startsWith(title))?.scrollIntoView?.({ block: "nearest" });
+    });
   }
 
   // A page read drops a section edit once the version moved, and a comment it holds:
@@ -1267,7 +1324,7 @@
       }
       const write = await io.docsCreatePage(next, ticket);
       const title = next.title.trim();
-      toastQueued(`create page ${title}`, under ? sourceOf(under) : null, { write });
+      pageToasts.set(pageKey(next.parent, title), toastQueued(`create page ${title}`, under ? sourceOf(under) : null, { write }));
       echoWrite(next.parent, "page", title, {
         write,
         many: true,
@@ -1282,6 +1339,7 @@
         },
         follower,
       });
+      showQueuedPage(next.parent, title);
       return true;
     } catch (cause) {
       push({ text: `Could not queue the page: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -1364,10 +1422,9 @@
           <div class="tf-dl-for">
             <h4>For you</h4>
             {#each forYou as item (item.entity_id)}
-              <!-- On the page it names, the row marks that page and still jumps to the mention. -->
+              <!-- On the page it names, the row still jumps to the mention. The tree's row is the rail's one mark of the open page (F-451). -->
               <a
                 href={forYouHash(item.entity_id)}
-                aria-current={item.entity_id === current ? "true" : undefined}
                 onclick={() => {
                   if (mentionHere && item.entity_id === current) toMention();
                 }}>{item.title}<span class="tf-why">{forYouWhy(item)}</span></a
@@ -1385,13 +1442,13 @@
           <p class="tf-dl-note">{hasSource ? "No pages have synced yet." : "No wiki source is set up yet."}</p>
         {:else if shownSpace === undefined}
           {#each tree.spaces as space (spaceId(space))}
-            <details open={current !== null && space.pages.some((p) => p.entity_id === current)}>
+            <details open={space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}>
               <summary class="tf-spc"><span class="tf-spc-n" title={space.name ?? space.key}>{space.name ?? space.key}</span> <span class="tf-count">{space.pages.length}</span></summary>
-              <div class="tf-fold-in"><TfDocTree {space} {current} /></div>
+              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} /></div>
             </details>
           {/each}
         {:else if shownSpace}
-          <TfDocTree space={shownSpace} {current} />
+          <TfDocTree space={shownSpace} {current} reveal={revealed} />
         {/if}
       {/if}
     </div>
@@ -1546,7 +1603,7 @@
                 {@const url = p.web_url}
                 <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
               {/if}
-              {#if !syncInMore}
+              {#if !syncInMore && !beside}
                 <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />
               {:else if detail !== null}
                 <TfDetailRefresh {detail} {refresh} {reread} page noun="page" />
@@ -1591,6 +1648,7 @@
                 {stems}
                 onopen={open}
                 oncopy={copy}
+                oncopylink={(section, heading) => copySection(p, section, heading)}
                 onsave={(section, text) => saveSection(p, section, text)}
               />
             {:else}

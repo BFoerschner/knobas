@@ -13,6 +13,7 @@ import {
   spaceAt,
   pagePlace,
   pagesByLevel,
+  pagesByPath,
   placeOf,
   readingMinutes,
   sectionsOf,
@@ -316,4 +317,31 @@ test("a sentence's ticket keys are told from its words", () => {
   expect(keyParts("Linked to PAY-231")).toEqual(["Linked to ", "PAY-231", ""]);
   expect(keyParts("Via Payout worker")).toEqual(["Via Payout worker"]);
   expect(keyParts("Parent PAY-230, Engineering")).toEqual(["Parent ", "PAY-230", ", Engineering"]);
+});
+
+test("a space's pages are in order of their path, so a folder's pages stand together (F-452)", () => {
+  const pages = [
+    { entity_id: "a", title: "Carrier event model", parent: "t" },
+    { entity_id: "b", title: "Booking API v3 guide", parent: "bk" },
+    { entity_id: "t", title: "Tracking", parent: null },
+    { entity_id: "bk", title: "Booking", parent: null },
+    { entity_id: "bf", title: "Booking flow", parent: null },
+    { entity_id: "c", title: "Aardvark", parent: "t" },
+  ];
+  expect(pagesByPath({ pages }).map((row) => row.label)).toEqual([
+    "Booking",
+    "Booking › Booking API v3 guide",
+    "Booking flow",
+    "Tracking",
+    "Tracking › Aardvark",
+    "Tracking › Carrier event model",
+  ]);
+});
+
+test("a parent loop on a bad answer still ends a page's path", () => {
+  const pages = [
+    { entity_id: "x", title: "X", parent: "y" },
+    { entity_id: "y", title: "Y", parent: "x" },
+  ];
+  expect(pagesByPath({ pages }).map((row) => row.label)).toEqual(["X › Y", "Y › X"]);
 });

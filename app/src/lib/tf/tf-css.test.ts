@@ -336,7 +336,8 @@ test("the Docs reader: tree and page, the outline the page's sticky right column
   expect(block(code, ".tf-rd-sheet")).toMatch(/grid-template-columns:\s*minmax\(0, 1fr\) 268px;/);
   const outline = block(code, ".tf-rd-outline");
   expect(outline).toMatch(/position:\s*sticky/);
-  expect(outline).toMatch(/top:\s*0/);
+  // Where it starts, under the pinned crumb row and the sheet's padding, so its heading does not move as the page scrolls (F-443).
+  expect(outline).toMatch(/top:\s*60px/);
   // The outline folds by the sheet's own width (`readerFit`), and no window width in the stylesheet decides it.
   expect(block(code, ".tf-rd-sheet")).toContain("column-gap: 56px");
   expect(OUTLINE_ROOM).toBe(268 + 56);
@@ -348,12 +349,13 @@ test("the Docs reader: tree and page, the outline the page's sticky right column
   expect(code.slice(rail, code.indexOf("\n}", rail))).toMatch(/\.tf-rd\s*\{[^}]*grid-template-columns:\s*220px minmax\(0, 1fr\)/);
 });
 
-test("nothing in the Docs reader's page is capped in width (#2081)", () => {
+test("beside the outline nothing in the Docs reader's page is capped in width, and folded its body stops at 730 px (#2081, F-432)", () => {
   const capped = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
     .filter(([, selector]) => /\.tf-(rd-page|rd-sheet|doc|cmts|sec-edit|compose|pre|callout|macro|rd-foot)\b/.test(selector!))
     .filter(([, , body]) => /max-width/.test(body!))
     .map(([, selector]) => selector!.trim());
-  expect(capped).toEqual([]);
+  expect(capped).toEqual([".tf-rd-solo :is(.tf-doc, .tf-rd-fold)"]);
+  expect(block(code, ".tf-rd-solo :is(.tf-doc, .tf-rd-fold)")).toMatch(/max-width:\s*730px/);
   expect(code).not.toContain("74ch");
 });
 
@@ -399,7 +401,7 @@ test("no page's scroller reserves room for its bar: the page is as wide as the w
   expect(block(code, ".tf-sbody")).toMatch(/width:\s*100cqw/);
 });
 
-const STICKY_BARS = [":is(.tf-mon, .tf-mon-gaps) thead th", ".tf-fbar", ".tf-findbar", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap:has(.tf-lane + .tf-lane) > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)", ".tf-laned > h2", ".tf-lanes-more"];
+const STICKY_BARS = [":is(.tf-mon, .tf-mon-gaps) thead th", ".tf-fbar", ".tf-findbar", ".tf-rd-crumbrow", ".tf-ln-h", ".tf-wtabs", ".tf-logbar", ".tf-pdf-bar", ".tf-board-wrap:has(.tf-lane + .tf-lane) .tf-sbody > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3", ".tf-ticketcard .tf-go", ".tf-diff .tf-fh", ".tf-list .tf-tbl th", ".tf-board-wrap:has(.tf-lane + .tf-lane) > :is(.tf-fhead, .tf-fbar, .tf-crumbs)", ".tf-tm-week :is(th:first-child, td.tf-tm-t)", ".tf-tm-week :is(th.tf-tm-tot, td.tf-tm-tot)", ".tf-laned > h2", ".tf-lanes-more"];
 
 test("every sticky side column is bounded by the window and scrolls on its own, so its last entry is reachable (#2091)", () => {
   const sticky = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]

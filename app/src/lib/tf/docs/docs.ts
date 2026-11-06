@@ -241,6 +241,32 @@ export function foldsHolding(space: DocSpace, entityId: string | null): Set<stri
 }
 
 /**
+ * A space's pages in order of their path, each with the path it reads as, *Booking › Booking API v3 guide*. By segment,
+ * so a folder's pages stay together whatever sorts between its name and the separator (F-452).
+ */
+export function pagesByPath(space: Pick<DocSpace, "pages">): { entity_id: string; label: string }[] {
+  const byId = new Map(space.pages.map((page) => [page.entity_id, page]));
+  const rows = space.pages.map((page) => {
+    const names: string[] = [];
+    const seen = new Set<string>();
+    // The backend breaks parent loops; the set stops the walk on a bad answer all the same.
+    for (let at: DocNode | undefined = page; at !== undefined && !seen.has(at.entity_id); at = at.parent === null ? undefined : byId.get(at.parent)) {
+      seen.add(at.entity_id);
+      names.unshift(at.title);
+    }
+    return { entity_id: page.entity_id, names };
+  });
+  rows.sort((a, b) => {
+    for (let i = 0; i < Math.min(a.names.length, b.names.length); i++) {
+      const order = a.names[i]!.localeCompare(b.names[i]!);
+      if (order !== 0) return order;
+    }
+    return a.names.length - b.names.length;
+  });
+  return rows.map((row) => ({ entity_id: row.entity_id, label: row.names.join(" › ") }));
+}
+
+/**
  * How long the search waits for a pause in typing before it asks (#2200): a
  * word typed at a steady pace is one search, not one per key.
  */
@@ -693,9 +719,9 @@ export function refusalReason(refusal: SectionRefusal, source: string): string {
   return `This section has a table, code or a macro. knobas edits text-only sections; edit this one in ${source}.`;
 }
 
-/** What *Copy link* copies: the knobas address, then the page in the source. */
-export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">): string {
-  return [pageHash(page.entity_id), page.web_url].filter((x): x is string => x !== null).join("\n");
+/** What *Copy link* copies: the knobas address, then the page in the source. A section's `#` copies its own address. */
+export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">, section?: number): string {
+  return [pageHash(page.entity_id, section), page.web_url].filter((x): x is string => x !== null).join("\n");
 }
 
 // ---------------------------------------------------------------------------

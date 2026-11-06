@@ -103,8 +103,11 @@
     <section class="tf-panel tf-dh-job" aria-label="Pages on {job}">
       <header>
         <h3>Pages on <TfKey value={job} /></h3>
-        {#if above > 0}<span class="tf-dh-also">{above} listed above</span>{/if}
-        <span class="tf-count">{allJobPages.length}</span>
+        {#if above > 0}
+          <span class="tf-dh-also">{counted(allJobPages.length, "page", "pages")}, {above} listed above</span>
+        {:else}
+          <span class="tf-count">{allJobPages.length}</span>
+        {/if}
       </header>
       <div class="tf-dh-rows">
         {#each jobRows as page (page.entity_id)}
