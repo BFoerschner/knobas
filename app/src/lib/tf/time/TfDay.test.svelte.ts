@@ -494,7 +494,7 @@ test("Assign… on an open stretch picks a ticket by name and writes a block on 
 test("the picker marks no row until the arrow keys move, the footer says what Assign waits for, and a pick clears it (design system, Forms)", async () => {
   render();
   await settle();
-  button(row("offered"), "Assign…").click();
+  button(row("offered"), "Other ticket…").click();
   await settle();
   const marked = () => target.querySelectorAll('[role="dialog"] [role="option"][aria-selected="true"]').length;
   expect(marked()).toBe(0);
@@ -512,10 +512,10 @@ test("the picker marks no row until the arrow keys move, the footer says what As
   expect(document.activeElement).toBe(button(target, "Assign"));
 });
 
-test("Assign… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
+test("Other ticket… on an offered block lists the recent tickets, and only tickets, before anything is typed, and Enter picks one", async () => {
   const sent = render();
   await settle();
-  button(row("offered"), "Assign…").click();
+  button(row("offered"), "Other ticket…").click();
   await settle();
   expect(options()).toEqual(["PAY-228 Payout export to CSV"]);
   // Assign waits for a pick.
@@ -605,7 +605,7 @@ test("an open stretch offers Add to the current job, and makes a block on it ove
   const sent = render({ job: { key: "PAY-231", entityId: "jira:PAY-231" } });
   await settle();
   expect(button(row("open"), "Add to PAY-231").className).not.toContain("tf-ghost");
-  expect(button(row("open"), "Assign…").className).toContain("tf-ghost");
+  expect(button(row("open"), "Other ticket…").className).toContain("tf-ghost");
   button(row("open"), "Add to PAY-231").click();
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:PAY-231" }]]);
@@ -674,13 +674,13 @@ test("a run of offered rows going to one ticket offers one Add over all of them"
   expect(runs()).toHaveLength(0);
 });
 
-test("each row in a run keeps its own Add to, Assign… and Dismiss", async () => {
+test("each row in a run keeps its own Add to, Other ticket… and Dismiss", async () => {
   render({ blocks: jobPrJob(), offers: linked("linked_to_target"), open: [] });
   await settle();
   const offered = [...target.querySelectorAll<HTMLElement>('.tf-tm-row[data-state="offered"]')];
   expect(offered).toHaveLength(3);
   for (const each of offered) {
-    for (const label of ["Add to PAY-231", "Assign…", "Dismiss"]) expect(() => button(each, label)).not.toThrow();
+    for (const label of ["Add to PAY-231", "Other ticket…", "Dismiss"]) expect(() => button(each, label)).not.toThrow();
   }
 });
 
@@ -747,4 +747,14 @@ test("The Day tab stops its clock while its page is hidden and reads it once whe
     vi.useRealTimers();
     page.shown = true;
   }
+});
+
+test("a row's actions stand in their slots, and Other ticket… stands beside a ticket the row names", async () => {
+  render({ job: { key: "PAY-231", entityId: "jira:PAY-231" } });
+  await settle();
+  const slot = (each: HTMLElement) =>
+    [...each.querySelectorAll<HTMLButtonElement>(".tf-tm-acts button")].map((found) => [squash(found.textContent), found.className.match(/tf-tm-s\d/)?.[0]]);
+  expect(slot(row("offered"))).toEqual([["Add to PAY-228", "tf-tm-s1"], ["Other ticket…", "tf-tm-s2"], ["Dismiss", "tf-tm-s3"]]);
+  expect(slot(row("open"))).toEqual([["Add to PAY-231", "tf-tm-s1"], ["Other ticket…", "tf-tm-s2"]]);
+  expect(slot(row("unlogged")).at(-1)).toEqual(["Edit…", "tf-tm-s3"]);
 });

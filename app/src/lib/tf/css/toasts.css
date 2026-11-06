@@ -9,7 +9,7 @@
   animation: tf-rise .2s ease-out;
 }
 .tf-toast.tf-err { background: var(--err); }
-.tf-toast button { border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; }
+.tf-toast button { border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; white-space: nowrap; flex: none; }
 .tf-toast .tf-x { text-decoration: none; opacity: .7; }
 /* A toast never sits on a dialog's footer: while one is open the newest toast stands in the band a dialog leaves under it
    (`dialogs.css`), and the older ones wait. They come back when it closes, if their time has not run out. */

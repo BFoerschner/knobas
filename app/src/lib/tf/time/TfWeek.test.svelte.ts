@@ -196,7 +196,7 @@ test("the total row adds every row per day", async () => {
   await render();
   const total = [...target.querySelectorAll("tbody tr")].at(-1)!;
   expect([...total.querySelectorAll("td")].map(text)).toEqual([
-    "Every day",
+    "Total",
     "2h 48m",
     "1h 42m",
     "2h 36m",

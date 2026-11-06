@@ -7,6 +7,7 @@
  * and a pipeline is named by its declared name (ADR-0022).
  */
 import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
+import { MONTHS } from "../../time/day";
 import { clockLabel } from "../../time/format";
 import { originLabel } from "../job/job";
 
@@ -54,6 +55,25 @@ export function latestTime(pipeline: PipelineRow, now: Date = new Date()): strin
   const latest = pipeline.recent[0];
   const at = latest?.started ?? latest?.updated_at ?? null;
   return at === null ? "" : shortTime(at, now);
+}
+
+/**
+ * The time on a narrow rail (901 to 1240 px), where the pipeline's name is what the row is scanned by:
+ * *11:45* today, *Thu 13:05* this past week, else *3 Nov*. The row's title has the whole of it.
+ */
+export function railTime(pipeline: PipelineRow, now: Date = new Date()): string {
+  const latest = pipeline.recent[0];
+  const iso = latest?.started ?? latest?.updated_at ?? null;
+  if (iso === null) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const midnight = (day: Date) => new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime();
+  const days = Math.round((midnight(now) - midnight(at)) / 86_400_000);
+  // Asked of its own day, the label is the clock alone.
+  const clock = clockLabel(iso, at, true);
+  if (days === 0) return clock;
+  if (days > 0 && days < 7) return `${at.toLocaleDateString("en-GB", { weekday: "short" })} ${clock}`;
+  return `${at.getDate()} ${(MONTHS[at.getMonth()] ?? "").slice(0, 3)}`;
 }
 
 /** An instant as a row writes it: *11:45* today, *yesterday 16:20*, else the date. */

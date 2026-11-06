@@ -873,3 +873,49 @@ test("a long roster draws the monitors near the viewport, spacer rows standing f
   await settle();
   expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["api-1999 /health HTTP"]);
 });
+
+const NO_TOKEN = { id: "kuma", health: { state: "missing_secret", checked_at: "2026-08-22T08:00:00Z" }, auth_kind: "ApiToken" };
+
+test("a source with no token draws the band with its fix, and the header stops saying synced", async () => {
+  await draw([], "PAY-231", ports({ listSources: async () => [{ ...sourceFacts("kuma", { display_name: "Uptime Kuma" }), ...NO_TOKEN } as never], syncStatus: async () => [] }));
+  const band = target.querySelector(".tf-stale")!;
+  expect(band.textContent).toContain("no token stored. Pauses and new monitors wait in the queue until it works again.");
+  expect(band.querySelector("a")?.textContent).toBe("Enter token…");
+  expect(band.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/kuma/reenter");
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).not.toContain("synced");
+});
+
+test("a source that syncs draws no band, and the header says when", async () => {
+  await draw([], "PAY-231", ports({ syncStatus: async () => [] }));
+  expect(target.querySelector(".tf-stale")).toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).toContain("synced");
+});
+
+test("an alert that closed under the row says so in words, not as a failure, and the roster is read again", async () => {
+  let reads = 0;
+  const gone = { code: "not_found", message: 'no open alert on "kuma:2"', source_id: null };
+  await draw([], "PAY-231", ports({
+    monitorRoster: async () => {
+      reads += 1;
+      return ROSTER;
+    },
+    ackAlert: async () => Promise.reject(gone),
+  }));
+  const before = reads;
+  button(rows()[0]!, "Ack")!.click();
+  await settle();
+  const said = toasts.items.at(-1)!;
+  expect(said.text).toMatch(/has already recovered, so its alert has closed\.$/);
+  expect(said.tone).toBeUndefined();
+  expect(reads).toBeGreaterThan(before);
+});
+
+test("taking an ack back takes its toast's Undo with it", async () => {
+  await draw([]);
+  button(rows()[0]!, "Ack")!.click();
+  await settle();
+  expect(toasts.items.some((t) => t.text.startsWith("Acked in knobas"))).toBe(true);
+  button(rows()[0]!, "Acked")!.click();
+  await settle();
+  expect(toasts.items.some((t) => t.text.startsWith("Acked in knobas"))).toBe(false);
+});

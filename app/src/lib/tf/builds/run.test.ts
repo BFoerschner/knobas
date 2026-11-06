@@ -20,6 +20,7 @@ import {
   rerunRequest,
   runTabHash,
   runTabOf,
+  noSuchRunTab,
   tookLine,
 } from "./run";
 
@@ -62,6 +63,9 @@ test("a run's tab is the address's third segment, and Overview is the run's own 
   expect(runTabOf(["p", "r", "changes"])).toBe("changes");
   expect(runTabOf(["p", "r", "params"])).toBe("params");
   expect(runTabOf(["p", "r", "nonsense"])).toBe("overview");
+  expect(noSuchRunTab(["p", "r", "nonsense"])).toBe(true);
+  expect(noSuchRunTab(["p", "r", "params"])).toBe(false);
+  expect(noSuchRunTab(["p", "r"])).toBe(false);
   expect(runTabHash("teamcity:buildType:A", "teamcity:build:7", "overview")).toBe(
     "#/build/teamcity%3AbuildType%3AA/teamcity%3Abuild%3A7",
   );

@@ -33,13 +33,17 @@
   to draws it disabled with the reason. The first publish's picker asks
   about every page it offers.
 
+  A date has one page, which the backend doesn't write twice (`page_to_make`).
+  So the form stays editable once published and says so: a line after the
+  publish, the warn band once something changed since.
+
   `date` is the day the address names (`#/time/standup/<date>`, #1504), today
   without one.
 -->
 <script lang="ts">
   import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
-  import { onDestroy, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -206,6 +210,13 @@
 
   const form = $derived(readProtocol(bodyMd));
   const publication = $derived(protocol?.publication ?? null);
+  /**
+   * What the page was made from, as far as this visit knows. A date has one page, which the backend
+   * doesn't write twice (`page_to_make`), so what changes after a publish stays in the note, and says so.
+   */
+  let publishedBody = $state<string | null>(null);
+  const published = $derived(publication !== null && publication.page_entity_id !== null && publication.linked);
+  const changedSince = $derived(published && publishedBody !== null && bodyMd !== publishedBody);
 
   async function openProtocol() {
     try {
@@ -214,6 +225,7 @@
       protocol = opened;
       title = note.note.title;
       bodyMd = note.note.body_md;
+      publishedBody = opened.publication === null ? null : bodyMd;
       const read = readProtocol(bodyMd);
       known = [...read.attendees];
       drafts = { ...read.notes };
@@ -324,13 +336,35 @@
     node.focus();
   }
 
-  /** Enter adds what was typed; Esc drops it without closing the view. */
+  /** The add field is gone, so focus goes back to the button that opened it, and `Enter` adds the next. */
+  function focusAdd(which: "person" | "item") {
+    void tick().then(() => document.querySelector<HTMLElement>(`.tf-kept:not([hidden]) [data-su-add="${which}"], [data-su-add="${which}"]`)?.focus());
+  }
+
+  /**
+   * Enter adds what was typed and the field stays, empty, for the next name or item: a standup has several. Enter on the
+   * empty field closes it, as Esc does, without closing the view; held back, or the key would press the button focus lands on.
+   */
   function addKey(event: KeyboardEvent) {
-    if (event.key === "Enter") finishAdding();
+    const which = adding;
+    if (which === null) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (addText.trim() !== "") {
+        if (which === "person") addPerson(addText);
+        else edit(withActionItem(bodyMd, addText));
+        addText = "";
+        return;
+      }
+      adding = null;
+      addText = "";
+      focusAdd(which);
+    }
     if (event.key === "Escape") {
       event.stopPropagation();
       addText = "";
       adding = null;
+      focusAdd(which);
     }
   }
 
@@ -381,7 +415,8 @@
       protocol = await io.publishStandupProtocol(day, chosen);
       dialog = null;
       failure = null;
-      push({ text: target ? `Publishing to Confluence under ${target.reading}` : "Publishing to Confluence" });
+      publishedBody = bodyMd;
+      push({ text: target ? `Queued for Confluence, under ${target.reading}` : "Queued for Confluence" });
       if (chosen) void readTarget();
       followPublication();
     } catch (cause) {
@@ -651,7 +686,7 @@
       {:else if publication.page_entity_id !== null && publication.linked}
         <a class="tf-btn tf-sm tf-ghost" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Open the published page</a>
       {:else}
-        <span class="tf-chip tf-open">{publication.state === "held" ? "held in the queue" : "publishing"}</span>
+        <TfStateChip class="tf-su-going" text={publication.state === "held" ? "Held in the queue" : "Publishing"} tone={publication.state === "held" ? "warn" : "info"} />
       {/if}
     </header>
     <div class="tf-su-body">
@@ -661,8 +696,20 @@
       {#if publication?.detail}
         <p class="tf-su-none">{publication.detail}</p>
       {/if}
+      {#if changedSince}
+        <div class="tf-stale tf-su-pub" role="status">Changed since it was published. The page keeps the earlier version, because knobas makes one page a day and can't update it yet.</div>
+      {:else if published}
+        <p class="tf-su-none tf-su-pub">Published. Anything you change here stays in this note, and the page keeps what it got.</p>
+      {/if}
 
-      <div class="tf-pane-h">Who was there</div>
+      <div class="tf-su-h">
+        <div class="tf-pane-h">Who was there</div>
+        {#if adding !== "person"}
+          <button class="tf-btn tf-sm tf-ghost" data-su-add="person" disabled={!loaded || protocol === null} onclick={() => (adding = "person")}>
+            Add someone
+          </button>
+        {/if}
+      </div>
       <div class="tf-su-people">
         <div class="tf-fchips" role="group" aria-label="Who was there">
           {#each known as name (name)}
@@ -681,10 +728,6 @@
             onkeydown={addKey}
             onblur={finishAdding}
           />
-        {:else}
-          <button class="tf-btn tf-sm tf-ghost" disabled={!loaded || protocol === null} onclick={() => (adding = "person")}>
-            Add someone
-          </button>
         {/if}
       </div>
 
@@ -695,7 +738,14 @@
         </label>
       {/each}
 
-      <div class="tf-pane-h tf-su-gap">Action items</div>
+      <div class="tf-su-h tf-su-gap">
+        <div class="tf-pane-h">Action items</div>
+        {#if adding !== "item"}
+          <button class="tf-btn tf-sm tf-ghost" data-su-add="item" disabled={!loaded || protocol === null} onclick={() => (adding = "item")}>
+            Add an action item
+          </button>
+        {/if}
+      </div>
       {#each form.items as item, index (index)}
         {@const made = filedFor(item.text)}
         {@const owner = ownerOf(item.text)}
@@ -721,14 +771,12 @@
           onkeydown={addKey}
           onblur={finishAdding}
         />
-      {:else}
-        <button class="tf-btn tf-sm tf-ghost" disabled={!loaded || protocol === null} onclick={() => (adding = "item")}>
-          Add an action item
-        </button>
       {/if}
 
       <p class="tf-su-foot">
-        {#if target}
+        {#if target && publication !== null}
+          New protocols publish under <b>{target.reading}</b>. Change it in <a href="#/settings/standup">Settings › Standup</a>.
+        {:else if target}
           Publishes under <b>{target.reading}</b>. Change it in <a href="#/settings/standup">Settings › Standup</a>.
         {:else}
           The first publish asks where. Change it in <a href="#/settings/standup">Settings › Standup</a>.

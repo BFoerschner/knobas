@@ -57,12 +57,14 @@
 .tf-tm-legend .tf-btn { margin-left: auto; }
 .tf-tm-list {
   display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet);
-  overflow: hidden;
+  overflow: hidden; container: tmlist / inline-size;
 }
 .tf-tm-row {
   /* Fixed, not `auto`: each row is its own grid, so an `auto` column put every row's chip somewhere else. */
-  display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px 300px; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px var(--tf-tm-acts); gap: 12px; align-items: center;
   padding: 10px 14px; border-bottom: 1px solid var(--rule-2); cursor: pointer;
+  /* What the slots below add up to. A key too long for its slot takes room from the title, and moves nothing else. */
+  --tf-tm-acts: minmax(320px, max-content);
 }
 .tf-tm-row:last-child { border-bottom: 0; }
 .tf-tm-row:hover { background: var(--sheet-2); }
@@ -71,10 +73,35 @@
 .tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
 .tf-tm-what { font-weight: 500; }
 .tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); font-weight: 400; margin-top: 2px; }
-.tf-tm-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; flex-wrap: wrap; }
+/* A row's actions stand in three slots, so each kind starts at one x down the list and a group never wraps a button at a time. */
+.tf-tm-acts {
+  display: grid; grid-template-columns: minmax(134px, max-content) minmax(106px, max-content) minmax(68px, max-content);
+  column-gap: var(--control-gap); justify-content: end; justify-items: start;
+}
+.tf-tm-s1 { grid-column: 1; }
+.tf-tm-s2 { grid-column: 2; }
+.tf-tm-s3 { grid-column: 3; }
+/* A run's one action stands in the rows' first slot. */
 .tf-tm-group {
-  display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, max-content); gap: 12px; align-items: center; justify-items: start;
   padding: 8px 14px; border-bottom: 1px solid var(--rule-2); background: var(--sheet-2); font-size: var(--t-sm);
+}
+/* The list's own width decides. The first columns narrow, then the chip goes under the title, which frees its column; then the slots go whole under the title. */
+@container tmlist (max-width: 1200px) {
+  .tf-tm-row { grid-template-columns: 110px minmax(0, 1fr) 100px var(--tf-tm-acts); }
+}
+@container tmlist (max-width: 899px) {
+  .tf-tm-row { grid-template-columns: 110px minmax(0, 1fr) var(--tf-tm-acts); row-gap: 6px; }
+  .tf-tm-when { grid-column: 1; grid-row: 1 / span 2; align-self: start; }
+  .tf-tm-what { grid-column: 2; grid-row: 1; }
+  .tf-tm-state { grid-column: 2; grid-row: 2; }
+  .tf-tm-acts { grid-column: 3; grid-row: 1 / span 2; }
+}
+@container tmlist (max-width: 679px) {
+  .tf-tm-row { grid-template-columns: 110px minmax(0, 1fr); }
+  .tf-tm-when { grid-row: 1 / span 3; }
+  .tf-tm-acts { grid-column: 2; grid-row: 3; justify-content: start; }
+  .tf-tm-group { grid-template-columns: minmax(0, 1fr); }
 }
 .tf-tm-group small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
 .tf .tf-tm-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 0 0; max-width: 80ch; }
@@ -115,7 +142,9 @@
 .tf-tm-bar-bed { fill: var(--rule-2); }
 .tf-tm-bar-lg { fill: var(--ok); }
 .tf-tm-bar-hd { fill: var(--warn); }
-.tf-tm-bar-un { fill: var(--ink-2); }
+/* To log is the warn tone it is in the figures and on Day's *Unlogged* chip. The cell's words tell it from held, and `tf-tm-bar-seam` parts the two. */
+.tf-tm-bar-un { fill: var(--warn); }
+.tf-tm-bar-seam { fill: var(--sheet); }
 .tf-tm-total td { background: var(--sheet-2); font-weight: 600; }
 /* The total row is filled throughout, so today's column carries on as its rule at the head does. */
 .tf-tm-total td.tf-tm-today { box-shadow: inset 0 2px 0 var(--ink); }
@@ -130,16 +159,21 @@
 /* ---------- time: the Standup tab (#829) ---------- */
 .tf-su { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .tf-su-body { padding: 12px; }
-.tf-su-body h4 { font-size: var(--t-sm); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
+/* A group's label in a panel, the same step as the protocol's; the first starts where the protocol's does. */
+.tf-su-body h4 { font-size: var(--t-xs); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
+.tf-su-body > h4:first-of-type { margin-top: 0; min-height: var(--control-h-sm); display: flex; align-items: center; }
 .tf-su-body ul { margin: 0; padding: 0; list-style: none; }
 .tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 0; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
 .tf-su-body li > a:hover { background: var(--sheet-2); }
 .tf .tf-su-none { margin: 0; padding: 5px 0; color: var(--ink-2); font-size: var(--t-sm); }
 .tf-su-day { font-size: var(--t-sm); }
-/* A ghost that starts a list starts where the list's words do: its 8 px of padding and 1 px of border hang out to the left. */
-.tf-su-body > .tf-btn.tf-ghost { margin-left: -9px; }
-/* A panel heading's action sits on the right of the heading line (Controls: section heading). */
-.tf-su .tf-panel > header > .tf-btn { margin-left: auto; }
+/* A panel heading's action sits on the right of the heading line (Controls: section heading). A ghost's word ends on the box's edge. */
+.tf-su .tf-panel > header > :is(.tf-btn, .tf-su-going) { margin-left: auto; }
+.tf-su .tf-panel > header > .tf-btn.tf-ghost { margin-right: -9px; }
+/* So does a group's: *Add someone* no longer wraps alone under the pills, and the line keeps its height while the field is open. */
+.tf-su-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: var(--control-h-sm); margin-bottom: 4px; }
+.tf-su-h > .tf-btn.tf-ghost { margin-right: -9px; }
+.tf-su-pub { margin: 0 0 10px; }
 .tf-su-people { display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; margin-bottom: 8px; }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
 .tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }

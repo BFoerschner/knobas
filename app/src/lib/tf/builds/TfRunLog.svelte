@@ -216,9 +216,10 @@
     <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
   </label>
   <span class="tf-nav2">
-    <button type="button" aria-label="Previous match" onclick={() => jump(-1)}>↑</button><button
+    <button type="button" aria-label="Previous match" disabled={hits.total === 0} onclick={() => jump(-1)}>↑</button><button
       type="button"
       aria-label="Next match"
+      disabled={hits.total === 0}
       onclick={() => jump(1)}>↓</button
     >
   </span>

@@ -510,7 +510,7 @@ test("the Artifacts panel lists the first four with Download through knobas, and
   await settle();
   const panel = target.querySelector('[aria-label="Artifacts"].tf-panel')!;
   expect([...panel.querySelectorAll(".tf-r .tf-t")].map((t) => t.textContent)).toEqual(["a.xml", "b.html", "c.log", "d.log"]);
-  expect(panel.querySelector(".tf-open")?.textContent).toBe("All 5");
+  expect(panel.querySelector(".tf-open")?.textContent).toBe("All artifacts");
   panel.querySelector<HTMLButtonElement>(".tf-r button")!.click();
   await settle();
   // D8 (#856): through knobas into the downloads folder, not the source's page.
@@ -1318,4 +1318,13 @@ test("⌘R on a run of a turned-off source, which draws no button, asks nothing 
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect([probe.refreshed, probe.synced]).toEqual([[], []]);
+});
+
+test("a tab a run doesn't have says so, marks no tab, and offers Overview", async () => {
+  draw("teamcity:build:1187", "nonsense");
+  await settle();
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("A run has no such tab.");
+  expect(target.querySelector(".tf-nohere a")?.textContent).toBe("Overview");
+  expect(target.querySelector('.tf-tabs [aria-current="page"]')).toBeNull();
+  expect(target.querySelector('[aria-label="Artifacts"].tf-panel')).toBeNull();
 });

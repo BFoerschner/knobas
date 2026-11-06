@@ -217,6 +217,7 @@
                         <rect class="tf-tm-bar-lg" width="{logged}%" height="100%" />
                         <rect class="tf-tm-bar-hd" x="{logged}%" width="{held}%" height="100%" />
                         <rect class="tf-tm-bar-un" x="{logged + held}%" width="{toLog}%" height="100%" />
+                        {#if held > 0 && toLog > 0}<rect class="tf-tm-bar-seam" x="{logged + held}%" width="1" height="100%" />{/if}
                       </svg>
                     {/if}
                     {#if cell.note !== null}<small>{cell.note}</small>{/if}
@@ -228,7 +229,7 @@
           </tr>
         {/each}
         <tr class="tf-tm-total">
-          <td>Every day</td>
+          <td>Total</td>
           {#each shown.dayTotals as total, index (index)}
             <td class={["tf-tm-c", index > 4 && "tf-tm-we", ready.week.days[index] === dayKey(clock) && "tf-tm-today"]}><b>{total > 0 ? minutesLabel(total) : "–"}</b></td>
           {/each}

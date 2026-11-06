@@ -93,11 +93,16 @@
 .tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); font-variant-ligatures: none; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
 .tf-problem .tf-acts { display: flex; gap: var(--control-gap); flex-wrap: wrap; }
 .tf-problem .tf-dim { font-size: var(--t-sm); }
-.tf-runfacts { padding: 0 12px 12px; }
+/* The box is the list's own: the heading stands above it, so its padding is the same on all four sides. */
+.tf-runfacts { padding: 12px; }
+/* A link made of words: underlined, and its word ends on the box's edge below it. */
+.tf-runov .tf-panel > header a.tf-open { text-decoration: underline; text-underline-offset: 2px; margin-right: -7px; }
 .tf-runfacts .tf-mono { font-size: var(--t-xs); }
 .tf-runbody .tf-r .tf-mono { font-size: var(--t-xs); }
 .tf-runbody .tf-r .tf-dim { font-size: var(--t-xs); }
 .tf-runagain { margin-top: 10px; }
+/* Log find's arrows rest with nothing to step through. */
+.tf-nav2 button:disabled { opacity: .45; cursor: default; }
 @media (max-width: 900px) { .tf-runbody { padding-left: 16px; padding-right: 16px; } }
 
 /* ---------- Builds (#848): the pipeline list beside the selected pipeline's runs ---------- */
@@ -110,7 +115,7 @@
 .tf-pl h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 0; padding: 12px 8px 4px; }
 .tf-pl-note { font-size: var(--t-sm); color: var(--ink-2); padding: 12px 8px; }
 .tf-pi {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: center;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 6px; align-items: center;
   padding: 5px 8px; border-radius: 4px; text-decoration: none; font-size: var(--t-sm); color: var(--ink);
 }
 .tf-pi:hover { background: var(--sheet-2); }
@@ -124,9 +129,10 @@
 .tf-pi-when { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tf-pi[aria-current="true"] .tf-pi-when { color: inherit; opacity: .8; }
 .tf-pi[aria-current="true"] .tf-pi-nm.tf-bad { color: inherit; }
-.tf-strip { display: flex; gap: 2px; grid-column: 1 / span 2; margin-top: 3px; }
-.tf-strip i { width: 7px; height: 5px; border-radius: 1px; background: var(--ok); }
-.tf-strip i.tf-run-err { background: var(--err); }
+/* A failed tick stands 2 px taller, so it differs by more than hue: on a rail's selected row green and red have nearly one lightness. */
+.tf-strip { display: flex; gap: 2px; grid-column: 1 / span 2; margin-top: 3px; align-items: flex-end; min-height: 7px; }
+.tf-strip i { flex: none; width: 7px; height: 5px; border-radius: 1px; background: var(--ok); }
+.tf-strip i.tf-run-err { height: 7px; background: var(--err); }
 .tf-strip i.tf-run-warn { background: var(--warn); }
 .tf-strip i.tf-run-run { background: var(--info); }
 .tf-strip i.tf-run-q { background: var(--rule); }
@@ -165,6 +171,14 @@
 .tf-runs .tf-run-tests { width: 140px; font-size: var(--t-sm); }
 .tf-runs .tf-tests-failed { color: var(--err); font-weight: 600; }
 @media (max-width: 1240px) { .tf-bv { grid-template-columns: 240px minmax(0, 1fr); } }
+/* The name is what the rail is scanned by. On a 240 px rail it has the row, and the time, gone short (`railTime`), shares the ticks' line. */
+@media (min-width: 901px) and (max-width: 1240px) {
+  .tf-pi-nm { grid-column: 1 / span 2; }
+  /* As wide as its ticks, so they start under the name. Deep in the tree, the oldest ticks give way first. */
+  .tf-strip { grid-column: 1; grid-row: 2; margin-top: 0; width: fit-content; max-width: 100%; justify-self: start; overflow: hidden; justify-content: flex-end; }
+  .tf-pi:has(> .tf-pi-when:empty) .tf-strip { grid-column: 1 / span 2; }
+  .tf-pi-when { grid-column: 2; grid-row: 2; align-self: end; font-size: var(--t-2xs); line-height: 1; }
+}
 /* The run table sheds by its own width, not the window's: the duration drops its bar, then a column goes at a time. */
 @container (max-width: 1000px) {
   .tf-runs .tf-run-no { width: 130px; }

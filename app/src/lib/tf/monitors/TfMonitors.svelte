@@ -34,6 +34,10 @@
     anything is on its way so does the end of every sync, which is when a
     sent one's monitor arrives.
 
+  A source of the roster's that can't sync draws the pipeline's band over the
+  tabs (`staleLine`) with its fix, and the header then says nothing of when it
+  synced: a check's own time is not a sync.
+
   **Refresh (#2138, #2107's pieces).** Monitors has no page of one monitor,
   so a monitor's *Refresh*, or *Sync now* where its source does not read one
   item (`MonitorRow.refreshes`), ends its row's actions, after *Ack* and
@@ -64,14 +68,19 @@
     RouteRow,
     UnmonitoredAsset,
   } from "../../ipc/assets";
-  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { QueuedWrite, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import type { WriteFollower } from "../../shell/follow-write";
   import { counted } from "../counted";
   import type { OpenJobPorts } from "../job/open-jobs";
+  import type { SourceFacts } from "../job/job";
   import type { DetailRefreshPorts } from "../refresh.svelte";
 
   /** The reads and writes this page makes, injectable so a test needs no bridge. */
+  type SourceRow = SourceFacts & Partial<Pick<SourceSummary, "health" | "auth_kind">>;
+
   export interface MonitorPorts extends OpenJobPorts {
+    /** The sources' names, and whether each can sign in. */
+    listSources: () => Promise<SourceRow[]>;
     monitorRoster: () => Promise<MonitorRow[]>;
     unmonitoredAssets: () => Promise<UnmonitoredAsset[]>;
     openAlerts: () => Promise<OpenAlert[]>;
@@ -92,6 +101,8 @@
     refresh?: DetailRefreshPorts;
     /** The roster changed what the nav's badge counts: a monitor hidden or back. */
     badgesChanged?: () => void;
+    /** How each source's last sync ended, for the band over the page; the bridge's when left out. */
+    syncStatus?: () => Promise<SourceSyncStatus[]>;
   }
 </script>
 
@@ -104,7 +115,7 @@
   import TfNothingHere from "../TfNothingHere.svelte";
   import type { RoleFrameProps } from "../page-entry";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     ackAlert,
     unackAlert,
@@ -118,12 +129,12 @@
     unmonitoredAssets,
   } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
-  import { listSources } from "../../ipc/sources";
+  import { listSources, syncStatus } from "../../ipc/sources";
   import { mayHaveLanded, writeFollower } from "../../shell/follow-write";
   import { echoOn, echoWrite, echoesOn, settleEchoes, watchEchoes, type Echo } from "../queued.svelte";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { ago } from "../../shell/time";
-  import { push } from "../../shell/toasts.svelte";
+  import { dismiss, push } from "../../shell/toasts.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import TfNoMatch from "../filter/TfNoMatch.svelte";
@@ -133,6 +144,7 @@
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { listenSynced } from "../builds/pipeline-ports";
+  import { staleLine, syncWith } from "../builds/pipeline";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     stateChip,
@@ -181,6 +193,7 @@
     },
     now: fixedNow,
     sync,
+    syncRevision = 0,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -191,8 +204,6 @@
     ports?: MonitorPorts;
     /** Injectable clock, for the bars and the header's *synced*. */
     now?: Date;
-    // The frame's `syncRevision` (#2106) is left unread: this view reads
-    // again on the end of every run of its role's sources already.
   } & RoleFrameProps = $props();
 
   const now = $derived(fixedNow ?? new Date());
@@ -208,10 +219,15 @@
   let roster = $state<MonitorRow[] | null>(null);
   let unwatched = $state<UnmonitoredAsset[] | null>(null);
   let sourceNames = $state<Record<string, string>>({});
+  /** The sources as last read, `null` until then: whether one can sign in decides the band and the header's *synced*. */
+  let sources = $state<SourceRow[] | null>(null);
+  let syncRows = $state<SourceSyncStatus[]>([]);
   let failed = $state<string | null>(null);
   let jobs = $state<OpenJob[]>([]);
   /** When each monitor's open alert was acked, by monitor id: the open alerts' `acked_at`, so it outlives the visit (#1461). */
   let acked = $state<Record<string, string>>({});
+  /** Each ack's toast while it stands: taking the ack back takes its *Undo* with it. */
+  const ackToasts = new Map<string, number>();
   /** Rows whose write has not answered: a double click is one press. */
   let pressing = $state<Record<string, true>>({});
   let creating = $state<MonitorSubject | null>(null);
@@ -219,6 +235,13 @@
 
   /** Bumped to read both lists again. */
   let revision = $state(0);
+  // The frame moves this when *Sync now*'s runs end and each time the page is shown again, so a token entered in Settings takes the band away (#2106).
+  let syncedAt = untrack(() => syncRevision);
+  $effect(() => {
+    if (syncRevision === syncedAt) return;
+    syncedAt = syncRevision;
+    untrack(() => (revision += 1));
+  });
   /** The refreshes waiting on the roster read that answers next (#2138). */
   let rereads: (() => void)[] = [];
 
@@ -262,7 +285,17 @@
     }, fail);
     ports.listSources().then(
       (rows) => {
-        if (live) sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+        if (!live) return;
+        sourceNames = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
+        sources = rows;
+      },
+      () => {
+        if (live) sources ??= [];
+      },
+    );
+    (ports.syncStatus ?? syncStatus)().then(
+      (rows) => {
+        if (live) syncRows = rows;
       },
       () => {},
     );
@@ -369,7 +402,7 @@
   );
   $effect(() => {
     if (!waiting) return;
-    return listenSynced(ports, null, () => {}, () => (revision += 1));
+    return listenSynced(ports, null, (row) => (syncRows = syncWith(syncRows, row)), () => (revision += 1));
   });
 
   /** What *Monitor queued* says on hover: where the create is. */
@@ -454,12 +487,23 @@
   /** Below 1240 px half-hour bars would be under a pixel wide: one bar an hour, the worse of its two half-hours. */
   const hourlyBars = new MediaQuery("(max-width: 1240px)");
 
+  /** A source of the roster's that can't sync says so over the page, with its fix, as a pipeline's does. */
+  const stale = $derived.by(() => {
+    if (roster === null || sources === null) return [];
+    const ids = [...new Set(roster.map((row) => row.source_id))];
+    return ids.flatMap((id) => {
+      const line = staleLine({ source_id: id, source_name: sourceNames[id] ?? id }, sources ?? [], syncRows, now, "Pauses and new monitors");
+      return line === null ? [] : [{ id, line }];
+    });
+  });
+
   const header = $derived.by(() => {
     if (roster === null) return "Checks from your monitoring source, each watching an asset.";
-    const sources = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
+    const names = [...new Set(roster.map((row) => sourceNames[row.source_id] ?? row.source_id))];
     const newest = roster.map((row) => row.checked_at).sort().at(-1) ?? null;
-    const from = sources.length > 0 ? ` from ${sources.join(" and ")}` : "";
-    const synced = newest !== null ? `, synced ${ago(newest, now)}` : "";
+    const from = names.length > 0 ? ` from ${names.join(" and ")}` : "";
+    // A check's own time is not a sync: where a source can't sync, the band says how old its data is.
+    const synced = newest !== null && sources !== null && stale.length === 0 ? `, synced ${ago(newest, now)}` : "";
     return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset.`;
   });
 
@@ -537,9 +581,9 @@
     try {
       const alert = await ports.ackAlert(row.entity_id);
       acked[row.entity_id] = alert?.acked_at ?? new Date().toISOString();
-      push({ text: "Acked in knobas. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row) } });
+      ackToasts.set(row.entity_id, push({ text: "Acked in knobas. The alert stays open until the monitor recovers.", action: { label: "Undo", run: () => void unack(row) } }));
     } catch (error) {
-      push({ text: ipcErrorMessage(error), tone: "err" });
+      refusedAck(row, error);
     } finally {
       delete pressing[row.entity_id];
     }
@@ -552,12 +596,31 @@
     try {
       await ports.unackAlert(row.entity_id);
       delete acked[row.entity_id];
+      dropAckToast(row);
       push({ text: `${row.name} is asking again, in the Inbox too.` });
     } catch (error) {
-      push({ text: ipcErrorMessage(error), tone: "err" });
+      refusedAck(row, error);
     } finally {
       delete pressing[row.entity_id];
     }
+  }
+
+  function dropAckToast(row: MonitorRow) {
+    const id = ackToasts.get(row.entity_id);
+    if (id !== undefined) dismiss(id);
+    ackToasts.delete(row.entity_id);
+  }
+
+  /** The alert closed while the row was drawn: not a failure, so it says what happened and the row is read again. */
+  function refusedAck(row: MonitorRow, error: unknown) {
+    if (isIpcError(error) && error.code === "not_found") {
+      delete acked[row.entity_id];
+      dropAckToast(row);
+      push({ text: `${row.name} has already recovered, so its alert has closed.` });
+      revision += 1;
+      return;
+    }
+    push({ text: ipcErrorMessage(error), tone: "err" });
   }
 
   /** *Hide* or *Unhide*: knobas-local, so the row moves at once and the roster is read again. */
@@ -665,6 +728,12 @@
   </div>
   {#if sync}<div class="tf-acts">{@render sync()}</div>{/if}
 </header>
+{#each stale as { id, line } (id)}
+  <div class="tf-stale tf-bstale">
+    {line.text}
+    {#if line.fix !== null}<a href={line.fix.href}>{line.fix.words}</a>{/if}
+  </div>
+{/each}
 <nav class="tf-tabs" aria-label="Monitors">
   <a href="#/monitors" aria-current={tab === "all" ? "page" : undefined}
     >Monitors{#if roster !== null && roster.length > 0}{" "}<span class="tf-count">{roster.length}</span>{/if}</a

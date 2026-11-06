@@ -14,6 +14,7 @@ import {
   isRunning,
   keptPipelines,
   latestTime,
+  railTime,
   pipelineHash,
   pipelineOf,
   runHash,
@@ -205,4 +206,14 @@ test("with This job on, a bare #/builds selects the job's failing pipeline, else
   expect(pipelineOf(list, [], [list[1]!, list[2]!])?.name).toBe("MineBad");
   expect(pipelineOf(list, [], [list[1]!])?.name).toBe("Mine");
   expect(pipelineOf(list, [], [])?.name).toBe("Elsewhere");
+});
+
+test("on a narrow rail the time goes short: the clock today, the weekday this past week, else the date", () => {
+  const now = new Date(2026, 7, 22, 15, 0);
+  const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
+  expect(railTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
+  expect(railTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("Fri 16:20");
+  expect(railTime(at(new Date(2026, 7, 16, 9, 0)), now)).toBe("Sun 09:00");
+  expect(railTime(at(new Date(2026, 7, 15, 9, 0)), now)).toBe("15 Aug");
+  expect(railTime(pipeline("B", []), now)).toBe("");
 });

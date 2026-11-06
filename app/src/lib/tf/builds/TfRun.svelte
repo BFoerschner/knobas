@@ -88,6 +88,7 @@
   import { downloadAndSay, fitSteps, isCommand, stepSegments } from "./run-reads";
   import {
     RUN_TABS,
+    noSuchRunTab,
     artifactsOf,
     builtCommit,
     repositoryOfCommit,
@@ -131,6 +132,7 @@
   const pipelineId = $derived(pipeline.entity_id);
   const runId = $derived(rest[1] ?? "");
   const tab = $derived(runTabOf(rest));
+  const noTab = $derived(noSuchRunTab(rest));
 
   /** How many older pages a run not among the latest is looked for in. */
   const OLDER_PAGES = 5;
@@ -553,7 +555,7 @@
 
   <nav class="tf-tabs" aria-label="Run">
     {#each RUN_TABS as entry (entry.id)}
-      <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab ? "page" : undefined}
+      <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab && !noTab ? "page" : undefined}
         >{entry.name}{#if entry.id === "tests" && testsCount > 0}{" "}<span class="tf-count tf-err">{testsCount} failed</span
           >{:else if entry.id === "artifacts" && artifacts.total > 0}{" "}<span class="tf-count">{artifacts.total}</span>{/if}</a
       >
@@ -561,10 +563,12 @@
   </nav>
 
   <div class="tf-runbody">
-    {#if viewFailed !== null && (tab === "overview" || tab === "changes" || tab === "params")}
+    {#if viewFailed !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}
       <p class="tf-dim">The run could not be read from {pipeline.source_name}: {viewFailed}</p>
     {/if}
-    {#if tab === "overview"}
+    {#if noTab}
+      <TfNothingHere message="A run has no such tab." href={runTabHash(pipelineId, runId, "overview")} action="Overview" />
+    {:else if tab === "overview"}
       <div class="tf-runov">
         {#if failed && failure !== null}
           <div class="tf-problem">
@@ -616,7 +620,7 @@
           <section class="tf-panel" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>
-              {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All {artifacts.total}</a>{/if}
+              {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All artifacts</a>{/if}
             </header>
             <div class="tf-rows">
               {#each artifacts.first as artifact, i (i)}

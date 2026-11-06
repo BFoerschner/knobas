@@ -17,7 +17,7 @@ import type { WriteSource } from "../../shell/queued-toast";
 import { matchesAll } from "../filter/filter";
 import type { WriteFollower } from "../../shell/follow-write";
 import { echoWrite, type Echo } from "../queued.svelte";
-import { reenterWords, secretNoun } from "../settings/settings";
+import { credentialFix, secretNoun } from "../settings/settings";
 import { stateWord } from "../state-word";
 import { pipelineHash, runTone, shortTime } from "./builds";
 
@@ -447,9 +447,11 @@ export interface StaleLine {
  */
 export function staleLine(
   pipeline: Pick<PipelineRow, "source_id" | "source_name">,
-  sources: readonly Pick<SourceSummary, "id" | "health" | "auth_kind">[],
+  sources: readonly (Pick<SourceSummary, "id"> & Partial<Pick<SourceSummary, "health" | "auth_kind">>)[],
   sync: readonly SourceSyncStatus[],
   now: Date = new Date(),
+  /** What waits while the source can't be signed in to, as the page's own words. */
+  waits = "Runs you start",
 ): StaleLine | null {
   const source = sources.find((row) => row.id === pipeline.source_id);
   const state = source?.health;
@@ -461,8 +463,8 @@ export function staleLine(
     const why = state.state === "missing_secret" ? `no ${secret} stored` : "sign-in failing";
     const lead = since ? `${name} data is ${ageLabel(since, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
     return {
-      text: `${lead} Runs you start wait in the queue until it works again.`,
-      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}/reenter`, words: `${reenterWords(source.auth_kind)}…`, secret },
+      text: `${lead} ${waits} wait in the queue until it works again.`,
+      fix: { href: `#/settings/source/${encodeURIComponent(pipeline.source_id)}/reenter`, words: `${credentialFix(source.auth_kind, state.state)}…`, secret },
     };
   }
   if (run && !run.running && (run.last_outcome === "unreachable" || run.last_outcome === "error")) {

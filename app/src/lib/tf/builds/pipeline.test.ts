@@ -254,7 +254,7 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
   // A token source is told to re-enter its token (#1405).
   expect(staleLine(pipeline, health("missing_secret", "Pat"), sync("ok"), now)).toEqual({
     text: "TeamCity data is 38 min old: no token stored. Runs you start wait in the queue until it works again.",
-    fix: { href: "#/settings/source/teamcity/reenter", words: "Re-enter token…", secret: "token" },
+    fix: { href: "#/settings/source/teamcity/reenter", words: "Enter token…", secret: "token" },
   });
   expect(staleLine(pipeline, health("missing_secret"), sync("ok"), now)?.text).toContain("no password stored");
   expect(staleLine(pipeline, health("ok"), sync("unreachable"), now)).toEqual({

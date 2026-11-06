@@ -375,7 +375,7 @@ test("Publish goes to the stored page without asking, after saving", async () =>
   await settle();
   expect(calls.saved.length).toBe(1);
   expect(calls.published).toEqual([undefined]);
-  expect(text()).toContain("publishing");
+  expect(text()).toContain("Publishing");
 });
 
 test("Publish under a page the credential cannot add pages to is drawn disabled saying why, and publishes nothing (#2053)", async () => {
@@ -421,6 +421,44 @@ test("a published protocol links its page", async () => {
   await settle();
   const link = [...target.querySelectorAll("a")].find((found) => found.textContent?.trim() === "Open the published page");
   expect(link?.getAttribute("href")).toBe("#/page/wiki%3A901");
+});
+
+test("once published it says where changes go, and a change says the page doesn't have it", async () => {
+  open({ publication: { write_id: 5, state: "sent", detail: null, page_entity_id: "wiki:901", linked: true } });
+  await settle();
+  expect(target.querySelector(".tf-su-pub")?.textContent).toContain("stays in this note");
+  expect(target.querySelector(".tf-su-foot")?.textContent).toContain("New protocols publish under");
+  const box = target.querySelector<HTMLTextAreaElement>(".tf-su-pn textarea")!;
+  box.value = "Something new";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("The page keeps the earlier version");
+});
+
+test("Publish's toast says it queued, which stays true once the page lands", async () => {
+  open();
+  await settle();
+  button("Publish to Confluence").click();
+  await settle();
+  expect(toasts.items.at(-1)?.text).toMatch(/^Queued for Confluence/);
+});
+
+test("Enter adds and leaves the field open for the next, and Enter on the empty field gives focus back to the button", async () => {
+  open();
+  await settle();
+  button("Add someone").click();
+  await settle();
+  const field = document.activeElement as HTMLInputElement;
+  field.value = "Ana";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  expect(document.activeElement).toBe(field);
+  expect(field.value).toBe("");
+  expect(target.querySelector('.tf-su-people [aria-pressed="true"]:last-of-type')?.textContent?.trim()).toBe("Ana");
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  expect(document.activeElement?.textContent?.trim()).toBe("Add someone");
 });
 
 test("an item whose ticket the protocol already links shows its key and status, and no Create ticket (#1433)", async () => {

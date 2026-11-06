@@ -638,55 +638,58 @@
             {:else if row.state === "offered"}<TfStateChip text="offered" />
             {:else}<TfStateChip text="open" />{/if}
           </span>
+          <!-- Three slots, so the eye runs down a column: what the row is for, the other way to do it, then the row's own upkeep. *Other ticket…* stands beside a ticket the row names; with none named there is no other, and the one action is *Assign…*, as the dialog's title says. -->
           <span class="tf-tm-acts">
             {#if row.state === "unlogged" && row.target?.kind === "entity"}
               {@const on = row.target.entity_id}
-              {#if row.block?.block.ended_by_relaunch}
-                <button class="tf-btn tf-sm" onclick={() => extendToNow(row)}>Extend to now</button>
-              {/if}
               {@const cannot = refusalOf(refused, on, "log_work")}
-              <button class="tf-btn tf-sm" {...refusedAttrs(cannot)} onclick={() => cannot === null && onlog?.(on, key)}>Log…</button>
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit…</button>
+              <button class="tf-btn tf-sm tf-tm-s1" {...refusedAttrs(cannot)} onclick={() => cannot === null && onlog?.(on, key)}>Log…</button>
+              {#if row.block?.block.ended_by_relaunch}
+                <button class="tf-btn tf-sm tf-tm-s2" onclick={() => extendToNow(row)}>Extend to now</button>
+              {/if}
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={() => open({ mode: "edit", row })}>Edit…</button>
             {:else if row.state === "running"}
-              <button class="tf-btn tf-sm" onclick={() => ontimer?.()}>Stop and log…</button>
+              <button class="tf-btn tf-sm tf-tm-s1" onclick={() => ontimer?.()}>Stop and log…</button>
             {:else if row.state === "label"}
               {#if row.suggestion}
                 {@const to = row.suggestion.entity_id}
                 <button
-                  class="tf-btn tf-sm"
+                  class="tf-btn tf-sm tf-tm-s1"
                   onclick={() => giveTo(row, to, `Assigned to ${keyOf(to)}. It is in Log all now.`)}
                 >
                   Assign to <TfKey value={keyOf(to)} />
                 </button>
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
+                <button class="tf-btn tf-sm tf-ghost tf-tm-s2" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
               {:else}
-                <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+                <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "edit", row })}>Edit…</button>
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={() => open({ mode: "edit", row })}>Edit…</button>
             {:else if row.state === "offered"}
               {#if row.suggestion}
                 {@const to = row.suggestion.entity_id}
                 <button
-                  class="tf-btn tf-sm"
+                  class="tf-btn tf-sm tf-tm-s1"
                   onclick={() => giveTo(row, to, `Added ${durationOf(row)} to ${keyOf(to)}`)}
                 >
                   Add to <TfKey value={keyOf(to)} />
                 </button>
+                <button class="tf-btn tf-sm tf-ghost tf-tm-s2" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
+              {:else}
+                <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
-              <button class="tf-btn tf-sm tf-ghost" onclick={() => dismiss(row)}>Dismiss</button>
+              <button class="tf-btn tf-sm tf-ghost tf-tm-s3" onclick={() => dismiss(row)}>Dismiss</button>
             {:else if row.state === "open"}
               {#if job !== null}
                 {@const to = job.entityId}
                 <button
-                  class="tf-btn tf-sm"
+                  class="tf-btn tf-sm tf-tm-s1"
                   onclick={() => addOpen(row, to, `Made a block on ${job.key}, ${span(row)}`)}
                 >
                   Add to <TfKey value={job.key} />
                 </button>
-                <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+                <button class="tf-btn tf-sm tf-ghost tf-tm-s2" onclick={() => open({ mode: "assign", row })}>Other ticket…</button>
               {:else}
-                <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+                <button class="tf-btn tf-sm tf-tm-s1" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               {/if}
             {/if}
           </span>
