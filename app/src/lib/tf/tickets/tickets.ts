@@ -152,7 +152,7 @@ export function firstName(name: string | null): string | null {
  * What the List calls someone, in its column and its *Assignee* select (F-107): the first word of the source's name, or with no
  * name the account's first part with a capital, so `mara` and `Mara Lindqvist` read alike a few rows apart. Drawn, never stored: filters stay on the account.
  */
-export function listName(card: Pick<MiniBoardCard, "assignee" | "assignee_name">): string | null {
+export function listName(card: Pick<MiniBoardCard, "assignee"> & { assignee_name?: string | null }): string | null {
   if (card.assignee_name) return firstName(card.assignee_name);
   const part = card.assignee?.split(/[.\s_@-]+/).find(Boolean);
   return part === undefined ? null : part.charAt(0).toUpperCase() + part.slice(1);

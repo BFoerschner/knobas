@@ -33,7 +33,7 @@
 
   function closePanel(event: MouseEvent) {
     event.preventDefault();
-    layers.open.findLast((layer) => layer.kind === "panel")?.close();
+    layers.open.filter((layer) => layer.kind === "panel").at(-1)?.close();
   }
 </script>
 

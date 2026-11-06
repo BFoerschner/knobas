@@ -315,7 +315,7 @@ test("*Assignee* offers the source's accounts and the cards' people by the name 
     ["jonas.becker", { name: "Jonas Becker", mine: false }],
     ["jonas.k", { name: null, mine: false }],
   ]);
-  expect(labels([], twins).map(([, label]) => label)).toEqual(["jonas.k", "Jonas Becker"]);
+  expect(labels([], twins).map(([, label]) => label)).toEqual(["Jonas Becker", "jonas.k"]);
 });
 
 test("a card calls its assignee by name where the source keeps one, else by account (F-107)", () => {
