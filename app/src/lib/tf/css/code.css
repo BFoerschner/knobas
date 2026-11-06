@@ -39,6 +39,11 @@
 .tf-repohold.tf-held { visibility: hidden; }
 /* Stacked under the title, the row starts at the page's edge: what shows starts there too, and the room follows it (F-256). */
 .tf-repohold.tf-held.tf-stacked > * { order: 1; }
+/* The primary alone, while a pull request sent from here waits for a read (F-263): the same room, on the same terms. */
+.tf-repoheld { visibility: hidden; }
+.tf-repohold.tf-stacked > .tf-repoheld { order: 1; }
+/* A pull request just sent, in Branches' cell: a link to its row, as *#142* above it is one (F-264). */
+.tf-sentlink .tf-chip { text-decoration: underline; text-underline-offset: 2px; }
 /* A repository's title never breaks inside its name. */
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */

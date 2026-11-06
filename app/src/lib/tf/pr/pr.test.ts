@@ -9,6 +9,7 @@ import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
 import { stampLabel } from "../../time/format";
 import {
   chipAct,
+  chipWords,
   checkReading,
   checksLine,
   conversationOf,
@@ -406,6 +407,17 @@ test("a check that counts its tests reads as Builds says it, failed first, and t
   expect(checkReading(row("pending", "step 3 of 5 · 6 min ago"))).toBe("Pending, step 3 of 5 · 6 min ago");
   expect(checkReading(row("success", null))).toBe("Passed");
   expect(checkReading(row(null, "7 min ago"))).toBe("7 min ago");
+});
+
+test("a review's chip says what it is doing while queued and what it did once sent; other chips keep their words (F-262)", () => {
+  const review = (text: string, state: string) => ({ kind: "review", text, state });
+  expect(chipWords(review("approve", "queued"))).toBe("Approving, queued");
+  expect(chipWords(review("approve", "sent"))).toBe("Approved, sent");
+  expect(chipWords(review("comment", "queued"))).toBe("Commenting, queued");
+  expect(chipWords(review("comment", "sent"))).toBe("Commented, sent");
+  expect(chipWords(review("request_changes", "sent"))).toBe("Changes requested, sent");
+  expect(chipWords({ kind: "merge", text: "merge", state: "sent" })).toBe("Merging, sent");
+  expect(chipWords({ kind: "source:x", text: "Pin", state: "sent" })).toBe("Pin, sent");
 });
 
 test("a chip's words are the app's own or a source's as written; nothing else reaches the row (F-261, F-236)", () => {

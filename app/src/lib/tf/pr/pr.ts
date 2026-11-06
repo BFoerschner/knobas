@@ -385,7 +385,7 @@ export function mergeReasons(merge: ViewAction | null): string[] {
 /** The verdicts a review can carry, in prototype-6's order. */
 export type Verdict = "comment" | "approve" | "request_changes";
 
-/** A review on its way, in the write chips' grammar (*Approving, sent*), and the state its row draws until the read holds it (F-251). */
+/** A review on its way: what its chip says while queued (*Approving, queued*), and the state its chip says once sent (*Approved, sent*) and its row draws until the read holds it (F-251, F-262). */
 export const REVIEW_SENT: Record<Verdict, { act: string; state: string }> = {
   approve: { act: "Approving", state: "Approved" },
   request_changes: { act: "Requesting changes", state: "Changes requested" },
@@ -414,6 +414,12 @@ export function chipAct(echo: { kind: string; text: string }): string | null {
   if (echo.kind === "review") return Object.hasOwn(REVIEW_SENT, echo.text) ? REVIEW_SENT[echo.text as Verdict].act : null;
   if (echo.kind.startsWith(SOURCE_ACTION)) return echo.text;
   return Object.hasOwn(ACTS, echo.kind) ? (ACTS[echo.kind] ?? null) : null;
+}
+
+/** A chip's whole words: what it names, then where its write is. A sent review says what it did, as *Approving, sent* sounds unfinished (F-262). */
+export function chipWords(echo: { kind: string; text: string; state: string }): string {
+  const sent = echo.kind === "review" && echo.state === "sent" && Object.hasOwn(REVIEW_SENT, echo.text) ? REVIEW_SENT[echo.text as Verdict].state : null;
+  return `${sent ?? chipAct(echo)}, ${echo.state}`;
 }
 
 /** One choice of *Submit review* (R-8.18): its verdict, its words, and the source's action that sends it. */

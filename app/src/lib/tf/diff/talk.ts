@@ -43,4 +43,6 @@ export interface DiffTalk {
   resolve(thread: LineThread, on: boolean): void;
   /** The replies queued on `thread` this session that the read does not hold yet. */
   queuedOn(thread: LineThread): readonly string[];
+  /** Whether `name` is the reader, whose comments and resolves read *You* as Conversation's do. */
+  isMe(name: string): boolean;
 }

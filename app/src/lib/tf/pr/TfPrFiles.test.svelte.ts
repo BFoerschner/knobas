@@ -75,6 +75,8 @@ function filesView(commentable = true): SourceView {
 
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
+/** The reader's name at the source. */
+let reader: string | null = null;
 let pending: PendingCommentStore;
 let viewed: string[];
 let asked: (string | null)[];
@@ -120,6 +122,7 @@ async function draw(answer: SourceView | (() => SourceView) = filesView(), write
     target,
     props: {
       prId: PR,
+      me: reader,
       entityView: async (id: string, section: string | null) => {
         asked.push(id === PR ? section : `${id} ${section}`);
         return (section !== null && others[section]) || (typeof answer === "function" ? answer() : answer);
@@ -477,6 +480,20 @@ test("#2277: Reply… queues a reply on the thread's line, drawn queued until th
   await settle();
   expect(asked).toEqual(["files", "files"]);
   expect(squash(RETRY_CARD()!.querySelector(".tf-thread"))).toBe("jonas Should the jitter be bounded? knobas Bounded to ±10 % now. Reply… Resolve");
+});
+
+test("the reader's line comments and resolves say You, as Conversation's do; another's keep their name (F-221)", async () => {
+  reader = "jonas";
+  const resolved = [{ ...RETRY.threads[0]!, resolved_by: "jonas" }, RETRY.threads[1]!];
+  await draw(at("c90d11", { retry: "1111111", note: "2222222" }, resolved), true);
+  expect(squash(RETRY_CARD()!.querySelector(".tf-thread"))).toBe("Resolved by you · 1 comment Show Unresolve");
+  [...RETRY_CARD()!.querySelectorAll<HTMLButtonElement>(".tf-thread button")].find((b) => b.textContent === "Show")!.click();
+  flushSync();
+  const authors = [...RETRY_CARD()!.querySelectorAll(".tf-said b")].map((b) => b.textContent);
+  expect(authors).toContain("You");
+  expect(authors).toContain("priya");
+  expect(authors).not.toContain("jonas");
+  reader = null;
 });
 
 test("#2277: Resolve queues the resolve and collapses the thread; a resolved thread reads collapsed, and Forgejo's offers none", async () => {

@@ -574,6 +574,11 @@
 
   /** *New pull request*'s branch: the header's search's while it stands, else the plain proposal. */
   const starting = $derived(toPropose !== null && !sentFrom.has(toPropose) ? toPropose : proposed);
+  /**
+   * A pull request sent from here that no read holds yet, with nothing else to start: the primary stays out, as it would otherwise name
+   * another pull request right after this one was made, or start this one again (F-263). A branch picked by hand still says what stands on it.
+   */
+  const sentWaits = $derived(sentFrom.size > 0 && (selected === null || selected.isDefault) && (toPropose === null || sentFrom.has(toPropose)));
   /** What Compare says above its form about the branch this press chose (F-063): nothing, where the reader picked it. */
   let guessed = $state<{ branch: string; why: string } | null>(null);
   /**
@@ -661,6 +666,9 @@
         <span class="tf-repohold" class:tf-held={tab === "compare"} class:tf-stacked={stacked} inert={tab === "compare"}>
           {#if oneBranch}
             <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
+          {:else if sentWaits}
+            <!-- Its room, unseen, so the tabs under the header hold still until the read brings it back (F-249). -->
+            <span class="tf-btn tf-primary tf-repoheld" aria-hidden="true">New pull request</span>
           {:else if openedFrom?.entityId}
             <a class="tf-btn tf-primary" href={itemHash({ entity_id: openedFrom.entityId, kind: "pr" })}>Open PR {openedFrom.number ?? ""}</a>
           {:else if starting !== null}

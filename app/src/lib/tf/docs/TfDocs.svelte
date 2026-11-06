@@ -34,7 +34,7 @@
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
   keeps the query: every match is marked and the find bar steps through them
-  (R-10.5, R-10.12). The outline (`TfDocOutline`, R-10.15) is the page's own
+  (R-10.5, R-10.12); ⌘F opens that bar on any page (F-456). The outline (`TfDocOutline`, R-10.15) is the page's own
   right column, sticking while the page scrolls; where the header's actions would
   stop fitting one row beside it (`readerFit`, by the sheet's own width) it folds
   between the meta line and the first section instead. Every page opened is a visit
@@ -851,6 +851,10 @@
     const query = stems;
     if (p === null) return;
     const again = started?.id === p.entity_id && started.stems === query;
+    // Words typed in the bar on this page go to their first match. Only a page newly drawn lands on the section its address names.
+    const samePage = started?.id === p.entity_id;
+    // A bar nobody typed in doesn't follow the reader to the next page.
+    if (started !== null && !samePage && untrack(() => find) === "") findTyped = false;
     started = { id: p.entity_id, stems: query };
     void tick().then(() => {
       if (resuming?.id === p.entity_id) {
@@ -871,7 +875,7 @@
         return;
       }
       at = -1;
-      if (place.kind === "page" && place.section !== null) {
+      if (place.kind === "page" && place.section !== null && !samePage) {
         document.getElementById(`s-${place.section}`)?.scrollIntoView?.();
         matches();
       } else if (stems.length > 0) jump(1);
@@ -896,13 +900,51 @@
     findTyped = false;
   }
 
-  /** The bar closes, and focus left in it, or on nothing, goes to the page's title rather than the body (F-436). */
+  let findBox = $state<HTMLInputElement | null>(null);
+  /** What held focus when ⌘F opened the bar, which it goes back to when the bar closes. */
+  let findFrom: HTMLElement | null = null;
+
+  /** The bar comes in or goes above the page, and the line being read holds still, in a webview that doesn't anchor a scroll too. */
+  function holdingPlace(change: () => void): void {
+    const from = main !== null && article !== null && main.scrollTop > 0 ? article.getBoundingClientRect().top : null;
+    change();
+    if (from !== null) void tick().then(() => {
+      if (main !== null && article !== null) main.scrollTop += article.getBoundingClientRect().top - from;
+    });
+  }
+
+  /** The bar closes, and focus left in it, or on nothing, goes back to what held it before ⌘F, else the page's title rather than the body (F-436). */
   function closeFind(): void {
     const at = document.activeElement;
     const free = at === null || at === document.body || at.closest(".tf-findbar") !== null;
-    setFind("");
-    if (free) article?.querySelector<HTMLElement>(".tf-rd-title")?.focus({ preventScroll: true });
+    const from = findFrom;
+    findFrom = null;
+    holdingPlace(() => setFind(""));
+    if (free) (from?.isConnected ? from : article?.querySelector<HTMLElement>(".tf-rd-title"))?.focus({ preventScroll: true });
   }
+
+  /** ⌘F: the bar on any page, with focus in its box. Pressed again, or on a bar a hit opened, it selects the box's words (F-456). */
+  function openFind(): void {
+    const at = document.activeElement;
+    if (!findOpen) findFrom = at instanceof HTMLElement && at !== document.body ? at : null;
+    holdingPlace(() => (findTyped = true));
+    void tick().then(() => {
+      findBox?.focus({ preventScroll: true });
+      findBox?.select();
+    });
+  }
+
+  $effect(() => {
+    const onkey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "f" || event.defaultPrevented) return;
+      // A page keep-alive holds hidden takes no keys, and a dialog or the tree's drawer owns the keyboard over this one.
+      if (!shown() || page === null || layers.open.some((layer) => layer.kind !== "panel")) return;
+      event.preventDefault();
+      openFind();
+    };
+    window.addEventListener("keydown", onkey);
+    return () => window.removeEventListener("keydown", onkey);
+  });
 
   // On the layer stack, so `Esc` closes the bar before it leaves the page, wherever focus is.
   $effect(() => {
@@ -1487,6 +1529,7 @@
       <div class="tf-findbar" role="search">
         <span>Matches for</span>
         <input
+          bind:this={findBox}
           value={find}
           oninput={(e) => {
             findTyped = true;
@@ -1592,7 +1635,7 @@
                   onclick={() => {
                     if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
                   }}
-                  >New page here…</button>
+                  >New page…</button>
               {/if}
               <TfDocMore
                 onlink={linkPorts ? () => (linking = true) : undefined}

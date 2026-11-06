@@ -112,6 +112,7 @@
     REVIEW_SENT,
     SOURCE_ACTION,
     chipAct,
+    chipWords,
     commitParts,
     conversationOf,
     conflictsOf,
@@ -141,6 +142,7 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { diffOf, rangeOf } from "./files";
+  import { BY_POINTER_MS } from "../press-guard";
   import TfPrFiles from "./TfPrFiles.svelte";
   import TfPrMerge from "./TfPrMerge.svelte";
   import TfPrReview from "./TfPrReview.svelte";
@@ -618,7 +620,7 @@
 
   /** The chip an echo draws, which is also what holds a button back: what it names, then where its write is (#2103). */
   function chipOf(echo: Echo): string {
-    return `${chipAct(echo)}, ${echo.state}`;
+    return chipWords(echo);
   }
 
   /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
@@ -652,11 +654,20 @@
   /** The composer's words are this pull request's own draft, through `Esc`, a move to another and a return (the key table). */
   const draft = $derived(prId === null ? "" : drafts.get(`comment:${prId}`));
   let sending = $state(false);
+  let composer = $state<HTMLTextAreaElement | null>(null);
+  /** A second press with a still pointer lands on *Comment*, disabled by now, whose press gives focus to what holds it: it goes back to the box. */
+  let sentAt = 0;
+  function keepInComposer(event: FocusEvent) {
+    if (event.target === event.currentTarget && Date.now() - sentAt < BY_POINTER_MS) composer?.focus({ preventScroll: true });
+  }
 
   async function send() {
     const body = draft.trim();
     if (prId === null || body === "" || sending || (comment?.disabled ?? null) !== null) return;
     sending = true;
+    // *Comment* goes off with its draft, so focus stays in the box, whichever way this was sent (F-266).
+    composer?.focus({ preventScroll: true });
+    sentAt = Date.now();
     const source = detail?.source ?? null;
     try {
       const id = prId;
@@ -820,6 +831,7 @@
           listen={ports.listen}
           {follower}
           openAt={repo === null ? null : { entityId: repo.entity_id, at: header.head }}
+          {me}
         />
       {:else}
         <div>
@@ -889,8 +901,9 @@
                 <div class="tf-empty">No comments yet.</div>
               {/if}
               {#if comment !== null}
-                <div class="tf-compose" tabindex="-1">
+                <div class="tf-compose" tabindex="-1" onfocus={keepInComposer}>
                   <textarea
+                    bind:this={composer}
                     value={draft}
                     oninput={(event) => prId !== null && drafts.put(`comment:${prId}`, event.currentTarget.value)}
                     placeholder="Comment on {name}"

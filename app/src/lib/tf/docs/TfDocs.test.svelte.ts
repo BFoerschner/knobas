@@ -833,6 +833,8 @@ async function searchOnPage(words: string, rest = ["confluence:2"]): Promise<voi
 }
 
 const button = (label: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+/** The page header's *New page…*, which the tree's stands beside with the same words (F-457). */
+const pageNewPage = () => [...target.querySelectorAll(".tf-rd-page .tf-fhead .tf-acts button")].find((b) => b.textContent?.trim() === "New page…") as HTMLButtonElement | undefined;
 
 test("Docs draws no search field and leaves / to the shell, which opens the launcher on #d (#2425)", async () => {
   await draw(["confluence:2"]);
@@ -1262,6 +1264,45 @@ async function findOnPage(word: string): Promise<void> {
   expect(target.querySelector(".tf-findbar input")).not.toBeNull();
 }
 
+test("⌘F opens the find bar on a page with focus in its box, a second selects its words, and Esc gives focus back (F-456)", async () => {
+  await draw(["confluence:2"]);
+  const press = () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true }));
+  const title = target.querySelector<HTMLElement>(".tf-rd-title")!;
+  title.focus();
+  expect(target.querySelector(".tf-findbar")).toBeNull();
+  press();
+  await settle();
+  const box = target.querySelector<HTMLInputElement>(".tf-findbar input")!;
+  expect(document.activeElement).toBe(box);
+  // Nobody has typed: an empty box stays open and says nothing.
+  expect(target.querySelector(".tf-findn")?.textContent).toBe("");
+  fill(box, "ledger");
+  await settle();
+  expect(target.querySelector(".tf-findn")?.textContent).toBe("1 of 1");
+  box.setSelectionRange(6, 6);
+  press();
+  await settle();
+  expect(target.querySelectorAll(".tf-findbar")).toHaveLength(1);
+  expect([box.selectionStart, box.selectionEnd]).toEqual([0, 6]);
+  // A word with no match says so, and the bar stays for the next.
+  fill(box, "zebra");
+  await settle();
+  expect(target.querySelector(".tf-findn")?.textContent).toBe("none on this page");
+  box.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await settle();
+  expect(target.querySelector(".tf-findbar")).toBeNull();
+  expect(document.activeElement).toBe(title);
+});
+
+test("⌘F leaves a dialog alone: the dialog owns the keyboard (F-456)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  pageNewPage()!.click();
+  await settle();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(target.querySelector(".tf-findbar")).toBeNull();
+});
+
 test("a wide sheet puts the outline in the page's right column, with match counts while finding (#2081)", async () => {
   sheetWidth(1100);
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
@@ -1665,7 +1706,7 @@ test("a comment goes through the queue; copy link and the actions a source does 
   target.innerHTML = "";
   await draw(["confluence:2"]);
   expect(button("Comment")).toBeUndefined();
-  expect(button("New page here…")).toBeUndefined();
+  expect(pageNewPage()).toBeUndefined();
   expect(button("Edit section…")).toBeUndefined();
 });
 
@@ -1686,7 +1727,7 @@ test("Esc closes an open section editor first, and focus goes back to its Edit s
 
 test("New page marks its title as needed in words, and says beside the footer what is missing until there is one (the enabled rule)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   expect(dialog.querySelector(".tf-req")?.textContent).toBe("required");
@@ -1701,7 +1742,7 @@ test("New page marks its title as needed in words, and says beside the footer wh
 
 test("New page asks for the space, the parent and the title, and queues the plain text", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")?.value).toBe("confluence/OPS");
@@ -1740,8 +1781,7 @@ test("the writes the page's credential cannot make are drawn disabled saying why
   const drawn = (label: string) => [...target.querySelectorAll("button")].filter((b) => b.textContent?.trim() === label);
   const refused: [string, string, number][] = [
     ["Comment", "comment", 1],
-    ["New page…", "create_page", 1],
-    ["New page here…", "create_page", 1],
+    ["New page…", "create_page", 2],
     ["Edit section…", "update_page", 1],
   ];
   for (const [label, op, count] of refused) {
@@ -1775,7 +1815,7 @@ test("the page's writes stay enabled where the source refuses nothing, or cannot
       }),
     }),
   );
-  for (const label of ["Comment", "New page…", "New page here…", "Edit section…"]) {
+  for (const label of ["Comment", "New page…", "Edit section…"]) {
     const b = button(label)!;
     expect(b.getAttribute("aria-disabled"), label).toBeNull();
     expect(b.title, label).toBe("");
@@ -1793,7 +1833,7 @@ test("New page refuses a parent the credential cannot add pages under, saying wh
       ),
     }),
   );
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
@@ -2017,7 +2057,7 @@ test("New page with Link it to <job> for a job the mirror lacks is refused, and 
   const links = linkPorts();
   links.listSources = vi.fn(async () => [] as never);
   const io = await drawJob(["confluence:2"], links, ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
@@ -2057,9 +2097,9 @@ test("This job and Link to <job> use the ticket the reader opened when two sourc
 const headActs = () => target.querySelector<HTMLElement>(".tf-rd-page .tf-fhead .tf-acts");
 const actions = () => [...(headActs()?.querySelectorAll("button") ?? [])].map((b) => b.textContent?.trim());
 
-test("the actions read Link to <job> from a job, New page here, More, then Open in; no Comment (#2082, #2286)", async () => {
+test("the actions read Link to <job> from a job, New page, More, then Open in; no Comment (#2082, #2286)", async () => {
   await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
-  expect(actions()).toEqual(["Link to PAY-231", "New page here…", "More", "Open in Confluence"]);
+  expect(actions()).toEqual(["Link to PAY-231", "New page…", "More", "Open in Confluence"]);
 
   if (view) unmount(view);
   target.innerHTML = "";
@@ -2068,7 +2108,7 @@ test("the actions read Link to <job> from a job, New page here, More, then Open 
     props: { ready: true, rest: ["confluence:2"], job: null, ports: ports({ docsPage: vi.fn(async () => RICH) }), linkPorts: linkPorts() as never },
   });
   await settle();
-  expect(actions()).toEqual(["New page here…", "More", "Open in Confluence"]);
+  expect(actions()).toEqual(["New page…", "More", "Open in Confluence"]);
   // The comment box at the foot is the way to comment.
   expect(button("Comment")?.closest(".tf-compose")).not.toBeNull();
 });
@@ -2128,7 +2168,7 @@ test("with no Refresh page, where the row does not fit even with the outline fol
   });
   await settle();
   expect(headActs()!.lastElementChild).toBe(syncNow()[0]);
-  // New page here, More, Open in and Sync now, at 100 px each with no gap in jsdom.
+  // New page, More, Open in and Sync now, at 100 px each with no gap in jsdom.
   sheetResize(399);
   await settle();
   expect(headActs()!.querySelector(".tf-syncnow")).toBeNull();
@@ -2166,7 +2206,7 @@ test("beside Refresh page, Sync now is in More at any width, and takes no room f
   item.click();
   await settle();
   expect(target.querySelector(".tf-rd-more .tf-menu")).toBeNull();
-  // New page here, More, Open in and Refresh, at 100 px each with no gap in jsdom. The reading minimum decides the fold, not Sync now.
+  // New page, More, Open in and Refresh, at 100 px each with no gap in jsdom. The reading minimum decides the fold, not Sync now.
   sheetResize(OUTLINE_ROOM + READING_MIN);
   await settle();
   expect(target.querySelector(".tf-rd-solo")).toBeNull();
@@ -2288,7 +2328,7 @@ async function sendComment(words: string) {
 }
 
 async function createPage(title: string, words: string) {
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   fill(dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!, title);
@@ -2344,7 +2384,7 @@ test("a page queued under a closed fold opens the folds around it, and they stay
   let tree = deep;
   const io = ports({ docsPage: vi.fn(async () => RICH), docsTree: vi.fn(async () => tree), getEntity: vi.fn(async () => pageDetail()), refresh: refreshProbe().ports });
   await draw(["confluence:2"], io);
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   const under = dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")!;
@@ -2373,7 +2413,7 @@ test("a page queued under a closed fold opens the folds around it, and they stay
 
 test("a page queued into another space turns the rail to that space, so its row is seen (F-449)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   const dialog = document.querySelector("[role='dialog']")!;
   const space = dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
@@ -3364,7 +3404,7 @@ const dialogButton = (name: string) => [...document.querySelectorAll<HTMLElement
 test("New page's Esc and × keep the words and the place they were written for; only Cancel and a queued page end them (F-442)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   const reopen = async () => {
-    button("New page here…")!.click();
+    pageNewPage()!.click();
     await settle();
   };
   await reopen();
@@ -3397,13 +3437,13 @@ test("New page's Esc and × keep the words and the place they were written for; 
 
 test("a queued New page leaves no draft behind (F-442)", async () => {
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   typeInto("Title", "Rota");
   await settle();
   dialogButton("Create page")!.click();
   await settle();
-  button("New page here…")!.click();
+  pageNewPage()!.click();
   await settle();
   expect(newPageField<HTMLInputElement>("Title").value).toBe("");
 });

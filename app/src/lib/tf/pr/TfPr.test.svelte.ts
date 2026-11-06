@@ -594,6 +594,8 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(writes).toEqual([{ Comment: { entity: PR, body: "Thanks, looks good." } }]);
   expect(messages()[2]).toBe("MA YouQueued Thanks, looks good.");
   expect(box.value).toBe("");
+  // *Comment* goes off with its draft: focus goes to the box, as ⌘Enter leaves it there (F-266).
+  expect(document.activeElement).toBe(box);
   expect(toasts.items.at(-1)!.text).toBe("Queued: comment on PR #142.");
   expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
 });

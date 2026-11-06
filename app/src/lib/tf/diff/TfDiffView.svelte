@@ -116,6 +116,7 @@
     pipelines = defaultPipelines,
     piping = diffPipelines,
     tools = null,
+    me = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -147,6 +148,8 @@
     piping?: Pick<DiffPipelinesSetting, "on">;
     /** A caller's own control in the toolbar, beside the layout: *Ignore whitespace*. */
     tools?: Snippet | null;
+    /** The reader's name at the source: a thread's comments by that name read *You*, as Conversation's do. None, each keeps its name. */
+    me?: string | null;
   } = $props();
 
   let filter = $state("");
@@ -464,6 +467,7 @@
     canReply: (thread) => !!review?.reply && thread.replies && thread.id !== null,
     canResolve: (thread) => !!review?.resolve && thread.id !== null,
     isResolved: (thread) => review?.resolved?.(thread) ?? thread.resolved_by !== null,
+    isMe: (name) => me !== null && name === me,
     isShown: (thread) => thread.id !== null && shownThreads[thread.id] === true,
     show(thread, on) {
       if (thread.id !== null) shownThreads = { ...shownThreads, [thread.id]: on };
@@ -692,7 +696,7 @@
   {#each comments as comment, n (n)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p title={agoStamp(comment.at)}><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
+      <p title={agoStamp(comment.at)}><b>{talk.isMe(comment.author) ? "You" : comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
       <TfMarkdown text={comment.body} {render} />
     </div>
   {/each}

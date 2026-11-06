@@ -845,8 +845,8 @@ test("a branch holding a key offers Link the PR to <key> in knobas, ticked; it a
 
 // -- A pull request sent from a branch (F-257): nothing offers that branch again, and two with one title both draw. ----
 
-async function createFromSpike(words: string) {
-  await draw(COMPARE("spike/sepa-instant"));
+async function createFromSpike(words: string, branch = "spike/sepa-instant") {
+  await draw(COMPARE(branch));
   type(target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!, words);
   button("Create pull request", target)!.click();
   await settle();
@@ -893,6 +893,32 @@ test("the header's New pull request skips a branch one was sent from", async () 
   await createFromSpike("Instant SEPA spike");
   await draw(["gitea:tidewater/payout-service", "branches"]);
   expect(header()).not.toContain("spike");
+});
+
+test("the header names no other pull request while one sent here waits for a read: its primary stays out, holding its room (F-263)", async () => {
+  await createFromSpike("Instant SEPA spike");
+  await createFromSpike("Release", "release/1.9");
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  const head = target.querySelector(".tf-fhead")!;
+  expect(head.querySelector("a.tf-primary")).toBeNull();
+  expect(head.querySelector(".tf-repoheld")?.textContent).toBe("New pull request");
+  expect(head.querySelector(".tf-repoheld")?.getAttribute("aria-hidden")).toBe("true");
+  unmount(view!);
+  view = null;
+  // The read that holds it settles the echo, and the primary is back.
+  forgetEchoes();
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  expect(target.querySelector(".tf-fhead a.tf-primary")).not.toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-repoheld")).toBeNull();
+});
+
+test("a sent pull request's chip in Branches links to the Pull requests tab (F-264)", async () => {
+  await createFromSpike("Instant SEPA spike");
+  await draw(["gitea:tidewater/payout-service", "branches"]);
+  const spike = [...target.querySelectorAll("table.tf-rbranches tbody tr")].find((tr) => text(tr).startsWith("spike/"))!;
+  const link = spike.children[2]!.querySelector("a")!;
+  expect(text(link)).toBe("Queued");
+  expect(link.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/prs");
 });
 
 test("a sent pull request the source refuses gives the form back, with what was typed (F-257)", async () => {

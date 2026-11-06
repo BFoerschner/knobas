@@ -16,8 +16,8 @@
   its facts (ADR-0020 rule 4).
 
   A pull request this session sent from a branch stands in its *Pull request*
-  cell, *Queued* then *Sent*, and its *New pull request* goes, until the
-  branch's view holds it (F-257).
+  cell, *Queued* then *Sent*, a link to the *Pull requests* tab (F-264), and
+  its *New pull request* goes, until the branch's view holds it (F-257).
 
   *Delete…* opens prototype-6's `openDeleteBranch` and queues `DeleteBranch`
   against the branch. A branch made or deleted this session is drawn at once
@@ -52,6 +52,7 @@
     REPO_PRS,
     branchStanding,
     compareHash,
+    repoHash,
     sourceName,
     viewRows,
     visibleBranches,
@@ -268,7 +269,7 @@
           <td
             >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
-                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<TfStateChip text={prSent.get(row.name)} tone="info" />{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
+                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<a class="tf-sentlink" href={repoHash(repoId, "prs")} title="Show in Pull requests" onclick={(event) => jumpAcross(event, "Branches")}><TfStateChip text={prSent.get(row.name)} tone="info" /></a>{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
           <td>{row.mine ? "you" : (row.author ?? "")}</td>
           <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
