@@ -6,6 +6,7 @@ import type { RenderContent, UserRenderer, UserRendererDraft } from "../../ipc/a
 import { installCommands } from "../../render/command";
 import { renderersFor, renderersForFence } from "../../render/registry";
 import { toasts } from "../../shell/toasts.svelte";
+import { drafts } from "../drafts.svelte";
 import TfRenderersSection, { type RendererPorts } from "./TfRenderersSection.svelte";
 import type { RendererDefault } from "../../render/defaults";
 import { createRendererDefaults } from "../../render/defaults.svelte";
@@ -31,6 +32,7 @@ function storedDefaults(start: RendererDefault[] = []) {
 let target: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
+  drafts.reset();
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -81,6 +83,84 @@ function type(label: string, value: string) {
 }
 
 const button = (name: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === name)!;
+
+const esc = () => {
+  target.querySelector(".tf-dialog")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+};
+const fieldValue = (id: string) => target.querySelector<HTMLInputElement>(`#${id}`)!.value;
+
+test("`Esc` and × keep a new renderer's words; Cancel and a save end them (F-647)", async () => {
+  const { ports } = backend();
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+
+  button("Add a renderer…").click();
+  flushSync();
+  type("Name", "PlantUML");
+  type("Command", "plantuml -pipe");
+  esc();
+  expect(target.querySelector(".tf-dialog")).toBeNull();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name")).toBe("PlantUML");
+  expect(fieldValue("tf-rnd-cmd")).toBe("plantuml -pipe");
+  target.querySelector<HTMLButtonElement>(".tf-dclose")!.click();
+  flushSync();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name"), "× kept them too").toBe("PlantUML");
+  button("Cancel").click();
+  flushSync();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name"), "Cancel ended them").toBe("");
+  type("Name", "D2");
+  type("Command", "d2 -");
+  button("Add renderer").click();
+  target.querySelector<HTMLFormElement>("#tf-rnd-form")?.requestSubmit();
+  await settle();
+  expect(target.querySelector(".tf-dialog")).toBeNull();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name"), "a save ended them").toBe("");
+});
+
+test("an edit keeps its words per renderer, and a renderer left unchanged holds nothing (F-647)", async () => {
+  const one = (id: string, name: string): UserRenderer => ({ id, name, command: `${id} -`, patterns: [], fences: [], input: "text", output: "svg", timeout_secs: 10, diff: false });
+  const { ports } = backend([one("a", "Alpha"), one("b", "Beta")]);
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  const edit = (name: string) => {
+    target.querySelector<HTMLButtonElement>(`button[aria-label="Edit ${name}…"]`)!.click();
+    flushSync();
+  };
+
+  edit("Alpha");
+  expect(drafts.has("renderer:a"), "opened, nothing typed").toBe(false);
+  type("Command", "alpha --svg");
+  esc();
+  edit("Beta");
+  expect(fieldValue("tf-rnd-cmd"), "Beta's own").toBe("b -");
+  esc();
+  edit("Alpha");
+  expect(fieldValue("tf-rnd-cmd")).toBe("alpha --svg");
+});
+
+test("the test pane's sample comes back after leaving the section", async () => {
+  const one: UserRenderer = { id: "a", name: "Alpha", command: "a -", patterns: [], fences: [], input: "text", output: "svg", timeout_secs: 10, diff: false };
+  app = mount(TfRenderersSection, { target, props: { ports: backend([one]).ports, defaults: storedDefaults().store } });
+  await settle();
+  type("Sample", "graph LR");
+  unmount(app);
+  app = mount(TfRenderersSection, { target, props: { ports: backend([one]).ports, defaults: storedDefaults().store } });
+  await settle();
+  expect(fieldValue("tf-rnd-sample")).toBe("graph LR");
+});
 
 test("a renderer added here is saved whole, in the registry at once, and runs in the test pane", async () => {
   const { ports, sent, ran } = backend();

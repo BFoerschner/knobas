@@ -43,3 +43,37 @@ export function createSourceDrafts(): SourceDrafts {
 
 /** The window's one store. */
 export const sourceDrafts = createSourceDrafts();
+
+/**
+ * What `Esc` or × leaves of *Add a source* (F-647): which adapter, the address and the name, for the session. *Cancel* and a
+ * source added end it. **Nothing else, and never a secret:** the token, the password and the account stay in the dialog and
+ * go with it, and so does a test's answer, so a reopened dialog asks for the token and tests again.
+ */
+export interface NewSourceDraft {
+  /** The adapter's descriptor id. */
+  adapter: string;
+  address: string;
+  name: string;
+}
+
+const newSource = createDrafts<NewSourceDraft>();
+const NEW_SOURCE = "new-source";
+
+/**
+ * An address as it may be held. An address can carry a sign-in, so a query and a fragment go, and one with an `@` in it or a
+ * password half typed (`me:hun`) is not held at all. `host:8080` is a port and stays.
+ */
+export function addressToHold(typed: string): string {
+  const bare = typed.trim().split(/[?#]/, 1)[0] ?? "";
+  const authority = bare.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").split("/", 1)[0] ?? "";
+  return bare.includes("@") || /:\D/.test(authority) ? "" : bare;
+}
+
+export const newSourceDraft = {
+  held: (): NewSourceDraft | undefined => newSource.held(NEW_SOURCE),
+  /** Hold what the form says now. The address goes through {@link addressToHold}, and nothing else can be passed. */
+  hold(adapter: string, address: string, name: string): void {
+    newSource.put(NEW_SOURCE, { adapter, address: addressToHold(address), name });
+  },
+  forget: (): void => newSource.forget(NEW_SOURCE),
+};

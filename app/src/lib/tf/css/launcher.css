@@ -4,7 +4,7 @@
    answers replace each other. Mono only on a ticket's key; everything else is Archivo. */
 .tf-dialog.tf-launch { width: min(840px, calc(100vw - 32px)); height: min(588px, 84vh); }
 /* One column model for every row (F-625): the tag, the key cell, and what a row is about, so a *Go to* row's words start where a result's title does.
-   A name runs across the tag and the key cell, and only a name longer than both pushes its own row's words on (F-640), so a short key stays near its title. */
+   A name runs across the tag and the key cell (F-640), so a short key stays near its title. */
 .tf-launch { --ln-tag: 28px; --ln-key: 118px; --ln-gap: 12px; --ln-name: calc(var(--ln-tag) + var(--ln-gap) + var(--ln-key)); }
 /* The `>` palette has no key cell to line up with, so one column holds its longest place, *Settings › Checkouts and Open in*. */
 .tf-ln-list.tf-ln-palette { --ln-name: 220px; }
@@ -90,6 +90,9 @@
   padding: 7px 18px; font-size: var(--t-sm); color: var(--ink-2);
 }
 .tf-ln-opt .tf-ln-nm { color: var(--ink); }
+/* Among results, what a *Go to* or *Search everything* row says starts where a title does, however long its name (F-625): a long name takes a second line. */
+.tf .tf-ln-opt.tf-ln-go { grid-template-columns: var(--ln-name) minmax(0, 1fr); }
+.tf-ln-go .tf-ln-nm { overflow-wrap: anywhere; }
 .tf-ln-none { padding: 14px 18px; color: var(--ink-2); font-size: var(--t-sm); line-height: 1.5; }
 .tf-ln-none.tf-ln-err { color: var(--err); }
 /* The paste that missed: a sentence, the link as typed, and the one thing left to do with it. */

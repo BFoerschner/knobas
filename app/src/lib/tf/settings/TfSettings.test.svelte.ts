@@ -27,6 +27,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { GITEA_SCHEMA, JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
 import type { SettingsPorts } from "./ports";
+import { newSourceDraft } from "./source-drafts.svelte";
 import TfSettings from "./TfSettings.svelte";
 
 let target: HTMLElement;
@@ -35,6 +36,7 @@ let view: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
   location.hash = "";
   sourceDrafts.reset();
+  newSourceDraft.forget();
   target = document.createElement("div");
   document.body.appendChild(target);
 });

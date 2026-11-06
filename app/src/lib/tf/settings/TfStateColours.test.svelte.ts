@@ -8,6 +8,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { KindStateColours, StateWordColour, ToneChoice } from "../../ipc/sources";
 import { reset, toasts } from "../../shell/toasts.svelte";
+import { stateWord } from "../state-word";
+import { columnName } from "./state-colours";
 import TfStateColours, { type StateColourPorts } from "./TfStateColours.svelte";
 
 let target: HTMLElement;
@@ -93,18 +95,18 @@ async function draw(ports: StateColourPorts) {
 const section = (name: string) => target.querySelector<HTMLElement>(`section[aria-label="${name}"]`);
 /** The words in a section's column, in the order drawn. */
 const column = (name: string, tone: string) =>
-  [...(section(name)?.querySelectorAll(`[role="group"][aria-label="${tone}"] .tf-sc-word`) ?? [])].map(text);
-const chip = (word: string) => target.querySelector<HTMLElement>(`.tf-sc-chip[aria-label="${word}"]`);
-const grip = (word: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="Move ${word}"]`);
+  [...(section(name)?.querySelectorAll(`[role="group"][aria-label="${columnName(tone as ToneChoice)}"] .tf-sc-word`) ?? [])].map(text);
+const chip = (word: string) => target.querySelector<HTMLElement>(`.tf-sc-chip[aria-label="${stateWord(word)}"]`);
+const grip = (word: string) => target.querySelector<HTMLButtonElement>(`button[aria-label="Move ${stateWord(word)}"]`);
 const press = (word: string, key: string) => grip(word)!.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
 
 test("each word sits in its tone's column; declared words first, then seen words alphabetically", async () => {
   await draw(fakePorts([tickets()]));
 
   expect(column("Tickets", "ok")).toEqual(["Done"]);
-  expect(column("Tickets", "info")).toEqual(["In Progress"]);
+  expect(column("Tickets", "info")).toEqual(["In progress"]);
   expect(column("Tickets", "err")).toEqual(["Closed"]);
-  expect(column("Tickets", "No colour")).toEqual(["Blocked", "To Do"]);
+  expect(column("Tickets", "none")).toEqual(["Blocked", "To do"]);
   expect(column("Tickets", "warn")).toEqual([]);
   expect(column("Tickets", "muted")).toEqual([]);
   // Across the board, in reading order: the declared ones in declared order, then the seen ones.
@@ -129,7 +131,7 @@ test("the order puts declared words before seen ones whatever order the read giv
   await draw(fakePorts([mixed]));
 
   expect(column("Tickets", "warn")).toEqual(["Waiting", "Paused"]);
-  expect(column("Tickets", "No colour")).toEqual(["Alpha", "Zebra"]);
+  expect(column("Tickets", "none")).toEqual(["Alpha", "Zebra"]);
 });
 
 test("→ moves a focused chip one column and sets the tone; ← from info sets err", async () => {
@@ -161,7 +163,7 @@ test("→ from muted sets No colour; → at No colour and ← at ok do nothing",
   press("closed", "ArrowRight");
   await settle();
   expect(ports.setToneOverride).toHaveBeenLastCalledWith("pr", "closed", "none");
-  expect(column("Pull requests", "No colour")).toEqual(["closed"]);
+  expect(column("Pull requests", "none")).toEqual(["Closed"]);
 
   ports.setToneOverride.mockClear();
   press("closed", "ArrowRight");
@@ -175,7 +177,7 @@ test("a drop on a column sets that column's tone, as the keys do", async () => {
   await draw(ports);
 
   chip("Blocked")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
-  const err = section("Tickets")!.querySelector('[role="group"][aria-label="err"]')!;
+  const err = section("Tickets")!.querySelector('[role="group"][aria-label="Error"]')!;
   err.dispatchEvent(new Event("dragover", { bubbles: true, cancelable: true }));
   err.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
   await settle();
@@ -186,7 +188,7 @@ test("a drop on a column sets that column's tone, as the keys do", async () => {
   // A drop back on the column it came from sends nothing.
   ports.setToneOverride.mockClear();
   chip("Done")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
-  section("Tickets")!.querySelector('[role="group"][aria-label="ok"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+  section("Tickets")!.querySelector('[role="group"][aria-label="Good"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
   await settle();
   expect(ports.setToneOverride).not.toHaveBeenCalled();
 });
@@ -198,19 +200,22 @@ test("a drag that ends without a drop leaves nothing held: a later drop from els
   chip("Blocked")!.dispatchEvent(new Event("dragstart", { bubbles: true }));
   chip("Blocked")!.dispatchEvent(new Event("dragend", { bubbles: true }));
   // Text dragged in from outside the board: no dragstart on a chip.
-  section("Tickets")!.querySelector('[role="group"][aria-label="err"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
+  section("Tickets")!.querySelector('[role="group"][aria-label="Error"]')!.dispatchEvent(new Event("drop", { bubbles: true, cancelable: true }));
   await settle();
   expect(ports.setToneOverride).not.toHaveBeenCalled();
 });
 
-test("a chip says where its tone comes from; Reset sits only on yours and clears that word", async () => {
+test("only a word you moved is marked; where the others come from is in the title; Reset clears that word (F-634)", async () => {
   const ports = fakePorts([tickets()]);
   await draw(ports);
 
-  expect(text(chip("Done")!.querySelector(".tf-sc-from"))).toBe("adapter");
-  expect(text(chip("Closed")!.querySelector(".tf-sc-from"))).toBe("yours");
+  expect(text(chip("Done"))).toBe("Done");
+  expect(grip("Done")!.title).toContain("From the adapter");
+  expect(text(chip("Closed"))).toBe("ClosedReset");
+  expect(grip("Closed")!.title).toContain("Yours");
   // A to-do status draws no colour, and that is its category's (spec #2463).
-  expect(text(chip("To Do")!.querySelector(".tf-sc-from"))).toBe("Jira category");
+  expect(text(chip("To Do"))).toBe("To do");
+  expect(grip("To Do")!.title).toContain("From its Jira category");
   expect(target.querySelectorAll('button[aria-label^="Reset "]').length).toBe(1);
   // The word and Reset are the chip's own buttons, the control the design system names for them.
   expect(grip("Closed")!.classList.contains("tf-chipbtn")).toBe(true);
@@ -221,6 +226,7 @@ test("a chip says where its tone comes from; Reset sits only on yours and clears
   expect(ports.clearToneOverrides).toHaveBeenCalledWith("ticket", "Closed");
   expect(column("Tickets", "muted")).toEqual(["Closed"]);
   expect(target.querySelector('button[aria-label="Reset Closed"]')).toBeNull();
+  expect(document.activeElement, "focus stays with the word, which moved").toBe(grip("Closed"));
 });
 
 test("a seen status at its category's tone sits in that column, labelled Jira category; Reset returns it there", async () => {
@@ -238,14 +244,40 @@ test("a seen status at its category's tone sits in that column, labelled Jira ca
   await draw(ports);
 
   expect(column("Tickets", "info")).toEqual(["Ready for QA"]);
-  expect(text(chip("Ready for QA")!.querySelector(".tf-sc-from"))).toBe("Jira category");
+  expect(grip("Ready for QA")!.title).toContain("From its Jira category");
   expect(column("Tickets", "warn")).toEqual(["Shipped"]);
 
   target.querySelector<HTMLButtonElement>('button[aria-label="Reset Shipped"]')!.click();
   await settle();
   expect(ports.clearToneOverrides).toHaveBeenCalledWith("ticket", "Shipped");
   expect(column("Tickets", "ok")).toEqual(["Done", "Shipped"]);
-  expect(text(chip("Shipped")!.querySelector(".tf-sc-from"))).toBe("Jira category");
+  expect(grip("Shipped")!.title).toContain("From its Jira category");
+  expect(text(chip("Shipped"))).toBe("Shipped");
+});
+
+test("a chip says the word as other chips do, the source's spelling in its title, and sends the source's word (F-634)", async () => {
+  const ports = fakePorts([{ kind: "build", has_category: false, words: [word({ word: "SUCCESS", declared_tone: "ok" }), word({ word: "FAILURE", declared_tone: "err" })] }]);
+  await draw(ports);
+
+  expect(column("Builds", "ok")).toEqual(["Passed"]);
+  expect(column("Builds", "err")).toEqual(["Failed"]);
+  expect(grip("SUCCESS")!.title).toContain("SUCCESS");
+  // What is stored is the source's word.
+  press("SUCCESS", "ArrowRight");
+  await settle();
+  expect(ports.setToneOverride).toHaveBeenCalledWith("build", "SUCCESS", "warn");
+  expect(column("Builds", "warn")).toEqual(["Passed"]);
+  expect(document.activeElement).toBe(grip("SUCCESS"));
+});
+
+test("a column is headed by what it means, and the line under a section names columns, not tokens (F-634)", async () => {
+  await draw(fakePorts([{ kind: "build", has_category: false, words: [word({ word: "SUCCESS", declared_tone: "ok" })] }]));
+
+  const heads = [...section("Builds")!.querySelectorAll(".tf-sc-colh")].map(text);
+  expect(heads).toEqual(["Good", "Warning", "Error", "Active", "Quiet", "No colour"]);
+  const line = text(section("Builds")!.querySelector(".tf-sc-line"));
+  expect(line).toContain("Error is what the inbox and signals count as a failed build");
+  expect(line).not.toMatch(/\b(err|ok|info|muted)\b/);
 });
 
 test("Reset all clears the whole kind", async () => {

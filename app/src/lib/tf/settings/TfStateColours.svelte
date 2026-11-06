@@ -13,6 +13,9 @@
 
   Every surface that draws a state reads the merged map, so a move changes
   more than the colour: the line under each section says what (`drives`).
+
+  A chip says its word as every other chip does (`stateWord`, F-634), so *Passed* and not *SUCCESS*; the source's spelling is
+  in its title. Only a word you moved is marked, by its *Reset*: where the others' tones come from is in the title too.
 -->
 <script lang="ts" module>
   import type { SectionPorts } from "./ports";
@@ -28,6 +31,7 @@
   import type { KindStateColours, ToneChoice } from "../../ipc/sources";
   import { kindLabel } from "../../shell/kinds";
   import { push } from "../../shell/toasts.svelte";
+  import { stateWord } from "../state-word";
   import { toneClass } from "../tone";
   import { COLUMNS, columnName, columnOf, drives, ordered, originName, stepped } from "./state-colours";
 
@@ -65,11 +69,19 @@
   async function place(kind: string, word: string, column: ToneChoice, refocus: boolean) {
     const now = stored?.find((k) => k.kind === kind)?.words.find((w) => w.word === word);
     if (now === undefined || columnOf(now) === column) return;
-    const done = await write(() => ports.setToneOverride(kind, word, column), `Could not set the colour of ${word}`);
-    if (done && refocus) {
-      await tick();
-      board?.querySelector<HTMLElement>(`section[data-kind="${CSS.escape(kind)}"] button[aria-label="Move ${CSS.escape(word)}"]`)?.focus();
-    }
+    const done = await write(() => ports.setToneOverride(kind, word, column), `Could not set the colour of ${stateWord(word)}`);
+    if (done && refocus) await focusWord(kind, word);
+  }
+
+  /** A word's grip, wherever its chip now stands, so a press by key carries on from it. */
+  async function focusWord(kind: string, word: string) {
+    await tick();
+    board?.querySelector<HTMLElement>(`section[data-kind="${CSS.escape(kind)}"] button[data-word="${CSS.escape(word)}"]`)?.focus();
+  }
+
+  /** *Reset*: the button goes with the mark, so focus stays with the word. */
+  async function resetWord(kind: string, word: string) {
+    if (await write(() => ports.clearToneOverrides(kind, word), `Could not reset ${stateWord(word)}`)) await focusWord(kind, word);
   }
 
   function gripKeys(event: KeyboardEvent, kind: string, word: KindStateColours["words"][number]) {
@@ -91,9 +103,9 @@
     if (held !== null && held.kind === kind) void place(kind, held.word, column, false);
   }
 
-  /** A line with its tone names in backticks, as text and code runs. */
-  function runs(line: string): { code: boolean; text: string }[] {
-    return line.split("`").map((text, i) => ({ code: i % 2 === 1, text }));
+  /** A line with its columns' names in backticks, as text and name runs. */
+  function runs(line: string): { name: boolean; text: string }[] {
+    return line.split("`").map((text, i) => ({ name: i % 2 === 1, text }));
   }
 </script>
 
@@ -101,7 +113,7 @@
   <div class="tf-sc" bind:this={board}>
     <h2 class="tf-sc-title">State colours</h2>
     <p class="tf-stg-p">
-      Where a state word draws, per kind of item. Drag a word to another column, or focus it and press ← or →. It saves at once.
+      The colour each state word draws in, per kind of item. Drag a word to another column, or focus it and press ← or →. It saves at once.
     </p>
     {#each stored as kind (kind.kind)}
       {@const name = kindLabel(kind.kind)}
@@ -130,25 +142,27 @@
                 {#if column !== "none"}<span class="tf-dot tf-{column}" aria-hidden="true"></span>{/if}{columnName(column)}
               </div>
               {#each words.filter((w) => columnOf(w) === column) as word (word.word)}
+                {@const said = stateWord(word.word)}
                 <span
                   class="tf-chip tf-sc-chip {toneClass(word)}"
                   role="group"
-                  aria-label={word.word}
+                  aria-label={said}
                   draggable="true"
                   ondragstart={(event) => dragStart(event, kind.kind, word.word)}
                   ondragend={() => (dragged = null)}
                   ><button
                     type="button"
                     class="tf-chipbtn tf-sc-word"
-                    aria-label="Move {word.word}"
-                    title="Drag, or press ← or →"
-                    onkeydown={(event) => gripKeys(event, kind.kind, word)}>{word.word}</button
-                  ><span class="tf-sc-from">{originName(word.origin)}</span>{#if word.yours !== null}<button
+                    aria-label="Move {said}"
+                    data-word={word.word}
+                    title="{word.word}. {originName(word.origin)}. Drag, or press ← or →"
+                    onkeydown={(event) => gripKeys(event, kind.kind, word)}>{said}</button
+                  >{#if word.yours !== null}<button
                       type="button"
                       class="tf-chipbtn tf-sc-reset"
-                      aria-label="Reset {word.word}"
+                      aria-label="Reset {said}"
                       title="Back to the default"
-                      onclick={() => void write(() => ports.clearToneOverrides(kind.kind, word.word), `Could not reset ${word.word}`)}
+                      onclick={() => void resetWord(kind.kind, word.word)}
                       >Reset</button
                     >{/if}</span
                 >
@@ -158,7 +172,7 @@
         </div>
         {#if line !== null}
           <p class="tf-stg-p tf-sc-line">
-            {#each runs(line) as run, i (i)}{#if run.code}<code>{run.text}</code>{:else}{run.text}{/if}{/each}
+            {#each runs(line) as run, i (i)}{#if run.name}<i>{run.text}</i>{:else}{run.text}{/if}{/each}
           </p>
         {/if}
       </section>

@@ -453,9 +453,19 @@
    * *Everything* with a preview (#2431): the dialog grows, and over a search
    * the body splits, the results at the left and the selected row's
    * excerpts at the right. Titles is the one list at the usual size.
+   *
+   * A search that found nothing is one sentence, so it keeps the usual size (F-625). Only while nothing has been found since
+   * the launcher opened: from then on it stays grown, so the box doesn't move under words that stop finding anything, and
+   * the usual search never moves it at all.
    */
   const deep = $derived(scope.titles === false);
   const split = $derived(deep && overlay === null && naming === null && sheet.current === null && session.mode === "results" && holdsAnswer(session.rows));
+  const nothingFound = $derived(session.mode === "results" && session.response !== null && !holdsAnswer(session.rows));
+  let found = $state(false);
+  $effect(() => {
+    if (!open || !deep) found = false;
+    else if (split) found = true;
+  });
 
   /**
    * The row the pane draws: the selection, once it has rested for
@@ -1120,7 +1130,7 @@
   -->
   <TfDialog
     title="Search and actions"
-    className={deep ? "tf-launch tf-launch-deep" : "tf-launch"}
+    className={deep && (found || !nothingFound) ? "tf-launch tf-launch-deep" : "tf-launch"}
     onclose={close}
     scrimCloses
     footer={footerKeys.length > 0 || saveShown ? keysAndSave : undefined}

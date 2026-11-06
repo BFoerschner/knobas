@@ -11,7 +11,7 @@ import { flushSync } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { LauncherHome, SearchQuery, SearchResponse } from "../ipc";
-import { Session } from "./session.svelte";
+import { askedAs, Session } from "./session.svelte";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -645,4 +645,30 @@ test("asking again under the other mode keeps a list just saved as saved", async
   expect(session.savedId).toBe("list-1");
 
   session.dispose();
+});
+
+test("a pull request written as a developer writes it is asked as one, and anything else goes as typed (F-066)", () => {
+  for (const raw of ["PR 142", "pr 142", "PR #142", "PR#142", " pull request 142 "]) expect(askedAs(raw), raw).toBe("#p 142");
+  for (const raw of ["142", "#142", "PR-142", "pr142", "PR 142 retry", "#t PR 142", "prose 142"]) expect(askedAs(raw), raw).toBe(raw);
+});
+
+test("the box keeps what was typed, the engine is asked for pull requests, and a saved list keeps what was asked (F-066)", async () => {
+  const asked: string[] = [];
+  const created: string[] = [];
+  const session = new Session({
+    debounceMs: 0,
+    search: async (query: SearchQuery) => {
+      asked.push(query.raw);
+      return { interpreted: { text: "142", prefix: null, filters: { sources: [], kinds: ["pr"], updated_within_days: null, mine: false, authors: [] }, unknown_tokens: [], left_out_tokens: [] }, groups: [], total: 0, took_ms: 1, coverage: [] } as unknown as SearchResponse;
+    },
+    launcherHome: async () => ({}) as LauncherHome,
+    createSmartList: async (name: string, query: string) => (created.push(query), { id: "list-1", name, query }) as never,
+  });
+  session.set("PR 142");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(asked).toEqual(["#p 142"]);
+  expect(session.raw).toBe("PR 142");
+  await session.saveCurrent("That one");
+  expect(created).toEqual(["#p 142"]);
 });

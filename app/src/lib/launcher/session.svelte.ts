@@ -38,6 +38,16 @@ export const DEBOUNCE_MS = 90;
 /** How many rows one answer may carry. The engine clamps to 200 anyway. */
 export const SEARCH_LIMIT = 40;
 
+/**
+ * What the engine is asked for the words in the box. A developer writes a pull request as *PR 142*, and the engine would look
+ * for the word *PR* in its titles (F-066), so that form asks for pull requests holding 142, in the grammar's own `#p`. The box
+ * keeps what was typed. Anything else goes as typed: the grammar stays the engine's.
+ */
+export function askedAs(raw: string): string {
+  const number = /^\s*(?:pr|pull request)(?:\s+#?|#)(\d+)\s*$/i.exec(raw)?.[1];
+  return number === undefined ? raw : `#p ${number}`;
+}
+
 /** The IPC the session drives. Injected so tests need no bridge. */
 export interface SessionPorts {
   search(query: SearchQuery): Promise<SearchResponse>;
@@ -301,7 +311,7 @@ export class Session {
     const create = this.#ports.createSmartList;
     if (!create) return;
     await this.#write(async () => {
-      this.savedId = (await create(label, this.raw)).id;
+      this.savedId = (await create(label, askedAs(this.raw))).id;
     });
   }
 
@@ -451,7 +461,7 @@ export class Session {
     this.pending = true;
     try {
       const response = await this.#ports.search({
-        raw: this.raw,
+        raw: askedAs(this.raw),
         limit: SEARCH_LIMIT,
         // `noFilters()` rather than the literal: the shape is the bridge's, so
         // a dimension added to `SearchFilters` is one edit there and none here.

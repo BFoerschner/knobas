@@ -17,6 +17,10 @@
   Settings › Sources mounts it, and so does the first-run wizard's *Connect a
   real system* (#1400), with the same ports: there is one add-source flow.
 
+  **`Esc` and × keep the adapter, the address and the name** (F-647, `newSourceDraft`), wherever it was opened, and *Cancel*
+  ends them, as a source added does. The token, the password, the account and a test's answer are this dialog's own state and
+  go with it, so a reopened dialog asks for the token and tests again.
+
   *Install an adapter* (#1202, #1209, ADR-0028) takes a GitHub repository
   URL (its latest release), a manifest URL, or the path of a local
   `knobas-adapter.json`. *Install…* runs every check and writes nothing
@@ -33,7 +37,7 @@
   default, and its page changes that.
 -->
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { Attachment } from "svelte/attachments";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -47,6 +51,7 @@
   import { pageFields } from "./source-config";
   import { IDENTITY_FIELD } from "./settings";
   import { reach } from "./adapter-preview";
+  import { newSourceDraft } from "./source-drafts.svelte";
   import TfAdapterFacts from "./TfAdapterFacts.svelte";
   import TfDialog from "./TfDialog.svelte";
   import TfSchemaForm from "./TfSchemaForm.svelte";
@@ -102,11 +107,22 @@
       .then((rows) => {
         if (dead) return;
         adapters = rows;
-        // Nothing is preselected (Controls, the enabled rule), unless there is nothing to choose between.
-        if (chosen === null && rows.length === 1) choose(rows[0]!);
+        // What `Esc` or × left here comes back; an adapter that has gone since gives nothing back.
+        const held = newSourceDraft.held();
+        const left = rows.find((adapter) => adapter.id === held?.adapter);
+        if (chosen === null && held && left) {
+          choose(left);
+          baseUrl = held.address;
+          displayName = held.name;
+          // Otherwise nothing is preselected (Controls, the enabled rule), unless there is nothing to choose between.
+        } else if (chosen === null && rows.length === 1) choose(rows[0]!);
         // What the dialog asks first arrived after it opened, so focus goes in now.
         void tick().then(() => {
-          if (!dead) (form?.querySelector<HTMLElement>("#tf-add-address") ?? radios?.querySelector<HTMLElement>("input"))?.focus();
+          if (dead) return;
+          const field = form?.querySelector<HTMLElement>("#tf-add-address");
+          (field ?? radios?.querySelector<HTMLElement>("input"))?.focus();
+          // With the field above it in view too, in a short window, as a pick does (F-624).
+          field?.scrollIntoView?.({ block: "center" });
         });
       })
       .catch((cause) => {
@@ -116,6 +132,19 @@
       dead = true;
     };
   });
+
+  // Held as it changes, so going by any way keeps it. These three and no other: never a field that holds a secret.
+  $effect(() => {
+    if (chosen === null) return;
+    const [adapter, address, name] = [chosen.id, baseUrl, displayName];
+    untrack(() => newSourceDraft.hold(adapter, address, name));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discard() {
+    newSourceDraft.forget();
+    onclose();
+  }
 
   const config = $derived(chosen === null ? { fields: [], error: null } : pageFields(chosen.config_schema, { keepUser: true }));
   const validated = $derived(validate(config.fields, configValues));
@@ -296,6 +325,7 @@
       });
       secret = "";
       accountPassword = "";
+      newSourceDraft.forget();
       onsaved(source);
     } catch (cause) {
       // The dialog stays open with the draft: a name collision is not a reason to retype it.
@@ -418,7 +448,7 @@
   {/snippet}
   {#snippet footer()}
     <button class="tf-btn tf-first" disabled={!ready || testing} onclick={() => void test()}>Test connection</button>
-    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={discard}>Cancel</button>
     <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
   {/snippet}
 </TfDialog>

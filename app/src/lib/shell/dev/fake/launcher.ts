@@ -304,15 +304,18 @@ function launcherKindHits(): { haystack: string; hit: Hit; log?: string }[] {
  * answers the shape and not the engine's question. The ranking, the excerpt
  * and the grammar are the engine's, witnessed over a real PostgreSQL in
  * `knobas-search`'s integration tests. A leading `#` filter narrows to its
- * kinds (`SYNTAX`'s letters), so a section's search can be looked at too. Any
- * other prefix or a `:` token is not answered here.
+ * kinds (`SYNTAX`'s letters), so a section's search can be looked at too, and a
+ * `#` word that is no filter is the word, hash dropped (#2420). Any other
+ * prefix or a `:` token is not answered here.
  */
 function wordSearch(raw: string, titles: boolean): SearchResponse | null {
-  const asked = raw.trim();
-  const filter = /^#([a-z]+)(?:\s+(.*))?$/i.exec(asked);
-  const letters = [...(filter?.[1]?.toLowerCase() ?? "")];
-  const kinds = letters.flatMap((letter) => SYNTAX.find((row) => row.token === `#${letter}`)?.kind ?? []);
-  if (kinds.length !== letters.length) return null;
+  const typed = raw.trim();
+  const named = /^#([a-z]+)(?:\s+(.*))?$/i.exec(typed);
+  const lettersOf = [...(named?.[1]?.toLowerCase() ?? "")];
+  const kindsOf = lettersOf.flatMap((letter) => SYNTAX.find((row) => row.token === `#${letter}`)?.kind ?? []);
+  const filter = kindsOf.length === lettersOf.length ? named : null;
+  const kinds = filter ? kindsOf : [];
+  const asked = filter ? typed : typed.replace(/^#(?=[^\s])/, "");
   const text = filter ? (filter[2] ?? "").trim() : asked;
   if ((text === "" && filter === null) || /^[>?#@]/.test(text) || /\S+:/.test(text)) return null;
   const words = text.toLowerCase().split(/\s+/).filter(Boolean);

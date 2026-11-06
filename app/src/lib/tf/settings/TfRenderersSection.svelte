@@ -23,7 +23,8 @@
   pipelines are `TfPipelinesSettings`.
 
   A renderer is added and edited in `TfDialog`, as a source is (F-618): focus goes to its first field, `Esc` closes it,
-  and focus comes back to what opened it.
+  and focus comes back to what opened it. `Esc` and × keep what was typed, per renderer, and *Cancel* and a save end it, as
+  *New page* does (F-647). The test pane's sample is kept across a leave too.
 
   The test pane runs a *saved* renderer on pasted text: the webview never
   sends a program (ADR-0016), so a renderer is saved before it is tried, as
@@ -47,6 +48,9 @@
 </script>
 
 <script lang="ts">
+  import { untrack } from "svelte";
+
+  import { drafts } from "../drafts.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { secondsLabel } from "../../time/format";
   import type { CommandOutput, RendererDefault, RendererInput } from "../../ipc/app";
@@ -91,7 +95,12 @@
 
   /** The test pane: which saved renderer, the sample, and the run asked for. */
   let testId = $state("");
-  let sample = $state("");
+  const SAMPLE_DRAFT = "renderer-sample";
+  let sample = $state(untrack(() => drafts.get(SAMPLE_DRAFT)));
+  $effect(() => {
+    const words = sample;
+    untrack(() => drafts.put(SAMPLE_DRAFT, words));
+  });
   let trying = $state<{ renderer: Renderer; text: string; at: number } | null>(null);
 
   /** Counts installs, so the renderers a default can name are read again after one. */
@@ -149,9 +158,12 @@
     diff: r.diff,
   });
 
-  function edit(at: number | "new") {
+  type RendererForm = typeof form;
+
+  /** The form as it opens with nothing typed: the renderer's own values, or a new one's. */
+  function freshForm(at: number | "new"): RendererForm {
     const r = at === "new" ? null : saved![at]!;
-    form = {
+    return {
       name: r?.name ?? "",
       command: r?.command ?? "",
       patterns: r?.patterns.join(" ") ?? "",
@@ -161,8 +173,29 @@
       timeout: String(r?.timeout_secs ?? 10),
       diff: r?.diff ?? false,
     };
+  }
+
+  const draftKey = (at: number | "new") => `renderer:${at === "new" ? "new" : saved![at]!.id}`;
+
+  function edit(at: number | "new") {
+    const key = draftKey(at);
+    form = drafts.has(key) ? (JSON.parse(drafts.get(key)) as RendererForm) : freshForm(at);
     refusal = null;
     editing = at;
+  }
+
+  // What `Esc` or × left comes back when this renderer's dialog opens again. A form as it opened is no draft.
+  $effect(() => {
+    if (editing === null) return;
+    const words = JSON.stringify(form);
+    const at = editing;
+    untrack(() => drafts.put(draftKey(at), words === JSON.stringify(freshForm(at)) ? "" : words));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discardForm() {
+    if (editing !== null) drafts.forget(draftKey(editing));
+    editing = null;
   }
 
   async function store(list: UserRendererDraft[]): Promise<boolean> {
@@ -201,6 +234,7 @@
       testId = editing === "new" ? (saved.at(-1)?.id ?? testId) : saved[editing]!.id;
       // The press rule: an edit changes nothing else on the page that says it landed.
       push({ text: `${editing === "new" ? "Added" : "Saved"} ${form.name.trim()}` });
+      drafts.forget(draftKey(editing));
       editing = null;
     }
     saving = false;
@@ -216,6 +250,7 @@
     if (saved === null) return;
     const gone = saved[at]!;
     if (!(await store(saved.filter((_, i) => i !== at).map(draftOf)))) return;
+    drafts.forget(`renderer:${gone.id}`);
     refusal = null;
     rendererRemoved({ name: gone.name, at, item: draftOf(gone) });
   }
@@ -338,7 +373,7 @@
         {#if refusal !== null}<p class="tf-dlg-note tf-stg-errt" role="alert" {@attach (node) => node.scrollIntoView?.({ block: "nearest" })}>{refusal}</p>{/if}
       {/snippet}
       {#snippet footer()}
-        <button class="tf-btn tf-ghost" onclick={() => (editing = null)}>Cancel</button>
+        <button class="tf-btn tf-ghost" onclick={discardForm}>Cancel</button>
         <button class="tf-btn tf-primary" type="submit" form="tf-rnd-form" disabled={formWhy !== null || saving}>{editing === "new" ? "Add renderer" : "Save renderer"}</button>
       {/snippet}
     </TfDialog>

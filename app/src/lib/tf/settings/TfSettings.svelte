@@ -15,6 +15,8 @@
   status. Only the newest list read may land (`latestRead`, #107).
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { pageVisible } from "../kept-pages.svelte";
   import TfRailBar from "../TfRailBar.svelte";
   import TfScroller from "../TfScroller.svelte";
@@ -206,11 +208,16 @@
   const crumbName = $derived(!known ? "Nothing here" : sourceId === null ? sectionName : (current?.display_name ?? sourceId));
   /** Below 900 px, whether the sections rail is unfolded under its bar. */
   let railOpen = $state(false);
-  /** The section's column is the page's scroller, so moving to another section starts it at its top. */
+  /** Which section or source is drawn: only a move between them starts the column at its top, not a dialog's own address. */
+  const shownPlace = $derived(`${place.section}/${sourceId ?? ""}`);
+  /**
+   * The section's column is the page's scroller, so moving to another section starts it at its top (F-650). After the
+   * flush: `keepScroll` on the kept page sets back what it noted before the move, and its effect runs after this one, which
+   * a section drawn at once showed as a page opened part way down.
+   */
   function atTopOnMove(scroller: HTMLElement) {
-    void place.section;
-    void sourceId;
-    scroller.scrollTop = 0;
+    void shownPlace;
+    void tick().then(() => (scroller.scrollTop = 0));
   }
 </script>
 

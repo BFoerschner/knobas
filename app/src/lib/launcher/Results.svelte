@@ -109,7 +109,7 @@
     {#if row.kind === "action"}
       <button
         id={optionId(index)}
-        class="tf-ln-opt"
+        class="tf-ln-opt tf-ln-go"
         class:tf-ln-on={index === selected}
         role="option"
         aria-selected={index === selected}
@@ -178,7 +178,7 @@
   {#if row.kind === "docs"}
     <button
       id={optionId(index)}
-      class="tf-ln-opt"
+      class="tf-ln-opt tf-ln-go"
       class:tf-ln-on={index === selected}
       role="option"
       aria-selected={index === selected}
@@ -201,7 +201,7 @@
     {#if row.kind === "widen"}
       <button
         id={optionId(index)}
-        class="tf-ln-opt"
+        class="tf-ln-opt tf-ln-go"
         class:tf-ln-on={index === selected}
         role="option"
         aria-selected={index === selected}
