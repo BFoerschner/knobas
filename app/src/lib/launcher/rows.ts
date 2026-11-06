@@ -151,13 +151,19 @@ export function flatten(input: {
       );
       const answer = [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
       const words = response.interpreted.text;
-      // Filters or a prefix mean the reader is narrowing a search, not naming a place.
-      const filtered = (input.raw ?? words).trim() !== words.trim();
-      const places = filtered ? [] : placeRows(input.extras?.places ?? [], words, answer.length === 0);
+      const filtered = narrowed(input.raw ?? words, words);
+      // Over an answer, a filter means the reader is narrowing a search, not naming a place. Where it finds nothing, the
+      // words may still be a place's name, and a dead end one key from it helps nobody (F-042).
+      const places = filtered && answer.length > 0 ? [] : placeRows(input.extras?.places ?? [], words, answer.length === 0);
       const widen = answer.length === 0 && input.extras?.widens === true && (filtered || input.titles === true);
       return [...places, ...answer, ...(widen ? [{ kind: "widen", id: "widen", words } as const] : [])];
     }
   }
+}
+
+/** Whether filters or a prefix narrow the search beyond its words: the box holds more than the parse's words. */
+export function narrowed(raw: string, words: string): boolean {
+  return raw.trim() !== words.trim();
 }
 
 /** The *Go to* rows over an answer: by name, and by what a place holds where nothing else answered. */

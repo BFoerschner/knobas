@@ -11,7 +11,7 @@
  */
 import { tick } from "svelte";
 
-import { ipcErrorMessage } from "../ipc";
+import { ipcErrorMessage, isIpcError } from "../ipc";
 import type { LinkSetRow, ViewAction } from "../ipc/entity";
 import { drawn } from "../detail/relations";
 import { linkFailureMessage } from "../detail/links";
@@ -366,7 +366,7 @@ export class SheetMode {
     if (!at) return;
     const { subject, relation } = at;
     const { io, session, focus, close, navigate } = this.#host;
-    const settled = (work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>) => void this.#settled(work, said, undo);
+    const settled = (work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string) => void this.#settled(work, said, undo, name);
     switch (does.kind) {
       case "go":
         close();
@@ -376,7 +376,7 @@ export class SheetMode {
       case "write":
         return settled(() => io.submitWrite(does.payload), () => does.said);
       case "ack":
-        return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId));
+        return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId), subject.kind === "entity" ? subject.title : undefined);
       case "link": {
         const job = this.#host.job;
         if (!job || subject.kind !== "entity") return;
@@ -469,26 +469,35 @@ export class SheetMode {
           return settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
         }
         if (does.op === "ack") {
-          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.", () => io.inboxUnack(item.key));
+          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.", () => io.inboxUnack(item.key), item.title);
         }
         return settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
       }
     }
   }
 
-  /** *Undo* on a toast: its own failure is said too, since nothing else is looking. */
-  #undone(undo: () => Promise<unknown>): void {
-    undo().catch((cause: unknown) => push({ text: ipcErrorMessage(cause), tone: "err" }));
+  /**
+   * *Undo* on a toast: its own failure is said too, since nothing else is looking. A monitor that recovered meanwhile has
+   * no alert left to take back, which is news and no fault: said as the Inbox says it, never the backend's `no open alert`.
+   */
+  #undone(undo: () => Promise<unknown>, name?: string): void {
+    undo().catch((cause: unknown) => push(this.#refusal(cause, name)));
+  }
+
+  /** What a write's refusal says: an alert that left at its source in words, anything else as the backend put it. */
+  #refusal(cause: unknown, name?: string): { text: string; tone?: "err" } {
+    if (name !== undefined && isIpcError(cause) && cause.code === "not_found") return { text: `${name} has already left the inbox. It was resolved at its source.` };
+    return { text: ipcErrorMessage(cause), tone: "err" };
   }
 
   /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
-  async #settled(work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>): Promise<void> {
+  async #settled(work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string): Promise<void> {
     try {
       await work();
-      push({ text: said(), ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo) } }) });
+      push({ text: said(), ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo, name) } }) });
       this.#host.close();
     } catch (cause) {
-      push({ text: ipcErrorMessage(cause), tone: "err" });
+      push(this.#refusal(cause, name));
       this.#host.focus();
     }
   }

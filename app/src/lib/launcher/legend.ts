@@ -19,6 +19,7 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 
 import type { Tone } from "../ipc/entity";
 import { type KindStateColours, stateColours } from "../ipc/sources";
+import { stateWord } from "../tf/state-word";
 
 export interface LegendLine {
   kind: string;
@@ -39,7 +40,8 @@ export function legendOf(colours: KindStateColours[]): LegendLine[] {
       kind,
       tones: ORDER.map((tone) => ({
         tone,
-        words: [...new Set(words.filter((word) => word.tone === tone && word.origin !== "category").map((word) => word.word))],
+        // As a chip says it (*Passed*, not *SUCCESS*), so two spellings of one word are one word here.
+        words: [...new Set(words.filter((word) => word.tone === tone && word.origin !== "category").map((word) => stateWord(word.word)))],
       })).filter((line) => line.words.length > 0),
       rest: has_category ? CATEGORY_LINE : null,
     }))

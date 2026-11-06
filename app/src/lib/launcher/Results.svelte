@@ -22,6 +22,8 @@
     selected,
     optionId,
     chordOf = () => null,
+    within = null,
+    filtered = false,
     now,
     onopen,
     onhover,
@@ -36,6 +38,10 @@
     optionId: (index: number) => string;
     /** The chord bound to a row (#2429), drawn at its end; none when omitted. */
     chordOf?: (row: LauncherRow) => string | null;
+    /** The section whose filter the box is on, which an empty answer's line names. */
+    within?: string | null;
+    /** Whether filters narrowed the search, so an empty answer is no claim about everything. */
+    filtered?: boolean;
     onopen: (row: LauncherRow) => void;
     onhover: (index: number) => void;
   } = $props();
@@ -183,7 +189,7 @@
 {#if !holdsAnswer(rows)}
   <!-- Under any place row, so the line is about the search and not about the row above it. -->
   <p class="tf-ln-none">
-    {#if placeCount > 0}No tickets, code, builds or docs match{:else}Nothing matches{/if}
+    {#if within !== null}Nothing in {within} matches{:else if placeCount > 0 && !filtered}No tickets, code, builds or docs match{:else}Nothing matches{/if}
     <strong>{response.interpreted.text || "these filters"}</strong>.
   </p>
   {#each rows as row, index (row.id)}

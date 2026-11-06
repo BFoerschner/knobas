@@ -35,6 +35,23 @@ export function seedName(filter: string): string | null {
   return found ? SECTION_NAME[found[0]] : null;
 }
 
+/** What the chip in front of the box calls a prefix the backend read: `>` is *Go to*, as its rows' heading says. */
+const MODE_NAME: Readonly<Record<string, string>> = {
+  action: "Go to",
+  person: "People",
+  source: "Source",
+  time: "Time",
+  note: "Notes",
+  list: "Smart list",
+  asset: "Assets",
+  help: "Help",
+};
+
+/** The chip's words for a prefix; one this build has no word for keeps its own, with a capital. */
+export function modeName(prefix: string): string {
+  return MODE_NAME[prefix] ?? prefix.charAt(0).toUpperCase() + prefix.slice(1);
+}
+
 /**
  * The kinds a section's filter names, read from the `#` rows of `table`, the
  * letters the parser pins: the chip already says them, so the bar under the

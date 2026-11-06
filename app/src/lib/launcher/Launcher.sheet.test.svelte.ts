@@ -525,6 +525,19 @@ test("a monitor is acknowledged", async () => {
   expect(calls.unackAlert).toHaveBeenCalledWith("kuma:7");
 });
 
+test("Undo on a monitor that has since recovered says so in words, as the Inbox does", async () => {
+  const calls = mountIt();
+  await settle();
+  await sheetOn("monitor");
+  narrow("ack");
+  press("Enter");
+  await settle();
+  calls.unackAlert.mockRejectedValueOnce({ code: "not_found", message: 'no open alert on "kuma:7"', source_id: null });
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(lastToast()).toBe("payout-api has already left the inbox. It was resolved at its source.");
+});
+
 test("Copy title and Copy key put the text on the clipboard", async () => {
   const calls = mountIt();
   await settle();

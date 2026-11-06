@@ -106,8 +106,8 @@
   import { SheetMode } from "./sheet-mode.svelte";
   import { type SheetPorts, realSheetPorts } from "./sheet-ports";
   import { type LauncherAction, filterActions, navigationActions, placeActions } from "./actions";
-  import { type InboxPreview, type LauncherRow, holdsAnswer, stepOf, walk } from "./rows";
-  import { seedKinds, seedName } from "./section";
+  import { type InboxPreview, type LauncherRow, holdsAnswer, narrowed, stepOf, walk } from "./rows";
+  import { modeName, seedKinds, seedName } from "./section";
   import { pastedUrl } from "./url";
   import { opener } from "../tf/inbox/inbox";
   import { Session, type SessionPorts } from "./session.svelte";
@@ -960,7 +960,7 @@
     ["Tab", "actions"],
     ["⌘B", "bind a key to the action"],
     ["⌘S", "save as list"],
-    ["⌘?", "filters"],
+    ["⌘?", "help"],
     // #2430, joined in the merge with #2424: the box answers it too.
     ["⌘D", "titles or everything"],
     ["Esc", "back"],
@@ -968,6 +968,10 @@
   /** The chips render from the answer; before one lands there is nothing to
       say about a query nobody has interpreted yet. */
   const interpreted = $derived(session.response?.interpreted ?? null);
+  /** The prefix the box opened with, by its name: drawn in front of the box, where the other modes say theirs (F-626). */
+  const typedMode = $derived(
+    boxLabel === null && session.raw.trim() !== "" && interpreted?.prefix ? modeName(interpreted.prefix) : null,
+  );
   /** Whether the footer's *Save as list* is on offer: an answer to save, and no mode over it that has its own keys. */
   const saveShown = $derived(session.canSave && holdsAnswer(session.rows) && overlay === null && naming === null && sheet.current === null);
 
@@ -1057,6 +1061,7 @@
             </button>
           </span>
         {/if}
+        {#if typedMode !== null}<span class="tf-ln-mode">{typedMode}</span>{/if}
         <QueryBox
           bind:this={box}
           value={naming !== null ? naming : overlay ? overlay.filter : sheet.current ? sheet.text : boxWords}
@@ -1219,6 +1224,8 @@
             response={session.response}
             rows={session.rows}
             chordOf={listChord}
+            within={seedLabel}
+            filtered={narrowed(session.raw, session.response.interpreted.text)}
             selected={session.selected}
             {optionId}
             {now}

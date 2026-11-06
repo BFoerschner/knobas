@@ -566,7 +566,7 @@ test("a combined # filter is sent as typed and draws one chip per letter", async
   expect(sent.at(-1)).toBe("#rl sepa");
   const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
   // The words the `?` card gives each letter, one chip per kind the answer filtered on.
-  expect(chips).toEqual(["repositories", "lists"]);
+  expect(chips).toEqual(["Repositories", "Lists"]);
 });
 
 test("a key typed as a word finds its ticket and draws no filter chip", async () => {
@@ -781,7 +781,9 @@ test("a named person is a chip, and nothing about them is greyed out", async () 
   await debounced();
 
   const chips = [...target.querySelectorAll(".tf-ln-fchip.tf-ln-set")].map((el) => el.textContent?.trim());
-  expect(chips).toEqual(["people", "@me", "jonas"]);
+  expect(chips).toEqual(["@me", "jonas"]);
+  // The prefix is a mode, said in front of the box where a section's chip stands, and it moves no row (F-626).
+  expect(target.querySelector(".tf-ln-boxrow .tf-ln-mode")?.textContent).toBe("People");
   expect([...target.querySelectorAll(".tf-ln-fchip.tf-ln-off")]).toEqual([]);
 });
 
@@ -2301,7 +2303,8 @@ test("a value suggestion draws inline, a sheet's action keeps two columns like a
     const prefix = target.querySelector<HTMLElement>('[aria-label="Results"] .tf-ln-opt');
     expect(prefix, "the palette draws prefix rows").not.toBeNull();
     expect(getComputedStyle(prefix!).display).toBe("grid");
-    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("240px 1fr");
+    // The name spans the tag and the key cell, so what follows starts where a result's title does (F-625).
+    expect(getComputedStyle(prefix!).gridTemplateColumns).toBe("var(--ln-name) 1fr");
 
     unmount(app!);
     app = undefined;
@@ -2320,7 +2323,7 @@ test("a value suggestion draws inline, a sheet's action keeps two columns like a
     press("Tab");
     const action = target.querySelector<HTMLElement>(".tf-ln-sheet button[role='option']")!;
     expect(action.classList.contains("tf-ln-opt"), "a sheet action is a prefix row").toBe(true);
-    expect(getComputedStyle(action).gridTemplateColumns).toBe("240px 1fr");
+    expect(getComputedStyle(action).gridTemplateColumns).toBe("var(--ln-name) 1fr");
   } finally {
     style.remove();
   }
@@ -2523,11 +2526,16 @@ test("Settings' sections are offered by their own names, and by what they hold w
   expect(optionNames().filter((name) => name?.startsWith("Settings"))).toEqual(["Settings"]);
 });
 
-test("a filtered search offers no place: the reader is narrowing, not naming one", async () => {
+test("a filter over an answer offers no place: the reader is narrowing, not naming one", async () => {
+  const held = hit({ entity_id: "teamcity:Settings_Build", kind: "pipeline", title: "Settings_Build" });
   open({
     query: "#b ",
     ports: {
-      search: async () => ({ ...noHits("settings") }),
+      search: async () =>
+        response({
+          ...noHits("settings"),
+          groups: [{ kind: "pipeline", label: "Pipeline", plural: "Pipelines", monogram: "PL", total: 1, hits: [held] }],
+        }),
       launcherHome: async () => HOME,
     },
   });
@@ -2535,7 +2543,33 @@ test("a filtered search offers no place: the reader is narrowing, not naming one
   await debounced();
   typeInBox("settings");
   await debounced();
-  expect(optionNames()).not.toContain("Settings");
+  expect(optionNames()).toEqual(["Settings_Build"]);
+});
+
+test("a filter that finds nothing offers the place the words name, over Search everything, and says what it searched (F-042)", async () => {
+  open({
+    query: "#rp ",
+    ports: {
+      search: async () => noHits("asset"),
+      launcherHome: async () => HOME,
+    },
+  });
+  await settle();
+  await debounced();
+  typeInBox("asset");
+  await debounced();
+  expect(optionNames()).toEqual(["Asset tree", "Search everything"]);
+  expect(onRow()).toBe("Asset tree");
+  expect(target.querySelector(".tf-ln-none")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Nothing in Code matches asset.");
+});
+
+test("a filter typed by hand that finds nothing makes no claim about everything (F-042)", async () => {
+  open({ ports: { search: async () => noHits("asset"), launcherHome: async () => HOME } });
+  await settle();
+  typeInBox("#b asset");
+  await debounced();
+  expect(optionNames()).toEqual(["Asset tree", "Search everything"]);
+  expect(target.querySelector(".tf-ln-none")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Nothing matches asset.");
 });
 
 test("nothing found: the line says so under the place, and ↑↓ reach Search everything (F-602)", async () => {
@@ -2891,8 +2925,8 @@ test("the ? card ends with a legend per kind, from the merged state colours", as
   expect(legend.querySelectorAll('[role="option"]')).toHaveLength(0);
   expect(legendDrawn()).toEqual([
     // `pending` under the reader's `err`, and with it no `warn` line at all.
-    { kind: "Monitors", tones: [["ok", "up"], ["err", "down, pending"], ["muted", "maintenance"]] },
-    { kind: "Pull requests", tones: [["ok", "merged"], ["info", "open"], ["muted", "closed"]] },
+    { kind: "Monitors", tones: [["ok", "Up"], ["err", "Down, Pending"], ["muted", "Maintenance"]] },
+    { kind: "Pull requests", tones: [["ok", "Merged"], ["info", "Open"], ["muted", "Closed"]] },
     { kind: "Tickets", tones: [["ok", "Done, Resolved"], ["err", "Blocked"]] },
   ]);
 });
@@ -2966,9 +3000,9 @@ test("after a set while the card is open, the legend re-reads and shows the new 
   press("?", { metaKey: true, shiftKey: true });
   await settle();
   expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
-    ["ok", "merged"],
-    ["info", "open"],
-    ["muted", "closed"],
+    ["ok", "Merged"],
+    ["info", "Open"],
+    ["muted", "Closed"],
   ]);
 
   // The reader moves `closed` to `err` in Settings; the command emits.
@@ -2979,9 +3013,9 @@ test("after a set while the card is open, the legend re-reads and shows the new 
   await settle();
 
   expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
-    ["ok", "merged"],
-    ["info", "open"],
-    ["err", "closed"],
+    ["ok", "Merged"],
+    ["info", "Open"],
+    ["err", "Closed"],
   ]);
 
   // The reader clears it again: the word goes back under the adapter's tone.
@@ -2990,9 +3024,9 @@ test("after a set while the card is open, the legend re-reads and shows the new 
   await settle();
 
   expect(legendDrawn()?.find((line) => line.kind === "Pull requests")?.tones).toEqual([
-    ["ok", "merged"],
-    ["info", "open"],
-    ["muted", "closed"],
+    ["ok", "Merged"],
+    ["info", "Open"],
+    ["muted", "Closed"],
   ]);
 });
 
