@@ -85,6 +85,7 @@
 .tf-ticketcard.tf-card, .tf-tcard.tf-card, .tf-row.tf-card {
   --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
   --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+  --mark: #F6E08F;
 }
 /* The sections table (#2401): a bordered list, one row a section: the name, the count in tabular figures, at most
    one state with its dot (in full ink when it asks something of you), and a chevron that says the row opens. The
