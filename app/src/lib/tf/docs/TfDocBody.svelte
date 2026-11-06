@@ -16,10 +16,15 @@
   *queued*, then *sent* (#1424, #2102), until a read of the page has a newer version; *Edit
   section* then starts from the queued text, and *Edit and resend* on a held
   or refused save opens the editor with it.
+
+  An open editor's words are a draft (`drafts`, `section:<page>:<section>`, F-430): `Esc` or
+  leaving the page closes the editor and keeps them, the section's heading says *Draft*, and
+  *Edit section…* opens on them. *Cancel* throws them away, and a save ends them.
 -->
 <script lang="ts">
-  import { tick } from "svelte";
   import TfStateChip from "../TfStateChip.svelte";
+  import { drafts } from "../drafts.svelte";
+  import { inlineEditor } from "../inline-editor";
   import type { DocBlock, DocSection } from "../../ipc/entity";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
@@ -60,6 +65,9 @@
   let editing = $state<number | null>(null);
   let draft = $state("");
   let saving = $state(false);
+  /** The section the editor opened on, which focus goes back to once it has closed. */
+  let openedOn: number | null = null;
+  const draftKey = (number: number) => `section:${entityId}:${number}`;
 
   // Another page closes an open editor; the same page read again keeps it
   // (#2072). The `$derived` is what keeps it: the effect hears the id only when
@@ -76,6 +84,7 @@
       const again = takeAgain(entityId, sectionKind(section.number));
       if (again === null) continue;
       editing = section.number;
+      openedOn = section.number;
       draft = again;
     }
   });
@@ -89,8 +98,36 @@
     const section = sections.find((s) => s.number === number);
     if (!section || section.text === null || refusal !== null) return;
     editing = number;
-    draft = queuedText(number) ?? section.text;
+    openedOn = number;
+    draft = drafts.has(draftKey(number)) ? drafts.get(draftKey(number)) : (queuedText(number) ?? section.text);
   }
+
+  /** What was typed is the draft; words back at the section's own text are none. */
+  function typed(number: number, words: string) {
+    draft = words;
+    const start = queuedText(number) ?? sections.find((s) => s.number === number)?.text ?? null;
+    if (words === start) drafts.forget(draftKey(number));
+    else drafts.put(draftKey(number), words);
+  }
+
+  /** `Esc`, and anything else that only closes: the draft stays for *Edit section…*. */
+  function close() {
+    editing = null;
+  }
+
+  /** *Cancel*: the explicit discard. */
+  function cancel(number: number) {
+    drafts.forget(draftKey(number));
+    editing = null;
+  }
+
+  /** ⌘Enter: read when pressed, because the attachment outlives one read of the page. */
+  function saveOpen() {
+    if (editing !== null) void save(editing);
+  }
+
+  /** The heading's *Edit section…*, drawn again once the editor has closed. */
+  const backToEdit = () => (openedOn === null ? null : (document.getElementById(`s-${openedOn}`)?.querySelector<HTMLElement>(".tf-tools button") ?? null));
 
   async function save(number: number) {
     // An editor can be open when the refusal lands: opened before the answer,
@@ -98,23 +135,13 @@
     if (saving || refusal !== null) return;
     saving = true;
     try {
-      if (await onsave(number, draft)) editing = null;
+      if (await onsave(number, draft)) {
+        drafts.forget(draftKey(number));
+        editing = null;
+      }
     } finally {
       saving = false;
     }
-  }
-
-  function focus(node: HTMLTextAreaElement) {
-    node.focus();
-  }
-
-  /** An inline editor closes first on `Esc` (the return contract), and focus goes back to what opened it. */
-  function oneditkey(event: KeyboardEvent, number: number) {
-    if (event.key !== "Escape") return;
-    event.preventDefault();
-    event.stopPropagation();
-    editing = null;
-    void tick().then(() => document.getElementById(`s-${number}`)?.querySelector<HTMLElement>(".tf-tools button")?.focus());
   }
 </script>
 
@@ -128,6 +155,7 @@
       <h2 id={`s-${section.number}`}>
         <TfDocInlines text={section.heading.text} {onopen} {stems} />
         {#if queued !== null}<TfStateChip text={queuedState(section.number)} tone="info" class="tf-queued-mark" />{/if}
+        {#if editing !== section.number && drafts.has(draftKey(section.number))}<TfStateChip text="draft" tone="info" class="tf-queued-mark" />{/if}
         <span class="tf-tools">
           <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
           {#if editable && said}
@@ -140,11 +168,11 @@
         </span>
       </h2>
       {#if editing === section.number}
-        <div class="tf-sec-edit">
-          <textarea bind:value={draft} aria-label="Section text" use:focus onkeydown={(event) => oneditkey(event, section.number)}></textarea>
+        <div class="tf-sec-edit" {@attach inlineEditor(close, { back: backToEdit, send: saveOpen, escCloses: true })}>
+          <textarea value={draft} aria-label="Section text" oninput={(event) => typed(section.number, event.currentTarget.value)}></textarea>
           <div class="tf-acts">
             <span class="tf-dim">Text, lists and panels. Saved to {sourceName} through the write queue.</span>
-            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => cancel(section.number)}>Cancel</button>
             <button
               type="button"
               class="tf-btn tf-sm tf-primary"

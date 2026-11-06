@@ -613,7 +613,8 @@ test("the compare page proposes Into and From, the change and its commits, and q
   expect(from!.value).toBe("spike/sepa-instant");
   expect([...from!.options].map((o) => o.value)).not.toContain("main");
   const title = target.querySelector<HTMLInputElement>(".tf-compare input[type=text]")!;
-  expect(title.value).toBe("sepa-instant");
+  // One commit says what the change is better than the branch's name does (F-241).
+  expect(title.value).toBe("PAY-231: jitter in backoff");
   expect(target.querySelector<HTMLTextAreaElement>(".tf-compare textarea")!.value).toBe("");
   expect(text(target.querySelector(".tf-compare .tf-cfiles"))).toBe("1 file changed against main");
   expect([...target.querySelectorAll(".tf-compare .tf-diff .tf-ln")].map(text)).toEqual(["1− 3", "1+ 5"]);
@@ -627,6 +628,26 @@ test("the compare page proposes Into and From, the change and its commits, and q
   ]);
   expect(location.hash).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/prs");
   expect(toasts.items.at(-1)!.text).toBe("Queued: open PR Instant SEPA spike.");
+  // It lands on the tab it was queued for, with its row and its chip (F-242).
+  unmount(view!);
+  view = null;
+  await draw(["gitea:tidewater/payout-service", "prs"]);
+  expect([...target.querySelectorAll(".tf-rsent")].map(text)).toEqual(["Instant SEPA spikeQueued"]);
+});
+
+test("a branch name git would refuse says so while typing, and the primary stays off (F-247)", async () => {
+  await draw([REPO]);
+  button("New branch…", target)!.click();
+  await settle();
+  const name = document.querySelector<HTMLInputElement>("#tf-nb-name")!;
+  type(name, "feature/PAY-231-Feature Foo bar");
+  await settle();
+  expect(document.querySelector(".tf-dialog .tf-dwhy")?.textContent).toBe("A branch name can’t have spaces in it.");
+  expect(button("Create branch")!.disabled).toBe(true);
+  type(name, "feature/PAY-231-foo");
+  await settle();
+  expect(document.querySelector(".tf-dialog .tf-dwhy")).toBeNull();
+  expect(button("Create branch")!.disabled).toBe(false);
 });
 
 test("Create pull request is disabled with the source's reason where the branch's view offers it disabled, and queues nothing (#2030)", async () => {

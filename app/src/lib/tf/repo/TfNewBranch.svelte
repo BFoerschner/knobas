@@ -20,7 +20,7 @@
   import TfDialog from "../settings/TfDialog.svelte";
   import { echoWrite } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { MADE, REPO_BRANCHES, newBranchName } from "./repo";
+  import { MADE, REPO_BRANCHES, branchNameProblem, newBranchName } from "./repo";
 
   let {
     repoId,
@@ -52,7 +52,8 @@
   let link = $state(true);
   let busy = $state(false);
 
-  const ready = $derived(name.trim() !== "" && !name.trim().endsWith("/") && start !== "" && !busy);
+  const nameProblem = $derived(branchNameProblem(name));
+  const ready = $derived(nameProblem === null && start !== "" && !busy);
 
   /** The ticket the job's key names in the mirror, the link's other end. */
   async function jobTicket(key: string): Promise<string | null> {
@@ -83,7 +84,7 @@
   }
 </script>
 
-<TfDialog why={busy ? null : name.trim() === "" ? "Name the branch." : name.trim().endsWith("/") ? "A branch name can’t end in /." : start === "" ? "Choose where it starts." : null} {onclose}>
+<TfDialog why={busy ? null : (nameProblem ?? (start === "" ? "Choose where it starts." : null))} {onclose}>
   {#snippet title()}New branch in <span class="tf-mono">{repoName}</span>{/snippet}
   {#snippet body()}
     <form

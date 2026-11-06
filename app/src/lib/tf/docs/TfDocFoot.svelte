@@ -8,15 +8,31 @@
 
   Nothing remembers an open fold: Docs draws the foot afresh for every page
   it opens, so each opens closed.
+
+  A ticket linked by hand here has *Unlink* on its row (F-433), with *Undo* in the
+  toast; a link the source states or a set draws is the ticket's drawer's to handle.
 -->
 <script lang="ts">
-  import type { DocPage, DocSpace } from "../../ipc/entity";
+  import type { DocPage, DocSpace, LinkEntry } from "../../ipc/entity";
   import { entityAddress } from "../address";
   import { stateWord } from "../state-word";
   import TfKey from "../TfKey.svelte";
   import { backlinkGroups, LINKED_FLAT, linkedFromHeading, pageHash } from "./docs";
 
-  let { page, spaces }: { page: DocPage; spaces: readonly DocSpace[] } = $props();
+  let {
+    page,
+    spaces,
+    links = [],
+    onunlink,
+  }: {
+    page: DocPage;
+    spaces: readonly DocSpace[];
+    /** The page's own links, which say which ticket here was linked by hand. */
+    links?: readonly LinkEntry[];
+    onunlink?: ((link: LinkEntry["link"]) => void) | undefined;
+  } = $props();
+
+  const byHand = (entityId: string) => links.find((entry) => entry.other.entity_id === entityId && entry.link.origin === "manual")?.link ?? null;
 
   const groups = $derived(backlinkGroups(page.backlinks, spaces, page.source_id));
 </script>
@@ -28,7 +44,12 @@
       {#each page.work as work (work.entity_id)}
         <li>
           <a href={entityAddress("ticket", work.entity_id)}><TfKey value={work.key} /> {work.title}</a
-          >{#if work.status}<span class="tf-s">{stateWord(work.status)}</span>{/if}
+          >{#if work.status}<span class="tf-s">{stateWord(work.status)}</span>{/if}{#if onunlink && work.linked && byHand(work.entity_id)}{@const link = byHand(work.entity_id)!}<button
+              type="button"
+              class="tf-btn tf-sm tf-ghost tf-rd-unlink"
+              aria-label="Unlink {work.key}"
+              onclick={() => onunlink(link)}>Unlink</button
+            >{/if}
         </li>
       {/each}
     </ul>

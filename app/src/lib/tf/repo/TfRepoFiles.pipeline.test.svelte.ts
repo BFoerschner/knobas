@@ -362,11 +362,33 @@ test("Save as default for *.json.gz… stores the pipeline by name and points th
   expect(pattern.value).toBe("*.json.gz");
   name.value = "Events";
   name.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
   button("Save")!.click();
   await settle();
   expect(pipelines.saves).toEqual([[{ id: null, name: "Events", steps: [{ step: "gunzip" }] }]]);
   expect(defaults.saves).toEqual([[{ pattern: "*.json.gz", renderer: "", pipeline: "events" }]]);
   expect(text(target.querySelector(".tf-pipe .tf-acts"))).toContain("Events, the default for *.json.gz");
+});
+
+test("Save stays off with a reason until the pipeline has a name, and the sentence about replacing has its own line (F-237)", async () => {
+  const { piped } = pipedPort(() => done("x"));
+  draw(piped, undefined, { defaults: storedDefaults([]).store, pipelines: storedPipelines([]).store });
+  await settle();
+  button("Pipeline")!.click();
+  await settle();
+  await addStep("gzip");
+  button("Save as default for *.json.gz…")!.click();
+  await settle();
+  const form = target.querySelector(".tf-psave")!;
+  expect(button("Save")!.disabled).toBe(true);
+  expect(form.querySelector(".tf-dwhy")?.textContent).toBe("Name it first.");
+  const name = target.querySelector<HTMLInputElement>("input[aria-label='Pipeline name']")!;
+  name.value = "Events";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(button("Save")!.disabled).toBe(false);
+  expect(form.querySelector(".tf-dwhy")).toBeNull();
+  expect(form.querySelector(".tf-psave-note")).not.toBeNull();
 });
 
 test("the person's command steps are in the Add step menu, under Your commands", async () => {

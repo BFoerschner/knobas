@@ -22,7 +22,7 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import { sourceRoles, WIKI } from "../roles.svelte";
-  import { continueReading, forYouWhy, pageHash, pagesByLevel, spaceHash, spaceId, type JobPageGroup } from "./docs";
+  import { continueReading, forYouHash, forYouWhy, pageHash, pagesByLevel, spaceHash, spaceId, type JobPageGroup } from "./docs";
 
   let {
     tree,
@@ -33,6 +33,7 @@
     sync,
     notice,
     onretry,
+    onresume,
   }: {
     /** The tree as read, `null` until its first answer. */
     tree: DocsTree | null;
@@ -48,6 +49,8 @@
     /** What a search's address has to say above the lists. */
     notice?: Snippet | undefined;
     onretry: () => void;
+    /** *Continue reading* was pressed on this page: it opens where the reader left it (F-431). */
+    onresume?: ((entityId: string) => void) | undefined;
   } = $props();
 
   /** How many of a space's top pages its tile lists. */
@@ -159,7 +162,7 @@
           <section class="tf-panel" aria-label="Continue reading">
             <header><h3>Continue reading</h3></header>
             <div class="tf-dh-rows">
-              <a class="tf-dh-row" href={pageHash(lastShown.entity_id)}>
+              <a class="tf-dh-row" href={pageHash(lastShown.entity_id)} onclick={() => onresume?.(lastShown.entity_id)}>
                 <span class="tf-dh-t">{lastShown.title}</span>
                 <span class="tf-why">{lastShown.where}{#if onJob.has(lastShown.entity_id)}, on this job{/if}{#if forYou.some((item) => item.entity_id === lastShown.entity_id)}, mentions you{/if}</span>
               </a>
@@ -175,7 +178,7 @@
           {:else}
             <div class="tf-dh-rows">
               {#each forYouRows as item (item.entity_id)}
-                <a class="tf-dh-row" href={pageHash(item.entity_id)}>
+                <a class="tf-dh-row" href={forYouHash(item.entity_id)}>
                   <span class="tf-dh-t">{item.title}</span>
                   <span class="tf-why">{forYouWhy(item)}{#if onJob.has(item.entity_id)}, on this job{/if}</span>
                 </a>

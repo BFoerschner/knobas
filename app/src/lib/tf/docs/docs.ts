@@ -33,7 +33,7 @@ import { isDone } from "../tickets/tickets";
 export type DocsPlace =
   | { kind: "home" }
   | { kind: "space"; source: string | null; key: string }
-  | { kind: "page"; id: string; section: number | null }
+  | { kind: "page"; id: string; section: number | null; mention?: true }
   | { kind: "search"; words: string };
 
 /**
@@ -57,7 +57,7 @@ export function placeOf(rest: string[]): DocsPlace {
       : { kind: "space", source: null, key: next };
   }
   const section = next !== undefined && /^\d+$/.test(next) ? Number(next) : null;
-  return { kind: "page", id: head, section };
+  return next === MENTION ? { kind: "page", id: head, section, mention: true } : { kind: "page", id: head, section };
 }
 
 /**
@@ -73,6 +73,48 @@ export function docsSearchHash(words: string): string {
 export function pageHash(entityId: string, section?: number): string {
   const base = `#/page/${encodeURIComponent(entityId)}`;
   return section === undefined ? base : `${base}/${section}`;
+}
+
+/** What a page's address ends in when it opens at the reader's mention, as a ticket's does. */
+const MENTION = "mention";
+
+/** Where a *For you* row opens: the page, brought to the mention it is listed for (F-431). */
+export function forYouHash(entityId: string): string {
+  return `${pageHash(entityId)}/${MENTION}`;
+}
+
+/** Whether a block names the reader: what brings a page's comment into view from *For you*. */
+export function mentionsMe(block: DocBlock): boolean {
+  switch (block.type) {
+    case "heading":
+    case "paragraph":
+      return block.text.some((run) => run.type === "mention" && run.me);
+    case "list":
+      return block.items.flatMap((item) => item.blocks).some(mentionsMe);
+    case "table":
+      return block.rows.flat().flatMap((cell) => cell.blocks).some(mentionsMe);
+    case "panel":
+    case "collapsible":
+      return block.blocks.some(mentionsMe);
+    default:
+      return false;
+  }
+}
+
+/** Where the reader was on each page this session, for *Continue reading* (F-431). Held for the window, never written anywhere. */
+const reading = new Map<string, number>();
+
+export function noteReading(entityId: string, top: number): void {
+  reading.set(entityId, top);
+}
+
+export function readingAt(entityId: string): number {
+  return reading.get(entityId) ?? 0;
+}
+
+/** A new session, which is what each test is. */
+export function forgetReading(): void {
+  reading.clear();
 }
 
 /** A space's first page: the first one at the top of its tree. */

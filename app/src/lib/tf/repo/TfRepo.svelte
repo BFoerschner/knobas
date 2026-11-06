@@ -421,6 +421,12 @@
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
   }
 
+  /** The pull requests again, for one this session queued. */
+  function rereadPrs(): void {
+    const id = repoId;
+    if (id !== null) void readRow(id, () => repoId === id, true);
+  }
+
   /** The checkout, and its diff when it has changes: for the `M` marks. */
   function readCheckout(id: string, alive: () => boolean) {
     ports.entityCheckout(id).then(
@@ -668,12 +674,13 @@
                   defaultBranch={defaultBranch?.name ?? null}
                   {refreshed}
                   {branchRefused}
+                  shown={one === slot}
                   onNewBranch={() => (newBranch = { from: null })}
                 />
               {:else if one === "commits"}
                 <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
               {:else if one === "prs"}
-                <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} />
+                <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
               {/if}
             </TfRepoTab>
           {/if}

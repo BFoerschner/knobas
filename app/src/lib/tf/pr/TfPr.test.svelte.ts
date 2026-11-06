@@ -437,7 +437,7 @@ test("Edit sends only what changed, and the header says an edit is queued", asyn
   await settle();
   expect(writes).toEqual([{ EditPullRequest: { entity: PR, title: "SEPA retry with backoff", body: null, state: null } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-fhead .tf-sub")).toContain("Edit queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Saving edit, queued");
 });
 
 test("Close asks the source's sentence and queues the closed state", async () => {
@@ -448,7 +448,7 @@ test("Close asks the source's sentence and queues the closed state", async () =>
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Close pull request")!.click();
   await settle();
   expect(writes).toEqual([{ EditPullRequest: { entity: PR, title: null, body: null, state: "closed" } }]);
-  expect(text(".tf-fhead .tf-sub")).toContain("Close queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Closing, queued");
 });
 
 /** #2289: a destructive confirm is filled red; any other confirm is the plain primary. */
@@ -509,7 +509,7 @@ test("a source action draws the dialog its source declares and queues SourceActi
   await settle();
   expect(writes).toEqual([{ SourceAction: { entity: PR, id: "stamp_release", fields: { channel: "stable", note: "for 2.0" } } }]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-fhead .tf-sub")).toContain("Stamp release queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Stamp release Stable, queued");
 });
 
 test("a source action the source draws disabled says why and opens nothing", async () => {
@@ -711,7 +711,7 @@ test("line comments waiting turn Review… into Submit review (N pending), which
   // The review took them: none waits, the toolbar is Review… again, the header says so.
   expect(pending.of(PR)).toEqual([]);
   expect(buttons().slice(0, 2)).toEqual(["Merge…", "Review…"]);
-  expect(text(".tf-fhead .tf-sub")).toContain("Review queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Sending review, queued");
 });
 
 test("#2276: Submit review from Overview reads the diff's head first and sends no comment written on an earlier head", async () => {
@@ -930,7 +930,7 @@ test("Merge… open: the three lines, the styles, a squash's message, the delete
     { MergePullRequest: { entity: PR, style: "squash", delete_branch: false, message: "SEPA retry with backoff (#142)" } },
   ]);
   expect(document.querySelector(".tf-dialog")).toBeNull();
-  expect(text(".tf-fhead .tf-sub")).toContain("Merge queued");
+  expect(text(".tf-fhead .tf-sub")).toContain("Merging, queued");
 });
 
 test("a merge commit sends no message, and a pull request linked to no ticket draws no In Review line", async () => {
@@ -972,7 +972,7 @@ test("after a queued merge, Merge… is held: aria-disabled, titled merge queued
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
   await queueMerge();
   expect(writes).toHaveLength(1);
-  expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "Merging, queued"]);
   expect(button("Merge…")!.classList.contains("tf-primary")).toBe(false);
   button("Merge…")!.click();
   flushSync();
@@ -984,7 +984,7 @@ test("after a queued merge, Update branch, Edit and Close are held with merge qu
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, UPDATE, mergeAction(null)]) }));
   await queueMerge();
   for (const name of ["Update branch…", "Edit…", "Close…"]) {
-    expect(holdOf(name)).toEqual(["true", "merge queued"]);
+    expect(holdOf(name)).toEqual(["true", "Merging, queued"]);
     button(name)!.click();
     flushSync();
     expect(document.querySelector(".tf-dialog")).toBeNull();
@@ -998,8 +998,8 @@ test("after a queued close, Merge… and Close are held with close queued; Edit 
   dialogButton("Close pull request").click();
   await settle();
   expect(writes).toHaveLength(1);
-  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
-  expect(holdOf("Close…")).toEqual(["true", "close queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "Closing, queued"]);
+  expect(holdOf("Close…")).toEqual(["true", "Closing, queued"]);
   expect(holdOf("Edit…")).toEqual([null, ""]);
   expect(holdOf("Update branch…")).toEqual([null, ""]);
   button("Merge…")!.click();
@@ -1015,8 +1015,8 @@ test("the hold outlives leaving the page and ends with the session; a source's o
   expect(holdOf("Stamp release")).toEqual([null, ""]);
   unmount(view!);
   await draw([PR], offered());
-  expect(holdOf("Merge…")).toEqual(["true", "merge queued"]);
-  expect(holdOf("Edit…")).toEqual(["true", "merge queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "Merging, queued"]);
+  expect(holdOf("Edit…")).toEqual(["true", "Merging, queued"]);
   unmount(view!);
   forgetEchoes();
   await draw([PR], offered());
@@ -1042,7 +1042,7 @@ const chips = () => [...target.querySelectorAll(".tf-fhead .tf-sub .tf-chip")].m
 test("a landed close drops its chip and the holds it drove; the source reopening it later does not bring the chip back", async () => {
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
   await queueClose();
-  expect(chips()).toEqual(["Open", "Close queued"]);
+  expect(chips()).toEqual(["Open", "Closing, queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, REOPEN], "closed") }));
   expect(chips()).toEqual(["Closed"]);
@@ -1058,8 +1058,8 @@ test("a close the read still shows open keeps its chip and its holds", async () 
   await queueClose();
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT, EDIT, CLOSE, mergeAction(null)]) }));
-  expect(chips()).toEqual(["Open", "Close queued"]);
-  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
+  expect(chips()).toEqual(["Open", "Closing, queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "Closing, queued"]);
 });
 
 test("a landed merge drops its chip; an edit the queue has not sent keeps its chip", async () => {
@@ -1073,10 +1073,10 @@ test("a landed merge drops its chip; an edit the queue has not sent keeps its ch
   dialogButton("Save changes").click();
   await settle();
   await queueMerge();
-  expect(chips()).toEqual(["Open", "Edit queued", "Merge queued"]);
+  expect(chips()).toEqual(["Open", "Saving edit, queued", "Merging, queued"]);
   unmount(view!);
   await draw([PR], ports({ pr: prView([COMMENT], "merged") }));
-  expect(chips()).toEqual(["Merged", "Edit queued"]);
+  expect(chips()).toEqual(["Merged", "Saving edit, queued"]);
 });
 
 test("a comment's mark goes once the conversation holds its words", async () => {
@@ -1110,7 +1110,7 @@ test("a close the queue refuses drops its chip and its holds, and says why", asy
   });
   await draw([PR], numbered, follower);
   await queueClose();
-  expect(holdOf("Merge…")).toEqual(["true", "close queued"]);
+  expect(holdOf("Merge…")).toEqual(["true", "Closing, queued"]);
   hear({ id: 31, state: "refused", detail: "403 Forbidden" } as never);
   flushSync();
   expect(chips()).toEqual(["Open"]);
@@ -1183,6 +1183,7 @@ test("a comment's echo says queued, then sent, and goes on the view's re-read th
 });
 
 test("a merge, a close and a reopen each say queued, then sent, and go on the re-read whose state moved (#2103)", async () => {
+  const ACT: Record<string, string> = { merge: "Merging", close: "Closing", reopen: "Reopening" };
   for (const [queue, verb, from, to] of [
     [queueMerge, "merge", prView([COMMENT, EDIT, CLOSE, mergeAction(null)]), prView([COMMENT], "merged")],
     [queueClose, "close", prView([COMMENT, EDIT, CLOSE, mergeAction(null)]), prView([COMMENT, EDIT, REOPEN], "closed")],
@@ -1202,11 +1203,11 @@ test("a merge, a close and a reopen each say queued, then sent, and go on the re
     const { sync, follower, sent, io } = lifecycle(() => read);
     await draw([PR], io, follower);
     await queue();
-    expect(chips().slice(1)).toEqual([`${verb.charAt(0).toUpperCase()}${verb.slice(1)} queued`]);
+    expect(chips().slice(1)).toEqual([`${ACT[verb]}, queued`]);
     sent(80);
-    expect(chips().slice(1)).toEqual([`${verb.charAt(0).toUpperCase()}${verb.slice(1)} sent`]);
+    expect(chips().slice(1)).toEqual([`${ACT[verb]}, sent`]);
     await sync.ended("gitea"); // the source still says what it said: the echo stays
-    expect(chips().slice(1)).toEqual([`${verb.charAt(0).toUpperCase()}${verb.slice(1)} sent`]);
+    expect(chips().slice(1)).toEqual([`${ACT[verb]}, sent`]);
     read = to;
     await sync.refreshed(PR, 80);
     expect(chips().slice(1)).toEqual([]);
@@ -1228,11 +1229,11 @@ test("an edit says queued, then sent, and goes on the first live read asked once
   flushSync();
   dialogButton("Save changes").click();
   await settle();
-  expect(chips()).toEqual(["Open", "Edit queued"]);
+  expect(chips()).toEqual(["Open", "Saving edit, queued"]);
   await sync.ended("gitea"); // read while the edit is still open: not yet shown
-  expect(chips()).toEqual(["Open", "Edit queued"]);
+  expect(chips()).toEqual(["Open", "Saving edit, queued"]);
   sent(80);
-  expect(chips()).toEqual(["Open", "Edit sent"]);
+  expect(chips()).toEqual(["Open", "Saving edit, sent"]);
   await sync.ended("gitea");
   expect(chips()).toEqual(["Open"]);
 });
@@ -1245,7 +1246,7 @@ test("a review goes on the re-read of the refresh that followed it, even before 
   flushSync();
   dialogButton("Submit review").click();
   await settle();
-  expect(chips()).toEqual(["Open", "Review queued"]);
+  expect(chips()).toEqual(["Open", "Sending review, queued"]);
   await sync.refreshed(PR, 80);
   expect(chips()).toEqual(["Open"]);
 });
@@ -1259,9 +1260,9 @@ test("a source action says queued, then sent, and goes on the re-read once sent 
   flushSync();
   dialogButton("Stamp release").click();
   await settle();
-  expect(chips()).toEqual(["Open", "Stamp release queued"]);
+  expect(chips()).toEqual(["Open", "Stamp release, queued"]);
   sent(80);
-  expect(chips()).toEqual(["Open", "Stamp release sent"]);
+  expect(chips()).toEqual(["Open", "Stamp release, sent"]);
   await sync.refreshed(PR, 80);
   expect(chips()).toEqual(["Open"]);
 });

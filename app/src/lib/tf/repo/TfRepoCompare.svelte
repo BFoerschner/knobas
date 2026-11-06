@@ -31,7 +31,7 @@
   branch by name, and the change says when it will show.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
@@ -45,6 +45,8 @@
   import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
+  import { echoWrite } from "../queued.svelte";
+  import { placeRestoring } from "../return-place";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import TfWaiting from "../TfWaiting.svelte";
@@ -53,7 +55,9 @@
     branchStanding,
     compareHash,
     keyIn,
+    MADE_PR,
     proposal,
+    REPO_PRS,
     repoHash,
     sourceName,
     type BranchOption,
@@ -71,6 +75,7 @@
     defaultBranch,
     refreshed = 0,
     branchRefused = null,
+    shown = true,
     onNewBranch = () => {},
   }: {
     ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff">;
@@ -87,6 +92,8 @@
     refreshed?: number;
     /** Why the source draws *New branch…* disabled, where it does. */
     branchRefused?: string | null;
+    /** Whether this tab is the one shown: arriving on it, *Title* takes focus if nothing else has it. */
+    shown?: boolean;
     /** Opens *New branch…*, which is what a repository of one branch can do here. */
     onNewBranch?: () => void;
   } = $props();
@@ -230,6 +237,7 @@
         const from: ProposedFrom = { key, summary: found.row.title, description };
         ({ title, body } = proposal(name, from));
         ticket = { key, id: found.row.entity_id };
+        selectTitle();
       } catch {
         // No ticket to propose from: the branch's own name stands.
       }
@@ -254,6 +262,35 @@
   const needs = $derived(same ? "Into and From are the same branch, so there is nothing to compare." : (refused ?? (title.trim() === "" ? "Give it a title." : null)));
   const commits = $derived(standing?.commits ?? []);
 
+  // One commit says what the change is better than its branch's name does (F-241). Only over the name proposed: typed words stay.
+  $effect(() => {
+    const only = commits.length === 1 ? (commits[0]?.title ?? "") : "";
+    if (only === "" || ticket !== null) return;
+    untrack(() => {
+      if (title === proposal(head ?? "", null).title) {
+        title = only;
+        selectTitle();
+      }
+    });
+  });
+
+  /** *Title*, ready to type over, unless the reader already has focus somewhere of their own. A press on *New pull request* leaves it on nothing. */
+  let titleField = $state<HTMLInputElement | null>(null);
+  function selectTitle(): void {
+    void tick().then(() => {
+      if (placeRestoring()) return;
+      const at = document.activeElement;
+      const free = at === null || at === document.body || at === titleField || at.closest("[inert], [hidden]") !== null;
+      if (!free || titleField === null || titleField.getClientRects().length === 0 || !untrack(() => shown)) return;
+      titleField.focus({ preventScroll: true });
+      titleField.select();
+    });
+  }
+  // On arriving at the form, and again if a ticket's words replace the proposal below.
+  $effect(() => {
+    if (shown && titleField !== null) untrack(selectTitle);
+  });
+
   async function create() {
     if (!ready || head === null) return;
     busy = true;
@@ -261,8 +298,12 @@
     try {
       const linkTo = ticket !== null && link ? ticket.id : undefined;
       const write = await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
-      toastQueued(`open PR ${words}`, source, { write });
-      location.hash = repoHash(repoId, "prs");
+      const prs = repoHash(repoId, "prs");
+      toastQueued(`open PR ${words}`, source, { write, where: { label: "Show pull requests", run: () => (location.hash = prs) } });
+      // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
+      echoWrite(repoId, MADE_PR, words, { write, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
+      busy = false;
+      location.hash = prs;
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;
@@ -313,7 +354,7 @@
         </select>
         {#if !standing?.pr}
           <label for="tf-cmp-title">Title</label>
-          <input id="tf-cmp-title" type="text" autocomplete="off" bind:value={title} />
+          <input id="tf-cmp-title" type="text" autocomplete="off" bind:this={titleField} bind:value={title} />
           <label for="tf-cmp-body">Description</label>
           <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
           {#if ticket !== null}

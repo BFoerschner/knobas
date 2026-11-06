@@ -34,8 +34,10 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "launcher/keys.svelte.ts#launcherKeys": async () => (await import("../launcher/keys.svelte")).launcherKeys.reset(),
   // *Run pipelines on diffs* (#2270), stored in `localStorage`: each test starts with it on.
   "tf/diff/diff-pipelines.svelte.ts#diffPipelines": async () => (await import("../tf/diff/diff-pipelines.svelte")).diffPipelines.reset(),
-  // What was typed on a source's page and not saved (F-617): each test starts with none.
   "tf/settings/secret-prompt.svelte.ts#secretPrompt": async () => (await import("../tf/settings/secret-prompt.svelte")).resetSecretPrompt(),
+  "tf/drafts.svelte.ts#typed": async () => (await import("../tf/drafts.svelte")).drafts.reset(),
+  "tf/docs/docs.ts#reading": async () => (await import("../tf/docs/docs")).forgetReading(),
+  // What was typed on a source's page and not saved (F-617): each test starts with none.
   "tf/settings/source-drafts.svelte.ts#sourceDrafts": async () => (await import("../tf/settings/source-drafts.svelte")).sourceDrafts.reset(),
   // The source list's role claims (#1196), held once per window.
   "tf/roles.svelte.ts#sourceRoles": async () => (await import("../tf/roles.svelte")).sourceRoles.forget(),
@@ -119,7 +121,10 @@ export const NOT_YET_RESET: readonly string[] = [];
  * `view-read.ts`) and components, not other plain `.ts` files. Each must still
  * be a key of {@link RESETS}.
  */
-export const UNSCANNED: readonly string[] = ["shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens"];
+export const UNSCANNED: readonly string[] = [
+  // Made by a generic factory and held in a plain `.ts`: the scan reads neither.
+  "tf/drafts.svelte.ts#typed",
+  "tf/docs/docs.ts#reading","shell/follow-write.ts#shared", "shell/dev/fake-seed.ts#restores", "render/embed.ts#embedOpens"];
 
 /**
  * A file that mocks a store's dependency with a partial factory cannot load the

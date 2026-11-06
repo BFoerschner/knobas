@@ -83,7 +83,7 @@ test("with nothing read, or a page the tree no longer holds, there is no Continu
 test("For you says who mentioned you, and says so when nobody has", () => {
   draw({ tree: TREE });
   expect(section("For you")?.textContent).toContain("Priya mentioned you");
-  expect(hrefs(section("For you"))).toEqual(["#/page/confluence%3Ae1"]);
+  expect(hrefs(section("For you"))).toEqual(["#/page/confluence%3Ae1/mention"]);
   void unmount(view!);
   draw({ tree: { ...TREE, for_you: [] } });
   expect(section("For you")?.textContent).toContain("No page mentions you right now.");

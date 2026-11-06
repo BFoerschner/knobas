@@ -545,8 +545,10 @@
   });
 
   /** Echo a write queued as `verb`, followed under `name`. */
-  function echoChip(id: string, verb: string, name: string, write: QueuedWrite) {
-    echoWrite(id, verb, verb, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null });
+  function echoChip(id: string, verb: string, name: string, write: QueuedWrite, chose = "") {
+    // What was chosen names it: *Add label backport*, and a second label is a second chip.
+    const text = chose === "" ? verb : `${verb.charAt(0).toUpperCase()}${verb.slice(1)} ${chose}`;
+    echoWrite(id, verb, text, { write, base: header.state?.text ?? null, following: { name }, follower, surface: PR_SURFACE, source: detail?.source?.id ?? null, ...(chose === "" ? {} : { many: true }) });
   }
 
   /**
@@ -565,9 +567,20 @@
     reopen: ["merge", ...STATE_CHANGES],
   };
 
-  /** The chip an echo draws, which is also what holds a button back: `merge queued`, then `merge sent`. */
+  /** The act a write's chip names, as *Review asked of sven* does: *Close sent* reads as if something was sent to close (F-236). */
+  const ACTS: Record<string, string> = {
+    merge: "Merging",
+    close: "Closing",
+    reopen: "Reopening",
+    update: "Updating branch",
+    edit: "Saving edit",
+    review: "Sending review",
+  };
+
+  /** The chip an echo draws, which is also what holds a button back: the act, or a source's own action as its words and what was chosen, and where its write is (#2103). */
   function chipOf(echo: Echo): string {
-    return `${echo.text} ${echo.state}`;
+    const act = ACTS[echo.kind] ?? `${echo.text.charAt(0).toUpperCase()}${echo.text.slice(1)}`;
+    return `${act}, ${echo.state}`;
   }
 
   /** The chip this session queued that holds the write keyed `key` back, or null while it is live. */
@@ -666,7 +679,10 @@
           {#if header.state !== null}<TfStateChip text={header.state.text} tone={header.state.tone ?? 'muted'} />{/if}
           {#each chips as echo (`${echo.kind}\n${echo.text}`)}
             <!-- A review request names the act and the login as written: a state word would turn it into *Sven sent*. -->
-            {" "}{#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<TfStateChip text={chipOf(echo)} tone="info" />{/if}
+            {" "}{#if echo.kind === REQUESTED}<span class="tf-chip tf-info" title="Review request {echo.state}">Review asked of {echo.text}</span>{:else}<span class="tf-chip tf-info">{chipOf(echo)}</span>{/if}
+          {/each}
+          {#each detail?.labels ?? [] as label (label)}
+            {" "}<span class="tf-chip">{label}</span>
           {/each}
           {#if header.head !== null}
             {" "}<span class="tf-mono">{header.head}</span>{#if header.base !== null}{" "}into <span class="tf-mono">{header.base}</span>{/if}{#if header.author !== null},{/if}
@@ -1054,11 +1070,11 @@
     action={write.action}
     entityId={prId}
     title={write.heading ?? (/^add\b/i.test(write.label) ? `${plainLabel(write.label)} to ${name}` : `${plainLabel(write.label)} ${name}`)}
-    what="{write.phrase} {name}"
+    what={(chose) => (chose === "" || write.key.startsWith("source:") === false ? `${write.phrase} ${name}` : `${write.verb} ${chose} on ${name}`)}
     primary={write.primary ?? null}
     source={detail?.source ?? null}
     submitWrite={ports.submitWrite}
-    onqueued={(queued) => echoChip(prId, write.verb, plainLabel(write.label), queued)}
+    onqueued={(queued, chose) => echoChip(prId, write.verb, plainLabel(write.label), queued, chose)}
     onclose={() => (shown = null)}
   />
 {/if}

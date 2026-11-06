@@ -85,6 +85,8 @@
   let saving = $state<{ name: string; pattern: string } | null>(null);
   let storing = $state(false);
   let saveFace = $state<HTMLButtonElement | null>(null);
+  /** What *Save* waits for, in words beside it (design system, the enabled rule). */
+  const saveNeeds = $derived(saving === null ? null : saving.name.trim() === "" ? "Name it first." : saving.pattern.trim() === "" ? "Say which files it is the default for." : null);
 
   async function save() {
     if (saving === null || onsave === undefined) return;
@@ -292,9 +294,10 @@
     >
       <label>Name <input aria-label="Pipeline name" bind:value={saving.name} placeholder="Gzipped JSON" spellcheck="false" /></label>
       <label>Default for <input class="tf-pmono" aria-label="File pattern" bind:value={saving.pattern} spellcheck="false" /></label>
-      <span class="tf-dim tf-small">A pipeline of the same name is replaced, and every pattern that uses it follows.</span>
-      <button type="submit" class="tf-btn tf-sm tf-primary" disabled={storing}>Save</button>
+      {#if saveNeeds !== null}<p class="tf-dwhy" role="status">{saveNeeds}</p>{/if}
+      <button type="submit" class="tf-btn tf-sm tf-primary" disabled={storing || saveNeeds !== null}>Save</button>
       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (saving = null)}>Cancel</button>
+      <span class="tf-dim tf-small tf-psave-note">A pipeline of the same name is replaced, and every pattern that uses it follows.</span>
     </form>
   {/if}
 </div>

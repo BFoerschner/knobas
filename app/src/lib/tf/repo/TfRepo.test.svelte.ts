@@ -305,7 +305,7 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect([...select.options].map((o) => o.textContent)).toEqual(["main", "feature/PAY-231-sepa-retry"]);
   expect(select.value).toBe("main");
   // #2238's order, as the mockup draws it: the primary, the others, Open in, Refresh last.
-  const acts = [...target.querySelector(".tf-fhead > .tf-acts")!.children];
+  const acts = [...target.querySelector(".tf-fhead > .tf-acts")!.children].flatMap((el) => (el.matches(".tf-repohold") ? [...el.children] : [el]));
   expect(acts[0]!.matches("a.tf-btn.tf-primary")).toBe(true);
   expect(text(acts[0]!)).toBe("New pull request");
   expect(acts[1]!.querySelector("select")).toBe(select);
@@ -531,6 +531,8 @@ test("the branch selector holds its room unseen on Compare, whose Into and From 
   expect(held().classList.contains("tf-held")).toBe(true);
   expect(held().inert).toBe(true);
   expect(target.querySelector("#tf-cmp-from")).not.toBeNull();
+  unmount(view!);
+  view = null;
   await draw([REPO, "commits"]);
   expect(held().classList.contains("tf-held")).toBe(false);
   expect(held().inert).toBe(false);

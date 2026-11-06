@@ -14,7 +14,8 @@ import { createLayers } from "../layers.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { pressRefreshKey, refreshProbe } from "../refresh.fixture";
 import { parseTfHash } from "../route";
-import { READER_DRAWER, SEARCH_PAUSE_MS } from "./docs";
+import { drafts } from "../drafts.svelte";
+import { forgetReading, READER_DRAWER, readingAt, SEARCH_PAUSE_MS } from "./docs";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -1469,6 +1470,13 @@ test("at 900px and wider a label chip searches for itself in the tree's column, 
   expect(document.activeElement).toBe(chip);
   expect(drawerOpen()).toBe(false);
   expect(target.querySelector(".tf-rd-backdrop")).toBeNull();
+  // `Esc` ends that search and comes back to the chip, before it would leave the page (F-437).
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  chip.blur();
+  layers.open[0]!.close();
+  await settle();
+  expect(searched()).toBeNull();
+  expect(document.activeElement).toBe(chip);
   expect(layers.open).toEqual([]);
 });
 
@@ -1918,7 +1926,8 @@ function linkPorts() {
       if (id !== "jira:PAY-231") throw { code: "not_found", message: id, source_id: null };
       return { row: { entity_id: id, kind: "ticket", title: "SEPA retry" } } as never;
     }),
-    createLink: vi.fn(async () => null as never),
+    createLink: vi.fn(async () => ({ id: "link-1", from_id: "confluence:2", to_id: "jira:PAY-231", relation: "documents", note: null }) as never),
+    unlink: vi.fn(async () => {}),
     search: vi.fn(async () => null as never),
     launcherHome: vi.fn(async () => null as never),
   };
@@ -2620,7 +2629,7 @@ test("a link that answers after another page was opened reads nothing back over 
   const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? OTHER : RICH));
   let linked: () => void = () => {};
   const links = linkPorts();
-  links.createLink = vi.fn(() => new Promise<never>((resolve) => (linked = () => resolve(null as never))));
+  links.createLink = vi.fn(() => new Promise<never>((resolve) => (linked = () => resolve({ id: "link-1" } as never))));
   const props = $state({ ready: true, rest: ["confluence:2"], job: "PAY-231", ports: ports({ docsPage }), linkPorts: links as never });
   view = mount(TfDocs, { target, props });
   await settle();
@@ -2812,6 +2821,7 @@ function pageDetail(over: Partial<EntityDetail> = {}): EntityDetail {
     source: { id: "confluence", display_name: "Tidewater Confluence", adapter_kind: "confluence", enabled: true },
     refreshes: true,
     deleted_at: null,
+    links: [],
     ...over,
   } as unknown as EntityDetail;
 }
@@ -3021,4 +3031,156 @@ test("⌘R in the composer runs the page's Refresh, and the composer keeps its t
   expect(r.refreshed).toEqual(["confluence:2"]);
   expect(io.docsPage).toHaveBeenCalledTimes(2);
   expect(target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!.value).toBe("Half said");
+});
+
+// -- Typed words, the find bar and the way back (Round 12) --
+
+const composerBox = () => target.querySelector<HTMLTextAreaElement>(".tf-compose textarea")!;
+const typeIn = (box: HTMLTextAreaElement | HTMLInputElement, words: string) => {
+  box.value = words;
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+};
+const keyOn = (el: Element, key: string, more: KeyboardEventInit = {}) => el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...more }));
+
+test("a comment's draft stays on its own page, and ⌘Enter sends it (F-429, F-435)", async () => {
+  const docsPage = vi.fn(async (id: string) => (id === "confluence:1" ? { ...OTHER, writes: RICH.writes } : RICH));
+  const io = await draw(["confluence:2"], ports({ docsPage }));
+  typeIn(composerBox(), "half a thought");
+  await settle();
+  shown!.rest = ["confluence:1"];
+  await settle();
+  expect(composerBox().value).toBe("");
+  expect(button("Comment")!.disabled).toBe(true);
+  shown!.rest = ["confluence:2"];
+  await settle();
+  expect(composerBox().value).toBe("half a thought");
+  keyOn(composerBox(), "Enter", { metaKey: true });
+  await settle();
+  expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "half a thought" } });
+  expect(composerBox().value).toBe("");
+  expect(drafts.has("comment:confluence:2")).toBe(false);
+});
+
+test("Esc on a section's editor keeps its words, the heading says Draft, and only Cancel throws them away (F-430)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const open = () => button("Edit section…")!.click();
+  open();
+  await settle();
+  const before = target.querySelector<HTMLTextAreaElement>(".tf-sec-edit textarea")!.value;
+  typeIn(target.querySelector<HTMLTextAreaElement>(".tf-sec-edit textarea")!, `${before} and more`);
+  await settle();
+  keyOn(target.querySelector(".tf-sec-edit textarea")!, "Escape");
+  await settle();
+  expect(target.querySelector(".tf-sec-edit")).toBeNull();
+  expect(target.querySelector(".tf-queued-mark")?.textContent).toBe("Draft");
+  expect(document.activeElement?.textContent).toBe("Edit section…");
+  open();
+  await settle();
+  expect(target.querySelector<HTMLTextAreaElement>(".tf-sec-edit textarea")!.value).toBe(`${before} and more`);
+  button("Cancel")!.click();
+  await settle();
+  expect(target.querySelector(".tf-queued-mark")).toBeNull();
+  open();
+  await settle();
+  expect(target.querySelector<HTMLTextAreaElement>(".tf-sec-edit textarea")!.value).toBe(before);
+});
+
+test("⌘Enter in a section's editor saves it (F-435)", async () => {
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("Edit section…")!.click();
+  await settle();
+  keyOn(target.querySelector(".tf-sec-edit textarea")!, "Enter", { metaKey: true });
+  await settle();
+  expect(io.docsEditSection).toHaveBeenCalled();
+  expect(target.querySelector(".tf-sec-edit")).toBeNull();
+});
+
+test("the find bar with no match turns its arrows off, and emptying the box does not close it; Esc closes it and focus goes to the title (F-436)", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => OUTLINED), docsSearch: vi.fn(async () => HITS) }));
+  await findOnPage("ledger");
+  const bar = () => target.querySelector(".tf-findbar");
+  const box = bar()!.querySelector("input")!;
+  box.focus();
+  typeIn(box, "nothingmatchesthis");
+  await settle();
+  expect(bar()!.querySelector<HTMLButtonElement>("button[aria-label=Previous]")!.disabled).toBe(true);
+  expect(bar()!.querySelector<HTMLButtonElement>("button[aria-label=Next]")!.disabled).toBe(true);
+  expect(bar()!.querySelector(".tf-findn")!.textContent).toBe("none on this page");
+  typeIn(box, "");
+  await settle();
+  expect(bar()).not.toBeNull();
+  expect(document.activeElement).toBe(box);
+  keyOn(box, "Escape");
+  await settle();
+  expect(bar()).toBeNull();
+  expect(document.activeElement).toBe(target.querySelector(".tf-rd-title"));
+});
+
+test("a search that could not ask offers Try again, which asks again with the same words (F-439)", async () => {
+  let fail = true;
+  const docsSearch = vi.fn(async () => {
+    if (fail) throw { code: "internal", message: "502", source_id: null };
+    return HITS;
+  });
+  await draw(["search", "ledger"], ports({ docsSearch, searchPause: 0 }));
+  expect(target.querySelector(".tf-dh-answer")?.textContent).toContain("Could not search");
+  fail = false;
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-dh-answer button")].find((b) => b.textContent === "Try again")!.click();
+  await settle();
+  expect(docsSearch).toHaveBeenCalledTimes(2);
+  expect(target.querySelector(".tf-dh-answer")).toBeNull();
+});
+
+test("Link to <job> says so with Undo, and Undo withdraws the link it made (F-433)", async () => {
+  const links = linkPorts();
+  await drawJob(["confluence:2"], links, ports({ jobReach: vi.fn(async () => REACH), docsPage: vi.fn(async () => RICH) }));
+  button("Link to PAY-231")!.click();
+  await settle();
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Linked to PAY-231");
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(links.unlink).toHaveBeenCalledWith("link-1");
+});
+
+test("the foot's Unlink withdraws a link made by hand, with Undo; a ticket the body only references has none (F-433)", async () => {
+  const links = linkPorts();
+  const on = { link: { id: "link-7", from_id: "confluence:2", to_id: "jira:OPS-77", relation: "documents", origin: "manual", note: null }, other: { entity_id: "jira:OPS-77", deleted_at: null, title: "x", kind: "ticket" } };
+  const worked = { ...RICH, work: [{ entity_id: "jira:OPS-77", key: "OPS-77", title: "x", status: null, linked: true }, { entity_id: "jira:OPS-78", key: "OPS-78", title: "y", status: null, linked: false }] };
+  const io = ports({ docsPage: vi.fn(async () => worked), getEntity: vi.fn(async () => pageDetail({ links: [on] as never })) });
+  view = mount(TfDocs, { target, props: { ready: true, rest: ["confluence:2"], job: null, ports: io, linkPorts: links as never } });
+  await settle();
+  const unlinks = [...target.querySelectorAll<HTMLButtonElement>(".tf-rd-unlink")];
+  expect(unlinks.map((b) => b.getAttribute("aria-label"))).toEqual(["Unlink OPS-77"]);
+  unlinks[0]!.click();
+  await settle();
+  expect(links.unlink).toHaveBeenCalledWith("link-7");
+  const toast = toasts.items.at(-1)!;
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(links.createLink).toHaveBeenCalledWith("confluence:2", "jira:OPS-77", "documents", undefined);
+});
+
+test("Continue reading goes back to where the page was left; opening it another way starts at the top (F-431)", async () => {
+  forgetReading();
+  const io = ports({ docsPage: vi.fn(async () => RICH) });
+  await draw(["confluence:2"], io);
+  const main = target.querySelector<HTMLElement>(".tf-rd-main")!;
+  main.scrollTop = 1200;
+  main.dispatchEvent(new Event("scroll"));
+  await settle();
+  expect(readingAt("confluence:2")).toBe(main.scrollTop);
+  forgetReading();
+});
+
+test("For you opens a page at its mention, and on that page the row is marked and still answers (F-431, F-441)", async () => {
+  const mentioned = { ...RICH, entity_id: "confluence:2", comments: [{ id: "c1", author: "priya", author_name: "Priya", at: null, blocks: [{ type: "paragraph", text: [{ type: "mention", user: "me", name: "Me", me: true }] }] }] } as unknown as DocPage;
+  const tree = { ...TREE, for_you: [{ entity_id: "confluence:2", title: "On-call handbook", space_key: "OPS", by_name: "Priya Nair" }] };
+  await draw(["confluence:2", "mention"], ports({ docsPage: vi.fn(async () => mentioned), docsTree: vi.fn(async () => tree) }));
+  expect(target.querySelector(".tf-msg.tf-mention")).not.toBeNull();
+  const row = target.querySelector<HTMLAnchorElement>(".tf-dl-for a")!;
+  expect(row.getAttribute("href")).toBe("#/page/confluence%3A2/mention");
+  expect(row.getAttribute("aria-current")).toBe("true");
 });

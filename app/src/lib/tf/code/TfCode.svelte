@@ -310,6 +310,8 @@
   const choices = $derived(repoChoices(repos?.rows ?? [], known));
   const openCounts = $derived(openPrsOf(lines ?? []));
   const compare = $derived(compareHash(branches, repos?.rows ?? []));
+  /** The job's open pull request: the loudest button goes there, as *New pull request* would only land on saying one is open (F-243). */
+  const jobPr = $derived(job === null ? null : ((lines ?? []).find((line) => line.row.state?.text.toLowerCase() === "open" && index.jobOf({ entity_id: line.row.entity_id, kind: line.row.kind }) === job) ?? null));
 
   // -- the filter bars -------------------------------------------------------
 
@@ -435,11 +437,13 @@
   <div>
     <h1>Code</h1>
     <div class="tf-sub">
-      {repos === null ? "Repositories and pull requests, what asks for you first." : headerLine(repos.total, repos.rows, sources)}
+      {repos === null ? "Repositories and pull requests, yours first." : headerLine(repos.total, repos.rows, sources)}
     </div>
   </div>
   <div class="tf-acts">
-    {#if compare !== null}
+    {#if jobPr !== null}
+      <a class="tf-btn tf-primary" href={itemHash(jobPr.row)}>Open PR {jobPr.number ?? ""}</a>
+    {:else if compare !== null}
       <a class="tf-btn tf-primary" href={compare}>New pull request</a>
     {:else}
       <!-- Focusable, so the reason in its title reaches the keyboard too. -->

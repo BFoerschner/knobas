@@ -83,6 +83,7 @@
     type DocsHits,
     type DocsTree,
     type EntityDetail,
+    type LinkEntry,
     type NewPage,
     type Reached,
   } from "../../ipc/entity";
@@ -92,7 +93,7 @@
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { resolveTicket } from "../job/job";
@@ -131,10 +132,13 @@
     LINK_RELATION,
     blockWords,
     firstName,
+    forYouHash,
     forYouIn,
     forYouWhy,
     inlineWords,
     jobPageGroups,
+    mentionsMe,
+    noteReading,
     pageHash,
     pageToOpen,
     spaceAt,
@@ -143,6 +147,7 @@
     person,
     placeOf,
     reachedPages,
+    readingAt,
     readingMinutes,
     revealMatch,
     scopeName,
@@ -158,8 +163,12 @@
   } from "./docs";
   import { replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { linkedOn } from "../job/connections";
   import type { EscTarget } from "../escape";
   import { filterKeys } from "../filter-keys";
+  import { drafts } from "../drafts.svelte";
+  import { sendKey } from "../inline-editor";
 
   /** The page's own reads and writes; *Link to…* uses the job's ports. */
   export interface DocsPorts {
@@ -191,7 +200,7 @@
     searchPause?: number;
   }
 
-  type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "search" | "launcherHome">;
+  type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "unlink" | "search" | "launcherHome">;
 
   let {
     ready,
@@ -356,12 +365,22 @@
     try {
       const read = await io.docsTree();
       if (mine !== treeAsked) return;
+      // A row of the home's that holds focus can move: the page read last goes up into *Continue reading* (F-438).
+      const held = document.activeElement?.closest("a.tf-dh-row")?.getAttribute("href") ?? null;
       tree = read;
       treeError = null;
       settlePages(read);
+      if (held !== null) void tick().then(() => keepRow(held));
     } catch (cause) {
       if (mine === treeAsked && (!quiet || tree === null)) treeError = ipcErrorMessage(cause);
     }
+  }
+
+  /** The home's row for `href` takes focus back, when the read that moved it left focus on nothing. */
+  function keepRow(href: string): void {
+    const at = document.activeElement;
+    if (at !== null && at !== document.body && at.isConnected) return;
+    [...(main?.querySelectorAll<HTMLElement>("a.tf-dh-row") ?? [])].find((row) => row.getAttribute("href") === href)?.focus({ preventScroll: true });
   }
 
   /**
@@ -498,7 +517,10 @@
   // The search asks once typing pauses (#2200), for what was typed last; an
   // answer to an older keystroke is dropped.
   let asked = 0;
+  /** Bumped by *Try again* on a search that could not ask (F-439). */
+  let searchAttempt = $state(0);
   $effect(() => {
+    void searchAttempt;
     const text = query;
     const scope = !jobOn && shownSpace ? { source_id: shownSpace.source_id, key: shownSpace.key } : null;
     if (!ready || text.trim() === "") {
@@ -572,7 +594,7 @@
       // Coming back from a hit is no arrival: the way back puts focus on the hit that was opened.
       arriving = query !== words;
       query = words;
-      find = "";
+      setFind("");
       picked = "*";
     });
   });
@@ -591,8 +613,15 @@
   /** The search is over: the tree is back, and the highlighting and the search's *All spaces* gone. */
   function endSearch(): void {
     query = "";
-    find = "";
+    setFind("");
     picked = null;
+    fromChip = null;
+  }
+
+  /** *Try again* on a search that could not ask: the words stay, and what it finds takes focus, as on arriving. */
+  function retrySearch(): void {
+    arriving = place.kind === "search";
+    searchAttempt += 1;
   }
 
   // Leaving a search's address by anything but one of its hits leaves the search, as `Esc` does a row's narrowing.
@@ -613,7 +642,8 @@
 
   /** Open a hit with its query carried over. */
   function openHit(entityId: string): void {
-    find = found?.needles.join(" ") ?? "";
+    setFind(found?.needles.join(" ") ?? "");
+    fromChip = null;
     openingHit = true;
     location.hash = pageHash(entityId);
   }
@@ -631,9 +661,27 @@
 
   function searchLabel(label: string, chip: HTMLElement): void {
     query = label;
-    find = "";
+    setFind("");
+    fromChip = chip;
     openTree(chip);
   }
+
+  /** The label chip a search on a page came from: `Esc` ends that search and goes back to it, and leaves the page only after (F-437). */
+  let fromChip = $state.raw<HTMLElement | null>(null);
+  const shown = pageVisible();
+  $effect(() => {
+    if (fromChip === null || !shown()) return;
+    return untrack(() =>
+      layers.add({
+        kind: "panel",
+        close: () => {
+          const chip = fromChip;
+          clearSearch();
+          chip?.focus();
+        },
+      }),
+    );
+  });
 
   // ---- below 900px the tree is a drawer over the page (#2084) ----
   /** A window narrower than 900px, where the tree leaves the grid and the Pages button opens it. */
@@ -740,6 +788,21 @@
 
   /** The page and the query the find bar last started on. */
   let started: { id: string; stems: string[] } | null = null;
+  /** *Continue reading* pressed: the page it names, drawn, goes back to where it was left (F-431). */
+  let resuming: { id: string; top: number } | null = null;
+
+  /** A page opened at its mention: the newest comment that names the reader, else the first mention in its body. */
+  function toMention(): void {
+    const comments = article?.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
+    const at = comments?.[comments.length - 1] ?? article?.querySelector<HTMLElement>(".tf-ment.tf-me");
+    at?.scrollIntoView?.({ block: "center" });
+  }
+
+  /** *For you*'s row on the page it names changes no address once it is there, so it jumps from here too. */
+  const mentionHere = $derived(place.kind === "page" && place.mention === true && page?.entity_id === place.id);
+  $effect(() => {
+    if (mentionHere) void tick().then(toMention);
+  });
 
   // A page drawn with a query marks its first match, unless the address names
   // a section, which is scrolled to instead. The same page read again (a sync
@@ -751,6 +814,16 @@
     const again = started?.id === p.entity_id && started.stems === query;
     started = { id: p.entity_id, stems: query };
     void tick().then(() => {
+      if (resuming?.id === p.entity_id) {
+        const { top } = resuming;
+        resuming = null;
+        // A frame on too: opening an address sets the page's scroller back to the top as it shows the page.
+        const back = () => {
+          if (main !== null) main.scrollTop = top;
+        };
+        back();
+        requestAnimationFrame(back);
+      }
       if (again) {
         const all = matches();
         at = Math.min(at, all.length - 1);
@@ -773,6 +846,31 @@
     event.preventDefault();
     jump(event.shiftKey ? -1 : 1);
   }
+
+  /** Set by typing in the box: emptied by hand, the bar stays, because the next word is on its way. */
+  let findTyped = $state(false);
+  const findOpen = $derived((find !== "" || findTyped) && page !== null);
+
+  /** What the find bar marks, from anything but the bar's own box. */
+  function setFind(words: string): void {
+    find = words;
+    findTyped = false;
+  }
+
+  /** The bar closes, and focus left in it, or on nothing, goes to the page's title rather than the body (F-436). */
+  function closeFind(): void {
+    const at = document.activeElement;
+    const free = at === null || at === document.body || at.closest(".tf-findbar") !== null;
+    setFind("");
+    if (free) article?.querySelector<HTMLElement>(".tf-rd-title")?.focus({ preventScroll: true });
+  }
+
+  // On the layer stack, so `Esc` closes the bar before it leaves the page, wherever focus is.
+  $effect(() => {
+    if (!findOpen || !shown()) return;
+    return untrack(() => layers.add({ kind: "panel", close: closeFind }));
+  });
+
 
   // ---- what the reader's width makes of its header (`readerFit`) ----
   let sheet = $state<HTMLElement | null>(null);
@@ -821,6 +919,8 @@
   let active = $state<number | null>(null);
   function follow(): void {
     if (!main || !article) return;
+    // Where the reader is on this page, for *Continue reading*. Only with its own page drawn: another's scroll is not this one's.
+    if (place.kind === "page" && page?.entity_id === place.id) noteReading(place.id, main.scrollTop);
     // A section is the one you are in once its heading is in the column's top third, with its body in view under it.
     const top = main.getBoundingClientRect().top + main.clientHeight / 3;
     let now: number | null = null;
@@ -868,7 +968,9 @@
   // ---- actions ----
   let linking = $state(false);
   let newPage = $state<{ space: string | null; parent: string | null; title?: string; text?: string } | null>(null);
-  let comment = $state("");
+  /** Each page's composer holds its own words, so a draft never lands on the next page (F-429). */
+  const commentKey = (entityId: string) => `comment:${entityId}`;
+  const comment = $derived(page === null ? "" : drafts.get(commentKey(page.entity_id)));
   let commenting = $state(false);
 
   /** The page's writes its source's credential cannot make, asked once the page is drawn (#2053). */
@@ -944,13 +1046,41 @@
         return;
       }
       const row = drawn(LINK_RELATION, p.entity_id, ticket);
-      await linkPorts!.createLink(row.fromId, row.toId, row.relation);
-      push({ text: `Linked to ${key}` });
+      const made = await linkPorts!.createLink(row.fromId, row.toId, row.relation);
+      toastLinked(`Linked to ${key}`, p.entity_id, made.id);
       await rereadPage(p.entity_id);
     } catch (cause) {
       push({ text: `Could not link it: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
       linkingJob = false;
+    }
+  }
+
+  /** A link just made says so with a way back, from where it was made (F-433). */
+  function toastLinked(text: string, pageId: string, linkId: string): void {
+    undoable(text, () =>
+      void linkPorts!
+        .unlink(linkId)
+        .then(() => rereadPage(pageId))
+        .catch((cause: unknown) => push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" })),
+    );
+  }
+
+  /** The foot's *Unlink*: a link drawn by hand goes at once, with *Undo*, as the ticket's drawer has it. */
+  async function unlinkWork(pageId: string, link: LinkEntry["link"]): Promise<void> {
+    if (!linkPorts) return;
+    const ports = linkPorts;
+    try {
+      await ports.unlink(link.id);
+      undoable("Unlinked in knobas only.", () =>
+        void ports
+          .createLink(link.from_id, link.to_id, link.relation, link.note ?? undefined)
+          .then(() => rereadPage(pageId))
+          .catch((cause: unknown) => push({ text: `Could not link it again: ${ipcErrorMessage(cause)}`, tone: "err" })),
+      );
+      await rereadPage(pageId);
+    } catch (cause) {
+      push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
 
@@ -1000,7 +1130,7 @@
     if (page === null) return;
     const words = takeAgain(page.entity_id, "comment");
     if (words === null) return;
-    comment = words;
+    drafts.put(commentKey(page.entity_id), words);
     void tick().then(() => composer?.focus());
   });
 
@@ -1046,10 +1176,10 @@
   }
 
   async function sendComment(p: DocPage): Promise<void> {
-    if (comment.trim() === "" || commenting || refusal("comment") !== null) return;
+    const body = drafts.get(commentKey(p.entity_id));
+    if (body.trim() === "" || commenting || refusal("comment") !== null) return;
     commenting = true;
     try {
-      const body = comment;
       const id = p.entity_id;
       const write = await io.submitWrite({ Comment: { entity: id, body } });
       toastQueued(`comment on ${p.title}`, sourceOf(p), { write });
@@ -1067,12 +1197,17 @@
         },
         follower,
       });
-      comment = "";
+      drafts.forget(commentKey(id));
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
       commenting = false;
     }
+  }
+
+  /** ⌘Enter in the composer: read when pressed, because the attachment outlives one read of the page. */
+  function sendOpenComment(): void {
+    if (page !== null) void sendComment(page);
   }
 
   async function createPage(next: NewPage, linkToJob: boolean): Promise<boolean> {
@@ -1147,7 +1282,7 @@
         <p class="tf-dl-note">Could not read the page tree: {treeError}</p>
       {:else if searching}
         {#if searchError !== null}
-          <p class="tf-dl-note">Could not search: {searchError}</p>
+          <p class="tf-dl-note">Could not search: {searchError} <button type="button" class="tf-linkish" onclick={retrySearch}>Try again</button></p>
         {:else if hits !== null}
           <TfDocHits
             found={hits}
@@ -1184,8 +1319,13 @@
           <div class="tf-dl-for">
             <h4>For you</h4>
             {#each forYou as item (item.entity_id)}
-              <a href={pageHash(item.entity_id)}
-                >{item.title}<span class="tf-why">{forYouWhy(item)}</span></a
+              <!-- On the page it names, the row marks that page and still jumps to the mention. -->
+              <a
+                href={forYouHash(item.entity_id)}
+                aria-current={item.entity_id === current ? "true" : undefined}
+                onclick={() => {
+                  if (mentionHere && item.entity_id === current) toMention();
+                }}>{item.title}<span class="tf-why">{forYouWhy(item)}</span></a
               >
             {/each}
           </div>
@@ -1240,14 +1380,24 @@
         value={place.kind === "search" ? place.words : (page?.title ?? spaceHere?.name ?? spaceHere?.key ?? "Docs home")}
         open={drawer} controls="tf-docs-tree" onpress={(event) => openTree(event.currentTarget as Element)} />
     {/if}
-    {#if find !== "" && page !== null}
+    {#if findOpen}
       <div class="tf-findbar" role="search">
         <span>Matches for</span>
-        <input value={find} oninput={(e) => (find = e.currentTarget.value)} onkeydown={onfindkey} aria-label="Find in page" {@attach filterKeys({ close: () => (find = "") })} />
-        <span>{marks === 0 ? "none on this page" : `${Math.max(at, 0) + 1} of ${marks}`}</span>
-        <button type="button" onclick={() => jump(-1)} aria-label="Previous">↑</button>
-        <button type="button" onclick={() => jump(1)} aria-label="Next">↓</button>
-        <button type="button" class="tf-findx" onclick={() => (find = "")} aria-label="Stop highlighting">✕</button>
+        <input
+          value={find}
+          oninput={(e) => {
+            findTyped = true;
+            find = e.currentTarget.value;
+          }}
+          onkeydown={onfindkey}
+          aria-label="Find in page"
+          {@attach filterKeys({ close: closeFind })}
+        />
+        <!-- A held width: the arrows beside it do not move as the words change. -->
+        <span class="tf-findn">{find.trim() === "" ? "" : marks === 0 ? "none on this page" : `${Math.max(at, 0) + 1} of ${marks}`}</span>
+        <button type="button" disabled={marks === 0} onclick={() => jump(-1)} aria-label="Previous">↑</button>
+        <button type="button" disabled={marks === 0} onclick={() => jump(1)} aria-label="Next">↓</button>
+        <button type="button" class="tf-findx" onclick={closeFind} aria-label="Stop highlighting">✕</button>
       </div>
     {/if}
     {#if home}
@@ -1266,6 +1416,7 @@
         {sync}
         notice={answerHere || hitsHere ? searchAnswer : undefined}
         onretry={() => void readTree(false)}
+        onresume={(id) => (resuming = { id, top: readingAt(id) })}
       />
     {:else if spaceHere !== undefined}
       <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: spaceHere.name ?? spaceHere.key }]} {back} /></div>
@@ -1316,7 +1467,7 @@
           <!-- The canonical header (#2238, #2286): the title, and on its line the actions in the
                Controls order, "Open in" a ghost, the page's Refresh and the view's Sync now last. -->
           <div class="tf-fhead tf-rd-head">
-            <h1 class="tf-rd-title">
+            <h1 class="tf-rd-title" tabindex="-1">
               <TfMarked text={p.title} {stems} />
             </h1>
             <div class="tf-acts" bind:this={headActs}>
@@ -1401,13 +1552,13 @@
               <p class="tf-dl-note">knobas cannot read this page's body. Open it in {p.source_name}.</p>
             {/if}
             {#key p.entity_id}
-              <TfDocFoot page={p} spaces={tree.spaces} />
+              <TfDocFoot page={p} spaces={tree.spaces} links={detail === null ? [] : linkedOn(detail)} onunlink={linkPorts ? (link) => unlinkWork(p.entity_id, link) : undefined} />
             {/key}
             <div class="tf-cmts">
               <h2>Comments {#if p.comments.length + queuedComments.length > 0}<span class="tf-count">{p.comments.length + queuedComments.length}</span>{/if}</h2>
               {#each p.comments as c, i (i)}
                 {@const mine = c.author !== null && p.me.includes(c.author)}
-                <div class="tf-msg">
+                <div class="tf-msg" class:tf-mention={c.blocks.some(mentionsMe)}>
                   <span class="tf-av" class:tf-me={mine}>{initials(c.author)}</span>
                   <div class="tf-cmt-body">
                     <div class="tf-who">
@@ -1440,7 +1591,13 @@
               {/if}
               {#if p.writes.includes("comment")}
                 <div class="tf-compose">
-                  <textarea bind:this={composer} bind:value={comment} placeholder="Comment on this page" aria-label="Comment on this page"
+                  <textarea
+                    bind:this={composer}
+                    value={comment}
+                    oninput={(event) => drafts.put(commentKey(p.entity_id), event.currentTarget.value)}
+                    placeholder="Comment on this page"
+                    aria-label="Comment on this page"
+                    {@attach sendKey(sendOpenComment)}
                   ></textarea>
                   <div class="tf-acts">
                     <button
@@ -1473,6 +1630,7 @@
   <div class="tf-empty tf-dh-answer">
     {#if searchError !== null}
       <p>Could not search: {searchError}</p>
+      <button type="button" class="tf-btn tf-sm" onclick={retrySearch}>Try again</button>
     {:else}
       <p>No page matches <b>{query.trim()}</b>. Every word has to appear in the page or its comments.</p>
     {/if}
@@ -1492,10 +1650,11 @@
     entityId={p.entity_id}
     ports={linkPorts}
     {layers}
+    linked={[...p.work.filter((work) => work.linked).map((work) => work.entity_id), ...(detail === null ? [] : linkedOn(detail).map((entry) => entry.other.entity_id))]}
     onclose={() => (linking = false)}
-    onlinked={() => {
+    onlinked={(target, made) => {
       linking = false;
-      push({ text: "Linked in knobas" });
+      toastLinked(`Linked to ${target.title} in knobas`, p.entity_id, made.id);
       void rereadPage(p.entity_id);
     }}
   />

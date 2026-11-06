@@ -4,7 +4,8 @@
   Code's row: its number, its title over its author (`code_facts`), its state
   chip, the job it belongs to (`job/open-jobs.ts`) and when it last moved. From
   the mirror (`list_entities`), every state, newest first; a row opens
-  `#/pr/<entity id>`.
+  `#/pr/<entity id>`. A pull request this session queued stands first with its
+  chip, *Queued* then *Sent*, until the mirror holds its title (F-242).
 -->
 <script lang="ts">
   import TfKey from "../TfKey.svelte";
@@ -19,7 +20,10 @@
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob, type OpenJobPorts } from "../job/open-jobs";
-  import { visibleRepoPrs } from "./repo";
+  import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
+  import { untrack } from "svelte";
+  import type { EchoListen } from "../queued.svelte";
+  import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
   import { waitPhase } from "../waiting";
 
@@ -30,8 +34,9 @@
     job,
     now,
     newPr = null,
+    reread = () => {},
   }: {
-    ports: OpenJobPorts & { codeFacts: (entityIds: string[]) => Promise<CodeFacts[]> };
+    ports: OpenJobPorts & { codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>; listen?: EchoListen };
     repoId: string;
     /** The repository's pull requests, or `null` before the read answered. */
     rows: EntityRow[] | null;
@@ -40,7 +45,18 @@
     now: Date;
     /** Where *New pull request* goes, where there is a branch to propose. */
     newPr?: string | null;
+    /** Reads the rows again: what brings a queued one in. */
+    reread?: () => void;
   } = $props();
+
+  /** What this session queued that the rows don't hold yet. */
+  const sent = $derived(echoesOn(repoId, MADE_PR));
+  $effect(() => {
+    if (rows === null) return;
+    const titles = new Set(rows.map((row) => row.title.trim()));
+    untrack(() => settleEchoes(repoId, (echo) => echo.kind === MADE_PR && titles.has(echo.text.trim())));
+  });
+  $effect(() => untrack(() => watchEchoes(REPO_PRS, () => reread(), { listen: ports.listen })));
 
   let jobs = $state<OpenJob[]>([]);
   /** Each pull request's author, once `code_facts` answered; a failed read leaves the line off. */
@@ -90,21 +106,30 @@
 </script>
 
 <div class="tf-rbar">
-  <FilterBar {config} {filter} shown={rows === null ? null : shown.length} total={rows?.length ?? null} />
+  <FilterBar {config} {filter} shown={rows === null ? null : shown.length + sent.length} total={rows === null ? null : rows.length + sent.length} />
 </div>
 <!-- The page reads the rows; a refresh replaces them in place, so only the first read waits here (#2246). -->
 <TfWaiting phase={waitPhase({ drawn: rows !== null, reading: false, failed: false })} columns={5}>
-{#if rows !== null && rows.length === 0}
+{#if rows !== null && rows.length === 0 && sent.length === 0}
   <div class="tf-empty">
     <p>This repository has no pull requests yet.</p>
     {#if newPr !== null}<a class="tf-btn tf-sm" href={newPr}>New pull request</a>{/if}
   </div>
-{:else if shown.length === 0}
+{:else if shown.length === 0 && sent.length === 0}
   <TfNoMatch noun="pull requests" {filter} />
 {:else}
   <!-- Code's row and Code's columns: one list of pull requests, drawn one way. -->
   <table class="tf-tbl tf-rprs tf-cprs">
     <tbody>
+      {#each sent as echo (echo.text)}
+        <tr class="tf-rsent">
+          <td class="tf-prno"></td>
+          <td><span class="tf-rowt">{echo.text}</span></td>
+          <td><TfStateChip text={echo.state} tone="info" /></td>
+          <td></td>
+          <td></td>
+        </tr>
+      {/each}
       {#each shown as row (row.entity_id)}
         {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
         {@const author = authors.get(row.entity_id)}

@@ -153,7 +153,7 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   await draw([]);
 
   expect(text(target.querySelector("h1"))).toBe("Code");
-  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, what asks for you first.");
+  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, yours first.");
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Repositories 3", "Pull requests 4"]);
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
@@ -245,8 +245,23 @@ test("Waiting on me keeps the review asked of you; This job with nothing held of
   expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#139"]);
 });
 
-test("New pull request opens the compare page for the job's branch; with no job it cannot", async () => {
+test("the primary opens the job's open pull request, not a compare page that only says one is open (F-243)", async () => {
   await draw([]);
+  const primary = target.querySelector<HTMLAnchorElement>(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("Open PR #142");
+  expect(primary.getAttribute("href")).toMatch(/^#\/pr\//);
+});
+
+test("New pull request opens the compare page for the job's branch; with no job it cannot", async () => {
+  const base = ports();
+  await draw([], "PAY-231", {
+    ...base,
+    // The job's branch stands, and no pull request of the job's is open.
+    listEntities: async (filter, limit, offset) => {
+      const page = await base.listEntities(filter, limit, offset);
+      return filter.kinds?.includes("pr") ? { ...page, rows: page.rows.map((row) => ({ ...row, state: { ...row.state!, text: "Merged" } })) } : page;
+    },
+  });
   const link = [...target.querySelectorAll("a")].find((a) => text(a) === "New pull request");
   expect(link?.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2FPAY-231-sepa-retry",

@@ -29,6 +29,7 @@
     entityId,
     ports,
     layers,
+    linked = [],
     onclose,
     onlinked,
   }: {
@@ -38,8 +39,10 @@
       createLink: (fromId: string, toId: string, relation?: string, note?: string) => Promise<LinkRow>;
     };
     layers: Layers;
+    /** What this already links to: its rows say so and can't be picked (F-434). */
+    linked?: readonly string[];
     onclose: () => void;
-    onlinked: (target: LinkTarget) => void;
+    onlinked: (target: LinkTarget, made: LinkRow) => void;
   } = $props();
 
   /** The relations a job's link offers, one list with the launcher's *Link to ⟨job⟩* (#2426). */
@@ -67,7 +70,11 @@
   let field = $state<HTMLInputElement | null>(null);
   let primary = $state<HTMLButtonElement | null>(null);
 
-  const hits = $derived(session.rows.flatMap((row) => (row.kind === "hit" && row.hit.entity_id !== entityId ? [row.hit] : [])));
+  const found = $derived(session.rows.flatMap((row) => (row.kind === "hit" && row.hit.entity_id !== entityId ? [row.hit] : [])));
+  /** What can be picked, which the arrow keys and `Enter` walk. */
+  const hits = $derived(found.filter((hit) => !linked.includes(hit.entity_id)));
+  /** What this already links to: last, named, and not a choice. */
+  const taken = $derived(found.filter((hit) => linked.includes(hit.entity_id)));
 
   function pick(hit: SearchHit) {
     target = hit;
@@ -109,8 +116,8 @@
     failure = null;
     try {
       const row = drawn(relation, entityId, target.entity_id);
-      await ports.createLink(row.fromId, row.toId, row.relation, note.trim() === "" ? undefined : note.trim());
-      onlinked(target);
+      const made = await ports.createLink(row.fromId, row.toId, row.relation, note.trim() === "" ? undefined : note.trim());
+      onlinked(target, made);
     } catch (rejection) {
       failure = linkFailureMessage(rejection);
     } finally {
@@ -146,11 +153,16 @@
         {#if session.error}
           <p class="tf-dim">{session.error}</p>
         {/if}
-        {#if hits.length > 0}
+        {#if found.length > 0}
           <div class="tf-fwide tf-picklist" role="listbox" aria-label="Link targets">
             {#each hits as hit, index (hit.entity_id)}
               <button type="button" role="option" aria-selected={keyed && index === cursor} onclick={() => pick(hit)}>
                 <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">{kindSingular(hit.kind, null)}</span>
+              </button>
+            {/each}
+            {#each taken as hit (hit.entity_id)}
+              <button type="button" role="option" aria-selected="false" disabled>
+                <span class="tf-pickt">{#if hit.kind === "ticket"}<TfKey value={keyOf(hit.entity_id)} lead />{/if}<span class:tf-mono={codeTitle(hit.kind)}>{hit.title}</span></span><span class="tf-dim">Already linked</span>
               </button>
             {/each}
           </div>

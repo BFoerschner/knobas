@@ -34,6 +34,8 @@
 .tf-bsel:has(select:disabled) { opacity: .55; }
 /* *New pull request* and the branch picker sit in the header's row as its own items. On Compare they hold their room unseen, so the tabs under the header hold still (F-249). */
 .tf-repohold { display: contents; }
+/* A pull request on its way: its title dimmed as a queued thing is, and nothing to open yet (F-242). */
+.tf-rsent .tf-rowt { color: var(--ink-2); font-weight: 500; }
 .tf-repohold.tf-held { visibility: hidden; }
 /* A repository's title never breaks inside its name. */
 .tf-repohead h1 { overflow-wrap: normal; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -333,9 +335,11 @@
 .tf-swipe-after img { width: 100%; height: 100%; object-fit: contain; }
 .tf-swipe-bar { display: flex; gap: 8px; align-items: center; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-swipe-bar input { width: 240px; }
+/* In the gutter, at the start of the line's numbers, where the eye already is: at the row's far end it was 900 px from the code (F-244). */
 .tf .tf-addc {
+  position: absolute; left: 2px; top: 1px; z-index: 1;
   opacity: 0; border: 0; background: var(--info); color: var(--sheet); border-radius: 4px; width: 18px; height: 18px;
-  line-height: 16px; cursor: pointer; margin: 2px 6px 0; font: 700 var(--t-sm) var(--sans); padding: 0;
+  line-height: 16px; cursor: pointer; margin: 0; font: 700 var(--t-sm) var(--sans); padding: 0;
 }
 .tf-diff .tf-ln:hover .tf-addc, .tf-addc:focus-visible { opacity: 1; }
 .tf-thread {
@@ -451,6 +455,8 @@
 .tf-pstep.tf-puser .tf-pname::after { content: " cmd"; font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); }
 .tf-psave { display: flex; align-items: center; gap: var(--control-gap); flex-wrap: wrap; justify-content: flex-end; }
 .tf-psave label { display: inline-flex; align-items: center; gap: 6px; }
+/* Its own line, under the fields and buttons (F-237). */
+.tf-psave .tf-psave-note { flex: 1 1 100%; text-align: right; }
 .tf-psave input { height: var(--control-h-sm); padding: 0 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--field); color: var(--ink); }
 .tf-suggest { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--rule); background: var(--info-bg); color: var(--info); font-size: var(--t-sm); }
 .tf-stepfail .tf-sfcols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }

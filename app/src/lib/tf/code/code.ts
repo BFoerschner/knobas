@@ -290,5 +290,5 @@ export function headerLine(
   } catch {
     host = null;
   }
-  return host ? `${total} ${noun} on ${host}, what asks for you first.` : `${total} ${noun}, what asks for you first.`;
+  return host ? `${total} ${noun} on ${host}, yours first.` : `${total} ${noun}, yours first.`;
 }
