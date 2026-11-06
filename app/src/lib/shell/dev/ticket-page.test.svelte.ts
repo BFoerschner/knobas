@@ -286,14 +286,19 @@ test("Resume work chooses the ticket and starts the timer on it; the foot then s
   expect(pageCard()!.querySelector(".tf-clock"), "the running time is the chip's alone").toBeNull();
 });
 
-test("Start work chooses the ticket and runs the stepper", async () => {
+test("Start work shows the stepper and chooses nothing, and running its steps chooses the ticket (F-130)", async () => {
   await openOn("#/ticket/mock%3APAY-240", "Payout dashboard latency");
   const page = await pageOf("PAY-240");
   expect(shown(".tf-steps"), "reading runs no stepper").toBeNull();
   await until(() => foot(page)?.textContent?.trim() === "Start work", "Start work never offered");
   foot(page)!.click();
-  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
   await until(() => shown(".tf-steps") !== null, "the stepper never ran");
+  expect(chosenJob.id, "a look at the steps chooses nothing").toBeNull();
+  expect(mood(pageCard()!)).not.toBe("pinned");
+  const run = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-steps footer button")].find((button) => button.textContent === "Run all steps");
+  await until(() => run() !== undefined && run()!.getAttribute("aria-disabled") !== "true", "Run all steps never offered");
+  run()!.click();
+  await until(() => chosenJob.id === "mock:PAY-240", `the chosen job is ${chosenJob.id}`);
   expect(mood(pageCard()!)).toBe("pinned");
 });
 

@@ -15,8 +15,10 @@
   *Cancel* and *Log*, with nothing about a clock. A stop's draft opens over the running clock (#896); what each button
   does to it is `drafting.svelte.ts`'s, and this answers with an outcome,
   except that *Log* awaits `onbeforelog` (the clock stopping) before it sends.
-  `Esc` and the backdrop are the quiet answer: a stop's draft stops the clock
-  (*Stop, log later*), any other is discarded.
+  `Esc` and the × are the quiet answer, and a quiet answer changes nothing: a stop's
+  draft goes back to the running clock (*Cancel, keep running*; Björn, 2026-11-06,
+  reversing #896's *Stop, log later*), any other is discarded. The scrim does nothing,
+  as on every dialog with a footer.
 
   A worklog the ticket's source's credential cannot make (`refused_writes`,
   #2052) draws *Log* disabled with the reason, and stops no clock for it.
@@ -123,11 +125,11 @@
     return "you wrote";
   }
 
-  /** Leaving without logging: a stop's draft keeps the time, any other is dropped. */
+  /** Leaving without answering: a stop's draft leaves the clock running, any other is dropped. */
   function leave() {
     // A log in flight answers for itself; leaving now would say "unlogged".
     if (sending) return;
-    onoutcome(stopped ? "later" : "discard");
+    onoutcome(stopped ? "keep" : "discard");
   }
 
   function send() {
@@ -177,8 +179,9 @@
 
 {#snippet heading()}Log time to <span class="tf-mono">{form.key}</span>{/snippet}
 
-<!-- `Esc` and the backdrop leave quietly, through `TfDialog`'s `onclose`. -->
-<TfDialog why={form.seconds <= 0 ? "Nothing to log yet: enter the minutes." : null} title={heading} subtitle={title} onclose={leave} {layers}>
+<!-- `Esc` and the × leave quietly, through `TfDialog`'s `onclose`. -->
+<!-- Wide enough that *Nothing to log yet* stands in the footer's row with the four buttons, so emptying Minutes moves nothing. -->
+<TfDialog why={form.seconds <= 0 ? "Nothing to log yet." : null} title={heading} subtitle={title} className="tf-logdlg" onclose={leave} {layers}>
   {#snippet body()}
       <div class="tf-formgrid">
         <label for="tf-log-from">From</label>
@@ -217,13 +220,13 @@
           value={form.comment}
           oninput={(event) => form.takeOver(event.currentTarget.value)}
         ></textarea>
+        <p class="tf-dim tf-note">
+          {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}
+        </p>
       </div>
-      <p class="tf-dim tf-note">
-        Goes to {sourceName(draft.entity_id)} through the write queue.
-        {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}
-      </p>
+      <!-- One thought: where the worklog goes, and what that road can do to it (ADR-0012). -->
       <!-- prettier-ignore -->
-      <p class="tf-dim tf-fine">A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.</p>
+      <p class="tf-dim tf-fine">Goes to {sourceName(draft.entity_id)} through the write queue. A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.</p>
       {#if refused !== null}<p class="tf-fail">{refused}</p>{/if}
       {#if failed}<p class="tf-fail" role="alert">{failed}</p>{/if}
   {/snippet}

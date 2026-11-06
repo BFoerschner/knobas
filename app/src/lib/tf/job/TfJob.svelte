@@ -7,8 +7,10 @@
   card's class is the only difference (`TfJobCard.svelte`). Reading never
   chooses: only a `#/job/<…>` address (`choose`), which then lands on the
   ticket's own address, and the card's foot (`footAction`) choose. *Start
-  work* chooses and shows the stepper, *Resume work* chooses and starts the
-  timer, *Work on this* chooses; pinned, the foot is the timer. The page's
+  work* shows the stepper and chooses nothing until its steps run (F-130),
+  *Resume work* chooses and starts the timer, *Work on this* chooses; pinned,
+  the foot is the timer. A press that takes the choice from another ticket
+  says so, with the way back (`chooseSaying`). The page's
   breadcrumb is *Tickets › KEY*; `Esc` takes the ticket page's rung (the
   opener, else Tickets) and does nothing at home.
 
@@ -56,7 +58,7 @@
   import TfKey from "../TfKey.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfScroller from "../TfScroller.svelte";
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import type { LinkEntry, LinkSetDetail, LinkSetRow } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
@@ -77,7 +79,7 @@
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob } from "./current.svelte";
-  import { chosenJob } from "./chosen.svelte";
+  import { chooseSaying, chosenJob, pageAsk } from "./chosen.svelte";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { entityAddress } from "../address";
   import { replaceAddress } from "../opener";
@@ -240,7 +242,7 @@
     if (!choose || !pageShown() || resolvedId === null) return;
     const id = resolvedId;
     untrack(() => {
-      chosenJob.choose(id);
+      chooseSaying(id);
       replaceAddress(ticketHash(id));
     });
   });
@@ -252,6 +254,8 @@
     drawer = false;
     linking = false;
     stepping = false;
+    steppedTo = false;
+    stepsStarted = false;
     // Only the address re-opens a job: what the reader reads before its first
     // await is not a reason to read again.
     untrack(() => {
@@ -477,17 +481,41 @@
   /** The reader's username in the ticket's source: the card's reporter in full ink, and the reader's share of the logged time (#2403). */
   const me = $derived(detail ? username(sources.find((source) => source.id === detail.row.source_id)) : null);
   /**
-   * The stepper shows on the chosen job (*Start work* is what chooses a
-   * ticket read), and once shown it stays on this page while the ticket
-   * still offers it, so a timer that chooses another ticket meanwhile does
-   * not take the steps away mid-run.
+   * The stepper shows on the chosen job, and on a ticket only read once
+   * *Start work* is pressed, at the foot or in the Tickets preview (`pageAsk`).
+   * Once shown it stays on this page while the ticket still offers it, so a
+   * timer that chooses another ticket meanwhile does not take the steps away
+   * mid-run. The foot steps aside until a step has run (`stepsStarted`), and
+   * comes back with the timer (F-125).
    */
   let stepping = $state(false);
+  /** A press brought the reader to the steps, so focus goes to them. */
+  let steppedTo = $state(false);
+  let stepsStarted = $state(false);
   const offersSteps = $derived(detail ? offersStartWork(detail.status, mine) : false);
   $effect(() => {
     if (pinned && offersSteps) stepping = true;
   });
   const starting = $derived(stepping && offersSteps);
+  // What the Tickets preview's button asked of this page, taken once it shows the ticket.
+  $effect(() => {
+    const wanted = pageAsk.current;
+    if (wanted === null || wanted.id !== resolvedId || !pageShown() || !detail) return;
+    const { row } = detail;
+    untrack(() => {
+      pageAsk.clear();
+      if (wanted.does === "steps") {
+        steppedTo = true;
+        stepping = true;
+      } else onstarttimer(row.entity_id, row.title);
+    });
+  });
+  /** *Cancel* on the steps: as if *Start work* had not been pressed, with focus back on it. */
+  function cancelSteps() {
+    stepping = false;
+    steppedTo = false;
+    void tick().then(() => [...document.querySelectorAll<HTMLElement>(".tf-ticketcard .tf-go .tf-btn")].find((go) => !go.closest(".tf-kept[hidden]"))?.focus({ preventScroll: true }));
+  }
   const timerOnIt = $derived(
     detail !== null && detail !== undefined && timer.current?.target.kind === "entity" && timer.current.target.entity_id === detail.row.entity_id,
   );
@@ -506,12 +534,15 @@
         onstarttimer(id, title);
         return;
       case "resume":
-        chosenJob.choose(id);
+        chooseSaying(id);
         onstarttimer(id, title);
         return;
       case "start-work":
+        steppedTo = true;
+        stepping = true;
+        return;
       case "choose":
-        chosenJob.choose(id);
+        chooseSaying(id);
     }
   }
   const blocked = $derived(detail ? blockerEntries(detail) : []);
@@ -567,7 +598,7 @@
       {mine}
       {me}
       {pinned}
-      action={starting ? null : action}
+      action={starting && !(stepsStarted && pinned) ? null : action}
       onaction={act}
       {table}
       onlink={() => (drawer = true)}
@@ -591,7 +622,7 @@
             </div>
           {/each}
           {#if starting}
-            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} />
+            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} oncancel={pinned ? undefined : cancelSteps} arrive={steppedTo} bind:started={stepsStarted} />
           {/if}
           <section aria-label="Description">
             <div class="tf-panel tf-tkdesc">

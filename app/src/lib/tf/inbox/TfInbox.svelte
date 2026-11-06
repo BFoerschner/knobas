@@ -8,6 +8,10 @@
   build's status). The snoozed shelf is a fold under the list, its rows in the list's shape,
   each saying when it comes back, with *Wake*.
 
+  **The sentence is the link (F-132):** to the row's place, and the whole row answers
+  a press on it. A button is only for what a link can't say: *Ack*, *Re-run*, a
+  credential's fix, and on hover *Snooze…* and *Done*.
+
   Answers are drawn at once (#775), so a press says so in a toast that collapses
   repeats (`tally`) and takes them back with *Undo*: a snooze with a date now
   brings an item back from the shelf or from *Done*, because the backend's snooze
@@ -25,8 +29,9 @@
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
+  import { inlineEditor } from "../inline-editor";
   import { clockLabel } from "../../time/format";
-  import { onDestroy } from "svelte";
+  import { onDestroy, tick } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import { health } from "../../shell/health.svelte";
@@ -57,7 +62,7 @@
   import { reenterWords, secretNoun } from "../settings/settings";
   import TfKey from "../TfKey.svelte";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
-  import { backLabel, expiryOf, failed, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, untilLabel, visible } from "./inbox";
+  import { backLabel, expiryOf, failed, fixOf, KIND_CHIPS, kindOf, named, opener, rowActions, sentence, shortDay, untilLabel, visible } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
   export interface InboxPorts {
@@ -101,6 +106,12 @@
   const shown = pageVisible();
   everyWhileShown(() => !fixedNow && shown(), 30_000, () => (clock = new Date()));
   const now = $derived(fixedNow ?? clock);
+
+  /** The time column: a clock for today and yesterday, older a day in the words the sentences date themselves in (F-116). */
+  function when(at: string): string {
+    const label = clockLabel(at, now, true);
+    return /^\d{4}-/.test(label) ? shortDay(new Date(at), now) : label;
+  }
 
   const filter = sessionFilter("inbox");
   // Prototype-6 opens the Inbox on *All*.
@@ -269,8 +280,20 @@
     };
   });
 
+  /** A row that leaves takes focus with it, so a keyboard's place moves on to the row that takes its place, or the one before the last. */
+  function keepPlace(entry: InboxEntry, among: readonly InboxEntry[] = rows, control = ":is(a, button)") {
+    const at = among.findIndex((row) => row.item.key === entry.item.key);
+    const next = (among[at + 1] ?? among[at - 1])?.item.key;
+    void tick().then(() => {
+      if (document.activeElement !== document.body && document.activeElement !== null) return;
+      const row = next === undefined ? null : document.querySelector(`.tf-ib[data-row="${CSS.escape(next)}"]`);
+      (row?.querySelector<HTMLElement>(control) ?? document.querySelector<HTMLElement>(".tf-ishelf > summary"))?.focus({ preventScroll: true });
+    });
+  }
+
   function snooze(entry: InboxEntry, at: Date) {
     snoozing = null;
+    keepPlace(entry);
     snoozeToast({ entry, until: untilLabel(at, now) });
     void inbox.snooze(entry.item.key, at, saysFailure(named(entry.item), "snooze", () => snooze(entry, at)));
   }
@@ -281,12 +304,28 @@
   }));
 
   function done(entry: InboxEntry) {
+    keepPlace(entry);
     doneToast(entry);
     void inbox.complete(entry.item.key, saysFailure(named(entry.item), "finish", () => done(entry)));
   }
 
-  /** *Wake*: back in the stream now. */
+  /** *Wake*: back in the stream now, which is often out of sight above the shelf, so a toast says so. *Undo* snoozes it again as it was. */
+  const wakeToast = tally<InboxEntry>((held) => ({
+    text: held.length === 1 ? `Back in the inbox: ${named(held[0]!.item)}` : `${held.length} items back in the inbox`,
+    action: {
+      label: "Undo",
+      run: () =>
+        held.forEach((one) => {
+          const until = one.item.snoozed_until;
+          if (until) void inbox.snooze(one.item.key, new Date(until), saysFailure(named(one.item), "snooze", () => {}));
+        }),
+    },
+  }));
+
   function wake(entry: InboxEntry) {
+    // Its *Wake*, not its link: a second press wakes the next one rather than leaving the page.
+    keepPlace(entry, shelf, "button");
+    wakeToast(entry);
     void inbox.snooze(entry.item.key, new Date(), saysFailure(named(entry.item), "wake", () => wake(entry)));
   }
 
@@ -326,6 +365,12 @@
   {#if inbox.error !== null && inbox.error !== toasted}
     <p class="tf-ifail">Could not read the inbox: {inbox.error}</p>
   {/if}
+  {#snippet said(item: InboxEntry["item"])}
+    {@const place = opener(item)}
+    <div class="tf-what">
+      {#if failed(item)}<span class="tf-dot tf-err"></span>{/if}{#if place !== null}<a href={place.href}>{sentence(item)}</a>{:else}{sentence(item)}{/if}
+    </div>
+  {/snippet}
   {#snippet context(item: InboxEntry["item"], back: string | null)}
     {@const belongs = index.jobOf(item)}
     {@const belongsId = index.jobIdOf(item)}
@@ -336,15 +381,13 @@
   <div class="tf-inbox" {@attach win.list}>
     {#each win.slice(rows) as entry (entry.item.key)}
       {@const item = entry.item}
-      {@const open = opener(item, credentialFix)}
-      <div class="tf-ib" {@attach win.row(item.key)}>
-        <time datetime={item.occurred_at}>{clockLabel(item.occurred_at, now, true)}</time>
-        <div class="tf-what">
-          {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}{sentence(item)}
-        </div>
+      {@const fix = fixOf(item, credentialFix)}
+      <div class="tf-ib" data-row={item.key} {@attach win.row(item.key)}>
+        <time datetime={item.occurred_at}>{when(item.occurred_at)}</time>
+        {@render said(item)}
         <div class="tf-acts tf-rowend">
-          {#if open !== null}
-            <a class="tf-btn tf-sm" href={open.href}>{open.label}</a>
+          {#if fix !== null}
+            <a class="tf-btn tf-sm" href={fix.href}>{fix.label}</a>
           {/if}
           {#snippet rowAction(action: ReturnType<typeof rowActions>[number], ghost: boolean)}
             <button
@@ -352,6 +395,7 @@
               class="tf-btn tf-sm"
               class:tf-ghost={ghost}
               {...refusedAttrs(refusal(entry, action))}
+              data-snooze={action === "snooze" ? item.key : undefined}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
               onclick={() => press(entry, action)}>{labelOf(action)}</button
             >
@@ -367,7 +411,15 @@
         </div>
         {@render context(item, null)}
         {#if snoozing === item.key}
-          <div class="tf-isnooze" role="group" aria-label="Snooze until">
+          <div
+            class="tf-isnooze"
+            role="group"
+            aria-label="Snooze until"
+            {@attach inlineEditor(() => (snoozing = null), {
+              focus: "button",
+              back: () => document.querySelector<HTMLElement>(`[data-snooze="${CSS.escape(item.key)}"]`),
+            })}
+          >
             {#each snoozePresets(now, expiryOf(item)) as preset (preset.label)}
               <button type="button" class="tf-btn tf-sm" onclick={() => snooze(entry, preset.at)}>{preset.label}</button>
             {/each}
@@ -405,11 +457,9 @@
       <summary>Snoozed <span class="tf-count">{shelf.length}</span></summary>
       <div class="tf-ishelf-rows">
         {#each shelf as entry (entry.item.key)}
-          <div class="tf-ib">
-            <time datetime={entry.item.occurred_at}>{clockLabel(entry.item.occurred_at, now, true)}</time>
-            <div class="tf-what">
-              {#if failed(entry.item)}<span class="tf-dot tf-err"></span>{" "}{/if}{sentence(entry.item)}
-            </div>
+          <div class="tf-ib" data-row={entry.item.key}>
+            <time datetime={entry.item.occurred_at}>{when(entry.item.occurred_at)}</time>
+            {@render said(entry.item)}
             <div class="tf-acts tf-rowend">
               <button type="button" class="tf-btn tf-sm" onclick={() => wake(entry)}>Wake</button>
             </div>

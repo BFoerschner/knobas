@@ -3,13 +3,11 @@
  * draws, what a card's corner says, what the preview's button reads, and
  * what *Around this ticket* counts.
  */
-import type { EntityDetail, KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { EntityDetail, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
-import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 import { keyOf } from "../../time/format";
 import { entityAddress } from "../address";
 import { stateWord } from "../state-word";
-import type { SectionTally } from "../job/sections";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
 export const COLUMN_CAP = 8;
@@ -190,23 +188,26 @@ export function ticketFacts(
  * decides it: *Start work* on a To Do ticket of mine, *Open job* on a done one
  * or somebody else's, *Resume work* on the rest of mine. The state is the
  * ticket's own status, whatever column it stands in (#1423). `chooses` says
- * where it goes: *Start work* and *Resume work* to the job's address
- * (`jobHash`), which makes it the chosen job; *Open job* only reads, so to the
- * ticket's page (`ticketHash`), which chooses nothing (spec #2396).
+ * where it goes: *Resume work* to the job's address (`jobHash`), which makes it
+ * the chosen job; *Open ticket* only reads, so to the ticket's page
+ * (`ticketHash`), which chooses nothing (spec #2396); and *Start work* to the
+ * ticket's page too, because it chooses nothing until its steps run (F-130).
+ * `asks` is what the ticket's page does on arriving (`job/chosen.svelte.ts`).
  */
 export function previewAction(
   card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
   timerOnIt: boolean,
   chosen = false,
-): { label: string; note: string; chooses: boolean } {
+): { label: string; note: string; chooses: boolean; asks?: "steps" | "timer" } {
   const lower = card.status?.toLowerCase() ?? "";
   // Already the job: nothing to start from here, and its page has the timer.
   if (chosen) return { label: "Open ticket", note: timerOnIt ? "Your timer is running on this ticket." : "This is the ticket you are on.", chooses: false };
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",
-      note: "Creates a branch and PR, moves it to In progress, starts the timer. You review each step.",
-      chooses: true,
+      note: "Shows the steps first. Nothing happens until you run them.",
+      chooses: false,
+      asks: "steps",
     };
   }
   if (lower === "done") return { label: "Open ticket", note: "Done. Opening shows what was attached.", chooses: false };
@@ -217,70 +218,8 @@ export function previewAction(
     label: "Resume work",
     note: timerOnIt ? "Your timer is running on this ticket." : "Starts the timer on this ticket.",
     chooses: true,
+    ...(timerOnIt ? {} : { asks: "timer" as const }),
   };
-}
-
-/** One line of *Around this ticket*: a section and what it holds. */
-export interface AroundLine {
-  section: string;
-  /** How many: what its row's figure says. */
-  n: number;
-  /** "7 builds": the row's title. */
-  count: string;
-  /** "1 failing" or "1 down", or `null` when nothing is. */
-  failing: string | null;
-  /** Words in the state's place where the figure stands for two kinds: "2 repos, 1 PR". */
-  note: string | null;
-  /** The first thing counted, for a section that lands on one thing (Assets). */
-  first: string | null;
-}
-
-/**
- * *Around this ticket* (R-3.9): one line per section of what the ticket's
- * job would show, from the tally of the job's section reads
- * (`reachTally`, #1030) — so a build is its configuration's latest, and a
- * ticket nobody has opened yet counts what it reaches — grouped the way the room's tiles
- * group kinds (`sectionOf`). Tickets are the view's own and not a section
- * here. A section of one kind says that kind's plural; a mixed one says
- * *items*. Code counts what its landing's two tabs show, as the card's row does
- * (`card-sections.ts`), and where it holds both its note says how the figure
- * divides. Tone `err` is what fails or is down. A line the Builds read
- * counted (`section: "builds"`) counts under Builds whatever its run kind
- * (#1256): the mirror answered it for the CI role, so the shell need not know
- * the role's run kinds (#1300).
- */
-export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTally, "section" | "first">>)[] | null): AroundLine[] {
-  const sections = new Map<string, { label: string; order: number; kinds: Map<string, number>; bad: number; first: string | null }>();
-  for (const line of tally ?? []) {
-    if (line.kind === "ticket" || line.count === 0) continue;
-    const section = sectionOf(line.section === "builds" ? "build" : line.kind);
-    const held = sections.get(section.id) ?? { label: section.label, order: section.order, kinds: new Map<string, number>(), bad: 0, first: null };
-    held.kinds.set(line.kind, (held.kinds.get(line.kind) ?? 0) + line.count);
-    if (line.tone === "err") held.bad += line.count;
-    held.first ??= line.first ?? null;
-    sections.set(section.id, held);
-  }
-  return [...sections.values()]
-    .sort((a, b) => a.order - b.order)
-    .map((held) => {
-      const repos = held.kinds.get("repo") ?? 0;
-      const prs = held.kinds.get("pr") ?? 0;
-      const code = held.label === "Code" && repos + prs > 0;
-      const kinds = code ? [...held.kinds.keys()].filter((kind) => kind === "repo" || kind === "pr") : [...held.kinds.keys()];
-      const n = code ? repos + prs : [...held.kinds.values()].reduce((all, one) => all + one, 0);
-      const only = kinds.length === 1 ? kinds[0]! : null;
-      const one = n === 1;
-      const noun = (only === null ? (one ? "item" : "items") : one ? kindSingular(only) : kindLabel(only)).toLowerCase();
-      const bad = Math.min(held.bad, n);
-      return {
-        section: held.label,
-        n,
-        count: `${n} ${noun}`,
-        failing: bad > 0 ? `${bad} ${held.label === "Monitors" ? "down" : "failing"}` : null,
-        note: code && repos > 0 && prs > 0 ? `${repos} ${repos === 1 ? "repo" : "repos"}, ${prs} ${prs === 1 ? "PR" : "PRs"}` : null,
-        first: held.first,
-      };
-    });
 }
 
 /** What a ticket board's lanes split by (R-3.5): nothing, or one field. */

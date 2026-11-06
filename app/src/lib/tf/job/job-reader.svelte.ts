@@ -24,7 +24,6 @@ import type {
 } from "../../ipc/entity";
 import { ipcErrorMessage } from "../../ipc";
 import {
-  assetTone,
   isMine,
   keyOf,
   offersStartWork,
@@ -35,9 +34,9 @@ import {
 } from "./job";
 import { bridgeTicketBoard, type JobPorts } from "./ports";
 import { entityCheckout } from "../../ipc/entity";
-import { isDone } from "../tickets/tickets";
 import { parentOf } from "../sets/apply";
-import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
+import { countSubtasks, readAssetLines, readUnpushed } from "./card-sections";
+import { reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
 
 /** The reads the reader makes: the job's own ports, without its writes. */
 export type JobReaderPorts = Pick<
@@ -60,9 +59,6 @@ export interface Subtasks {
   total: number;
   open: number;
 }
-
-/** How many of a ticket's branches have their checkout read for Code's *not pushed* (#2401). */
-export const UNPUSHED_LIMIT = 10;
 
 /** One repository *Start work*'s dropdown offers. */
 export interface RepoChoice {
@@ -218,23 +214,8 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     }
     if (mine !== token) return;
     state.reached = new Map(rows.map((row) => [row.entity_id, row]));
-    const ids = rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT);
-    const read = await Promise.allSettled(ids.map((row) => ports.getAsset(row.entity_id)));
-    if (mine !== token) return;
-    state.assets = read.flatMap((answer) =>
-      answer.status === "fulfilled"
-        ? [
-            {
-              id: answer.value.asset.id,
-              name: answer.value.asset.name,
-              type: answer.value.asset.type_label,
-              environment: answer.value.effective_environment?.value ?? null,
-              on: answer.value.held_by.at(-1)?.name ?? null,
-              tone: assetTone(answer.value.asset.health),
-            },
-          ]
-        : [],
-    );
+    const lines = await readAssetLines(ports.getAsset, rows);
+    if (mine === token) state.assets = lines;
   }
 
   /** The link sets that apply and the parent; nothing of either when the read fails. */
@@ -326,7 +307,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       readRows(id, SECTION_READS.code, mine).then((rows) => {
         if (mine !== token || !rows) return;
         state.code = rows;
-        return readUnpushed(rows, mine);
+        return readUnpushedOf(rows, mine);
       }),
     ]);
   }
@@ -335,7 +316,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
     if (mine !== token) return;
     state.code = rows;
-    void readUnpushed(rows, mine);
+    void readUnpushedOf(rows, mine);
   }
 
   /**
@@ -347,35 +328,16 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     try {
       const board = await (ports.ticketBoard ?? bridgeTicketBoard)(`under:${keyOf(id)}`);
       if (mine !== token) return;
-      const total = board.columns.reduce((sum, column) => sum + column.total, 0);
-      const open = board.columns.filter((column) => !isDone(column.status)).reduce((sum, column) => sum + column.total, 0);
-      state.subtasks = { total, open };
+      state.subtasks = countSubtasks(board);
     } catch {
       if (mine === token) state.subtasks = { total: 0, open: 0 };
     }
   }
 
-  /**
-   * Code's *not pushed* (#2401): a branch counts when its checkout on this
-   * machine stands on that branch with commits ahead of its upstream. The
-   * mirror's branches are the forge's, so only the checkout knows. A branch
-   * with no checkout, or one standing elsewhere, counts nothing.
-   */
-  async function readUnpushed(rows: readonly EntityRow[], mine: number) {
-    const read = ports.entityCheckout ?? entityCheckout;
-    const branches = rows.filter((row) => row.kind === "branch").slice(0, UNPUSHED_LIMIT);
-    const answers = await Promise.allSettled(branches.map(async (row) => read(row.entity_id)));
-    if (mine !== token) return;
-    state.unpushed = new Set(
-      branches
-        .filter((row, at) => {
-          const answer = answers[at]!;
-          if (answer.status !== "fulfilled") return false;
-          const tree = answer.value.tree;
-          return tree !== null && tree.status === "read" && tree.branch === row.title && tree.ahead > 0;
-        })
-        .map((row) => row.entity_id),
-    );
+  /** Code's *not pushed* (#2401). */
+  async function readUnpushedOf(rows: readonly EntityRow[], mine: number) {
+    const unpushed = await readUnpushed(ports.entityCheckout ?? entityCheckout, rows);
+    if (mine === token) state.unpushed = unpushed;
   }
 
   return {

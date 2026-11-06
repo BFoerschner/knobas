@@ -191,11 +191,15 @@ test("each row is a time, a sentence, its actions and its kind and job", async (
   expect(rows().map((row) => text(row.querySelector("time")))).toEqual(["13:50", "12:40", "10:14", "yesterday 16:30"]);
   expect(rows().map((row) => row.querySelector(".tf-dot.tf-err") !== null)).toEqual([false, true, true, false]);
   expect(rows().map((row) => [...row.querySelectorAll(".tf-acts > *")].map((each) => text(each)).join(" "))).toEqual([
-    "Review Snooze… Done",
-    "Open monitor Ack Snooze… Done",
-    "Open log Re-run Snooze… Done",
-    "Open ticket Snooze… Done",
+    "Snooze… Done",
+    "Ack Snooze… Done",
+    "Re-run Snooze… Done",
+    "Snooze… Done",
   ]);
+  // The sentence is the link to the row's place (F-132), so a button is only for what a link can't do.
+  expect(rows().map((row) => text(row.querySelector(".tf-what a")))).toEqual(rows().map((row) => text(row.querySelector(".tf-what"))));
+  expect(rowOf("Payout dashboard").querySelector(".tf-what a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-240");
+
   expect(rowOf("Idempotent").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
   expect(text(target.querySelector(".tf-ishelf summary"))).toBe("Snoozed 1");
   expect(shelfRows().map((row) => text(row.querySelector(".tf-what")))).toEqual(["The Jira credential expires on Monday 7 Sep 2026"]);
@@ -533,15 +537,14 @@ test("a row about a ticket links its ticket page by its entity id, so a key two 
   expect(rowOf("Same key").querySelector(".tf-ctx a")?.getAttribute("href")).toBe("#/ticket/gitea%3APAY-231");
 });
 
-test("a row's Open ticket names the ticket's source, so a key two sources hold opens the one the row is about (#1977, spec #2227)", async () => {
+test("a row's sentence names the ticket's source, so a key two sources hold opens the one the row is about (#1977, spec #2227)", async () => {
   await open({
     extra: [
       entry({ key: "new_assignment:gitea:PAY-231", category: "new_assignment", source_id: "gitea", entity_id: "gitea:PAY-231",
         kind: "ticket", title: "Same key, other source", reason: "assigned to you", occurred_at: at(17, 0) }),
     ],
   });
-  const openTicket = [...rowOf("Same key").querySelectorAll(".tf-acts a")].find((each) => text(each) === "Open ticket");
-  expect(openTicket?.getAttribute("href")).toBe("#/ticket/gitea%3APAY-231");
+  expect(rowOf("Same key").querySelector(".tf-what a")?.getAttribute("href")).toBe("#/ticket/gitea%3APAY-231");
 });
 
 test("an inbox left open across midnight ticks its clock: a row reads yesterday and Tomorrow moves a day on (#1681)", async () => {

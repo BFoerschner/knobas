@@ -28,12 +28,11 @@ import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
-import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
 import { createKindRegistry } from "../../shell/kind-registry.svelte";
 import type { FrameKinds } from "./job";
-import { reachTally } from "./sections";
-import { chosenJob } from "./chosen.svelte";
+import { cardSections, readCardReads } from "./card-sections";
+import { chosenJob, pageAsk } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
 import { sourceFacts } from "./source-facts.fixture";
 
@@ -788,6 +787,92 @@ test("the stepper leaves once the ticket no longer offers Start work: its move l
   expect(target.querySelector(".tf-tkdesc"), "the description stays").not.toBeNull();
 });
 
+/** PAY-231 with its stepper up and nothing run; the flow's run answers `after`. */
+function stepping(after: StartWorkStep["outcome"][], timer?: { current: RunningTimer | null; elapsed: string | null }) {
+  open("PAY-231", {
+    ...(timer ? { timer } : {}),
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      startWork: {
+        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        run: () => Promise.resolve(flow(after)),
+        retry: () => Promise.resolve([]),
+        skip: () => Promise.resolve(flow(after)),
+        amend: () => Promise.resolve([]),
+      },
+    }),
+  });
+}
+const named = (word: string) => [...target.querySelectorAll<HTMLElement>(".tf-steps footer button, .tf-go button")].find((b) => b.textContent === word);
+
+test("once the steps ran, the primary says what they wait on and the foot is back with the timer (F-125)", async () => {
+  stepping(["succeeded", "queued", "queued", "queued"], { current: { target: { kind: "entity", entity_id: ID }, started_at: new Date().toISOString() } as RunningTimer, elapsed: "0:00:01" });
+  await settle();
+  expect(target.querySelector(".tf-go"), "the foot steps aside while nothing has run").toBeNull();
+  named("Run all steps")!.click();
+  await settle();
+  const primary = named("Waiting on 3 writes")!;
+  expect(primary.getAttribute("aria-disabled")).toBe("true");
+  expect(primary.classList.contains("tf-lg"), "large only while the steps are unrun").toBe(false);
+  expect(named("Show queue")).toBeDefined();
+  expect(named("Stop and log…"), "the foot stops the timer again").toBeDefined();
+});
+
+test("Start work chooses nothing until its steps run, and Cancel leaves everything as it was (F-130)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  stepping(["queued", "queued", "queued", "queued"]);
+  await settle();
+  const start = named("Start work")!;
+  expect(target.querySelector(".tf-steps"), "nothing shows the steps yet").toBeNull();
+  start.click();
+  await settle();
+  expect(target.querySelector(".tf-steps"), "the press shows the steps").not.toBeNull();
+  expect(chosenJob.id, "a look chooses nothing").toBe("jira:PAY-99");
+  expect(target.querySelector("article")!.classList.contains("tf-sheetcard")).toBe(true);
+
+  named("Cancel")!.click();
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  expect(chosenJob.id).toBe("jira:PAY-99");
+  expect(document.activeElement, "focus goes back to Start work").toBe(named("Start work"));
+
+  named("Start work")!.click();
+  await settle();
+  toasts.items.length = 0;
+  named("Run all steps")!.click();
+  await settle();
+  expect(chosenJob.id, "the run is what chooses").toBe(ID);
+  expect(toasts.items.map((toast) => toast.text)).toContain("Started work on PAY-231, in place of PAY-99. 4 writes queued.");
+  expect(target.querySelector(".tf-steps footer")!.textContent, "nothing to cancel once it ran").not.toContain("Cancel");
+});
+
+test("the Tickets preview's Start work opens the ticket on its steps, once (F-130)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  pageAsk.ask(ID, "steps");
+  stepping(["queued", "queued", "queued", "queued"]);
+  await settle();
+  expect(target.querySelector(".tf-steps")).not.toBeNull();
+  expect(pageAsk.current).toBeNull();
+  expect(chosenJob.id).toBe("jira:PAY-99");
+});
+
+test("a press that takes the choice from another ticket says so, with the way back (F-130)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  open("PAY-231", {
+    ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "In Progress", author: "mara" })) : Promise.reject({ code: "not_found" })) }),
+  });
+  await settle();
+  toasts.items.length = 0;
+  named("Resume work")!.click();
+  await settle();
+  expect(chosenJob.id).toBe(ID);
+  const said = toasts.items.find((toast) => toast.text === "On PAY-231 now.")!;
+  expect(said.action?.label).toBe("Back to PAY-99");
+  said.action!.run();
+  expect(chosenJob.id).toBe("jira:PAY-99");
+});
+
 test("a To Do ticket of somebody else's, or mine in progress, shows no Start work", async () => {
   open("PAY-231", {
     ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "To Do", author: "jonas" })) : Promise.reject({ code: "not_found" })) }),
@@ -823,6 +908,15 @@ const RUN = { ...build("forge:run#77", "ci.yml #77", "err", "failure", "forge"),
 const MOCK_REPO = { ...code("mock:demo-repo", "repo", "demo-repo", "2026-10-15T13:00:00Z", null, null), source_id: "mock" };
 const MOCK_BUILD = build("mock:build#1", "Mock_Build #1", "err", "failed", "mock");
 
+/** The Tickets preview's read of the same rows (F-109): no sub-tasks and no checkouts in these tests. */
+const previewPorts = (p: JobPorts) => ({
+  listEntities: p.listEntities,
+  jobReach: p.jobReach,
+  getAsset: p.getAsset,
+  ticketBoard: () => Promise.reject(new Error("no board")),
+  entityCheckout: () => Promise.reject(new Error("no checkout")),
+});
+
 test("the job's Builds read asks for the CI role, and a run of a kind that is not build counts under Builds", async () => {
   const p = ports({ others: [B_OK, RUN], jobReach: () => Promise.resolve([own(B_OK.entity_id, "build"), own(RUN.entity_id, "workflow_run")]) });
   const registry = claimsRegistry();
@@ -832,10 +926,9 @@ test("the job's Builds read asks for the CI role, and a run of a kind that is no
   const runs = calls.list.find((filter) => filter.order === "latest_per_parent")!;
   expect(runs).toMatchObject({ role: "ci", kinds: [] });
 
-  const tally = await reachTally(p, ID);
-  expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1, section: "builds" });
   // Counted under Builds because the Builds read answered it, not because the shell knows the run kind.
-  expect(aroundLines(tally).find((line) => line.section === "Builds")?.count).toBe("2 items");
+  const table = cardSections(await readCardReads(previewPorts(p), ID));
+  expect(table.rows.find((row) => row.name === "Builds")).toMatchObject({ count: 2, state: { tone: "err", text: "1 failing" } });
 });
 
 test("the job's section reads keep none by source: each read asked for its role (#1295-#1298)", async () => {
@@ -843,10 +936,10 @@ test("the job's section reads keep none by source: each read asked for its role 
   open("PAY-231", { ports: p, registry: claimsRegistry() });
   await settle();
 
-  const tally = await reachTally(p, ID);
-  const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
+  const reads = await readCardReads(previewPorts(p), ID);
+  const count = (rows: readonly EntityRow[] | null, kind: string) => (rows ?? []).filter((row) => row.kind === kind).length;
   // The counts are the sections' rows, as read.
-  expect([count("repo"), count("build")]).toEqual([2, 2]);
+  expect([count(reads.code, "repo"), count(reads.builds, "build")]).toEqual([2, 2]);
   expect(calls.list.every((filter) => typeof filter.role === "string")).toBe(true);
 });
 
@@ -858,7 +951,7 @@ test("with no CI claim known, Builds still asks for the CI role and names no kin
   expect(calls.list.find((filter) => filter.order === "latest_per_parent")).toMatchObject({ role: "ci", kinds: [] });
 
   calls.list.length = 0;
-  await reachTally(p, ID);
+  await readCardReads(previewPorts(p), ID);
   const tallied = calls.list.find((filter) => filter.order === "latest_per_parent");
   expect(tallied).toMatchObject({ role: "ci", kinds: [], reach: ID });
 });

@@ -22,6 +22,8 @@ import { toasts } from "../../shell/toasts.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { LANE_FIELDS, laneOf } from "./tickets";
+import { scopedTicket } from "../job/scoped.svelte";
+import { layers } from "../layers.svelte";
 import { until } from "../../shell/test-wait";
 
 // Every command that reaches the bridge past the page's ports, by name: the
@@ -362,7 +364,8 @@ test("the first card is selected: outlined, and the preview shows it with Start 
   expect(preview().textContent).toContain("The description of jira:PAY-1.");
   const button = preview().querySelector<HTMLAnchorElement>(".tf-go .tf-primary")!;
   expect(button.textContent).toBe("Start work");
-  expect(button.getAttribute("href")).toBe("#/job/jira%3APAY-1");
+  // It opens the ticket on its steps and chooses nothing until they run (F-130).
+  expect(button.getAttribute("href")).toBe("#/ticket/jira%3APAY-1");
 });
 
 test("selecting another card moves the outline and the preview's button follows its state", async () => {
@@ -1209,14 +1212,14 @@ test("each status sits on one column, an over-limit column is err, tickets on no
   await previewed(h);
   const cols = () => [...dialog()!.querySelectorAll<HTMLElement>(".tf-vw-col")];
   const pressed = (col: HTMLElement) =>
-    [...col.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
+    [...col.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
   // In Progress onto the first column leaves its own.
-  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "In progress")!.click();
+  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "In progress")!.click();
   await settle();
   expect(cols().map(pressed)).toEqual([["To do", "In progress"], [], ["Done"]]);
   input(cols()[0]!.querySelector<HTMLInputElement>('input[aria-label="At most"]')!, "10");
   // Done off its column: on no column.
-  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "Done")!.click();
+  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Done")!.click();
   // Columns and limits redraw the answer already read; only the query reads again.
   await settle();
   expect(dialog()!.textContent).toContain("Done is on no column, so those tickets do not show on the board.");
@@ -1984,4 +1987,22 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(selectedKey()).toBe("PAY-0001");
   expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-0001");
   expect(drawn()[0]).toBe("jira:PAY-0001");
+});
+
+test("the preview's Sub-tasks row narrows the page where it stands, and Esc undoes it, with the bar saying so", async () => {
+  const h = harness();
+  await open(h);
+  scopedTicket.openSubtasks("jira:PAY-1");
+  flushSync();
+  await settle();
+  expect(target.querySelector("h1")!.textContent).toContain("Sub-tasks of");
+  expect(target.querySelector(".tf-esc")!.textContent).toContain("Back to All tickets");
+  const layer = layers.open.at(-1)!;
+  expect(layer.kind).toBe("panel");
+  layer.close();
+  flushSync();
+  await settle();
+  expect(scopedTicket.subtasksOf).toBeNull();
+  expect(target.querySelector("h1")!.textContent).toContain("All tickets");
+  expect(layers.open, "the way out goes with the narrowing").not.toContain(layer);
 });

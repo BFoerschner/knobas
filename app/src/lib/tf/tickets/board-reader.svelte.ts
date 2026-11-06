@@ -22,17 +22,19 @@ import type {
 } from "../../ipc/entity";
 import type { ViewColumn } from "../../ipc/search";
 import type { Prose } from "../../render/prose";
-import { reachTally, type ReachPorts } from "../job/sections";
+import { getAsset, type AssetDetail } from "../../ipc/assets";
+import { entityCheckout, type CheckoutView } from "../../ipc/entity";
+import { cardSections, readCardReads, type CardTable } from "../job/card-sections";
+import { bridgeTicketBoard } from "../job/ports";
+import type { ReachPorts } from "../job/sections";
 import { TICKET_SYSTEM } from "../roles.svelte";
 import {
-  aroundLines,
   boardLanes,
   COLUMN_CAP,
   columnDone,
   drawnCards,
   LANES_AT_FIRST,
   TYPED_CAP,
-  type AroundLine,
   type Lane,
   type LaneField,
   type ListSort,
@@ -58,8 +60,14 @@ export interface BoardReaderPorts {
   detail: (entityId: string) => Promise<Pick<EntityDetail, "description" | "markup">>;
   /** The job's section reads, scoped by what a ticket reaches: *Around this ticket* (#1030). */
   listEntities: ReachPorts["listEntities"];
-  /** What a ticket reaches (`job_reach`, #817), for the Assets line. */
+  /** What a ticket reaches (`job_reach`, #817), for the Assets row. */
   jobReach: ReachPorts["jobReach"];
+  /** One reached asset, for the Assets row's state; the bridge's when left out. */
+  getAsset?: (assetId: string) => Promise<AssetDetail>;
+  /** The board under `under:<key>`, for the Sub-tasks row; the bridge's when left out. */
+  ticketBoard?: (query: string) => Promise<MiniBoard>;
+  /** A branch's checkout on this machine, for Code's *not pushed*; the bridge's when left out. */
+  entityCheckout?: (entityId: string) => Promise<CheckoutView>;
 }
 
 /** One view's session: the switches over what it was saved with, and the expanded columns. */
@@ -151,7 +159,7 @@ export interface BoardReader {
   /** The previewed ticket's description, or `null` until it answers or where it has none. */
   readonly description: Prose | null;
   /** What the previewed ticket reaches, by section, or `null` until it answers. */
-  readonly around: AroundLine[] | null;
+  readonly around: CardTable | null;
   /** Opens a scope: the board starts fresh, and an answer for the last one is dropped. */
   open(scope: BoardScope, filter: BoardFilter): void;
   /** A change in the filter bar: read once the keys pause. */
@@ -214,7 +222,7 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
     scope: { key: "", base: null, savedView: null } as BoardScope,
     filter: { query: "", words: false } as BoardFilter,
     description: null as Prose | null,
-    around: null as AroundLine[] | null,
+    around: null as CardTable | null,
   });
   /** Bumped by every read and every key, so only the last read's answer lands. */
   let reading = 0;
@@ -418,12 +426,11 @@ export function createBoardReader(ports: BoardReaderPorts, options: BoardReaderO
           }
         })
         .catch(() => {});
-      // What the job's sections would show, through the job-reach read: no
-      // context is needed, and none is promoted to draw this (#1030). Each
-      // line says which section's read counted it, so a run of any kind counts
-      // under Builds without the shell knowing the CI role's run kinds (#1300).
-      void reachTally(ports, id).then((tally) => {
-        if (mine === previewed) state.around = aroundLines(tally);
+      // The card's own rows, through the job-reach read: no context is needed, and
+      // none is promoted to draw this (#1030). A run counts under Builds because
+      // the Builds read answered it, as on the card (#1300).
+      void readCardReads({ ...ports, getAsset: ports.getAsset ?? getAsset, ticketBoard: ports.ticketBoard ?? bridgeTicketBoard, entityCheckout: ports.entityCheckout ?? entityCheckout }, id).then((reads) => {
+        if (mine === previewed) state.around = cardSections(reads);
       });
     },
     close() {

@@ -23,6 +23,12 @@
   Step 5 is the shell's *Start timer*, which opens the worklog draft for a
   timer already running on another ticket before it starts this one (R-4.9,
   story 62).
+
+  **Nothing is chosen until something runs (F-130).** The steps are a look, on the
+  card's sheet, so *Cancel* and `Esc` leave everything as it was; *Run all steps*
+  makes the ticket the job and its toast names the one it replaces. Once a step has
+  run, the primary says where the flow is (`runWord`) and the page's foot comes back
+  with the timer (`started`).
 -->
 <script lang="ts">
   import { onDestroy, untrack } from "svelte";
@@ -33,7 +39,8 @@
   import type { Timer } from "../../shell/timer.svelte";
   import { toastStarted } from "../../shell/queued-toast";
   import { refusedAttrs } from "../../shell/refused-writes";
-  import { createStartWork, demandOf, editable, edited, type StartWorkApi } from "../../start-work/start-work.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
+  import { createStartWork, demandOf, editable, edited, runWord, unrun, type StartWorkApi } from "../../start-work/start-work.svelte";
   import { keyOf } from "./job";
   import { chosenJob } from "./chosen.svelte";
   import { pageVisible } from "../kept-pages.svelte";
@@ -46,6 +53,9 @@
     api,
     onstarttimer,
     moveRefused = null,
+    oncancel,
+    started = $bindable(false),
+    arrive = false,
   }: {
     detail: EntityDetail;
     /** Every repository, `null` while read: the dropdown's options. */
@@ -57,6 +67,12 @@
     onstarttimer: (entityId: string, title: string) => void;
     /** Why the source's credential cannot move this ticket (#2052), or `null`. */
     moveRefused?: string | null;
+    /** *Cancel*, while nothing has run; left out where the steps are not a look (the ticket is already the job). */
+    oncancel?: (() => void) | undefined;
+    /** Whether something of the flow has run, for the page's foot. */
+    started?: boolean;
+    /** A press brought the reader here: focus comes to the steps, since the press's own button has gone. */
+    arrive?: boolean;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -82,6 +98,12 @@
     proposed = true;
     untrack(() => void flow.load(options[0]!.entity_id));
   });
+
+  const fresh = $derived(unrun(flow.steps));
+  $effect(() => {
+    started = !fresh;
+  });
+  const run = $derived(runWord(flow.steps, flow.busy));
 
   const step = (kind: StartWorkStep["step"]) => flow.steps.find((each) => each.step === kind) ?? null;
   const branch = $derived(step("create_branch"));
@@ -144,18 +166,29 @@
     }
   }
 
+  /** The steps have begun: the ticket is the job now (spec #2227), and the toast says so and what it replaced. */
+  function began() {
+    const before = chosenJob.id;
+    toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source, undefined, before !== null && before !== detail.row.entity_id ? keyOf(before) : null);
+    chosenJob.choose(detail.row.entity_id);
+  }
+
   async function runAll() {
+    if (!run.can) return;
     // A move the credential cannot make is skipped, never queued; the skip runs the flow on past it.
     if (moveRefused !== null && move !== null && editable(move.outcome)) await flow.skip(move.id);
     else await flow.run();
-    if (flow.error === null) {
-      toastStarted(key, flow.steps.filter((each) => each.outcome === "queued").length, detail.source);
-      // The ticket work just started on is the one home shows (spec #2227).
-      chosenJob.choose(detail.row.entity_id);
-    }
+    if (flow.error === null) began();
     if (flow.error === null && !timerDone && !timerSkipped) {
       onstarttimer(detail.row.entity_id, detail.row.title);
     }
+  }
+
+  /** *Skip* runs the flow on past the step, so a skip with nothing run yet begins the work as *Run all steps* does. */
+  async function skipStep(id: number) {
+    const first = fresh;
+    await flow.skip(id);
+    if (first && flow.error === null) began();
   }
 
   const ROWS = [
@@ -177,7 +210,7 @@
 
 <p class="tf-dim tf-swnote">Check the names, then run the steps. Each write waits in the queue until it reaches the source.</p>
 {#if flow.error}<p class="tf-bad tf-small" role="alert">{flow.error}</p>{/if}
-<div class="tf-steps" aria-label="Start work">
+<div class="tf-steps" role="group" aria-label="Start work" tabindex="-1" {@attach (node: HTMLElement) => { if (untrack(() => arrive)) node.focus({ preventScroll: true }); }}>
   {#each ROWS as row, index (row.id)}
     {@const of = flowStep(row.id)}
     {@const state = stateOf(row.id)}
@@ -216,7 +249,7 @@
           <button class="tf-btn tf-sm" disabled={flow.busy} onclick={() => void flow.retry(of.id)}>{of.outcome === "queued" ? "Check again" : "Retry"}</button>
         {/if}
         {#if of && current?.id === of.id && of.outcome !== "running"}
-          <button class="tf-btn tf-sm tf-ghost" disabled={flow.busy} onclick={() => void flow.skip(of.id)}>Skip</button>
+          <button class="tf-btn tf-sm tf-ghost" disabled={flow.busy} onclick={() => void skipStep(of.id)}>Skip</button>
         {:else if row.id === "timer" && !timerDone && !timerSkipped}
           <button class="tf-btn tf-sm tf-ghost" onclick={() => (timerSkipped = true)}>Skip</button>
         {/if}
@@ -228,6 +261,12 @@
   {/each}
   <footer>
     <span class="tf-dim tf-small tf-swhint">A failed step can be retried, skipped or amended.</span>
-    <button class="tf-btn tf-primary tf-lg" disabled={flow.busy || flow.steps.length === 0} onclick={() => void runAll()}>Run all steps</button>
+    {#if fresh && oncancel}
+      <button class="tf-btn tf-ghost" type="button" onclick={oncancel}>Cancel</button>
+    {:else if !fresh}
+      <button class="tf-btn tf-ghost" type="button" onclick={openWriteQueue}>Show queue</button>
+    {/if}
+    <!-- `aria-disabled`, so a keyboard's place stays on it as it changes its words after the press. -->
+    <button class="tf-btn tf-primary" class:tf-lg={fresh} type="button" aria-disabled={run.can ? undefined : "true"} onclick={() => void runAll()}>{run.word}</button>
   </footer>
 </div>

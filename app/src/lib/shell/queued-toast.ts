@@ -57,9 +57,11 @@ export function toastQueued(what: string, source: WriteSource | null | undefined
  * *Show queue*, "1 write queued." for one, and no count when nothing was
  * queued (every step skipped or already there). The sign-in sentence follows
  * the count, as on every other queued write, and only when something waits.
+ * `replaced` is the job this one takes over from, which the toast names (F-130):
+ * "Started work on PAY-240, in place of PAY-231."
  */
-export function toastStarted(key: string, queued: number, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health): void {
-  const started = `Started work on ${key}.`;
+export function toastStarted(key: string, queued: number, source: WriteSource | null | undefined, store: Pick<Health, "get"> = health, replaced: string | null = null): void {
+  const started = replaced === null ? `Started work on ${key}.` : `Started work on ${key}, in place of ${replaced}.`;
   if (queued <= 0) {
     push({ text: started });
     return;

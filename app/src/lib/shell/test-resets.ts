@@ -64,6 +64,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/job/current.svelte.ts#crumb": async () => (await import("../tf/job/current.svelte")).breadcrumbJob.set(null),
   // The chosen job (spec #2227), kept in `localStorage`: each test starts with none.
   "tf/job/chosen.svelte.ts#chosenJob": async () => (await import("../tf/job/chosen.svelte")).chosenJob.reset(),
+  // What a press elsewhere asked of a ticket's page, taken once it shows the ticket.
+  "tf/job/chosen.svelte.ts#asked": async () => (await import("../tf/job/chosen.svelte")).pageAsk.clear(),
   // The ticket page card's width (#2402), kept in `localStorage`: each test starts at the default.
   "tf/job/card-width.svelte.ts#cardWidth": async () => (await import("../tf/job/card-width.svelte")).cardWidth.reset(),
   // A ticket a section view is narrowed to without choosing it (#2401): each test starts with none.

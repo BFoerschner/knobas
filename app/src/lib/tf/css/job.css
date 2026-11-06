@@ -144,8 +144,9 @@
 .tf-ticketcard.tf-sheetcard { background: var(--sheet); color: var(--ink); border-right-color: var(--rule); }
 .tf-sheetcard p { color: var(--ink-2); }
 .tf-sheetcard .tf-chip { background: var(--muted-bg); color: var(--ink); }
-.tf-sheetcard .tf-go .tf-btn { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
-.tf-sheetcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--ink) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
+/* The app's one primary, as the Tickets preview draws the same button: `--fill`, so it stays below the card's yellow in dark. */
+.tf-sheetcard .tf-go .tf-btn { background: var(--fill); color: var(--sheet); border-color: var(--fill); }
+.tf-sheetcard .tf-go .tf-btn:hover { --tf-hover: color-mix(in srgb, var(--fill) 80%, var(--sheet)); background: var(--tf-hover); border-color: var(--tf-hover); }
 /* The reading column (#2399): the title, the description and the whole thread, centred in the space beside the
    card at a reading width (Björn's call; the design system's left alignment stays everywhere else). */
 .tf-ticketpage .tf-wbody { padding: 24px 22px 48px; }
@@ -262,6 +263,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 /* ---------- Start work (R-4.9) ---------- */
 .tf-swnote { margin: 0; }
 .tf-steps { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+/* It takes focus so a keyboard's next Tab is the first field; it is no control, so it draws no ring. */
+.tf .tf-steps:focus-visible { outline: none; }
 .tf-step {
   display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 14px;
   border-top: 1px solid var(--rule-2); align-items: center;
@@ -290,9 +293,12 @@ a.tf-r:hover { background: var(--sheet-2); }
 /* The canonical footer (#2294): the note on the left, the primary on the right. */
 .tf-steps footer {
   display: flex; justify-content: flex-end; gap: var(--control-gap); padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
-  border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap;
+  border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap; min-height: calc(var(--control-h-lg) + 25px);
 }
 .tf-steps footer .tf-swhint { margin-right: auto; }
+
+/* ---------- the worklog draft (`TfWorklogDraft.svelte`) ---------- */
+.tf-dialog.tf-logdlg { width: min(720px, calc(100vw - 32px)); }
 
 /* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
 .tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }

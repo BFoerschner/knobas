@@ -37,19 +37,18 @@
   import TfKey from "../TfKey.svelte";
   import TfKeyed from "../TfKeyed.svelte";
   import TfStateChip from "../TfStateChip.svelte";
-  import { stateWord } from "../state-word";
   import { MediaQuery } from "svelte/reactivity";
   import type { EntityDetail } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import { openExternal } from "../../shell/open-external";
-  import { pressSection, type CardTable } from "./card-sections";
+  import type { CardTable } from "./card-sections";
+  import TfCardRows from "./TfCardRows.svelte";
   import { cardWidth, naturalWidth, SIDE_MAX, SIDE_MIN } from "./card-width.svelte";
   import { ticketHash } from "../route";
   import { parentOf } from "../sets/apply";
   import { epicLine, initials } from "../tickets/tickets";
   import { blockers, keyOf, loggedRow } from "./job";
-  import { toneClass } from "../tone";
 
   let {
     detail,
@@ -293,20 +292,7 @@
     {/if}
   </dl>
   {#if table.rows.length > 0}
-    <div class="tf-tktable tf-tksecs">
-      {#each table.rows as row (row.name)}
-        <a
-          href={row.href}
-          title={row.opens === "subtasks" ? `Tickets under ${key}. ${row.words}` : `${row.name} view, this ticket only. ${row.words}`}
-          onclick={() => pressSection(row, detail.row.entity_id)}
-          ><span class="tf-tkname">{row.name}</span><span class="tf-n">{row.count}</span>{#if row.state !== null}<span
-              class="tf-st"
-              class:tf-asks={row.state.tone === "err" || row.state.tone === "warn"}
-              ><span class="tf-dot {toneClass(row.state)}" aria-hidden="true"></span>{stateWord(row.state.text)}</span
-            >{:else if row.note !== undefined}<span class="tf-st">{row.note}</span>{:else}<span></span>{/if}<span class="tf-chev" aria-hidden="true">›</span></a
-        >
-      {/each}
-    </div>
+    <TfCardRows rows={table.rows} entityId={detail.row.entity_id} ticketKey={key} />
   {:else if table.settled}
     <p class="tf-tknone">Nothing connected yet.</p>
   {/if}

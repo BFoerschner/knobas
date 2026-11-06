@@ -114,25 +114,34 @@ export interface Opener {
 }
 
 /**
- * The row's first action, a link to the item's own view (R-4.10's
+ * A row's way to fix what it is about, for the button the sentence cannot be
+ * (F-132): a credential row says the fix in the status bar's words and goes where
+ * its link goes (`credentialFix`). `null` on any other row, and until the sources
+ * are read.
+ */
+export function fixOf(item: Pick<InboxItem, "category" | "source_id">, credentialFix?: (sourceId: string) => string | null): Opener | null {
+  if (item.category !== "credential_expiry" && item.category !== "failed_sign_in") return null;
+  const fix = credentialFix?.(item.source_id) ?? null;
+  return fix === null ? null : { label: `${fix}…`, href: `#/settings/source/${encodeURIComponent(item.source_id)}/reenter` };
+}
+
+/**
+ * Where a row opens: the sentence is the link on the Inbox page (F-132), and the
+ * launcher's sheet says the word. A link to the item's own view (R-4.10's
  * `itemHash`), worded by what it opens as prototype-6 words it. A ticket
  * assigned to the reader opens its ticket page (spec #2227), to read before
  * taking it on; a mention on a ticket opens the ticket's `/mention` address,
  * which draws the same page brought to the newest comment that mentions the
  * reader (`TfConversation`'s `toMention`). An alert's key names its monitor
- * (`alert:<monitor id>`), so *Open monitor* opens Monitors with that row marked.
- * A row about a credential says the fix in the status bar's words and goes where
- * its link goes (`credentialFix`); until the sources are read it says what it opens.
+ * (`alert:<monitor id>`), so it opens Monitors with that row marked. A row about a
+ * credential opens its source's page, which holds *Re-enter* (`fixOf`).
  */
 export function opener(
   item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id"> & Partial<Pick<InboxItem, "key">>,
-  credentialFix?: (sourceId: string) => string | null,
 ): Opener | null {
   // Both are about the source itself, whose page holds *Re-enter* (#1571).
   if (item.category === "credential_expiry" || item.category === "failed_sign_in") {
-    const page = `#/settings/source/${encodeURIComponent(item.source_id)}`;
-    const fix = credentialFix?.(item.source_id) ?? null;
-    return fix === null ? { label: "Source settings", href: page } : { label: `${fix}…`, href: `${page}/reenter` };
+    return { label: "Source settings", href: `#/settings/source/${encodeURIComponent(item.source_id)}` };
   }
   if (item.category === "alert") {
     const monitor = item.key?.startsWith(ALERT_KEY) ? item.key.slice(ALERT_KEY.length) : "";
@@ -193,9 +202,16 @@ export function backLabel(item: Pick<InboxItem, "snoozed_until">): string | null
   return back && !Number.isNaN(back.getTime()) ? sentenceDay(back) : null;
 }
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /** A day as `knobas_core::inbox` writes one in a reason: *Thursday 3 Sep 2026*. */
 export function sentenceDay(at: Date): string {
   return `${at.toLocaleDateString("en-GB", { weekday: "long" })} ${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}`;
+}
+
+/** The same day in the room of the time column: *Wed 4 Nov*, with its year when it is not this year's. */
+export function shortDay(at: Date, now: Date): string {
+  const day = `${WEEKDAYS[at.getDay()]} ${at.getDate()} ${MONTHS[at.getMonth()]}`;
+  return at.getFullYear() === now.getFullYear() ? day : `${day} ${at.getFullYear()}`;
 }

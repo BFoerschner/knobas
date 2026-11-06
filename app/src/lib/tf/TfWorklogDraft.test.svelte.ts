@@ -173,12 +173,10 @@ test("it says where the worklog goes, and quotes ADR-0012", async () => {
   render();
   await waitFor(() =>
     expect(text()).toContain(
-      "Goes to Jira through the write queue. The comment follows the boxes you tick until you edit it.",
+      "Goes to Jira through the write queue. A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.",
     ),
   );
-  expect(text()).toContain(
-    "A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.",
-  );
+  expect(text()).toContain("The comment follows the boxes you tick until you edit it.");
 });
 
 test("opened by a stop it offers Discard, Stop, log later, Cancel, keep running and Log", () => {
@@ -286,8 +284,8 @@ test("a refused log is said, and the draft stays open", async () => {
   expect(outcomes).toEqual([]);
 });
 
-test("Esc closes it as a layer: a stop's draft leaves the clock stopped, any other is discarded", () => {
-  for (const [stopped, expected] of [[true, "later"], [false, "discard"]] as const) {
+test("Esc closes it as a layer: a stop's draft keeps the clock running, reversing #896 (Björn, 2026-11-06), any other is discarded", () => {
+  for (const [stopped, expected] of [[true, "keep"], [false, "discard"]] as const) {
     const layers = createLayers();
     const { outcomes } = render({ stopped, layers });
     expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);

@@ -142,6 +142,27 @@ export function moving(steps: readonly StartWorkStep[]): boolean {
   return current !== undefined && (current.outcome === "running" || current.outcome === "pending");
 }
 
+/** Whether nothing of the flow has been sent, skipped or decided yet: the reader can still walk away. */
+export function unrun(steps: readonly StartWorkStep[]): boolean {
+  return steps.every((step) => step.outcome === "pending");
+}
+
+/**
+ * What the stepper's primary says (F-125). *Run all steps* until something ran;
+ * after that the flow's own state, because pressing it again could do nothing the
+ * steps' own *Retry* and *Skip* don't. It is what the page reads to know the press
+ * took.
+ */
+export function runWord(steps: readonly StartWorkStep[], busy: boolean): { word: string; can: boolean } {
+  if (unrun(steps)) return busy ? { word: "Running the steps…", can: false } : { word: "Run all steps", can: steps.length > 0 };
+  const at = steps.findIndex((step) => demandOf(step.outcome) !== "done");
+  if (at < 0) return { word: "All steps done", can: false };
+  if (steps[at]!.outcome === "failed") return { word: `Step ${at + 1} failed`, can: false };
+  const waiting = steps.filter((step) => step.outcome === "queued").length;
+  if (waiting > 0) return { word: `Waiting on ${waiting} ${waiting === 1 ? "write" : "writes"}`, can: false };
+  return { word: "Running the steps…", can: false };
+}
+
 /** The five commands the stepper calls, injectable so a test needs no bridge. */
 export interface StartWorkApi {
   flow: (entityId: string, repoId: string | null) => Promise<StartWorkStep[]>;

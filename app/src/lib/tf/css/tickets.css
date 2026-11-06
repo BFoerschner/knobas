@@ -17,22 +17,24 @@
 .tf-board-head .tf-acts { align-items: center; }
 .tf-board-title { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .tf-lane { padding: 14px 22px; }
-/* One band fills the pane and scrolls inside itself, so the sideways scrollbar and the column heads stay on screen. */
+/* One band fills the pane and scrolls inside itself, so the sideways scrollbar sits at the pane's foot and the heads stay
+   on screen, as under lanes. The body gives up its `auto` height here, or the band grows with its cards and that scrollbar
+   goes down with them. The columns' box runs to the pane's edges, so its bars stand where the page's would. */
 .tf-board-wrap:has(.tf-sbody > .tf-lane):not(:has(.tf-lane + .tf-lane)) .tf-sclip { height: 100%; }
-.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding-bottom: 0; }
-.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; padding-bottom: 14px; }
+@media (min-width: 901px) {
+  .tf-board-wrap:has(.tf-sbody > .tf-lane):not(:has(.tf-lane + .tf-lane)) .tf-sbody { flex: 1 1 0; min-height: 0; }
+}
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 0 0; }
+.tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane > .tf-cols { flex: 1; min-height: 0; overflow: auto; padding: 0 22px 14px; }
 .tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-col h3 { position: sticky; top: 0; z-index: 1; background: var(--paper); margin-bottom: 0; padding-bottom: 8px; }
 /* Lanes (#813): each band headed by what its tickets share and its count. */
 .tf-lane + .tf-lane { padding-top: 4px; }
 .tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; margin: 6px 0 8px; }
 /* A lane's head stays in reach while the lanes scroll sideways together. */
 .tf-laned > h2 { position: sticky; left: 22px; width: max-content; }
-/* 192 px: a card's first line fits, and at 1440 px the fifth column shows, so the board says there is more. */
-.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(192px, 1fr); gap: 8px; align-items: start; overflow-x: auto; }
-/* A board of one or two columns (a ticket's sub-tasks) keeps a card's width, with its avatar beside its words. */
-.tf-cols:not(:has(> :nth-child(3))) { grid-auto-columns: minmax(192px, 420px); }
-/* Lanes share one column grid: every lane holds the same statuses in the same order, each column one width, so the eye runs down a status. */
-.tf .tf-laned > .tf-cols { grid-auto-columns: 232px; }
+/* One column width on every board, with lanes or without: a card stays one shape when a filter drops a column or lanes go
+   on, and the eye runs down a status. At 1440 px with the preview the fourth column shows in part, so the board says there is more. */
+.tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: 232px; gap: 8px; align-items: start; overflow-x: auto; }
 .tf-lanes-more { align-self: flex-start; position: sticky; left: 22px; margin: 0 22px 14px; }
 /* Lanes scroll together under one bar: a lane on its own would put its columns out of line with the rest. The body is as
    wide as the lanes, so the heads have room to stay put at the scroller's left. */
@@ -153,6 +155,9 @@
   /* Stacked, the rail folds behind its bar (`.tf-railbar`); open, it is capped so the board stays in reach. */
   .tf-views { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
   .tf-fbar, .tf-board-head, .tf-lane, .tf-list { padding-left: 16px; padding-right: 16px; }
+  /* The page scrolls here, and the columns keep their box to a window's height, so their sideways bar stays in reach. */
+  .tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane { padding-left: 0; padding-right: 0; }
+  .tf-board-wrap:not(:has(.tf-lane + .tf-lane)) .tf-sbody > .tf-lane > .tf-cols { padding-left: 16px; padding-right: 16px; max-height: max(320px, calc(100vh - 250px)); }
   /* The rail's words start on the page's 16 px edge, as the title under it does. */
   .tf-vlist { padding-left: 8px; padding-right: 8px; }
   .tf-laned > h2, .tf-lanes-more { left: 16px; }

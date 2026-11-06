@@ -52,7 +52,7 @@
     type ConditionField,
     type EditColumn,
   } from "./editor";
-  import { assigneeName, columnHead, columnName, LANE_FIELDS, splitLanes } from "./tickets";
+  import { assigneeName, columnHead, columnName, LANE_FIELDS, shortKey, splitLanes } from "./tickets";
   import { counted } from "../counted";
   import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
@@ -398,7 +398,7 @@
                 class="tf-vw-name-in"
                 aria-label="Name"
                 bind:value={name}
-                placeholder="For example, Payments bugs this sprint"
+                placeholder="Payments bugs this sprint"
               />
             </label>
             <label>
@@ -460,11 +460,10 @@
                   aria-label="Remove this condition"
                   onclick={() => (conditions = conditions.filter((_, i) => i !== at))}>✕</button
                 >
-                <div class="tf-vw-vals">
+                <div class="tf-fchips tf-vw-vals">
                   {#each options(condition) as [value, label] (value)}
                     <button
                       type="button"
-                      class="tf-vw-val"
                       aria-pressed={condition.values.some((v) => same(v, value))}
                       onclick={() => toggleValue(at, value)}>{label}</button
                     >
@@ -518,11 +517,10 @@
                       disabled={fixedSource !== null}
                       oninput={(event) => setColumn(at, { name: event.currentTarget.value })}
                     />
-                    <div class="tf-vw-vals">
+                    <div class="tf-fchips tf-vw-vals">
                       {#each statuses as status (status)}
                         <button
                           type="button"
-                          class="tf-vw-val"
                           aria-pressed={column.statuses.includes(status)}
                           disabled={fixedSource !== null}
                           onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{columnName(status)}</button
@@ -643,12 +641,14 @@
                       >{column.total}{#if column.limit !== null}{" "}of {column.limit}{/if}</b
                     >
                   </div>
-                  {#each column.cards as card (card.entity_id)}
-                    <div class="tf-vw-stub" title="{card.key} {card.title}"><span class="tf-mono">{card.key}</span>{card.title}</div>
-                  {/each}
-                  {#if column.total > column.cards.length}
-                    <div class="tf-vw-stub tf-vw-stub-more">{column.total - column.cards.length} more</div>
-                  {/if}
+                  <div class="tf-vw-stubs">
+                    {#each column.cards as card (card.entity_id)}
+                      <div class="tf-vw-stub" title="{card.key} {card.title}"><span class="tf-mono">{shortKey(card.key)}</span>{card.title}</div>
+                    {/each}
+                    {#if column.total > column.cards.length}
+                      <div class="tf-vw-stub tf-vw-stub-more">{column.total - column.cards.length} more</div>
+                    {/if}
+                  </div>
                 </div>
               {/each}
             </div>

@@ -6,7 +6,6 @@ import {
   columnHead,
   sentenceCase,
   shortKey,
-  aroundLines,
   boardLanes,
   columnDone,
   drawnCards,
@@ -93,16 +92,18 @@ test("initials are a person's first and last names' letters, an account's first 
   expect(initials(null)).toBe("–");
 });
 
-test("the preview's button: Start work, Resume work or Open job by the ticket's state", () => {
+test("the preview's button: Start work, Resume work or Open ticket by the ticket's state", () => {
   const mine = (status: string) => ({ assignee: "mara", mine: true, status });
   const theirs = { assignee: "jonas.becker", mine: false, status: "To Do" };
-  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: true });
+  // *Start work* shows the steps and chooses nothing until they run (F-130).
+  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: false, asks: "steps" });
   expect(previewAction(mine("In Progress"), false)).toEqual({
     label: "Resume work",
     note: "Starts the timer on this ticket.",
     chooses: true,
+    asks: "timer",
   });
-  expect(previewAction(mine("In Progress"), true).note).toBe("Your timer is running on this ticket.");
+  expect(previewAction(mine("In Progress"), true)).toEqual({ label: "Resume work", note: "Your timer is running on this ticket.", chooses: true });
   // *Open job* only reads (spec #2396): it goes to the ticket's page and chooses nothing.
   expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open ticket", chooses: false });
   expect(previewAction(theirs, false)).toEqual({ label: "Open ticket", note: "Assigned to jonas.becker.", chooses: false });
@@ -115,41 +116,6 @@ test("the preview's button reads the card's status, not the column it stands in 
   expect(previewAction({ ...ready!, assignee: "mara", mine: true }, false).label).toBe("Start work");
   const [shipped] = named("Shipped", ["Done"]).cards;
   expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open ticket");
-});
-
-test("Around this ticket groups the context's kinds as the room's tiles do, and counts what fails", () => {
-  expect(
-    aroundLines([
-      { kind: "ticket", tone: null, count: 3 },
-      { kind: "pr", tone: "info", count: 2 },
-      { kind: "commit", tone: null, count: 3 },
-      { kind: "build", tone: "err", count: 1 },
-      { kind: "build", tone: "ok", count: 6 },
-      { kind: "page", tone: null, count: 3 },
-      { kind: "monitor", tone: "err", count: 1 },
-    ]),
-  ).toMatchObject([
-    // Code counts what its landing shows, as the card's row does: pull requests and repositories, not commits.
-    { section: "Code", n: 2, count: "2 pull requests", failing: null, note: null },
-    { section: "Builds", n: 7, count: "7 builds", failing: "1 failing", note: null },
-    { section: "Docs", n: 3, count: "3 pages", failing: null, note: null },
-    { section: "Monitors", n: 1, count: "1 monitor", failing: "1 down", note: null },
-  ]);
-  expect(aroundLines(null)).toEqual([]);
-  expect(aroundLines([{ kind: "commit", tone: null, count: 3 }])).toMatchObject([{ section: "Code", n: 3, count: "3 commits" }]);
-  expect(aroundLines([{ kind: "repo", tone: null, count: 2 }, { kind: "pr", tone: "info", count: 1 }])).toMatchObject([{ section: "Code", n: 3, count: "3 items", note: "2 repos, 1 PR" }]);
-  expect(aroundLines([{ kind: "asset", tone: null, count: 2, section: "assets", first: "asset:a" }])).toMatchObject([{ section: "Assets", n: 2, first: "asset:a" }]);
-});
-
-test("Around this ticket counts what the Builds read answered under Builds, whatever its run kind (#1256, #1300)", () => {
-  const tally = [
-    { kind: "build", tone: "ok" as const, count: 1, section: "builds" as const },
-    { kind: "workflow_run", tone: "err" as const, count: 2, section: "builds" as const },
-  ];
-  expect(aroundLines(tally)).toMatchObject([{ section: "Builds", n: 3, count: "3 items", failing: "2 failing" }]);
-  // A line no section read counted is grouped by its kind alone.
-  const loose = tally.map(({ kind, tone, count }) => ({ kind, tone, count }));
-  expect(aroundLines(loose).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);
 });
 
 function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {

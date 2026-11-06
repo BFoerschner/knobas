@@ -166,6 +166,7 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { chosenJob } from "../job/chosen.svelte";
   import { scopedTicket } from "../job/scoped.svelte";
+  import { layers } from "../layers.svelte";
   import { keyOf } from "../job/job";
   import TfCrumbs from "../TfCrumbs.svelte";
   import TfRailBar from "../TfRailBar.svelte";
@@ -210,6 +211,15 @@
 
   /** The key whose sub-tasks a ticket card's row narrowed this view to (`job/scoped.svelte.ts`), or `null`. */
   const subtasksOf = $derived(viewId === null && scopedTicket.subtasksOf !== null ? keyOf(scopedTicket.subtasksOf) : null);
+  /**
+   * The preview's *Sub-tasks* row narrows this page where it stands, so no history entry holds the way back that a
+   * ticket card's row has. `Esc` still undoes it, here as a panel on the layer stack, and the bar says so.
+   */
+  const narrowedHere = $derived(subtasksOf !== null && back === null);
+  $effect(() => {
+    if (!narrowedHere || !pageShown()) return;
+    return untrack(() => layers.add({ kind: "panel", close: () => scopedTicket.clear() }));
+  });
 
   // ---- the views ----
   let views = $state<TicketViewRow[] | null>(null);
@@ -632,7 +642,10 @@
 </script>
 
 <div class="tf-tickets" class:tf-rail-shut={!railOpen}>
-  <TfRailBar label="View" value={view?.name ?? (subtasksOf === null ? "All tickets" : `Sub-tasks of ${subtasksOf}`)} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} />
+  <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
+  {#if subtasksOf === null}
+    <TfRailBar label="View" value={view?.name ?? "All tickets"} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} />
+  {/if}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
   <nav
     id="tf-views-rail"
@@ -707,7 +720,7 @@
   <TfScroller class="tf-board-wrap" {@attach fbarHeight}>
     {#if subtasksOf !== null}
       <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. -->
-      <TfCrumbs parts={[{ name: "Tickets" }]} {back} />
+      <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
     {/if}
     <header class="tf-fhead tf-board-head">
       <div class="tf-board-title">
