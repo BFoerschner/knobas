@@ -630,6 +630,40 @@ test("Add a rule takes focus to the rule's value, and Esc brings it back to the 
   expect(layers.open).toEqual([]);
 });
 
+/** F-554: the set saving under a waiting rule redraws its row, and that is no reason to take focus back from *Add…*. */
+test("a rule still waiting leaves focus on Add… when the dialog it opened closes and the set saves", async () => {
+  await draw(["payout-stack"]);
+  button("Add a rule").click();
+  await settle();
+  const opener = [...target.querySelectorAll<HTMLButtonElement>("article[aria-label='Pages'] .tf-set-add button")].at(-1)!;
+  opener.focus();
+  opener.click();
+  await settle();
+  [...document.querySelectorAll<HTMLInputElement>(".tf-dialog .tf-picks input")].at(-1)!.click();
+  await settle();
+  button("Add").click();
+  await settle();
+  await settle();
+  expect(saved.length).toBeGreaterThan(0);
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(target.querySelector(".tf-rule select[aria-label='Applies to which'] option[value='']"), "the rule still waits").not.toBeNull();
+  expect(document.activeElement).toBe(opener);
+});
+
+/** F-553: two sources holding one key are one ticket under *Shows on*, so they are one in the rule's count too. */
+test("a rule's count takes a key held by two sources once, as Shows on does", async () => {
+  const io = ports();
+  const held = { title: "Retry failed SEPA payouts", mine: true };
+  io.previewLinkSetRule = async () => [
+    { entity_id: "jira:PAY-231", ...held },
+    { entity_id: "jira-eu:PAY-231", ...held },
+    { entity_id: "jira:PAY-232", ...held },
+  ];
+  await draw(["payout-stack"], io);
+  await settle();
+  expect(text(".tf-rule-n")[0]).toBe("2 tickets");
+});
+
 test("changing a waiting rule's kind offers that kind's values", async () => {
   await draw(["payout-stack"]);
   button("Add a rule").click();

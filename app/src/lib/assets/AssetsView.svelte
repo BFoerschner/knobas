@@ -176,6 +176,7 @@
     routeAddressOf,
     selectionIn,
     sourceOf,
+    spareWidth,
     stripFor,
     walk,
     wireKey,
@@ -487,6 +488,11 @@
   let dependsFailure = $state<string | null>(null);
 
   /** The routes that would break and aren't already in the pane's *Reachable via*, which would say each one twice (F-509). */
+  /** What depends on it by a link stays open. What only sits inside it repeats the column beside the pane, so it waits in a fold (F-551). */
+  const dependsRows = $derived((dependsOn?.assets ?? []).filter((row) => row.relation !== null));
+  const insideRows = $derived((dependsOn?.assets ?? []).filter((row) => row.relation === null));
+  /** Closed on each asset. The list draws only while it's open, since a window can't measure rows a closed fold hides. */
+  let insideOpen = $state(false);
   const otherRoutes = $derived((dependsOn?.routes ?? []).filter((route) => !detail?.reachable_via.some((via) => via.id === route.id)));
   /** That list left some out, so a line says they break too: the panel still answers for them. */
   const repeatedRoutes = $derived((dependsOn?.routes.length ?? 0) > otherRoutes.length);
@@ -622,6 +628,7 @@
       // under this one's heading, is the pane stating a falsehood.
       dependsFor = id;
       dependsOn = null;
+      insideOpen = false;
       dependsFailure = null;
     }
     if (id === null) {
@@ -803,8 +810,14 @@
   /** The pane's two lists that run to thousands, *Holds* and *Depends on this*, windowed the same way; a line is 18 px, 2 apart. */
   const holdsWindow = new Windowed({ count: () => detail?.holds.length ?? 0, key: (at) => detail!.holds[at]!.id, estimate: 18, gap: 2 });
   const dependsWindow = new Windowed({
-    count: () => dependsOn?.assets.length ?? 0,
-    key: (at) => dependsOn!.assets[at]!.asset.id,
+    count: () => dependsRows.length,
+    key: (at) => dependsRows[at]!.asset.id,
+    estimate: 18,
+    gap: 2,
+  });
+  const insideWindow = new Windowed({
+    count: () => insideRows.length,
+    key: (at) => insideRows[at]!.asset.id,
     estimate: 18,
     gap: 2,
   });
@@ -1006,6 +1019,16 @@
    */
   $effect(() => {
     void wireEnds;
+    measureWires();
+  });
+
+  /**
+   * The room the columns can't use goes to the pane, through the CSSOM (the app's CSP refuses `style:`). The pane grows over the
+   * strip's blank end, so the strip measures the same and no row moves. The wires start at the pane's edge, so they measure again.
+   */
+  const paneTakes = $derived(spareWidth(columns.length, available, strip));
+  $effect(() => {
+    paneEl?.style.setProperty("--tf-pane-spare", `${paneTakes}px`);
     measureWires();
   });
 
@@ -2505,30 +2528,53 @@
           {:else if dependsOn.assets.length === 0}
             <p class="empty">Nothing depends on this.</p>
           {:else}
-            <ul class="lst" {@attach dependsWindow.list}>
-              {#each dependsWindow.slice(dependsOn.assets) as row (row.asset.id)}
-                {@const under = pathBelow(detail, row.path)}
-                <li {@attach dependsWindow.row(row.asset.id)}>
-                  <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
-                    {row.asset.name}
-                  </button>
-                  <!--
-                    Why it is on the list. A relation is rendered through the
-                    vocabulary's own table, from the *listed* asset's end — it
-                    is the one that depends on, or runs on, the asset in the
-                    pane. `null` is containment, which is a `parent_id` field
-                    and not a link (ADR-0014), so there is no relation to
-                    render and the word is *inside*.
-                  -->
-                  <span class="faint"
-                    >{row.relation === null ? "inside" : readingOf(row.relation, true)}</span
-                  >
-                  {#if under !== null}
-                    <span class="faint path" title={row.path}>{under}</span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
+            {#if dependsRows.length > 0}
+              <ul class="lst" {@attach dependsWindow.list}>
+                {#each dependsWindow.slice(dependsRows) as row (row.asset.id)}
+                  {@const under = pathBelow(detail, row.path)}
+                  <li {@attach dependsWindow.row(row.asset.id)}>
+                    <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
+                      {row.asset.name}
+                    </button>
+                    <!--
+                      Why it is on the list. A relation is rendered through the
+                      vocabulary's own table, from the *listed* asset's end — it
+                      is the one that depends on, or runs on, the asset in the
+                      pane.
+                    -->
+                    <span class="faint">{readingOf(row.relation!, true)}</span>
+                    {#if under !== null}
+                      <span class="faint path" title={row.path}>{under}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <!--
+              `null` is containment, which is a `parent_id` field and not a link
+              (ADR-0014), so there is no relation to render: the fold's words
+              say it, and it moves what is under it, so the wires measure again.
+            -->
+            {#if insideRows.length > 0}
+              <details class="inside tf-set-fold" bind:open={insideOpen} ontoggle={measureWires}>
+                <summary class="lab">Everything inside it <span class="tf-count">{insideRows.length}</span></summary>
+                {#if insideOpen}
+                  <ul class="lst" {@attach insideWindow.list}>
+                    {#each insideWindow.slice(insideRows) as row (row.asset.id)}
+                      {@const under = pathBelow(detail, row.path)}
+                      <li {@attach insideWindow.row(row.asset.id)}>
+                        <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
+                          {row.asset.name}
+                        </button>
+                        {#if under !== null}
+                          <span class="faint path" title={row.path}>{under}</span>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </details>
+            {/if}
           {/if}
           {#if otherRoutes.length > 0}
             <p class="lab via">Other routes that would break</p>
@@ -3013,7 +3059,7 @@
   /*
     The column and its header travel together; the rows scroll under it.
 
-    Its 220px is `tree.ts`'s `COLUMN_WIDTH` -- see the spine's rule below.
+    Its 216px is `tree.ts`'s `COLUMN_WIDTH` -- see the spine's rule below.
     The width moved here from `.col` when the header arrived (#429): what the
     strip lays out is this wrapper, so this is the number the arithmetic has
     to be told.
@@ -3021,7 +3067,7 @@
   .colw {
     display: flex;
     flex-direction: column;
-    width: 220px;
+    width: 216px;
     flex: none;
     min-height: 0;
     border-right: 1px solid var(--rule);
@@ -3234,7 +3280,7 @@
   }
 
   /*
-    A spine (story 28). Its 30px, and `.colw`'s 220px above, are `tree.ts`'s
+    A spine (story 28). Its 30px, and `.colw`'s 216px above, are `tree.ts`'s
     `SPINE_WIDTH` and `COLUMN_WIDTH`: the arithmetic that decides *which*
     columns collapse is pure, so it has to be told how wide the things it
     arranges are drawn. `the strip's arithmetic measures the widths this view
@@ -3439,6 +3485,8 @@
   .pane {
     position: relative;
     z-index: 1;
+    /* Over the strip's blank end, so the strip's measure stays the window's (`spareWidth`). */
+    margin-left: calc(-1 * var(--tf-pane-spare, 0px));
     border-left: 1px solid var(--rule);
     background: var(--sheet);
     padding: 14px 14px 20px;
@@ -3548,17 +3596,21 @@
     margin-top: 8px;
   }
 
-  .heldby summary {
+  :is(.heldby, .inside) summary {
     list-style: none;
     cursor: pointer;
   }
 
-  .heldby summary::-webkit-details-marker {
+  :is(.heldby, .inside) summary::-webkit-details-marker {
     display: none;
   }
 
-  .heldby[open] summary {
+  :is(.heldby, .inside)[open] summary {
     margin-bottom: 6px;
+  }
+
+  .lst + .inside {
+    margin-top: 8px;
   }
 
   /* A line here carries three things and the third is a whole path, which in

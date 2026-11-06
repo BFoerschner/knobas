@@ -30,6 +30,7 @@ import {
   type ColumnPath,
   stripFor,
   COLUMN_WIDTH,
+  spareWidth,
   SPINE_WIDTH,
   MATCH_LIMIT,
   estateQuery,
@@ -386,18 +387,18 @@ test("an unmeasured strip draws every column", () => {
 
 /**
  * **Every column that fits is drawn in full**, and the arithmetic is the
- * mockup's: a full column is 220px, a spine 30px, and the widest window that
+ * mockup's: a full column is 216px, a spine 30px, and the widest window that
  * cannot take one more column is the one that collapses.
  *
- * Worked: four columns need 880px and fit in 960; five need 1100 and do not,
- * so one of them becomes a 30px spine and the other four take 910.
+ * Worked: four columns need 864px and fit in 960; five need 1080 and do not,
+ * so one of them becomes a 30px spine and the other four take 894.
  */
 test("the oldest columns collapse when the newest no longer fit", () => {
   expect(stripFor(4, 960, null)).toEqual({ from: 0, to: 4 });
   expect(stripFor(5, 960, null)).toEqual({ from: 1, to: 5 });
   // knobas' narrowest allowed window (`minWidth: 1100`) leaves the strip
   // about 780px beside the fixed pane, and there the fourth level collapses:
-  // three columns and a spine are 720.
+  // three columns and a spine are 678.
   expect(stripFor(4, 780, null)).toEqual({ from: 1, to: 4 });
   expect(stripFor(6, 780, null)).toEqual({ from: 3, to: 6 });
 });
@@ -420,6 +421,36 @@ test("the default window collapses at the fifth column and the narrowest at the 
   expect(stripFor(5, DEFAULT_STRIP, null)).toEqual({ from: 1, to: 5 });
   expect(stripFor(3, NARROWEST_STRIP, null)).toEqual({ from: 0, to: 3 });
   expect(stripFor(4, NARROWEST_STRIP, null)).toEqual({ from: 1, to: 4 });
+});
+
+/**
+ * **At 1241 the fourth full column fits** (F-534): 901 of strip beside the pane
+ * takes four columns and a spine, 894, which at 220 it missed by 9.
+ */
+test("a 1241 window keeps four full columns on a path five deep", () => {
+  expect(stripFor(5, 901, null)).toEqual({ from: 1, to: 5 });
+});
+
+/**
+ * **The pane takes what no column could use** (F-534, F-548), and room for a
+ * whole column stays, because the next level opens there.
+ */
+test("spare width goes to the pane only when no further column would fit", () => {
+  // 1440, five levels: 1080 of 1100.
+  expect(spareWidth(5, 1100, stripFor(5, 1100, null))).toBe(20);
+  // 1241, five levels: four columns and a spine, 894 of 901.
+  expect(spareWidth(5, 901, stripFor(5, 901, null))).toBe(7);
+  // 1100, five levels: three columns and two spines, 708 of 760.
+  expect(spareWidth(5, 760, stripFor(5, 760, null))).toBe(52);
+  // 860, five levels: two columns and three spines, 522 of 560.
+  expect(spareWidth(5, 560, stripFor(5, 560, null))).toBe(38);
+  // A re-expanded spine draws the same width.
+  expect(spareWidth(5, 560, stripFor(5, 560, 0))).toBe(38);
+  // 1440, two levels: 668 are left, room for the next column.
+  expect(spareWidth(2, 1100, stripFor(2, 1100, null))).toBe(0);
+  // Nothing measured yet, and a window too narrow for its one column.
+  expect(spareWidth(2, 0, stripFor(2, 0, null))).toBe(0);
+  expect(spareWidth(3, 40, stripFor(3, 40, null))).toBe(0);
 });
 
 /**

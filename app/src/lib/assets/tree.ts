@@ -396,7 +396,7 @@ export function walk(key: string, path: ColumnPath, columns: AssetRow[][], from:
  * and not the `ol` inside it because #429 gave the column a header: what the
  * strip lays out is the wrapper, and the rows scroll under it.
  */
-export const COLUMN_WIDTH = 220;
+export const COLUMN_WIDTH = 216;
 
 /** How wide a collapsed column is drawn — `.spine`'s width. */
 export const SPINE_WIDTH = 30;
@@ -447,6 +447,19 @@ export function stripFor(columns: number, available: number, anchor: number | nu
   return { from, to: from + fits };
 }
 
+
+/**
+ * What the strip leaves that no further column could use, which the pane takes
+ * (F-534, F-548) rather than a band of grey beside it. Room for a whole column
+ * stays where it is: it is where the next level opens.
+ *
+ * The anchor doesn't move it: a strip is as wide wherever its window stands.
+ */
+export function spareWidth(columns: number, available: number, strip: Strip): number {
+  const full = strip.to - strip.from;
+  const spare = available - full * COLUMN_WIDTH - (columns - full) * SPINE_WIDTH;
+  return available > 0 && spare > 0 && spare < COLUMN_WIDTH ? spare : 0;
+}
 
 /**
  * One wire drawn from a route's row in the pane to the columns — story 31.

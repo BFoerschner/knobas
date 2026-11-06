@@ -79,15 +79,33 @@
 
   const shown = $derived(filterLinks(links, text));
 
-  /** A row a mouse press took away, its place held under the pointer until the pointer leaves it (F-138). */
-  let holding = $state.raw<{ list: string; at: number; id: string | number; height: number } | null>(null);
-  function hold(event: MouseEvent, list: string, at: number, id: string | number) {
+  /** The words a row drew, which its held place keeps. */
+  type RowWords = { title: string; how: string; mono: boolean };
+  /** A row a mouse press took away, its place held under the pointer until the pointer leaves it (F-138): its words stay, muted, with nothing to press. */
+  let holding = $state.raw<{ list: string; at: number; id: string | number; height: number; words: RowWords } | null>(null);
+  function hold(event: MouseEvent, list: string, at: number, id: string | number, words: RowWords) {
     const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-lk")?.getBoundingClientRect() : undefined;
-    if (box !== undefined) holding = { list, at, id, height: box.height };
+    if (box !== undefined) holding = { list, at, id, height: box.height, words };
   }
   $effect(() => {
     if (holding === null) return;
     return holdUnderPointer(() => document.querySelector(".tf-lk-held"), () => (holding = null));
+  });
+
+  let body = $state<HTMLElement | null>(null);
+  /** *Apply a link set…* or *Save as a link set…* was pressed, so the group the job's next read adds is its answer. */
+  let awaitingGroup = false;
+  // svelte-ignore state_referenced_locally
+  let knownGroups = new Set(groups.map((group) => group.key));
+  /** A set saved or applied draws its group below the fold, so the list brings it into view (F-550). Focus stays on the opener, in the header that doesn't scroll. */
+  $effect(() => {
+    const keys = groups.map((group) => group.key);
+    const fresh = keys.find((key) => !knownGroups.has(key));
+    knownGroups = new Set(keys);
+    if (!awaitingGroup || fresh === undefined) return;
+    awaitingGroup = false;
+    const heads = body?.querySelectorAll<HTMLElement>("[data-group]") ?? [];
+    [...heads].find((head) => head.dataset.group === fresh)?.scrollIntoView?.({ block: "start" });
   });
 
   $effect(() => {
@@ -132,27 +150,30 @@
     </label>
     <div class="tf-dacts">
       <button type="button" class="tf-btn tf-sm" onclick={onlinkto}>Link to…</button>
-      <button type="button" class="tf-btn tf-sm" onclick={onapplyset}>Apply a link set…</button>
-      <button type="button" class="tf-btn tf-sm" onclick={onsaveset}>Save as a link set…</button>
+      <button type="button" class="tf-btn tf-sm" onclick={() => { awaitingGroup = true; onapplyset(); }}>Apply a link set…</button>
+      <button type="button" class="tf-btn tf-sm" onclick={() => { awaitingGroup = true; onsaveset(); }}>Save as a link set…</button>
     </div>
   </div>
-  <div class="tf-dbody">
+  <div class="tf-dbody" bind:this={body}>
     <h3>Linked on <TfKey value={jobKey} lead /> <span class="tf-count">{shown.length}</span></h3>
     {#snippet heldRow(list: string, at: number, present: boolean)}
       {#if holding !== null && holding.list === list && holding.at === at && !present}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="tf-lk tf-lk-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding.height)}></div>
+        <div class="tf-lk tf-lk-held" aria-hidden="true" onmousedown={(event) => event.preventDefault()} {@attach heldHeight(holding.height)}>
+          <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={holding.words.mono}>{holding.words.title}</span>{" "}<span class="tf-how">{holding.words.how}</span></span>{@render stateOf(null)}</div>
+        </div>
       {/if}
     {/snippet}
     {#each shown as entry, at (entry.link.id)}
       {@const also = alsoIn(entry.other.entity_id)}
+      {@const how = `${kindWord(entry.other.kind)}${also.length > 0 ? `, also in ${also.join(", ")}` : ""}`}
       {@render heldRow("links", at, shown.some((one) => one.link.id === holding?.id))}
       <div class="tf-lk" data-row="link:{entry.link.id}">
         <a class="tf-lk-go" href={itemHash(entry.other)} onclick={onclose}
-          ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{kindWord(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</span></span
+          ><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={entry.other.kind === "repo"}><Marked text={entry.other.title} typed={text} /></span>{" "}<span class="tf-how">{how}</span></span
           >{@render stateOf(entry.other.state ?? null)}<span class="tf-chev" aria-hidden="true">›</span></a
         >
-        <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { if (entry.link.origin === "manual") hold(event, "links", shown.indexOf(entry), entry.link.id); onunlink(entry); }} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
+        <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { if (entry.link.origin === "manual") hold(event, "links", shown.indexOf(entry), entry.link.id, { title: entry.other.title, how, mono: entry.other.kind === "repo" }); onunlink(entry); }} aria-label="Unlink {entry.other.title}">{entry.link.origin === "manual" ? "Unlink" : "Unlink…"}</button>
       </div>
     {:else}
       {#if text.trim() !== ""}
@@ -164,7 +185,7 @@
     {#if shown.length > 0}{@render heldRow("links", shown.length, shown.some((one) => one.link.id === holding?.id))}{/if}
     {#each groups as group (group.key)}
       {@const rows = filterRows(group.rows, text)}
-      <h3>
+      <h3 data-group={group.key}>
         From {group.label}, <TfKeyed text={group.via} lead /> <span class="tf-count">{rows.length}</span>
         {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={() => { oneditset(); onclose(); }}>Edit set</a>{/if}
       </h3>
@@ -179,7 +200,7 @@
             <div class="tf-lk-go"><span class="tf-lk-t"><span class="tf-lk-name" class:tf-mono={row.kind === kindWord("repo")}><Marked text={row.title} typed={text} /></span>{" "}<span class="tf-how">{row.kind}</span></span>{@render stateOf(row.state)}</div>
           {/if}
           {#if group.setId !== null}
-            <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { hold(event, group.key, rows.indexOf(row), row.id); onhide(row); }} aria-label="Hide here: {row.title}">Hide here</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={(event) => { hold(event, group.key, rows.indexOf(row), row.id, { title: row.title, how: row.kind, mono: row.kind === kindWord("repo") }); onhide(row); }} aria-label="Hide here: {row.title}">Hide here</button>
           {/if}
         </div>
       {/each}

@@ -17,7 +17,7 @@
   import TfDialog from "../settings/TfDialog.svelte";
   import TfKey from "../TfKey.svelte";
   import { epicAbove, epicOf, offered, projectOf, savedDraft, savedName } from "../sets/apply";
-  import { kindOne } from "../sets/sets";
+  import { kindOne, onePerKey } from "../sets/sets";
   import { keyOf } from "./job";
 
   let {
@@ -70,7 +70,7 @@
   $effect(() => {
     let live = true;
     void ports.previewLinkSetRule({ kind: "parent", value: ticket.entity_id }).then(
-      (rows) => live && (subtasks = rows.length),
+      (rows) => live && (subtasks = onePerKey(rows).length),
       () => {},
     );
     void walk.then((top) => {
@@ -78,7 +78,7 @@
       epic = top.entity_id;
       if (top.title !== null && top.title !== keyOf(top.entity_id)) epicTitle = top.title;
       void ports.previewLinkSetRule({ kind: "epic", value: top.entity_id }).then(
-        (rows) => live && (epicCount = rows.length),
+        (rows) => live && (epicCount = onePerKey(rows).length),
         () => {},
       );
     });

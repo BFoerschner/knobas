@@ -158,7 +158,8 @@
       if (at in counts) continue;
       counts[at] = -1;
       ports.previewLinkSetRule({ kind: rule.kind, value: rule.value }).then(
-        (tickets) => (counts[at] = tickets.length),
+        // One chip a ticket, as *Shows on* counts them, so a rule never disagrees with its total (F-553).
+        (tickets) => (counts[at] = onePerKey(tickets).length),
         () => delete counts[at],
       );
     }
@@ -395,6 +396,9 @@
    */
   const waitingRule = (at: number) =>
     inlineEditor(() => cancelRule(), { focus: "select[aria-label='Applies to which']", back: () => ruleBack(at) });
+  /** One attachment while the same row waits. A new one each draw would take focus again whenever the set saved, as from *Add…* (F-554). */
+  const waitingAt = $derived(pending?.at ?? null);
+  const waitingEditor = $derived(waitingAt === null ? null : waitingRule(waitingAt));
 
   function cancelRule() {
     settled = false;
@@ -600,6 +604,8 @@
                 {#if state}<span class="tf-dot {toneClass(state)}" title={stateWord(state.text)}></span>{/if}
                 <a class="tf-member-name" class:tf-mono={kind === "repo"} href={entityAddress(kind, member.entity_id)}>{member.title ?? keyOf(member.entity_id)}</a>
                 {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{memberLine(member)}</span>{/if}
+                <!-- The word beside a dot, as the drawer's rows have it: a grey dot alone says nothing (F-540). -->
+                {#if state}<span class="tf-dim tf-member-line">{stateWord(state.text)}</span>{/if}
                 <button
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"
@@ -620,7 +626,7 @@
         {#each ruleRows as rule (rule.at)}
           {@const count = rule.waiting ? undefined : counts[countKey(rule)]}
           <!-- svelte-ignore a11y_no_static_element_interactions -->
-          <div class="tf-rule" data-rule={rule.at} onkeydown={(event) => ruleKey(event, rule.waiting)} {@attach rule.waiting ? waitingRule(rule.at) : null}>
+          <div class="tf-rule" data-rule={rule.at} onkeydown={(event) => ruleKey(event, rule.waiting)} {@attach rule.waiting ? waitingEditor : null}>
             <select aria-label="Rule" value={rule.kind} onchange={(event) => rekind(rule.at, event.currentTarget.value as LinkSetRuleKind)}>
               {#each RULE_KINDS as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}
             </select>
