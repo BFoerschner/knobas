@@ -109,6 +109,15 @@ test("the reader moving ends the hold: their scroll stands", async () => {
   end();
 });
 
+test("a link in a closed fold can't take focus, so a redrawn row goes to the one outside it (F-438)", async () => {
+  const { main, page } = draw(`<details><summary>Space</summary><a href="#/page/1">Booking</a></details><a class="row" href="#/page/1">Booking</a>`);
+  const place = { ...capturePlace(main, page, null, "#/page/1"), said: { text: "Booking", nth: 0 } };
+  const end = restorePlace(place, page);
+  await frames();
+  expect(document.activeElement).toBe(page.querySelector(".row"));
+  end();
+});
+
 test("a redraw during the hold is put right", async () => {
   const { main, page } = draw(`<a href="#/pr/1">PR</a>`);
   main.scrollTop = 60;

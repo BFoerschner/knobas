@@ -269,6 +269,7 @@ export const CORPUS: {
   },
   row("mock:payout-service#142", "pr", "Idempotent retry window", "2026-08-22T10:12:00Z", "mara", {
     num: 142,
+    labels: ["payments", "needs-review"],
     repo: "payout-service",
     state: "open",
     approvals: "1/2",

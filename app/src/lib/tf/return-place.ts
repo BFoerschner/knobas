@@ -131,7 +131,8 @@ function focusTarget(place: Place, page: Element): HTMLElement | null {
   const pressed = place.pressed !== null && place.pressed.isConnected && !reworded(place) ? inRow(place.pressed, place.to) : null;
   if (pressed !== null) return pressed;
   // Redrawn: the same words among the links to where it opened, else any link there, else the same words anywhere.
-  const links = [...page.querySelectorAll<HTMLElement>("a[href]")].filter((link) => link.getAttribute("href") === place.to);
+  // Not one in a closed fold, which can't take focus: Docs' rail holds a link to every page, ahead of the row that opened it (F-438).
+  const links = [...page.querySelectorAll<HTMLElement>("a[href]")].filter((link) => link.getAttribute("href") === place.to && link.closest("details:not([open])") === null);
   const said = place.said;
   if (said === null) return links[0] ?? null;
   const own = links.find((link) => textOf(link) === said.text) ?? links[0];

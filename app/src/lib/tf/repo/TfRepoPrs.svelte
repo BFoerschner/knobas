@@ -21,7 +21,7 @@
   import { itemHash } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob, type OpenJobPorts } from "../job/open-jobs";
   import { echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { EchoListen } from "../queued.svelte";
   import { MADE_PR, REPO_PRS, visibleRepoPrs } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
@@ -48,6 +48,14 @@
     /** Reads the rows again: what brings a queued one in. */
     reread?: () => void;
   } = $props();
+
+  /** The row a press landed on takes focus, where the press left it on nothing: *Create pull request*'s form has gone (F-242). */
+  function arrive(row: HTMLElement) {
+    void tick().then(() => {
+      const at = document.activeElement;
+      if (at === null || at === document.body || at.closest("[hidden], [inert]") !== null) row.focus({ preventScroll: true });
+    });
+  }
 
   /** What this session queued that the rows don't hold yet. */
   const sent = $derived(echoesOn(repoId, MADE_PR));
@@ -124,7 +132,7 @@
       {#each sent as echo (echo.text)}
         <tr class="tf-rsent">
           <td class="tf-prno"></td>
-          <td><span class="tf-rowt">{echo.text}</span></td>
+          <td><span class="tf-rowt" tabindex="-1" {@attach arrive}>{echo.text}</span></td>
           <td><TfStateChip text={echo.state} tone="info" /></td>
           <td></td>
           <td></td>
