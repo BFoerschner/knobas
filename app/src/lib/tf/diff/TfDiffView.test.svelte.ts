@@ -12,6 +12,7 @@ import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { createPendingComments } from "../../detail/view/pending-comments.svelte";
 import { createHighlightCore } from "../../render/highlight-core";
 import { workerPort, type HighlightMessage, type HighlightReply, type RenderPort } from "../../render/port";
+import { installFindKey } from "../filter-keys";
 import { layers } from "../layers.svelte";
 import { toasts } from "../../shell/toasts.svelte";
 import { createDiffLayout, LAYOUT_KEY } from "./diff-layout.svelte";
@@ -354,6 +355,19 @@ test("package-lock.json and Cargo.lock start collapsed; the caret opens them", (
   cardOf("src/retry.rs").querySelector<HTMLButtonElement>(".tf-fh-caret")!.click();
   flushSync();
   expect(cardOf("src/retry.rs").querySelectorAll(".tf-ln")).toHaveLength(0);
+});
+
+test("the file filter is a box beside the diff, so ⌘F passes it for the find bar (F-272)", () => {
+  const stop = installFindKey();
+  draw({ files: [file("src/retry.rs")], layout: createDiffLayout(() => null) });
+  const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
+  input.getClientRects = () => [{}] as unknown as DOMRectList;
+  expect(input.dataset["filter"]).toBe("aside");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.activeElement).not.toBe(input);
+  expect(document.querySelector(".tf-findhold input")).not.toBeNull();
+  stop();
 });
 
 test("the filter narrows the tree and the diff together", () => {

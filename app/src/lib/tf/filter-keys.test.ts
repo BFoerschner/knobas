@@ -1,7 +1,7 @@
 /** `filterKeys`: `Esc` in a box that narrows or finds means one thing everywhere. */
 import { afterEach, expect, test, vi } from "vitest";
 
-import { filterKeys, installFindKey } from "./filter-keys";
+import { addFindBar, filterKeys, installFindKey } from "./filter-keys";
 import { layers } from "./layers.svelte";
 
 afterEach(() => {
@@ -133,12 +133,47 @@ test("⌘F leaves an event something took, and a dialog or a drawer owns the key
   stop();
 });
 
-test("with no box, ⌘F asks the page, and a modified F is left alone", () => {
+test("the ladder: a find bar first, then a box, then the launcher, and a bar whose page isn't shown is passed over (F-272)", () => {
+  const launcher = vi.fn();
+  const stop = installFindKey(launcher);
+  const own = drawn("Filter changed files", { aside: true });
+  const hidden = vi.fn();
+  const open = vi.fn();
+  const offHidden = addFindBar({ here: () => false, open: hidden });
+  const offBar = addFindBar({ here: () => true, open });
+  expect(findKey().defaultPrevented).toBe(true);
+  expect(open).toHaveBeenCalledOnce();
+  expect(hidden).not.toHaveBeenCalled();
+  expect(document.activeElement).not.toBe(own.input);
+  offBar();
+  findKey();
+  expect(document.activeElement).toBe(own.input);
+  own.off();
+  own.input.remove();
+  findKey();
+  expect(launcher).toHaveBeenCalledOnce();
+  offHidden();
+  stop();
+});
+
+test("a dialog owns ⌘F over a find bar", () => {
+  const stop = installFindKey();
+  const open = vi.fn();
+  const off = addFindBar({ here: () => true, open });
+  const close = layers.add({ kind: "dialog", close: () => {} });
+  findKey();
+  expect(open).not.toHaveBeenCalled();
+  close();
+  off();
+  stop();
+});
+
+test("with no bar and no box, ⌘F is the launcher's, and a modified F is left alone", () => {
   const nobox = vi.fn();
   const stop = installFindKey(nobox);
   const event = findKey();
   expect(nobox).toHaveBeenCalledOnce();
-  expect(event.defaultPrevented).toBe(false);
+  expect(event.defaultPrevented).toBe(true);
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, shiftKey: true, bubbles: true }));
   window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
   expect(nobox).toHaveBeenCalledOnce();

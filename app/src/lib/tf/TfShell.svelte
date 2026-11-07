@@ -721,7 +721,7 @@
 
   // First, so that a press it swallows reaches nothing else.
   onMount(() => installPressGuard());
-  onMount(() => installFindKey(() => { if (route.view === "full" && route.head === "docs") onsearch(sectionFilter(route)); }));
+  onMount(() => installFindKey(() => onsearch(sectionFilter(route))));
   onMount(() => installRowRoom());
   onMount(() => installFocusKeep());
   onMount(() => {

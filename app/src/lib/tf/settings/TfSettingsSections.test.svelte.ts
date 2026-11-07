@@ -744,7 +744,7 @@ test("Open the backup folder refused: the platform's message in a toast (#1471)"
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(22);
+  expect(rows).toHaveLength(23);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
@@ -758,6 +758,7 @@ test("Keyboard lists the fixed shortcuts", async () => {
     "Anywhere; / outside a field",
     "Search this section: the launcher with its filter",
   ]);
+  expect(said, "F-662").toContain("⌘F");
   expect([...rows[3]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent), "history, #1086").toEqual([
     "⌘[",
     "⌘]",

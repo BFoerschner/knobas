@@ -11,7 +11,7 @@
  *
  * It uses `svelte/events`, so the input's own `onkeydown` runs first and can take the key.
  *
- * **⌘F** goes to the shown page's box, with its words selected (`installFindKey`). `Esc` in a box ⌘F went to, once it is empty,
+ * **⌘F** is one ladder (`installFindKey`), and this is the one place that decides it. `Esc` in a box ⌘F went to, once it is empty,
  * gives focus back to what held it instead of falling through, because ⌘F then `Esc` is changing your mind, not leaving the page.
  */
 import type { Attachment } from "svelte/attachments";
@@ -23,7 +23,7 @@ import { layers } from "./layers.svelte";
 export interface FilterKeysOptions {
   /** A find bar: closes on `Esc`. Say where focus returns in `close`, or let the keeper (`focus-keep.ts`) find it. */
   close?: () => void;
-  /** A box beside the page rather than for it: *Find a view*, *Go to file*. ⌘F takes one only where the page has no other. */
+  /** A box beside the page rather than for it: *Find a view*, *Go to file*, *Filter changed files*. ⌘F takes one only where the page has no other. */
   aside?: boolean;
 }
 
@@ -70,24 +70,44 @@ function shownBox(): HTMLInputElement | null {
   return boxes.find((box) => box.dataset["filter"] !== "aside") ?? boxes[0] ?? null;
 }
 
+/** A page's find bar, which ⌘F opens ahead of any box. */
+export interface FindBar {
+  /** Whether this bar's page is the one shown, with something to find in. */
+  here: () => boolean;
+  open: () => void;
+}
+
+const bars = new Set<FindBar>();
+
+/** Put a find bar on the ladder, until the call it returns. */
+export function addFindBar(bar: FindBar): () => void {
+  bars.add(bar);
+  return () => bars.delete(bar);
+}
+
 /**
- * ⌘F, one meaning on every page (design system, the key table): focus in the shown page's find or filter box, with its words
- * selected, so pressed twice it only selects again. A dialog or a drawer owns the key, as it does the rest of the keyboard. With
- * no box, `nobox` answers, and it does nothing where the page has no search to offer.
+ * ⌘F, one ladder on every page (design system, the key table), so no page leaves it dead:
  *
- * A Docs page's own listener opens its find bar. Whichever hears the key first, the answer is the same: the bar's box is the page's only box, and an
- * event either one took is left alone.
+ * 1. a dialog or a drawer owns the key, as it does the rest of the keyboard;
+ * 2. the shown page's find bar (`addFindBar`);
+ * 3. its find or filter box, with focus in it and its words selected, so pressed twice it only selects again;
+ * 4. `launcher`: the launcher on the section's filter, empty where the section has none.
  */
-export function installFindKey(nobox: () => void = () => {}): () => void {
+export function installFindKey(launcher: () => void = () => {}): () => void {
   return on(window, "keydown", (event: KeyboardEvent) => {
     if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "f" || event.defaultPrevented) return;
     if (layers.open.some((layer) => layer.kind !== "panel")) return;
-    const box = shownBox();
-    if (box === null) {
-      nobox();
+    event.preventDefault();
+    const bar = [...bars].find((one) => one.here());
+    if (bar !== undefined) {
+      bar.open();
       return;
     }
-    event.preventDefault();
+    const box = shownBox();
+    if (box === null) {
+      launcher();
+      return;
+    }
     const from = document.activeElement;
     if (from !== box) {
       box.focus();

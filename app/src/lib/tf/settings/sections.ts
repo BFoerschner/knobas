@@ -120,6 +120,7 @@ export const SHORTCUTS: readonly (readonly [keys: string, where: string, does: s
   ["⌘[ ⌘] ⌘← ⌘→", "Anywhere", "Back and forward through what you opened; the mouse's buttons too"],
   ["⌘R", "A detail or a role view", "Refresh, or Sync now"],
   ["/ ⌘/", "Anywhere; / outside a field", "Search this section: the launcher with its filter"],
+  ["⌘F", "Anywhere", "Find on this page: its find bar or filter box, else the section's search"],
   ["Esc", "Anywhere", "Back one step: dialog, drawer, filter, view, job"],
   ["⌘D", "Search box", "Titles only, or everything"],
   ["Tab", "Search box", "The actions on the selected result"],

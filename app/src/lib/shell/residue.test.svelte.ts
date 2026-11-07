@@ -416,6 +416,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
+const TfFindBar = (await import("../tf/TfFindBar.svelte")).default;
 const TfDiffRendered = (await import("../tf/diff/TfDiffRendered.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
@@ -1922,6 +1923,12 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  // ⌘F's bar on a page with no box: on the ladder until it goes.
+  {
+    name: "TfFindBar",
+    source: "lib/tf/TfFindBar.svelte",
+    open: (target) => ({ app: mount(TfFindBar, { target, props: { root: () => target } }) }),
   },
   // The one diff component (#2266): a highlight job per file side, cancelled with it.
   {

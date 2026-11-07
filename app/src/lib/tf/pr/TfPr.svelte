@@ -136,6 +136,8 @@
   import TfEntityAction from "../TfEntityAction.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
+  import TfFindBar from "../TfFindBar.svelte";
+  import TfKey from "../TfKey.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
@@ -475,12 +477,12 @@
     return choices.length > 0 && choices.every((choice) => choice.action === null) ? (choices.find((choice) => choice.why !== null)?.why ?? null) : null;
   });
   /** The ticket knobas links this pull request to, by its key, for *Merge…*'s In Review line. */
-  const ticket = $derived.by(() => {
-    const linked = detail?.links.find((entry) => entry.other.kind === "ticket");
-    return linked ? keyOf(linked.other.entity_id) : null;
-  });
+  const linkedTicket = $derived(detail?.links?.find((entry) => entry.other.kind === "ticket")?.other ?? null);
+  const ticket = $derived(linkedTicket === null ? null : keyOf(linkedTicket.entity_id));
   let reviewing = $state(false);
   let merging = $state(false);
+  /** The page, which ⌘F's bar finds in on any tab but the diff, which has its own. */
+  let pageEl = $state<HTMLElement | null>(null);
 
   /** *Request…* in the Reviewers panel, where the source offers it to this reader (ADR-0020 rule 4). */
   const request = $derived(offered((a) => a.write_op === "request_reviewers"));
@@ -719,7 +721,7 @@
   <p class="tf-dim tf-prline">{words}</p>
 {/snippet}
 
-<div class="tf-full">
+<div class="tf-full" bind:this={pageEl}>
   <TfCrumbs parts={crumbs} {back} />
 
   {#if prId === null || failed !== null}
@@ -741,6 +743,7 @@
             {" "}<span class="tf-mono">{header.head}</span>{#if header.base !== null}{" "}into <span class="tf-mono">{header.base}</span>{/if}{#if header.author !== null},{/if}
           {/if}
           {#if header.author !== null}{" "}by {mine ? "you" : header.author}{/if}
+          {#if ticket !== null && linkedTicket !== null}{" "}<TfKey chip value={ticket} href={itemHash(linkedTicket)} />{/if}
         </div>
       </div>
       <div class="tf-acts" {@attach holdArrivingPress}>
@@ -842,6 +845,7 @@
         />
       {:else}
         <div>
+          <TfFindBar root={() => pageEl} />
           {#if viewFailed !== null}
             <p class="tf-cfail">Could not read the pull request: {viewFailed}</p>
           {:else if view === null}

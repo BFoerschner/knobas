@@ -943,6 +943,13 @@ function linked(): EntityDetail {
   } as unknown as EntityDetail;
 }
 
+test("the header's meta line links the ticket knobas links the pull request to, by the chip the list draws (F-273)", async () => {
+  await draw([PR], ports({ getEntity: async () => linked() }));
+  const chip = target.querySelector<HTMLAnchorElement>(".tf-fhead .tf-sub a.tf-key.tf-chip")!;
+  expect(chip.textContent).toBe("PAY-231");
+  expect(chip.getAttribute("href")).toBe("#/ticket/jira%3APAY-231");
+});
+
 test("Merge… blocked: a warn box names each reason, Merge is disabled with the sentence as its tooltip", async () => {
   const blocked = mergeAction("1 of 2 required approvals; required check Payout_IntegrationTests #1187 failed");
   await draw([PR], ports({ getEntity: async () => linked(), pr: prView([COMMENT, EDIT, blocked]) }));

@@ -53,6 +53,7 @@
 -->
 <script lang="ts">
   import { filterKeys } from "../filter-keys";
+  import TfFindBar from "../TfFindBar.svelte";
   import TfStateChip from "../TfStateChip.svelte";
   import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
@@ -663,7 +664,9 @@
     return () => window.removeEventListener("keydown", keys);
   });
 
-  let filesHost: HTMLElement | null = null;
+  let filesHost = $state<HTMLElement | null>(null);
+  /** A windowed file is holding rows back: it pads for them (`Windowed`), and the find bar finds only what is drawn. */
+  const heldBack = () => [...(filesHost?.querySelectorAll<HTMLElement>(".tf-dbody") ?? [])].some((lines) => lines.style.paddingTop !== "" || lines.style.paddingBottom !== "");
   const cardOf = (key: string) => filesHost?.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`) ?? null;
   /** The file a mark is changing, and where its head stands on screen. */
   let marking: { key: string; path: string; on: boolean; top: number } | null = null;
@@ -707,6 +710,7 @@
 {/snippet}
 
 <div class="tf-dview">
+<TfFindBar root={() => filesHost} within="in open files" more={heldBack} />
 <div class="tf-dtool">
   <div class="tf-seg" role="group" aria-label="Layout">
     <button type="button" aria-pressed={!split} onclick={() => layout.set("unified")}>Unified</button>
@@ -751,7 +755,7 @@
     <div class="tf-dnav tf-rail" id="{uid}-files">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys()} />
+        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys({ aside: true })} />
       </label>
       {#if tree.length === 0}
         <div class="tf-empty tf-flist-none">

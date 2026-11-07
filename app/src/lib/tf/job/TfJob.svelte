@@ -57,6 +57,7 @@
 <script lang="ts">
   import TfKey from "../TfKey.svelte";
   import TfNothingHere from "../TfNothingHere.svelte";
+  import TfFindBar from "../TfFindBar.svelte";
   import TfScroller from "../TfScroller.svelte";
   import { onMount, tick, untrack } from "svelte";
 
@@ -227,6 +228,8 @@
 
   /** Whether keep-alive shows this job or holds it hidden (#2247). */
   const pageShown = pageVisible();
+  /** The reading column, which ⌘F's bar finds in. */
+  let reading = $state<HTMLElement | null>(null);
   onShownAgain(pageShown, () => (writesAsked += 1));
   /** A refresh's re-read (#2134): the ticket through the reader, and its writes asked about again. */
   function rereadJob() {
@@ -637,7 +640,8 @@
     />
     <TfScroller class="tf-work">
       <div class="tf-wbody">
-        <div class="tf-tkread">
+        <div class="tf-tkread" bind:this={reading}>
+          <TfFindBar root={() => reading} within="in this column" />
           <header class="tf-tkpagehead">
             <h1>{detail.row.title}</h1>
             <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} />

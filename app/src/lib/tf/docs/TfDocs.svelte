@@ -170,7 +170,8 @@
   import { pageVisible } from "../kept-pages.svelte";
   import { linkedOn } from "../job/connections";
   import type { EscTarget } from "../escape";
-  import { filterKeys } from "../filter-keys";
+  import { addFindBar, filterKeys } from "../filter-keys";
+  import { selectedWords } from "../find-text";
   import { drafts } from "../drafts.svelte";
   import { sendKey } from "../inline-editor";
 
@@ -970,30 +971,27 @@
     if (free) (from?.isConnected ? from : article?.querySelector<HTMLElement>(".tf-rd-title"))?.focus({ preventScroll: true });
   }
 
-  /** ⌘F: the bar on any page, with focus in its box. Pressed again, or on a bar a hit opened, it selects the box's words (F-456). */
+  /** ⌘F: the bar on any page, with focus in its box, starting from the selected text if there is any. Pressed again, or on a bar a hit opened, it selects the box's words (F-456, F-465). */
   function openFind(): void {
     const at = document.activeElement;
+    const seed = at?.closest(".tf-findbar") ? null : selectedWords();
     if (!findOpen) findFrom = at instanceof HTMLElement && at !== document.body ? at : null;
     const top = !findOpen && article !== null ? article.getBoundingClientRect().top : null;
-    holdingPlace(() => (findTyped = true));
+    const seedLine = seed !== null && article !== null ? seed.range.getBoundingClientRect().top - article.getBoundingClientRect().top : null;
+    holdingPlace(() => {
+      findTyped = true;
+      if (seed !== null) find = seed.words;
+    });
     void tick().then(() => {
-      if (top !== null) findPlace = { top, line: readingLine(), landed: main?.scrollTop ?? 0 };
+      if (top !== null) findPlace = { top, line: seedLine ?? readingLine(), landed: main?.scrollTop ?? 0 };
+      else if (seedLine !== null && findPlace !== null) findPlace.line = seedLine;
       findBox?.focus({ preventScroll: true });
       findBox?.select();
     });
   }
 
-  $effect(() => {
-    const onkey = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "f" || event.defaultPrevented) return;
-      // A page keep-alive holds hidden takes no keys, and a dialog or the tree's drawer owns the keyboard over this one.
-      if (!shown() || page === null || layers.open.some((layer) => layer.kind !== "panel")) return;
-      event.preventDefault();
-      openFind();
-    };
-    window.addEventListener("keydown", onkey);
-    return () => window.removeEventListener("keydown", onkey);
-  });
+  // On ⌘F's ladder, with a dialog or the tree's drawer owning the key over it. A page keep-alive holds hidden takes no keys.
+  $effect(() => addFindBar({ here: () => shown() && page !== null, open: openFind }));
 
   // On the layer stack, so `Esc` closes the bar before it leaves the page, wherever focus is.
   $effect(() => {

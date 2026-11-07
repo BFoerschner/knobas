@@ -225,6 +225,13 @@
 .tf-findbar .tf-findx { margin-left: auto; }
 /* As wide as its longest words, so the arrows after it hold their place (F-436). */
 .tf-findbar .tf-findn { flex: none; width: 14ch; white-space: nowrap; }
+/* The bar on a page with no box (`TfFindBar`): it floats at its scroller's top right and takes no room, so nothing moves as it opens. */
+.tf-findhold { position: sticky; top: 0; z-index: 7; height: 0; display: flex; justify-content: flex-end; align-items: flex-start; }
+.tf-findhold > .tf-findbar { position: static; border: 1px solid var(--rule); border-top: 0; border-radius: 0 0 4px 4px; margin-right: 12px; }
+.tf-findhold > .tf-findbar .tf-findx { margin-left: 0; }
+.tf-findbar.tf-findwide .tf-findn { width: 22ch; }
+::highlight(tf-find) { background-color: var(--mark); }
+::highlight(tf-find-now) { background-color: var(--fill); color: var(--sheet); }
 /* A comment that names the reader, edged as a ticket's is, where *For you* brings the page (F-431). */
 .tf-msg.tf-mention .tf-cmt-body { box-shadow: inset 3px 0 0 var(--mark); padding-left: 10px; }
 /* The title takes focus only by script: a closed find bar hands it there, with nothing to draw. */

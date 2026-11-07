@@ -9,6 +9,7 @@ import type { DocBlock, DocPage, DocsTree, EntityDetail, Reached, RefusedWrite, 
 import type { EntityRefresh, QueuedWrite } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { installFindKey } from "../filter-keys";
 import { sessionFilter } from "../filter/filter-state.svelte";
 import { pageContext } from "../kept-pages.svelte";
 import { createLayers } from "../layers.svelte";
@@ -112,13 +113,18 @@ const QUEUED: QueuedWrite = {
 let target: HTMLDivElement;
 let view: ReturnType<typeof mount> | null = null;
 
+/** ⌘F's one ladder, which the shell installs. */
+let stopFindKey = (): void => {};
+
 beforeEach(() => {
   target = document.createElement("div");
   document.body.append(target);
+  stopFindKey = installFindKey();
 });
 
 /** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  stopFindKey();
   forgetEchoes();
   if (view) unmount(view);
   view = null;
