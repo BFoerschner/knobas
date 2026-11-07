@@ -104,6 +104,7 @@
   import { clockLabel } from "../../time/format";
   import { flushSync, onMount, tick, untrack } from "svelte";
   import { stamped, stampOf } from "../opener";
+  import { rowInView } from "../return-place";
   import { parseTfHash } from "../route";
   import type { RoleFrameProps } from "../page-entry";
 
@@ -638,14 +639,26 @@
   }
 
   /** `j`/`k` and the arrows (R-3.10): the next or previous card on screen, selected and focused. */
+  /** With nothing selected and the first ticket scrolled away, a walk starts from what is in view, so its first key keeps the place (F-075). */
+  function walkStart(by: 1 | -1): number | null {
+    if (session.selected !== null) return null;
+    const cards = [...document.querySelectorAll<HTMLElement>(".tf-tickets [data-entity]")];
+    const first = cards.find((card) => card.dataset.entity === current?.card.entity_id);
+    if (first === undefined || rowInView([first], by) !== null) return null;
+    const seen = rowInView(cards, by) as HTMLElement | null;
+    const found = visible.findIndex((entry) => entry.card.entity_id === seen?.dataset.entity);
+    return found < 0 ? null : found;
+  }
+
   function step(by: 1 | -1) {
     if (visible.length === 0) return;
     const at = current === null ? 0 : visible.findIndex((entry) => entry.card.entity_id === current.card.entity_id);
-    const to = Math.min(visible.length - 1, Math.max(0, at + by));
+    const seen = walkStart(by);
+    const to = seen ?? Math.min(visible.length - 1, Math.max(0, at + by));
     const next = visible[to]!;
     session.selected = next.card.entity_id;
-    // A list row past the drawn ones is drawn first; the board's cards are all drawn.
-    if (showing.layout !== "board") win.reveal(to);
+    // A list row past the drawn ones is drawn first; the board's cards are all drawn, and so is a row in view.
+    if (showing.layout !== "board" && seen === null) win.reveal(to);
     flushSync();
     const element = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(next.card.entity_id)}"]`);
     element?.focus();

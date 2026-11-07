@@ -125,10 +125,11 @@
   {/if}
   <a
     class="tf-iconbtn"
-    href="#/settings"
+    href={navHref("settings")}
     aria-label="Settings"
     title="Settings (⌘,)"
     aria-current={current === "settings" ? "page" : undefined}
+    onclick={(event) => press(event, "settings")}
   >
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
       <circle cx="8" cy="8" r="5.6" stroke-width="2.6" stroke-dasharray="2.2 2.2" />

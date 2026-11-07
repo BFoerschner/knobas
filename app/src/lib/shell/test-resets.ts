@@ -102,6 +102,8 @@ export const RESETS: Record<string, () => Promise<void>> = {
   "tf/builds/TfBuilds.svelte#remembered": async () => (await import("../tf/builds/TfBuilds.svelte")).forgetFolds(),
   "tf/repo/TfRepo.svelte#chosen": async () => (await import("../tf/repo/TfRepo.svelte")).forgetBranches(),
   "tf/tickets/TicketsPage.svelte#session": async () => (await import("../tf/tickets/TicketsPage.svelte")).forgetTicketsSession(),
+  "tf/docs/TfDocs.svelte#openSpaces": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
+  "tf/docs/TfDocs.svelte#openFolds": async () => (await import("../tf/docs/TfDocs.svelte")).forgetDocFolds(),
   // In a plain `.ts` file, so the scan lists it by hand ({@link UNSCANNED}): the shell's
   // one write follower, with the listener it registered.
   "shell/follow-write.ts#shared": async () => (await import("./follow-write")).resetWriteFollower(),

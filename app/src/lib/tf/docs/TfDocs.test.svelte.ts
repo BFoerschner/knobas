@@ -431,6 +431,34 @@ test("a 4,000-page space draws its tree in one pass over the pages, and a closed
   expect(inner().querySelectorAll(":scope > .tf-fold-in > a, :scope > .tf-fold-in > details > summary a")).toHaveLength(8);
 });
 
+test("a fold the reader opened holds for the session, in its space, past a tree read and a page drawn anew (F-464)", async () => {
+  const io = ports({ docsTree: vi.fn(async () => bulkTree(200, { parent: 0 })) });
+  await draw([], io);
+  const nav = () => target.querySelector("nav[aria-label='Docs']")!;
+  const space = () => nav().querySelector<HTMLDetailsElement>("details")!;
+  const fold = () => [...nav().querySelectorAll<HTMLDetailsElement>(".tf-fold-in details")].find((d) => d.querySelector("summary a")?.textContent === "Page 00001")!;
+  const toggle = async (d: HTMLDetailsElement, open: boolean) => {
+    d.open = open;
+    d.dispatchEvent(new Event("toggle"));
+    await settle();
+  };
+  expect(space().open).toBe(false);
+  await toggle(space(), true);
+  await toggle(fold(), true);
+  unmount(view!);
+  await draw([], io);
+  expect(space().open, "drawn anew, the space is as it was left").toBe(true);
+  expect(fold().open, "and the fold inside it").toBe(true);
+  // Closed by the reader, it stays closed.
+  await toggle(fold(), false);
+  await toggle(space(), false);
+  unmount(view!);
+  await draw([], io);
+  expect(space().open).toBe(false);
+  await toggle(space(), true);
+  expect(fold().open).toBe(false);
+});
+
 test("the body: a live ticket chip, my mention in yellow, a page link, code with its language, a table, the placeholder", async () => {
   await draw(["confluence:2"]);
   const doc = target.querySelector(".tf-doc")!;

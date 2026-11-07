@@ -62,6 +62,26 @@
   with what was typed. A queued page's row opens the folds around it and shows the
   space it went to, and the read that holds the page says so on a toast with *Open* (F-449).
 -->
+<script lang="ts" module>
+  import { SvelteSet } from "svelte/reactivity";
+
+  /** The spaces folded open in the rail by the reader, and each space's folds, for the session: a return finds them as left, whichever of the rail's trees draws them. */
+  const openSpaces = new SvelteSet<string>();
+  const openFolds = new Map<string, SvelteSet<string>>();
+
+  function foldsOf(space: string): SvelteSet<string> {
+    const held = openFolds.get(space) ?? new SvelteSet<string>();
+    openFolds.set(space, held);
+    return held;
+  }
+
+  /** A new session: what each test is. */
+  export function forgetDocFolds(): void {
+    openSpaces.clear();
+    openFolds.clear();
+  }
+</script>
+
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
@@ -1538,13 +1558,20 @@
           <p class="tf-dl-note">{hasSource ? "No pages have synced yet." : "No wiki source is set up yet."}</p>
         {:else if shownSpace === undefined}
           {#each tree.spaces as space (spaceId(space))}
-            <details open={space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}>
+            {@const holds = space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}
+            <details
+              open={holds || openSpaces.has(spaceId(space))}
+              ontoggle={(event) => {
+                if (!event.currentTarget.open) openSpaces.delete(spaceId(space));
+                else if (!holds) openSpaces.add(spaceId(space));
+              }}
+            >
               <summary class="tf-spc"><span class="tf-spc-n" title={space.name ?? space.key}>{space.name ?? space.key}</span> <span class="tf-count">{space.pages.length}</span></summary>
-              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} /></div>
+              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} /></div>
             </details>
           {/each}
         {:else if shownSpace}
-          <TfDocTree space={shownSpace} {current} reveal={revealed} />
+          <TfDocTree space={shownSpace} {current} reveal={revealed} opened={foldsOf(spaceId(shownSpace))} />
         {/if}
       {/if}
     </div>

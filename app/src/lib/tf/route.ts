@@ -231,15 +231,39 @@ export function monitorHash(entityId: string): string {
 
 /**
  * The section whose nav entry should come back to `route`, or `null`: a saved
- * view on Tickets, the tabs of Code, Monitors and Time, and a pipeline on Builds,
- * so the address says what the page shows. A deeper address (a set, a Docs space,
- * a marked monitor) is a place, and the entry is the way to the section's own page.
+ * view on Tickets, the tabs of Code, Monitors and Time, a pipeline on Builds,
+ * so the address says what the page shows, a search on Docs, and a section of
+ * Settings, which the cog comes back to. A deeper address (a set, a Docs space,
+ * a marked monitor, a source's page) is a place, and the entry is the way to the section's own page.
  */
 export function sectionTabOf(route: TfRoute): Section | null {
   if (route.view === "tickets") return "tickets";
   if (route.view !== "full" || route.head !== route.section) return null;
   if (route.section === "code" || route.section === "time" || route.section === "builds") return route.section;
+  if (route.section === "docs") return route.rest[0] === undefined || route.rest[0] === "search" ? "docs" : null;
+  if (route.section === "settings") return route.rest[0] === "source" ? null : "settings";
   return route.section === "monitors" && route.rest[0] !== MONITOR_AT ? "monitors" : null;
+}
+
+/**
+ * The run, pull request or repository `route` stands on, as its address with no tab, or `null`: the items a section
+ * remembers when one is left by a nav press, so its row can bring it back. A ticket and a Docs page have no such place:
+ * a ticket has no tab to lose, and Docs has *Continue reading*.
+ */
+export function itemOf(route: TfRoute): string | null {
+  if (route.view !== "full") return null;
+  const [id, run] = route.rest;
+  if (id === undefined) return null;
+  if (route.head === "build") return run === undefined ? null : `#/build/${encodeURIComponent(id)}/${encodeURIComponent(run)}`;
+  if (route.head === "pr" || route.head === "repo") return `#/${route.head}/${encodeURIComponent(id)}`;
+  return null;
+}
+
+/** Whether `to` is the bare address of the item the address `left` stands on: the one link that reopens it. A link that names a tab is not. */
+export function reopens(left: string, to: string): boolean {
+  const route = parseTfHash(to);
+  const item = itemOf(route);
+  return item !== null && item === itemOf(parseTfHash(left)) && route.view === "full" && route.rest.length === (route.head === "build" ? 2 : 1);
 }
 
 /**

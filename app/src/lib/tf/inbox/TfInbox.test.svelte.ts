@@ -6,7 +6,7 @@
  */
 import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, tick, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, onTestFinished, test, vi } from "vitest";
 
 import { createInbox, type Inbox } from "../../inbox/inbox.svelte";
 import type { ContextRow, EntityDetail, InboxEntry, InboxItem, Reached, RefusedWrite, WriteAsk } from "../../ipc/entity";
@@ -525,6 +525,32 @@ test("j and k walk the rows, and focus goes to each row's link (F-143)", async (
   key("k");
   flushSync();
   expect(document.activeElement).toBe(rows()[0]!.querySelector(".tf-what a"));
+});
+
+test("with no row focused, j and k start from the rows in view, so the first key keeps the place (F-075)", async () => {
+  await open();
+  const key = (name: string) => window.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true }));
+  const all = rows();
+  // Row 0 is scrolled away, and rows 1 and 2 are all that is in view.
+  const inView = all.slice(1, 3);
+  for (const [at, row] of all.entries()) row.getBoundingClientRect = () => ({ left: 0, width: 100, height: 60, top: at * 100, bottom: at * 100 + 60 }) as DOMRect;
+  const hit = document.elementFromPoint;
+  document.elementFromPoint = (_x, y) => inView.find((row) => { const box = row.getBoundingClientRect(); return y > box.top && y < box.bottom; }) ?? null;
+  onTestFinished(() => {
+    document.elementFromPoint = hit;
+  });
+  (document.activeElement as HTMLElement | null)?.blur();
+  key("j");
+  flushSync();
+  expect(document.activeElement).toBe(all[1]!.querySelector(".tf-what a"));
+  (document.activeElement as HTMLElement | null)?.blur();
+  key("k");
+  flushSync();
+  expect(document.activeElement).toBe(all[2]!.querySelector(".tf-what a"));
+  // From a focused row it is an ordinary step.
+  key("k");
+  flushSync();
+  expect(document.activeElement).toBe(all[1]!.querySelector(".tf-what a"));
 });
 
 test("Tab goes through a row's words before its actions: the job's key comes before them (F-143)", async () => {

@@ -97,6 +97,28 @@ function setScrolls(place: Place, page: Element): boolean {
 
 const ROW = "tr, li, [data-entity]";
 
+/** Whether a press on `pressed` meant the address `to`: its link does, or with no link of its own, a link in its row, as a row's press opens. */
+export function pressOpens(pressed: Element | null, to: string): boolean {
+  if (pressed === null) return false;
+  const link = pressed.closest("a[href]");
+  if (link !== null) return link.getAttribute("href") === to;
+  return [...(pressed.closest(ROW)?.querySelectorAll("a[href]") ?? [])].some((row) => row.getAttribute("href") === to);
+}
+
+/**
+ * The first of `rows` whole on screen and not under anything, or with `by` -1 the last: what the eye is on, where a walk
+ * with nothing focused starts, so its first key keeps the place (F-075). `null` when none is.
+ */
+export function rowInView(rows: Iterable<Element>, by: 1 | -1): Element | null {
+  const list = by === 1 ? [...rows] : [...rows].reverse();
+  const shown = (row: Element) => {
+    const box = row.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    return box.height > 0 && [box.top + 1, box.bottom - 1].every((y) => row.contains(document.elementFromPoint(x, y)));
+  };
+  return list.find(shown) ?? null;
+}
+
 /** The ticket an address names, which a board's card or a list's row carries as `data-entity`. */
 function ticketOf(hash: string): string | null {
   const found = /^#\/(?:ticket|job)\/([^/]+)/.exec(hash)?.[1];

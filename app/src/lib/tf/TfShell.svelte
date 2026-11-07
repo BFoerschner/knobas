@@ -83,12 +83,12 @@
   import { provideBackStep, provideShownPageName } from "./page-name.svelte";
   import { onRefreshKey } from "./page-refresh.svelte";
   import { PAGES } from "./pages";
-  import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
+  import { capturePlace, pressOpens, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
   import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { installFindKey } from "./filter-keys";
   import { installPressGuard } from "./press-guard";
-  import { isTopPage, parentOf, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
+  import { isTopPage, itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -223,6 +223,11 @@
   let stepping = false;
   /** The address a press on a nav entry is on its way to: a return to the section as it was left, which opens nothing. */
   let navTo: string | null = null;
+  /**
+   * The run, pull request or repository each section was left on by a nav press, tab included: a press on its row in that
+   * section brings it back. Used once, and any other arrival at an item of the section ends it.
+   */
+  const leftItems: Partial<Record<Section, string>> = {};
   /** The kept pages drawn so far: one shown for the first time starts at the top, not at the last page's scroll. */
   const drawnPages = new WeakSet<Element>();
   /** Ends the return under way when another address comes. */
@@ -250,8 +255,8 @@
   }
 
   /**
-   * Once `to` is drawn: back to its place on a return, or on a nav press, which leaves focus where it is; a new place in a
-   * kept page, or a page never shown, at the top.
+   * Once `to` is drawn: back to its place on a return, or on a nav press or a row's reopening, which leave focus where it is;
+   * a new place in a kept page, or a page never shown, at the top.
    */
   function settlePlace(to: string, from: string, returning: boolean, opening: boolean, left: Element | null, nav: boolean) {
     endReturn?.();
@@ -284,7 +289,7 @@
    * the card row's narrowing is what the entry says.
    */
   function arrive() {
-    const now = location.hash;
+    let now = location.hash;
     // Two writes before the events are delivered are two events that read one address. The second moved nothing, and
     // its stamped entry would read as a return, whose hold would then undo the reader's next scroll.
     if (now === hash) return;
@@ -293,9 +298,18 @@
     const left = shownKept();
     // The page the app first drew was never shown by an address change, and it has been drawn all the same.
     if (left !== null) drawnPages.add(left);
-    const nav = navTo === now;
+    // A plain press on the row of the item this section was left on, and launcher jumps and links from elsewhere never are.
+    const reopen = how === null && had === null ? reopening(now) : null;
+    const nav = navTo === now || reopen !== null;
     navTo = null;
     if (how !== "replace") notePlace(hash, now);
+    // In place of the row's address, on the entry the press made, so one press is one step back.
+    if (reopen !== null) {
+      history.replaceState(history.state, "", reopen);
+      now = reopen;
+    }
+    const arrived = parseTfHash(now);
+    if (itemOf(arrived) !== null) delete leftItems[sectionOf(arrived)!];
     // A stamped entry is one history stepped to, which is a return as `Esc` is. A tab switch is neither that nor a new place.
     const returning = how !== "replace" && (stepping || had !== null);
     const opening = how !== "replace" && !returning && !samePage(hash, now);
@@ -310,6 +324,13 @@
     const was = hash;
     hash = now;
     if (how !== "replace") settlePlace(now, was, returning, opening, left, nav);
+  }
+
+  /** The address a press going to `to` reopens, if `to` is the bare address of the item this section was left on. */
+  function reopening(to: string): string | null {
+    const section = sectionOf(route);
+    const left = section === null ? undefined : leftItems[section];
+    return left !== undefined && reopens(left, to) && pressOpens(pressed, to) ? left : null;
   }
 
   /**
@@ -339,6 +360,8 @@
   const lastPipeline = sessionValue("builds-last-pipeline");
   $effect(() => {
     const onRun = route.view === "full" && route.head === "build";
+    // A source's page is not a section of Settings: the cog goes to Sources from there.
+    if (route.view === "full" && route.head === "settings" && route.rest[0] === "source") sectionTabs.settings = "#/settings/sources";
     const section = onRun ? "builds" : sectionTabOf(route);
     if (section === null || untrack(() => scopedTicket.section) === section) return;
     // Builds remembers only a pipeline it holds, so an address it doesn't is nothing to come back to, and a run leads back to its own.
@@ -355,16 +378,22 @@
   /**
    * A press on a nav entry: the section as it was left, each scroller included, opened by nothing, so `Esc` never jumps from
    * one section to another by way of a tab. It ends a card row's narrowing, wherever that was: a nav entry starts a new trip.
+   * The cog and `⌘,` return the same way and keep their opener, since `Esc` leaves Settings for the page they were pressed on.
    */
-  function onnav(_section: Exclude<Section, "job">, target: string) {
+  function onnav(section: Exclude<Section, "job">, target: string) {
+    const gear = section === "settings";
     if (location.hash === target) {
+      if (gear) return;
       here = { ...NOT_OPENED, prev: here.prev };
       history.replaceState(stamped(history.state, here), "");
       scopedTicket.clear();
-    } else {
-      navTo = target;
-      goWithoutOpener(target);
+      return;
     }
+    const from = sectionOf(route);
+    if (from !== null && itemOf(route) !== null) leftItems[from] = location.hash;
+    navTo = target;
+    if (gear) go(target);
+    else goWithoutOpener(target);
   }
 
   /**
@@ -636,7 +665,7 @@
     }
     if (mod && event.key === ",") {
       event.preventDefault();
-      go("#/settings");
+      if (!dialogOpen()) onnav("settings", navHref("settings"));
       return;
     }
     // A saved list's chord (#2429): search on the list, from any page and in

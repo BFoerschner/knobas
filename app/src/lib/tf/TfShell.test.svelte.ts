@@ -709,6 +709,122 @@ test("a nav entry returns to the tab the section was left on, opened by nothing,
   expect(location.hash).toBe("#/code/prs");
 });
 
+test("a row brings back the run left by a nav press, once, on one entry; Esc goes to the pipeline; another way in opens it anew (F-371)", async () => {
+  start({ nav: windowNav });
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  /** A press in the shown page, on a link to `href`: what a run's row draws, whatever the read drew around it. */
+  const row = async (href: string) => {
+    const link = document.createElement("a");
+    link.setAttribute("href", href);
+    seen(".tf-main .tf-kept")[0]!.append(link);
+    link.click();
+    await settle();
+    link.remove();
+    await settle();
+  };
+  await at("#/builds");
+  await at("#/build/p/1/log");
+  entry("Docs").click();
+  await settle();
+  entry("Builds").click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+
+  // A link that names a tab gets that tab, and it ends the memory, as opening any item does.
+  await row("#/build/p/1/tests");
+  expect(location.hash).toBe("#/build/p/1/tests");
+  await reached("#/inbox");
+  await at("#/build/p/1/log");
+  entry("Builds").click();
+  await settle();
+
+  // Another run's row opens that run, and the first one's memory ends with it.
+  await row("#/build/p/2");
+  expect(location.hash).toBe("#/build/p/2");
+  await at("#/builds");
+  await row("#/build/p/1");
+  expect(location.hash).toBe("#/build/p/1");
+
+  // The way the plan draws it: left on the Log, back by the entry, its row.
+  await at("#/build/p/1/log");
+  entry("Docs").click();
+  await settle();
+  entry("Builds").click();
+  await settle();
+  const steps = history.length;
+  await row("#/build/p/1");
+  expect(location.hash).toBe("#/build/p/1/log");
+  expect(history.length, "one press is one entry").toBe(steps + 1);
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(true);
+  expect(location.hash).toBe("#/builds");
+  // Used once.
+  await row("#/build/p/1");
+  expect(location.hash).toBe("#/build/p/1");
+});
+
+test("a link from another section, and a jump by address, open the item left at its own address (F-454)", async () => {
+  start({ nav: windowNav });
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  await at("#/pr/9/diff");
+  entry("Docs").click();
+  await settle();
+  const link = document.createElement("a");
+  link.setAttribute("href", "#/pr/9");
+  seen(".tf-main .tf-kept")[0]!.append(link);
+  link.click();
+  await settle();
+  link.remove();
+  expect(location.hash).toBe("#/pr/9");
+  await at("#/pr/9/diff");
+  entry("Code").click();
+  await settle();
+  await at("#/pr/9");
+  expect(location.hash, "no press on the page asked for it").toBe("#/pr/9");
+});
+
+test("the cog and ⌘, come back to the section of Settings, keep their opener, and from a source's page go to Sources (F-661, F-076)", async () => {
+  start({ nav: windowNav });
+  const cog = () => target.querySelector<HTMLAnchorElement>(".tf-top [aria-label='Settings']")!;
+  await at("#/settings/appearance");
+  await at("#/inbox");
+  expect(cog().getAttribute("href")).toBe("#/settings/appearance");
+  cog().click();
+  await settle();
+  expect(location.hash).toBe("#/settings/appearance");
+  expect(escHint(), "Esc leaves Settings for where the cog was pressed").toBe("Back to Inbox Esc");
+  // A press on the section you are on moves nothing and keeps the way out.
+  cog().click();
+  await settle();
+  expect(location.hash).toBe("#/settings/appearance");
+  expect(escHint()).toBe("Back to Inbox Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/inbox");
+  press(",", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/settings/appearance");
+  await at("#/settings/source/jira");
+  await at("#/inbox");
+  expect(cog().getAttribute("href")).toBe("#/settings/sources");
+  await at("#/settings");
+  await at("#/inbox");
+  expect(cog().getAttribute("href"), "the status bar's Sources is a section like any").toBe("#/settings");
+});
+
+test("a nav entry brings back a Docs search and not a space or a page", async () => {
+  start({ nav: windowNav });
+  const docs = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Docs")!;
+  await at("#/docs/search/retry");
+  await at("#/page/4711");
+  expect(docs().getAttribute("href")).toBe("#/docs/search/retry");
+  await at("#/docs/space/ENG");
+  expect(docs().getAttribute("href")).toBe("#/docs/search/retry");
+  await at("#/docs");
+  expect(docs().getAttribute("href")).toBe("#/docs");
+});
+
 test("a nav press is a return: the page's scroll comes back through its read, focus stays on the entry, and the first page drawn counts (F-370, F-071)", async () => {
   start({ nav: windowNav });
   await at("#/inbox");

@@ -38,6 +38,7 @@
 <script lang="ts">
   import { pageVisible } from "../kept-pages.svelte";
   import { PressHold } from "../press-hold.svelte";
+  import { rowInView } from "../return-place";
   import { everyWhileShown } from "../while-shown.svelte";
   import { inlineEditor } from "../inline-editor";
   import { snoozeFloat, spentAt } from "./snooze-float";
@@ -269,14 +270,16 @@
   /** The rows `j` and `k` walk: the list, then an open shelf's. */
   let shelfEl = $state<HTMLDetailsElement | null>(null);
 
-  /** `j`/`k` and the arrows (F-143): to the next or previous row's link, as Tickets walks its cards. */
+  /** `j`/`k` and the arrows (F-143): to the next or previous row's link, as Tickets walks its cards. With no row focused, from what is in view (F-075). */
   function walk(by: 1 | -1) {
     const keys = [...rows, ...(shelfEl?.open ? shelf : [])].map((row) => row.item.key);
     if (keys.length === 0) return;
     const on = document.activeElement?.closest<HTMLElement>(".tf-ib[data-row]")?.dataset["row"];
     const at = on === undefined ? -1 : keys.indexOf(on);
-    const to = at < 0 ? (by === 1 ? 0 : keys.length - 1) : Math.min(keys.length - 1, Math.max(0, at + by));
-    if (to < rows.length) win.reveal(to);
+    const seen = at < 0 ? (rowInView(document.querySelectorAll(".tf-ib[data-row]"), by) as HTMLElement | null)?.dataset["row"] : undefined;
+    const from = seen === undefined ? -1 : keys.indexOf(seen);
+    const to = at >= 0 ? Math.min(keys.length - 1, Math.max(0, at + by)) : from >= 0 ? from : by === 1 ? 0 : keys.length - 1;
+    if (to < rows.length && from < 0) win.reveal(to);
     flushSync();
     const row = document.querySelector<HTMLElement>(`.tf-ib[data-row="${CSS.escape(keys[to]!)}"]`);
     row?.querySelector<HTMLElement>("a, button")?.focus();
