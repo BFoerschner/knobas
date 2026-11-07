@@ -181,10 +181,14 @@ vi.mock("../ipc/entity", () => ({
       page_title: "2026-09-03",
       publication: null,
       owed_tickets: [],
+      changed_since: false,
+      page_moved: false,
+      again: null,
     }),
   standupPublishTarget: () => deferred(null),
   setStandupPublishTarget: () => deferred(null),
   publishStandupProtocol: () => deferred(null),
+  publishStandupProtocolAgain: () => deferred(null),
   createActionItemTicket: () => deferred(null),
   actionItemTicket: () => deferred(null),
   // The Tickets tile's read (#178). Deferred like the rest, so the tile is
@@ -341,6 +345,8 @@ const { createTestNav } = await import("../assets/test-nav.svelte");
 const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
+const TfMenuFixture = (await import("../tf/TfMenu.fixture.svelte")).default;
+const TfRailBar = (await import("../tf/TfRailBar.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const TfDocMore = (await import("../tf/docs/TfDocMore.svelte")).default;
 const TfFileMore = (await import("../tf/repo/TfFileMore.svelte")).default;
@@ -410,6 +416,7 @@ const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const TfDiffView = (await import("../tf/diff/TfDiffView.svelte")).default;
+const TfFindBar = (await import("../tf/TfFindBar.svelte")).default;
 const TfDiffRendered = (await import("../tf/diff/TfDiffRendered.svelte")).default;
 const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const TfDetailRefresh = (await import("../tf/TfDetailRefresh.svelte")).default;
@@ -438,6 +445,7 @@ const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).defaul
 const WriteQueuePanel = (await import("./WriteQueue.svelte")).default;
 const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
+const TfSecretPromptHost = (await import("../tf/settings/TfSecretPromptHost.svelte")).default;
 const TfInstalledAdapters = (await import("../tf/settings/TfInstalledAdapters.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
@@ -454,6 +462,7 @@ const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const PublishTargetPicker = (await import("../standup/PublishTargetPicker.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
+const TfAssetTree = (await import("../tf/asset-tree/TfAssetTree.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
@@ -701,6 +710,8 @@ function setPorts() {
   return {
     linkSets: () => deferred([set]),
     linkSetHints: () => deferred([]),
+    assetTypeNames: () => deferred({}),
+    monitors: () => deferred([]),
     linkSet: () => deferred(set),
     saveLinkSet: () => deferred(set),
     deleteLinkSet: () => deferred(undefined),
@@ -728,6 +739,21 @@ const CASES: Case[] = [
     open: (target) => ({ app: mount(App, { target, props: {} }) }),
   },
   {
+    /** The one menu: its outside-click, address, scroll and resize listeners live while it is open. */
+    name: "TfMenu",
+    source: "lib/tf/TfMenu.svelte",
+    open: (target) => ({ app: mount(TfMenuFixture, { target, props: { layers: createLayers() } }) }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>(".face")?.click(),
+  },
+  {
+    /** The fold bar: an open fold is a panel on the layer stack (F-619). */
+    name: "TfRailBar",
+    source: "lib/tf/TfRailBar.svelte",
+    open: (target) => ({
+      app: mount(TfRailBar, { target, props: { label: "Section", value: "Sources", open: true, controls: "rail", onpress: () => {}, onclose: () => {}, layers: createLayers() } }),
+    }),
+  },
+  {
     /** A ticket view's ⋯ menu (#812): its outside-click listener lives while it is open. */
     name: "ViewMenu",
     source: "lib/tf/tickets/ViewMenu.svelte",
@@ -740,7 +766,7 @@ const CASES: Case[] = [
     /** The Docs reader's More menu (#2082): its outside-click listener lives while it is open. */
     name: "TfDocMore",
     source: "lib/tf/docs/TfDocMore.svelte",
-    open: (target) => ({ app: mount(TfDocMore, { target, props: { onexport: () => {} } }) }),
+    open: (target) => ({ app: mount(TfDocMore, { target, props: { oncopy: () => {}, onexport: () => {} } }) }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
   {
@@ -1536,6 +1562,7 @@ const CASES: Case[] = [
             snoozeInboxItem: () => deferred(undefined),
             completeInboxItem: () => deferred(undefined),
             ackAlert: () => deferred(undefined),
+            unackAlert: () => deferred(undefined),
             listen: () => deferred(() => {}),
           }),
           ports: {
@@ -1897,6 +1924,12 @@ const CASES: Case[] = [
       }),
     }),
   },
+  // ⌘F's bar on a page with no box: on the ladder until it goes.
+  {
+    name: "TfFindBar",
+    source: "lib/tf/TfFindBar.svelte",
+    open: (target) => ({ app: mount(TfFindBar, { target, props: { root: () => target } }) }),
+  },
   // The one diff component (#2266): a highlight job per file side, cancelled with it.
   {
     name: "TfDiffView",
@@ -1955,6 +1988,7 @@ const CASES: Case[] = [
             unmonitoredAssets: () => deferred([]),
             openAlerts: () => deferred([]),
             ackAlert: () => deferred({} as never),
+            unackAlert: () => deferred({} as never),
             setMonitorHidden: () => deferred(false),
             submitWrite: () => deferred({ id: 1 } as never),
             getAsset: () => deferred({} as never),
@@ -2033,6 +2067,7 @@ const CASES: Case[] = [
           ticket: { entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200", title: "Retry failed SEPA payouts" },
           links: [],
           ports: {
+            linkSets: () => new Promise(() => {}),
             saveLinkSet: () => new Promise(() => {}),
             previewLinkSetRule: () => deferred([]),
             getEntity: () => new Promise(() => {}),
@@ -2150,6 +2185,17 @@ const CASES: Case[] = [
       }),
     }),
   },
+  {
+    /** The credential prompt over a page (F-048): its reads land after the unmount. */
+    name: "TfSecretPromptHost",
+    source: "lib/tf/settings/TfSecretPromptHost.svelte",
+    open: (target) => ({
+      app: mount(TfSecretPromptHost, {
+        target,
+        props: { sourceId: "jira", layers: createLayers(), ports: settingsPorts() },
+      }),
+    }),
+  },
   // The other Settings sections (#831): reads only, each landing late.
   sectionCase("TfTimeSection", "time"),
   sectionCase("TfNotificationsSection", "notifications"),
@@ -2258,7 +2304,7 @@ const CASES: Case[] = [
         props: {
           ports: {
             standupDigest: () => deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
-            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null, owed_tickets: [] }),
+            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null, owed_tickets: [], changed_since: false, page_moved: false, again: null }),
             getNote: () => deferred({ note: { id: "note:p", title: "", body_md: "", created_at: "", updated_at: "" }, refs: [], links: [] }),
             standupPublishTarget: () => deferred(null),
             follower: { follow: () => () => {} },
@@ -2391,6 +2437,11 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    name: "TfAssetTree",
+    source: "lib/tf/asset-tree/TfAssetTree.svelte",
+    open: (target) => ({ app: mount(TfAssetTree, { target, props: { head: "asset", rest: ["asset:postgres"] } }) }),
   },
   {
     /**

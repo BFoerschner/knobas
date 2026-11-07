@@ -31,6 +31,8 @@ export function isRunning(pipeline: PipelineRow): boolean {
  * A run's block in the strip: finished, its declared tone; in flight,
  * running once it started and queued before.
  */
+export { stateWord } from "../state-word";
+
 export function runTone(run: RunRow): "ok" | "err" | "warn" | "muted" | "run" | "q" {
   if (run.finished === null && run.started !== null) return "run";
   if (run.finished === null && run.started === null) return "q";
@@ -54,7 +56,7 @@ export function latestTime(pipeline: PipelineRow, now: Date = new Date()): strin
   return at === null ? "" : shortTime(at, now);
 }
 
-/** An instant as a row writes it: *11:45* today, *yesterday 16:20*, else the date. */
+/** An instant as a row writes it, on the one ladder: *11:45* today, *yesterday 16:20*, *Wed 14:32*, then *3 Nov*. */
 export function shortTime(iso: string, now: Date = new Date()): string {
   return clockLabel(iso, now, true);
 }
@@ -298,4 +300,23 @@ export function reasonsLine(reasons: readonly PipelineReason[], job: string): st
 /** The job's reasons by pipeline id. */
 export function reasonsById(rows: readonly JobPipeline[]): Map<string, PipelineReason[]> {
   return new Map(rows.map((row) => [row.pipeline_id, row.reasons]));
+}
+
+/** A run's tests in the one form the app draws them (F-010): *1 failed, 41 passed*, with an empty count left out. */
+export function testsWords(tests: { failed: number; passed: number; ignored: number }): string {
+  const said = [
+    ...(tests.failed > 0 ? [`${tests.failed} failed`] : []),
+    ...(tests.passed > 0 ? [`${tests.passed} passed`] : []),
+    ...(tests.ignored > 0 ? [`${tests.ignored} ignored`] : []),
+  ];
+  return said.join(", ") || "0 passed";
+}
+
+/**
+ * TeamCity's status line for a failed build (*Tests failed: 3 (3 new), passed: 212*), which is all the Inbox holds of its tests,
+ * read as counts and drawn as Builds draws them. Any other line is the source's own words, and stays as it wrote them.
+ */
+export function failedBuildLine(line: string): string {
+  const counts = /^Tests failed: (\d+)(?: \(\d+ new\))?(?:, passed: (\d+))?(?:, ignored: (\d+))?$/.exec(line);
+  return counts === null ? line : testsWords({ failed: Number(counts[1]), passed: Number(counts[2] ?? 0), ignored: Number(counts[3] ?? 0) });
 }

@@ -20,7 +20,7 @@
   import TfDialog from "../settings/TfDialog.svelte";
   import { echoWrite } from "../queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { MADE, REPO_BRANCHES, newBranchName } from "./repo";
+  import { MADE, REPO_BRANCHES, branchNameProblem, newBranchName } from "./repo";
 
   let {
     repoId,
@@ -52,7 +52,8 @@
   let link = $state(true);
   let busy = $state(false);
 
-  const ready = $derived(name.trim() !== "" && !name.trim().endsWith("/") && start !== "" && !busy);
+  const nameProblem = $derived(branchNameProblem(name));
+  const ready = $derived(nameProblem === null && start !== "" && !busy);
 
   /** The ticket the job's key names in the mirror, the link's other end. */
   async function jobTicket(key: string): Promise<string | null> {
@@ -74,7 +75,7 @@
       }
       const write = await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
       echoWrite(repoId, MADE, branch, { write, many: true, following: { name: `Branch ${branch}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
-      toastQueued(`create branch ${branch} in ${repoName}`, source);
+      toastQueued(`create branch ${branch} in ${repoName}`, source, { write });
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the branch: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -83,7 +84,8 @@
   }
 </script>
 
-<TfDialog title="New branch in {repoName}" {onclose}>
+<TfDialog why={busy ? null : (nameProblem ?? (start === "" ? "Choose where it starts." : null))} {onclose}>
+  {#snippet title()}New branch in <span class="tf-mono">{repoName}</span>{/snippet}
   {#snippet body()}
     <form
       class="tf-formgrid"
@@ -93,16 +95,15 @@
         void create();
       }}
     >
-      <label for="tf-nb-name">Name</label>
+      <label for="tf-nb-name">Name <small class="tf-req">required</small></label>
       <input id="tf-nb-name" class="tf-mono" type="text" autocomplete="off" spellcheck="false" bind:value={name} />
       <label for="tf-nb-from">From</label>
-      <select id="tf-nb-from" bind:value={start}>
+      <select id="tf-nb-from" class="tf-mono" bind:value={start}>
         {#if from !== null}<option value={from.value}>{from.label}</option>{/if}
         {#each branches as branch (branch)}<option value={branch}>{branch}</option>{/each}
       </select>
       {#if job !== null}
-        <span>Link to</span>
-        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> {job} <span class="tf-dim">(in knobas)</span></label>
+        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link it to <span class="tf-mono">{job}</span> in knobas</label>
       {/if}
     </form>
   {/snippet}

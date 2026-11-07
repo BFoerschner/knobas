@@ -81,7 +81,12 @@
   landed.
 -->
 <script lang="ts">
-  import { ipcErrorMessage, type SearchResponse } from "../ipc";
+  import { stateWord } from "../tf/state-word";
+  import { tick, untrack } from "svelte";
+
+  import { ipcErrorMessage, isIpcError, type SearchResponse } from "../ipc";
+  import { inlineEditor } from "../tf/inline-editor";
+  import TfNothingHere from "../tf/TfNothingHere.svelte";
   import {
     applyEstateImport as realApplyEstateImport,
     assetTree as realAssetTree,
@@ -111,6 +116,7 @@
     type RouteRow,
   } from "../ipc/assets";
   import {
+    createLink as realCreateLink,
     submitWrite as realSubmitWrite,
     unlink as realUnlink,
     type LinkEntry,
@@ -128,11 +134,13 @@
   import { alerts as sharedAlerts, type Alerts } from "./alerts.svelte";
   import { latestRead } from "../shell/latest-read";
   import TfDialog from "../tf/settings/TfDialog.svelte";
+  import { LINK_CAME_FROM } from "../tf/job/connections";
   import { ago } from "../shell/time";
   // The queued-write line, and the same one the Monitors tab draws for a pause:
   // what a create can honestly say now is that knobas asked, and a toast is
   // where this app says that.
-  import { push } from "../shell/toasts.svelte";
+  import { push, undoable } from "../shell/toasts.svelte";
+  import { holdStillPress } from "../tf/still-press";
   import { Windowed } from "../shell/windowed.svelte";
   import { hashFor } from "../shell/router";
   import { entityAddress } from "../tf/address";
@@ -150,19 +158,31 @@
     parseProperty,
     PROPERTY_KINDS,
     propertyEdit,
+    proseParts,
+    readsWide,
   } from "./editing";
+  import { filterKeys } from "../tf/filter-keys";
+  import { pageVisible } from "../tf/kept-pages.svelte";
+  import { layers as sharedLayers } from "../tf/layers.svelte";
+  import { inTextField } from "../shell/keys";
   import {
     addressOf,
     columnPathFor,
     emptyPath,
     estateQuery,
     heldByPath,
+    kindTag,
     landingOf,
     matchesIn,
+    pathBelow,
     problemBadge,
     routeAddressOf,
     selectionIn,
     sourceOf,
+    focusedColumn,
+    heldStrip,
+    pressKeepsStrip,
+    spareWidth,
     stripFor,
     walk,
     wireKey,
@@ -210,6 +230,8 @@
      * a second dialog to keep in step with the first.
      */
     unlink: typeof realUnlink;
+    /** *Undo* on that toast: the same pair linked again, which the backend allows (#70). */
+    relink: typeof realCreateLink;
     /**
      * What breaks if the selected asset goes down (#505) — the pane's
      * *Depends on this* panel.
@@ -253,7 +275,13 @@
     alerts = sharedAlerts,
     now = () => new Date(),
     stripWidth,
+    onnamed,
+    onholder,
+    onroots,
+    marks,
   }: {
+    /** A ticket's assets to mark in the columns, and what holds them (`TfAssetTree`). */
+    marks?: { assets: ReadonlySet<string>; holders: ReadonlySet<string>; key: string } | undefined;
     nav: AssetsNav;
     ports?: Partial<AssetPorts>;
     /**
@@ -280,6 +308,12 @@
      * nothing (`stripFor`).
      */
     stripWidth?: () => number;
+    /** Told the asset the pane has read, or `null`: what the page's breadcrumb calls this address. */
+    onnamed?: (name: string | null) => void;
+    /** The asset holding the selected one, which the shell's `Esc` steps up to; `null` at the top. */
+    onholder?: (holder: { id: string; name: string } | null) => void;
+    /** The estate's top level, each time it is read: the page opens a single root on arrival (F-054). */
+    onroots?: (roots: AssetRow[]) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -301,6 +335,7 @@
     deleteRoute: realDeleteRoute,
     openExternal: realOpenExternal,
     unlink: realUnlink,
+    relink: realCreateLink,
     dependsOnThis: realDependsOnThis,
     previewEstateImport: realPreviewEstateImport,
     applyEstateImport: realApplyEstateImport,
@@ -345,6 +380,8 @@
   /** One list per column, aligned with `path.parents`. */
   let columns = $state<AssetRow[][]>([]);
   let failure = $state<string | null>(null);
+  /** {@link failure} when the address names nothing the estate holds: the one nothing-here state, not a failed read. */
+  const NOT_HELD = "knobas does not hold this asset. It may have been deleted, or not have synced yet.";
   /** Nothing has come back yet — told apart from "an estate with nothing in it". */
   let loaded = $state(false);
 
@@ -393,6 +430,8 @@
   let creating = $state<CreateAt | null>(null);
   let moving = $state(false);
   let deleting = $state(false);
+  /** The link *Unlink…* is asking about: one knobas could not draw again as it was. */
+  let unlinking = $state<LinkEntry | null>(null);
   /** The route editor: open on a new route, or on one of the pane's own. */
   let exposing = $state(false);
   let editingRoute = $state<RouteRow | null>(null);
@@ -433,6 +472,14 @@
   let writing = $state(false);
 
   /**
+   * A walk by `↑` or `↓` (F-556), or a press in the selection's own column (F-560): where it was going and where from, and
+   * the fold, the pane's width and the path when it was pressed. The selection moving anywhere else ends it (the effect
+   * below), so a level change and an opened address fold as ever. The path stands until the pane's read lands, so nothing
+   * moves meanwhile.
+   */
+  let walked = $state.raw<{ of: string; was: string | null; from: number; spare: number; width: number; path: ColumnPath } | null>(null);
+
+  /**
    * The layout, derived from the pane's read and from nothing else.
    *
    * Not from a click: a click sets the address, the address is read back, and
@@ -440,7 +487,11 @@
    * draw the same thing as an address clicked into.
    */
   const path = $derived<ColumnPath>(
-    detail === null || detail.asset.id !== selectedId ? emptyPath() : columnPathFor(detail),
+    detail !== null && detail.asset.id === selectedId
+      ? columnPathFor(detail)
+      : walked !== null && walked.of === selectedId && failure === null
+        ? walked.path
+        : emptyPath(),
   );
 
   /**
@@ -453,6 +504,19 @@
    */
   let dependsOn = $state<DependsOnThis | null>(null);
   let dependsFailure = $state<string | null>(null);
+
+  /** The routes that would break and aren't already in the pane's *Reachable via*, which would say each one twice (F-509). */
+  /** What depends on it by a link stays open. What only sits inside it repeats the column beside the pane, so it waits in a fold (F-551). */
+  const dependsRows = $derived((dependsOn?.assets ?? []).filter((row) => row.relation !== null));
+  const insideRows = $derived((dependsOn?.assets ?? []).filter((row) => row.relation === null));
+  /** Closed on each asset. The list draws only while it's open, since a window can't measure rows a closed fold hides. */
+  let insideOpen = $state(false);
+  /** *Reachable via* folds from this many routes, closed on each asset as well (F-509). A big holder has six, at 732 px. */
+  const VIA_FOLDS_FROM = 6;
+  let viaOpen = $state(false);
+  const otherRoutes = $derived((dependsOn?.routes ?? []).filter((route) => !detail?.reachable_via.some((via) => via.id === route.id)));
+  /** That list left some out, so a line says they break too: the panel still answers for them. */
+  const repeatedRoutes = $derived((dependsOn?.routes.length ?? 0) > otherRoutes.length);
 
   const detailRead = latestRead<AssetDetail>();
   const dependsRead = latestRead<DependsOnThis>();
@@ -553,7 +617,7 @@
         // there has no path, and a pane still showing the last one would be
         // the view lying about what the address names.
         detail = null;
-        failure = ipcErrorMessage(cause);
+        failure = isIpcError(cause) && cause.code === "not_found" ? NOT_HELD : ipcErrorMessage(cause);
       },
     });
   });
@@ -585,6 +649,8 @@
       // under this one's heading, is the pane stating a falsehood.
       dependsFor = id;
       dependsOn = null;
+      insideOpen = false;
+      viaOpen = false;
       dependsFailure = null;
     }
     if (id === null) {
@@ -625,6 +691,7 @@
       ok: (lists) => {
         columns = lists;
         loaded = true;
+        onroots?.(lists[0] ?? []);
       },
       fail: (cause) => {
         columns = [];
@@ -634,8 +701,19 @@
     });
   });
 
+  $effect(() => onnamed?.(detail?.asset.name ?? null));
+  $effect(() => {
+    const held = detail?.held_by.at(-1) ?? null;
+    onholder?.(held === null ? null : { id: held.id, name: held.name });
+  });
+
   function select(row: AssetRow) {
     nav.go(addressOf(row));
+  }
+
+  /** A press that leaves the asset being read for another: `Esc` comes back to this one, where a walk climbs its holders. */
+  function jump(hash: string) {
+    (nav.jump ?? nav.go)(hash);
   }
 
   // -- the walk (story 29) --------------------------------------------------
@@ -701,8 +779,31 @@
   /** The anchor, if it still belongs to the path on screen. */
   const anchor = $derived(anchored !== null && anchored.of === selectedId ? anchored.at : null);
 
+  /** It ends once the selection, having got there, goes anywhere else: coming back later is not the same walk. */
+  $effect(() => {
+    const id = selectedId;
+    untrack(() => {
+      if (walked === null) return;
+      if (id === walked.of) walked.was = null;
+      else if (id !== walked.was) walked = null;
+    });
+  });
+
+  /** The walk that holds the strip still, if it's still the walk on screen in a window of the same width. */
+  const standing = $derived(walked !== null && (walked.of === selectedId || walked.was === selectedId) && walked.width === available ? walked : null);
+  const held = $derived(standing === null ? null : heldStrip(columns.length, focusedColumn(path), available, standing.from));
+
   /** Which columns are drawn in full; the rest are spines. */
-  const strip = $derived(stripFor(columns.length, available, anchor));
+  const strip = $derived(held ?? stripFor(columns.length, available, anchor));
+  /** The columns on screen: a next level that doesn't fit beside a held strip waits, and `→` still walks into it. */
+  const shown = $derived(held === null ? columns : columns.slice(0, held.to));
+
+  /** The estate with nothing in it: no filter, because there is nothing to find. */
+  const emptyEstate = $derived(loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0);
+
+  const uid = $props.id();
+  /** The open alerts' fold, the reader's: a selection changes nothing. */
+  let alertsOpen = $state(false);
 
   /** Is this column collapsed? */
   function collapsed(column: number): boolean {
@@ -747,8 +848,14 @@
   /** The pane's two lists that run to thousands, *Holds* and *Depends on this*, windowed the same way; a line is 18 px, 2 apart. */
   const holdsWindow = new Windowed({ count: () => detail?.holds.length ?? 0, key: (at) => detail!.holds[at]!.id, estimate: 18, gap: 2 });
   const dependsWindow = new Windowed({
-    count: () => dependsOn?.assets.length ?? 0,
-    key: (at) => dependsOn!.assets[at]!.asset.id,
+    count: () => dependsRows.length,
+    key: (at) => dependsRows[at]!.asset.id,
+    estimate: 18,
+    gap: 2,
+  });
+  const insideWindow = new Windowed({
+    count: () => insideRows.length,
+    key: (at) => insideRows[at]!.asset.id,
     estimate: 18,
     gap: 2,
   });
@@ -766,7 +873,7 @@
    * frame between the two reads.
    */
   const wireEnds = $derived<Wire[]>(
-    detail === null || detail.asset.id !== selectedId ? [] : wiresFor(detail, columns, strip),
+    detail === null || detail.asset.id !== selectedId ? [] : wiresFor(detail, shown, strip),
   );
 
   /** One wire, measured: where it lands and the curve that gets there. */
@@ -950,6 +1057,20 @@
    */
   $effect(() => {
     void wireEnds;
+    // Opening *Reachable via* draws the rows the wires leave.
+    void viaOpen;
+    measureWires();
+  });
+
+  /**
+   * The room the columns can't use goes to the pane, through the CSSOM (the app's CSP refuses `style:`). The pane grows over the
+   * strip's blank end, so the strip measures the same and no row moves. The wires start at the pane's edge, so they measure again.
+   */
+  const paneTakes = $derived(
+    standing !== null && held !== null ? standing.spare : spareWidth(shown.length, available, strip, focusedColumn(path) < 0 || shown.length - 1 > focusedColumn(path)),
+  );
+  $effect(() => {
+    paneEl?.style.setProperty("--tf-pane-spare", `${paneTakes}px`);
     measureWires();
   });
 
@@ -1034,13 +1155,10 @@
   /**
    * One press of the keyboard on the Tree.
    *
-   * Two rules decide whether the press is the walk's, and they are different
-   * on purpose:
+   * Two rules decide whether the press is the walk's:
    *
-   * * `Esc` is answered from **anywhere in the view** — it is an unwind, and
-   *   a reader reading the pane means the same thing by it as one standing in
-   *   a column. The press the Tree has no step for is *not* consumed, and the
-   *   shell's ladder takes it back to the room (`shell/keys.ts`).
+   * * `Esc` is not the walk's: the shell's ladder answers it, where the crumb
+   *   bar's *Back to* says, whatever has focus (the return contract).
    * * the arrows and `Enter` are answered everywhere **except** the two
    *   places with keys of their own: the pane, which is full of buttons
    *   (*Held by*, *Holds*, a history) whose activation `Enter` would
@@ -1050,25 +1168,71 @@
    */
   const KEEPS_ITS_OWN_KEYS = ".pane, .find";
 
-  function onkeydown(event: KeyboardEvent): void {
-    if (event.key !== "Escape" && !WALK_KEYS.includes(event.key)) return;
-    const from = event.target;
-    const elsewhere = from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null;
-    if (event.key !== "Escape" && elsewhere) return;
+  /** A press on a row: the strip stands if the press is in the selection's own column and what it opens fits (F-560). */
+  function pressRow(row: AssetRow, column: number): void {
+    const keeps = pressKeepsStrip(column, focusedColumn(path), row.has_children, available, strip.from);
+    walked = keeps ? { of: row.id, was: selectedId, from: strip.from, spare: paneTakes, width: available, path } : null;
+    select(row);
+  }
 
-    const step = walk(event.key, path, columns);
-    if (step.go === "nowhere" && event.key === "Escape") return;
+  function onkeydown(event: KeyboardEvent): void {
+    if (!WALK_KEYS.includes(event.key)) return;
+    const from = event.target;
+    if (from instanceof Element && from.closest(KEEPS_ITS_OWN_KEYS) !== null) return;
+    // A dialog over the tree has the keys, wherever it draws. And a key whose control went on that same press, as `Enter` in
+    // *Rename*'s field does, has been answered, and is on its way up from nowhere the walk can read.
+    if (from instanceof Element && (from.closest(".tf-dialog") !== null || !from.isConnected)) return;
+
+    // `Tab` stops once per column, so the walk starts from the column the row with focus is in.
+    const row = from instanceof Element ? from.closest<HTMLElement>("button.row[data-asset]") : null;
+    const column = row?.closest("ol.col")?.getAttribute("data-col");
+    const step = column === null || column === undefined ? walk(event.key, path, columns) : walk(event.key, path, columns, Number(column));
     event.preventDefault();
     event.stopPropagation();
-    if (step.go === "asset") {
+    // `Enter` on a row `Tab` reached is what a click on it does, and so is `→` on one the path doesn't run through.
+    const here = row?.dataset["asset"];
+    if (here !== undefined && here !== selectedId && (event.key === "Enter" || (event.key === "ArrowRight" && row?.getAttribute("aria-current") === null))) {
       wantFocus = true;
-      nav.go(addressOf({ id: step.id }));
-    } else if (step.go === "top") {
-      // No focus to want: nothing is selected, and the flag would be spent on
-      // whatever the reader selected next.
-      nav.go(hashFor({ view: "assets", tab: "tree", assetId: null }));
+      const asRow = columns[Number(column)]?.find((one) => one.id === here);
+      if (asRow === undefined) nav.go(addressOf({ id: here }));
+      else pressRow(asRow, Number(column));
+      return;
     }
+    // Nowhere to walk, as under an estate's one root: focus still comes to the row, so the press has an answer and `→` goes on.
+    if (step.go !== "asset") {
+      if (row === null && selectedId !== null) tree?.querySelector<HTMLElement>(`.cols button.row[data-asset=${CSS.escape(selectedId)}]`)?.focus();
+      return;
+    }
+    // The address is already there, from a column `Tab` reached: only focus has anywhere to go.
+    if (step.id === selectedId) {
+      tree?.querySelector<HTMLElement>(`.cols button.row[data-asset=${CSS.escape(step.id)}]`)?.focus();
+      return;
+    }
+    wantFocus = true;
+    // `↑` and `↓` hold the strip still, if the column they walk is on screen.
+    if ((event.key === "ArrowDown" || event.key === "ArrowUp") && !collapsed(Math.max(0, column == null ? focusedColumn(path) : Number(column)))) {
+      walked = { of: step.id, was: selectedId, from: strip.from, spare: paneTakes, width: available, path };
+    }
+    nav.go(addressOf({ id: step.id }));
   }
+
+  /**
+   * `↑` and `↓` act on the selected row wherever focus rests, unless a field holds it or a dialog is open (F-562), so
+   * arriving at an asset from a ticket or at `#/assets` walks at once. What's inside the view went through its own handler.
+   */
+  const visible = pageVisible();
+  $effect(() => {
+    const onwindow = (event: KeyboardEvent) => {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || !visible()) return;
+      if (sharedLayers.open.some((layer) => layer.kind !== "panel")) return;
+      const at = document.activeElement;
+      if (inTextField(at) || at?.closest(".view, .tf-dialog, [role='menu']") != null) return;
+      onkeydown(event);
+    };
+    window.addEventListener("keydown", onwindow);
+    return () => window.removeEventListener("keydown", onwindow);
+  });
 
   // -- the search box (story 30) -------------------------------------------
 
@@ -1138,7 +1302,7 @@
   function reveal(match: Match): void {
     clearQuery();
     wantFocus = true;
-    nav.go(addressOf({ id: match.id }));
+    jump(addressOf({ id: match.id }));
   }
 
   /** The box's own keys — the launcher's, on a shorter list. */
@@ -1187,6 +1351,7 @@
     creating = null;
     moving = false;
     deleting = false;
+    unlinking = null;
     exposing = false;
     editingRoute = null;
     linking = false;
@@ -1278,16 +1443,38 @@
     return kindFor(property, detail === null ? undefined : schemaOf(detail.asset.type_id));
   }
 
+  /** Put the open inline editor away. `paneEditor` gives focus back. */
+  function closeInline() {
+    renaming = false;
+    editingKey = null;
+    adding = false;
+  }
+
+  /**
+   * An editor drawn in the pane (`inlineEditor`): on the layer stack while it is open, so `Esc` closes it first whatever
+   * has focus, its first field taking focus with what it holds selected, so typing replaces it (a long value's box has the
+   * caret at its end: it is there to be changed, not replaced), and focus back on what
+   * opened it, found by its `data-reopen` because a row of the pane is redrawn by then. The whole form comes into view
+   * when it opens at the pane's bottom edge.
+   */
+  function paneEditor(reopen: string) {
+    return (form: HTMLElement) => {
+      const off = inlineEditor(closeInline, {
+        back: () => paneEl?.querySelector<HTMLElement>(`[data-reopen="${CSS.escape(reopen)}"]`) ?? null,
+      })(form);
+      form.querySelector<HTMLInputElement>("input")?.select();
+      void tick().then(() => bring(form));
+      return off;
+    };
+  }
+
   /**
    * `Esc` in an inline editor: put it away, and **consume the press**.
    *
    * Rung 1 of the `Esc` ladder, the rung `TfDialog`'s own handler occupies for a
-   * dialog. The view answers `Escape` from anywhere inside itself -- that is
-   * #430's walk, and it is deliberate, because a reader in the pane means the
-   * same thing by the key as one standing in a column. So an editor that
-   * closed and let the press through would cancel the edit *and* walk the
-   * selection out of the asset being edited, which is two unwinds for one
-   * keypress.
+   * dialog. An editor that closed and let the press through would cancel the edit
+   * *and* take the bar's step off the asset being edited, which is two unwinds for
+   * one keypress. With focus outside the editor the layer above answers instead.
    */
   function cancelEditor(event: KeyboardEvent, close: () => void) {
     event.preventDefault();
@@ -1354,11 +1541,36 @@
 
   async function saveName() {
     const current = detail;
-    if (current === null) return;
-    const done = await write(() =>
-      io.editAsset(current.asset.id, [{ field: "name", value: nameDraft }]),
-    );
-    if (done !== null) renaming = false;
+    if (current === null || nameDraft.trim() === "") return;
+    if (nameDraft.trim() === current.asset.name) {
+      closeInline();
+      return;
+    }
+    const { id, name } = current.asset;
+    const named = nameDraft.trim();
+    const done = await write(() => io.editAsset(id, [{ field: "name", value: nameDraft }]));
+    if (done === null) return;
+    renaming = false;
+    holdStillPress();
+    undoable(`Renamed ${name} to ${named}`, () => undoWrite(() => io.editAsset(id, [{ field: "name", value: name }])), { subject: `rename:${id}` });
+  }
+
+  /** The toast's *Undo* outlives the page and any other write under way, so it is not `write`: it sends, and the page reads the answer if it is still here. */
+  function undoWrite(send: () => Promise<unknown>) {
+    holdStillPress();
+    void send()
+      .then(() => (revision += 1))
+      .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" }));
+  }
+
+  /** A move written: the toast names the old place's way back, so a wrong pick doesn't mean finding it by memory (F-545). */
+  function moved(asset: AssetRow, into: string) {
+    moving = false;
+    // The address is unchanged — the asset kept its id — so the re-read is
+    // what redraws the columns at the new path.
+    revision += 1;
+    const { id, name, parent_id: from } = asset;
+    undoable(`Moved ${name} to ${into}`, () => undoWrite(() => io.moveAsset(id, from)), { subject: `move:${id}` });
   }
 
   /**
@@ -1379,6 +1591,9 @@
     }, false);
     if (done === null) return;
     deleting = false;
+    // Focus on the holder's row, not on its *Delete…*: the next `Enter` must not start deleting the parent (F-532).
+    wantFocus = true;
+    push({ text: `Deleted ${current.asset.name}` });
     nav.go(
       parent === null ? hashFor({ view: "assets", tab: "tree", assetId: null }) : addressOf(parent),
     );
@@ -1443,6 +1658,14 @@
     if (detail === null || typeof value !== "string") return null;
     const known = [detail.asset, ...detail.held_by, ...detail.holds];
     return known.find((row) => row.id === value)?.name ?? null;
+  }
+
+  /**
+   * Whether a property's value is a code value, drawn in mono: a port, an image,
+   * an address. Words with a space in them are not (design system, Type).
+   */
+  function readsAsCode(property: AssetProperty): boolean {
+    return property.value !== null && !/\s/.test(String(property.value.value));
   }
 
   /** A property's value as text. `null` is drawn as an em dash, not as "null". */
@@ -1510,7 +1733,7 @@
    * happen is a click leading back to the asset the reader is looking at.
    */
   function goToSource(hash: string | null) {
-    if (hash !== null) nav.go(hash);
+    if (hash !== null) jump(hash);
   }
 
   /**
@@ -1518,10 +1741,38 @@
    *
    * The re-read is what puts the pane's list, the column's badge and the
    * asset's history back in step: unlinking is a mutation like any other here,
-   * and `write` is the one path every mutation in this view takes.
+   * and `write` is the one path every mutation in this view takes. It asks
+   * nothing, so its toast has *Undo*, which draws the same link again (the
+   * removal rule). `create_link` always records a link as drawn by hand
+   * (`knobas_core::link::draw`), so that holds only for a link that was: one
+   * from anywhere else could not come back as it was, and asks first instead.
    */
   async function removeLink(entry: LinkEntry) {
-    await write(() => io.unlink(entry.link.id));
+    if (entry.link.origin !== "manual") {
+      unlinking = entry;
+      return;
+    }
+    const { from_id, to_id, relation, note } = entry.link;
+    const done = await withdraw(entry);
+    if (done === null) return;
+    push({
+      text: `Unlinked ${entry.other.title || entry.other.entity_id}`,
+      action: {
+        label: "Undo",
+        run: () => void write(() => io.relink(from_id, to_id, relation, note ?? undefined)),
+      },
+    });
+  }
+
+  const withdraw = (entry: LinkEntry) =>
+    write(async () => {
+      await io.unlink(entry.link.id);
+      return true;
+    });
+
+  async function confirmUnlink(entry: LinkEntry) {
+    const done = await withdraw(entry);
+    if (done !== null) unlinking = null;
   }
 </script>
 
@@ -1541,19 +1792,22 @@
 -->
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <section class="view" onkeydown={onkeydown}>
-  <div class="room-bar">
-    <h1>Assets</h1>
+  <header class="tf-fhead">
+    <div>
+      <!-- One line at both addresses, with no sentence that goes on the first click: the rows stay where they were. -->
+      <h1>{detail?.asset.name ?? "Asset tree"}</h1>
+    </div>
     <!--
       No tab strip (#1459): its *Monitors* tab named a roster that went with
       the rooms UI (#1087), and one tab left is no strip. Monitors is a section
       of its own at `#/monitors` (R-11.3).
 
-      In the room bar, not on a column header: an import is about the
+      In the header, not on a column header: an import is about the
       whole estate, and the address that most needs it — a tree with nothing
       in it yet — has neither a column nor a selection to hang it off.
     -->
-    <button class="tf-btn imp" onclick={() => (importing = true)}>Import</button>
-  </div>
+    <div class="tf-acts"><button class="tf-btn imp" onclick={() => (importing = true)}>Import…</button></div>
+  </header>
 
   {#if typesFailure}
     <!--
@@ -1561,7 +1815,7 @@
       address that most needs this message (`#/assets/tree`, nothing selected)
       has no pane to draw it in.
     -->
-    <p class="fail tf" role="alert">Creating is unavailable: {typesFailure}</p>
+    <p class="fail typesfail" role="alert">Creating is unavailable: {typesFailure}</p>
   {/if}
 
   <!--
@@ -1589,8 +1843,9 @@
     Ack, the cards and the "Not monitored" roster are #446's and #449's; this
     is the list and the count, which is what #444 owes.
   -->
-  {#if alerts.count > 0}
-    <section class="alerts" aria-label="Open alerts">
+  {#snippet openAlerts()}
+    <!-- Folded to start with and the reader's after that: a selection changes nothing, so a click moves no row. The count stays in view. -->
+    <section class="alerts" id="tf-alerts-{uid}" aria-label="Open alerts" hidden={!alertsOpen}>
       <ul>
         {#each alerts.open as alert (alert.id)}
           {#if alert.assets.length === 0}
@@ -1604,14 +1859,15 @@
             {#each alert.assets as watched (watched.id)}
               <li>
                 <span class="st {alert.state}" aria-hidden="true"></span>
+                <!-- Its path is in the title: the row's next step is the asset, whose path the columns draw. -->
                 <button
                   class="go"
+                  title={watched.path ?? "Top level"}
                   onclick={() =>
-                    nav.go(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
+                    jump(hashFor({ view: "assets", tab: "tree", assetId: watched.id }))}
                 >
                   <span class="mn">{alert.monitor_name}</span>
                   <span class="nm">{watched.name}</span>
-                  <span class="pth faint">{watched.path ?? "top level"}</span>
                 </button>
                 <!--
                   Acked is drawn and not hidden: #446's ack clears the *inbox*
@@ -1619,7 +1875,7 @@
                   would say the estate was well.
                 -->
                 {#if alert.acked_at}
-                  <span class="ak faint">acked</span>
+                  <span class="ak faint">{stateWord("acked")}</span>
                 {/if}
                 <span class="wh faint">{ago(alert.opened_at, now())}</span>
               </li>
@@ -1628,7 +1884,7 @@
         {/each}
       </ul>
     </section>
-  {/if}
+  {/snippet}
 
   <!--
     The estate's search (story 30), on a strip of its own between the room bar
@@ -1639,18 +1895,30 @@
     sliver. A row of its own also keeps the box clear of the path it is about
     to open, since the offers overlay the columns and nothing else.
   -->
-  <div class="find">
-    <input
-      class="q"
-      type="search"
-      value={query}
-      placeholder="Find an asset"
-      aria-label="Find an asset in the estate"
-      autocomplete="off"
-      spellcheck="false"
-      oninput={(event) => typed(event.currentTarget.value)}
-      onkeydown={onboxkey}
-    />
+  {#if !emptyEstate || alerts.count > 0}
+  <div class="find tf-fbar">
+    {#if !emptyEstate}
+    <label class="tf-fsearch">
+      <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
+        ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
+      >
+      <input
+        class="q"
+        type="search"
+        value={query}
+        placeholder="Find an asset"
+        aria-label="Find an asset in the estate"
+        autocomplete="off"
+        spellcheck="false"
+        oninput={(event) => typed(event.currentTarget.value)}
+        onkeydown={onboxkey}
+        {@attach filterKeys()}
+      />
+      {#if query !== ""}
+        <button type="button" class="tf-fclear" aria-label="Clear the search" onclick={() => typed("")}>✕</button>
+      {/if}
+    </label>
+    {/if}
     {#if query.trim() !== ""}
       <ol class="res">
         {#each matches as match, index (match.id)}
@@ -1677,13 +1945,26 @@
         {/if}
       </ol>
     {/if}
+    <!-- The band's end, as a filter bar's count: one band above the columns, whether there are alerts or not, so the columns start at one height. -->
+    {#if alerts.count > 0}
+      <button type="button" class="tf-btn tf-sm tf-ghost fold" class:open={alertsOpen} aria-expanded={alertsOpen} aria-controls="tf-alerts-{uid}" onclick={() => (alertsOpen = !alertsOpen)}>
+        Open alerts <span class="tf-count tf-err">{alerts.count}</span>
+      </button>
+    {/if}
   </div>
+  {/if}
+  {#if alerts.count > 0}{@render openAlerts()}{/if}
 
   <div class="tree" bind:this={tree}>
     <div class="cols" bind:this={stripEl}>
-      {#if failure}
-        <p class="empty fail">{failure}</p>
-      {:else if loaded && columns.length > 0 && (columns[0]?.length ?? 0) === 0}
+      {#if failure === NOT_HELD}
+        <div class="none gone"><TfNothingHere message={NOT_HELD} href="#/assets" action="Asset tree" /></div>
+      {:else if failure}
+        <div class="none tf-empty solo">
+          <p class="empty fail">{failure}</p>
+          <button class="tf-btn" onclick={() => (revision += 1)}>Try again</button>
+        </div>
+      {:else if emptyEstate}
         <!--
           The estate with nothing in it, which is what a fresh install has
           until the import (#439) or a hand-created asset. It says so in its
@@ -1692,14 +1973,14 @@
           this state, because a column header with no rows under it is not
           somewhere a reader thinks to look.
         -->
-        <div class="none">
-          <p class="empty">Nothing in the estate yet.</p>
-          <button class="tf-btn tf-sm" disabled={types.length === 0} onclick={() => openCreate(0)}>
-            New asset
+        <div class="none tf-empty solo">
+          <p class="empty">Nothing in the estate yet. Import an estate file, or add the first asset by hand.</p>
+          <button class="tf-btn tf-primary" disabled={types.length === 0} onclick={() => openCreate(0)}>
+            New asset…
           </button>
         </div>
       {:else}
-        {#each columns as column, index (index)}
+        {#each shown as column, index (index)}
           {@const chosen = selectionIn(path, index)}
           {#if collapsed(index)}
             <!--
@@ -1712,14 +1993,20 @@
             <button
               class="col spine"
               data-spine={index}
-              onclick={() => (anchored = { at: index, of: selectedId })}
+              onclick={() => {
+                walked = null;
+                anchored = { at: index, of: selectedId };
+              }}
               title="Show what {step?.name ?? 'the estate'} holds"
             >
-              <span class="smg" aria-hidden="true">{step?.monogram ?? "··"}</span>
+              <span class="smg" aria-hidden="true">{step ? kindTag(step.monogram) : "··"}</span>
               <span class="vn">{step?.name ?? "top level"}</span>
             </button>
           {:else}
             {@const win = windowOf(index)}
+            {@const drawn = win.slice(column)}
+            <!-- One tab stop per column, the path's row or else the first drawn: the arrows walk the rest. -->
+            {@const stop = drawn.some((row) => row.id === chosen) ? chosen : drawn[0]?.id}
             <div class="colw">
               <!--
                 Story 34: a plus on **every** column header, so creating at that
@@ -1731,30 +2018,38 @@
               <header class="col-h">
                 <span class="col-t">{headingFor(index)}</span>
                 <button
-                  class="plus"
+                  class="plus tf-iconbtn tf-sm"
                   disabled={types.length === 0}
                   aria-label="New asset in {headingFor(index)}"
                   title={plusTitle(index)}
                   onclick={() => openCreate(index)}
                 >
-                  +
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"
+                    ><path d="M8 3.5v9M3.5 8h9" /></svg
+                  >
                 </button>
               </header>
               <ol class="col" data-col={index} {@attach win.list}>
                 {#if win.before > 0}<li class="tf-wgap" aria-hidden="true" {@attach win.room("before")}></li>{/if}
-                {#each win.slice(column) as row (row.id)}
+                {#each drawn as row (row.id)}
                   {@const badge = problemBadge(row)}
                   {@const work = workBadge(row)}
                   <li {@attach win.row(row.id)}>
                     <button
-                      class="row {chosen === row.id ? 'on' : ''}"
+                      class="row {chosen === row.id ? 'on' : ''} {row.id === selectedId ? 'tip' : ''}"
                       aria-current={chosen === row.id ? "true" : undefined}
                       data-asset={row.id}
-                      title={addressOf(row)}
-                      onclick={() => select(row)}
+                      tabindex={row.id === stop ? 0 : -1}
+                      onclick={() => pressRow(row, index)}
                     >
-                      <span class="mg" title={row.type_label}>{row.monogram}</span>
-                      <span class="nm">{row.name}</span>
+                      <span class="mg" title={row.type_label}>{kindTag(row.monogram)}</span>
+                      <span class="nm" title={row.name}><span class="lbl">{row.name}</span></span>
+                      <!-- A mark and not the ticket's chip: the line under the bar names the ticket, and a chip took a 220 px row's name. -->
+                      {#if marks?.assets.has(row.id)}
+                        <span class="mark" title="{marks.key} reaches this asset" role="img" aria-label="{marks.key} reaches this asset"></span>
+                      {:else if marks?.holders.has(row.id)}
+                        <span class="holds" title="Holds an asset {marks.key} reaches" role="img" aria-label="Holds an asset {marks.key} reaches"></span>
+                      {/if}
                       {#if work !== null}
                         <!--
                           Story 32's first badge: how much work is linked to
@@ -1826,39 +2121,46 @@
       {/each}
     </svg>
 
-    <aside class="pane" bind:this={paneEl}>
+    <aside class="pane" tabindex="-1" bind:this={paneEl}>
       {#if detail === null}
-        <p class="empty">
+        <p class="empty paneempty">
           {loaded ? "Select an asset to see what it holds." : "Reading…"}
         </p>
       {:else}
         <header class="pane-h">
-          <span class="mg">{detail.asset.monogram}</span>
+          <span class="mg" title={detail.asset.type_label}>{kindTag(detail.asset.monogram)}</span>
           {#if renaming}
-            <input
-              class="inp"
-              type="text"
-              aria-label="Name"
-              autocomplete="off"
-              value={nameDraft}
-              oninput={(event) => (nameDraft = event.currentTarget.value)}
-              onkeydown={(event) => {
-                if (event.key === "Enter") void saveName();
-                if (event.key === "Escape") cancelEditor(event, () => (renaming = false));
-              }}
-            />
-            <button class="tf-btn tf-sm tf-primary" disabled={writing} onclick={() => void saveName()}>
-              Save
-            </button>
+            <div class="ed" {@attach paneEditor("rename")}>
+              <input
+                class="inp"
+                type="text"
+                aria-label="Name"
+                autocomplete="off"
+                value={nameDraft}
+                oninput={(event) => (nameDraft = event.currentTarget.value)}
+                onkeydown={(event) => {
+                  if (event.key === "Enter") {
+                    // Not left to go on: focus is back on *Rename…* by the time the press would land there, and it would open again.
+                    event.preventDefault();
+                    void saveName();
+                  }
+                  if (event.key === "Escape") cancelEditor(event, closeInline);
+                }}
+              />
+              <div class="ed-f">
+                {#if nameDraft.trim() === ""}<p class="tf-dwhy" role="status">Name it first.</p>{/if}
+                <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
+                <button class="tf-btn tf-sm tf-primary" disabled={writing || nameDraft.trim() === ""} onclick={() => void saveName()}>
+                  Save
+                </button>
+              </div>
+            </div>
           {:else}
-            <h2>{detail.asset.name}</h2>
-            <span class="kind">{detail.asset.type_label}</span>
+            <!-- Where it sits is in the title: the columns draw the path. -->
+            <h2 title={heldByPath(detail).join(" / ")}>{detail.asset.name}</h2>
+            <span class="kind tf-chip">{detail.asset.type_label}</span>
           {/if}
         </header>
-
-        <p class="crumb mono" title="Where this asset sits in the estate">
-          {heldByPath(detail).join(" / ")}
-        </p>
 
         <!--
           What the asset *has*, as against what is stored on it. Environment
@@ -1900,14 +2202,14 @@
             <div class="prop force">
               <dt>Health</dt>
               <dd>
-                <span class="hl {detail.asset.health}">{detail.asset.health}</span>
+                <span class="hl {detail.asset.health}">{stateWord(detail.asset.health)}</span>
                 {#if detail.asset.health !== detail.asset.status}
                   <!--
                     Only when the two differ: repeating "own status: down"
                     under a health of "down" is a line that never says
                     anything.
                   -->
-                  <span class="src faint">own status {detail.asset.status}</span>
+                  <span class="src faint">Own status {stateWord(detail.asset.status)}</span>
                 {/if}
               </dd>
             </div>
@@ -1921,7 +2223,7 @@
           from, and setting the stored half beside that is a design of its own.
         -->
         <div class="acts">
-          <button class="tf-btn tf-sm" onclick={beginRename}>Rename</button>
+          <button class="tf-btn tf-sm" data-reopen="rename" onclick={beginRename}>Rename…</button>
           <button class="tf-btn tf-sm" onclick={() => (moving = true)}>Move…</button>
           <!--
             Story 36: the same gesture a ticket's slide-over offers, opening
@@ -1939,7 +2241,7 @@
           >
             Link to…
           </button>
-          <button class="tf-btn tf-sm tf-danger" onclick={() => (deleting = true)}>Delete</button>
+          <button class="tf-btn tf-sm tf-danger" onclick={() => (deleting = true)}>Delete…</button>
         </div>
 
         {#if writeFailure}
@@ -1948,12 +2250,37 @@
 
         <section class="grp">
           <h3 class="lab">Properties</h3>
+          {#if detail.properties.some((property) => property.custom)}<p class="faint legend">* added here, not from its type</p>{/if}
           <dl class="props">
             {#each detail.properties as property (property.key)}
-              <div class="prop {property.custom ? 'own' : ''}">
+              {@const wide = readsWide(property)}
+              <div class="prop {property.custom ? 'own' : ''}" class:wide>
                 <dt>{property.label}</dt>
                 <dd>
-                  {#if editingKey === property.key}
+                  {#if editingKey === property.key && wide}
+                    <!-- Long words edit in a box that shows them all, caret at the end: `Enter` saves, as the other fields do, and `Shift+Enter` breaks the line. -->
+                    <div class="ed" {@attach paneEditor(`prop:${property.key}`)}>
+                      <textarea
+                        class="inp"
+                        rows={Math.min(14, Math.ceil(draft.length / 40) + 1)}
+                        aria-label={property.label}
+                        autocomplete="off"
+                        value={draft}
+                        oninput={(event) => (draft = event.currentTarget.value)}
+                        onkeydown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            void saveProperty(property);
+                          }
+                          if (event.key === "Escape") cancelEditor(event, closeInline);
+                        }}
+                      ></textarea>
+                      <div class="ed-f">
+                        <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
+                        <button class="tf-btn tf-sm tf-primary" disabled={writing} onclick={() => void saveProperty(property)}>Save</button>
+                      </div>
+                    </div>
+                  {:else if editingKey === property.key}
                     <!--
                       The kind decides the control, and the kind of a
                       *declared but unfilled* property can only come from the
@@ -1961,25 +2288,33 @@
                       `oninput` rather than `bind:value`: Svelte refuses a
                       two-way binding on an input whose `type` is dynamic.
                     -->
-                    <input
-                      class="inp"
-                      type={inputTypeFor(kindOf(property))}
-                      aria-label={property.label}
-                      autocomplete="off"
-                      value={draft}
-                      oninput={(event) => (draft = event.currentTarget.value)}
-                      onkeydown={(event) => {
-                        if (event.key === "Enter") void saveProperty(property);
-                        if (event.key === "Escape") cancelEditor(event, () => (editingKey = null));
-                      }}
-                    />
-                    <button
-                      class="tf-btn tf-sm tf-primary"
-                      disabled={writing}
-                      onclick={() => void saveProperty(property)}
-                    >
-                      Save
-                    </button>
+                    <div class="ed" {@attach paneEditor(`prop:${property.key}`)}>
+                      <input
+                        class="inp"
+                        type={inputTypeFor(kindOf(property))}
+                        aria-label={property.label}
+                        autocomplete="off"
+                        value={draft}
+                        oninput={(event) => (draft = event.currentTarget.value)}
+                        onkeydown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveProperty(property);
+                          }
+                          if (event.key === "Escape") cancelEditor(event, closeInline);
+                        }}
+                      />
+                      <div class="ed-f">
+                        <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
+                        <button
+                          class="tf-btn tf-sm tf-primary"
+                          disabled={writing}
+                          onclick={() => void saveProperty(property)}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </div>
                   {:else}
                     <!--
                       The value is the control. A declared property nobody has
@@ -1989,10 +2324,12 @@
                     -->
                     <button
                       class="val {property.value === null ? 'faint' : ''}"
+                      class:code={readsAsCode(property)}
                       title="Edit {property.label}"
+                      data-reopen="prop:{property.key}"
                       onclick={() => beginEdit(property)}
                     >
-                      {reading(property)}
+                      {#if wide}{#each proseParts(reading(property)) as part, at (at)}{#if part.code}<code>{part.text}</code>{:else}{part.text}{/if}{/each}{:else}{reading(property)}{/if}
                     </button>
                   {/if}
                 </dd>
@@ -2022,8 +2359,9 @@
             <!-- svelte-ignore a11y_no_static_element_interactions -->
             <div
               class="add"
+              {@attach paneEditor("add")}
               onkeydown={(event) => {
-                if (event.key === "Escape") cancelEditor(event, () => (adding = false));
+                if (event.key === "Escape") cancelEditor(event, closeInline);
               }}
             >
               <input
@@ -2031,7 +2369,7 @@
                 type="text"
                 aria-label="New property key"
                 autocomplete="off"
-                placeholder="backup window"
+                placeholder="Key: backup window"
                 bind:value={newKey}
               />
               <!-- The kinds are enumerated once, in `editing.ts`. -->
@@ -2041,18 +2379,25 @@
                 {/each}
               </select>
               <input
-                class="inp"
+                class="inp v"
                 type={inputTypeFor(newKind)}
                 aria-label="New property value"
                 autocomplete="off"
+                placeholder="Value"
                 value={newValue}
                 oninput={(event) => (newValue = event.currentTarget.value)}
                 onkeydown={(event) => {
-                  if (event.key === "Enter") void addProperty();
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void addProperty();
+                  }
                 }}
               />
               <div class="add-f">
-                <button class="tf-btn tf-sm" onclick={() => (adding = false)}>Cancel</button>
+                {#if newKey.trim() === "" || newValue.trim() === ""}
+                  <p class="tf-dwhy" role="status">{newKey.trim() === "" ? (newValue.trim() === "" ? "Needs a key and a value." : "Needs a key.") : "Needs a value."}</p>
+                {/if}
+                <button class="tf-btn tf-sm tf-ghost" onclick={closeInline}>Cancel</button>
                 <button
                   class="tf-btn tf-sm tf-primary"
                   disabled={writing || newKey.trim() === "" || newValue.trim() === ""}
@@ -2065,30 +2410,35 @@
           {:else}
             <button
               class="tf-btn tf-sm"
+              data-reopen="add"
               onclick={() => {
                 adding = true;
                 writeFailure = null;
               }}
             >
-              Add a property
+              Add a property…
             </button>
           {/if}
         </section>
 
-        <section class="grp">
-          <h3 class="lab">Held by</h3>
-          {#if detail.held_by.length === 0}
+        <!-- The columns draw this path, so it waits in a fold (F-509). The fold moves what is under it, so the wires measure again. -->
+        {#if detail.held_by.length === 0}
+          <section class="grp">
+            <h3 class="lab">Held by</h3>
             <p class="empty">At the top of the estate.</p>
-          {:else}
+          </section>
+        {:else}
+          <details class="grp heldby tf-set-fold" ontoggle={measureWires}>
+            <summary class="lab">Held by <span class="tf-count">{detail.held_by.length}</span></summary>
             <ul class="lst">
               {#each detail.held_by as held (held.id)}
                 <li>
-                  <button class="link" onclick={() => select(held)}>{held.name}</button>
+                  <button class="link" onclick={() => jump(addressOf(held))}>{held.name}</button>
                 </li>
               {/each}
             </ul>
-          {/if}
-        </section>
+          </details>
+        {/if}
 
         <section class="grp">
           <h3 class="lab">Holds</h3>
@@ -2098,7 +2448,7 @@
             <ul class="lst" {@attach holdsWindow.list}>
               {#each holdsWindow.slice(detail.holds) as held (held.id)}
                 <li {@attach holdsWindow.row(held.id)}>
-                  <button class="link" onclick={() => select(held)}>{held.name}</button>
+                  <button class="link" onclick={() => jump(addressOf(held))}>{held.name}</button>
                   <span class="faint">{held.type_label}</span>
                 </li>
               {/each}
@@ -2134,7 +2484,7 @@
             <span class="rname">
               <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
               {#if route.visibility === "public"}
-                <span class="vis">public</span>
+                <span class="vis tf-chip">Public</span>
               {/if}
             </span>
             <button
@@ -2146,7 +2496,7 @@
             </button>
             <span class="rto">{@render where()}</span>
             {#each route.properties as property (property.key)}
-              <span class="rprop faint">{property.label} {reading(property)}</span>
+              <span class="rprop faint">{property.label} {#each proseParts(reading(property)) as part, at (at)}{#if part.code}<code>{part.text}</code>{:else}{part.text}{/if}{/each}</span>
             {/each}
           </li>
         {/snippet}
@@ -2193,42 +2543,49 @@
               writeFailure = null;
             }}
           >
-            Add a route
+            Add a route…
           </button>
         </section>
 
-        <section class="grp">
-          <h3 class="lab">Reachable via</h3>
-          {#if detail.reachable_via.length === 0}
-            <p class="empty">Nothing lands here.</p>
-          {:else}
-            <ul class="lst routes">
-              {#each detail.reachable_via as route (route.id)}
-                {@render routeRow(wireKey("via", route.id), route, arrives)}
-                <!--
-                  Where it lands and who offers it — the two facts that make
-                  this list readable from the arriving end. `landing` is
-                  `tree.ts`' one answer to "here, through something above, or
-                  on something inside".
-                -->
-                {#snippet arrives()}
-                  {@const landing = landingOf(detail!, route)}
-                  {#if landing.goTo}
-                    <button class="link" onclick={() => goToSource(landing.goTo)}>
-                      {landing.note}
-                    </button>
-                  {:else}
-                    <span class="faint">{landing.note}</span>
-                  {/if}
-                  <span class="faint">· exposed by</span>
-                  <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
-                    {route.asset_name}
+        <!-- Each row: where it lands and who offers it, the two facts that make this list readable from the arriving end. -->
+        {#snippet viaRows()}
+          <ul class="lst routes">
+            {#each detail!.reachable_via as route (route.id)}
+              {@render routeRow(wireKey("via", route.id), route, arrives)}
+              <!-- `landing` is `tree.ts`' one answer to "here, through something above, or on something inside". -->
+              {#snippet arrives()}
+                {@const landing = landingOf(detail!, route)}
+                {#if landing.goTo}
+                  <button class="link" onclick={() => goToSource(landing.goTo)}>
+                    {landing.note}
                   </button>
-                {/snippet}
-              {/each}
-            </ul>
-          {/if}
-        </section>
+                {:else}
+                  <span class="faint">{landing.note}</span>
+                {/if}
+                <span class="faint">· exposed by</span>
+                <button class="link" onclick={() => goToSource(addressOf({ id: route.asset_id }))}>
+                  {route.asset_name}
+                </button>
+              {/snippet}
+            {/each}
+          </ul>
+        {/snippet}
+        <!-- From six routes the list waits in a fold, as *Held by* does (F-509). Its rows draw only while it's open, so a closed fold has no wires. -->
+        {#if detail.reachable_via.length >= VIA_FOLDS_FROM}
+          <details class="grp reachfold tf-set-fold" bind:open={viaOpen}>
+            <summary class="lab">Reachable via <span class="tf-count">{detail.reachable_via.length}</span></summary>
+            {#if viaOpen}{@render viaRows()}{/if}
+          </details>
+        {:else}
+          <section class="grp">
+            <h3 class="lab">Reachable via</h3>
+            {#if detail.reachable_via.length === 0}
+              <p class="empty">Nothing lands here.</p>
+            {:else}
+              {@render viaRows()}
+            {/if}
+          </section>
+        {/if}
 
         <!--
           **Depends on this** — what breaks if this asset goes down (spec
@@ -2241,11 +2598,9 @@
           one a reader wants before pulling a machine out.
 
           The routes come **beneath the list and outside the count**, which is
-          `CONTEXT.md`'s own arrangement: *"Routes whose target is the asset
-          are listed beneath as reachable via routes that would break and not
-          counted"*, which #1553 amended to *"the ones whose target is the
-          asset or anything in its answer"*, so that the number is about
-          assets. They are drawn as plain rows rather than through the
+          `CONTEXT.md`'s own arrangement (#1553), so that the number is about
+          assets. One already in *Reachable via* isn't said twice (F-509): a
+          line says it breaks too. They are drawn as plain rows rather than through the
           `routeRow` snippet above, deliberately: that row carries the
           `data-wire` end the wire measurement reads (#433), and a route here
           landing on the asset or inside it is already in *Reachable via* with
@@ -2254,7 +2609,7 @@
         <section class="grp breaks">
           <h3 class="lab">
             Depends on this
-            {#if dependsOn !== null}<span class="n">{dependsOn.assets.length}</span>{/if}
+            {#if dependsOn !== null}<span class="n tf-count">{dependsOn.assets.length}</span>{/if}
           </h3>
           {#if dependsFailure !== null}
             <p class="empty">{dependsFailure}</p>
@@ -2263,40 +2618,67 @@
           {:else if dependsOn.assets.length === 0}
             <p class="empty">Nothing depends on this.</p>
           {:else}
-            <ul class="lst" {@attach dependsWindow.list}>
-              {#each dependsWindow.slice(dependsOn.assets) as row (row.asset.id)}
-                <li {@attach dependsWindow.row(row.asset.id)}>
-                  <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
-                    {row.asset.name}
-                  </button>
-                  <!--
-                    Why it is on the list. A relation is rendered through the
-                    vocabulary's own table, from the *listed* asset's end — it
-                    is the one that depends on, or runs on, the asset in the
-                    pane. `null` is containment, which is a `parent_id` field
-                    and not a link (ADR-0014), so there is no relation to
-                    render and the word is *inside*.
-                  -->
-                  <span class="faint"
-                    >{row.relation === null ? "inside" : readingOf(row.relation, true)}</span
-                  >
-                  {#if row.path !== null}
-                    <span class="faint path">{row.path}</span>
-                  {/if}
-                </li>
-              {/each}
-            </ul>
+            {#if dependsRows.length > 0}
+              <ul class="lst" {@attach dependsWindow.list}>
+                {#each dependsWindow.slice(dependsRows) as row (row.asset.id)}
+                  {@const under = pathBelow(detail, row.path)}
+                  <li {@attach dependsWindow.row(row.asset.id)}>
+                    <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
+                      {row.asset.name}
+                    </button>
+                    <!--
+                      Why it is on the list. A relation is rendered through the
+                      vocabulary's own table, from the *listed* asset's end — it
+                      is the one that depends on, or runs on, the asset in the
+                      pane.
+                    -->
+                    <span class="faint">{readingOf(row.relation!, true)}</span>
+                    {#if under !== null}
+                      <span class="faint path" title={row.path}>{under}</span>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+            <!--
+              `null` is containment, which is a `parent_id` field and not a link
+              (ADR-0014), so there is no relation to render: the fold's words
+              say it, and it moves what is under it, so the wires measure again.
+            -->
+            {#if insideRows.length > 0}
+              <details class="inside tf-set-fold" bind:open={insideOpen} ontoggle={measureWires}>
+                <summary class="lab">Everything inside it <span class="tf-count">{insideRows.length}</span></summary>
+                {#if insideOpen}
+                  <ul class="lst" {@attach insideWindow.list}>
+                    {#each insideWindow.slice(insideRows) as row (row.asset.id)}
+                      {@const under = pathBelow(detail, row.path)}
+                      <li {@attach insideWindow.row(row.asset.id)}>
+                        <button class="link" onclick={() => goToSource(addressOf(row.asset))}>
+                          {row.asset.name}
+                        </button>
+                        {#if under !== null}
+                          <span class="faint path" title={row.path}>{under}</span>
+                        {/if}
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </details>
+            {/if}
           {/if}
-          {#if dependsOn !== null && dependsOn.routes.length > 0}
-            <p class="lab via">Reachable via routes that would break</p>
+          {#if otherRoutes.length > 0}
+            <p class="lab via">Other routes that would break</p>
             <ul class="lst">
-              {#each dependsOn.routes as route (route.id)}
+              {#each otherRoutes as route (route.id)}
                 <li class="rt">
                   <button class="link" onclick={() => openRoute(route)}>{route.name}</button>
                   <span class="faint mono">{route.url}</span>
                 </li>
               {/each}
             </ul>
+          {/if}
+          {#if repeatedRoutes}
+            <p class="empty alsobreak">The routes under <em>Reachable via</em> would break too.</p>
           {/if}
         </section>
 
@@ -2337,7 +2719,7 @@
                   {#if watch.tombstoned}
                     <span class="faint">Paused or gone from Kuma</span>
                   {:else if watch.state !== null}
-                    <span class="hl {watch.state}">{watch.state}</span>
+                    <span class="hl {watch.state}">{stateWord(watch.state)}</span>
                   {:else}
                     <span class="faint">no reading</span>
                   {/if}
@@ -2382,7 +2764,7 @@
         {#if detail.monitor_targets.length > 0}
           <section class="grp mkmon">
             <button class="tf-btn tf-sm" onclick={() => (creatingMonitor = true)}>
-              Create monitor for this asset
+              Create monitor for this asset…
             </button>
           </section>
         {/if}
@@ -2427,12 +2809,8 @@
           <LinksPanel
             entityId={detail.asset.id}
             links={detail.links}
-            onopen={(hash) => nav.go(hash)}
+            onopen={jump}
             onunlink={(entry) => void removeLink(entry)}
-            onlink={() => {
-              linking = true;
-              writeFailure = null;
-            }}
           />
         </section>
 
@@ -2532,11 +2910,8 @@
     tree={io.assetTree}
     move={io.moveAsset}
     onclose={() => (moving = false)}
-    onmoved={() => {
-      moving = false;
-      // The address is unchanged — the asset kept its id — so the re-read is
-      // what redraws the columns at the new path.
-      revision += 1;
+    onmoved={(into) => {
+      if (detail) moved(detail.asset, into);
     }}
   />
 {/if}
@@ -2585,12 +2960,30 @@
   />
 {/if}
 
+{#if unlinking !== null}
+  {@const link = unlinking}
+  <TfDialog title="Unlink {link.other.title || link.other.entity_id}?" onclose={() => (unlinking = null)}>
+    {#snippet body()}
+      <p class="ask">It came from {LINK_CAME_FROM[link.link.origin]}. Linking it again would mark it as drawn by hand, so this can't be undone.</p>
+      {#if writeFailure}
+        <p class="fail" role="alert">{writeFailure}</p>
+      {/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (unlinking = null)}>Cancel</button>
+      <button class="tf-btn tf-primary tf-danger" disabled={writing} onclick={() => void confirmUnlink(link)}>
+        {writing ? "Unlinking…" : "Unlink"}
+      </button>
+    {/snippet}
+  </TfDialog>
+{/if}
+
 {#if deleting && detail}
   <!-- Bound here: a `{#snippet}` is its own scope and the narrowing above does
        not reach into it. -->
   {@const doomed = detail.asset}
   {@const ask = deleteConfirm(detail)}
-  <TfDialog closeButton title="Delete asset" subtitle={doomed.name} onclose={() => (deleting = false)}>
+  <TfDialog title="Delete {doomed.name}?" onclose={() => (deleting = false)}>
     {#snippet body()}
       <!--
         `editing.ts`' sentence (#1463, R-11.19a): links stay marked deleted,
@@ -2611,27 +3004,33 @@
     {#snippet footer()}
       <button class="tf-btn tf-ghost" onclick={() => (deleting = false)}>Cancel</button>
       <button class="tf-btn tf-primary tf-danger" disabled={writing} onclick={() => void confirmDelete()}>
-        {writing ? "Deleting…" : "Delete"}
+        {writing ? "Deleting…" : "Delete asset"}
       </button>
     {/snippet}
   </TfDialog>
 {/if}
 
 <style>
-  /*
-    Pushed to the far end of the room bar, away from the heading: this is an
-    action on the whole estate. The room bar is the page's header, so the
-    button is `.tf-btn` at the default size (design system, Controls; #2291),
-    and only the placement is this view's.
-  */
-  .imp {
-    margin-left: auto;
+  /* The page under its breadcrumb: the header, the alerts, the filter band, and the tree taking what is left. */
+  .view {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    height: auto;
+    min-height: 0;
   }
 
-  /* Three rows now: the room bar, the search strip, and the tree under both.
-     `unported.css` gives `.view` two, and the strip is this view's own. */
-  .view {
-    grid-template-rows: auto auto 1fr;
+  /* The body under the header, with the rule the bands have. */
+  .view > .tf-fhead {
+    flex: none;
+  }
+
+  .typesfail {
+    flex: none;
+    margin: 0;
+    padding: 6px 22px;
+    font-size: var(--t-sm);
+    border-bottom: 1px solid var(--rule);
   }
 
   /* Columns scroll on their own axis; the pane does not move. Story 33.
@@ -2639,8 +3038,9 @@
      pixels and positioned in them. */
   .tree {
     position: relative;
+    flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 340px;
     min-height: 0;
     overflow: hidden;
   }
@@ -2661,7 +3061,9 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    overflow: visible;
+    /* Clipped to the tree, and behind the rows, so a wire never runs through a label or under the status bar. */
+    overflow: hidden;
+    z-index: 0;
   }
 
   .wires path {
@@ -2670,15 +3072,16 @@
   }
 
   .wires .halo {
-    stroke: var(--bg);
+    stroke: var(--paper);
     stroke-width: 3.2;
     opacity: 0.92;
   }
 
+  /* A wire is structure, not state, so it is ink and not a tone. */
   .wires .wire {
-    stroke: var(--amber);
+    stroke: var(--ink-2);
     stroke-width: 1;
-    opacity: 0.65;
+    opacity: 0.75;
   }
 
   /* Reached through something rather than pointed at: a spine standing in for
@@ -2688,8 +3091,8 @@
   }
 
   .wires .land {
-    fill: var(--amber);
-    opacity: 0.8;
+    fill: var(--ink-2);
+    opacity: 0.9;
   }
 
   /*
@@ -2726,12 +3129,27 @@
     min-width: 0;
     overflow-x: auto;
     overflow-y: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* An address that names no asset, an estate with nothing in it and a failed read have nothing for the pane to say. */
+  .tree:has(.gone, .solo) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tree:has(.gone, .solo) .pane {
+    display: none;
+  }
+
+  .none.solo {
+    align-self: center;
   }
 
   /*
     The column and its header travel together; the rows scroll under it.
 
-    Its 220px is `tree.ts`'s `COLUMN_WIDTH` -- see the spine's rule below.
+    Its 216px is `tree.ts`'s `COLUMN_WIDTH` -- see the spine's rule below.
     The width moved here from `.col` when the header arrived (#429): what the
     strip lays out is this wrapper, so this is the number the arithmetic has
     to be told.
@@ -2739,20 +3157,24 @@
   .colw {
     display: flex;
     flex-direction: column;
-    width: 220px;
+    width: 216px;
     flex: none;
     min-height: 0;
-    border-right: 1px solid var(--hair);
+    border-right: 1px solid var(--rule);
   }
 
   .col-h {
     display: flex;
     align-items: center;
+    justify-content: flex-start;
     gap: 6px;
-    height: 24px;
+    height: 34px;
     flex: none;
-    padding: 0 4px 0 10px;
-    border-bottom: 1px solid var(--hair);
+    padding: 0 4px 0 14px;
+    background: var(--sheet);
+    border-bottom: 1px solid var(--rule);
+    font: 600 var(--t-xs)/1.2 var(--sans);
+    color: var(--ink-2);
   }
 
   .col-h .col-t {
@@ -2761,40 +3183,35 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 600 10px/1 var(--disp);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
   }
 
-  .col-h .plus {
+  /* The open-alert fold (#444) stands at the filter band's end, and its list opens under the band, on the page's gutter. */
+  .fold {
+    margin-left: auto;
     flex: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 2px;
-    color: var(--muted);
-    font: 400 14px/1 var(--sans);
   }
 
-  .col-h .plus:hover:not(:disabled) {
-    background: var(--raised);
-    color: var(--text);
+  /* One drawn chevron, as every fold has. */
+  .fold::before {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin: 0 2px 1px 0;
+    border: solid currentColor;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(-45deg);
   }
 
-  .col-h .plus:disabled {
-    opacity: 0.4;
-    cursor: default;
+  .fold.open::before {
+    transform: rotate(45deg);
   }
 
-  /*
-    The search strip: one row, the box on the right, and its offers hanging
-    over the columns rather than pushing them down while a reader types.
-  */
-  /* The open-alert strip (#444). A band above the search, the same 14px
-     gutter every strip in this view uses. */
   .alerts {
-    padding: 4px 14px 6px;
-    border-bottom: 1px solid var(--hair);
+    flex: none;
+    padding: 6px 22px;
+    background: var(--sheet);
+    border-bottom: 1px solid var(--rule);
   }
 
   .alerts ul {
@@ -2814,25 +3231,26 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    min-height: 20px;
+    min-height: 22px;
+    font-size: var(--t-sm);
   }
 
   /* The state as a dot, not a word: `down` and `warn` are two colours the
      rest of this app already uses, and a word here would repeat what the
      colour says in the space the monitor's name needs. */
   .alerts .st {
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
     flex: none;
   }
 
   .alerts .st.down {
-    background: var(--fail);
+    background: var(--err);
   }
 
   .alerts .st.warn {
-    background: var(--amber);
+    background: var(--warn);
   }
 
   .alerts .go {
@@ -2851,92 +3269,92 @@
 
   .alerts .go:hover .nm {
     text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
   .alerts .mn {
-    font: 500 11px/1.4 var(--mono);
-    color: var(--text);
+    font-weight: 500;
     white-space: nowrap;
   }
 
   .alerts .nm,
-  .alerts .pth,
   .alerts .ak,
   .alerts .wh {
-    font: 400 11px/1.4 var(--mono);
+    font-size: var(--t-xs);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   /* Pushed to the far end, so the readings line up down the strip however
-     long the names before them are. */
+     long the names before them are. A duration is Archivo with tabular figures. */
   .alerts .wh {
     margin-left: auto;
     flex: none;
+    font-variant-numeric: tabular-nums;
   }
 
+  /* The search: the filter band every list page has, its offers hanging over the
+     columns rather than pushing them down while a reader types. */
   .find {
     position: relative;
-    display: flex;
-    justify-content: flex-end;
-    padding: 5px 14px;
-    border-bottom: 1px solid var(--hair);
+    flex: none;
+    border-top: 1px solid var(--rule);
   }
 
-  .find .q {
-    width: 220px;
-    height: 24px;
-    padding: 0 8px;
-    border: 1px solid var(--hair);
-    border-radius: 2px;
-    background: var(--panel);
-    font-size: 12px;
+  .find .tf-fsearch {
+    flex: 0 1 360px;
+  }
+
+  .find .q::-webkit-search-cancel-button {
+    display: none;
   }
 
   .find .res {
     position: absolute;
     top: 100%;
-    right: 14px;
+    left: 22px;
     z-index: 5;
     display: grid;
     gap: 1px;
-    width: 320px;
+    width: min(360px, calc(100% - 44px));
     max-height: 320px;
     margin: 4px 0 0;
     padding: 4px;
     overflow-y: auto;
     list-style: none;
-    border: 1px solid var(--hair);
-    background: var(--panel);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    background: var(--sheet);
+    box-shadow: var(--shadow);
   }
 
   .find .hit {
     display: grid;
     width: 100%;
-    padding: 4px 6px;
+    padding: 5px 8px;
+    border-radius: 4px;
     text-align: left;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   .find .hit.on,
   .find .hit:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .find .hit .pth {
-    font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: var(--t-xs);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .find .none {
-    padding: 6px;
-    color: var(--muted);
-    font-size: 12px;
+    padding: 6px 8px;
+    color: var(--ink-2);
+    font-size: var(--t-sm);
+    display: block;
   }
 
   .col {
@@ -2945,13 +3363,14 @@
     gap: 1px;
     flex: 1;
     margin: 0;
-    padding: 6px 0;
+    padding: 6px;
+    background: none;
     list-style: none;
     overflow-y: auto;
   }
 
   /*
-    A spine (story 28). Its 30px, and `.colw`'s 220px above, are `tree.ts`'s
+    A spine (story 28). Its 30px, and `.colw`'s 216px above, are `tree.ts`'s
     `SPINE_WIDTH` and `COLUMN_WIDTH`: the arithmetic that decides *which*
     columns collapse is pure, so it has to be told how wide the things it
     arranges are drawn. `the strip's arithmetic measures the widths this view
@@ -2968,22 +3387,25 @@
     width: 30px;
     flex: none;
     align-items: center;
-    padding: 6px 0;
+    padding: 8px 0;
     /* Its own, since #429 moved the full column's to the `.colw` wrapper the
        spine does not have: without it a run of spines is one grey block. */
-    border-right: 1px solid var(--hair);
-    background: var(--panel);
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--sheet);
     cursor: pointer;
   }
 
   .col.spine:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .col.spine .smg {
     flex: none;
-    font: 500 9.5px/1 var(--mono);
-    color: var(--muted);
+    font-size: var(--t-2xs);
+    line-height: 1;
+    font-weight: 500;
+    color: var(--ink-2);
   }
 
   /* The name, turned on its side: a 30px column has no other way to carry
@@ -2994,45 +3416,80 @@
     margin: 7px 0;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    font: 600 11px/1 var(--disp);
-    letter-spacing: 0.1em;
-    color: var(--faint);
+    font: 500 var(--t-xs)/1 var(--sans);
+    color: var(--ink-2);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
   .col.spine:hover .vn {
-    color: var(--muted);
+    color: var(--ink);
+  }
+
+  .col.spine:focus-visible,
+  .col :global(:focus-visible) {
+    outline-offset: -2px;
   }
 
   .none {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 10px 12px;
+    flex: 1;
   }
 
+  .none .empty {
+    padding: 0;
+  }
+
+  /* A row of the column: a rail's row (design system, Motion). The selected asset is the ink pill,
+     the assets above it on the path a paler one, so the path reads and one row says where you are. */
   .row {
     display: flex;
     align-items: center;
     gap: 8px;
     width: 100%;
     height: var(--row);
-    padding: 0 8px 0 10px;
+    padding: 0 6px 0 6px;
+    border: 0;
+    border-radius: 4px;
     text-align: left;
-    color: var(--text);
-    font-size: 12px;
+    color: var(--ink);
+    font-size: var(--t-sm);
   }
 
   .row:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
   }
 
   .row.on {
-    background: var(--raised);
-    box-shadow: inset 2px 0 0 var(--text);
+    background: var(--rule);
+  }
+
+  .row.tip {
+    background: var(--fill);
+    color: var(--sheet);
+  }
+
+  .row.tip .mg {
+    color: inherit;
+    border-color: currentColor;
+  }
+
+  /* An asset a ticket reaches is the solid mark, which the line under the bar starts with too; what holds one is its ring, enough to walk towards it. */
+  .row .mark,
+  .row .holds {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .row .mark {
+    background: currentColor;
+  }
+
+  .row .holds {
+    border: 1.5px solid currentColor;
+    opacity: 0.7;
   }
 
   .row .nm {
@@ -3043,41 +3500,74 @@
     white-space: nowrap;
   }
 
+  /* The words, and the tag beside them, stand on the row's own fill: a wire passes behind them and never through
+     them like a strikethrough, and is still seen in the gaps either side. */
+  .row {
+    --row-fill: var(--paper);
+  }
+
+  .row:hover {
+    --row-fill: var(--sheet-2);
+  }
+
+  .row.on {
+    --row-fill: var(--rule);
+  }
+
+  .row.tip {
+    --row-fill: var(--fill);
+  }
+
+  .row .lbl,
+  .row .mg,
   .row .chev {
-    color: var(--faint);
+    background: var(--row-fill);
+    box-shadow: 0 0 0 1px var(--row-fill);
+  }
+
+  .row .chev {
+    color: var(--ink-2);
     flex: none;
   }
 
-  /* Story 32's badge. Amber and red are the app's own two alarm colours
-     (`--amber`, `--fail`), and the number is monospaced so a column of them
-     lines up at one glance rather than being read one row at a time. */
+  .row.tip .chev {
+    color: inherit;
+  }
+
+  /* Story 32's badge: tabular figures, so a column of them lines up at one glance. */
   .row .badge {
     flex: none;
-    min-width: 16px;
-    padding: 0 4px;
-    border: 1px solid currentColor;
-    border-radius: 8px;
-    font-family: var(--mono);
-    font-size: 10px;
-    line-height: 14px;
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: var(--t-2xs);
+    font-weight: 600;
+    line-height: 16px;
     text-align: center;
+    font-variant-numeric: tabular-nums;
   }
 
   .row .badge.warn {
-    color: var(--amber);
+    background: var(--warn-bg);
+    color: var(--warn);
   }
 
   .row .badge.down {
-    color: var(--fail);
+    background: var(--err-bg);
+    color: var(--err);
   }
 
   /* The linked-work badge carries no alarm colour, because a linked ticket is
-     not a fault: it is the muted foreground, so it reads as a count rather
-     than as a state. It is drawn *before* the problem badge, so the two never
-     swap places on a row that has both. */
+     not a fault: it reads as a count rather than as a state. It is drawn
+     *before* the problem badge, so the two never swap places on a row that has both. */
   .row .badge.work {
-    color: var(--muted);
-    border-color: var(--hair2);
+    background: var(--rule);
+    color: var(--ink-2);
+  }
+
+  .row.tip .badge {
+    background: rgb(255 255 255 / 18%);
+    color: inherit;
   }
 
   /* Positioned so that it paints over the wire layer, which is absolute and
@@ -3085,55 +3575,132 @@
   .pane {
     position: relative;
     z-index: 1;
-    border-left: 1px solid var(--hair);
-    background: var(--panel);
-    padding: 10px 12px 18px;
+    /* Over the strip's blank end, so the strip's measure stays the window's (`spareWidth`). */
+    margin-left: calc(-1 * var(--tf-pane-spare, 0px));
+    border-left: 1px solid var(--rule);
+    background: var(--sheet);
+    padding: 14px 14px 20px;
     overflow-y: auto;
     min-width: 0;
+  }
+
+  .paneempty {
+    padding: 22px 0;
+    text-align: center;
   }
 
   .pane-h {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 4px;
   }
 
   .pane-h h2 {
-    font: 600 16px/1.2 var(--disp);
+    font-size: var(--t-xl);
+    font-weight: 600;
+    line-height: 1.25;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .crumb {
-    font-size: 11px;
-    color: var(--muted);
-    margin: 0 0 14px;
     overflow-wrap: anywhere;
   }
 
+  /* An editor's field has the whole line, with its Cancel and Save under it: a 340 px pane has no room beside it. */
+  .pane-h .inp {
+    flex: 1 1 200px;
+    width: auto;
+    min-width: 0;
+  }
+
+  .ed {
+    display: contents;
+  }
+
+  .ed-f {
+    display: flex;
+    flex: 1 1 100%;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--control-gap);
+  }
+
+  .ed-f .tf-dwhy {
+    margin-right: auto;
+  }
+
+  .pane-h + .grp {
+    margin-top: 10px;
+  }
+
   .grp {
-    margin: 0 0 14px;
+    margin: 0;
+    padding: 12px 0;
+    border-top: 1px solid var(--rule-2);
+  }
+
+  .acts + .grp,
+  .pane-h + .grp {
+    border-top: 0;
+    padding-top: 0;
   }
 
   .grp h3 {
-    margin: 0 0 4px;
+    margin: 0 0 6px;
+  }
+
+  /* A section's own button stands under what it adds to. */
+  .grp > :global(.tf-btn) {
+    margin-top: 8px;
+  }
+
+  .mkmon > :global(.tf-btn) {
+    margin-top: 0;
+  }
+
+  .grp .empty {
+    padding: 0;
+    font-size: var(--t-sm);
+  }
+
+  /* A link made of words is underlined (design system, Layout). */
+  .link {
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    text-align: left;
   }
 
   /* The count beside *Depends on this* (#505): the number of assets that
      break, and never the routes, which sit under their own line below. */
   .breaks .n {
-    margin-left: 6px;
-    font: 600 11px/1 var(--mono);
-    color: var(--fg);
+    margin-left: 4px;
   }
 
   /* The routes' own line, inside the section rather than a heading of its
      own: they belong to this panel's answer and are outside its count. */
   .breaks .via {
     margin: 8px 0 4px;
+  }
+
+  .breaks .alsobreak {
+    margin-top: 8px;
+  }
+
+  :is(.heldby, .reachfold, .inside) summary {
+    list-style: none;
+    cursor: pointer;
+  }
+
+  :is(.heldby, .reachfold, .inside) summary::-webkit-details-marker {
+    display: none;
+  }
+
+  :is(.heldby, .reachfold, .inside)[open] summary {
+    margin-bottom: 6px;
+  }
+
+  .lst + .inside {
+    margin-top: 8px;
   }
 
   /* A line here carries three things and the third is a whole path, which in
@@ -3168,36 +3735,43 @@
     flex: 0 0 auto;
     max-width: 100%;
     overflow-wrap: anywhere;
+    font-size: var(--t-xs);
     font-variant-ligatures: none;
   }
 
   .breaks .lst li .path {
     grid-column: 1 / -1;
+    font-size: var(--t-xs);
   }
 
   .props {
     display: grid;
-    gap: 2px;
+    gap: 4px;
     margin: 0;
   }
 
   .prop {
     display: grid;
-    grid-template-columns: 108px minmax(0, 1fr);
+    grid-template-columns: 112px minmax(0, 1fr);
     column-gap: 8px;
     align-items: baseline;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   /* A custom key is marked, so the reader can tell the schema from their own
      additions without the pane keeping a copy of the type table. */
+  .legend {
+    margin: 0 0 6px;
+    font-size: var(--t-xs);
+  }
+
   .prop.own dt::after {
     content: "*";
-    color: var(--faint);
+    color: var(--ink-2);
   }
 
   .prop dt {
-    color: var(--muted);
+    color: var(--ink-2);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -3206,43 +3780,31 @@
   .prop dd {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
+    min-width: 0;
     margin: 0;
-    font-family: var(--mono);
     overflow-wrap: anywhere;
   }
 
   /*
      The *In force* rows stack their value and the note about where it came
-     from, rather than sharing one line: the note is a sentence, and `.prop
-     dd`'s `overflow-wrap: anywhere` -- right for an IP or an image tag --
-     breaks a sentence one character at a time in a 200px pane.
+     from, rather than sharing one line: the note is a sentence.
   */
   .prop.force dd {
-    display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 1px;
   }
 
   /*
-     Where a value came from, under the value and never instead of it. One
-     line, elided if the ancestor's name is long -- the treatment `.row .nm`
-     gets one section up, and the reason is the same: this is a sentence, and
-     a sentence broken across three lines in a 200px column reads as three.
+     Where a value came from, under the value and never instead of it. It wraps
+     rather than cut the ancestor's name: the name is the point of the link.
   */
   .prop .src {
     max-width: 100%;
-    font-family: var(--sans);
-    font-size: 11px;
+    font-size: var(--t-xs);
     text-align: left;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .prop button.src {
-    text-decoration: underline;
+    overflow-wrap: anywhere;
   }
 
   /*
@@ -3252,23 +3814,56 @@
      has no such state -- and Kuma's `pending` and `maintenance` fall through
      to the inherited colour, which is what "no opinion" should look like.
   */
+  .hl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hl::before {
+    content: "";
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+
   .prop .hl.up,
   .watch .hl.up {
     color: var(--ok);
   }
 
+  .hl.up::before {
+    background: var(--ok);
+  }
+
   .prop .hl.warn,
   .watch .hl.warn {
-    color: var(--amber);
+    color: var(--warn);
+  }
+
+  .hl.warn::before {
+    background: var(--warn);
   }
 
   .prop .hl.down,
   .watch .hl.down {
-    color: var(--fail);
+    color: var(--err);
   }
 
+  .hl.down::before {
+    background: var(--err);
+  }
+
+  /* No state, so no dot: a grey one reads as a state of its own. */
   .prop .hl.none {
-    color: var(--faint);
+    color: var(--ink-2);
+    flex: none;
+  }
+
+  .hl.none::before {
+    content: none;
   }
 
   /* The value reads as the value it is until it is hovered: a pane of boxes
@@ -3276,59 +3871,90 @@
   .prop dd .val {
     flex: 1;
     min-width: 0;
-    padding: 0 3px;
+    margin-left: -4px;
+    padding: 0 4px;
     text-align: left;
     color: inherit;
     font: inherit;
-    border-radius: 2px;
+    border-radius: 3px;
     overflow-wrap: anywhere;
+    cursor: text;
+  }
+
+  /* A long value has the pane's width, under its label, and breaks at spaces: a 190 px column cut *ssh://knob / as-wsl* in two. */
+  .prop.wide {
+    grid-template-columns: minmax(0, 1fr);
+    row-gap: 1px;
+  }
+
+  .prop.wide dd,
+  .prop.wide dd .val {
+    overflow-wrap: break-word;
+  }
+
+  .prop.wide dd .val code {
+    font: var(--t-xs) var(--mono);
+    font-variant-ligatures: none;
+  }
+
+  .prop dd .val.code {
+    font-family: var(--mono);
+    font-size: var(--t-xs);
+    font-variant-ligatures: none;
+    letter-spacing: normal;
+    word-spacing: normal;
   }
 
   .prop dd .val:hover {
-    background: var(--raised);
+    background: var(--sheet-2);
+  }
+
+  .prop dd:has(> .ed) {
+    flex-wrap: wrap;
   }
 
   .prop dd .inp {
-    height: 22px;
-    font: inherit;
+    flex: 1 1 100%;
+    width: auto;
+    min-width: 0;
   }
 
   .acts {
     display: flex;
     flex-wrap: wrap;
     gap: var(--control-gap);
-    margin: 0 0 12px;
+    margin: 0 0 14px;
   }
 
   .wf {
     margin: -6px 0 12px;
-    font-size: 12px;
-  }
-
-  .tf {
-    margin: 0;
-    padding: 6px 12px;
-    font-size: 12px;
-    border-bottom: 1px solid var(--hair);
+    font-size: var(--t-sm);
   }
 
   .add {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 88px;
+    grid-template-columns: minmax(0, 1fr) 96px;
     gap: 6px;
     margin-top: 8px;
   }
 
+  .add .v,
   .add .add-f {
     grid-column: 1 / -1;
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: var(--control-gap);
   }
 
+  /* What Add waits for, beside it (design system, Disabled). */
+  .add .tf-dwhy {
+    margin-right: auto;
+  }
+
   .ask {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--t-md);
   }
 
   /* One route per row: what it is called, where it answers, and where it
@@ -3342,13 +3968,13 @@
   .lst.routes li {
     display: grid;
     gap: 2px;
-    padding: 4px 0;
-    border-bottom: 1px solid var(--hair);
+    padding: 6px 0;
+    border-bottom: 1px solid var(--rule-2);
   }
 
   .routes li.on {
-    box-shadow: inset 2px 0 0 var(--link);
-    padding-left: 6px;
+    box-shadow: inset 2px 0 0 var(--ink);
+    padding-left: 8px;
   }
 
   .routes .rname {
@@ -3357,35 +3983,44 @@
     gap: 6px;
   }
 
-  .routes .vis {
-    font: 500 9px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--amber);
-  }
-
   .routes .url {
     justify-self: start;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
-    color: var(--muted);
+    font-size: var(--t-xs);
+    font-variant-ligatures: none;
+    color: var(--ink-2);
     text-align: left;
   }
 
   .routes .url:hover {
-    color: var(--link);
+    color: var(--ink);
+    text-decoration: underline;
+    text-underline-offset: 2px;
   }
 
-  .routes .rto,
+  /* A property reads as one sentence, its name then its value, with its code values among the words. */
   .routes .rprop {
+    display: block;
+  }
+
+  .routes .rprop code {
+    font: var(--t-xs) var(--mono);
+    font-variant-ligatures: none;
+  }
+
+  .routes .rto {
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
     gap: 4px;
-    font-size: 11px;
+  }
+
+  .routes .rto,
+  .routes .rprop {
+    font-size: var(--t-xs);
     /* A real route property can be a command line (until #634 the estate's
        tunnel routes carried a whole `ssh -N -L ...`), which wraps at no space
        there is: without this the pane scrolls
@@ -3401,7 +4036,7 @@
     margin: 0;
     padding: 0;
     list-style: none;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   .lst li,
@@ -3409,6 +4044,10 @@
     display: flex;
     align-items: baseline;
     gap: 8px;
+  }
+
+  .lst li .faint {
+    font-size: var(--t-xs);
   }
 
   .hist .hw {
@@ -3419,7 +4058,28 @@
 
   .hist .ha {
     flex: none;
-    font-family: var(--mono);
-    font-size: 11px;
+    font-size: var(--t-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (max-width: 900px) {
+    .alerts {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+
+    .find .res {
+      left: 16px;
+      width: min(440px, calc(100% - 32px));
+    }
+
+    .tree {
+      grid-template-columns: minmax(0, 1fr) 300px;
+    }
+
+    .typesfail {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
   }
 </style>

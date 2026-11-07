@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
-  import { goWithoutOpener } from "./lib/tf/opener";
+  import { goLaunched, goVisiting, goWithoutOpener } from "./lib/tf/opener";
+  import { askForSecret, reenterSourceOf } from "./lib/tf/settings/secret-prompt.svelte";
   import { listen } from "@tauri-apps/api/event";
 
   import { alerts } from "./lib/assets/alerts.svelte";
@@ -16,7 +17,7 @@
   import { assetTargetId, targetReading } from "./lib/shell/timer";
   import { toastQueued } from "./lib/shell/queued-toast";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
-  import { push } from "./lib/shell/toasts.svelte";
+  import { dismiss, push, undoable } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
   import FirstRun, { type FirstRunLanding } from "./lib/sources/FirstRun.svelte";
@@ -45,9 +46,16 @@
    */
   homeIfBlank(location);
 
-  /** Go to an address the launcher or the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
+  /** Go to an address the capture window names: nothing in the app opened it, so `Esc` goes up from it (#2229). */
   function navigate(hash: string) {
     goWithoutOpener(hash);
+  }
+
+  /** A row the launcher opened: a jump that says where it came from (F-047), or the credential prompt over the page, as a press on its link gives. */
+  function launched(hash: string) {
+    const source = reenterSourceOf(hash);
+    if (source === null) goLaunched(hash);
+    else askForSecret(source);
   }
 
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
@@ -114,8 +122,13 @@
     worklogDraft: (entityId, when) => worklogDraft(entityId, when),
     onadhoc: (block, offer) => (adHoc = { block, offer }),
     push,
+    dismiss,
+    undoable,
     complain,
-    onday: () => (location.hash = "#/time"),
+    // A top page opened from somewhere to come back from: *Back to* and `Esc` return to where the stop was (F-140).
+    onday: () => {
+      if (location.hash !== "#/time") goVisiting("#/time");
+    },
   });
 
   /**
@@ -139,7 +152,7 @@
     timeRevision += 1;
     const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
     // A worklog carries no source to name (`Worklog` has its entity only), so no sign-in sentence.
-    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null);
+    toastQueued(`log ${minutesLabel(Math.floor(logged.seconds / 60))} to ${key}`, null, { write: logged.write_queue_id === null ? null : { id: logged.write_queue_id } });
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
   }
 
@@ -161,8 +174,8 @@
   }
 
   /** *Start timer* on a ticket: the running ticket's draft first (R-13.2). */
-  function startTimerOn(entityId: string, title: string) {
-    void drafts.switchTo({ kind: "entity", entity_id: entityId }, title);
+  function startTimerOn(entityId: string, title: string, quiet = false) {
+    void drafts.switchTo({ kind: "entity", entity_id: entityId }, title, quiet);
   }
 
   // ⌘T with nothing in front starts on the page's job (#1435): on the Job page the job on screen, else the chosen job (spec #2227);
@@ -380,7 +393,7 @@
         inbox={{ count: inbox.count, items: inbox.stream.map((entry) => entry.item), actions: Object.fromEntries(inbox.stream.map((entry) => [entry.item.key, entry.actions])) }}
         openEntity={breadcrumbJob.job === null ? undefined : { entityId: breadcrumbJob.job.entityId, label: breadcrumbJob.job.key }}
         ontimer={startTimerOn}
-        onnavigate={navigate}
+        onnavigate={launched}
         onclose={() => {}}
       />
     {/snippet}

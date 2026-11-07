@@ -27,7 +27,7 @@ use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{
     ActionField, Block, CommitHint, Fact, FieldKind, Setting, SourceView, Tone, ViewAction,
-    ViewRow, ViewSection,
+    ViewRow, ViewSection, ago,
 };
 
 use crate::client::{FAILED_TESTS, HttpRest};
@@ -393,7 +393,7 @@ fn build_row(viewer: &Viewer<'_>, config: &str, build: &Build, now: DateTime<Utc
     let meta: Vec<String> = [
         nonblank(build.branch_name.as_deref()).map(str::to_owned),
         duration.map(span),
-        finished.or(started).or(queued).map(|t| age(now - t)),
+        finished.or(started).or(queued).map(|t| ago(t, now)),
     ]
     .into_iter()
     .flatten()
@@ -419,17 +419,6 @@ fn span(d: chrono::TimeDelta) -> String {
         0..60 => format!("{s}s"),
         60..3600 => format!("{}m {:02}s", s / 60, s % 60),
         _ => format!("{}h {:02}m", s / 3600, s % 3600 / 60),
-    }
-}
-
-/// How long ago: `just now`, `12m ago`, `3h ago`, `5d ago`.
-fn age(d: chrono::TimeDelta) -> String {
-    let s = d.num_seconds().max(0);
-    match s {
-        0..60 => "just now".to_owned(),
-        60..3600 => format!("{}m ago", s / 60),
-        3600..86_400 => format!("{}h ago", s / 3600),
-        _ => format!("{}d ago", s / 86_400),
     }
 }
 
@@ -1442,10 +1431,12 @@ mod tests {
             "0s",
             "a clock skew is not a negative build"
         );
-        assert_eq!(age(TimeDelta::seconds(20)), "just now");
-        assert_eq!(age(TimeDelta::seconds(720)), "12m ago");
-        assert_eq!(age(TimeDelta::seconds(3 * 3600 + 5)), "3h ago");
-        assert_eq!(age(TimeDelta::days(5)), "5d ago");
+        let now = Utc::now();
+        assert_eq!(ago(now - TimeDelta::seconds(20), now), "just now");
+        assert_eq!(ago(now - TimeDelta::seconds(720), now), "12 min ago");
+        assert_eq!(ago(now - TimeDelta::seconds(3 * 3600 + 5), now), "3 h ago");
+        let old = now - TimeDelta::days(5);
+        assert_eq!(ago(old, now), old.format("%Y-%m-%d").to_string());
     }
 
     /// A git URL may carry a credential (`https://user:token@host/…`); the

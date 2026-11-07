@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { parseTfHash, sectionOf } from "../tf/route";
 import { settingsPlace } from "../tf/settings/settings";
-import { filterActions, navigationActions } from "./actions";
+import { filterActions, matchingPlaces, navigationActions, placeActions } from "./actions";
 
 /**
  * #1417: `>` with an empty query is the app's navigation menu (spec §4): the
@@ -21,7 +21,7 @@ test("the palette lists every section the shell has an address for, in the top b
     "Time",
     "Settings",
     "Settings › Sources",
-    "Settings › Checkouts and Open in…",
+    "Settings › Checkouts and Open in",
     "Settings › Time",
     "Settings › Desktop notifications",
     "Settings › Standup",
@@ -60,7 +60,7 @@ test("every row's address parses back to the section it names", () => {
     ["Time", "time"],
     ["Settings", "settings"],
     ["Settings › Sources", "settings/sources"],
-    ["Settings › Checkouts and Open in…", "settings/checkouts"],
+    ["Settings › Checkouts and Open in", "settings/checkouts"],
     ["Settings › Time", "settings/time"],
     ["Settings › Desktop notifications", "settings/notifications"],
     ["Settings › Standup", "settings/standup"],
@@ -102,4 +102,32 @@ test("typing after > narrows the menu", () => {
       .map((action) => action.label)
       .filter((label) => label.startsWith("Settings")),
   ]);
+});
+
+test("a name ranks above what a place holds, so > and a plain word agree (F-058)", () => {
+  const labels = (text: string) => filterActions(navigationActions(), text).map((action) => action.label);
+  expect(labels("builds")[0]).toBe("Builds");
+  expect(labels("builds")).toContain("Inbox");
+  expect(labels("time").slice(0, 2)).toEqual(["Time", "Settings › Time"]);
+  expect(labels("time")).toContain("Monitors");
+});
+
+const PLACES = placeActions();
+const names = (typed: string, andDetails = false) => matchingPlaces(PLACES, typed, andDetails).map((place) => place.label);
+
+test("a place matches at the start of a word of its name, and a settings section by its own name (F-603)", () => {
+  expect(names("sett")).toEqual(["Settings"]);
+  expect(names("asset tree")).toEqual(["Asset tree"]);
+  expect(names("tree")).toEqual(["Asset tree"]);
+  expect(names("appearance")).toEqual(["Settings › Appearance"]);
+  expect(names("time")).toEqual(["Time", "Settings › Time"]);
+  // Not fourteen rows for one word, and not the inside of a word.
+  expect(names("settings")).toEqual(["Settings"]);
+  expect(names("ettings")).toEqual([]);
+  expect(names("s")).toEqual([]);
+});
+
+test("where nothing else answered, what a place holds counts too, after the names", () => {
+  expect(names("theme")).toEqual([]);
+  expect(names("theme", true)).toEqual(["Settings › Appearance"]);
 });

@@ -5,7 +5,7 @@
  * *Create monitor*'s two writes.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AssetDetail, AssetEdit, MonitorRow, OpenAlert, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
@@ -18,6 +18,7 @@ import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
 import { sourceFacts } from "../job/source-facts.fixture";
 import { pressRefreshKey, refreshProbe, type RefreshProbe } from "../refresh.fixture";
+import { PRESS_HOLD_MS } from "../press-hold.svelte";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -92,6 +93,7 @@ let writes: WriteOpPayload[];
 let edits: [string, AssetEdit[]][];
 let routeEdits: [string, RouteEdit[]][];
 let acks: string[];
+let unacks: string[];
 /** Each `set_monitor_hidden` the page made: the monitor, and hidden or not. */
 let hides: [string, boolean][];
 /** The write follows the page holds, by write id: a test tells each what the queue says. */
@@ -109,6 +111,7 @@ beforeEach(() => {
   edits = [];
   routeEdits = [];
   acks = [];
+  unacks = [];
   hides = [];
   forgetFilters();
   heard = new Map();
@@ -134,6 +137,10 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
     openAlerts: async () => [],
     ackAlert: async (id) => {
       acks.push(id);
+      return {} as never;
+    },
+    unackAlert: async (id) => {
+      unacks.push(id);
       return {} as never;
     },
     setMonitorHidden: async (id, hidden) => {
@@ -198,11 +205,27 @@ const rows = () => [...target.querySelectorAll("tbody tr")];
 const button = (tr: Element, label: string) =>
   [...tr.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label);
 
+test("a down monitor's chip holds the word, and the time beside it is plain text", async () => {
+  const at = new Date(NOW.getTime() - 60 * 60_000).toISOString();
+  const down = monitor("kuma:9", "jira", { state: "down", samples: [{ taken_at: at, state: "down" }] });
+  await draw([], null, ports({ monitorRoster: async () => [down] }));
+  expect(text(rows()[0]!.querySelector(".tf-chip"))).toBe("Down");
+  expect(text(rows()[0]!.querySelector(".tf-mon-since"))).toMatch(/^since \d\d:\d\d$/);
+});
+
+test("Hide and Unhide tell the nav's badge, which leaves a hidden monitor out", async () => {
+  let told = 0;
+  await draw([], "PAY-231", ports({ badgesChanged: () => (told += 1) }));
+  button(rows()[0]!, "Hide")!.click();
+  await settle();
+  expect(told).toBe(1);
+});
+
 test("#/monitors draws the header, both tabs with counts, and the roster sorted down, warning, paused, up", async () => {
   await draw([]);
   expect(text(target.querySelector("h1"))).toBe("Monitors");
   expect(text(target.querySelector(".tf-sub"))).toBe(
-    "4 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset. Bars cover the last 24 hours in half-hours.",
+    "4 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset.",
   );
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Monitors 4", "Assets nothing watches 2"]);
@@ -215,7 +238,8 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
   ]);
   const [, , , up] = rows();
   const cells = [...up!.querySelectorAll("td")].map(text);
-  expect(cells.slice(1, 6)).toEqual(["up", "", "140 ms", "99.98 %", "payouts Service"]);
+  // The third is the figures under the bars, which CSS draws only where their columns have gone.
+  expect(cells.slice(1, 6)).toEqual(["Up", "payouts Service", "140 ms, 99.98 %", "140 ms", "99.98 %"]);
   expect(up!.querySelectorAll(".tf-mbar i")).toHaveLength(48);
   expect(up!.querySelector<HTMLAnchorElement>("td a")?.getAttribute("href")).toBe("#/asset/asset%3Ar");
 });
@@ -227,19 +251,19 @@ test("Ack is on a down monitor only, acks it by the monitor, and reads Acked", a
   button(down!, "Ack")!.click();
   await settle();
   expect(acks).toEqual(["kuma:2"]);
-  expect(button(down!, "Acked")?.disabled).toBe(true);
-  expect(toasts.items.map((t) => t.text)).toContain("Acked in knobas. The alert stays open until the monitor recovers.");
+  expect(button(down!, "Acked")?.getAttribute("aria-pressed")).toBe("true");
+  expect(toasts.items.map((t) => t.text)).toContain("Acked. The alert stays open until the monitor recovers.");
 });
 
 const alertOf = (monitor_id: string, acked_at: string | null): OpenAlert =>
   ({ id: 1, monitor_id, monitor_name: "flows-stage", state: "down", opened_at: "2026-10-16T12:00:00Z", acked_at }) as OpenAlert;
 
-test("a down row whose open alert is acked reads a disabled Acked on first draw, and Ack when it is not", async () => {
+test("a down row whose open alert is acked reads a pressed Acked on first draw, and Ack when it is not", async () => {
   await draw([], "PAY-231", ports({ openAlerts: async () => [alertOf("kuma:2", "2026-10-16T13:00:00Z")] }));
   const down = rows()[0]!;
   expect(button(down, "Ack")).toBeUndefined();
-  expect(button(down, "Acked")?.disabled).toBe(true);
-  expect(button(down, "Acked")?.title).toContain("2026-10-16");
+  expect(button(down, "Acked")?.getAttribute("aria-pressed")).toBe("true");
+  expect(button(down, "Acked")?.title).toContain("take it back");
   unmount(view!);
   view = null;
   await draw([], "PAY-231", ports({ openAlerts: async () => [alertOf("kuma:2", null)] }));
@@ -259,12 +283,55 @@ test("an ack survives leaving the page: a remount over the now-acked alert still
   await draw([], "PAY-231", stand);
   button(rows()[0]!, "Ack")!.click();
   await settle();
-  expect(button(rows()[0]!, "Acked")?.disabled).toBe(true);
+  expect(button(rows()[0]!, "Acked")).toBeDefined();
   unmount(view!);
   view = null;
   await draw([], "PAY-231", stand);
-  expect(button(rows()[0]!, "Acked")?.disabled).toBe(true);
+  expect(button(rows()[0]!, "Acked")).toBeDefined();
   expect(button(rows()[0]!, "Ack")).toBeUndefined();
+});
+
+test("Acked holds about two seconds, so a second press isn't an un-ack, and Undo and a later press still are (F-351)", async () => {
+  await draw([]);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const run = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      flushSync();
+    };
+    button(rows()[0]!, "Ack")!.click();
+    await run(10);
+    button(rows()[0]!, "Acked")!.click();
+    await run(10);
+    expect(unacks, "the second press lands on the hold").toEqual([]);
+    expect(button(rows()[0]!, "Acked")).toBeDefined();
+    toasts.items.find((t) => t.text.startsWith("Acked"))!.action!.run();
+    await run(10);
+    expect(unacks, "Undo isn't held").toEqual(["kuma:2"]);
+
+    button(rows()[0]!, "Ack")!.click();
+    await run(10);
+    await run(PRESS_HOLD_MS);
+    button(rows()[0]!, "Acked")!.click();
+    await run(10);
+    expect(unacks, "after the hold, a press takes it back").toEqual(["kuma:2", "kuma:2"]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Undo on the ack's toast takes it back", async () => {
+  await draw([]);
+  const down = rows()[0]!;
+  button(down, "Ack")!.click();
+  await settle();
+  const toast = toasts.items.find((t) => t.text.startsWith("Acked"))!;
+  expect(toast.action?.label).toBe("Undo");
+  toast.action!.run();
+  await settle();
+  expect(unacks).toEqual(["kuma:2"]);
+  expect(button(rows()[0]!, "Ack")).toBeDefined();
+  expect(toasts.items.at(-1)!.text).toContain("is asking again");
 });
 
 test("Pause and Resume queue the source's op for that monitor", async () => {
@@ -288,6 +355,26 @@ const names = () => monitorRows().map((tr) => text(tr.querySelector("td")).repla
 const count = () => text(target.querySelector(".tf-fcount")) + text(target.querySelector(".tf-mon-hidn"));
 const row = (name: string) => monitorRows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
 
+test("a mouse's Hide leaves the row's words in its place, with nothing to press, until the pointer leaves it (F-064)", async () => {
+  let roster = ROSTER;
+  await draw([], "PAY-231", ports({
+    monitorRoster: async () => roster,
+    setMonitorHidden: async (id, hidden) => {
+      roster = roster.map((each) => (each.entity_id === id ? { ...each, hidden } : each));
+      return hidden;
+    },
+  }));
+  button(row("flows-stage"), "Hide")!.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  const held = target.querySelector(".tf-mon-held")!;
+  expect(text(held)).toContain("flows-stage");
+  expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
+  expect(held.querySelector(".tf-chip")!.classList.contains("tf-err"), "no tone").toBe(false);
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+  await settle();
+  expect(target.querySelector(".tf-mon-held")).toBeNull();
+});
+
 test("Hide moves a monitor into the closed fold at the roster's end; opened, it is dimmed with Unhide and no Ack", async () => {
   let roster = ROSTER;
   const stand = ports({
@@ -306,11 +393,11 @@ test("Hide moves a monitor into the closed fold at the roster's end; opened, it 
   expect(hides).toEqual([["kuma:2", true]]);
   expect(names()).toEqual(["pg-payments", "yard-planner", "payouts /health"]);
   expect(fold()!.open).toBe(false);
-  expect(text(fold()!.querySelector("summary"))).toBe("1 hidden monitor Their alerts don’t reach the inbox or notify you.");
+  expect(text(fold()!.querySelector("summary"))).toBe("1 hidden monitor Its alerts don’t reach the inbox or notify you.");
   expect(rows().at(-1)!.classList.contains("tf-mon-foldrow")).toBe(true);
   expect(count()).toBe("3 monitors, 1 hidden");
   expect(toasts.items.map((t) => t.text)).toContain(
-    "Hid flows-stage. Its alerts no longer reach the inbox or notify; it is under the hidden monitors at the end.",
+    "Hid flows-stage. Its alerts stay quiet.",
   );
 
   fold()!.open = true;
@@ -331,6 +418,14 @@ test("Hide moves a monitor into the closed fold at the roster's end; opened, it 
   expect(names()).toEqual(["flows-stage", "pg-payments", "yard-planner", "payouts /health"]);
   expect(fold()).toBeNull();
   expect(count()).toBe("4 monitors");
+});
+
+test("a marked monitor that is hidden is a row of the list, so neither the count nor the fold counts it again", async () => {
+  const hiddenTwo = ROSTER.map((each) => (each.entity_id === "kuma:2" || each.entity_id === "kuma:1" ? { ...each, hidden: true } : each));
+  await draw(["at", "kuma:2"], "PAY-231", ports({ monitorRoster: async () => hiddenTwo }));
+  expect(target.querySelector("tr.tf-mon-at")?.textContent).toContain("flows-stage");
+  expect(text(fold()!.querySelector("summary"))).toMatch(/^1 hidden monitor /);
+  expect(count()).toBe(`${monitorRows().length} monitors, 1 hidden`);
 });
 
 test("the fold stays as the reader left it, and opens by itself on a search only hidden monitors answer", async () => {
@@ -387,18 +482,19 @@ test("This job keeps the monitors watching what the job reaches; My jobs and All
 test("#/monitors/unmonitored lists the assets and routes worth a check with env and owner, and has no filter bar", async () => {
   await draw(["unmonitored"]);
   expect(target.querySelector(".tf-tabs [aria-current='page']")?.textContent).toContain("Assets nothing watches");
-  expect(text(target.querySelector(".tf-mon-lead"))).toBe("Containers, services, routes, databases and VMs that no monitor watches.");
+  expect(text(target.querySelector(".tf-sub"))).toBe("Containers, services, routes, databases and VMs that no monitor watches.");
   expect(rows().map((tr) => [...tr.querySelectorAll("td")].map(text))).toEqual([
-    ["pg-main", "Database server", "prod", "ops", "Create monitor"],
-    ["Gitea", "Route", "prod", "ops", "Create monitor"],
+    ["pg-main", "Database server", "prod", "ops", "Create monitor…"],
+    ["Gitea", "Route", "prod", "ops", "Create monitor…"],
   ]);
   expect(rows()[1]!.querySelector("td a")?.getAttribute("href")).toBe("#/route/route%3Agitea");
-  expect(target.querySelector("input[type='search'], .tf-fbar")).toBeNull();
+  // Its own band, over its own rows.
+  expect(target.querySelector<HTMLInputElement>(".tf-fbar input")?.placeholder).toBe("Filter assets");
 });
 
 test("Create monitor on a route opens as HTTP on its URL plus /health and records the name on the route", async () => {
   await draw(["unmonitored"]);
-  button(rows()[1]!, "Create monitor")!.click();
+  button(rows()[1]!, "Create monitor…")!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(text(dialog.querySelector("h2"))).toBe("Create a monitor for Gitea");
@@ -418,7 +514,7 @@ test("Create monitor on a route opens as HTTP on its URL plus /health and record
 
 test("Create monitor opens prefilled as TCP, records the name on the asset, then queues the create with its kind", async () => {
   await draw(["unmonitored"]);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   expect(text(dialog.querySelector("h2"))).toBe("Create a monitor for pg-main");
@@ -437,7 +533,7 @@ test("Create monitor opens prefilled as TCP, records the name on the asset, then
 
 test("a create the backend refuses stays open and says why", async () => {
   await draw(["unmonitored"], null, ports({ submitWrite: async () => Promise.reject({ code: "invalid", message: "no Docker host" }) }));
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   const dialog = document.querySelector(".tf-dialog")!;
   [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Create monitor")!.click();
@@ -475,8 +571,8 @@ test("after a reload, a create on its way draws Monitor queued on its row and of
   await draw(["unmonitored"], null, ports(withCreate(() => onItsWay(7, "pending"))));
   const [pg, route] = rows();
   expect(lastCell(pg!)).toBe("Monitor queued");
-  expect(button(pg!, "Create monitor")).toBeUndefined();
-  expect(button(route!, "Create monitor")).toBeDefined();
+  expect(button(pg!, "Create monitor…")).toBeUndefined();
+  expect(button(route!, "Create monitor…")).toBeDefined();
 });
 
 test("a create pressed now draws Monitor queued at once, before the re-read answers, and the re-read keeps it", async () => {
@@ -496,7 +592,7 @@ test("a create pressed now draws Monitor queued at once, before the re-read answ
     },
   });
   await draw(["unmonitored"], null, stand);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();
@@ -505,7 +601,7 @@ test("a create pressed now draws Monitor queued at once, before the re-read answ
   answer();
   await settle();
   expect(lastCell(rows()[0]!)).toBe("Monitor queued");
-  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeUndefined();
 });
 
 test("a create the queue refuses gives Create monitor back and says why", async () => {
@@ -519,7 +615,7 @@ test("a create the queue refuses gives Create monitor back and says why", async 
     },
   });
   await draw(["unmonitored"], null, stand);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();
@@ -528,7 +624,7 @@ test("a create the queue refuses gives Create monitor back and says why", async 
   going = null;
   heard.get(1)!(onItsWay(1, "refused", "no Docker host"));
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
   expect(toasts.items.map((t) => t.text)).toContain("Monitor pg-main was refused: no Docker host");
 });
 
@@ -539,7 +635,7 @@ test("after a reload, a pending create is followed: held on drift, it gives Crea
   going = null;
   heard.get(7)!(onItsWay(7, "held"));
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
   expect(heard.size).toBe(0);
 });
 
@@ -557,13 +653,13 @@ test("after a reload, a create held as unconfirmed draws Monitor queued, says wh
   const chip = rows()[0]!.querySelector<HTMLElement>(".tf-chip.tf-info");
   expect(text(chip)).toBe("Monitor queued");
   expect(chip?.title).toBe("Sent to Uptime Kuma, which did not answer, so it may be there. Check Uptime Kuma, then send it again or discard it in the write queue.");
-  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeUndefined();
   expect([...heard.keys()]).toEqual([7]);
 
   going = null;
   heard.get(7)!(undefined);
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
 });
 
 test("a pending create the queue holds as unconfirmed stays Monitor queued and followed, with no Edit and resend (#1966)", async () => {
@@ -573,7 +669,7 @@ test("a pending create the queue holds as unconfirmed stays Monitor queued and f
   heard.get(7)!(unconfirmed(7));
   await settle();
   expect(lastCell(rows()[0]!)).toBe("Monitor queued");
-  expect(button(rows()[0]!, "Create monitor")).toBeUndefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeUndefined();
   expect([...heard.keys()]).toEqual([7]);
   const told = toasts.items.find((t) => t.text.startsWith("Monitor pg-main may have arrived"));
   expect(told?.more ?? []).toEqual([]);
@@ -585,7 +681,7 @@ test("a create withdrawn in the queue leaves the open rows, and the re-read give
   going = null;
   heard.get(7)!(undefined);
   await settle();
-  expect(button(rows()[0]!, "Create monitor")).toBeDefined();
+  expect(button(rows()[0]!, "Create monitor…")).toBeDefined();
 });
 
 test("a sent create reads Monitor sent until the end of the sync that brings its monitor in, and is not followed (#2105)", async () => {
@@ -628,7 +724,7 @@ test("a create says Monitor queued, then Monitor sent, and goes once the roster 
     },
   });
   await draw(["unmonitored"], null, stand);
-  button(rows()[0]!, "Create monitor")!.click();
+  button(rows()[0]!, "Create monitor…")!.click();
   await settle();
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();
@@ -663,23 +759,29 @@ test("a pause and a resume each draw a row echo queued, then sent, gone once the
   });
   await draw([], null, stand);
   const row = (name: string) => rows().find((tr) => text(tr.querySelector("td")).startsWith(name))!;
-  const echo = (name: string) => row(name).querySelector(".tf-mon-acts .tf-chip")?.textContent ?? null;
+  // In the State cell, after the state chip, because it says the state is changing (F-337, F-349).
+  const echo = (name: string) => row(name).querySelector(".tf-mon-state .tf-queued-mark")?.textContent ?? null;
   button(row("payouts /health"), "Pause")!.click();
   await settle();
   button(row("yard-planner"), "Resume")!.click();
   await settle();
-  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["queued", "queued"]);
-  expect(button(row("payouts /health"), "Pause")).toBeUndefined();
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Queued", "Queued"]);
+  // The button stays where it was, turned off, and a second press is nothing.
+  const pause = button(row("payouts /health"), "Pause")!;
+  expect(pause.getAttribute("aria-disabled")).toBe("true");
+  pause.click();
+  await settle();
+  expect(writes.filter((write) => "PauseMonitor" in write)).toHaveLength(1);
 
   heard.get(30)!(undefined);
   heard.get(31)!(undefined);
   await settle();
-  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["sent", "sent"]);
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Sent", "Sent"]);
 
   // A run's end before Kuma's /metrics moved: still on its way.
   syncEnds();
   await settle();
-  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["sent", "sent"]);
+  expect([echo("payouts /health"), echo("yard-planner")]).toEqual(["Sent", "Sent"]);
 
   roster = ROSTER.map((one) =>
     one.entity_id === "kuma:1" ? { ...one, tombstoned: true, actions: ["resume_monitor"] } : one.entity_id === "kuma:3" ? { ...one, tombstoned: false, actions: ["pause_monitor"] } : one,
@@ -708,7 +810,7 @@ test("a row whose source reads one monitor draws Refresh, one whose source does 
 
 test("a row's Refresh is a small button in the row's trailing group, last after Pause (#2288)", async () => {
   await draw([], null, ports({ monitorRoster: async () => [monitor("kuma:1", "payouts /health")] }));
-  const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-trail")!;
+  const trail = rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-rowacts")!;
   expect([...trail.querySelectorAll("button")].map((b) => [text(b), b.className])).toEqual([
     ["Pause", "tf-btn tf-sm tf-ghost"],
     ["Hide", "tf-btn tf-sm tf-ghost"],
@@ -736,7 +838,7 @@ test("Refresh reads the monitor from its source, then the roster again over what
   await settle();
   heard.get(40)!(undefined);
   await settle();
-  expect(rowNamed("payouts /health").querySelector(".tf-mon-acts .tf-chip")?.textContent).toBe("sent");
+  expect(rowNamed("payouts /health").querySelector(".tf-mon-state .tf-queued-mark")?.textContent).toBe("Sent");
   const before = reads;
 
   const refresh = rowNamed("payouts /health").querySelector<HTMLButtonElement>(".tf-refresh")!;
@@ -819,4 +921,77 @@ test("a long roster draws the monitors near the viewport, spacer rows standing f
   field.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
   expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["api-1999 /health HTTP"]);
+});
+
+const NO_TOKEN = { id: "kuma", health: { state: "missing_secret", checked_at: "2026-08-22T08:00:00Z" }, auth_kind: "ApiToken" };
+
+test("a source with no token draws the band with its fix, and the header stops saying synced", async () => {
+  await draw([], "PAY-231", ports({ listSources: async () => [{ ...sourceFacts("kuma", { display_name: "Uptime Kuma" }), ...NO_TOKEN } as never], syncStatus: async () => [] }));
+  const band = target.querySelector(".tf-stale")!;
+  expect(band.textContent).toContain("no token stored. Pauses and new monitors wait in the queue until it works again.");
+  expect(band.querySelector("a")?.textContent).toBe("Enter token…");
+  expect(band.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/kuma/reenter");
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).not.toContain("synced");
+});
+
+test("a source that syncs draws no band, and the header says when", async () => {
+  await draw([], "PAY-231", ports({ syncStatus: async () => [] }));
+  expect(target.querySelector(".tf-stale")).toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).toContain("synced");
+});
+
+test("an alert that closed under the row says so in words, not as a failure, and the roster is read again", async () => {
+  let reads = 0;
+  const gone = { code: "not_found", message: 'no open alert on "kuma:2"', source_id: null };
+  await draw([], "PAY-231", ports({
+    monitorRoster: async () => {
+      reads += 1;
+      return ROSTER;
+    },
+    ackAlert: async () => Promise.reject(gone),
+  }));
+  const before = reads;
+  button(rows()[0]!, "Ack")!.click();
+  await settle();
+  const said = toasts.items.at(-1)!;
+  expect(said.text).toMatch(/has already left the inbox\. It was resolved at its source\.$/);
+  expect(said.tone).toBeUndefined();
+  expect(reads).toBeGreaterThan(before);
+});
+
+test("taking an ack back takes its toast's Undo with it", async () => {
+  await draw([]);
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const run = async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms);
+      flushSync();
+    };
+    button(rows()[0]!, "Ack")!.click();
+    await run(10);
+    expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(true);
+    await run(PRESS_HOLD_MS);
+    button(rows()[0]!, "Acked")!.click();
+    await run(10);
+    expect(toasts.items.some((t) => t.text.startsWith("Acked"))).toBe(false);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the page shown again reads the sources again, so a token entered in Settings takes the band away", async () => {
+  let health = "missing_secret";
+  const stand = ports({
+    listSources: async () => [{ ...sourceFacts("kuma", { display_name: "Uptime Kuma" }), id: "kuma", health: { state: health, checked_at: "2026-08-22T08:00:00Z" }, auth_kind: "ApiToken" } as never],
+    syncStatus: async () => [],
+  });
+  const props = $state({ ready: true, rest: [] as string[], job: "PAY-231" as string | null, ports: stand, now: NOW, syncRevision: 0 });
+  view = mount(TfMonitors, { target, props });
+  await settle();
+  expect(target.querySelector(".tf-stale")).not.toBeNull();
+  health = "ok";
+  props.syncRevision = 1;
+  await settle();
+  expect(target.querySelector(".tf-stale")).toBeNull();
+  expect(target.querySelector(".tf-fhead .tf-sub")?.textContent).toContain("synced");
 });

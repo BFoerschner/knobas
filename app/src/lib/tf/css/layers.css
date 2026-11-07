@@ -1,0 +1,17 @@
+/* ---------- what floats (design system, *Layers*) ----------
+   One host at the shell's root, inside `.tf`, so no page's `overflow`, sticky band or stacking context reaches what is
+   in it. It lays out nothing and makes no stacking context, so each float's own `z-index` meets the dialogs' and the
+   toasts': a drawer 21, a dialog 30, a menu 35 (a menu a dialog opened is over it), a toast 40. */
+.tf-floats, .tf-drawerhost { display: contents; }
+
+/* A menu (`TfMenu.svelte`): placed from its opener in `left`, `top` and `max-height`, so it scrolls when taller than
+   the room. A class beside `.tf-menu` gives a menu its width and its rows. */
+.tf-menu {
+  position: fixed; left: 0; top: 0; z-index: 35; min-width: 200px; display: flex; flex-direction: column; overflow-y: auto;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 4px;
+}
+.tf-menu:focus { outline: none; }
+.tf-menu :focus-visible { outline-offset: -2px; }
+.tf-menu button { flex: none; border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+.tf-menu button:hover { background: var(--sheet-2); }
+.tf-menu hr { flex: none; border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }

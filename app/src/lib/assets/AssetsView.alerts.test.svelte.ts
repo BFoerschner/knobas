@@ -154,16 +154,16 @@ test("an estate with nothing wrong in it draws no strip at all", async () => {
  * The headline: the monitor, the asset, where it lives and how long it has
  * been like this.
  *
- * The path is on the row because two containers called `postgres` are told
- * apart by it and by nothing else — the rule the launcher's own offers follow
- * in this view.
+ * The path is the row's title, because two containers called `postgres` are told
+ * apart by it and by nothing else, and on the row it repeated what the columns draw.
  */
 test("an open alert names the monitor, the asset, its path and how long", async () => {
   const alerts = alertsHolding([alert()]);
   await alerts.refresh();
   render(alerts);
 
-  expect(rows()).toEqual(["postgres (tunnel) postgres hel1 / vm-db-01 30 min ago"]);
+  expect(rows()).toEqual(["postgres (tunnel) postgres 30 min ago"]);
+  expect(target.querySelector(".alerts .go")!.getAttribute("title")).toBe("hel1 / vm-db-01");
   expect(target.querySelector(".alerts .st")!.classList.contains("down")).toBe(true);
 });
 
@@ -188,8 +188,8 @@ test("one alert on a monitor watching two assets draws a row each", async () => 
   render(alerts);
 
   expect(rows()).toEqual([
-    "postgres (tunnel) postgres hel1 / vm-db-01 30 min ago",
-    "postgres (tunnel) vm-db-01 hel1 30 min ago",
+    "postgres (tunnel) postgres 30 min ago",
+    "postgres (tunnel) vm-db-01 30 min ago",
   ]);
 });
 
@@ -222,7 +222,7 @@ test("an acked alert is still listed, and marked", async () => {
   await alerts.refresh();
   render(alerts);
 
-  expect(rows()[0]).toContain("acked");
+  expect(rows()[0]).toContain("Acked");
 });
 
 /** A warn alert is amber, not red — down and warn are two readings. */
@@ -263,6 +263,17 @@ test("clicking a row opens the asset it is about", async () => {
  * The strip follows the store without a remount, which is what makes it live:
  * an alert closed by a sync run leaves through the store's own re-read.
  */
+test("an alert's row is a jump, which Esc comes back from, not a walk through the columns (F-522)", async () => {
+  const alerts = alertsHolding([alert()]);
+  await alerts.refresh();
+  const nav = render(alerts);
+  const jumps: string[] = [];
+  nav.jump = (hash) => jumps.push(hash);
+  target.querySelector<HTMLButtonElement>(".alerts .go")!.click();
+  flushSync();
+  expect(jumps).toEqual(["#/asset/asset:postgres"]);
+});
+
 test("the strip follows the store as alerts open and close", async () => {
   let open: OpenAlert[] = [];
   const alerts = createAlerts({

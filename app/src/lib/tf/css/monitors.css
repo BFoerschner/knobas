@@ -1,7 +1,30 @@
 /* Monitors (#864): prototype-6's `.bar`, the roster's columns, the unwatched tab. */
 .tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.tf-mbar { display: flex; gap: 1px; height: 12px; width: 96px; flex: none; }
-.tf-mbar i { flex: 1; border-radius: 1px; background: var(--ok); opacity: .8; }
+/* 48 half-hours at 2 px and a 1 px gap, whole pixels at any scale. Narrow, 24 hours at 3 px: `barsOf` merges them. */
+.tf-mbar { display: inline-flex; gap: 1px; height: 14px; flex: none; vertical-align: middle; }
+.tf-mbar i { flex: none; width: 2px; border-radius: 1px; background: var(--ok); opacity: .8; }
+.tf-mbar-axis { display: flex; justify-content: space-between; width: 143px; font-size: var(--t-2xs); font-weight: 400; color: var(--ink-2); }
+.tf-mon { table-layout: fixed; }
+.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed, .tf-mon-held):hover > td { background: var(--sheet-2); }
+.tf-monc-state { width: 216px; }
+.tf-monc-bars { width: 170px; }
+.tf-monc-num { width: 92px; }
+.tf-monc-watch { width: 17%; }
+/* Fixed whether or not a row holds *Ack*, so the columns do not move as a filter hides the last one down. The row's other
+   actions stand in place of its figures on hover (Motion), or of its bars where the figures have left their columns. */
+.tf-monc-acts { width: 72px; }
+/* The chip holds the word and the time is plain text, on its own line at every width. A pause's or resume's echo stands
+   beside the state chip, so the row holds its height as the echo comes and goes (F-337, F-349). */
+.tf-mon-state { display: flex; flex-wrap: wrap; gap: 2px 6px; align-items: center; }
+.tf-mon-since { flex-basis: 100%; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.tf-mon-figs { display: none; font-size: var(--t-xs); color: var(--ink-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* The heads stay under the filter bar on a long list. At 900 px and below `.tf-cbody` scrolls sideways, so it would be their scrollport and they stay put. */
+@media (min-width: 901px) {
+  .tf-tbl:is(.tf-mon, .tf-mon-gaps) { overflow: clip; }
+  :is(.tf-mon, .tf-mon-gaps) thead th { position: sticky; top: 47px; z-index: 3; }
+}
+.tf-mon tbody tr:not(.tf-mon-foldrow, .tf-mon-failed) > td:first-child { overflow: hidden; text-overflow: ellipsis; }
+.tf-mon a.tf-mon-asset { text-decoration: underline; text-underline-offset: 2px; }
 .tf-mbar i.tf-seg-down { background: var(--err); opacity: 1; }
 .tf-mbar i.tf-seg-warn { background: var(--warn); opacity: 1; }
 .tf-mbar i.tf-seg-paused { background: var(--rule); opacity: 1; }
@@ -9,9 +32,34 @@
 .tf-mon .tf-mon-type { font-size: var(--t-xs); }
 .tf-mon .tf-mon-asset { font-size: var(--t-xs); color: inherit; }
 .tf-mon-acts { white-space: nowrap; text-align: right; }
-.tf-mon-acts .tf-trail { justify-content: flex-end; flex-wrap: nowrap; }
+.tf-mon tbody tr:not(.tf-mon-foldrow) > td:first-child { font-size: var(--t-md); font-weight: 500; white-space: nowrap; }
+.tf-mon .tf-mon-type { font-weight: 400; }
+/* The page never scrolls sideways: past what the table needs, the bars narrow, then the figures wait. */
+@media (max-width: 1240px) {
+  .tf-mbar i { width: 3px; }
+  .tf-mbar-axis { width: 95px; }
+  .tf-monc-state { width: 160px; }
+  .tf-monc-bars { width: 122px; }
+  .tf-monc-num { width: 90px; }
+  .tf-monc-watch { width: 24%; }
+}
+/* The figures' columns go, and the figures stay: under the bars, in the row. */
+@media (max-width: 1040px) {
+  /* Narrowed to nothing, not `display: none`: a row's `colspan="7"` (the fold, a failure, a gap) would make two new columns of the
+     rest of the table's width, and with a hidden monitor the table stopped short of its box. */
+  .tf-monc-num { width: 0; }
+  .tf-mon :is(th, td).tf-num { padding: 0; overflow: hidden; }
+  .tf-mon th.tf-num { visibility: hidden; }
+  .tf-mon td.tf-num > * { display: none; }
+  .tf-mon-figs { display: block; margin-top: 2px; }
+  /* Now the last column: wide enough for the row's actions, which take the figures' line on hover and leave the bars
+     readable, so the bar under the pointer keeps its title. Lowered from the row's middle by what puts the group's top at the figures' line. */
+  .tf-monc-bars { width: 190px; }
+  .tf-mon .tf-mon-acts .tf-rowacts { transform: translateY(calc(-50% + 10px)); }
+}
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
-.tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Figures read down their column: right-aligned, with room before the next one starts. */
+.tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; padding-right: 24px; }
 
 .tf-mon .tf-mon-failed > td { padding-top: 0; border-top: 0; }
 
@@ -22,9 +70,17 @@
   padding: 10px 12px; display: flex; gap: 8px; align-items: baseline;
 }
 .tf-mon-fold > summary::-webkit-details-marker { display: none; }
-.tf-mon-fold > summary::before { content: "▸"; font-size: var(--t-xs); width: 10px; }
-.tf-mon-fold[open] > summary::before { content: "▾"; }
 .tf-mon-fold > summary .tf-dim { font-weight: 400; }
 .tf-mon .tf-mon-hid > td { color: var(--ink-2); }
+/* The monitor an alert or a link opened the roster at: the list's selected row. */
+.tf-mon .tf-mon-at > td { box-shadow: inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
+.tf-mon .tf-mon-at > td:first-child { box-shadow: inset 2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
+.tf-mon .tf-mon-at > td:last-child { box-shadow: inset -2px 0 0 var(--ink), inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink); }
 .tf-mon .tf-mon-hid .tf-mbar { opacity: .45; }
 .tf-mon-hidn { font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; margin-left: calc(-1 * var(--control-gap)); }
+/* The count keeps room for *, 1 hidden*, as `.tf-fcount` does for its own words: *Hide* wrapping the band would move the rows under the pointer. */
+.tf-fend:has(> .tf-mon-hidn) { justify-content: flex-end; min-width: 146px; }
+.tf-mon-hidn:empty { display: none; }
+/* A row *Hide* took away keeps its height and its words, dimmed and with no controls, until the pointer leaves it (F-064). */
+.tf-mon tr.tf-mon-held > td { height: var(--tf-row-held); }
+.tf-mon tr.tf-mon-held :is(td, .tf-mon-since, .tf-mon-figs) { color: var(--muted); }

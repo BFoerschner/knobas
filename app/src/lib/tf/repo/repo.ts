@@ -56,6 +56,10 @@ export function headLine(
  * file until the source holds a newer blob.
  */
 export const MADE = "branch";
+/** A pull request this session queued, on the repository's entity with its title as the text (F-242) and the branch it proposes as its `base` (F-257). */
+export const MADE_PR = "pull request";
+/** The surface those echoes are tagged with, so the repository's *Pull requests* reads again for them. */
+export const REPO_PRS = "repo-prs";
 export const DELETED = "delete";
 export const commitKind = (branch: string, path: string) => `commit ${branch}\u0000${path}`;
 /** The surfaces they are tagged with, whose re-reads settle them. */
@@ -137,6 +141,11 @@ export function readRepoRoute(rest: readonly string[]): RepoRoute {
     branch: tab === "compare" ? compared.branch : null,
     base: tab === "compare" ? compared.base : null,
   };
+}
+
+/** Whether what follows `repo` in the address is a tab the page has, or a line of a file. */
+export function knowsRepoTab(rest: readonly string[]): boolean {
+  return rest[1] === undefined || rest[1] === LINE || TABS.has(rest[1]);
 }
 
 /** The address of the repository page, a tab of it, or a place inside a tab. */
@@ -606,6 +615,26 @@ export function proposal(head: string, ticket: ProposedFrom | null): { title: st
     title: `${ticket.key}: ${ticket.summary}`,
     body: description === "" ? `Closes ${ticket.key}.` : `${description}\n\nCloses ${ticket.key}.`,
   };
+}
+
+/**
+ * What git would refuse in a branch's name (`git check-ref-format`), in words, or `null` for one it takes. The dialog
+ * says so while typing, so the refusal isn't a queued write that comes back (F-247).
+ */
+export function branchNameProblem(name: string): string | null {
+  const it = name.trim();
+  if (it === "") return "Name the branch.";
+  if (/\s/.test(it)) return "A branch name can’t have spaces in it.";
+  if (it.endsWith("/")) return "A branch name can’t end in /.";
+  if (it.startsWith("/") || it.startsWith("-")) return `A branch name can’t start with ${it[0]}.`;
+  if (it.includes("//")) return "A branch name can’t have // in it.";
+  if (it.includes("..")) return "A branch name can’t have .. in it.";
+  if (it.includes("@{")) return "A branch name can’t have @{ in it.";
+  const bad = /[~^:?*[\\\x00-\x1f\x7f]/.exec(it);
+  if (bad !== null) return `A branch name can’t have ${bad[0]} in it.`;
+  if (it.endsWith(".") || it.endsWith(".lock")) return `A branch name can’t end in ${it.endsWith(".") ? "." : ".lock"}.`;
+  if (it.split("/").some((part) => part.startsWith("."))) return "A part of a branch name can’t start with a dot.";
+  return null;
 }
 
 /** *New branch…*'s name, prefilled with the job's key (R-8.8). */

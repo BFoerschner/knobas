@@ -25,7 +25,8 @@
     at,
     refreshed = 0,
   }: {
-    ports: Pick<RepoPorts, "entityView">;
+    /** `codeFacts` says whose the commit is; without it the strip names the author as the source does. */
+    ports: Pick<RepoPorts, "entityView"> & Partial<Pick<RepoPorts, "codeFacts">>;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
@@ -38,6 +39,8 @@
   /** How many commits the Commits tab counts, `null` where the source said not. */
   let total = $state<number | null>(null);
   const by = $derived(last ? authorOf(last) : null);
+  /** Whether that commit is the reader's own, `code_facts`' word: it reads *You*, as the Commits tab says. */
+  let mine = $state(false);
 
   function read(where: string, alive: () => boolean, again: boolean): Promise<unknown> {
     return ports.entityView(where, "commits").then(
@@ -45,6 +48,17 @@
         if (!alive()) return;
         last = viewRows(view?.sections[0])[0] ?? null;
         total = view?.sections[0]?.count == null ? null : Number(view.sections[0].count);
+        const id = last?.entity_id ?? null;
+        if (id === null) {
+          mine = false;
+          return;
+        }
+        return ports.codeFacts?.([id]).then(
+          (facts) => {
+            if (alive() && last?.entity_id === id) mine = facts.some((entry) => entry.entity_id === id && entry.mine);
+          },
+          () => {},
+        );
       },
       () => {
         if (alive() && !again) last = null;
@@ -78,7 +92,7 @@
   <!-- The mockup's order: who, the message, the sha, when, then the way to the history. -->
   <div class="tf-lastc">
     {#if by?.author}
-      <span class="tf-av" aria-hidden="true">{initials(by.author)}</span><b class="tf-lastc-by">{by.author}</b>
+      <span class="tf-av" class:tf-me={mine} aria-hidden="true">{initials(by.author)}</span><b class="tf-lastc-by">{mine ? "You" : by.author}</b>
     {/if}
     <span class="tf-lastc-msg">{last.title}</span>
     {#if last.entity_id !== null}

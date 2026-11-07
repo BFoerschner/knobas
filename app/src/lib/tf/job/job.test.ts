@@ -52,7 +52,7 @@ test("the card's foot: the decision while reading, the timer once pinned, nothin
   expect(footAction({ ...reading, status: "done", mine: false })).toBeNull();
 
   const pinned = { pinned: true, status: "Done", mine: false };
-  expect(footAction({ ...pinned, timerOnIt: true })).toEqual({ label: "Stop and log", does: "stop" });
+  expect(footAction({ ...pinned, timerOnIt: true })).toEqual({ label: "Stop and log…", does: "stop" });
   expect(footAction({ ...pinned, timerOnIt: false })).toEqual({ label: "Start timer", does: "start-timer" });
 });
 

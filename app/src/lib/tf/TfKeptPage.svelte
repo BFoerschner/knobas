@@ -9,7 +9,7 @@
   role frame (#2106) for a page that names a `role`: *Sync now* into its header
   as `sync`, and `syncRevision`, which also moves each time the page is shown
   again, so a role view re-reads on its return as it does after a run. It
-  keeps the page's scroll across a hide (`keepScroll`, #2248).
+  keeps the page's scroll across a hide (`keepScroll`, #2248), for as long as it shows the address it was left at.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -44,7 +44,7 @@
   providePageName(() => visible);
   // The shell's one scroller is every page's: each page shows again where it was left (#2248).
   let wrapper = $state<HTMLElement>();
-  keepScroll(() => wrapper, () => visible);
+  keepScroll(() => wrapper, () => visible, () => JSON.stringify(route));
 
   /**
    * The page's *This job*: the ticket a card's sections row narrowed this
@@ -90,12 +90,14 @@
 {/snippet}
 
 <div class="tf-kept" hidden={!visible} bind:this={wrapper}>
-  {#if page.crumbs && route.view === "full"}
-    <div class="tf-full">
-      <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} />
+  <div class="tf-keptpage">
+    {#if page.crumbs && route.view === "full"}
+      <div class="tf-full">
+        <TfCrumbs parts={shellCrumbs(route)} back={ctx.back} sectionTop />
+        <Page {...pageProps} {...frameProps} />
+      </div>
+    {:else}
       <Page {...pageProps} {...frameProps} />
-    </div>
-  {:else}
-    <Page {...pageProps} {...frameProps} />
-  {/if}
+    {/if}
+  </div>
 </div>

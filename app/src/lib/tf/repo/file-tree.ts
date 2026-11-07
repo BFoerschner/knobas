@@ -124,6 +124,19 @@ export function fileMeta(file: { path: string; size: number | bigint; binary: bo
 }
 
 /**
+ * A commit row's second reading: the source's `author · age`, or *You · age*
+ * on the reader's own commit (F-221), as the page's other lines call them.
+ * `mine` is `code_facts`' word, so a commit the mirror does not hold keeps its
+ * author's name, and a line that names no author stays as the source wrote it.
+ */
+export function commitLine(row: ViewRow, mine: boolean): string {
+  const meta = row.meta ?? "";
+  if (!mine || !row.author) return meta;
+  const { when } = authorOf(row);
+  return when !== null && when !== row.author ? `You · ${when}` : "You";
+}
+
+/**
  * A commit row's author, drawn apart from when it was made: `author` where
  * the source names one, and `when`, the rest of its meta (`mara · 3 hours
  * ago` without `mara · `). With no author, the meta is drawn whole.

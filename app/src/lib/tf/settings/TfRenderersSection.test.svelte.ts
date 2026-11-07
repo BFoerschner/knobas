@@ -5,6 +5,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { RenderContent, UserRenderer, UserRendererDraft } from "../../ipc/app";
 import { installCommands } from "../../render/command";
 import { renderersFor, renderersForFence } from "../../render/registry";
+import { toasts } from "../../shell/toasts.svelte";
+import { drafts } from "../drafts.svelte";
 import TfRenderersSection, { type RendererPorts } from "./TfRenderersSection.svelte";
 import type { RendererDefault } from "../../render/defaults";
 import { createRendererDefaults } from "../../render/defaults.svelte";
@@ -30,6 +32,7 @@ function storedDefaults(start: RendererDefault[] = []) {
 let target: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
 beforeEach(() => {
+  drafts.reset();
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -81,6 +84,84 @@ function type(label: string, value: string) {
 
 const button = (name: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === name)!;
 
+const esc = () => {
+  target.querySelector(".tf-dialog")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+};
+const fieldValue = (id: string) => target.querySelector<HTMLInputElement>(`#${id}`)!.value;
+
+test("`Esc` and × keep a new renderer's words; Cancel and a save end them (F-647)", async () => {
+  const { ports } = backend();
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+
+  button("Add a renderer…").click();
+  flushSync();
+  type("Name", "PlantUML");
+  type("Command", "plantuml -pipe");
+  esc();
+  expect(target.querySelector(".tf-dialog")).toBeNull();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name")).toBe("PlantUML");
+  expect(fieldValue("tf-rnd-cmd")).toBe("plantuml -pipe");
+  target.querySelector<HTMLButtonElement>(".tf-dclose")!.click();
+  flushSync();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name"), "× kept them too").toBe("PlantUML");
+  button("Cancel").click();
+  flushSync();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name"), "Cancel ended them").toBe("");
+  type("Name", "D2");
+  type("Command", "d2 -");
+  button("Add renderer").click();
+  target.querySelector<HTMLFormElement>("#tf-rnd-form")?.requestSubmit();
+  await settle();
+  expect(target.querySelector(".tf-dialog")).toBeNull();
+
+  button("Add a renderer…").click();
+  flushSync();
+  expect(fieldValue("tf-rnd-name"), "a save ended them").toBe("");
+});
+
+test("an edit keeps its words per renderer, and a renderer left unchanged holds nothing (F-647)", async () => {
+  const one = (id: string, name: string): UserRenderer => ({ id, name, command: `${id} -`, patterns: [], fences: [], input: "text", output: "svg", timeout_secs: 10, diff: false });
+  const { ports } = backend([one("a", "Alpha"), one("b", "Beta")]);
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  const edit = (name: string) => {
+    target.querySelector<HTMLButtonElement>(`button[aria-label="Edit ${name}…"]`)!.click();
+    flushSync();
+  };
+
+  edit("Alpha");
+  expect(drafts.has("renderer:a"), "opened, nothing typed").toBe(false);
+  type("Command", "alpha --svg");
+  esc();
+  edit("Beta");
+  expect(fieldValue("tf-rnd-cmd"), "Beta's own").toBe("b -");
+  esc();
+  edit("Alpha");
+  expect(fieldValue("tf-rnd-cmd")).toBe("alpha --svg");
+});
+
+test("the test pane's sample comes back after leaving the section", async () => {
+  const one: UserRenderer = { id: "a", name: "Alpha", command: "a -", patterns: [], fences: [], input: "text", output: "svg", timeout_secs: 10, diff: false };
+  app = mount(TfRenderersSection, { target, props: { ports: backend([one]).ports, defaults: storedDefaults().store } });
+  await settle();
+  type("Sample", "graph LR");
+  unmount(app);
+  app = mount(TfRenderersSection, { target, props: { ports: backend([one]).ports, defaults: storedDefaults().store } });
+  await settle();
+  expect(fieldValue("tf-rnd-sample")).toBe("graph LR");
+});
+
 test("a renderer added here is saved whole, in the registry at once, and runs in the test pane", async () => {
   const { ports, sent, ran } = backend();
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
@@ -95,7 +176,7 @@ test("a renderer added here is saved whole, in the registry at once, and runs in
   type("Markdown fence languages", "Cat");
   type("Writes", "html");
   type("Timeout", "3");
-  button("Save").click();
+  button("Add renderer").click();
   await settle();
 
   expect(sent).toEqual([
@@ -130,15 +211,15 @@ test("a renderer that draws diffs says so in its form, and an edit keeps it (#22
   expect(box().checked).toBe(false);
   box().click();
   flushSync();
-  button("Save").click();
+  button("Add renderer").click();
   await settle();
   expect(sent.at(-1)?.[0]?.diff).toBe(true);
   expect(renderersFor({ path: "a.page", binary: false })[0]?.diff).toBe(true);
 
-  button("Edit").click();
+  button("Edit…").click();
   flushSync();
   expect(box().checked).toBe(true);
-  button("Save").click();
+  button("Save renderer").click();
   await settle();
   expect(sent.at(-1)?.[0]?.diff).toBe(true);
 });
@@ -157,6 +238,25 @@ test("Remove saves the list without it, and the registry drops it", async () => 
   expect(renderersFor({ path: "a.page", binary: false }).map((r) => r.id)).toEqual(["source"]);
 });
 
+test("Remove says so on one toast with Undo, however many went, and Undo puts them all back in their places (F-611)", async () => {
+  const one = (id: string): UserRenderer => ({ id, name: id, command: "cat", patterns: [`*.${id}`], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false });
+  const { ports, sent } = backend([one("a"), one("b"), one("c")]);
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+
+  target.querySelector<HTMLButtonElement>('button[aria-label="Remove a"]')!.click();
+  await settle();
+  const removals = () => toasts.items.filter((toast) => toast.text.startsWith("Removed"));
+  expect(removals().map((toast) => [toast.text, toast.action?.label])).toEqual([["Removed a", "Undo"]]);
+  target.querySelector<HTMLButtonElement>('button[aria-label="Remove b"]')!.click();
+  await settle();
+  expect(removals().map((toast) => toast.text), "repeats collapse").toEqual(["Removed 2 renderers"]);
+
+  removals()[0]!.action!.run();
+  await settle();
+  expect(sent.at(-1)!.map((draft) => draft.id)).toEqual(["a", "b", "c"]);
+});
+
 test("a command the backend refuses is said beside the form, which stays open", async () => {
   const { ports } = backend();
   ports.setUserRenderers = () => Promise.reject({ code: "invalid", message: "Bad's command cannot be run: the command has a quote that is never closed" });
@@ -167,11 +267,63 @@ test("a command the backend refuses is said beside the form, which stays open", 
   flushSync();
   type("Name", "Bad");
   type("Command", "cat 'x");
-  button("Save").click();
+  button("Add renderer").click();
   await settle();
 
   expect(target.querySelector("[role=alert]")?.textContent).toContain("never closed");
   expect(target.querySelector("#tf-rnd-name")).not.toBeNull();
+});
+
+test("Add a renderer… is a dialog: focus in, the missing line, Esc out with focus back (F-618)", async () => {
+  const { ports, sent } = backend();
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  const opener = button("Add a renderer…");
+  opener.focus();
+  opener.click();
+  await settle();
+
+  const dialog = target.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog.querySelector("h2")?.textContent).toBe("Add a renderer");
+  expect(document.activeElement?.id).toBe("tf-rnd-name");
+  expect([...dialog.querySelectorAll(".tf-req")]).toHaveLength(2);
+  expect(button("Add renderer").disabled).toBe(true);
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("Still needs the name and the command.");
+
+  type("Name", "Cat");
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("Still needs the command.");
+  type("Command", "cat");
+  expect(dialog.querySelector(".tf-dwhy")).toBeNull();
+  type("Timeout", "999");
+  expect(dialog.querySelector(".tf-dwhy")?.textContent).toBe("The timeout takes 1 to 120 seconds.");
+  expect(sent).toEqual([]);
+
+  document.activeElement!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await settle();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(document.activeElement).toBe(opener);
+});
+
+test("a removal the backend refuses is said beside the table, with no form open to hold it", async () => {
+  const { ports } = backend([{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
+  ports.setUserRenderers = () => Promise.reject({ code: "invalid", message: "the list could not be written" });
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  [...target.querySelectorAll("button")].find((b) => b.getAttribute("aria-label") === "Remove Cat")!.click();
+  await settle();
+  expect(target.querySelector("[role=alert]")?.textContent).toContain("could not be written");
+  expect(target.querySelector("tbody")?.textContent).toContain("Cat");
+});
+
+test("Run waits for a sample, and says so", async () => {
+  const { ports } = backend([{ id: "cat", name: "Cat", command: "cat", patterns: [], fences: [], input: "text", output: "html", timeout_secs: 10, diff: false }]);
+  app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store } });
+  await settle();
+  expect(button("Run").disabled).toBe(true);
+  expect(button("Run").parentElement?.querySelector(".tf-dwhy")?.textContent).toBe("Paste some sample text first.");
+  type("Sample", "hello");
+  expect(button("Run").disabled).toBe(false);
+  expect(button("Run").parentElement?.querySelector(".tf-dwhy")).toBeNull();
 });
 
 // -- Default renderers (#2263) ---------------------------------------------------
@@ -239,9 +391,9 @@ test("Run pipelines on diffs is on until turned off here, and stored (#2270, Sta
   const piping = createDiffPipelines({ read: async () => true, save: async (on) => (saved.push(on), on) });
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
   await settle();
-  const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
+  const box = target.querySelector<HTMLButtonElement>("#tf-rnd-pipes")!;
   expect(target.querySelector('label[for="tf-rnd-pipes"]')?.textContent).toMatch(/^Run pipelines on diffs/);
-  expect(box.checked).toBe(true);
+  expect(box.getAttribute("aria-checked")).toBe("true");
   box.click();
   await settle();
   expect(saved).toEqual([false]);
@@ -253,11 +405,11 @@ test("a refused save of Run pipelines on diffs puts the box back (Standards 6)",
   const piping = createDiffPipelines({ read: async () => true, save: () => Promise.reject(new Error("the database is gone")) });
   app = mount(TfRenderersSection, { target, props: { ports, defaults: storedDefaults().store, piping } });
   await settle();
-  const box = target.querySelector<HTMLInputElement>("#tf-rnd-pipes")!;
+  const box = target.querySelector<HTMLButtonElement>("#tf-rnd-pipes")!;
   box.click();
   await settle();
   expect(piping.on).toBe(true);
-  expect(box.checked).toBe(true);
+  expect(box.getAttribute("aria-checked")).toBe("true");
 });
 
 /** #2343: "Small: everything inside a page body" (Controls); a dialog has its own footer rule. */

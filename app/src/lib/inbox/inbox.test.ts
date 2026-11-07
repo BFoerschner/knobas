@@ -77,6 +77,7 @@ vi.mock("../shell/follow-write", () => ({
 // module from this window would fail here rather than reach a real bridge.
 vi.mock("../ipc/assets", () => ({
   ackAlert: (monitorId: string) => record(`ack ${monitorId}`, undefined),
+  unackAlert: (monitorId: string) => record(`unack ${monitorId}`, undefined),
 }));
 
 /** No Tauri bridge in jsdom; the view must still mount. */
@@ -313,6 +314,7 @@ test("the inbox re-reads when a source's credential health moves", async () => {
     snoozeInboxItem: () => Promise.resolve(),
     completeInboxItem: () => Promise.resolve(),
     ackAlert: () => Promise.resolve(),
+    unackAlert: () => Promise.resolve(),
     listen: (event, handler) => {
       handlers.set(event, handler);
       return Promise.resolve(() => {});
@@ -344,6 +346,7 @@ test("a burst of events during a read makes one more read, not one per event", a
     snoozeInboxItem: () => Promise.resolve(),
     completeInboxItem: () => Promise.resolve(),
     ackAlert: () => Promise.resolve(),
+    unackAlert: () => Promise.resolve(),
     listen: (_event, handler) => {
       handlers.push(handler);
       return Promise.resolve(() => {});

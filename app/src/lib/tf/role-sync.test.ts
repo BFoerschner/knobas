@@ -7,7 +7,9 @@ import { expect, test } from "vitest";
 
 import type { RoleRun, SourceSyncStatus } from "../ipc/sources";
 import { EVENTS } from "../ipc";
-import { createRoleSyncs, createSourceSyncs, type RoleSyncPorts } from "./role-sync.svelte";
+import { toasts } from "../shell/toasts.svelte";
+import { createAllSync, createRoleSyncs, createSourceSyncs, type RoleSyncPorts } from "./role-sync.svelte";
+import { sourceRoles } from "./roles.svelte";
 
 function status(source_id: string, run_id: number, running: boolean): SourceSyncStatus {
   return {
@@ -136,4 +138,83 @@ test("a detail's Sync now runs its one source, held by source id, until that run
   send(status("kuma", 12, false));
   expect(sync.running).toBe(false);
   expect(sync.revision).toBe(1);
+});
+
+const named = (id: string, display_name: string) => ({ id, display_name, roles: [], role_misses: [] });
+
+test("a press ends in one toast naming the source, when every run has, replaced by the next press's (F-448, F-455, F-068)", async () => {
+  toasts.items = [];
+  sourceRoles.take([named("confluence", "Tidewater Confluence")]);
+  const { ports, send } = harness([{ source_id: "confluence", run_id: 7 }]);
+  const sync = createRoleSyncs(ports).of("wiki");
+  await sync.start();
+  await settle();
+  expect(toasts.items).toEqual([]);
+  send({ ...status("confluence", 7, false), last_outcome: "ok", last_changed: true });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced Tidewater Confluence"]);
+  await sync.start();
+  await settle();
+  send({ ...status("confluence", 7, false), last_outcome: "ok", last_changed: false });
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Tidewater Confluence is up to date"]);
+  await sync.start();
+  await settle();
+  send({ ...status("confluence", 7, false), last_outcome: "unreachable" });
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([["Could not sync Tidewater Confluence: the source can't be reached", "err"]]);
+  toasts.items = [];
+  sourceRoles.forget();
+});
+
+test("several runs read as a count, and a run that failed is named however the others ended", async () => {
+  toasts.items = [];
+  sourceRoles.take([named("gitea", "Tidewater Gitea"), named("forgejo", "Forgejo"), named("mirror", "Mirror")]);
+  const runs = [
+    { source_id: "gitea", run_id: 1 },
+    { source_id: "forgejo", run_id: 2 },
+  ];
+  const { ports, send } = harness(runs);
+  const sync = createRoleSyncs(ports).of("code-host");
+  const end = async (first: Partial<SourceSyncStatus>, second: Partial<SourceSyncStatus>) => {
+    await sync.start();
+    await settle();
+    send({ ...status("gitea", 1, false), ...first });
+    send({ ...status("forgejo", 2, false), ...second });
+    return toasts.items.map((toast) => toast.text);
+  };
+  expect(await end({ last_changed: true }, { last_changed: false })).toEqual(["Synced 2 sources"]);
+  expect(await end({ last_changed: false }, { last_changed: false })).toEqual(["2 sources are up to date"]);
+  expect(await end({ last_outcome: "ok" }, { last_outcome: "unauthorized" })).toEqual(["Could not sync Forgejo: the sign-in failed"]);
+  expect(await end({ last_outcome: "unauthorized" }, { last_outcome: "unauthorized" })).toEqual(["Could not sync Tidewater Gitea and Forgejo: the sign-in failed"]);
+  expect(await end({ last_outcome: "unauthorized" }, { last_outcome: "error" })).toEqual([
+    "Could not sync Tidewater Gitea: the sign-in failed. Could not sync Forgejo: the run failed",
+  ]);
+  toasts.items = [];
+  sourceRoles.forget();
+});
+
+test("a role with no runs says so without naming the role", async () => {
+  toasts.items = [];
+  const { ports } = harness([]);
+  await createRoleSyncs(ports).of("wiki").start();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Nothing to sync"]);
+  toasts.items = [];
+});
+
+test("Sync all is told only run ids: each ending names its source, and the answer waits for them all (F-652)", async () => {
+  toasts.items = [];
+  sourceRoles.take([named("gitea", "Tidewater Gitea"), named("teamcity", "Tidewater TeamCity")]);
+  const { ports, send } = harness([]);
+  const sync = createAllSync(ports, () => Promise.resolve([11, 12]));
+  await sync.start();
+  await settle();
+  expect(sync.running).toBe(true);
+  send(status("jira", 9, false));
+  send(status("gitea", 11, true));
+  expect(sync.going).toBe(2);
+  send({ ...status("gitea", 11, false), last_outcome: "ok" });
+  expect(toasts.items).toEqual([]);
+  send({ ...status("teamcity", 12, false), last_outcome: "unauthorized" });
+  expect(sync.running).toBe(false);
+  expect(toasts.items.map((toast) => [toast.text, toast.subject])).toEqual([["Could not sync Tidewater TeamCity: the sign-in failed", "sync:all"]]);
+  toasts.items = [];
+  sourceRoles.forget();
 });

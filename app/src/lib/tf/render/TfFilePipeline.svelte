@@ -5,19 +5,22 @@
   `bytes → step → step → renderer`. Each step has a grip (drag it, or focus it and press ← or →), its name, its
   arguments inline (a jq filter, a decompressor, a format) and a remove button. *Add step* lists the built-in
   steps (`render/pipeline.ts`). A changed jq filter is sent a moment after typing stops, or at once on `Enter`;
-  every other change at once. *Reset* drops the pipeline.
+  every other change at once. *Reset* takes the steps away and leaves the bar open for new ones. *Close* puts the bar
+  away, as `Esc` does: both give focus back to what opened it, and the steps come back if it is opened again.
+
+  *Not saved* speaks once there is something to save: an empty bar has nothing to lose.
 
   #2265: *Add step* also lists the person's own command steps (*Your commands*, saved in Settings › Renderers).
   *Save as default for `*.json.gz`…* asks for a name and a pattern and hands them to `onsave`; a pipeline shown
   because it is a pattern's default says so where *Not saved* stands.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
-
   import type { CommandStep } from "../../ipc/app";
   import type { PipeFormat, PipeStep } from "../../ipc/entity";
   import { FORMATS, STEP_CHOICES, moveStep, nameAfter, stepName, withStep } from "../../render/pipeline";
+  import { inlineEditor } from "../inline-editor";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
+  import TfMenu from "../TfMenu.svelte";
 
   let {
     steps,
@@ -27,11 +30,15 @@
     running = false,
     onchange,
     onreset,
+    onclose = null,
+    closeTo = () => null,
+    edited = true,
     commands = [],
     saved = null,
     savePattern = "",
     savedName = "",
     onsave,
+    onaddcommand,
     layers = sharedLayers,
   }: {
     steps: PipeStep[];
@@ -43,7 +50,14 @@
     failedAt?: number | null;
     running?: boolean;
     onchange: (steps: PipeStep[]) => void;
+    /** Takes the steps away, or an edit of a default back to the default. */
     onreset: () => void;
+    /** Puts the bar away, where the reader opened it; `null` where it stands by itself (a default's bar) or the page is hidden. */
+    onclose?: (() => void) | null;
+    /** What takes focus when the bar goes: what opened it is gone by then. */
+    closeTo?: () => HTMLElement | null;
+    /** The steps are the reader's, not the default's as it stands: there is something to reset. */
+    edited?: boolean;
     /** The person's command steps (#2265), offered under *Your commands*. */
     commands?: readonly CommandStep[];
     /** The named pipeline shown, and the pattern it is the default for, when the steps are that default's. */
@@ -54,6 +68,8 @@
     savedName?: string;
     /** Saves the steps as `name`, the default for `pattern`; no button without it. */
     onsave?: ((name: string, pattern: string) => Promise<void>) | undefined;
+    /** Starts a new command step where the bar stands. Without it, *Add a command step…* goes to Settings › Renderers, where they are made. */
+    onaddcommand?: (() => void) | undefined;
     layers?: Layers | undefined;
   } = $props();
 
@@ -62,13 +78,15 @@
 
   let adding = $state(false);
   let face = $state<HTMLButtonElement | null>(null);
-  let menu = $state<HTMLDivElement | null>(null);
   let bar = $state<HTMLDivElement | null>(null);
   let typing: ReturnType<typeof setTimeout> | null = null;
   let dragged: number | null = null;
   /** The *Save as default* form, while it is open. */
   let saving = $state<{ name: string; pattern: string } | null>(null);
   let storing = $state(false);
+  let saveFace = $state<HTMLButtonElement | null>(null);
+  /** What *Save* waits for, in words beside it (design system, the enabled rule). */
+  const saveNeeds = $derived(saving === null ? null : saving.name.trim() === "" ? "Name it first." : saving.pattern.trim() === "" ? "Say which files it is the default for." : null);
 
   async function save() {
     if (saving === null || onsave === undefined) return;
@@ -85,48 +103,22 @@
     }
   }
 
-  $effect(() => {
-    if (!adding) return;
-    const off = untrack(() => layers.add({ kind: "dialog", close: () => closeMenu() }));
-    queueMicrotask(() => menu?.querySelector<HTMLElement>("button")?.focus());
-    const outside = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && !menu?.contains(target) && !face?.contains(target)) adding = false;
-    };
-    window.addEventListener("click", outside, true);
-    return () => {
-      off();
-      window.removeEventListener("click", outside, true);
-    };
-  });
   $effect(() => () => {
     if (typing !== null) clearTimeout(typing);
   });
 
-  function closeMenu() {
-    adding = false;
-    face?.focus();
-  }
-
-  function menuKeys(event: KeyboardEvent) {
-    const items = [...(menu?.querySelectorAll<HTMLElement>("button, a") ?? [])];
-    const at = items.indexOf(document.activeElement as HTMLElement);
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      closeMenu();
-    } else if (event.key === "ArrowDown" && items.length > 0) {
-      event.preventDefault();
-      items[(at + 1) % items.length]?.focus();
-    } else if (event.key === "ArrowUp" && items.length > 0) {
-      event.preventDefault();
-      items[(at - 1 + items.length) % items.length]?.focus();
-    }
-  }
-
   function add(make: (name: string) => PipeStep) {
     adding = false;
-    onchange([...steps, make(nameAfter(path, steps))]);
+    const step = make(nameAfter(path, steps));
+    onchange([...steps, step]);
+    // A jq filter is what the step is for, so the caret goes there; the menu's own close lands first.
+    if (step.step === "jq") setTimeout(() => [...(bar?.querySelectorAll<HTMLElement>(".tf-pfilter") ?? [])].at(-1)?.focus());
+  }
+
+  function reset() {
+    onreset();
+    // *Reset* goes with the steps it took away, so focus goes to what starts new ones.
+    queueMicrotask(() => face?.focus());
   }
 
   function remove(index: number) {
@@ -171,7 +163,7 @@
   }
 </script>
 
-<div class="tf-pipe" bind:this={bar}>
+<div class="tf-pipe" bind:this={bar} {@attach onclose !== null && inlineEditor(onclose, { back: closeTo, focus: ".tf-pfilter, [aria-haspopup=menu]", layers })}>
   <div class="tf-psteps">
     <span class="tf-plab">Pipeline</span><span class="tf-psrc">bytes</span><span class="tf-parrow" aria-hidden="true">→</span>
     {#each steps as step, i (i)}
@@ -249,11 +241,9 @@
     <span class="tf-pstep tf-prenderer">{shownAs}</span>
     <span class="tf-pmenu">
       <button bind:this={face} type="button" class="tf-btn tf-sm tf-ghost" aria-haspopup="menu" aria-expanded={adding} onclick={() => (adding = !adding)}
-        >+ Add step</button
+        >Add step…</button
       >
-      {#if adding}
-        <!-- svelte-ignore a11y_interactive_supports_focus -->
-        <div class="tf-menu" role="menu" tabindex="-1" aria-label="Add step" bind:this={menu} onkeydown={menuKeys}>
+      <TfMenu bind:open={adding} opener={face} label="Add step" className="tf-pmenu-m" align="start" {layers}>
           <div class="tf-rsw-mh">Built in</div>
           {#each STEP_CHOICES as choice (choice.id)}
             <button type="button" role="menuitem" onclick={() => add(choice.make)}
@@ -267,27 +257,36 @@
               ><span>{command.name}</span><span class="tf-rsw-kb tf-pmono">{command.command}</span></button
             >
           {/each}
-          <a role="menuitem" href="#/settings/renderers" onclick={() => (adding = false)}
-            ><span>Add a command step…</span><span class="tf-rsw-kb">Settings › Renderers</span></a
-          >
-        </div>
-      {/if}
+          {#if onaddcommand !== undefined}
+            <button type="button" role="menuitem" onclick={() => ((adding = false), onaddcommand?.())}><span>Add a command step…</span></button>
+          {:else}
+            <a role="menuitem" href="#/settings/renderers" onclick={() => (adding = false)}
+              ><span>Add a command step…</span><span class="tf-rsw-kb">Settings › Renderers</span></a
+            >
+          {/if}
+      </TfMenu>
     </span>
   </div>
-  <div class="tf-acts">
+  <div class="tf-acts tf-trail">
     <span class="tf-dim tf-small" aria-live="polite"
-      >{running ? "Running…" : saved !== null ? `${saved.name}, the default for ${saved.pattern}` : "Not saved"}</span
+      >{running ? "Running…" : saved !== null ? `${saved.name}, the default for ${saved.pattern}` : steps.length > 0 ? "Not saved" : ""}</span
     >
     {#if onsave !== undefined && saved === null && steps.length > 0 && saving === null}
-      <button type="button" class="tf-btn tf-sm" onclick={() => (saving = { name: savedName, pattern: savePattern })}
+      <button type="button" class="tf-btn tf-sm" bind:this={saveFace} onclick={() => (saving = { name: savedName, pattern: savePattern })}
         >Save as default for <span class="tf-pmono">{savePattern}</span>…</button
       >
     {/if}
-    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={onreset}>Reset</button>
+    {#if edited && steps.length > 0}
+      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={reset}>Reset</button>
+    {/if}
+    {#if onclose !== null}
+      <button type="button" class="tf-btn tf-sm tf-ghost" onclick={onclose}>Close</button>
+    {/if}
   </div>
   {#if saving !== null}
     <form
       class="tf-psave"
+      {@attach inlineEditor(() => (saving = null), { back: () => saveFace ?? face, layers })}
       onsubmit={(event) => {
         event.preventDefault();
         void save();
@@ -295,9 +294,10 @@
     >
       <label>Name <input aria-label="Pipeline name" bind:value={saving.name} placeholder="Gzipped JSON" spellcheck="false" /></label>
       <label>Default for <input class="tf-pmono" aria-label="File pattern" bind:value={saving.pattern} spellcheck="false" /></label>
-      <span class="tf-dim tf-small">A pipeline of the same name is replaced, and every pattern that uses it follows.</span>
-      <button type="submit" class="tf-btn tf-sm tf-primary" disabled={storing}>Save</button>
+      {#if saveNeeds !== null}<p class="tf-dwhy" role="status">{saveNeeds}</p>{/if}
+      <button type="submit" class="tf-btn tf-sm tf-primary" disabled={storing || saveNeeds !== null}>Save</button>
       <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (saving = null)}>Cancel</button>
+      <span class="tf-dim tf-small tf-psave-note">A pipeline of the same name is replaced, and every pattern that uses it follows.</span>
     </form>
   {/if}
 </div>

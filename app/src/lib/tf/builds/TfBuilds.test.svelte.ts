@@ -3,11 +3,13 @@
  * filter and chips, the selected pipeline's runs on the right, and the
  * source's word in one header line only.
  */
+import { layers as sharedLayers } from "../layers.svelte";
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import * as entityIpc from "../../ipc/entity";
+import { sessionFilter } from "../filter/filter-state.svelte";
 import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
 
 // Only the default *This job* read (#1537) reaches these; the other tests pass `ports.jobPipelines`.
@@ -109,8 +111,24 @@ function draw(rest: string[], head = "builds", asked: string[] = [], extra: Part
   page = mount(TfBuilds, { target, props: { ready: true, head, rest, job: null, ports, ...(sync ? { sync: syncNow } : {}) } });
 }
 
-const rows = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-pi")];
+const rows = () => [...target.querySelectorAll<HTMLAnchorElement>(".tf-pl-rows .tf-pi")];
 const names = () => rows().map((row) => row.querySelector(".tf-pi-nm")?.textContent);
+
+test("an open Pipeline fold is a panel: Esc folds it first, and focus returns to its bar (F-619)", async () => {
+  draw([]);
+  await settle();
+  const before = sharedLayers.open.length;
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  expect(sharedLayers.open).toHaveLength(before + 1);
+  sharedLayers.open.at(-1)!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(bar);
+  expect(sharedLayers.open).toHaveLength(before);
+});
 
 test("each pipeline is a row: its name, err when its latest run failed, a strip of the last twelve runs, its path on hover", async () => {
   draw([]);
@@ -138,8 +156,8 @@ test("a bare #/builds selects the first failing pipeline and lists its runs newe
   expect(target.querySelector(".tf-bmain h1")?.textContent).toBe("Payout_IntegrationTests");
   const first = target.querySelector(".tf-runs tbody tr");
   expect(first?.textContent).toContain("#1187");
-  expect(first?.textContent).toContain("FAILURE");
-  expect(first?.textContent).toContain("4 m 12 s");
+  expect(first?.textContent).toContain("Failed");
+  expect(first?.textContent).toContain("4m 12s");
   expect(target.querySelectorAll(".tf-runs tbody tr")).toHaveLength(14);
 });
 
@@ -162,6 +180,23 @@ test("the chips keep the failing or the running ones", async () => {
   chip("Running").click();
   flushSync();
   expect(names()).toEqual(["Payout_Build"]);
+});
+
+test("a filter that hides the pipeline you are on keeps it pinned over the list, saying why, until you leave it", async () => {
+  draw(["teamcity:buildType:Payout_Lint"]);
+  await settle();
+  const pinned = () => target.querySelector<HTMLAnchorElement>(".tf-pl-pin a");
+  expect(pinned()).toBeNull();
+  const chip = (word: string) => [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === word)!;
+  chip("Failing").click();
+  flushSync();
+  expect(names()).not.toContain("Payout_Lint");
+  expect(pinned()?.getAttribute("aria-current")).toBe("true");
+  expect(pinned()?.textContent).toContain("Payout_Lint");
+  expect(pinned()?.textContent).toContain("Hidden by the filter");
+  chip("Failing").click();
+  flushSync();
+  expect(pinned()).toBeNull();
 });
 
 test("the source's word appears once in the list, as the header line over its pipelines", async () => {
@@ -192,7 +227,7 @@ test("a run's address without its pipeline moves to the full address of the pipe
 test("a run's address no pipeline ran says so", async () => {
   draw(["teamcity:build:1"], "build", [], { view: () => Promise.resolve(null) });
   await settle();
-  expect(target.querySelector(".tf-bmain .tf-empty")?.textContent).toContain("No run at this address.");
+  expect(target.querySelector(".tf-bmain .tf-empty")?.textContent).toContain("knobas does not hold this run.");
 });
 
 test("no pipelines says what would fill the list", async () => {
@@ -374,14 +409,28 @@ const ON_JOB: JobPipeline[] = [
   { pipeline_id: "teamcity:buildType:Payout_Deploy_Prod", reasons: [{ kind: "pr_check", pr: "gitea:svc#142" }] },
 ];
 
-test("This job is on by default with a job: the tree pruned to its pipelines, each with its reasons", async () => {
+test("a pipeline This job leaves out stays pinned over the list while you are on it, and says it is not on the job", async () => {
+  const off = TREE.find((p) => !ON_JOB.some((row) => row.pipeline_id === p.entity_id))!;
+  sessionFilter("builds-pipelines").scope = "job";
+  drawTree({ job: "PAY-231", reasons: ON_JOB, rest: [off.entity_id] });
+  await settle();
+  const pinned = target.querySelector<HTMLAnchorElement>(".tf-pl-pin a");
+  expect(pinned?.getAttribute("aria-current")).toBe("true");
+  expect(pinned?.textContent).toContain(off.name);
+  expect(pinned?.textContent).toContain("Not in PAY-231");
+});
+
+test("All is the default, as on every page; This job prunes the tree to its pipelines, each with its reasons", async () => {
   drawTree({ job: "PAY-231", reasons: ON_JOB });
   await settle();
   const scope = [...target.querySelectorAll<HTMLButtonElement>(".tf-pl .tf-seg button")];
-  expect(scope.map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
-    ["This job PAY-231", "true"],
-    ["All", "false"],
+  expect(scope.map((b) => [b.textContent?.replace(/\s+/g, " ").trim(), b.getAttribute("aria-pressed")])).toEqual([
+    [`This job ${ON_JOB.length}`, "false"],
+    ["All", "true"],
   ]);
+  scope[0]!.click();
+  flushSync();
+  await settle();
   expect(target.querySelector(".tf-scope-note")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
     "2 of 5 pipelines are relevant to PAY-231. Show all",
   );
@@ -404,6 +453,7 @@ test("This job is on by default with a job: the tree pruned to its pipelines, ea
 });
 
 test("a job with no pipelines says so and offers to search all of them", async () => {
+  sessionFilter("builds-pipelines").scope = "job";
   drawTree({ job: "PAY-999", reasons: [] });
   await settle();
   const note = [...target.querySelectorAll(".tf-pl-note")].map((n) => n.textContent?.replace(/\s+/g, " ").trim());

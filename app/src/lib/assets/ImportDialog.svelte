@@ -106,6 +106,8 @@
   named, above the preview.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { ipcErrorMessage, isIpcError } from "../ipc";
   import { IMPORT_PRODUCERS } from "../ipc/assets";
   import type {
@@ -222,7 +224,12 @@
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
   function stand(path: AssetRow[]) {
     crumb = path;
+    walked = true;
   }
+
+  /** A walk asked for this read, so focus goes on to the level it draws. */
+  let walked = false;
+  let levelEl = $state<HTMLElement | null>(null);
 
   /**
    * The level the picker is standing on, re-read whenever it moves.
@@ -237,6 +244,8 @@
     void columnRead(() => tree(parent), {
       ok: (answer) => {
         rows = answer;
+        if (walked) void tick().then(() => (levelEl?.querySelector<HTMLElement>(".into") ?? levelEl?.closest(".fld")?.querySelector<HTMLElement>(".crumbed:last-of-type"))?.focus());
+        walked = false;
       },
       fail: (cause) => {
         rows = [];
@@ -376,7 +385,7 @@
   );
 </script>
 
-<TfDialog
+<TfDialog why={busy || preview !== null ? null : !isImporter ? "Choose the estate file." : landing !== null ? `Press Put them in ${landingName} first.` : `Press Read ${producerLabel()} first.`}
   closeButton
   title="Import an estate file"
   subtitle={chosen ?? "Nothing is written until you press Import"}
@@ -451,7 +460,7 @@
                 </button>
               {/each}
             </nav>
-            <ul class="lst pick">
+            <ul class="lst pick" bind:this={levelEl}>
               {#each rows as row (row.id)}
                 <li>
                   <button class="into" onclick={() => stand([...crumb, row])}>
@@ -662,26 +671,69 @@
     overflow-y: auto;
   }
 
-  .fld .l,
+  /* The field's label on its left, on the dialogs' one label column (design system, Layout). */
+  .fld {
+    display: grid;
+    grid-template-columns: var(--tf-label) minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: center;
+  }
+
+  .fld > :global(*):not(.l) {
+    grid-column: 2;
+  }
+
+  .fld :global(input.inp),
+  .fld :global(select.inp) {
+    height: var(--control-h);
+  }
+
+  /* The file control's button is drawn as the app's default button, not the browser's. */
+  .fld input[type="file"]::file-selector-button {
+    height: 100%;
+    margin-right: 10px;
+    padding: 0 11px;
+    border: 0;
+    border-right: 1px solid var(--rule);
+    background: var(--sheet);
+    color: var(--ink);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .fld input[type="file"] {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .fld > :global(.tf-btn) {
+    justify-self: start;
+  }
+
+  .fld .l {
+    font-size: var(--t-sm);
+    color: var(--ink-2);
+  }
+
   .grp .l {
     display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
+    font-size: var(--t-xs);
+    font-weight: 600;
+    color: var(--ink-2);
     margin: 0 0 6px;
   }
 
   .lead {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--muted);
     line-height: 1.5;
   }
 
   .none {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
     color: var(--faint);
   }
 
@@ -691,7 +743,7 @@
     padding: 0;
     display: grid;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .lst > li {
@@ -706,7 +758,7 @@
 
   .lst .id {
     margin-left: auto;
-    font: 400 11px var(--mono);
+    font: 400 var(--t-2xs) var(--mono);
     color: var(--faint);
   }
 
@@ -727,7 +779,7 @@
     display: flex;
     gap: 8px;
     align-items: baseline;
-    font-size: 11px;
+    font-size: var(--t-2xs);
   }
 
   .props .k {
@@ -747,7 +799,7 @@
 
   .hint {
     margin: 4px 0 0;
-    font-size: 11px;
+    font-size: var(--t-2xs);
     color: var(--faint);
     line-height: 1.5;
   }
@@ -758,7 +810,7 @@
     align-items: baseline;
     flex-wrap: wrap;
     margin: 6px 0;
-    font-size: 12px;
+    font-size: var(--t-xs);
   }
 
   .crumbed,

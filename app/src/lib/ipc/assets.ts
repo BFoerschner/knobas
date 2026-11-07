@@ -440,6 +440,14 @@ export function ackAlert(monitorId: string): Promise<OpenAlert> {
 }
 
 /**
+ * Take an ack back: the alert asks again, in the inbox too. Knobas-local, as
+ * the ack is. `not_found` when the monitor has since recovered.
+ */
+export function unackAlert(monitorId: string): Promise<OpenAlert> {
+  return invoke<OpenAlert>("unack_alert", { monitorId });
+}
+
+/**
  * Hide one monitor from the Monitors tab, or show it again; resolves to
  * whether it is hidden now.
  *

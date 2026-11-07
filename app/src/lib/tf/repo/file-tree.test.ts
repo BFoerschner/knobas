@@ -6,7 +6,7 @@
 import { expect, test } from "vitest";
 
 import type { TreeEntry, ViewRow } from "../../ipc/entity";
-import { authorOf, fileMeta, goToFile, initials, treeKey, treeRows } from "./file-tree";
+import { authorOf, commitLine, fileMeta, goToFile, initials, treeKey, treeRows } from "./file-tree";
 
 const dir = (name: string): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${name}` });
 const file = (name: string): TreeEntry => ({ name, kind: "file", size: 1, section: `file:${name}` });
@@ -95,6 +95,19 @@ test("a commit row's author is drawn apart from when, which is the rest of its m
 
 test("an author's initials are the first letters of two parts of the name", () => {
   expect(initials("Mara Lindqvist")).toBe("ML");
-  expect(initials("jonas.becker")).toBe("JB");
+  expect(initials("jonas.becker")).toBe("JO");
   expect(initials("mara")).toBe("MA");
+});
+
+const commit = (meta: string | null, author?: string): ViewRow => ({ entity_id: null, title: "t", meta, tone: null, chip: "abc", url: null, ...(author === undefined ? {} : { author }) });
+
+test("a commit's line says You on the reader's own and keeps its age", () => {
+  expect(commitLine(commit("mara · 3 h ago", "mara"), true)).toBe("You · 3 h ago");
+  expect(commitLine(commit("mara", "mara"), true)).toBe("You");
+});
+
+test("a commit's line stays the source's on anybody else's, and where it names no author", () => {
+  expect(commitLine(commit("jonas · 2026-08-21", "jonas"), false)).toBe("jonas · 2026-08-21");
+  expect(commitLine(commit("3 h ago"), true)).toBe("3 h ago");
+  expect(commitLine(commit(null), false)).toBe("");
 });

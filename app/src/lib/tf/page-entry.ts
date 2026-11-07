@@ -104,6 +104,8 @@ export interface RoleFrameProps {
 export interface TfPageEntry {
   /** Whether this page draws `route`. */
   matches: (route: TfRoute) => boolean;
+  /** Whether the page has what the address names, for a section whose tabs are its address; absent means it does. */
+  knows?: (route: TfRoute) => boolean;
   component: Component<Record<string, unknown>>;
   /**
    * Whether the shell draws its breadcrumb (R-1.6) above the page, as for a
@@ -136,6 +138,7 @@ export interface TfPageEntry {
  */
 export function definePage<Props extends object, Matched extends TfRoute>(page: {
   matches: (route: TfRoute) => route is Matched;
+  knows?: (route: Matched) => boolean;
   component: Component<Props>;
   crumbs?: boolean;
   role?: string;

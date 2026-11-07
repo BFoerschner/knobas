@@ -17,7 +17,10 @@ import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
-import { goWithoutOpener, replaceAddress } from "./opener";
+import { sessionFilter, sessionValue } from "./filter/filter-state.svelte";
+import { scopedTicket } from "./job/scoped.svelte";
+import { goAcross, goLaunched, goVisiting, goWithoutOpener, replaceAddress } from "./opener";
+import type { SettingsPorts } from "./settings/ports";
 import { NAV, SECTION_NAME } from "./route";
 import { chosenJob } from "./job/chosen.svelte";
 import TfShell, { type TfShellPorts } from "./TfShell.svelte";
@@ -109,6 +112,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  scopedTicket.clear();
   refreshed.length = 0;
   if (shell) unmount(shell);
   shell = null;
@@ -131,7 +135,7 @@ async function at(hash: string) {
   await settle();
 }
 
-/** Go to `hash` with no opener, as the ⌘K launcher, a deep link and an `Esc` step do (#2229). */
+/** Go to `hash` with no opener, as a deep link and an `Esc` step do (#2229). */
 async function reached(hash: string) {
   goWithoutOpener(hash);
   await settle();
@@ -233,6 +237,7 @@ function start(
     rendererDefaults?: TfShellPorts["rendererDefaults"];
     namedPipelines?: TfShellPorts["namedPipelines"];
     keys?: KeyStore;
+    secretPorts?: Pick<SettingsPorts, "listSources" | "listAdapters" | "appStatus" | "setSourceSecret" | "syncNow">;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -283,6 +288,7 @@ function start(
       ...(over.roleSyncs ? { roleSyncs: over.roleSyncs } : {}),
       ...(over.dialogs ? { dialogs: over.dialogs } : {}),
       ...(over.keys ? { keys: over.keys } : {}),
+      ...(over.secretPorts ? { secretPorts: over.secretPorts } : {}),
     },
   });
   flushSync();
@@ -298,7 +304,7 @@ function filterField(text: string): HTMLInputElement {
   return field;
 }
 
-test("Esc unwinds dialog, drawer, filter text, filter focus, then leaves the ticket page, one layer per press; an old tab address has no rung of its own (#2399)", async () => {
+test("Esc unwinds dialog, drawer, filter text, then leaves the ticket page, one layer per press; an old tab address has no rung of its own (#2399)", async () => {
   const layers = createLayers();
   const closed: string[] = [];
   const offDrawer = layers.add({ kind: "drawer", close: () => (closed.push("drawer"), offDrawer()) });
@@ -319,10 +325,7 @@ test("Esc unwinds dialog, drawer, filter text, filter focus, then leaves the tic
   expect(typed, "clearing the filter tells the view it changed").toEqual([""]);
   expect(document.activeElement).toBe(field);
 
-  press("Escape");
-  expect(document.activeElement).not.toBe(field);
-  expect(location.hash).toBe("#/ticket/jira%3APAY-231/conv");
-
+  // The key table: an empty box falls through, so it costs no press of its own.
   press("Escape");
   await settle();
   expect(location.hash, "the page has no tabs: Esc goes to Tickets, its structural parent").toBe("#/tickets");
@@ -337,9 +340,6 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
   start();
   const tops = [
     ...NAV.map((section) => `#/${section}`),
-    "#/settings",
-    "#/assets",
-    "#/assets/tree",
     "#/tickets/view-1",
     // Home: the chosen job's page, or the empty state with none (spec #2396).
     "#/job",
@@ -357,8 +357,7 @@ test("Esc on every nav entry's top page and on Settings does nothing, and no bre
 test("Esc on a detail page reached with no opener goes to its structural parent; deeper inside a section, to the section's top page", async () => {
   start();
   const parents: [string, string][] = [
-    ["#/build/pipe-1/run-4812", "#/builds"],
-    ["#/builds/pipe-1", "#/builds"],
+    ["#/build/pipe-1/run-4812", "#/builds/pipe-1"],
     ["#/pr/gh:pr-12", "#/code"],
     ["#/pr/gh:pr-12/files", "#/code"],
     ["#/repo/gh:repo-1", "#/code"],
@@ -372,9 +371,6 @@ test("Esc on a detail page reached with no opener goes to its structural parent;
     ["#/docs/space/ENG", "#/docs"],
     ["#/asset/assets:svc-1", "#/assets"],
     ["#/route/assets:route-1", "#/assets"],
-    ["#/code/repos", "#/code"],
-    ["#/monitors/unmonitored", "#/monitors"],
-    ["#/settings/appearance", "#/settings"],
     // A ticket page (spec #2227), here one the mirror cannot read: its parent is Tickets either way.
     ["#/ticket/jira:PAY-999", "#/tickets"],
   ];
@@ -437,16 +433,49 @@ test("a run opened from another run's link: Esc returns to that run, and a secon
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
-test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structural parent", async () => {
+test("a launcher jump says where it came from, to a detail and to a top page, and ends a trip (F-047)", async () => {
   start({ nav: windowNav });
-  await at("#/ticket/jira%3APAY-231");
-  // The launcher's pick, as `App.svelte` makes it.
-  goWithoutOpener("#/build/pipe-1/run-4812");
+  await at("#/settings/keyboard");
+  goLaunched("#/ticket/jira%3APAY-240");
+  await settle();
+  expect(escHint()).toBe("Back to Keyboard Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/settings/keyboard");
+
+  await at("#/code");
+  goLaunched("#/settings/sources");
+  await settle();
+  expect(escHint()).toBe("Back to Code Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/code");
+
+  await at("#/builds");
+  goLaunched("#/tickets");
   await settle();
   expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/builds");
+
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  goLaunched("#/monitors");
+  await settle();
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("a run reached by a deep link: Esc goes to Builds, its structural parent", async () => {
+  start({ nav: windowNav });
+  await at("#/ticket/jira%3APAY-231");
+  goWithoutOpener("#/build/pipe-1/run-4812");
+  await settle();
+  expect(escHint()).toBe("Back to Builds Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/builds/pipe-1");
 
   unmount(shell!);
   shell = null;
@@ -456,7 +485,7 @@ test("a run reached by ⌘K or by a deep link: Esc goes to Builds, its structura
   expect(escHint()).toBe("Back to Builds Esc");
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/pipe-1");
 });
 
 test("a pull request opened from Code, switched to its Files tab: Esc returns to Code, not to the previous tab", async () => {
@@ -505,6 +534,423 @@ test("after ⌘[ and ⌘] through history, Esc on an entry still uses that entry
   expect(location.hash).toBe("#/ticket/jira%3APAY-231");
 });
 
+// ---- the way back is a chain, and a card row's narrowing goes with it (F-005, F-034, F-520, F-522) ----
+
+const TICKET = "#/ticket/jira%3APAY-231";
+const ENTITY = "jira:PAY-231";
+
+test("a card row's trip through a repository's tab ends where it began: the bar and This job on the section, then the ticket", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  await at("#/repo/gh:repo-1");
+  await at("#/repo/gh:repo-1/branches");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/code");
+  expect(escHint(), "the opener's own opener came back with it").toBe("Back to PAY-231 Esc");
+  expect(scopedTicket.section).toBe("code");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+  expect(scopedTicket.section, "on the ticket the trip is over").toBeNull();
+});
+
+test("a detail in another section keeps the row's narrowing, so the way back finds the list as it was", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("monitors", ENTITY);
+  await at("#/monitors");
+  await at("#/asset/asset%3Aa");
+  expect(scopedTicket.section, "the detail is part of the trip").toBe("monitors");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/monitors");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  expect(sessionFilter("monitors").scope).toBe("job");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("⌘[ and ⌘] put a trip's narrowing back as each entry had it, and its bar with it", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("builds", ENTITY);
+  await at("#/builds");
+  press("[", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe(TICKET);
+  expect(scopedTicket.section).toBeNull();
+  press("]", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  expect(scopedTicket.section).toBe("builds");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+});
+
+test("a nav entry or the launcher ends a trip, wherever it had got to, and stepping back to the trip brings it again", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.open("code", ENTITY);
+  await at("#/code");
+  await at("#/repo/gh:repo-1");
+  seen<HTMLAnchorElement>(`nav a[href="#/builds"]`)[0]!.click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  expect(scopedTicket.section, "a nav entry starts a new trip").toBeNull();
+  expect(sessionFilter("code-repos").scope).not.toBe("job");
+  press("[", { metaKey: true });
+  await settle();
+  expect(scopedTicket.section).toBe("code");
+  await reached("#/monitors");
+  expect(scopedTicket.section, "the launcher does too").toBeNull();
+});
+
+test("Sub-tasks: a sub-task and back keeps the narrowing; a saved view ends it", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.openSubtasks(ENTITY);
+  await at("#/tickets");
+  await at("#/ticket/jira%3APAY-300");
+  expect(scopedTicket.subtasksOf).toBe(ENTITY);
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/tickets");
+  expect(scopedTicket.subtasksOf).toBe(ENTITY);
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  await at("#/tickets/view-1");
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("narrowing ended in place leaves the entry saying so: a detail and back does not narrow it again", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  scopedTicket.openSubtasks(ENTITY);
+  await at("#/tickets");
+  // *All tickets* on the list's rail.
+  scopedTicket.clear();
+  await settle();
+  await at("#/ticket/jira%3APAY-300");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/tickets");
+  expect(scopedTicket.section).toBeNull();
+});
+
+test("a top page opened to come back from says where it came from, and a set opened from it returns through it", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  goVisiting("#/sets");
+  await settle();
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  await at("#/sets/set-1");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/sets");
+  expect(escHint(), "the set's Esc put the visit back").toBe("Back to PAY-231 Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+});
+
+test("a jump across the tree is an opening, a walk is not: Esc comes back to the asset being read, then to what opened the tree", async () => {
+  start({ nav: windowNav });
+  await at(TICKET);
+  await at("#/asset/asset%3Aa");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  goAcross("#/asset/asset%3Ab");
+  await settle();
+  expect(escHint(), "the jump's opener is the asset it left").toMatch(/^Back to (?!PAY-231)/);
+  // A walk through the columns from there keeps it, and the way back is not the entry before.
+  await at("#/asset/asset%3Ac");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/asset/asset%3Aa");
+  expect(escHint()).toBe("Back to PAY-231 Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(TICKET);
+});
+
+test("a press from a repository's tab to another of its tabs is an opening named for that tab, and Esc comes back to it (F-259, F-065)", async () => {
+  const REPO = "#/repo/mock%3Atidewater%2Fpayout-service";
+  start({ nav: windowNav });
+  await at("#/code");
+  await at(`${REPO}/branches`);
+  const opener = escHint();
+  // A press on the tab row is no opening: the page's opener stays.
+  await at(`${REPO}/commits`);
+  expect(escHint()).toBe(opener);
+  goAcross(`${REPO}/compare/spike%2Fsepa-instant`, "Commits");
+  await settle();
+  expect(escHint()).toBe("Back to Commits Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe(`${REPO}/commits`);
+  expect(escHint()).toBe(opener);
+});
+
+test("a nav entry returns to the tab the section was left on, opened by nothing, so Esc stays", async () => {
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  await at("#/inbox");
+  const code = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Code")!;
+  expect(code().getAttribute("href")).toBe("#/code/prs");
+  code().click();
+  await settle();
+  expect(location.hash).toBe("#/code/prs");
+  expect(escHint()).toBeNull();
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(false);
+  expect(location.hash).toBe("#/code/prs");
+});
+
+test("a row brings back the run left by a nav press, once, on one entry; Esc goes to the pipeline; another way in opens it anew (F-371)", async () => {
+  start({ nav: windowNav });
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  /** A press in the shown page, on a link to `href`: what a run's row draws, whatever the read drew around it. */
+  const row = async (href: string) => {
+    const link = document.createElement("a");
+    link.setAttribute("href", href);
+    seen(".tf-main .tf-kept")[0]!.append(link);
+    link.click();
+    await settle();
+    link.remove();
+    await settle();
+  };
+  await at("#/builds");
+  await at("#/build/p/1/log");
+  entry("Docs").click();
+  await settle();
+  entry("Builds").click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+
+  // A link that names a tab gets that tab, and it ends the memory, as opening any item does.
+  await row("#/build/p/1/tests");
+  expect(location.hash).toBe("#/build/p/1/tests");
+  await reached("#/inbox");
+  await at("#/build/p/1/log");
+  entry("Builds").click();
+  await settle();
+
+  // Another run's row opens that run, and the first one's memory ends with it.
+  await row("#/build/p/2");
+  expect(location.hash).toBe("#/build/p/2");
+  await at("#/builds");
+  await row("#/build/p/1");
+  expect(location.hash).toBe("#/build/p/1");
+
+  // The way the plan draws it: left on the Log, back by the entry, its row.
+  await at("#/build/p/1/log");
+  entry("Docs").click();
+  await settle();
+  entry("Builds").click();
+  await settle();
+  const steps = history.length;
+  await row("#/build/p/1");
+  expect(location.hash).toBe("#/build/p/1/log");
+  expect(history.length, "one press is one entry").toBe(steps + 1);
+  const event = press("Escape");
+  await settle();
+  expect(event.defaultPrevented).toBe(true);
+  expect(location.hash).toBe("#/builds");
+  // Used once.
+  await row("#/build/p/1");
+  expect(location.hash).toBe("#/build/p/1");
+});
+
+test("a link from another section, and a jump by address, open the item left at its own address (F-454)", async () => {
+  start({ nav: windowNav });
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  await at("#/pr/9/diff");
+  entry("Docs").click();
+  await settle();
+  const link = document.createElement("a");
+  link.setAttribute("href", "#/pr/9");
+  seen(".tf-main .tf-kept")[0]!.append(link);
+  link.click();
+  await settle();
+  link.remove();
+  expect(location.hash).toBe("#/pr/9");
+  await at("#/pr/9/diff");
+  entry("Code").click();
+  await settle();
+  await at("#/pr/9");
+  expect(location.hash, "no press on the page asked for it").toBe("#/pr/9");
+});
+
+test("the cog and ⌘, come back to the section of Settings, keep their opener, and from a source's page go to Sources (F-661, F-076)", async () => {
+  start({ nav: windowNav });
+  const cog = () => target.querySelector<HTMLAnchorElement>(".tf-top [aria-label='Settings']")!;
+  await at("#/settings/appearance");
+  await at("#/inbox");
+  expect(cog().getAttribute("href")).toBe("#/settings/appearance");
+  cog().click();
+  await settle();
+  expect(location.hash).toBe("#/settings/appearance");
+  expect(escHint(), "Esc leaves Settings for where the cog was pressed").toBe("Back to Inbox Esc");
+  // A press on the section you are on moves nothing and keeps the way out.
+  cog().click();
+  await settle();
+  expect(location.hash).toBe("#/settings/appearance");
+  expect(escHint()).toBe("Back to Inbox Esc");
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/inbox");
+  press(",", { metaKey: true });
+  await settle();
+  expect(location.hash).toBe("#/settings/appearance");
+  await at("#/settings/source/jira");
+  await at("#/inbox");
+  expect(cog().getAttribute("href")).toBe("#/settings/sources");
+  await at("#/settings");
+  await at("#/inbox");
+  expect(cog().getAttribute("href"), "the status bar's Sources is a section like any").toBe("#/settings");
+});
+
+test("a nav entry brings back a Docs search and not a space or a page", async () => {
+  start({ nav: windowNav });
+  const docs = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Docs")!;
+  await at("#/docs/search/retry");
+  await at("#/page/4711");
+  expect(docs().getAttribute("href")).toBe("#/docs/search/retry");
+  await at("#/docs/space/ENG");
+  expect(docs().getAttribute("href")).toBe("#/docs/search/retry");
+  await at("#/docs");
+  expect(docs().getAttribute("href")).toBe("#/docs");
+});
+
+test("a nav press is a return: the page's scroll comes back through its read, focus stays on the entry, and the first page drawn counts (F-370, F-071)", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  main.scrollTop = 200;
+  entry("Docs").click();
+  await settle();
+  expect(location.hash).toBe("#/docs");
+  entry("Inbox").focus();
+  entry("Inbox").click();
+  await settle();
+  // The page redraws what it holds, and the browser clamps its scroller to what is there for now.
+  main.scrollTop = 0;
+  await vi.waitFor(() => expect(main.scrollTop).toBe(200));
+  expect(document.activeElement).toBe(entry("Inbox"));
+  expect(press("Escape").defaultPrevented, "it opened nothing").toBe(false);
+  expect(location.hash).toBe("#/inbox");
+});
+
+test("a link to a kept page is an opening, not a return: at another address it starts at the top (F-454)", async () => {
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  main.scrollTop = 200;
+  await at("#/inbox");
+  await at("#/code/repos");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(main.scrollTop).toBe(0);
+});
+
+test("a wheel during a nav return's hold wins: the scroll is the reader's from there (F-370)", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  main.scrollTop = 200;
+  entry("Docs").click();
+  await settle();
+  entry("Inbox").click();
+  await settle();
+  window.dispatchEvent(new WheelEvent("wheel"));
+  main.scrollTop = 350;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(main.scrollTop).toBe(350);
+});
+
+test("Builds' entry comes back to the pipeline it holds, a run's own from a run, and never to an address it doesn't hold (F-370)", async () => {
+  start({ nav: windowNav });
+  const builds = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Builds")!.getAttribute("href");
+  const last = sessionValue("builds-last-pipeline");
+  await at("#/builds/nope");
+  expect(builds(), "no such pipeline").toBe("#/builds");
+  last.value = "pipe:a";
+  await at("#/builds/pipe%3Aa");
+  expect(builds()).toBe("#/builds/pipe%3Aa");
+  last.value = "pipe:b";
+  await at("#/build/pipe%3Ab/run-1");
+  expect(builds()).toBe("#/builds/pipe%3Ab");
+  await at("#/builds/nope");
+  expect(builds(), "the last it held").toBe("#/builds/pipe%3Ab");
+  last.value = null;
+});
+
+test("a run pressed on bare Builds: the entry comes back to that place by the pipeline's own address (F-370)", async () => {
+  start({ nav: windowNav });
+  await at("#/builds");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  const page = target.querySelector<HTMLElement>(".tf-kept:not([hidden])")!;
+  const run = page.appendChild(document.createElement("a"));
+  run.href = "#/build/pipe%3Aa/run-1";
+  main.scrollTop = 300;
+  run.addEventListener("click", (event) => event.preventDefault());
+  run.click();
+  const last = sessionValue("builds-last-pipeline");
+  last.value = "pipe:a";
+  await at("#/build/pipe%3Aa/run-1");
+  run.remove();
+  main.scrollTop = 0;
+  expect(entry("Builds").getAttribute("href")).toBe("#/builds/pipe%3Aa");
+  entry("Builds").click();
+  await settle();
+  await vi.waitFor(() => expect(main.scrollTop).toBe(300));
+  last.value = null;
+});
+
+test("a tab the page does not have is not what its nav entry comes back to", async () => {
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  await at("#/code/nope");
+  expect(seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Code")!.getAttribute("href")).toBe("#/code/prs");
+});
+
+test("back to a page: the row that opened the detail has focus again, and the page's scroll is what it was", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const kept = target.querySelector<HTMLElement>(".tf-kept:not([hidden])")!;
+  const link = document.createElement("a");
+  link.setAttribute("href", "#/pr/gh:pr-12");
+  kept.appendChild(link);
+  main.scrollTop = 80;
+  link.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  await settle();
+  expect(location.hash).toBe("#/pr/gh:pr-12");
+  main.scrollTop = 0;
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/inbox");
+  await vi.waitFor(() => expect(document.activeElement).toBe(link));
+  expect(main.scrollTop).toBe(80);
+});
+
+test("one address told twice is not a return: the scroll the reader makes next stays", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  // Two writes before the events are delivered: each event reads the address as it is by then, so both name this one.
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await settle();
+  main.scrollTop = 80;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(main.scrollTop).toBe(80);
+});
+
 test("a top page never navigates on Esc, even when it has an opener", async () => {
   start({ nav: windowNav });
   await at("#/build/pipe-1/run-4812");
@@ -526,16 +972,14 @@ test("the breadcrumb on a full view shows the path with no job chip, and its hin
   expect(parent.textContent).toBe("Asset tree");
   expect(parent.getAttribute("href")).toBe("#/assets");
   expect(escHint()).toBe("Back to Asset tree Esc");
-  expect(target.querySelector(".tf-nav a[aria-current]"), "the asset tree lights no nav entry").toBeNull();
+  expect(target.querySelector(".tf-nav a[aria-current]"), "the asset tree has no nav entry, so nothing lights").toBeNull();
 
   await reached("#/settings/appearance");
   crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Appearance");
-  expect(escHint()).toBe("Back to Settings Esc");
-  press("Escape");
-  await settle();
-  expect(location.hash).toBe("#/settings");
+  // A section of Settings has no parent: the place above it would be a sibling.
+  expect(escHint()).toBeNull();
 });
 
 test("a commit's page with no opener names its repository's page as the breadcrumb's map calls it, until the page has its title", async () => {
@@ -551,7 +995,7 @@ test("an address the new shell has no place for names itself", async () => {
   expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/nowhere");
-  expect(seen(".tf-empty")[0]?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
+  expect(seen(".tf-empty")[0]?.textContent).toContain("knobas has no such page.");
 });
 
 // #1085: a rooms-UI address lands where the new shell keeps that thing, in
@@ -880,6 +1324,20 @@ test("/ in a field is typed; ⌘/ opens search with the section's filter even th
   expect(onsearch.mock.calls).toEqual([["#d "]]);
 });
 
+test("⌘F on a page with no bar and no box is the section's search, empty where the section has none (F-460, F-074)", async () => {
+  const onsearch = vi.fn();
+  start({ onsearch });
+  await at("#/docs");
+  press("f", { metaKey: true });
+  await at("#/docs/space/ENG");
+  press("f", { metaKey: true });
+  await at("#/inbox");
+  press("f", { metaKey: true });
+  await at("#/settings");
+  press("f", { metaKey: true });
+  expect(onsearch.mock.calls).toEqual([["#d "], ["#d "], ["#i "], [""]]);
+});
+
 test("the slash is read by its key, not its code, so a layout that shifts for it still opens search (#2425)", async () => {
   const onsearch = vi.fn();
   start({ onsearch });
@@ -941,6 +1399,38 @@ test("⌘[ ⌘] ⌘← ⌘→ and the mouse's back and forward buttons step thro
   }
 });
 
+test("a press on a …/reenter link opens the prompt over the page: the address stays, Cancel is back with focus on the link (F-048)", async () => {
+  const setSourceSecret = vi.fn(async () => ({ source_id: "tc", state: "ok", checked_at: null, detail: null, secret_expires_at: null }) as never);
+  start({
+    secretPorts: {
+      listSources: async () => [{ id: "tc", display_name: "TeamCity", adapter_kind: "teamcity", auth_kind: "UserPassword" }] as never,
+      listAdapters: async () => [],
+      appStatus: async () => ({ secrets_in_memory: false }),
+      setSourceSecret,
+      syncNow: async () => 1,
+    },
+  });
+  await at("#/builds");
+  const link = document.createElement("a");
+  link.href = "#/settings/source/tc/reenter";
+  link.setAttribute("href", "#/settings/source/tc/reenter");
+  link.textContent = "Re-enter password…";
+  document.querySelector(".tf-main")!.append(link);
+  link.click();
+  await settle();
+  expect(location.hash).toBe("#/builds");
+  const dialog = () => document.querySelector(".tf-dialog");
+  expect(dialog()?.querySelector("h2")?.textContent).toContain("TeamCity");
+  expect(document.activeElement?.id).toBe("tf-reenter-secret");
+  press("Escape");
+  await settle();
+  expect(dialog()).toBeNull();
+  expect(location.hash).toBe("#/builds");
+  expect(document.activeElement).toBe(link);
+  link.remove();
+  expect(setSourceSecret).not.toHaveBeenCalled();
+});
+
 test("history keys leave a text field's own keys, Ctrl+arrows, ⌥ with Ctrl and a key already answered alone", () => {
   const nav = { back: vi.fn(), forward: vi.fn() };
   start({ nav });
@@ -982,7 +1472,7 @@ test("the status bar: sync ages, a 401 with Re-enter password, the queued writes
   expect(bar.textContent).toContain("Jira synced 4 min ago");
   const bad = bar.querySelector(".tf-bad")!;
   expect(bad.textContent).toContain("TeamCity: sign-in failed");
-  expect(bad.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
+  expect(bad.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity/reenter");
   expect(bar.querySelector("button.tf-queued")?.textContent).toBe("2 queued writes");
 });
 
@@ -1132,7 +1622,7 @@ test("Esc on the window closes an asset dialog and leaves the page; history wait
 
 /**
  * The bar fits its width (#1410): the healthy readings share one run that
- * shrinks with an ellipsis, and its title keeps every word. A failed
+ * shows the whole readings that fit, and its title keeps every word. A failed
  * credential and the queue control sit outside it, so they never shrink.
  */
 test("only the healthy readings shrink; a failed credential and the queue stay whole", async () => {
@@ -1215,7 +1705,7 @@ test("a running timer is not a job the breadcrumb or Esc returns to", async () =
   expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
   press("Escape");
   await settle();
-  expect(location.hash).toBe("#/builds");
+  expect(location.hash).toBe("#/builds/pipe-1");
 });
 
 test("a toast from anywhere lands in the shell's stack, as text, and its action runs and dismisses it (R-1.8)", async () => {
@@ -1247,7 +1737,7 @@ test("a job address chooses its ticket and lands on the ticket's page, whose Sta
   expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent?.trim()).toBe("Tickets");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-jobcard .tf-go button")].find((b) => b.textContent === "Start timer")!.click();
-  expect(started).toEqual([["jira:PAY-231", "Retry failed SEPA payouts"]]);
+  expect(started).toEqual([["jira:PAY-231", "PAY-231"]]);
 });
 
 /**
@@ -1474,6 +1964,7 @@ test("an item's page draws the kind's label as its breadcrumb; with no parent an
   const crumbs = seen(".tf-crumbs")[0]!;
   expect(crumbs.querySelector(".tf-jobchip")).toBeNull();
   expect(crumbs.querySelector("strong")?.textContent).toBe("Survey");
+  expect(document.title, "the window's title follows the name the page read, after the address moved (F-015)").toBe("Survey · knobas");
   expect(escHint()).toBeNull();
   expect(seen(".tf-fhead h1")[0]?.textContent).toBe("Quay crane 4 inspection");
 
@@ -1610,12 +2101,13 @@ test("Docs draws its Sync now last in its header (#2286)", async () => {
   expect(syncButton()?.parentElement?.lastElementChild).toBe(syncButton());
 });
 
-test("Code's Sync now is a default-size header button, last after New pull request (#2238, #2295)", async () => {
+test("Code's Sync now is a default-size header button, last in the header (#2238, #2295)", async () => {
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }] });
   await at("#/code");
   const acts = seen(".tf-fhead .tf-acts").find((el) => el.contains(syncButton()));
   const names = [...(acts?.children ?? [])].map((el) => el.textContent?.trim());
-  expect(names).toEqual(["New pull request", "Sync now"]);
+  // No job here, so no *New pull request* either (F-252): a repository's page offers it.
+  expect(names).toEqual(["Sync now"]);
   expect(syncButton()!.classList.contains("tf-btn")).toBe(true);
   expect(syncButton()!.classList.contains("tf-sm"), "a header button is default size").toBe(false);
 });
@@ -1645,7 +2137,7 @@ test("a role with no enabled source draws no Sync now", async () => {
   }
 });
 
-test("Sync now says Syncing… and is disabled until its runs end, then returns", async () => {
+test("Sync now says Syncing… and is off, holding focus, until its runs end, then returns", async () => {
   const { asked, syncs, end } = roleSyncHarness();
   start({ sources: [{ id: "mock", display_name: "Tidewater", roles: ALL_ROLES, enabled: true }], roleSyncs: syncs });
   await at("#/docs");
@@ -1653,7 +2145,7 @@ test("Sync now says Syncing… and is disabled until its runs end, then returns"
   await settle();
   expect(asked).toEqual(["wiki"]);
   expect(syncButton()?.textContent?.trim()).toBe("Syncing…");
-  expect(syncButton()?.disabled).toBe(true);
+  expect(syncButton()?.getAttribute("aria-disabled")).toBe("true");
 
   // Still going on another view of the role? No: each role has its own runs.
   await at("#/builds");
@@ -1664,7 +2156,7 @@ test("Sync now says Syncing… and is disabled until its runs end, then returns"
   end(41);
   await settle();
   expect(syncButton()?.textContent?.trim()).toBe("Sync now");
-  expect(syncButton()?.disabled).toBe(false);
+  expect(syncButton()?.hasAttribute("aria-disabled")).toBe(false);
 });
 
 test("a view not re-read on a run's end reads again when its Sync now runs end", async () => {
@@ -1710,7 +2202,7 @@ test("⌘R while Sync now says Syncing… runs nothing more, and a held key pres
   await at("#/docs");
   cmdR();
   await settle();
-  expect(syncButton()?.disabled).toBe(true);
+  expect(syncButton()?.getAttribute("aria-disabled")).toBe("true");
   expect(cmdR().defaultPrevented).toBe(true);
   await settle();
   expect(asked).toEqual(["wiki"]);

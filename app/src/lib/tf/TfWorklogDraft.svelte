@@ -6,17 +6,24 @@
 
   It adds two reads the prototype draws and the draft does not carry:
   `day_blocks` for the intervals and the ticket's title (the draft names its
-  blocks by id), and `list_sources` for the source names ("Goes to Jira",
-  "10:02, Gitea").
+  blocks by id), and `list_sources` for the source name ("Goes to Jira").
 
-  **Which buttons depends on what opened it.** After a stop: *Stop, log
-  later*, *Keep running*, *Discard* and *Log*. Without one (the ad-hoc
-  dialog's *Log to a ticket…*): *Discard* and *Log*, with nothing about a
-  clock. A stop's draft opens over the running clock (#896); what each button
+  **Which buttons depends on what opened it.** After a stop: *Stop, don't log*,
+  which drops the draft and not the time (F-140), then *Stop, log later*, *Cancel, keep
+  running* and *Log*. Without one (the ad-hoc dialog's *Log to a ticket…*):
+  *Cancel* and *Log*, with nothing about a clock. A stop's draft opens over the running clock (#896); what each button
   does to it is `drafting.svelte.ts`'s, and this answers with an outcome,
   except that *Log* awaits `onbeforelog` (the clock stopping) before it sends.
-  `Esc` and the backdrop are the quiet answer: a stop's draft stops the clock
-  (*Stop, log later*), any other is discarded.
+  `Esc` and the × are the quiet answer, and a quiet answer changes nothing: a stop's
+  draft goes back to the running clock (*Cancel, keep running*; Björn, 2026-11-06,
+  reversing #896's *Stop, log later*), any other is left. The scrim does nothing,
+  as on every dialog with a footer.
+
+  **A comment the reader edited outlives the dialog** (the key table, `drafts`): for its ticket
+  and day, through `Esc`, the ×, *Cancel, keep running* and *Stop, log later*, each of which
+  leaves the time to be logged later. *Log* ends it, and so do *Stop, don't log* and a
+  plain *Cancel*, which are the explicit discards. ⌘Enter is `TfDialog`'s, and presses *Log*. `Enter` in *From* or *Minutes*
+  presses it too, because taking the offered time is the common case (F-363).
 
   A worklog the ticket's source's credential cannot make (`refused_writes`,
   #2052) draws *Log* disabled with the reason, and stops no clock for it.
@@ -26,16 +33,17 @@
 -->
 <script lang="ts">
   import { onMount } from "svelte";
+  import TfKey from "./TfKey.svelte";
 
   import { listSources as realListSources, type SourceSummary } from "../ipc/sources";
   import {
     dayBlocks as realDayBlocks,
     logWork as realLogWork,
-    type Candidate,
     type DayBlock,
     type Draft,
     type Worklog,
   } from "../ipc/time";
+  import { drafts } from "./drafts.svelte";
   import { askRefused, refusalOf, refusedAttrs, type RefusedWritesPort } from "../shell/refused-writes";
   import { clockReading, dayBounds, dayKey, dayLabel, readerDay } from "../time/day";
   import { DraftForm } from "../time/draft-form.svelte";
@@ -81,6 +89,20 @@
   // svelte-ignore state_referenced_locally
   // Read once: a draft swapped mid-life would drop the reader's ticks.
   const form = new DraftForm(draft);
+  // svelte-ignore state_referenced_locally
+  const commentKey = `worklog:${draft.entity_id}:${draft.day}`;
+  if (drafts.has(commentKey)) form.takeOver(drafts.get(commentKey));
+
+  function typed(words: string) {
+    form.takeOver(words);
+    drafts.put(commentKey, words);
+  }
+
+  /** An explicit discard: the time's answer, and the words with it. */
+  function discard() {
+    drafts.forget(commentKey);
+    onoutcome("discard");
+  }
 
   let sending = $state(false);
   let failed = $state<string | null>(null);
@@ -115,18 +137,11 @@
     return `${head}: ${list}`;
   });
 
-  /** Where a candidate was seen, as the prototype says it. */
-  function seenIn(candidate: Candidate): string {
-    if (candidate.source === "mirror" && candidate.entity_id !== null) return sourceName(candidate.entity_id);
-    if (candidate.source === "note") return "note";
-    return "you wrote";
-  }
-
-  /** Leaving without logging: a stop's draft keeps the time, any other is dropped. */
+  /** Leaving without answering: a stop's draft leaves the clock running, any other is dropped. */
   function leave() {
     // A log in flight answers for itself; leaving now would say "unlogged".
     if (sending) return;
-    onoutcome(stopped ? "later" : "discard");
+    onoutcome(stopped ? "keep" : "discard");
   }
 
   function send() {
@@ -140,6 +155,7 @@
         (worklog) => {
           // Outside the rejection handler on purpose: the worklog exists now,
           // and a throw in the shell's toast must not read as a failed send.
+          drafts.forget(commentKey);
           onoutcome("logged");
           onlogged(worklog);
         },
@@ -149,6 +165,13 @@
           sending = false;
         },
       );
+  }
+
+  /** `Enter` in a single field takes what it holds. A modified one is `TfDialog`'s. */
+  function logOnEnter(event: KeyboardEvent) {
+    if (event.key !== "Enter" || event.isComposing || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (form.seconds > 0) send();
   }
 
   onMount(() => {
@@ -176,60 +199,71 @@
 
 {#snippet heading()}Log time to <span class="tf-mono">{form.key}</span>{/snippet}
 
-<!-- `Esc` and the backdrop leave quietly, through `TfDialog`'s `onclose`. -->
-<TfDialog title={heading} subtitle={title} onclose={leave} {layers}>
+<!-- `Esc` and the × leave quietly, through `TfDialog`'s `onclose`. -->
+<!-- Wide enough that *Nothing to log yet* stands in the footer's row with the four buttons, so emptying Minutes moves nothing. -->
+<TfDialog why={form.seconds <= 0 ? "Nothing to log yet." : null} title={heading} subtitle={title} className="tf-logdlg" onclose={leave} {layers}>
   {#snippet body()}
-      <div class="tf-dur">
-        <label><span>From</span><input type="time" aria-label="From" bind:value={form.began} /></label>
-        <label><span>Minutes</span><input type="number" min="1" step="1" aria-label="Minutes" bind:value={form.minutes} /></label>
-        <b>{form.reading}</b>
-        <span class="tf-dim">{intervals}</span>
+      <div class="tf-formgrid">
+        <label for="tf-log-from">From</label>
+        <div class="tf-dur"><input id="tf-log-from" type="time" aria-label="From" onkeydown={logOnEnter} bind:value={form.began} /></div>
+        <label for="tf-log-minutes">Minutes</label>
+        <div class="tf-dur">
+          <input id="tf-log-minutes" type="number" min="1" step="1" aria-label="Minutes" onkeydown={logOnEnter} bind:value={form.minutes} />
+          <b>{form.reading}</b>
+        </div>
+        <p class="tf-dim tf-note">{intervals}</p>
+
+        {#if draft.candidates.length > 0}
+          <fieldset class="tf-cands">
+            <legend class="tf-pane-h">What you did in that time</legend>
+            {#each draft.candidates as candidate (candidate.id)}
+              <label class="tf-ck tf-cand">
+                <input
+                  type="checkbox"
+                  checked={form.ticked.has(candidate.id)}
+                  onchange={() => form.toggle(candidate.id)}
+                />
+                <span>{candidate.bullet.replace(/^- /, "")}</span>
+                <span class="tf-dim">{clockReading(candidate.at)}</span>
+              </label>
+            {/each}
+          </fieldset>
+        {:else}
+          <p class="tf-pane-h">knobas saw nothing else in that time. The comment is yours to write.</p>
+        {/if}
+
+        <label for="tf-log-comment">Comment</label>
+        <textarea
+          id="tf-log-comment"
+          rows={Math.min(6, Math.max(3, draft.candidates.length))}
+          aria-label="Worklog comment"
+          value={form.comment}
+          oninput={(event) => typed(event.currentTarget.value)}
+        ></textarea>
+        <p class="tf-dim tf-note">
+          {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}
+        </p>
       </div>
-
-      {#if draft.candidates.length > 0}
-        <div class="tf-pane-h">What you did in that time</div>
-        {#each draft.candidates as candidate (candidate.id)}
-          <label class="tf-ck tf-cand">
-            <input
-              type="checkbox"
-              checked={form.ticked.has(candidate.id)}
-              onchange={() => form.toggle(candidate.id)}
-            />
-            <span>{candidate.bullet.replace(/^- /, "")}</span>
-            <span class="tf-dim">{clockReading(candidate.at)}, {seenIn(candidate)}</span>
-          </label>
-        {/each}
-      {:else}
-        <div class="tf-pane-h">knobas saw nothing else in that time. The comment is yours to write.</div>
-      {/if}
-
-      <textarea
-        rows="3"
-        aria-label="Worklog comment"
-        value={form.comment}
-        oninput={(event) => form.takeOver(event.currentTarget.value)}
-      ></textarea>
-      <p class="tf-dim tf-note">
-        Goes to {sourceName(draft.entity_id)} through the write queue.
-        {form.edited ? "The comment is yours now; ticking no longer rewrites it." : "The comment follows the boxes you tick until you edit it."}
-      </p>
+      <!-- One thought: where the worklog goes, and what that road can do to it (ADR-0012). -->
       <!-- prettier-ignore -->
-      <p class="tf-dim tf-fine">A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.</p>
+      <p class="tf-dim tf-fine">Goes to {sourceName(draft.entity_id)} through the write queue. A write knobas was sending when it stopped may arrive twice. knobas re-sends rather than guess; it never merges or drops what you wrote.</p>
       {#if refused !== null}<p class="tf-fail">{refused}</p>{/if}
       {#if failed}<p class="tf-fail" role="alert">{failed}</p>{/if}
   {/snippet}
   {#snippet footer()}
       {#if stopped}
-        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("later")}>
+        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={discard}>Stop, don't log</button>
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("later")}>
           Stop, log later
         </button>
         <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("keep")}>
-          Keep running
+          Cancel, keep running
         </button>
+      {:else}
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={discard}>Cancel</button>
       {/if}
-      <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
       <button class="tf-btn tf-primary" type="button" {...refusedAttrs(refused)} disabled={sending || form.seconds <= 0} onclick={send}>
-        Log {form.reading} to {form.key}
+        Log {form.reading} to <TfKey value={form.key} />
       </button>
   {/snippet}
 </TfDialog>

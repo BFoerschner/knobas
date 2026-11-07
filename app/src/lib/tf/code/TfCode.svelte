@@ -43,6 +43,8 @@
 </script>
 
 <script lang="ts">
+  import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { ipcErrorMessage } from "../../ipc";
   import { codeFacts, entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
@@ -52,6 +54,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { clones } from "../openin/clones.svelte";
   import { Windowed } from "../../shell/windowed.svelte";
   import { untrack } from "svelte";
@@ -59,7 +62,6 @@
   import { waitPhase } from "../waiting";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
-  import { toneClass } from "../tone";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     checkoutLine,
@@ -308,6 +310,8 @@
   const choices = $derived(repoChoices(repos?.rows ?? [], known));
   const openCounts = $derived(openPrsOf(lines ?? []));
   const compare = $derived(compareHash(branches, repos?.rows ?? []));
+  /** The job's open pull request: the loudest button goes there, as *New pull request* would only land on saying one is open (F-243). */
+  const jobPr = $derived(job === null ? null : ((lines ?? []).find((line) => line.row.state?.text.toLowerCase() === "open" && index.jobOf({ entity_id: line.row.entity_id, kind: line.row.kind }) === job) ?? null));
 
   // -- the filter bars -------------------------------------------------------
 
@@ -324,7 +328,9 @@
   });
 
   const scopes = $derived<FilterScope[]>([
-    ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" }] : []),
+    ...(job !== null
+      ? [{ id: "job", label: "This job", count: (tab === "prs" ? (everyPr?.rows ?? []) : (repos?.rows ?? [])).filter((row) => held(row.entity_id)).length, title: `What ${job} reaches`, query: "" }]
+      : []),
     { id: "mine", label: "Mine", query: "" },
     { id: "all", label: "All", query: "" },
   ]);
@@ -333,10 +339,7 @@
 
   const repoConfig = $derived<FilterConfig>({
     id: "code-repos",
-    placeholder:
-      repos === null
-        ? "Filter repositories by name, team or language"
-        : `Filter ${repos.total} repositories by name, team or language`,
+    placeholder: "Filter repositories",
     noun: "repositories",
     one: "repository",
     scopes,
@@ -348,7 +351,7 @@
   });
   const prConfig = $derived<FilterConfig>({
     id: "code-prs",
-    placeholder: "Filter pull requests by title, repo, author or number",
+    placeholder: "Filter PRs",
     noun: "pull requests",
     one: "pull request",
     scopes,
@@ -434,21 +437,16 @@
   <div>
     <h1>Code</h1>
     <div class="tf-sub">
-      {repos === null ? "Repositories and pull requests, what asks for you first." : headerLine(repos.total, repos.rows, sources)}
+      {repos === null ? "Repositories and pull requests, yours first." : headerLine(repos.total, repos.rows, sources)}
     </div>
   </div>
   <div class="tf-acts">
-    {#if compare !== null}
-      <a class="tf-btn" href={compare}>New pull request</a>
-    {:else}
-      <!-- Focusable, so the reason in its title reaches the keyboard too. -->
-      <button
-        type="button"
-        class="tf-btn"
-        aria-disabled="true"
-        title={job === null ? "Open a job to propose its branch" : `${job} has no branch yet`}>New pull request</button
-      >
+    {#if jobPr !== null}
+      <a class="tf-btn tf-primary" href={itemHash(jobPr.row)}>Open PR {jobPr.number ?? ""}</a>
+    {:else if compare !== null}
+      <a class="tf-btn tf-primary" href={compare}>New pull request</a>
     {/if}
+    <!-- With no job's branch to propose there is no button: a repository's own page offers it, on the branch it finds (F-252). -->
     <!-- *Sync now* last in the header (#2238 header order). -->
     {@render sync?.()}
   </div>
@@ -491,15 +489,17 @@
             {@const fact = known.get(row.entity_id)}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach repoWin.row(row.entity_id)}>
               <td
-                ><a class="tf-mono" href={itemHash(row)}><Marked text={row.title} typed={repoFilter.text} /></a
-                >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
+                ><a class="tf-mono" href={itemHash(row)}
+                  ><span class="tf-dim"><Marked text={row.title.slice(0, row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></span
+                  ><Marked text={row.title.slice(row.title.lastIndexOf("/") + 1)} typed={repoFilter.text} /></a
+                >{#if job !== null && held(row.entity_id)}{" "}<TfKey chip value={job} class="tf-chip-job" />{/if}</td
               >
               <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
               <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
-              <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
-              <td class="tf-nowrap"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></td>
+              <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</span></td>
+              <td class="tf-nowrap tf-right"><span class="tf-rowend"><span class="tf-rowacts"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></span></span></td>
             </tr>
           {/each}
           {#if repoWin.after > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="7" {@attach repoWin.room("after")}></td></tr>{/if}
@@ -519,21 +519,21 @@
       <table class="tf-tbl tf-cprs">
         <tbody {@attach win.list}>
           {#if win.before > 0}<tr class="tf-wgap" aria-hidden="true"><td colspan="5" {@attach win.room("before")}></td></tr>{/if}
-          {#each win.slice(kept) as { row, number, idle, author } (row.entity_id)}
+          {#each win.slice(kept) as { row, number, idle, author, mine } (row.entity_id)}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))} {@attach win.row(row.entity_id)}>
-              <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
+              <td class="tf-prno"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
-                ><a href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
+                ><a class="tf-rowt" href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
                   >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
-                    >{/if}{#if author}{row.path ? ", " : ""}<Marked text={author} typed={prFilter.text} />{/if}{#if idle}{row.path ||
+                    >{/if}{#if author}{row.path ? ", " : ""}{#if mine}you{:else}<Marked text={author} typed={prFilter.text} />{/if}{/if}{#if idle}{row.path ||
                     author
                       ? ", "
                       : ""}idle for more than 5 days{/if}</span
                 ></td
               >
-              <td>{#if row.state}<span class="tf-chip {toneClass(row.state)}">{row.state.text}</span>{/if}</td>
-              <td class="tf-mono tf-dim">{belongs ?? ""}</td>
+              <td>{#if row.state}<TfStateChip text={row.state.text} tone={row.state.tone} />{/if}</td>
+              <td class="tf-mono tf-dim">{#if belongs !== null && belongs === job}<TfKey chip value={belongs} class="tf-chip-job" />{:else}{belongs ?? ""}{/if}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? clockLabel(row.updated_at, now) : ""}</td>
             </tr>
           {/each}
@@ -548,10 +548,9 @@
 </div>
 
 {#snippet nothing()}
-  <div class="tf-empty">
-    Nothing matches.
+  <TfNoMatch noun={tab === "prs" ? "pull requests" : "repositories"} {filter}>
     {#if filter.scope === "job"}
       <button type="button" class="tf-btn tf-sm" onclick={searchAll}>Search all of Code</button>
     {/if}
-  </div>
+  </TfNoMatch>
 {/snippet}

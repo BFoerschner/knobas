@@ -8,6 +8,7 @@
 import { pageContext } from "../kept-pages.svelte";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { sourceDrafts } from "./source-drafts.svelte";
 
 import type { TicketViewRow } from "../../ipc/search";
 import type {
@@ -26,6 +27,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { GITEA_SCHEMA, JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
 import type { SettingsPorts } from "./ports";
+import { newSourceDraft } from "./source-drafts.svelte";
 import TfSettings from "./TfSettings.svelte";
 
 let target: HTMLElement;
@@ -33,6 +35,8 @@ let view: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
   location.hash = "";
+  sourceDrafts.reset();
+  newSourceDraft.forget();
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -251,7 +255,7 @@ test("Boards and filters: the choice and the favourite filters saved into the co
   );
   expect(rows).toEqual([
     ["Payments and Ops flow", "Kanban board", "18 and 3 in WEB, not synced", "Hide"],
-    ["PAY without a fix version hidden", "Filter", "4", "Show"],
+    ["PAY without a fix version Hidden", "Filter", "4", "Show"],
   ]);
   boards.querySelector<HTMLButtonElement>('button[aria-label="Show PAY without a fix version"]')!.click();
   await settle();
@@ -303,15 +307,21 @@ test("Sources lists each source with its state, address, holdings and last sync"
   button("Sync all").click();
   await settle();
   expect(p.syncAll).toHaveBeenCalledOnce();
+  // F-630: what really started, and a press that would add nothing is off with its reason.
+  expect(button("Sync all").getAttribute("aria-disabled")).toBe("true");
+  expect(button("Sync all").title).toBe("Every source is syncing");
+  button("Sync all").click();
+  await settle();
+  expect(p.syncAll).toHaveBeenCalledOnce();
 });
 
 test("Save sends what changed in the connection through update_source", async () => {
   const { p } = await open(["source", "jira"]);
-  expect(button("Save").disabled).toBe(true);
+  expect(button("Save connection").disabled).toBe(true);
 
   type("#tf-src-address", "https://jira2.tidewater.example");
   type("#tf-src-user", "mlindqvist");
-  button("Save").click();
+  button("Save connection").click();
   await settle();
 
   expect(p.updateSource).toHaveBeenCalledWith("jira", {
@@ -348,10 +358,10 @@ test("a source's page edits its adapter's config, drawn from the schema, and sen
   expect(syncs.querySelector("#tf-src-cfg-jql_filter")).not.toBeNull();
   expect(syncs.querySelector("#tf-src-cfg-username")).toBeNull();
   expect(field("projects").value).toBe("TW\nOPS");
-  expect(sectionButton("What it syncs", "Save").disabled).toBe(true);
+  expect(sectionButton("What it syncs", "Save sync settings").disabled).toBe(true);
 
   type("#tf-src-cfg-jql_filter", "project = TW AND updated >= -30d");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
 
   expect(p.updateSource).toHaveBeenCalledWith("jira", {
@@ -362,7 +372,7 @@ test("a source's page edits its adapter's config, drawn from the schema, and sen
 test("Sync WEB too opens the source's page with the project added, for the reader to save (#879)", async () => {
   const { p } = await open(["source", "jira", "add", "projects", "WEB"]);
   expect(field("projects").value).toBe("TW\nOPS\nWEB");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
   expect(p.updateSource).toHaveBeenCalledWith("jira", { config: { username: "mara", projects: ["TW", "OPS", "WEB"] } });
 });
@@ -386,7 +396,7 @@ test("the added project is in view, with a note beside Save until it is saved (#
     expect(scrolled).toEqual([section("What it syncs").querySelector(".tf-stg-acts"), field("projects")]);
     expect(addedNote()).toBe("WEB added, not saved yet");
 
-    sectionButton("What it syncs", "Save").click();
+    sectionButton("What it syncs", "Save sync settings").click();
     await settle();
     expect(p.updateSource).toHaveBeenCalledWith("jira", {
       config: { username: "mara", projects: ["PAY", "OPS", "CUS", "TRK", "WEB"] },
@@ -401,9 +411,10 @@ test("editing the added field takes the note away; a page opened without an addi
   await open(["source", "jira", "add", "projects", "WEB"]);
   expect(addedNote()).toBe("WEB added, not saved yet");
   type("#tf-src-cfg-projects", "TW\nOPS\nWEB\nCUS");
-  expect(addedNote()).toBeNull();
+  expect(addedNote()).toBe("Not saved");
   unmount(view!);
   view = null;
+  sourceDrafts.reset();
 
   await open(["source", "jira"]);
   expect(addedNote()).toBeNull();
@@ -414,7 +425,7 @@ test("editing the added field takes the note away; a page opened without an addi
 test("a project the source already syncs is not added twice", async () => {
   await open(["source", "jira", "add", "projects", "OPS"]);
   expect(field("projects").value).toBe("TW\nOPS");
-  expect(sectionButton("What it syncs", "Save").disabled).toBe(true);
+  expect(sectionButton("What it syncs", "Save sync settings").disabled).toBe(true);
 });
 
 test("a Jira source's page shows the two field ids, or says none is set (#1021)", async () => {
@@ -436,7 +447,7 @@ test("saving keeps a field id the sync recorded after the page was read, beside 
   expect(field("sprint_field").value).toBe("");
 
   type("#tf-src-cfg-epic_link_field", "customfield_10108");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
     config: {
@@ -449,7 +460,7 @@ test("saving keeps a field id the sync recorded after the page was read, beside 
 
   // The Connection's Save reads the stored config again too.
   type("#tf-src-user", "mlindqvist");
-  sectionButton("Connection", "Save").click();
+  sectionButton("Connection", "Save connection").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
     config: { username: "mlindqvist", projects: ["TW", "OPS"], sprint_field: "customfield_10107" },
@@ -460,7 +471,7 @@ test("clearing an id the reader typed removes it, so the next sync can record on
   const jira = summary("jira", "Jira", "ok", { config: { username: "mara", sprint_field: "customfield_1" } });
   const { p } = await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([jira, SOURCES[1]!])) }));
   type("#tf-src-cfg-sprint_field", "");
-  sectionButton("What it syncs", "Save").click();
+  sectionButton("What it syncs", "Save sync settings").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", { config: { username: "mara" } });
 });
@@ -484,7 +495,7 @@ test("Add a source opens in the ticket-first look, and Esc closes it through the
     props: { rest: [], job: null, ready: true, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
   });
   await settle();
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   expect(dialog().querySelector("h2")?.textContent).toBe("Add a source");
   expect(dialog().querySelector(".tf-pane-h")?.textContent).toBe("What is it?");
@@ -519,14 +530,15 @@ test("Add a source: the generated form, Test connection's fills, then one add_so
     ),
   });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
   flushSync();
 
   // Generated from the chosen adapter's schema: no per-adapter branch.
   expect(dialog().querySelector("#tf-add-cfg-projects")).not.toBeNull();
-  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("jira");
+  // The adapter's kind is taken here, so the form offers the next free id and starts with nothing to fix (F-624).
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("jira-2");
   expect(dialogButton("Add source").disabled).toBe(true);
 
   type("#tf-add-id", "jira-2");
@@ -679,7 +691,7 @@ test("a source of an adapter just installed in Add a source opens with its descr
   p.listSources = vi.fn(() => Promise.resolve(added ? [...SOURCES, HARBOUR] : SOURCES));
   const props = await openMovable([], p);
 
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
   dialogButton("Install…").click();
@@ -755,7 +767,7 @@ test("an Uninstall takes the adapter out of what Settings offers (#1406)", async
   dialogButton("Uninstall").click();
   await settle();
 
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   const radios = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")];
   expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual(["Jira Data Center"]);
@@ -767,7 +779,7 @@ test("Add a source shows an adapter's roles, hosts and limits before it installs
     installAdapter: vi.fn(() => Promise.resolve(installAnswer())),
   });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "  /releases/knobas-adapter.json ");
   dialogButton("Install…").click();
@@ -782,14 +794,14 @@ test("Add a source shows an adapter's roles, hosts and limits before it installs
     ["From", "/releases/knobas-adapter.json"],
     ["Roles", "wasm-fixture:survey-desk, CI"],
     ["Hosts", "It may reach this source's address, api.example.com and the host in its mirror setting, and no other host."],
-    ["Limits", "30 s per call (asked for), 256 MiB of memory (the default)"],
+    ["Limits", "30s per call (asked for), 256 MiB of memory (the default)"],
   ]);
 });
 
 test("Cancel on Install <name>? installs nothing and offers nothing new (#2031)", async () => {
   const p = ports({ previewInstallAdapter: vi.fn(() => Promise.resolve(previewAnswer())) });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
   dialogButton("Install…").click();
@@ -810,7 +822,7 @@ test("Add a source installs an adapter from a manifest, and it joins the radios 
   p.previewInstallAdapter = vi.fn(() => Promise.resolve(previewAnswer()));
   p.installAdapter = vi.fn(() => Promise.resolve(installAnswer()));
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   expect(dialogButton("Install…").disabled).toBe(true);
 
@@ -849,7 +861,7 @@ test("Add a source shows a refused install with its reason, and offers nothing n
     ),
   });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   type("#tf-add-manifest", "/releases/knobas-adapter.json");
   dialogButton("Install…").click();
@@ -866,9 +878,60 @@ test("Add a source shows a refused install with its reason, and offers nothing n
   expect(dialog().querySelector<HTMLInputElement>("#tf-add-manifest")!.value).toBe("/releases/knobas-adapter.json");
 });
 
+test("Add a source with several adapters preselects none, takes focus inside, and says what is missing (F-015, F-610)", async () => {
+  const p = ports();
+  const [jira] = await p.listAdapters();
+  p.listAdapters = vi.fn(() => Promise.resolve([jira!, { ...jira!, id: "other", adapter_kind: "other", name: "Other" }]));
+  await open([], p);
+  button("Add a source…").click();
+  await settle();
+  const radios = [...dialog().querySelectorAll<HTMLInputElement>('.tf-radio input[type="radio"]')];
+  expect(radios.some((radio) => radio.checked), "nothing is preselected").toBe(false);
+  expect(document.activeElement, "focus is inside, on what it asks first").toBe(radios[0]);
+  expect(dialog().querySelector("#tf-add-address")).toBeNull();
+  expect(dialog().querySelector(".tf-dwhy")?.textContent).toBe("Choose what it is first.");
+  expect(dialogButton("Add source").disabled).toBe(true);
+
+  radios[0]!.click();
+  await settle();
+  expect(dialog().querySelector(".tf-dwhy")?.textContent).toMatch(/^Still needs the address.* and the (token|password)\.$/);
+  expect(dialog().querySelector('label[for="tf-add-address"] .tf-req')?.textContent, "marked in words").toBe("required");
+  expect(dialog().querySelector('label[for="tf-add-secret"] .tf-req')?.textContent).toBe("required");
+});
+
+test("with nothing stored the credential is entered, not re-entered, with no word of where one is kept (F-608)", async () => {
+  const kuma = summary("kuma", "Uptime Kuma", "missing_secret", { auth_kind: "ApiToken", config: {} });
+  await open(["source", "kuma"], ports({ listSources: vi.fn(() => Promise.resolve([...SOURCES, kuma])) }));
+  expect(button("Enter…")).toBeTruthy();
+  button("Enter token…").click();
+  flushSync();
+  expect(dialog().querySelector("h2")?.textContent).toBe("Enter the Uptime Kuma token");
+  expect(dialog().textContent).not.toMatch(/keychain|re-enter/i);
+  expect(dialog().querySelector(".tf-dwhy")?.textContent).toBe("Type the token to sign in.");
+});
+
+test("the prompt opened by its address drops it on Cancel, so a reload does not ask again (F-613)", async () => {
+  location.hash = "#/settings/source/teamcity/reenter";
+  await open(["source", "teamcity", "reenter"]);
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  dialogButton("Cancel").click();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(location.hash).toBe("#/settings/source/teamcity");
+  location.hash = "";
+});
+
+test("an address that names no section keeps the rail, lights nothing, and says so (F-613)", async () => {
+  await open(["nope"]);
+  expect(target.querySelector('.tf-stg-nav a[href="#/settings/appearance"]')).not.toBeNull();
+  expect(target.querySelector(".tf-stg-nav a[aria-current]")).toBeNull();
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("Settings has no such section.");
+  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Settings");
+});
+
 test("Add a source waits for a passing test of what is typed now", async () => {
   await open([]);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
   flushSync();
@@ -968,7 +1031,7 @@ test("a failing credential is said on top, and Re-enter password stores the new 
     "Sign-in failed 38 min ago (401). Writes to TeamCity wait in the queue until you re-enter the password.",
   );
 
-  button("Re-enter password").click();
+  button("Re-enter password…").click();
   flushSync();
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Re-enter the TeamCity password");
   expect(button("Sign in").disabled).toBe(true);
@@ -982,12 +1045,110 @@ test("a failing credential is said on top, and Re-enter password stores the new 
   expect(target.querySelector('[role="dialog"]')).toBeNull();
 });
 
+/** Ports whose `sync:state` the test sends, and the sender. */
+function syncEvents(extra: Partial<SettingsPorts> = {}) {
+  const handlers = new Set<(event: { payload: unknown }) => void>();
+  const p = ports({
+    listen: vi.fn((_event: string, handler: (event: { payload: unknown }) => void) => {
+      handlers.add(handler);
+      return Promise.resolve(() => void handlers.delete(handler));
+    }),
+    ...extra,
+  });
+  const send = (row: Pick<SourceSyncStatus, "source_id" | "run_id" | "last_outcome"> & Partial<SourceSyncStatus>) => {
+    const whole: SourceSyncStatus = { running: false, started_at: null, last_finished_at: null, next_run_at: null, backoff_until: null, last_changed: null, ...row };
+    for (const handler of [...handlers]) handler({ payload: whole });
+  };
+  return { p, send };
+}
+
+test("a source's Sync now ends in one toast, in Syncing…'s place, and says how it failed (F-652)", async () => {
+  toasts.items = [];
+  const { p, send } = syncEvents();
+  await open(["source", "jira"], p);
+  button("Sync now").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Syncing Jira…"]);
+  // While it runs, the button holds focus and a press asks nothing more.
+  button("Sync now").click();
+  await settle();
+  expect(p.syncNow).toHaveBeenCalledOnce();
+  send({ source_id: "jira", run_id: 42, last_outcome: "ok", last_changed: true });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced Jira"]);
+
+  button("Sync now").click();
+  await settle();
+  send({ source_id: "jira", run_id: 42, last_outcome: "unauthorized" });
+  await settle();
+  expect(toasts.items.map((toast) => [toast.text, toast.tone])).toEqual([["Could not sync Jira: the sign-in failed", "err"]]);
+  toasts.items = [];
+});
+
+test("a source's Sync now refused says so and gives the button back", async () => {
+  toasts.items = [];
+  await open(["source", "jira"], ports({ syncNow: vi.fn(() => Promise.reject({ code: "not_ready", message: "starting", source_id: null })) }));
+  button("Sync now").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not sync Jira: starting"]);
+  expect(button("Sync now").getAttribute("aria-disabled")).toBeNull();
+  toasts.items = [];
+});
+
+test("Sync all ends in one toast, in its start's place, once every run has (F-652)", async () => {
+  toasts.items = [];
+  const { p, send } = syncEvents();
+  await open(["sources"], p);
+  button("Sync all").click();
+  await settle();
+  expect(toasts.items).toHaveLength(1);
+  expect(toasts.items[0]!.text).toMatch(/^Syncing /);
+  send({ source_id: "jira", run_id: 1, last_outcome: "ok", last_changed: true });
+  await settle();
+  expect(toasts.items[0]!.text).toMatch(/^Syncing /);
+  send({ source_id: "teamcity", run_id: 2, last_outcome: "ok", last_changed: false });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced 2 sources"]);
+  toasts.items = [];
+});
+
+test("Sync all counts the runs it started, because a source whose sign-in fails gets none, and leaves that source out of what's going", async () => {
+  toasts.items = [];
+  const { p, send } = syncEvents({ syncAll: vi.fn(() => Promise.resolve([1])) });
+  const { health } = await open(["sources"], p);
+  health.patch(healthOf("teamcity", "unauthorized"));
+  await settle();
+  button("Sync all").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Syncing 1 source. TeamCity can't sign in."]);
+  expect(button("Sync all").getAttribute("aria-disabled")).toBe("true");
+  send({ source_id: "jira", run_id: 1, last_outcome: "ok", last_changed: true });
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Synced jira"]); // No role list here, so the source's id stands for its name.
+  expect(button("Sync all").getAttribute("aria-disabled")).toBeNull();
+  toasts.items = [];
+});
+
+test("Sync all with every source's sign-in failing starts nothing and stays pressable", async () => {
+  toasts.items = [];
+  const { p } = syncEvents({ syncAll: vi.fn(() => Promise.resolve([])) });
+  const { health } = await open(["sources"], p);
+  health.patch(healthOf("jira", "unauthorized"));
+  health.patch(healthOf("teamcity", "unauthorized"));
+  await settle();
+  button("Sync all").click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Nothing to sync"]);
+  expect(button("Sync all").getAttribute("aria-disabled")).toBeNull();
+  toasts.items = [];
+});
+
 /** The credential row's line, and the Re-enter dialog's note under it. */
 async function storedLines(secretsInMemory: boolean): Promise<{ row: string; note: string }> {
   await open(["source", "teamcity"], ports({ appStatus: vi.fn(() => Promise.resolve({ secrets_in_memory: secretsInMemory })) }));
   const row = [...target.querySelectorAll(".tf-stg-row")].find((el) => el.querySelector(".tf-stg-l")?.textContent === "Password");
   const line = row?.querySelector(".tf-stg-c > span")?.textContent ?? "";
-  button("Re-enter password").click();
+  button("Re-enter password…").click();
   flushSync();
   const note = [...target.querySelectorAll('[role="dialog"] .tf-dlg-note')].map((el) => el.textContent ?? "").join(" ");
   return { row: line, note };
@@ -1013,7 +1174,7 @@ async function addDialogOver(over: (jira: AdapterRow) => AdapterRow[], p: Partia
   const [jira] = (await base.listAdapters()) as AdapterRow[];
   const all = ports({ ...p, listAdapters: vi.fn(() => Promise.resolve(over(jira!) as never)) });
   await open([], all);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   return all;
 }
@@ -1082,7 +1243,7 @@ test("Add a source: a failed save keeps the dialog open with its reason and the 
   await settle();
 
   expect(p.addSource).toHaveBeenCalledTimes(1);
-  expect(dialog().querySelector('[role="alert"]')!.textContent).toContain("a source with id jira already exists");
+  expect(dialog().querySelector('[role="alert"]')!.textContent).toContain("A source with id jira already exists");
   // A dialog that closed on failure would throw the whole draft away.
   expect(dialog().querySelector<HTMLInputElement>("#tf-add-address")!.value).toBe("https://jira2.tidewater.example");
   expect(dialog().querySelector<HTMLInputElement>("#tf-add-secret")!.value).toBe("s3cret");
@@ -1100,7 +1261,10 @@ test("Add a source: choosing another adapter resets the config, so no field of t
   expect(dialog().querySelector("#tf-add-cfg-flavor")).not.toBeNull();
   type("#tf-add-cfg-sprint_field", "customfield_99");
 
-  radios[1]!.click();
+  // The pick folded the list, so another kind is one *Change* away (F-656).
+  dialogButton("Change").click();
+  flushSync();
+  dialog().querySelectorAll<HTMLInputElement>(".tf-radio input")[1]!.click();
   flushSync();
   // Gitea's schema and nothing of Jira's: a config carrying `flavor` would be
   // written to a Gitea source's config column, where it means nothing.
@@ -1158,7 +1322,7 @@ test("Add a source: a discovered key the adapter does not declare never reaches 
 test("a password the source refuses keeps the dialog open and says so", async () => {
   const refuse = ports({ setSourceSecret: vi.fn((id: string) => Promise.resolve(healthOf(id, "unauthorized"))) });
   await open(["source", "teamcity"], refuse);
-  button("Re-enter password").click();
+  button("Re-enter password…").click();
   flushSync();
   type("#tf-reenter-secret", "wrong");
   button("Sign in").click();
@@ -1193,7 +1357,7 @@ const GAP_REPORT = {
 async function testInAddDialog(prefillEpic: string | null) {
   const p = ports({ testSource: vi.fn(() => Promise.resolve(GAP_REPORT)) });
   await open([], p);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
   flushSync();
@@ -1245,7 +1409,7 @@ test("a source's page shows its runs, and Checkouts draws its own section", asyn
   });
   await settle();
   // Built since #844: its own section.
-  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Checkouts and Open in…");
+  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Checkouts and Open in");
 });
 
 test("Esc closes a dialog through the shell's layer stack", async () => {
@@ -1354,7 +1518,7 @@ test("Add a source pre-fills a floor under a minute, else 15 minutes (#1188)", a
       addSource: vi.fn(() => Promise.resolve(summary(`${kind}-2`, kind, "ok"))),
     });
     await open([], p);
-    button("+ Add a source").click();
+    button("Add a source…").click();
     await settle();
     const radio = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")].find((label) =>
       label.textContent!.includes(FLOORED.find((a) => a.adapter_kind === kind)!.name),
@@ -1740,19 +1904,19 @@ test("a source's page opened mid-run draws the walk, and the run's row fills in 
   );
   expect(watchSync).toHaveBeenCalledTimes(1);
   expect(watchSync.mock.calls[0]?.[0]).toBe("jira");
-  expect(button("Sync now").disabled).toBe(true);
+  expect(button("Sync now").getAttribute("aria-disabled")).toBe("true");
   expect(runResults()[0]).toBe("Running…");
 
   channels[0]!(progress(7, { items: 1240, elapsed_ms: 83_000, walked: 120, of: 300, unit: "repositories" }));
   await settle();
-  expect(runReading()).toBe("120 of 300 repositories · 1,240 items · 83 s");
+  expect(runReading()).toBe("120 of 300 repositories · 1,240 items · 1m 23s");
   const bar = target.querySelector<HTMLProgressElement>(".tf-stg-run progress")!;
   expect([bar.max, bar.value]).toEqual([300, 120]);
 
   // A message without a reading keeps the last one: the writing phase sends none.
   channels[0]!(progress(7, { phase: "writing", items: 1302, elapsed_ms: 91_400 }));
   await settle();
-  expect(runReading()).toBe("120 of 300 repositories · 1,302 items · 91 s");
+  expect(runReading()).toBe("120 of 300 repositories · 1,302 items · 1m 31s");
 
   // The ending: the reading goes, and the runs are read again with the row filled in.
   runs[0] = { ...runs[0]!, finished_at: AGO(0), outcome: "ok", upserted: 1302 };
@@ -1792,7 +1956,7 @@ test("a run that starts while the page is open is watched, and leaving the page 
   expect(watchSync).toHaveBeenCalledTimes(1);
   channels[0]!(progress(8, { items: 3, elapsed_ms: 1_000, walked: 1, of: 4, unit: "projects" }));
   await settle();
-  expect(runReading()).toBe("1 of 4 projects · 3 items · 1 s");
+  expect(runReading()).toBe("1 of 4 projects · 3 items · 1s");
 
   // Leave for the list and come back: the page that left hears nothing more,
   // and the page that came back watches the run again on a channel of its own.
@@ -1807,7 +1971,7 @@ test("a run that starts while the page is open is watched, and leaving the page 
   expect(runReading() ?? "", "the left page's channel still reaches the page").not.toContain("999");
   channels[1]!(progress(8, { items: 5, elapsed_ms: 2_000, walked: 2, of: 4, unit: "projects" }));
   await settle();
-  expect(runReading()).toBe("2 of 4 projects · 5 items · 2 s");
+  expect(runReading()).toBe("2 of 4 projects · 5 items · 2s");
   expect(stops[1]?.aborted).toBe(false);
 });
 
@@ -1869,7 +2033,7 @@ test("a token source with no token stored is never told about a password (#1405)
 
   const alert = target.querySelector('[role="alert"]')!;
   expect(alert.textContent).toContain("No token is stored for Uptime Kuma.");
-  expect(button("Re-enter token")).toBeTruthy();
+  expect(button("Enter token…")).toBeTruthy();
   expect(target.textContent).not.toMatch(/password/i);
   unmount(view!);
   view = null;
@@ -2019,7 +2183,7 @@ const loneRows = () => target.querySelectorAll(".tf-stg-body > .tf-stg-acts").le
 
 test("Sources and a source's page put their actions on the title line, in the header's order", async () => {
   await open([]);
-  expect(headerActions()).toEqual(["+ Add a source", "Sync all"]);
+  expect(headerActions()).toEqual(["Add a source…", "Sync all"]);
   expect(loneRows()).toBe(0);
   unmount(view!);
   view = null;
@@ -2028,11 +2192,129 @@ test("Sources and a source's page put their actions on the title line, in the he
   expect(loneRows()).toBe(0);
 });
 
-test("a source that is gone offers All sources on the title line", async () => {
+test("a source that is gone draws the one nothing-here state, as a section that isn't does (F-613)", async () => {
   await open(["source", "nowhere"]);
-  expect(target.querySelector(".tf-stg-h h1")?.textContent).toBe("nowhere");
-  expect([...target.querySelectorAll<HTMLElement>(".tf-stg-h .tf-acts .tf-btn")].map((b) => b.textContent)).toEqual(["All sources"]);
-  expect(loneRows()).toBe(0);
+  expect(target.querySelector(".tf-nohere p")?.textContent).toBe("Settings has no such source. It may have been removed.");
+  expect([...target.querySelectorAll<HTMLElement>(".tf-nohere .tf-btn")].map((b) => b.textContent)).toEqual(["Sources"]);
+  expect(target.querySelector(".tf-stg-nav")).not.toBeNull();
+});
+
+// -- A source's draft (F-617) ------------------------------------------------------
+
+const leave = () => {
+  unmount(view!);
+  view = null;
+};
+
+test("what is typed on a source's page is there on return, marked Not saved, and the list says so", async () => {
+  await open(["source", "jira"]);
+  expect(section("Connection").querySelector(".tf-stg-pend")).toBeNull();
+  type("#tf-src-address", "https://new.example");
+  expect(section("Connection").querySelector(".tf-stg-pend")?.textContent).toBe("Not saved");
+  leave();
+
+  await open([]);
+  const row = [...target.querySelectorAll<HTMLElement>(".tf-stg-src")];
+  expect(row.filter((one) => one.textContent?.includes("Changes not saved"))).toHaveLength(1);
+  leave();
+
+  await open(["source", "jira"]);
+  expect(target.querySelector<HTMLInputElement>("#tf-src-address")!.value).toBe("https://new.example");
+  expect(section("Connection").querySelector(".tf-stg-pend")?.textContent).toBe("Not saved");
+  expect(button("Save connection").disabled).toBe(false);
+});
+
+test("a saved draft is gone: no note on the page, none in the list", async () => {
+  const { p } = await open(["source", "jira"]);
+  type("#tf-src-address", "https://new.example");
+  button("Save connection").click();
+  await settle();
+  expect(p.updateSource).toHaveBeenCalled();
+  expect(sourceDrafts.has("jira")).toBe(false);
+});
+
+test("Reset puts the connection back, focus on its first field, and Undo brings the words back", async () => {
+  await open(["source", "jira"]);
+  const stored = target.querySelector<HTMLInputElement>("#tf-src-address")!.value;
+  type("#tf-src-address", "https://new.example");
+  section("Connection").querySelector<HTMLButtonElement>('[aria-label="Reset the connection"]')!.click();
+  await settle();
+  expect(target.querySelector<HTMLInputElement>("#tf-src-address")!.value).toBe(stored);
+  expect(document.activeElement?.id).toBe("tf-src-address");
+  expect(section("Connection").querySelector(".tf-stg-pend")).toBeNull();
+  expect(sourceDrafts.has("jira")).toBe(false);
+
+  toasts.items.at(-1)!.action!.run();
+  await settle();
+  expect(target.querySelector<HTMLInputElement>("#tf-src-address")!.value).toBe("https://new.example");
+  expect(sourceDrafts.has("jira")).toBe(true);
+});
+
+test("an unsaved config field comes back over what is stored, and a value the sync recorded meanwhile still shows", async () => {
+  await open(["source", "jira"]);
+  type("#tf-src-cfg-epic_link_field", "customfield_10108");
+  expect(addedNote()).toBe("Not saved");
+  leave();
+
+  const recorded = summary("jira", "Jira", "ok", { config: { username: "mara", projects: ["TW", "OPS"], sprint_field: "customfield_10107" } });
+  await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([recorded, SOURCES[1]!])) }));
+  expect(field("epic_link_field").value).toBe("customfield_10108");
+  expect(field("sprint_field").value).toBe("customfield_10107");
+  expect(addedNote()).toBe("Not saved");
+
+  section("What it syncs").querySelector<HTMLButtonElement>('[aria-label="Reset the sync settings"]')!.click();
+  await settle();
+  expect(field("epic_link_field").value).toBe("");
+  expect(sourceDrafts.has("jira")).toBe(false);
+});
+
+test("the Section fold is a panel: Esc's first press only folds it, and focus returns to its bar (F-619)", async () => {
+  const layers = createLayers();
+  view = mount(TfSettings, {
+    target,
+    context,
+    props: { rest: ["source", "jira"], job: null, ready: true, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+  });
+  await settle();
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(layers.open).toEqual([]);
+  expect(document.activeElement).toBe(bar);
+});
+
+test("Add a source: a taken id is said as it is typed and marks its field (F-624)", async () => {
+  await open([]);
+  button("Add a source…").click();
+  await settle();
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  const id = dialog().querySelector<HTMLInputElement>("#tf-add-id")!;
+  expect(id.getAttribute("aria-invalid")).toBeNull();
+  type("#tf-add-id", "jira");
+  expect(id.getAttribute("aria-invalid")).toBe("true");
+  expect(dialog().querySelector("#tf-add-id-note")?.textContent?.trim()).toBe("A source called jira already exists.");
+});
+
+test("Add a source: a pointer's pick goes on to the address, a key's stays on the radios (F-624)", async () => {
+  await open([]);
+  button("Add a source…").click();
+  await settle();
+  const radios = () => [...dialog().querySelectorAll<HTMLInputElement>(".tf-radio input")];
+  radios()[0]!.click();
+  await settle();
+  expect(document.activeElement?.id).toBe("tf-add-address");
+
+  radios()[0]!.focus();
+  radios()[0]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  radios()[1]?.click();
+  await settle();
+  expect(document.activeElement?.id).not.toBe("tf-add-address");
 });
 
 test("Installed adapters: Check for updates is small on the heading line; a row's actions are small and trail it", async () => {
@@ -2057,7 +2339,7 @@ test("Installed adapters: Check for updates is small on the heading line; a row'
 
 test("Add a source's footer: Test connection on the far left, a ghost Cancel, then Add source", async () => {
   await open([]);
-  button("+ Add a source").click();
+  button("Add a source…").click();
   await settle();
   expect([...dialog().querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [b.textContent!.trim(), b.className])).toEqual([
     ["Test connection", "tf-btn tf-first"],

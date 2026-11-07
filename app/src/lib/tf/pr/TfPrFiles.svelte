@@ -70,6 +70,7 @@
     follower,
     render,
     openAt = null,
+    me = null,
     rangeDiff = (entityId, base, head, ignoreWhitespace) => entityRangeDiff(entityId, base, head, ignoreWhitespace),
     fileBytes = (entityId, path, commit) => entityFileBytes(entityId, path, commit),
     piped = (entityId, path, commit, steps) => entityFilePiped(entityId, path, commit, steps),
@@ -92,6 +93,8 @@
     render?: RenderPort;
     /** *Open in…* per file (#2274): the repository and the head the files are read at. */
     openAt?: { entityId: string; at: string | null } | null;
+    /** The reader's name at the source: their line comments read *You*, as Conversation's do. */
+    me?: string | null;
     /** A pick's diff, read at a checkout holding both commits, else the source's compare (ADR-0036); the IPC by default. */
     rangeDiff?: (entityId: string, base: string, head: string, ignoreWhitespace: boolean) => Promise<RangeDiff>;
     /** A file's bytes at a commit, for a rendered image diff (#2279); the IPC by default. */
@@ -246,6 +249,19 @@
     }
   }
 
+  /**
+   * The picker shares the diff's toolbar row (F-246), but sits outside it because each pick draws a new diff and the picker, with
+   * its focus, has to outlive that. The toolbar leaves room for however wide the picker's words are.
+   */
+  function pickRoom(bar: HTMLElement) {
+    const read = () => bar.parentElement?.style.setProperty("--tf-pick-w", `${bar.offsetWidth}px`);
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(read);
+    watch.observe(bar);
+    return () => watch.disconnect();
+  }
+
   const commentable = $derived(diff?.commentable ?? null);
   const review = $derived(
     commentable
@@ -287,8 +303,9 @@
 {:else if view === null}
   <div class="tf-empty">This source draws no changed files for a pull request.</div>
 {:else if view !== undefined}
+  <div class="tf-prfiles">
   {#if range !== null}
-    <div class="tf-pickbar">
+    <div class="tf-pickbar" {@attach pickRoom}>
       <TfPrPicker {range} {choice} onchoose={(next) => (choice = next)} />
     </div>
   {/if}
@@ -312,8 +329,10 @@
         openAt={openAt && ends ? { entityId: openAt.entityId, at: ends.head } : openAt}
         cut={shown.truncated}
         repository={range?.repository ?? null}
+        {me}
         {...render ? { render } : {}}
       />
     {/key}
   {/if}
+  </div>
 {/if}

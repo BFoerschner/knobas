@@ -7,8 +7,10 @@
   card's class is the only difference (`TfJobCard.svelte`). Reading never
   chooses: only a `#/job/<…>` address (`choose`), which then lands on the
   ticket's own address, and the card's foot (`footAction`) choose. *Start
-  work* chooses and shows the stepper, *Resume work* chooses and starts the
-  timer, *Work on this* chooses; pinned, the foot is the timer. The page's
+  work* shows the stepper and chooses nothing until its steps run (F-130),
+  *Resume work* chooses and starts the timer, *Work on this* chooses; pinned,
+  the foot is the timer. A press that takes the choice from another ticket
+  says so, with the way back (`chooseSaying`). The page's
   breadcrumb is *Tickets › KEY*; `Esc` takes the ticket page's rung (the
   opener, else Tickets) and does nothing at home.
 
@@ -53,7 +55,11 @@
   page drew, and the echoes settle on those reads as on any other.
 -->
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import TfKey from "../TfKey.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import TfFindBar from "../TfFindBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
+  import { onMount, tick, untrack } from "svelte";
 
   import type { LinkEntry, LinkSetDetail, LinkSetRow } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
@@ -62,25 +68,27 @@
   import { inTextField } from "../../shell/keys";
   import { toastQueued } from "../../shell/queued-toast";
   import type { Timer } from "../../shell/timer.svelte";
-  import { push } from "../../shell/toasts.svelte";
+  import { push, undoable } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
-  import { alsoIn, hiddenOf, linkedOn, groupsOf, type GroupRow } from "./connections";
+  import { alsoIn, hiddenOf, linkedOn, groupsOf, LINK_CAME_FROM, type GroupRow } from "./connections";
   import { blockerEntries, footAction, segmentKey, isMine, keyOf, offersStartWork, username, type FrameKinds } from "./job";
   import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
+  import TfDialog from "../settings/TfDialog.svelte";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
   import { createJobReader } from "./job-reader.svelte";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob } from "./current.svelte";
-  import { chosenJob } from "./chosen.svelte";
+  import { chooseSaying, chosenJob, pageAsk } from "./chosen.svelte";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, watchEchoes } from "../queued.svelte";
   import { entityAddress } from "../address";
   import { replaceAddress } from "../opener";
+  import { holdStillPress } from "../still-press";
   import { sectionHash, ticketHash } from "../route";
   import TfCrumbs from "../TfCrumbs.svelte";
   import type { EscTarget } from "../escape";
-  import TfConnections from "./TfConnections.svelte";
+  import TfConnections, { type DrawerPlace } from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
   import TfJobAttachments from "./TfJobAttachments.svelte";
@@ -126,8 +134,9 @@
     layers: Layers;
     /** The timer verb: with a timer running, stop it into the worklog draft. */
     ontimer: (() => void) | undefined;
-    /** Start the timer on this ticket, stopping another into its draft first. */
-    onstarttimer: (entityId: string, title: string) => void;
+    /** Start the timer on this ticket, stopping another into its draft first. `quiet`: the press's own toast says it runs. */
+    /** `name` is what its toast calls the ticket: its key, as the launcher's does. */
+    onstarttimer: (entityId: string, name: string, quiet?: boolean) => void;
     ports?: JobPorts;
     today?: () => Date;
     /** *Apply a link set…* and *Save as a link set…* (#869). */
@@ -142,6 +151,10 @@
   let linking = $state(false);
   /** *Apply a link set…* and *Save as a link set…* open (#869). */
   let applyingSet = $state(false);
+  /** *Manage link sets* or *Edit set* left from the drawer: coming back to this page opens it again, where the reader was. */
+  let drawerOnReturn = false;
+  /** Where in the drawer *Edit set* was pressed, which it opens at again (F-557). */
+  let drawerPlace = $state.raw<DrawerPlace | null>(null);
   let savingSet = $state(false);
 
   // ---- the job's reads are the reader's (#1320) ----
@@ -215,6 +228,8 @@
 
   /** Whether keep-alive shows this job or holds it hidden (#2247). */
   const pageShown = pageVisible();
+  /** The reading column, which ⌘F's bar finds in. */
+  let reading = $state<HTMLElement | null>(null);
   onShownAgain(pageShown, () => (writesAsked += 1));
   /** A refresh's re-read (#2134): the ticket through the reader, and its writes asked about again. */
   function rereadJob() {
@@ -233,10 +248,17 @@
   // chosen since.
   const resolvedId = $derived(detail?.row.entity_id ?? null);
   $effect(() => {
+    if (!pageShown() || !drawerOnReturn) return;
+    drawerOnReturn = false;
+    // What the drawer gives focus back to: the row that opens it, as if pressed again.
+    document.querySelector<HTMLElement>(".tf-kept:not([hidden]) .tf-tkacts button")?.focus({ preventScroll: true });
+    drawer = true;
+  });
+  $effect(() => {
     if (!choose || !pageShown() || resolvedId === null) return;
     const id = resolvedId;
     untrack(() => {
-      chosenJob.choose(id);
+      chooseSaying(id);
       replaceAddress(ticketHash(id));
     });
   });
@@ -248,6 +270,9 @@
     drawer = false;
     linking = false;
     stepping = false;
+    steppedTo = false;
+    stepsHere = false;
+    stepsStarted = false;
     // Only the address re-opens a job: what the reader reads before its first
     // await is not a reason to read again.
     untrack(() => {
@@ -315,14 +340,22 @@
     }
   }
 
-  /** *Save link set* (R-7.9): the dialog and the drawer close, the job re-reads, the toast opens the set. */
+  /**
+   * *Save link set* (R-7.9): the dialog closes and the job re-reads. As with *Apply*, the drawer stays, so its new group and *Edit set* lead to the set
+   * (F-544), and focus goes back to *Save as a link set…*. The toast takes it back (F-536), on the ticket it was saved from, since the toast outlives a move.
+   */
   function savedSet(set: LinkSetDetail) {
     savingSet = false;
-    drawer = false;
-    if (detail) reader.rereadReach(detail.row.entity_id);
-    push({
-      text: savedToast(set),
-      action: { label: "Open it", run: () => (location.hash = `#/sets/${encodeURIComponent(set.id)}`) },
+    const id = detail?.row.entity_id;
+    if (id !== undefined) reader.rereadReach(id);
+    undoable(savedToast(set), () => {
+      holdStillPress();
+      void sets
+        .deleteLinkSet(set.id)
+        .then(() => {
+          if (id !== undefined) reader.rereadReach(id);
+        })
+        .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" }));
     });
   }
 
@@ -337,7 +370,29 @@
     reader.rereadReach(id);
   }
 
-  async function unlinkEntry(entry: LinkEntry) {
+  /** The link *Unlink…* is asking about: one knobas could not draw again as it was (the removal rule). */
+  let unlinking = $state<LinkEntry | null>(null);
+
+  /** A link drawn by hand goes at once with *Undo*. `create_link` would redraw any other as drawn by hand, so it asks first. */
+  function unlinkEntry(entry: LinkEntry) {
+    if (entry.link.origin === "manual") void withdrawLink(entry);
+    else unlinking = entry;
+  }
+
+  async function confirmUnlink(entry: LinkEntry) {
+    const id = detail?.row.entity_id;
+    try {
+      await ports.unlink(entry.link.id);
+      unlinking = null;
+      rereadLinks(id);
+      push({ text: "Unlinked in knobas only." });
+    } catch (cause) {
+      unlinking = null;
+      push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  async function withdrawLink(entry: LinkEntry) {
     const { link } = entry;
     // *Undo* re-reads the ticket it was unlinked on: its toast outlives a move to another job.
     const id = detail?.row.entity_id;
@@ -419,7 +474,7 @@
         },
         follower,
       });
-      toastQueued(`comment on ${key}`, source);
+      toastQueued(`comment on ${key}`, source, { write });
       return true;
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -451,17 +506,50 @@
   /** The reader's username in the ticket's source: the card's reporter in full ink, and the reader's share of the logged time (#2403). */
   const me = $derived(detail ? username(sources.find((source) => source.id === detail.row.source_id)) : null);
   /**
-   * The stepper shows on the chosen job (*Start work* is what chooses a
-   * ticket read), and once shown it stays on this page while the ticket
-   * still offers it, so a timer that chooses another ticket meanwhile does
-   * not take the steps away mid-run.
+   * The stepper shows on the chosen job, and on a ticket only read once
+   * *Start work* is pressed, at the foot or in the Tickets preview (`pageAsk`).
+   * Once shown it stays on this page while the ticket still offers it, so a
+   * timer that chooses another ticket meanwhile does not take the steps away
+   * mid-run. The foot steps aside until a step has run (`stepsStarted`), and
+   * comes back with the timer (F-125).
    */
   let stepping = $state(false);
+  /** A press brought the reader to the steps, so focus goes to them. */
+  let steppedTo = $state(false);
+  let stepsStarted = $state(false);
+  /** *Start work* at the foot of this page opened the steps, so `Esc` closes them as *Cancel* does (F-139). From the Tickets preview, `Esc` still goes back to the list. */
+  let stepsHere = $state(false);
   const offersSteps = $derived(detail ? offersStartWork(detail.status, mine) : false);
   $effect(() => {
     if (pinned && offersSteps) stepping = true;
   });
   const starting = $derived(stepping && offersSteps);
+  // What the Tickets preview's button asked of this page, taken once it shows the ticket.
+  $effect(() => {
+    const wanted = pageAsk.current;
+    if (wanted === null || wanted.id !== resolvedId || !pageShown() || !detail) return;
+    const { row } = detail;
+    untrack(() => {
+      pageAsk.clear();
+      if (wanted.does === "steps") {
+        steppedTo = true;
+        stepping = true;
+      } else onstarttimer(row.entity_id, keyOf(row.entity_id));
+    });
+  });
+  /** *Cancel* on the steps: as if *Start work* had not been pressed, with focus back on it. */
+  function cancelSteps() {
+    stepping = false;
+    steppedTo = false;
+    stepsHere = false;
+    void tick().then(() => [...document.querySelectorAll<HTMLElement>(".tf-ticketcard .tf-go .tf-btn")].find((go) => !go.closest(".tf-kept[hidden]"))?.focus({ preventScroll: true }));
+  }
+  /** While nothing has run, the steps are a panel on the page, and `Esc` takes them first. */
+  const stepsArePanel = $derived(stepsHere && starting && !stepsStarted && !pinned);
+  $effect(() => {
+    if (!stepsArePanel || !pageShown()) return;
+    return untrack(() => layers.add({ kind: "panel", close: cancelSteps }));
+  });
   const timerOnIt = $derived(
     detail !== null && detail !== undefined && timer.current?.target.kind === "entity" && timer.current.target.entity_id === detail.row.entity_id,
   );
@@ -471,21 +559,24 @@
   function act() {
     if (!detail || action === null) return;
     const id = detail.row.entity_id;
-    const title = detail.row.title;
     switch (action.does) {
       case "stop":
         ontimer?.();
         return;
       case "start-timer":
-        onstarttimer(id, title);
+        onstarttimer(id, keyOf(id));
         return;
       case "resume":
-        chosenJob.choose(id);
-        onstarttimer(id, title);
+        chooseSaying(id);
+        onstarttimer(id, keyOf(id));
         return;
       case "start-work":
+        steppedTo = true;
+        stepping = true;
+        stepsHere = true;
+        return;
       case "choose":
-        chosenJob.choose(id);
+        chooseSaying(id);
     }
   }
   const blocked = $derived(detail ? blockerEntries(detail) : []);
@@ -518,24 +609,22 @@
 {#if detail === undefined && failure === null}
   <div class="tf-full tf-ticketpage">
     <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: segmentKey(segment) }]} {back} />
-    <div class="tf-empty"><p>Opening {segmentKey(segment)}…</p></div>
+    <div class="tf-empty tf-nohere"><p>Opening {segmentKey(segment)}…</p></div>
   </div>
 {:else if detail === null || (detail === undefined && failure !== null)}
   <div class="tf-full tf-ticketpage">
-    <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: segmentKey(segment) }]} {back} />
-    <div class="tf-empty">
-      {#if failure !== null}
-        <p>Could not open {segmentKey(segment)}: {failure}</p>
-      {:else}
-        <p>No ticket {segmentKey(segment)} in the mirror. It may not have synced yet.</p>
-      {/if}
-      <a class="tf-btn" href="#/tickets">All tickets</a>
-    </div>
+    <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: "Ticket" }]} {back} />
+    {#if failure !== null}
+      <TfNothingHere message="This ticket could not be opened: {failure}" href="#/tickets" action="All tickets" />
+    {:else}
+      <TfNothingHere message="knobas does not hold this ticket. It may not have synced yet." href="#/tickets" action="All tickets" />
+    {/if}
   </div>
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
   <div class="tf-full tf-ticketpage">
-  <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} {back} />
+  <!-- While the steps are a panel, `Esc` closes them and stays on this ticket, so the hint names the ticket, and a press closes them too (F-153). -->
+  <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} back={stepsArePanel ? { name: key } : back} />
   <div class="tf-ws" {@attach cardSide}>
     <TfJobCard
       {detail}
@@ -544,31 +633,32 @@
       {mine}
       {me}
       {pinned}
-      {action}
+      action={starting && !(stepsStarted && pinned) ? null : action}
       onaction={act}
       {table}
       onlink={() => (drawer = true)}
     />
-    <section class="tf-work">
+    <TfScroller class="tf-work">
       <div class="tf-wbody">
-        <div class="tf-tkread">
+        <div class="tf-tkread" bind:this={reading}>
+          <TfFindBar root={() => reading} within="in this column" />
           <header class="tf-tkpagehead">
             <h1>{detail.row.title}</h1>
             <TfDetailRefresh {detail} {refresh} reread={rereadJob} page button={false} />
           </header>
-          <TfDetailBanners {detail} failed={refresh.failed} />
+          <TfDetailBanners {detail} {refresh} reread={rereadJob} />
           {#if failure !== null}
             <p class="tf-dim">Could not read what this ticket reaches: {failure}</p>
           {/if}
           {#each blocked as blocker (blocker.entityId)}
             <div class="tf-blocked">
-              <strong>Blocked by {blocker.key} {blocker.title}</strong>
+              <strong>Blocked by <TfKey value={blocker.key} /> {blocker.title}</strong>
               {#if blocker.note}<span>{blocker.note}</span>{/if}
-              <a class="tf-btn tf-sm" href={entityAddress("ticket", blocker.entityId)}>Open {blocker.key}</a>
+              <a class="tf-btn tf-sm" href={entityAddress("ticket", blocker.entityId)}>Open <TfKey value={blocker.key} /></a>
             </div>
           {/each}
           {#if starting}
-            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} />
+            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} {moveRefused} oncancel={pinned ? undefined : cancelSteps} arrive={steppedTo} bind:started={stepsStarted} />
           {/if}
           <section aria-label="Description">
             <div class="tf-panel tf-tkdesc">
@@ -598,11 +688,12 @@
               oncomment={comment}
               attachments={detail.attachments ?? []}
               images={inlineImages}
+              selfName={mine ? (detail.author_name ?? null) : detail.reporter === me ? (detail.reporter_name ?? null) : null}
             />
           </section>
         </div>
       </div>
-    </section>
+    </TfScroller>
   </div>
   </div>
   {#if drawer}
@@ -613,8 +704,12 @@
       hidden={hiddenOf(inherited)}
       alsoIn={(entityId) => alsoIn(inherited, entityId)}
       {layers}
-      onclose={() => (drawer = false)}
-      onunlink={(entry) => void unlinkEntry(entry)}
+      place={drawerPlace}
+      onclose={() => {
+        drawer = false;
+        if (!drawerOnReturn) drawerPlace = null;
+      }}
+      onunlink={unlinkEntry}
       onlinkto={() => {
         linking = true;
       }}
@@ -622,6 +717,10 @@
       onshow={(memberId) => void showAgain(memberId)}
       onapplyset={() => (applyingSet = true)}
       onsaveset={() => (savingSet = true)}
+      oneditset={(place) => {
+        drawerOnReturn = true;
+        drawerPlace = place;
+      }}
     />
   {/if}
   {#if previewed !== null && previews !== null}
@@ -634,6 +733,10 @@
       read={sets.linkSets}
       {layers}
       onapply={(set) => void applySet(set)}
+      onmanage={() => {
+        drawerOnReturn = true;
+        drawerPlace = null;
+      }}
       onclose={() => (applyingSet = false)}
     />
   {/if}
@@ -641,11 +744,23 @@
     <TfSaveSet
       ticket={detail.row}
       links={connected.map((entry) => entry.other)}
-      ports={{ saveLinkSet: sets.saveLinkSet, previewLinkSetRule: sets.previewLinkSetRule, getEntity: ports.getEntity }}
+      ports={{ linkSets: sets.linkSets, saveLinkSet: sets.saveLinkSet, previewLinkSetRule: sets.previewLinkSetRule, getEntity: ports.getEntity }}
       {layers}
       onsaved={savedSet}
       onclose={() => (savingSet = false)}
     />
+  {/if}
+  {#if unlinking !== null}
+    {@const link = unlinking}
+    <TfDialog title="Unlink {link.other.title || link.other.entity_id}?" {layers} onclose={() => (unlinking = null)}>
+      {#snippet body()}
+        <p>It came from {LINK_CAME_FROM[link.link.origin]}. Linking it again would mark it as drawn by hand, so this can't be undone.</p>
+      {/snippet}
+      {#snippet footer()}
+        <button type="button" class="tf-btn tf-ghost" onclick={() => (unlinking = null)}>Cancel</button>
+        <button type="button" class="tf-btn tf-primary tf-danger" onclick={() => void confirmUnlink(link)}>Unlink</button>
+      {/snippet}
+    </TfDialog>
   {/if}
   {#if linking}
     <TfLinkTo
@@ -653,6 +768,7 @@
       entityId={detail.row.entity_id}
       {ports}
       {layers}
+      linked={connected.map((entry) => entry.other.entity_id)}
       onclose={() => (linking = false)}
       onlinked={() => {
         linking = false;

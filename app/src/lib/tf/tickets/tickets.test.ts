@@ -3,11 +3,17 @@ import { expect, test } from "vitest";
 
 import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
-  aroundLines,
+  columnHead,
+  sentenceCase,
+  shortKey,
   boardLanes,
   columnDone,
   drawnCards,
   moreLanesLine,
+  assigneeName,
+  assigneeOptions,
+  firstName,
+  listName,
   initials,
   laneTitle,
   moreLine,
@@ -81,25 +87,29 @@ test("Show N more counts what the column holds past what it draws, Done saying s
   expect(moreLine(column("To Do", 5), 5)).toBeNull();
 });
 
-test("initials are the account's two parts, or its first two letters, or a dash for nobody", () => {
-  expect(initials("mara.lindqvist")).toBe("ML");
+test("initials are a person's first and last names' letters, an account's first two letters, or a dash for nobody", () => {
+  expect(initials("mara.lindqvist")).toBe("MA");
+  expect(initials("mara")).toBe("MA");
+  expect(initials("Lena Hoffmann")).toBe("LH");
   expect(initials("jonas")).toBe("JO");
   expect(initials(null)).toBe("–");
 });
 
-test("the preview's button: Start work, Resume work or Open job by the ticket's state", () => {
+test("the preview's button: Start work, Resume work or Open ticket by the ticket's state", () => {
   const mine = (status: string) => ({ assignee: "mara", mine: true, status });
   const theirs = { assignee: "jonas.becker", mine: false, status: "To Do" };
-  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: true });
+  // *Start work* shows the steps and chooses nothing until they run (F-130).
+  expect(previewAction(mine("To Do"), false)).toMatchObject({ label: "Start work", chooses: false, asks: "steps" });
   expect(previewAction(mine("In Progress"), false)).toEqual({
     label: "Resume work",
     note: "Starts the timer on this ticket.",
     chooses: true,
+    asks: "timer",
   });
-  expect(previewAction(mine("In Progress"), true).note).toBe("Your timer is running on this ticket.");
+  expect(previewAction(mine("In Progress"), true)).toEqual({ label: "Resume work", note: "Your timer is running on this ticket.", chooses: true });
   // *Open job* only reads (spec #2396): it goes to the ticket's page and chooses nothing.
-  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open job", chooses: false });
-  expect(previewAction(theirs, false)).toEqual({ label: "Open job", note: "Assigned to jonas.becker.", chooses: false });
+  expect(previewAction(mine("Done"), false)).toMatchObject({ label: "Open ticket", chooses: false });
+  expect(previewAction(theirs, false)).toEqual({ label: "Open ticket", note: "Assigned to jonas.becker.", chooses: false });
   expect(previewAction({ assignee: null, mine: false, status: "To Do" }, false).note).toBe("Unassigned.");
 });
 
@@ -108,38 +118,7 @@ test("the preview's button reads the card's status, not the column it stands in 
   const [ready] = named("Ready", ["To Do"]).cards;
   expect(previewAction({ ...ready!, assignee: "mara", mine: true }, false).label).toBe("Start work");
   const [shipped] = named("Shipped", ["Done"]).cards;
-  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open job");
-});
-
-test("Around this ticket groups the context's kinds as the room's tiles do, and counts what fails", () => {
-  expect(
-    aroundLines([
-      { kind: "ticket", tone: null, count: 3 },
-      { kind: "pr", tone: "info", count: 2 },
-      { kind: "commit", tone: null, count: 3 },
-      { kind: "build", tone: "err", count: 1 },
-      { kind: "build", tone: "ok", count: 6 },
-      { kind: "page", tone: null, count: 3 },
-      { kind: "monitor", tone: "err", count: 1 },
-    ]),
-  ).toEqual([
-    { section: "Code", count: "5 items", failing: null },
-    { section: "Builds", count: "7 builds", failing: "1 failing or down" },
-    { section: "Docs", count: "3 pages", failing: null },
-    { section: "Monitors", count: "1 monitor", failing: "1 failing or down" },
-  ]);
-  expect(aroundLines(null)).toEqual([]);
-});
-
-test("Around this ticket counts what the Builds read answered under Builds, whatever its run kind (#1256, #1300)", () => {
-  const tally = [
-    { kind: "build", tone: "ok" as const, count: 1, section: "builds" as const },
-    { kind: "workflow_run", tone: "err" as const, count: 2, section: "builds" as const },
-  ];
-  expect(aroundLines(tally)).toEqual([{ section: "Builds", count: "3 items", failing: "2 failing or down" }]);
-  // A line no section read counted is grouped by its kind alone.
-  const loose = tally.map(({ kind, tone, count }) => ({ kind, tone, count }));
-  expect(aroundLines(loose).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);
+  expect(previewAction({ ...shipped!, assignee: "mara", mine: true }, false).label).toBe("Open ticket");
 });
 
 function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {
@@ -282,4 +261,69 @@ test("a key two sources hold is shared, and every ticket opens at its source's a
   expect(ticketAddress(mock)).toBe("#/ticket/mock%3APAY-231");
   // A key one source holds names its source too.
   expect(ticketAddress(card(7))).toBe("#/ticket/jira%3APAY-7");
+});
+
+test("a forge's long key keeps its repository and number; other keys stay whole", () => {
+  expect(shortKey("tidewater/payout-service/issues/143")).toBe("payout-service#143");
+  expect(shortKey("tidewater/ledger#12")).toBe("ledger#12");
+  expect(shortKey("PAY-231")).toBe("PAY-231");
+});
+
+test("a source's lower-case word reads as a label, and a written one stays as it is", () => {
+  expect(sentenceCase("closed")).toBe("Closed");
+  expect(sentenceCase("In Progress")).toBe("In Progress");
+  expect(sentenceCase(null)).toBeNull();
+});
+
+test("a column's head reads as a state only when it is called after one it holds", () => {
+  const columns = [
+    { name: "In Progress", statuses: ["In Progress"] },
+    { name: "Waiting on Björn", statuses: ["Blocked"] },
+    { name: "Doing", statuses: ["In Progress", "In Review"] },
+  ];
+  expect(columnHead("In Progress", columns)).toBe("In progress");
+  expect(columnHead("Waiting on Björn", columns)).toBe("Waiting on Björn");
+  expect(columnHead("Doing", columns)).toBe("Doing");
+  expect(columnHead("To Do", [])).toBe("To do");
+  expect(columnHead(null, [])).toBe("No status");
+});
+
+test("the List calls someone by the first word of their name, else by their account's first part with a capital (F-107)", () => {
+  expect(listName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara");
+  expect(listName({ assignee: "mara" })).toBe("Mara");
+  expect(listName({ assignee: "jonas.becker" })).toBe("Jonas");
+  expect(listName({ assignee: "lena_h@example.com" })).toBe("Lena");
+  expect(listName({ assignee: null })).toBeNull();
+});
+
+test("*Assignee* offers the source's accounts and the cards' people by the name the column draws (F-161, F-165)", () => {
+  const people = new Map([
+    ["jonas.becker", { name: "Jonas Becker", mine: false }],
+    ["priya", { name: null, mine: false }],
+    ["mara", { name: "Mara Lindqvist", mine: true }],
+  ]);
+  const labels = (accounts: string[], known = people) => assigneeOptions(accounts, known).map((option) => [option.value, option.label]);
+  expect(labels(["@me", "jonas.becker"])).toEqual([
+    ["@me", "Me"],
+    ["jonas.becker", "Jonas"],
+    ["priya", "Priya"],
+  ]);
+  // Your own cards add no row beside *Me*, but an account the source offers stays.
+  expect(labels(["@me", "mara"]).map(([, label]) => label)).toEqual(["Me", "Jonas", "Mara", "Priya"]);
+  // Two people who share a first name: the whole name, or the account where there is none.
+  const twins = new Map([
+    ["jonas.becker", { name: "Jonas Becker", mine: false }],
+    ["jonas.k", { name: null, mine: false }],
+  ]);
+  expect(labels([], twins).map(([, label]) => label)).toEqual(["Jonas Becker", "jonas.k"]);
+});
+
+test("a card calls its assignee by name where the source keeps one, else by account (F-107)", () => {
+  expect(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" })).toBe("Mara Lindqvist");
+  expect(assigneeName({ assignee: "mara" })).toBe("mara");
+  expect(assigneeName({ assignee: null })).toBeNull();
+  expect(firstName("Mara Lindqvist")).toBe("Mara");
+  expect(firstName("mara")).toBe("mara");
+  expect(firstName(null)).toBeNull();
+  expect(initials(assigneeName({ assignee: "mara", assignee_name: "Mara Lindqvist" }))).toBe(initials("Mara Lindqvist"));
 });

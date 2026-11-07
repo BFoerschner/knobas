@@ -3,12 +3,11 @@
  * draws, what a card's corner says, what the preview's button reads, and
  * what *Around this ticket* counts.
  */
-import type { EntityDetail, KindTally, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { EntityDetail, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
-import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 import { keyOf } from "../../time/format";
 import { entityAddress } from "../address";
-import type { SectionTally } from "../job/sections";
+import { stateWord } from "../state-word";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
 export const COLUMN_CAP = 8;
@@ -37,7 +36,35 @@ export function isDone(status: string | null): boolean {
  * name; a ticket's status is its card's (#1423).
  */
 export function columnName(status: string | null): string {
-  return status ?? "No status";
+  return status === null || status === "" ? "No status" : stateWord(status);
+}
+
+/**
+ * A column's head. A view's column called after a status it holds reads as that status does; one named anything else keeps
+ * the words it was given, by the reader or by a board in the source, because `stateWord` takes states and *Waiting on Björn*
+ * is a name.
+ */
+export function columnHead(name: string | null, columns: readonly { name: string; statuses: readonly (string | null)[] }[]): string {
+  const own = columns.find((column) => column.name === name);
+  return name !== null && name !== "" && own !== undefined && !own.statuses.includes(name) ? name : columnName(name);
+}
+
+/**
+ * A key as a card can hold it: a forge's `owner/repo/issues/143` or `owner/repo#143` is told apart by its repository
+ * and number, which an end-of-line ellipsis would cut. Every other key is short already.
+ */
+export function shortKey(key: string): string {
+  const issue = /^[^/\s]+\/([^/\s]+)\/issues\/(\d+)$/.exec(key) ?? /^[^/\s]+\/([^/\s#]+)#(\d+)$/.exec(key);
+  return issue === null ? key : `${issue[1]}#${issue[2]}`;
+}
+
+/**
+ * A source's word as a label: Gitea says *closed* and *high* where Jira says *Done* and *High*, and the shell's
+ * labels are sentence case. Only the first letter moves, for a word that is not a state, such as a priority: a status goes
+ * through {@link columnName}, and so `stateWord`.
+ */
+export function sentenceCase<Word extends string | null>(word: Word): Word | string {
+  return word === null || word === "" ? word : word[0]!.toLocaleUpperCase() + word.slice(1);
 }
 
 /**
@@ -95,15 +122,61 @@ export function commentsLine(count: number | null): string | null {
 }
 
 /**
- * The initials in a card's corner: the first letters of an account's first
- * two parts (`mara.lindqvist` is *ML*), or its first two letters, or *–* for
- * nobody.
+ * The initials on an avatar: a display name's first and last letters (*Lena Hoffmann* is *LH*), else the first two
+ * letters of an account's first part, or *–* for nobody. One account has one avatar, whichever form a read answered:
+ * `mara` and `mara.lindqvist` are both *MA*.
  */
 export function initials(assignee: string | null): string {
   if (assignee === null) return "–";
+  const names = assignee.trim().split(/\s+/);
+  if (names.length >= 2) return (names[0]![0]! + names.at(-1)![0]!).toUpperCase();
   const parts = assignee.split(/[.\s_@-]+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
   return (parts[0] ?? assignee).slice(0, 2).toUpperCase();
+}
+
+/**
+ * What a card calls its assignee (F-107): the name the source keeps beside the
+ * account, which is what a ticket's comments call the same person, else the
+ * account. Filters and lanes stay on the account, the stored value.
+ */
+export function assigneeName(card: Pick<MiniBoardCard, "assignee" | "assignee_name">): string | null {
+  return card.assignee_name ?? card.assignee;
+}
+
+/** What a list's narrow column calls someone: the first word of the name the source gave, on one line. The whole name is the cell's title. */
+export function firstName(name: string | null): string | null {
+  return name?.trim().split(/\s+/)[0] || null;
+}
+
+/**
+ * What the List calls someone, in its column and its *Assignee* select (F-107): the first word of the source's name, or with no
+ * name the account's first part with a capital, so `mara` and `Mara Lindqvist` read alike a few rows apart. Drawn, never stored: filters stay on the account.
+ */
+export function listName(card: Pick<MiniBoardCard, "assignee"> & { assignee_name?: string | null }): string | null {
+  if (card.assignee_name) return firstName(card.assignee_name);
+  const part = card.assignee?.split(/[.\s_@-]+/).find(Boolean);
+  return part === undefined ? null : part.charAt(0).toUpperCase() + part.slice(1);
+}
+
+/** Someone the cards read have named or assigned. */
+export interface CardPerson {
+  name: string | null;
+  mine: boolean;
+}
+
+/**
+ * *Assignee*'s options (F-161, F-165): the accounts the source offers and the people on the cards read, each by the name the
+ * column draws, or the whole name where two people share one. You are *Me*, so your own cards add no row of their own.
+ */
+export function assigneeOptions(accounts: readonly string[], people: ReadonlyMap<string, CardPerson>): { value: string; label: string }[] {
+  const offered = [...new Set([...accounts, ...[...people].filter(([, person]) => !person.mine).map(([account]) => account)])].filter((account) => account !== "@me");
+  const short = (account: string) => listName({ assignee: account, assignee_name: people.get(account)?.name ?? null }) ?? account;
+  const taken = new Map<string, number>();
+  for (const account of offered) taken.set(short(account), (taken.get(short(account)) ?? 0) + 1);
+  const named = offered
+    .map((value) => ({ value, label: (taken.get(short(value)) ?? 0) > 1 ? (people.get(value)?.name ?? value) : short(value) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+  return accounts.includes("@me") ? [{ value: "@me", label: "Me" }, ...named] : named;
 }
 
 /**
@@ -113,7 +186,7 @@ export function initials(assignee: string | null): string {
  */
 export type TicketFacts = Pick<
   MiniBoardCard,
-  "entity_id" | "key" | "title" | "status" | "assignee" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
+  "entity_id" | "key" | "title" | "status" | "assignee" | "assignee_name" | "priority" | "path" | "parent_title" | "updated_at" | "mine"
 >;
 
 /**
@@ -126,7 +199,7 @@ export type TicketFacts = Pick<
  * it is read, or when it cannot be, draws the path line alone.
  */
 export function ticketFacts(
-  detail: Pick<EntityDetail, "row" | "author" | "status" | "priority">,
+  detail: Pick<EntityDetail, "row" | "author" | "author_name" | "status" | "priority">,
   mine: boolean,
   parentTitle: string | null,
 ): TicketFacts {
@@ -136,6 +209,7 @@ export function ticketFacts(
     title: detail.row.title,
     status: detail.status,
     assignee: detail.author,
+    ...(detail.author_name ? { assignee_name: detail.author_name } : {}),
     priority: detail.priority,
     path: detail.row.path,
     parent_title: parentTitle,
@@ -150,79 +224,38 @@ export function ticketFacts(
  * decides it: *Start work* on a To Do ticket of mine, *Open job* on a done one
  * or somebody else's, *Resume work* on the rest of mine. The state is the
  * ticket's own status, whatever column it stands in (#1423). `chooses` says
- * where it goes: *Start work* and *Resume work* to the job's address
- * (`jobHash`), which makes it the chosen job; *Open job* only reads, so to the
- * ticket's page (`ticketHash`), which chooses nothing (spec #2396).
+ * where it goes: *Resume work* to the job's address (`jobHash`), which makes it
+ * the chosen job; *Open ticket* only reads, so to the ticket's page
+ * (`ticketHash`), which chooses nothing (spec #2396); and *Start work* to the
+ * ticket's page too, because it chooses nothing until its steps run (F-130).
+ * `asks` is what the ticket's page does on arriving (`job/chosen.svelte.ts`).
  */
 export function previewAction(
   card: Pick<MiniBoardCard, "assignee" | "mine" | "status">,
   timerOnIt: boolean,
-): { label: string; note: string; chooses: boolean } {
+  chosen = false,
+): { label: string; note: string; chooses: boolean; asks?: "steps" | "timer" } {
   const lower = card.status?.toLowerCase() ?? "";
+  // Already the job: nothing to start from here, and its page has the timer.
+  if (chosen) return { label: "Open ticket", note: timerOnIt ? "Your timer is running on this ticket." : "This is the ticket you are on.", chooses: false };
   if (lower === "to do" && card.mine) {
     return {
       label: "Start work",
-      note: "Creates a branch and PR, moves it to In Progress, starts the timer. You review each step.",
-      chooses: true,
+      note: "Shows the steps first. Nothing happens until you run them.",
+      chooses: false,
+      asks: "steps",
     };
   }
-  if (lower === "done") return { label: "Open job", note: "Done. Opening shows what was attached.", chooses: false };
+  if (lower === "done") return { label: "Open ticket", note: "Done. Opening shows what was attached.", chooses: false };
   if (!card.mine) {
-    return { label: "Open job", note: card.assignee ? `Assigned to ${card.assignee}.` : "Unassigned.", chooses: false };
+    return { label: "Open ticket", note: card.assignee ? `Assigned to ${assigneeName(card)}.` : "Unassigned.", chooses: false };
   }
   return {
     label: "Resume work",
     note: timerOnIt ? "Your timer is running on this ticket." : "Starts the timer on this ticket.",
     chooses: true,
+    ...(timerOnIt ? {} : { asks: "timer" as const }),
   };
-}
-
-/** One line of *Around this ticket*: a section and what it holds. */
-export interface AroundLine {
-  section: string;
-  /** "7 builds" */
-  count: string;
-  /** "1 failing or down", or `null` when nothing is. */
-  failing: string | null;
-}
-
-/**
- * *Around this ticket* (R-3.9): one line per section of what the ticket's
- * job would show, from the tally of the job's section reads
- * (`reachTally`, #1030) — so a build is its configuration's latest, and a
- * ticket nobody has opened yet counts what it reaches — grouped the way the room's tiles
- * group kinds (`sectionOf`). Tickets are the view's own and not a section
- * here. A section of one kind says that kind's plural; a mixed one (Code)
- * says *items*. Tone `err` is what fails or is down. A line the Builds read
- * counted (`section: "builds"`) counts under Builds whatever its run kind
- * (#1256): the mirror answered it for the CI role, so the shell need not know
- * the role's run kinds (#1300).
- */
-export function aroundLines(tally: readonly (KindTally & Partial<Pick<SectionTally, "section">>)[] | null): AroundLine[] {
-  const sections = new Map<string, { label: string; order: number; kinds: Set<string>; n: number; bad: number }>();
-  for (const line of tally ?? []) {
-    if (line.kind === "ticket" || line.count === 0) continue;
-    const section = sectionOf(line.section === "builds" ? "build" : line.kind);
-    const held = sections.get(section.id) ?? { label: section.label, order: section.order, kinds: new Set(), n: 0, bad: 0 };
-    held.kinds.add(line.kind);
-    held.n += line.count;
-    if (line.tone === "err") held.bad += line.count;
-    sections.set(section.id, held);
-  }
-  return [...sections.values()]
-    .sort((a, b) => a.order - b.order)
-    .map((held) => {
-      const only = held.kinds.size === 1 ? [...held.kinds][0]! : null;
-      const one = held.n === 1;
-      const noun = (
-        only === null ? (one ? "item" : "items") : one ? kindSingular(only) : kindLabel(only)
-      ).toLowerCase();
-      return {
-        section: held.label,
-        count: `${held.n} ${noun}`,
-        failing: held.bad > 0 ? `${held.bad} failing or down` : null,
-      };
-    });
 }
 
 /** What a ticket board's lanes split by (R-3.5): nothing, or one field. */

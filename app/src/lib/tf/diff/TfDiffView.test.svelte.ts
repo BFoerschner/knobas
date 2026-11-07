@@ -12,6 +12,9 @@ import type { DiffFile, DiffLine } from "../../ipc/entity";
 import { createPendingComments } from "../../detail/view/pending-comments.svelte";
 import { createHighlightCore } from "../../render/highlight-core";
 import { workerPort, type HighlightMessage, type HighlightReply, type RenderPort } from "../../render/port";
+import { installFindKey } from "../filter-keys";
+import { layers } from "../layers.svelte";
+import { toasts } from "../../shell/toasts.svelte";
 import { createDiffLayout, LAYOUT_KEY } from "./diff-layout.svelte";
 import TfDiffView from "./TfDiffView.svelte";
 
@@ -140,14 +143,25 @@ test("the layout chosen is kept across a restart and drawn by every diff", () =>
   expect(commit.querySelectorAll(".tf-srow")).toHaveLength(0);
 });
 
-test("a narrow window shows unified though split is chosen, and says why", () => {
+test("too little room presses Unified and disables Split with a title, though split is still the choice (F-226)", () => {
   const storage = memoryStorage();
   storage.setItem(LAYOUT_KEY, "split");
-  draw({ files: [RETRY], layout: createDiffLayout(() => storage), narrow: { current: true } });
-  expect(pressed()).toEqual(["Split"]);
+  const layout = createDiffLayout(() => storage);
+  draw({ files: [RETRY], layout, narrow: { current: true } });
+  expect(pressed()).toEqual(["Unified"]);
   expect(target.querySelectorAll(".tf-srow")).toHaveLength(0);
   expect(target.querySelectorAll(".tf-ln")).toHaveLength(4);
-  expect(squash(target.querySelector(".tf-dtool-why"))).toBe("Unified while the window is too narrow for split.");
+  const split = [...target.querySelectorAll<HTMLButtonElement>(".tf-dtool .tf-seg button")].find((b) => b.textContent === "Split")!;
+  expect(split.getAttribute("aria-disabled")).toBe("true");
+  expect(split.title).toContain("too little room");
+  // A press and `s` change nothing, and the choice waits for a wider window.
+  split.click();
+  flushSync();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(pressed()).toEqual(["Unified"]);
+  expect(layout.chosen).toBe("split");
+  expect(toasts.items.at(-1)?.text).toContain("too little room");
 });
 
 test("a line takes a comment only where the caller passes a review", () => {
@@ -195,7 +209,8 @@ test("a string that spans hunks is highlighted as one string on both sides", asy
 test("a labelled file is titled by its label and highlighted by its path's language", async () => {
   draw({ files: [{ ...RETRY, label: "src/retry.rs (modified, staged)" }], layout: createDiffLayout(() => null), render: shikiPort() });
   await highlighted(3);
-  expect(squash(target.querySelector(".tf-fh .tf-mono"))).toBe("src/retry.rs (modified, staged)");
+  expect(squash(target.querySelector(".tf-fh .tf-mono"))).toBe("src/retry.rs");
+  expect(squash(target.querySelector(".tf-fh .tf-state"))).toBe("modified, staged");
   expect(kinds(target.querySelectorAll(".tf-ln")[0]!)).toEqual(expect.arrayContaining(["kw:fn", "fn:retry"]));
 });
 
@@ -322,7 +337,7 @@ test("a rename shows old → new with its similarity, and a binary file a badge 
   const bin = cardOf("assets/logo.png");
   expect(squash(bin.querySelector(".tf-fh"))).toBe("BIN assets/logo.png");
   expect(bin.querySelectorAll(".tf-ln")).toHaveLength(0);
-  expect(squash(bin.querySelector(".tf-dwhy"))).toBe("A binary file: no lines to draw.");
+  expect(squash(bin.querySelector(".tf-dfwhy"))).toBe("A binary file: no lines to draw.");
   // The tree: each file under its directory with its badge.
   expect(treeRows()).toEqual(["assets", "BIN logo.png", "src/queue", "R 92% legacy.rs +1 −1"]);
 });
@@ -342,6 +357,19 @@ test("package-lock.json and Cargo.lock start collapsed; the caret opens them", (
   expect(cardOf("src/retry.rs").querySelectorAll(".tf-ln")).toHaveLength(0);
 });
 
+test("the file filter is a box beside the diff, so ⌘F passes it for the find bar (F-272)", () => {
+  const stop = installFindKey();
+  draw({ files: [file("src/retry.rs")], layout: createDiffLayout(() => null) });
+  const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
+  input.getClientRects = () => [{}] as unknown as DOMRectList;
+  expect(input.dataset["filter"]).toBe("aside");
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+  expect(document.activeElement).not.toBe(input);
+  expect(document.querySelector(".tf-findhold input")).not.toBeNull();
+  stop();
+});
+
 test("the filter narrows the tree and the diff together", () => {
   draw({ files: [file("src/retry.rs"), file("docs/retry.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
   const input = target.querySelector<HTMLInputElement>(".tf-minif input")!;
@@ -349,7 +377,99 @@ test("the filter narrows the tree and the diff together", () => {
   input.dispatchEvent(new Event("input"));
   flushSync();
   expect(treeRows()).toEqual(["docs", "M retry.md +1 −1", "src", "M retry.rs +1 −1"]);
-  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["src/retry.rs", "docs/retry.md"]);
+  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["docs/retry.md", "src/retry.rs"]);
+});
+
+test("the diffs are drawn in the rail's order, so j walks the rail down", () => {
+  draw({ files: [file("tests/z.rs"), file("src/b.rs"), file("docs/a.md"), file("Cargo.toml")], layout: createDiffLayout(() => null) });
+  expect([...target.querySelectorAll(".tf-diff .tf-fh .tf-mono")].map(squash)).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
+  const titles = [...target.querySelectorAll(".tf-flist button")].map((row) => row.getAttribute("title"));
+  expect(titles).toEqual(["Cargo.toml", "docs/a.md", "src/b.rs", "tests/z.rs"]);
+});
+
+test("a file picked in the rail opens if it was collapsed, and the bar over the rail names it and folds", () => {
+  const viewed = { paths: ["src/b.rs"], set: () => {} };
+  draw({ files: [file("src/a.rs"), file("src/b.rs")], layout: createDiffLayout(() => null), viewed });
+  expect(cardOf("src/b.rs").classList.contains("tf-closed")).toBe(true);
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(target.querySelector(".tf-dgrid")!.classList.contains("tf-rail-shut")).toBe(false);
+  target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/b.rs']")!.click();
+  flushSync();
+  expect(cardOf("src/b.rs").classList.contains("tf-closed")).toBe(false);
+  expect(target.querySelector(".tf-flist [aria-current=true]")!.getAttribute("title")).toBe("src/b.rs");
+  expect(squash(bar)).toBe("File: b.rs");
+  expect(target.querySelector(".tf-dgrid")!.classList.contains("tf-rail-shut")).toBe(true);
+});
+
+test("a pick holds the pill while the page stands where the pick put it, the reader's scroll lets go, and the scroll's end marks the last file", () => {
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  draw({ files: [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")], layout: createDiffLayout(() => null) }, page);
+  const metrics = (name: string, value: () => number) => Object.defineProperty(page, name, { configurable: true, get: value });
+  let top = 900;
+  metrics("scrollTop", () => top);
+  metrics("scrollHeight", () => 1500);
+  metrics("clientHeight", () => 600);
+  const pill = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+  const scrolled = (to: number) => {
+    top = to;
+    page.dispatchEvent(new Event("scroll"));
+    flushSync();
+  };
+  // At the scroll's end, whichever head has reached the top, the last file is the one marked.
+  scrolled(900);
+  expect(pill()).toBe("src/c.rs");
+  // A pick stands against the scroll event it causes itself, there being no room to move.
+  target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/a.rs']")!.click();
+  flushSync();
+  scrolled(900);
+  expect(pill()).toBe("src/a.rs");
+  // `j` holds its file the same way.
+  key("j");
+  flushSync();
+  scrolled(900);
+  expect(pill()).toBe("src/b.rs");
+  // The reader scrolling lets go.
+  scrolled(700);
+  scrolled(900);
+  expect(pill()).toBe("src/c.rs");
+});
+
+test("v keeps the file it marked current through the collapse, so j goes on from it (F-250)", () => {
+  const page = document.createElement("div");
+  page.className = "tf-main";
+  target.appendChild(page);
+  let top = 300;
+  Object.defineProperty(page, "scrollTop", { configurable: true, get: () => top, set: () => {} });
+  Object.defineProperty(page, "scrollHeight", { configurable: true, get: () => 1500 });
+  Object.defineProperty(page, "clientHeight", { configurable: true, get: () => 600 });
+  // The collapse shortens the page, so the browser moves it: that is not the reader scrolling.
+  const viewed = $state({
+    paths: [] as string[],
+    set: (path: string, on: boolean) => {
+      top = 100;
+      viewed.paths = on ? [...viewed.paths, path] : viewed.paths.filter((p) => p !== path);
+    },
+  });
+  draw({ files: [file("src/a.rs"), file("src/b.rs"), file("src/c.rs")], layout: createDiffLayout(() => null), viewed }, page);
+  const pill = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+  target.querySelector<HTMLButtonElement>(".tf-flist button[title='src/a.rs']")!.click();
+  flushSync();
+  key("j");
+  flushSync();
+  expect(pill()).toBe("src/b.rs");
+  key("v");
+  flushSync();
+  page.dispatchEvent(new Event("scroll"));
+  flushSync();
+  expect(viewed.paths).toEqual(["src/b.rs"]);
+  expect(pill()).toBe("src/b.rs");
+  key("j");
+  flushSync();
+  expect(pill()).toBe("src/c.rs");
 });
 
 test("each key does what it says, and none fires while typing in a comment", () => {
@@ -359,15 +479,13 @@ test("each key does what it says, and none fires while typing in a comment", () 
   const pending = createPendingComments(() => null);
   draw({ files: [TWO_HUNKS, file("src/b.rs"), file("src/c.rs")], layout, viewed, review: { entity: "pr", pending } });
   const current = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+  // The rail's order: by name.
   expect(key("j")).toBe(true);
+  expect(current()).toBe("src/b.rs");
+  key("j");
+  key("j");
   expect(current()).toBe("src/two.rs");
   key("j");
-  key("j");
-  expect(current()).toBe("src/c.rs");
-  key("j");
-  expect(current()).toBe("src/c.rs");
-  key("k");
-  key("k");
   expect(current()).toBe("src/two.rs");
 
   // n/p: the hunks of the file j/k is on.
@@ -390,16 +508,16 @@ test("each key does what it says, and none fires while typing in a comment", () 
   key("v");
   expect(viewed.paths).toEqual(["src/two.rs"]);
   expect(cardOf("src/two.rs").querySelectorAll(".tf-ln")).toHaveLength(0);
-  key("j");
-  expect(current()).toBe("src/b.rs");
+  key("k");
+  expect(current()).toBe("src/c.rs");
 
   // c: the comment box on the file's first changed line, focused; typing there is typing.
   expect(key("c")).toBe(true);
   const box = target.querySelector<HTMLTextAreaElement>(".tf-newc textarea")!;
-  expect(box.getAttribute("aria-label")).toBe("Comment on old line 2 of src/b.rs");
+  expect(box.getAttribute("aria-label")).toBe("Comment on old line 2 of src/c.rs");
   expect(document.activeElement).toBe(box);
   for (const name of ["j", "k", "n", "p", "v", "c", "s"]) expect(key(name, box), name).toBe(false);
-  expect(current()).toBe("src/b.rs");
+  expect(current()).toBe("src/c.rs");
   expect(viewed.paths).toEqual(["src/two.rs"]);
   expect(layout.chosen).toBe("unified");
 
@@ -411,16 +529,116 @@ test("each key does what it says, and none fires while typing in a comment", () 
   expect(layout.chosen).toBe("unified");
 });
 
+const THREE_FILES = () => [file("src/a.rs"), TWO_HUNKS, file("src/c.rs")];
+
+test("c on a collapsed file, as on arrival with the first file viewed, opens the box in the next open file (F-223)", () => {
+  const viewed = { paths: ["src/a.rs"], set() {} };
+  const pending = createPendingComments(() => null);
+  draw({ files: THREE_FILES(), viewed, review: { entity: "pr", pending } });
+  expect(key("c")).toBe(true);
+  const box = target.querySelector<HTMLTextAreaElement>(".tf-newc textarea")!;
+  expect(document.activeElement).toBe(box);
+  expect(box.closest("[data-file]")!.getAttribute("data-file")).not.toBe("src/a.rs");
+  expect(target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title")).toBe(box.closest("[data-file]")!.getAttribute("data-file"));
+});
+
+test("n from a collapsed file goes on to the next hunk, past a file's end too, and c acts on the hunk it reached (F-223)", () => {
+  const scroll = Element.prototype.scrollIntoView;
+  Element.prototype.scrollIntoView = () => {};
+  try {
+    const viewed = { paths: ["src/a.rs"], set() {} };
+    const pending = createPendingComments(() => null);
+    draw({ files: [file("src/a.rs"), TWO_HUNKS], viewed, review: { entity: "pr", pending } });
+    const current = () => target.querySelector(".tf-flist [aria-current=true]")?.getAttribute("title");
+    expect(key("n")).toBe(true);
+    expect(current()).toBe(TWO_HUNKS.path);
+    expect(key("n")).toBe(true);
+    expect(key("c")).toBe(true);
+    const box = target.querySelector<HTMLTextAreaElement>(".tf-newc textarea")!;
+    expect(document.activeElement).toBe(box);
+    expect(box.getAttribute("aria-label")).toBe(`Comment on line 31 of ${TWO_HUNKS.path}`);
+  } finally {
+    Element.prototype.scrollIntoView = scroll;
+  }
+});
+
+test("c with no open file says what it needs", () => {
+  const viewed = { paths: ["src/a.rs"], set() {} };
+  const pending = createPendingComments(() => null);
+  draw({ files: [file("src/a.rs")], viewed, review: { entity: "pr", pending } });
+  expect(key("c")).toBe(true);
+  expect(target.querySelector(".tf-newc")).toBeNull();
+  expect(toasts.items.at(-1)?.text).toContain("Open one");
+});
+
+test("a line's + puts focus in its box; Esc closes it first, and its words and focus come back (F-223)", async () => {
+  const pending = createPendingComments(() => null);
+  draw({ files: [RETRY], review: { entity: "pr", pending } });
+  const plus = target.querySelector<HTMLButtonElement>(".tf-addc")!;
+  const label = plus.getAttribute("aria-label")!;
+  plus.click();
+  flushSync();
+  const box = () => target.querySelector<HTMLTextAreaElement>(".tf-newc textarea");
+  expect(document.activeElement).toBe(box());
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+
+  box()!.value = "half a thought";
+  box()!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  // The shell's ladder: this closes the layer, so `Esc` doesn't leave the page with the box open.
+  layers.open[0]!.close();
+  flushSync();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(box()).toBeNull();
+  expect(layers.open).toHaveLength(0);
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(label);
+
+  // Reopened on the same line, the words are there, and Cancel means them gone.
+  (document.activeElement as HTMLButtonElement).click();
+  flushSync();
+  expect(box()!.value).toBe("half a thought");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-newc button")].find((b) => b.textContent === "Cancel")!.click();
+  flushSync();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe(label);
+  (document.activeElement as HTMLButtonElement).click();
+  flushSync();
+  expect(box()!.value).toBe("");
+});
+
+test("Esc in an empty box closes it at once, and ⌘↩ adds what is typed", () => {
+  const pending = createPendingComments(() => null);
+  draw({ files: [RETRY], review: { entity: "pr", pending } });
+  target.querySelector<HTMLButtonElement>(".tf-addc")!.click();
+  flushSync();
+  const box = () => target.querySelector<HTMLTextAreaElement>(".tf-newc textarea");
+  box()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  flushSync();
+  expect(box()).toBeNull();
+
+  target.querySelector<HTMLButtonElement>(".tf-addc")!.click();
+  flushSync();
+  box()!.value = "looks off";
+  box()!.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  box()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+  flushSync();
+  expect(box()).toBeNull();
+  expect(pending.of("pr").map((comment) => comment.body)).toEqual(["looks off"]);
+});
+
 test("a 3,000-line file shows Load diff, and loading it shows its lines", () => {
   const lines = Array.from({ length: 3_000 }, (_, n) => add(n + 1, `row ${n + 1}`));
   const big = file("src/big.rs", { change: "added", additions: 3_000, deletions: 0, hunks: [{ header: "@@ -0,0 +1,3000 @@", lines }] });
   draw({ files: [big], layout: createDiffLayout(() => null) });
   const card = cardOf("src/big.rs");
   expect(card.querySelectorAll(".tf-ln")).toHaveLength(0);
-  expect(squash(card.querySelector(".tf-dwhy"))).toBe("Over 1,500 lines (3,000 changed): not loaded until you ask; nothing is cut. Load diff");
-  card.querySelector<HTMLButtonElement>(".tf-dwhy button")!.click();
+  expect(squash(card.querySelector(".tf-dfwhy"))).toBe("Over 1,500 lines (3,000 changed): not loaded until you ask; nothing is cut. Load diff");
+  card.querySelector<HTMLButtonElement>(".tf-dfwhy button")!.click();
   flushSync();
-  expect(card.querySelector(".tf-dwhy")).toBeNull();
+  expect(card.querySelector(".tf-dfwhy")).toBeNull();
   // Windowed: the first lines are drawn, and the rest is room below them, not cut.
   const drawnRows = card.querySelectorAll(".tf-ln");
   expect(squash(drawnRows[0])).toBe("1+ row 1");
@@ -439,7 +657,7 @@ test("a diff the ceiling cut says so, naming the ceiling", () => {
 test("a generated file over the Load diff limit starts open on its Load diff line; a small one collapsed", () => {
   const big = file("src/generated/schema.rs", { additions: 1_912, deletions: 1_640 });
   draw({ files: [big, file("src/generated/small.rs")], layout: createDiffLayout(() => null) });
-  expect(squash(cardOf("src/generated/schema.rs").querySelector(".tf-dwhy"))).toBe(
+  expect(squash(cardOf("src/generated/schema.rs").querySelector(".tf-dfwhy"))).toBe(
     "Generated, and over 1,500 lines (3,552 changed): not loaded until you ask; nothing is cut. Load diff",
   );
   expect(cardOf("src/generated/small.rs").querySelector(".tf-fh-caret")!.getAttribute("aria-expanded")).toBe("false");

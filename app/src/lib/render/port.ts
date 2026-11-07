@@ -213,7 +213,7 @@ export function frameWorker(src: string, doc: Document = document, limit = 30_00
   const view = doc.defaultView!;
   let held: unknown[] | null = [];
   const timer = setTimeout(() => {
-    events.dispatchEvent(Object.assign(new Event("error"), { message: `D2's frame did not load within ${limit / 1000} s.` }));
+    events.dispatchEvent(Object.assign(new Event("error"), { message: `D2's frame did not load within ${limit / 1000}s.` }));
   }, limit);
   const heard = (event: MessageEvent) => {
     if (event.source === null || event.source !== frame.contentWindow) return;

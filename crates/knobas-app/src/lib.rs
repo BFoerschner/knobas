@@ -610,6 +610,8 @@ pub fn run() {
             commands::assets::save_dep_view,
             commands::assets::delete_dep_view,
             commands::assets::set_dep_view_defaults,
+            // Taking an ack back, appended after those.
+            commands::assets::unack_alert,
             // #866's link sets, appended at the foot: the list is append-only
             // (§10.8).
             commands::entity::link_sets,
@@ -711,6 +713,9 @@ pub fn run() {
             commands::search::bind_action_key,
             // #2417's artifact bytes, appended at the foot (§10.8).
             commands::entity::artifact_bytes,
+            // F-327's *Publish again*, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::publish_standup_protocol_again,
         ])
         .build(context)
         .expect("build the tauri application")

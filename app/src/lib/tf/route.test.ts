@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { isTopPage, jobHash, NAV, parentOf, parseTfHash, sectionOf, ticketHash } from "./route";
+import { isTopPage, itemOf, jobHash, NAV, parentOf, parseTfHash, reopens, sectionOf, ticketHash } from "./route";
 
 test("the empty address is Tickets, as in prototype-6", () => {
   expect(parseTfHash("")).toEqual({ view: "tickets", rest: [] });
@@ -91,4 +91,47 @@ test("a ticket page carries its tab, round-trips by its entity id, and every tic
 test("the nav has no Job entry (spec #2396)", () => {
   expect(NAV).not.toContain("job");
   expect(NAV[0]).toBe("tickets");
+});
+
+test("a nav entry comes back to a section's tab or saved view, and to no deeper place", async () => {
+  const { sectionTabOf } = await import("./route");
+  expect(sectionTabOf(parseTfHash("#/code/prs"))).toBe("code");
+  expect(sectionTabOf(parseTfHash("#/time/week"))).toBe("time");
+  expect(sectionTabOf(parseTfHash("#/monitors/unmonitored"))).toBe("monitors");
+  expect(sectionTabOf(parseTfHash("#/tickets/view-1"))).toBe("tickets");
+  expect(sectionTabOf(parseTfHash("#/builds/pipe-1"))).toBe("builds");
+  for (const place of ["#/monitors/at/kuma%3A3", "#/sets/payout-stack", "#/docs/space/ENG", "#/pr/gh:1", "#/build/pipe-1/run-2", "#/ticket/jira:PAY-1"]) {
+    expect(sectionTabOf(parseTfHash(place)), place).toBeNull();
+  }
+});
+
+test("Docs comes back to its home and a search, and Settings to a section, and neither to a place inside them", async () => {
+  const { sectionTabOf } = await import("./route");
+  for (const own of ["#/docs", "#/docs/search/retry"]) expect(sectionTabOf(parseTfHash(own)), own).toBe("docs");
+  for (const own of ["#/settings", "#/settings/appearance", "#/settings/sources"]) expect(sectionTabOf(parseTfHash(own)), own).toBe("settings");
+  for (const place of ["#/docs/space/ENG", "#/page/4711", "#/settings/source/jira", "#/settings/source/jira/reenter"]) {
+    expect(sectionTabOf(parseTfHash(place)), place).toBeNull();
+  }
+});
+
+test("a run, a pull request and a repository are items, on any of their tabs, and nothing else is", () => {
+  expect(itemOf(parseTfHash("#/build/pipe%3A1/run%3A2/log"))).toBe("#/build/pipe%3A1/run%3A2");
+  expect(itemOf(parseTfHash("#/build/pipe%3A1/run%3A2"))).toBe("#/build/pipe%3A1/run%3A2");
+  expect(itemOf(parseTfHash("#/pr/gh%3A1/diff"))).toBe("#/pr/gh%3A1");
+  expect(itemOf(parseTfHash("#/repo/gh%3Aa%2Fb/files/src/a.rs"))).toBe("#/repo/gh%3Aa%2Fb");
+  // A run's address that names no pipeline is replaced as soon as its pipeline is known.
+  for (const other of ["#/build/run-2", "#/builds/pipe-1", "#/code/prs", "#/ticket/jira:PAY-1", "#/page/4711", "#/docs/search/retry", "#/settings/appearance", "#/branch/x", "#/commit/x", "#/inbox"]) {
+    expect(itemOf(parseTfHash(other)), other).toBeNull();
+  }
+});
+
+test("only the item's bare address reopens what was left: not a tab's, and not another item's", () => {
+  expect(reopens("#/build/p/1/log", "#/build/p/1")).toBe(true);
+  expect(reopens("#/build/p/1", "#/build/p/1")).toBe(true);
+  expect(reopens("#/pr/gh%3A1/diff", "#/pr/gh%3A1")).toBe(true);
+  expect(reopens("#/repo/x/files/a/b.rs", "#/repo/x")).toBe(true);
+  expect(reopens("#/build/p/1/log", "#/build/p/1/tests")).toBe(false);
+  expect(reopens("#/build/p/1/log", "#/build/p/2")).toBe(false);
+  expect(reopens("#/pr/1/diff", "#/repo/1")).toBe(false);
+  expect(reopens("#/repo/x/files/a", "#/repo/x/files/a")).toBe(false);
 });

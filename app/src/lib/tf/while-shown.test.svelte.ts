@@ -97,3 +97,48 @@ test("the shell's scroller and a scroller inside go back to where they were when
   expect(tree.scrollTop).toBe(120);
   main.remove();
 });
+
+test("keepScroll leaves a page's rail where it was on a move inside the shown page, which isn't a hide", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const rail = scroller(document.createElement("nav"));
+  anchor.append(rail);
+  main.append(anchor);
+  document.body.append(main);
+  // As the page host does: each address hands the page a new entry, with `visible` the same.
+  const entry = $state({ value: { visible: true, address: "#/builds/lint" } });
+  run(() => keepScroll(() => anchor, () => entry.value.visible, () => entry.value.address));
+  rail.scrollTop = 600;
+  entry.value = { visible: true, address: "#/build/lint/904" };
+  flushSync();
+  expect(rail.scrollTop).toBe(600);
+  main.remove();
+});
+
+test("keepScroll sets a page back only at the address it was left at; another address starts at the top (F-454, F-067)", () => {
+  const main = scroller(document.createElement("div"));
+  main.className = "tf-main";
+  const anchor = document.createElement("div");
+  const reading = scroller(document.createElement("article"));
+  anchor.append(reading);
+  main.append(anchor);
+  document.body.append(main);
+  let address = "#/page/sepa";
+  run(() => keepScroll(() => anchor, () => page.shown, () => address));
+
+  main.scrollTop = 40;
+  reading.scrollTop = 600;
+  show(false);
+  show(true);
+  expect(reading.scrollTop, "the same address keeps its place").toBe(600);
+  expect(main.scrollTop).toBe(40);
+
+  show(false);
+  address = "#/page/psp";
+  main.scrollTop = 300;
+  show(true);
+  expect(reading.scrollTop, "a page nobody was reading opens at its top").toBe(0);
+  expect(main.scrollTop).toBe(0);
+  main.remove();
+});

@@ -648,20 +648,20 @@ pin_label() {
     fi
 }
 
-# Ported to the ticket-first shell by #1084: Settings › Checkouts and Open in…
+# Ported to the ticket-first shell by #1084: Settings › Checkouts and Open in
 # (ADR-0023's clones root and the reader's own applications) and the job's
 # Code section with its *Open in…* menu. The new shell uppercases none of these,
 # so each is pinned as the driver spells it.
 tf=../app/src/lib/tf
 pin_label $tf/TfTopBar.svelte 'aria-label="Settings"' \
     "the top bar's Settings button still has the name both drivers press"
-pin_label $tf/settings/settings.ts '"Checkouts and Open in…"' \
+pin_label $tf/settings/settings.ts '"Checkouts and Open in"' \
     "Settings still lists the section the open-in-editor driver opens"
 pin_label $tf/settings/TfCheckoutsSection.svelte '>Change…</button>' \
     "the clones root row still offers Change…"
 pin_label $tf/settings/TfCheckoutsSection.svelte 'aria-label="Clones root"' \
     "the clones root field still has its accessible name"
-pin_label $tf/settings/TfCheckoutsSection.svelte 'onclick={() => void saveTyped()}>Save</button>' \
+pin_label $tf/settings/TfCheckoutsSection.svelte 'form="tf-stg-root" disabled={rootUnchanged || savingRoot}>Save</button>' \
     "the clones root field is still stored by a button called Save"
 pin_label $tf/settings/TfCheckoutsSection.svelte '>Edit applications…</button>' \
     "the Open in… table still offers Edit applications…"
@@ -669,13 +669,13 @@ pin_label $tf/openin/TfAppsManage.svelte '>Add an application…</button>' \
     "the applications dialog still offers Add an application…"
 pin_label $tf/openin/TfAppsManage.svelte 'onclick={onclose}>Done</button>' \
     "the applications dialog still closes on Done"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-name">Name</label>' \
+pin_label $tf/openin/TfAppDialog.svelte 'id="tf-app-name" aria-label="Name"' \
     "the application dialog's name field is still labelled Name"
-pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-command">Command</label>' \
+pin_label $tf/openin/TfAppDialog.svelte 'aria-label="Command"' \
     "the application dialog's command field is still labelled Command"
 pin_label $tf/openin/TfAppDialog.svelte '"Add application"' \
     "the application dialog still adds with a button called Add application"
-pin_label $tf/openin/TfOpenIn.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+pin_label $tf/openin/TfOpenIn.svelte '}}>Open in…<svg class="tf-caret"' \
     "the checkout's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenIn.svelte 'role="menuitem" onclick={() => run(' \
     "the menu's applications are still menu items, which the driver walks to"
@@ -698,12 +698,15 @@ pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
 # the pull request header's *Open in…* menu.
 pin_label $tf/settings/settings.ts '["sources", "Sources"]' \
     "Settings still lists the Sources section pull-request-open-in opens"
-pin_label $tf/settings/TfSources.svelte 'onclick={onadd}>+ Add a source</button>' \
-    "Sources still offers + Add a source"
+pin_label $tf/settings/TfSources.svelte 'onclick={onadd}>Add a source…</button>' \
+    "Sources still offers Add a source…"
 pin_label ../crates/knobas-source-gitea/src/lib.rs 'name: "Gitea".to_owned()' \
     "the Gitea adapter is still called Gitea, the radio the driver clicks"
-pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-address">Address</label>' \
-    "Add a source's address field is still labelled Address"
+# The label also says *required*, and a driver matches a name whole, so the field names itself.
+pin_label $tf/settings/TfAddSource.svelte '<input id="tf-add-address" aria-label="Address"' \
+    "Add a source's address field is still named Address"
+pin_label $tf/settings/TfAddSource.svelte '<input id="tf-add-secret" aria-label={secretWord}' \
+    "Add a source's secret field is still named for what it holds"
 pin_label $tf/settings/TfAddSource.svelte '"Password" : "Token"' \
     "Add a source still labels a token field Token"
 pin_label $tf/settings/TfAddSource.svelte '<label for="tf-add-name">Name</label>' \
@@ -722,11 +725,11 @@ pin_label $tf/settings/TfSourcePage.svelte 'onclick={() => void remove()}>Remove
     "removing a source is still confirmed with Remove"
 pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-pr">For a pull request</label>' \
     "the application dialog's pull-request command is still labelled For a pull request"
-pin_label $tf/openin/TfOpenObject.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+pin_label $tf/openin/TfOpenObject.svelte '}}>Open in…<svg class="tf-caret"' \
     "the pull request's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenObject.svelte '<b>Diff tool</b>' \
     "the menu's Diff tool item still starts Diff tool"
-pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono">{page}</span>' \
+pin_label $tf/openin/TfOpenObject.svelte '<b>Browser</b><span class="tf-mono" title={page}>{page}</span>' \
     "the menu's Browser item still starts Browser and names the page"
 pin_label $tf/pr/TfPr.svelte 'header.base !== null && header.head !== null' \
     "the pull request header draws Open in… once the source view names both branches"
@@ -989,14 +992,14 @@ pin_label $tf/job/TfConversation.svelte 'aria-label="Comment on {jobKey}"' \
     "the ticket page's compose box still has the name the capture driver knows the page by"
 # The shortcut field is found by the focus, because the dialog and its heading
 # answer to its name too (measured 2026-10-18): `TfDialog` focuses its first field.
-pin_label $tf/settings/TfDialog.svelte 'querySelector<HTMLElement>("input:not(\[disabled\]):not(\[type=radio\])")' \
+pin_label $tf/settings/TfDialog.svelte 'reachable(`.tf-body :is(${FIELD})`)\[0\]' \
     "a dialog still puts the caret in its first field, where the capture driver types"
 # The way to a job the capture driver takes, from Tickets (the demo profile's
 # launcher found no ticket on 2026-10-18).
 pin_label $tf/route.ts 'tickets: "Tickets"' "the top bar's Tickets link keeps its name"
-pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter by key, summary, epic or person"' \
+pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter tickets"' \
     "the Tickets filter keeps the name the capture driver fills"
-for go in 'label: "Start work"' 'label: "Open job"' 'label: "Resume work"'; do
+for go in 'label: "Start work"' 'label: "Open ticket"' 'label: "Resume work"'; do
     pin_label $tf/tickets/tickets.ts "$go" "the ticket preview still words its job link $go"
 done
 pin_label $tf/tickets/TicketPreview.svelte 'href={action.chooses ? jobHash(card.entity_id) : ticketHash(card.entity_id)}>{action.label}</a>' \

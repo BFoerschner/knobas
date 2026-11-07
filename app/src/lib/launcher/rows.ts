@@ -12,8 +12,9 @@
  */
 import type { LauncherHome, ResultGroup, SearchHit, SearchResponse } from "../ipc";
 import type { EntityRow, InboxItem } from "../ipc/entity";
-import type { LauncherAction } from "./actions";
+import { type LauncherAction, matchingPlaces } from "./actions";
 import type { SyntaxEntry } from "./syntax";
+import { keyOf } from "../time/format";
 
 /**
  * The shell's live inbox (#1418): the count the top bar reads and the stream's
@@ -29,6 +30,14 @@ export interface InboxPreview {
 /** What the shell hands in beside `LauncherHome`. */
 export interface BoardExtras {
   inbox: InboxPreview | null;
+  /**
+   * The app's places, which a search with no filter offers by name above its
+   * answer. The launcher's; a link picker built on the session has none, since
+   * it is choosing a target and not going anywhere.
+   */
+  places?: readonly LauncherAction[];
+  /** Whether an empty answer offers *Search everything*: the launcher's, as `places` is. */
+  widens?: boolean;
 }
 
 /** One selectable line. */
@@ -45,7 +54,9 @@ export type LauncherRow =
   | { kind: "action"; id: string; action: LauncherAction }
   | { kind: "syntax"; id: string; entry: SyntaxEntry }
   /** *Search Docs for …* at the end of a `#d` answer (#2425): the Docs area, searching `words`. */
-  | { kind: "docs"; id: string; words: string };
+  | { kind: "docs"; id: string; words: string }
+  /** *Search everything* under an empty answer: the same `words`, with the filters gone and every field searched. */
+  | { kind: "widen"; id: string; words: string };
 
 /**
  * Which panel the body draws.
@@ -93,6 +104,8 @@ export function flatten(input: {
   extras?: BoardExtras;
   /** *Titles* rather than *Everything* (the query's `titles` flag): `#i` matches a line's title alone. */
   titles?: boolean;
+  /** The box's text, which says whether anything narrows the search beyond its words. */
+  raw?: string;
 }): LauncherRow[] {
   switch (input.mode) {
     // A pasted link is not a list: the entity it names is opened, and a link
@@ -127,7 +140,7 @@ export function flatten(input: {
     case "results": {
       const response = input.response;
       if (!response) return [];
-      const hits = response.groups.flatMap((group) =>
+      const hits = ticketsFirst(response).flatMap((group) =>
         group.hits.map(
           (hit): LauncherRow => ({
             kind: "hit",
@@ -137,9 +150,60 @@ export function flatten(input: {
           }),
         ),
       );
-      return [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
+      const answer = [...hits, ...inboxRows(response, input.extras?.inbox ?? null, input.titles ?? false), ...docsRow(response)];
+      const words = response.interpreted.text;
+      const filtered = narrowed(input.raw ?? words, words);
+      // Over an answer, a filter means the reader is narrowing a search, not naming a place. Where it finds nothing, the
+      // words may still be a place's name, and a dead end one key from it helps nobody (F-042).
+      const places = filtered && answer.length > 0 ? [] : placeRows(input.extras?.places ?? [], words, answer.length === 0);
+      const widen = answer.length === 0 && input.extras?.widens === true && (filtered || input.titles === true);
+      return [...places, ...answer, ...(widen ? [{ kind: "widen", id: "widen", words } as const] : [])];
     }
   }
+}
+
+/** Whether filters or a prefix narrow the search beyond its words: the box holds more than the parse's words. */
+export function narrowed(raw: string, words: string): boolean {
+  return raw.trim() !== words.trim();
+}
+
+/** The *Go to* rows over an answer: by name, and by what a place holds where nothing else answered. */
+function placeRows(places: readonly LauncherAction[], words: string, nothingElse: boolean): LauncherRow[] {
+  return matchingPlaces(places, words, nothingElse).map((action) => ({ kind: "action", id: `action:${action.id}`, action }));
+}
+
+/**
+ * The tickets in `items` whose key another ticket there holds (#1476): two sources, one key, and those are two tickets.
+ * Only these rows name their source. A favourite that is also recent is one ticket, drawn twice, and is no twin.
+ */
+export function twinTickets(items: readonly { kind: string; entity_id: string }[]): ReadonlySet<string> {
+  const byKey = new Map<string, Set<string>>();
+  for (const item of items) {
+    if (item.kind !== "ticket") continue;
+    const key = keyOf(item.entity_id);
+    byKey.set(key, (byKey.get(key) ?? new Set()).add(item.entity_id));
+  }
+  return new Set([...byKey.values()].filter((ids) => ids.size > 1).flatMap((ids) => [...ids]));
+}
+
+/** What a row stands for in the mirror: a hit, a recent item or a favourite. */
+export function rowItem(row: LauncherRow): { kind: string; entity_id: string; source_id: string } | null {
+  return row.kind === "hit" ? row.hit : row.kind === "recent" || row.kind === "favourite" ? row.row : null;
+}
+
+/** Whether `rows` hold an answer, as against only the rows that lead elsewhere (*Go to*, *Search everything*). */
+export function holdsAnswer(rows: readonly LauncherRow[]): boolean {
+  return rows.some((row) => row.kind !== "action" && row.kind !== "widen");
+}
+
+/**
+ * What a query that looks like a key is after is a ticket: *PAY* or *PAY-23*
+ * lists the tickets first, ahead of the saved views that happen to hold the
+ * letters. Any other query keeps the engine's order.
+ */
+export function ticketsFirst(response: SearchResponse): SearchResponse["groups"] {
+  if (!/^[A-Z][A-Z0-9]*(-\d*)?$/i.test(response.interpreted.text.trim())) return response.groups;
+  return [...response.groups].sort((a, b) => Number(b.kind === "ticket") - Number(a.kind === "ticket"));
 }
 
 /**
@@ -157,7 +221,7 @@ function inboxRows(response: SearchResponse, inbox: InboxPreview | null, titles:
   if (!inbox || !response.interpreted.filters.kinds.includes("inbox")) return [];
   const words = response.interpreted.text.toLowerCase().split(/\s+/u).filter(Boolean);
   const holds = (item: InboxItem) => {
-    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.category.replaceAll("_", " ")}`).toLowerCase();
+    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.detail ?? ""} ${item.category.replaceAll("_", " ")}`).toLowerCase();
     return words.every((word) => text.includes(word));
   };
   return inbox.items

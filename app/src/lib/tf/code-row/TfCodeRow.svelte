@@ -36,6 +36,7 @@
 </script>
 
 <script lang="ts">
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import { readAllRows, repoOfRow, underRepoHash, type UnderRepoKind } from "../repo/repo";
 
@@ -102,15 +103,9 @@
 {#if read === null}
   <!-- Not read yet, or on its way to the repository. -->
 {:else if "missing" in read}
-  <div class="tf-empty">
-    <p>Nothing lives at <span class="tf-mono">{location.hash}</span> in the new shell.</p>
-    <a class="tf-btn" href="#/tickets">Go to Tickets</a>
-  </div>
+  <TfNothingHere message="knobas does not hold this. It may not have synced yet." href="#/code" action="All repositories" />
 {:else if "failed" in read}
-  <div class="tf-empty"><p class="tf-cfail">Could not read {id}: {read.failed}</p></div>
+  <TfNothingHere message="This could not be read: {read.failed}" href="#/code" action="All repositories" />
 {:else}
-  <div class="tf-empty">
-    <p>{read.unplaced} is not under a repository in the mirror.</p>
-    <a class="tf-btn" href="#/code">Go to Code</a>
-  </div>
+  <TfNothingHere message="{read.unplaced} is under no repository knobas holds yet." href="#/code" action="All repositories" />
 {/if}

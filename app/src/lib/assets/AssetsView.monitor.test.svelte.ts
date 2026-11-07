@@ -202,7 +202,7 @@ function click(label: string) {
 function field(label: string): HTMLInputElement | HTMLSelectElement {
   const where = reachable();
   const tag = [...where.querySelectorAll("label")].find(
-    (candidate) => (candidate.textContent ?? "").trim() === label,
+    (candidate) => (candidate.textContent ?? "").replace("required", "").trim() === label,
   );
   const found =
     tag === undefined
@@ -256,14 +256,14 @@ test("a pane with no monitor target draws no create", async () => {
   render(store);
   await waitFor(() => expect(text()).toContain("knobas-gitea"));
 
-  expect(names()).not.toContain("Create monitor for this asset");
+  expect(names()).not.toContain("Create monitor for this asset…");
   expect(text()).not.toContain("Create monitor");
 });
 
 test("Create monitor opens a dialog on the layer stack, and its close shuts it (#1527)", async () => {
   render(estate([KUMA]));
-  await waitFor(() => expect(names()).toContain("Create monitor for this asset"));
-  click("Create monitor for this asset");
+  await waitFor(() => expect(names()).toContain("Create monitor for this asset…"));
+  click("Create monitor for this asset…");
   expect(text()).toContain("In Uptime Kuma");
 
   // On the shell's layer stack while open, so the window's `Esc` closes it (#1527).
@@ -300,10 +300,10 @@ test("create records the name first and then queues the write", async () => {
 
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor for this asset…"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor for this asset…");
   // Prefilled from what knobas already knows: the asset's name, and the URL of
   // the route that reaches it.
   expect((field("Name") as HTMLInputElement).value).toBe("knobas-gitea");
@@ -348,10 +348,10 @@ test("a second source is picked, and its own entity is what the write targets", 
   const store = estate([KUMA, KUMA_EU]);
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor for this asset…"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor for this asset…");
   type("Name", "gitea (local)");
   type("URL to check", "http://127.0.0.1:3000/api/healthz");
   choose("Create it in", "kuma-eu");
@@ -381,10 +381,10 @@ test("the recorded name lands in the pane's waiting list", async () => {
   const store = estate([KUMA]);
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor for this asset…"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor for this asset…");
   type("Name", "gitea");
   click("Create");
 
@@ -411,10 +411,10 @@ test("a refused write keeps the dialog open and says why", async () => {
   });
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor for this asset…"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor for this asset…");
   click("Create");
 
   await waitFor(() =>
@@ -438,10 +438,10 @@ test("a name that could not be recorded queues nothing", async () => {
   store.refuse("record", { code: "invalid", message: "an asset needs a name" });
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor for this asset…"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor for this asset…");
   click("Create");
 
   await waitFor(() => expect(text()).toContain("an asset needs a name"));
@@ -461,10 +461,10 @@ test("a form with no URL cannot be submitted", async () => {
   const store = estate([KUMA], []);
   render(store);
   await waitFor(() =>
-    expect(names()).toContain("Create monitor for this asset"),
+    expect(names()).toContain("Create monitor for this asset…"),
   );
 
-  click("Create monitor for this asset");
+  click("Create monitor for this asset…");
   expect((field("URL to check") as HTMLInputElement).value).toBe("");
   expect(button("Create").disabled).toBe(true);
 

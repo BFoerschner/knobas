@@ -6,12 +6,17 @@
   (#842) is its base; the layout is `mockups/code-area/diff.html`.
 
   - **Toolbar**: Unified / Split, one choice app-wide (`diff-layout`); a
-    window too narrow for split shows unified and says so. Where *Viewed* is
-    offered, how many files are viewed.
+    column with too little room for split presses *Unified* and disables
+    *Split* with a title, and `s` says the same. A caller's own control sits
+    beside them (`tools`). Where *Viewed* is offered, how many files are viewed.
   - **File tree** (`list`, #2268): files under their directories with a
     badge (added, deleted, renamed with similarity, mode, binary) and
     `+N −N`, a filter that narrows the tree and the diffs together, a click
-    that scrolls to the file.
+    that scrolls to the file and opens it if it is collapsed. The diffs are
+    drawn in the tree's order, so `j` walks the rail down. The pill follows the
+    scroll; a pick holds it until the reader scrolls, and the scroll's end marks
+    the last file. Where the diff has too little width for it, the tree folds
+    behind one bar (`TfRailBar`), and a pick folds it again.
   - **Files** (`TfDiffCard`): each collapses; lock files, generated files and
     viewed ones start collapsed. Lines are windowed and a file over 1,500
     changed lines waits for *Load diff* (#2269); changed words are marked and
@@ -28,16 +33,18 @@
     raw* / *Run pipeline* says otherwise. A piped diff takes no comments and
     does not expand: its lines are not the file's. A side that fails draws
     the raw diff under the step's error.
-  - **Keys** (`list`, #2268): `j`/`k` files, `n`/`p` hunks, `v` viewed, `c`
-    comment, `s` split; none while typing, none on a hidden page.
+  - **Keys** (`list`, #2268): `j`/`k` files, `n`/`p` hunks, on across files
+    past a collapsed one, `v` viewed, `c` comment, on the hunk `n` reached or
+    in the next open file, `s` split; none while typing, none on a hidden page.
   - **Ceiling** (`cut`): a diff the parser stopped at 50,000 lines says so.
   - **Highlighting**: each side of a file is one text through the renderer
     port (`render`, #2254), so a string or comment that spans hunks is
     highlighted as one. Plain until the tokens arrive.
   - **Capabilities the caller passes in**, absent by default:
     - `viewed`: a *Viewed* box per file that collapses it.
-    - `review`: a `+` per line that opens a comment box; *Add to review*
-      keeps the comment pending in the reader's store under its line.
+    - `review`: a `+` per line that opens a comment box, which takes focus;
+      *Add to review* keeps the comment pending in the reader's store under
+      its line. `Esc` closes the box and keeps what it holds for that line.
     - `openAt`: *Open in…* in each file's header (#2274), on the file at its
       first changed line, read at the diff's head; not on a deleted file.
     Threads the source holds are drawn wherever it answers them: under their
@@ -45,15 +52,19 @@
     (`pr/files.ts`); `gone` lists those on files the diff no longer holds.
 -->
 <script lang="ts">
+  import { filterKeys } from "../filter-keys";
+  import TfFindBar from "../TfFindBar.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
   import type { DiffLine, FileThread, LineComment } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
   import { lineName } from "../../detail/view/pending-comments.svelte";
-  import { onMount, untrack } from "svelte";
+  import { flushSync, onMount, untrack, type Snippet } from "svelte";
   import { renderPort, type HighlightJob, type LineTokens, type RenderPort } from "../../render/port";
   import { inTextField } from "../../shell/keys";
-  import { ago } from "../../shell/time";
+  import { ago, agoStamp } from "../../shell/time";
   import TfMarkdown from "../markdown/TfMarkdown.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { reviewSubject } from "../../shell/queued-toast";
   import { pageVisible } from "../kept-pages.svelte";
   import { matchesPath, sameTarget, targetOf } from "../pr/files";
   import {
@@ -73,7 +84,8 @@
     type SideText,
     type WholeTexts,
   } from "./diff";
-  import { diffLayout, windowNarrow, type DiffLayoutChoice } from "./diff-layout.svelte";
+  import { diffLayout, SPLIT_ROOM, type DiffLayoutChoice } from "./diff-layout.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
   import type { DiffTalk } from "./talk";
   import TfDiffCard from "./TfDiffCard.svelte";
   import { ipcCommands, type CommandPort } from "../../render/command";
@@ -99,11 +111,13 @@
     defaults = rendererDefaults,
     commands = ipcCommands,
     layout = diffLayout,
-    narrow = windowNarrow(),
+    narrow = { current: false },
     openAt = null,
     repository = null,
     pipelines = defaultPipelines,
     piping = diffPipelines,
+    tools = null,
+    me = null,
   }: {
     /** A file's `label`, where the caller gives one, is drawn in place of its path (`DrawnFile`). */
     files: readonly DrawnFile[];
@@ -123,6 +137,7 @@
     /** Runs a command renderer's rendered diff: the IPC, a fake in tests. */
     commands?: CommandPort;
     layout?: DiffLayoutChoice;
+    /** Says there is too little room for split, for a test: nothing is laid out there to measure. */
     narrow?: { readonly current: boolean };
     /** *Open in…* in each file's header (#2274): the repository (or branch) and the commit or branch the files are read at. */
     openAt?: OpenAt | null;
@@ -132,12 +147,36 @@
     pipelines?: DiffPipelines;
     /** *Run pipelines on diffs*: the app's setting by default. */
     piping?: Pick<DiffPipelinesSetting, "on">;
+    /** A caller's own control in the toolbar, beside the layout: *Ignore whitespace*. */
+    tools?: Snippet | null;
+    /** The reader's name at the source: a thread's comments by that name read *You*, as Conversation's do. None, each keeps its name. */
+    me?: string | null;
   } = $props();
 
   let filter = $state("");
   const shown = $derived(files.filter((file) => matchesPath(keyOf(file), filter)));
-  const drawn = $derived(list ? shown : files);
-  const split = $derived(shownLayout(layout.chosen, narrow.current) === "split");
+  const tree = $derived(list ? treeOf(shown) : []);
+  /** The rail's order, so a file's place in the list is its place on the page. */
+  const drawn = $derived(list ? tree.flatMap((row) => (row.kind === "file" ? [row.file] : [])) : files);
+  /** The width the diffs have, once measured. */
+  let room = $state(Number.POSITIVE_INFINITY);
+  const tight = $derived(narrow.current || room < SPLIT_ROOM);
+  const split = $derived(shownLayout(layout.chosen, tight) === "split");
+  /** Why *Split* can't be pressed, and what `s` says then. */
+  const NO_ROOM = "There is too little room here for split. A wider window has it.";
+  const uid = $props.id();
+  /** Whether the file list is unfolded under its bar, where it has one. */
+  let railOpen = $state(false);
+
+  /** Reads the column's width; a hidden page has none to read, so it keeps the last. */
+  function measure(node: HTMLElement) {
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(([entry]) => {
+      if (entry !== undefined && entry.contentRect.width > 0) room = entry.contentRect.width;
+    });
+    watch.observe(node);
+    return () => watch.disconnect();
+  }
   const isViewed = (path: string) => viewed?.paths.includes(path) ?? false;
 
   /** Each file's whole texts, once expanded context read them (by `keyOf`), and the read in flight. */
@@ -376,13 +415,24 @@
   let open = $state<{ path: string; side: "old" | "new"; line: number } | null>(null);
   let draft = $state("");
   const drafts = $derived(review ? review.pending.of(review.entity) : []);
+  /** What was typed in a box that went without *Add to review* or *Cancel*, by its line, so its words come back. */
+  const unsent = new Map<string, string>();
+  const spot = (at: { path: string; side: string; line: number }) => `${at.path}\n${at.side}\n${at.line}`;
+
+  /** Puts the open box's words by, as it goes or another line takes the box. */
+  function keepDraft() {
+    if (open === null) return;
+    if (draft.trim() === "") unsent.delete(spot(open));
+    else unsent.set(spot(open), draft);
+  }
 
   function addToReview() {
     if (open === null || review === null) return;
     if (review.pending.add(review.entity, { ...open, body: draft }) === null) return;
+    unsent.delete(spot(open));
     open = null;
     draft = "";
-    push({ text: "Added to your review. Nothing is sent until you submit it." });
+    push({ text: "Added to your review. Nothing is sent until you submit it.", subject: reviewSubject(review.entity) });
   }
 
   const talk: DiffTalk = {
@@ -395,8 +445,9 @@
     draftsAt: (path: string, line: DiffLine) => drafts.filter((d) => sameTarget(d, { path, ...targetOf(line) })),
     isOpen: (path: string, line: DiffLine) => open !== null && sameTarget(open, { path, ...targetOf(line) }),
     openAt(path: string, line: DiffLine) {
+      keepDraft();
       open = { path, ...targetOf(line) };
-      draft = "";
+      draft = unsent.get(spot(open)) ?? "";
     },
     get draft() {
       return draft;
@@ -404,21 +455,29 @@
     set draft(text: string) {
       draft = text;
     },
-    cancel() {
+    close() {
+      keepDraft();
       open = null;
+    },
+    cancel() {
+      if (open !== null) unsent.delete(spot(open));
+      open = null;
+      draft = "";
     },
     add: addToReview,
     canReply: (thread) => !!review?.reply && thread.replies && thread.id !== null,
     canResolve: (thread) => !!review?.resolve && thread.id !== null,
     isResolved: (thread) => review?.resolved?.(thread) ?? thread.resolved_by !== null,
+    isMe: (name) => me !== null && name === me,
     isShown: (thread) => thread.id !== null && shownThreads[thread.id] === true,
     show(thread, on) {
       if (thread.id !== null) shownThreads = { ...shownThreads, [thread.id]: on };
     },
     isReplying: (thread) => thread.id !== null && replying === thread.id,
     openReply(thread) {
+      keepReply();
       replying = thread.id;
-      replyDraft = "";
+      replyDraft = (thread.id !== null && unsentReplies.get(thread.id)) || "";
     },
     get replyDraft() {
       return replyDraft;
@@ -426,8 +485,14 @@
     set replyDraft(text: string) {
       replyDraft = text;
     },
-    cancelReply() {
+    closeReply() {
+      keepReply();
       replying = null;
+    },
+    cancelReply() {
+      if (replying !== null) unsentReplies.delete(replying);
+      replying = null;
+      replyDraft = "";
     },
     sendReply(path, thread) {
       const send = review?.reply;
@@ -435,6 +500,7 @@
       if (!send || body === "") return;
       void send(path, thread, body).then((queued) => {
         if (!queued || replying !== thread.id) return;
+        if (thread.id !== null) unsentReplies.delete(thread.id);
         replying = null;
         replyDraft = "";
       });
@@ -455,6 +521,13 @@
   /** The reply box open under one thread (#2277), by the thread's id, and its words. */
   let replying = $state<string | null>(null);
   let replyDraft = $state("");
+  const unsentReplies = new Map<string, string>();
+
+  function keepReply() {
+    if (replying === null) return;
+    if (replyDraft.trim() === "") unsentReplies.delete(replying);
+    else unsentReplies.set(replying, replyDraft);
+  }
   /** Resolved threads the reader opened. */
   let shownThreads = $state<Record<string, boolean>>({});
   /** Pending comments written on an earlier head (#2276): kept apart, never sent. */
@@ -464,15 +537,65 @@
   const homeless = $derived(drafts.filter((d) => !files.some((file) => file.path === d.path)));
 
   /** Each file's card, for the tree and the keys. */
-  type Card = { scrollTo(): void; nextHunk(step: 1 | -1): boolean; comment(): boolean };
+  type Card = { scrollTo(): void; nextHunk(step: 1 | -1, entering?: boolean): boolean; comment(): boolean };
   const cards: Record<string, Card | undefined> = $state({});
   /** The file `j`/`k` is on. */
   let current = $state<string | null>(null);
-  const tree = $derived(list ? treeOf(shown) : []);
+  /** The page's scroller, and where it stood when a press chose the file: the choice stands until the reader scrolls. */
+  let scroller: Element | null = null;
+  let heldAt: number | null = null;
+  const hold = () => (heldAt = scroller?.scrollTop ?? null);
+  /** A difference this small is the layout settling, not the reader scrolling. */
+  const SCROLLED = 2;
+  const nameOf = (key: string) => key.slice(key.lastIndexOf("/") + 1);
 
   function go(key: string) {
     current = key;
     cards[key]?.scrollTo();
+    hold();
+  }
+
+  /** A file picked in the list: it opens if it was collapsed, and the list folds again, before the page moves to it. */
+  function pick(file: DrawnFile) {
+    const key = keyOf(file);
+    railOpen = false;
+    if (isClosed(file)) folds = { ...folds, [key]: false };
+    flushSync();
+    go(key);
+  }
+
+  /**
+   * The file rail follows the scroll: the file whose head has reached the top of the scroller is the one you are in,
+   * and at the scroll's end the last, whose head may never reach the top.
+   */
+  function spy(host: HTMLElement) {
+    const found = host.closest(".tf-main, .tf-bmain");
+    scroller = found;
+    filesHost = host;
+    if (found === null) return;
+    const read = () => {
+      if (heldAt !== null && Math.abs(found.scrollTop - heldAt) < SCROLLED) return;
+      heldAt = null;
+      const last = drawn.at(-1);
+      if (last !== undefined && found.scrollHeight > found.clientHeight && found.scrollTop + found.clientHeight >= found.scrollHeight - SCROLLED) {
+        current = keyOf(last);
+        return;
+      }
+      const top = found.getBoundingClientRect().top + 8;
+      let at: string | null = null;
+      for (const file of drawn) {
+        const key = keyOf(file);
+        const card = host.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`);
+        if (card === null) continue;
+        if (card.getBoundingClientRect().top > top) break;
+        at = key;
+      }
+      const first = drawn[0];
+      current = at ?? (first === undefined ? null : keyOf(first));
+    };
+    read();
+    found.addEventListener("scroll", read, { passive: true });
+    return () => found.removeEventListener("scroll", read);
   }
 
   function onkey(event: KeyboardEvent) {
@@ -490,21 +613,39 @@
         break;
       }
       case "n":
-      case "p":
-        current = keyOf(here);
-        cards[current]?.nextHunk(event.key === "n" ? 1 : -1);
+      case "p": {
+        // Past this file's last hunk, or from a file with no lines drawn, on to the next file that has one.
+        const step = event.key === "n" ? 1 : -1;
+        const from = Math.max(0, at);
+        for (let i = from; i >= 0 && i < keys.length; i += step) {
+          if (!cards[keys[i]!]?.nextHunk(step, i !== from)) continue;
+          current = keys[i]!;
+          hold();
+          break;
+        }
         break;
+      }
       case "v":
         if (!viewed) return;
         current = keyOf(here);
         setViewed(here, !isViewed(here.path));
         break;
-      case "c":
-        current = keyOf(here);
-        if (!cards[current]?.comment()) return;
+      case "c": {
+        if (!review) return;
+        // The file `j` or `n` reached, else the next one with lines to comment on: a collapsed file has none.
+        const from = Math.max(0, at);
+        const taker = [...keys.slice(from), ...keys.slice(0, from)].find((key) => cards[key]?.comment());
+        if (taker === undefined) {
+          push({ text: "No open file takes a comment here. Open one, or show its raw diff, then press c." });
+          break;
+        }
+        current = taker;
+        hold();
         break;
+      }
       case "s":
-        layout.set(layout.chosen === "split" ? "unified" : "split");
+        if (tight) push({ text: NO_ROOM });
+        else layout.set(layout.chosen === "split" ? "unified" : "split");
         break;
       default:
         return;
@@ -523,48 +664,80 @@
     return () => window.removeEventListener("keydown", keys);
   });
 
+  let filesHost = $state<HTMLElement | null>(null);
+  /** A windowed file is holding rows back: it pads for them (`Windowed`), and the find bar finds only what is drawn. */
+  const heldBack = () => [...(filesHost?.querySelectorAll<HTMLElement>(".tf-dbody") ?? [])].some((lines) => lines.style.paddingTop !== "" || lines.style.paddingBottom !== "");
+  const cardOf = (key: string) => filesHost?.querySelector<HTMLElement>(`[data-file="${CSS.escape(key)}"]`) ?? null;
+  /** The file a mark is changing, and where its head stands on screen. */
+  let marking: { key: string; path: string; on: boolean; top: number } | null = null;
+
   /** Marks a file viewed or not; a collapse the reader set by hand gives way to it. */
   function setViewed(file: DrawnFile, on: boolean) {
-    const { [keyOf(file)]: _, ...rest } = folds;
+    const key = keyOf(file);
+    const { [key]: _, ...rest } = folds;
     folds = rest;
+    const top = scroller?.getBoundingClientRect().top ?? 0;
+    marking = { key, path: file.path, on, top: Math.max(cardOf(key)?.getBoundingClientRect().top ?? top, top) };
+    current = key;
     viewed?.set(file.path, on);
   }
+
+  // The file keeps its place through the collapse, so it stays current, a second press finds its box under the pointer, and the next
+  // `j` goes on from it. The page moved because of the mark, not the reader, so the spy leaves the choice alone (F-250).
+  $effect(() => {
+    void folds;
+    if (marking === null || isViewed(marking.path) !== marking.on) return;
+    const { key, top } = marking;
+    marking = null;
+    const card = cardOf(key);
+    if (scroller !== null && card !== null) scroller.scrollTop += card.getBoundingClientRect().top - top;
+    hold();
+  });
 </script>
 
 {#snippet said(comments: readonly LineComment[])}
   {#each comments as comment, n (n)}
     <!-- A line comment's body is the source's Markdown (`LineComment`), drawn by the Markdown component (#2261). -->
     <div class="tf-said">
-      <p><b>{comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
+      <p title={agoStamp(comment.at)}><b>{talk.isMe(comment.author) ? "You" : comment.author}</b>{comment.at ? ` ${ago(comment.at)}` : ""}</p>
       <TfMarkdown text={comment.body} {render} />
     </div>
   {/each}
 {/snippet}
 
 {#snippet mine(body: string)}
-  <div class="tf-thread tf-pending"><p><b>You</b> <span class="tf-chip tf-warn">pending</span> {body}</p></div>
+  <div class="tf-thread tf-pending"><p><b>You</b> <TfStateChip text="pending" tone="warn" /> {body}</p></div>
 {/snippet}
 
+<div class="tf-dview">
+<TfFindBar root={() => filesHost} within="in open files" more={heldBack} />
 <div class="tf-dtool">
   <div class="tf-seg" role="group" aria-label="Layout">
-    <button type="button" aria-pressed={layout.chosen === "unified"} onclick={() => layout.set("unified")}>Unified</button>
-    <button type="button" aria-pressed={layout.chosen === "split"} onclick={() => layout.set("split")}>Split</button>
-  </div>
-  {#if anyPipe}
-    {@const all = pipeAll ?? piping.on}
+    <button type="button" aria-pressed={!split} onclick={() => layout.set("unified")}>Unified</button>
     <button
       type="button"
-      class="tf-pill"
-      aria-pressed={all}
-      title="Run each file's default pipeline on both sides of this diff"
+      aria-pressed={split}
+      aria-disabled={tight ? "true" : undefined}
+      title={tight ? NO_ROOM : undefined}
       onclick={() => {
-        pipeAll = !all;
-        pipeOne = {};
-      }}>Run pipelines</button
+        if (!tight) layout.set("split");
+      }}>Split</button
     >
-  {/if}
-  {#if layout.chosen === "split" && narrow.current}
-    <span class="tf-dim tf-dtool-why">Unified while the window is too narrow for split.</span>
+  </div>
+  {@render tools?.()}
+  {#if anyPipe}
+    {@const all = pipeAll ?? piping.on}
+    <div class="tf-fchips">
+      <button
+        type="button"
+        aria-pressed={all}
+        title="Run each file's default pipeline on both sides of this diff"
+        onclick={() => {
+          pipeAll = !all;
+          pipeOne = {};
+        }}>Run pipelines</button
+      >
+    </div>
   {/if}
   {#if viewed && files.length > 0}
     {@const count = files.filter((file) => isViewed(file.path)).length}
@@ -576,13 +749,20 @@
     This diff is over knobas's ceiling of {DIFF_CEILING.toLocaleString("en-US")} lines: it is drawn up to there, and the source's own page has the rest.
   </p>
 {/if}
-<div class:tf-dgrid={list}>
+<div class:tf-dgrid={list} class:tf-rail-shut={list && !railOpen}>
   {#if list}
-    <div class="tf-dnav">
+    <TfRailBar label="File" value={current === null ? "None" : nameOf(current)} open={railOpen} controls="{uid}-files" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
+    <div class="tf-dnav tf-rail" id="{uid}-files">
       <label class="tf-minif">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" />
+        <input bind:value={filter} placeholder="Filter changed files" aria-label="Filter changed files" {@attach filterKeys({ aside: true })} />
       </label>
+      {#if tree.length === 0}
+        <div class="tf-empty tf-flist-none">
+          <p>No files match.</p>
+          <button type="button" class="tf-btn tf-sm" onclick={() => (filter = "")}>Clear the filter</button>
+        </div>
+      {:else}
       <nav class="tf-flist" aria-label="Changed files">
         {#each tree as row (row.kind === "dir" ? `dir\n${row.path}` : keyOf(row.file))}
           {#if row.kind === "dir"}
@@ -591,22 +771,22 @@
             {@const file = row.file}
             {@const done = isViewed(file.path)}
             {@const badge = badgeOf(file)}
+            {@const how = /, (not staged|staged)\)$/.exec(row.name)?.[1] ?? null}
             <button
               type="button"
               class:tf-viewed={done}
               class:tf-d1={row.depth === 1}
               aria-current={current === keyOf(file) ? "true" : undefined}
               title={keyOf(file)}
-              onclick={() => go(keyOf(file))}
-              ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{row.name}</span><span class="tf-n"
+              onclick={() => pick(file)}
+              ><span class="tf-bd tf-bd-{badge[0] === '+' || badge[0] === '−' ? 'X' : badge[0]}">{badge}</span><span class="tf-fname">{how === null ? row.name : row.name.slice(0, row.name.lastIndexOf(" ("))}</span>{#if how !== null}<span class="tf-state">{how}</span>{/if}<span class="tf-n"
                 >{#if file.change !== "binary"}<span class="tf-add-n">+{file.additions}</span> <span class="tf-del-n">−{file.deletions}</span>{/if}{done ? " ✓" : ""}</span
               ></button
             >
           {/if}
-        {:else}
-          <span class="tf-dim tf-flist-none">No file matches.</span>
         {/each}
       </nav>
+      {/if}
       <p class="tf-dkeys tf-dim">
         <span><kbd>j</kbd><kbd>k</kbd> files</span><span><kbd>n</kbd><kbd>p</kbd> hunks</span>{#if viewed}<span><kbd>v</kbd> viewed</span>{/if}{#if review}<span
             ><kbd>c</kbd> comment</span
@@ -614,7 +794,7 @@
       </p>
     </div>
   {/if}
-  <div class="tf-dfiles">
+  <div class="tf-dfiles" {@attach spy} {@attach measure}>
     {#each drawn as file (keyOf(file))}
       {@const key = keyOf(file)}
       {@const piped = pipedOf(file)}
@@ -648,9 +828,10 @@
         {repository}
       />
     {/each}
-    {#if gone.length > 0 || homeless.length > 0}
+    <!-- A filter that matches nothing says so once, in the file list beside its box, with its way off. -->
+    {#if (filter.trim() === "" || drawn.length > 0) && (gone.length > 0 || homeless.length > 0)}
       <details class="tf-outdated tf-gone">
-        <summary>On files this change no longer holds</summary>
+        <summary>Comments on files that are no longer in this change</summary>
         {#each gone as g, n (n)}
           <div class="tf-thread"><span class="tf-mono tf-dim">{g.path}, {lineName(g.thread.side, g.thread.line)}</span><TfWrittenAt thread={g.thread} {repository} />{@render said(g.thread.comments)}</div>
         {/each}
@@ -666,7 +847,7 @@
         {#each stale as d (d.id)}
           <div class="tf-thread tf-pending">
             <p>
-              <b>You</b> <span class="tf-chip tf-warn">pending</span>
+              <b>You</b> <TfStateChip text="pending" tone="warn" />
               <span class="tf-mono tf-dim">{d.path}, {lineName(d.side, d.line)}{d.head ? ` at ${d.head.slice(0, 7)}` : ""}</span>
               {d.body}
             </p>
@@ -678,4 +859,5 @@
       </details>
     {/if}
   </div>
+</div>
 </div>

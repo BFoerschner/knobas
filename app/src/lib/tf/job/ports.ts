@@ -19,6 +19,7 @@ import {
   miniBoard,
   previewLinkSetRule,
   saveLinkSet,
+  deleteLinkSet,
   promoteContext,
   submitWrite,
   unlink,
@@ -97,12 +98,13 @@ export function bridgeTicketBoard(query: string): Promise<MiniBoard> {
  * Link sets commands, no new ones. Apart from `JobPorts` so the job's other
  * suites need not stand them in.
  */
-export type JobSetPorts = Pick<SetPorts, "linkSets" | "saveLinkSet" | "previewLinkSetRule">;
+export type JobSetPorts = Pick<SetPorts, "linkSets" | "saveLinkSet" | "previewLinkSetRule" | "deleteLinkSet">;
 
 export const bridgeSetPorts: JobSetPorts = {
   linkSets: () => linkSets(),
   saveLinkSet: (draft) => saveLinkSet(draft),
   previewLinkSetRule: (rule) => previewLinkSetRule(rule),
+  deleteLinkSet: (id) => deleteLinkSet(id),
 };
 
 /**

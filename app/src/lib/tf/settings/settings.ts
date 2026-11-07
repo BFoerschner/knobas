@@ -33,7 +33,7 @@ export type SettingsSection =
 /** The left-hand navigation, top to bottom, with prototype-6's names. */
 export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] = [
   ["sources", "Sources"],
-  ["checkouts", "Checkouts and Open in…"],
+  ["checkouts", "Checkouts and Open in"],
   ["time", "Time"],
   ["notifications", "Desktop notifications"],
   ["standup", "Standup"],
@@ -50,7 +50,7 @@ export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] 
 /** Where in Settings the reader is: a section, or one source's page. */
 export type SettingsPlace =
   | { section: SettingsSection }
-  | { section: "sources"; source: string; add?: ListAddition };
+  | { section: "sources"; source: string; add?: ListAddition; reenter?: boolean };
 
 /** A value an address adds to a list field of a source's config, unsaved (#879). */
 export interface ListAddition {
@@ -69,9 +69,17 @@ export function settingsPlace(rest: readonly string[]): SettingsPlace {
   const [head, arg, verb, field, value] = rest;
   if (head === "source" && arg && verb === "add" && field && value)
     return { section: "sources", source: arg, add: { field, value } };
+  // The status bar's *Re-enter password*: the page with its prompt already open.
+  if (head === "source" && arg && verb === "reenter") return { section: "sources", source: arg, reenter: true };
   if (head === "source" && arg) return { section: "sources", source: arg };
   const known = SETTINGS_SECTIONS.find(([key]) => key === head);
   return { section: known ? known[0] : "sources" };
+}
+
+/** Whether what follows `#/settings` names a section or a source's page: an address that names neither has no page. */
+export function settingsKnows(rest: readonly string[]): boolean {
+  const [head, arg] = rest;
+  return head === undefined || (head === "source" && !!arg) || SETTINGS_SECTIONS.some(([key]) => key === head);
 }
 
 /** The address of a section of Settings. */
@@ -292,6 +300,14 @@ export function reenterWords(auth: AuthMethod | null | undefined): string {
   return `Re-enter ${secretNoun(auth)}`;
 }
 
+/**
+ * The fix for a credential, by whether one is stored: *Enter token* where none
+ * is, so nothing claims there was one to re-enter; else {@link reenterWords}.
+ */
+export function credentialFix(auth: AuthMethod | null | undefined, state: CredentialHealth["state"] | undefined): string {
+  return state === "missing_secret" ? `Enter ${secretNoun(auth)}` : reenterWords(auth);
+}
+
 /** One row of *Sync runs*. */
 export interface RunRow {
   id: number;
@@ -310,11 +326,11 @@ export function startedWords(iso: string, now: Date = new Date()): string {
 
 /**
  * A watched run's line (#1384), the wizard's reading on a source's page:
- * *120 of 300 repositories · 1,240 items · 83 s*, without the walk until the
+ * *120 of 300 repositories · 1,240 items · 1m 23s*, without the walk until the
  * run reports one and without the total when the adapter has none.
  */
 export function runProgressWords(items: number, elapsedMs: number, walk: Walk | null): string {
-  const parts = [`${items.toLocaleString("en-GB")} items`, `${Math.round(elapsedMs / 1000)} s`];
+  const parts = [`${items.toLocaleString("en-GB")} items`, secondsLabel(Math.round(elapsedMs / 1000))];
   if (walk !== null) {
     const of = walk.of === undefined ? "" : ` of ${walk.of.toLocaleString("en-GB")}`;
     parts.unshift(`${walk.walked.toLocaleString("en-GB")}${of} ${walk.unit}`.trimEnd());

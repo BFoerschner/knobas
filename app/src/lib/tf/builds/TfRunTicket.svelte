@@ -69,6 +69,8 @@
 
   let links = $state<LinkEntry[]>([]);
   let asking = $state<TicketDraft | null>(null);
+  /** Whether what is typed in the dialog outlives it: *Edit and resend* brings its own words, and they win. */
+  let keeping = $state(true);
   let projects = $state<Project[]>([]);
 
   const tickets = $derived(linkedTickets(links));
@@ -143,11 +145,12 @@
   // *Edit and resend*: the dialog again, with what was filed.
   $effect(() => {
     const again = takeAgain<TicketDraft>(runId, TICKET);
-    if (again !== null) untrack(() => void open(again));
+    if (again !== null) untrack(() => void open(again, false));
   });
 
-  async function open(from: TicketDraft) {
+  async function open(from: TicketDraft, keepWords = true) {
     asking = from;
+    keeping = keepWords;
     try {
       projects = await ports.projects();
     } catch (cause) {
@@ -167,7 +170,7 @@
         echoWrite(id, TICKET, title, { write, following: following(id, filed), follower: ports.follower(), surface: RUN_TICKET, source });
       }
       const summary = sources.find((s) => s.id === source);
-      toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source });
+      toastQueued(`ticket ${title}`, { id: source, display_name: summary?.display_name ?? source }, { write });
     } catch (cause) {
       push({ text: `Could not queue the ticket: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -182,7 +185,7 @@
   {#if queued !== null}
     <span class="tf-chip tf-info" title={queued.text}>Ticket {queued.state}</span>
   {:else}
-    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void open(draft)}>Create ticket</button>
+    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void open(draft)}>Create ticket…</button>
   {/if}
 {/each}
 
@@ -192,6 +195,7 @@
     {projects}
     words
     refusedWrites={ports.refusedWrites}
+    draftKey={keeping ? `run-ticket:${runId}` : undefined}
     onclose={() => (asking = null)}
     onfile={(filed) => void file(filed)}
   />

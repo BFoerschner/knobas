@@ -34,7 +34,10 @@
   button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
-  import { secondsLabel } from "../../time/format";
+  import { stateWord } from "../state-word";
+  import TfKey from "../TfKey.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { secondsLabel, timeLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -45,6 +48,7 @@
   import { push } from "../../shell/toasts.svelte";
   import { settingPayload } from "../../detail/view/settings";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
@@ -52,7 +56,8 @@
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
-  import { runHash, runTone, shortTime } from "./builds";
+  import { testsWords, runHash, runTone, shortTime } from "./builds";
+  import { RunHold } from "./run-hold.svelte";
   import { chainSentence } from "./chain";
   import { BRIDGE, listenSynced, type PipelinePorts } from "./pipeline-ports";
   import { fieldsOf, type RunRequest } from "./run-dialog";
@@ -352,8 +357,6 @@
 
   const adapterKind = $derived(sources.find((s) => s.id === pipeline.source_id)?.adapter_kind ?? null);
   const word = $derived(pipelineWord(adapters, adapterKind));
-  /** The project path, as the source nests it (#849), else the group. */
-  const project = $derived(pipeline.path.length > 0 ? pipeline.path.join(" › ") : (pipeline.group ?? ""));
   const repositories = $derived(settings?.repositories ?? []);
   const triggers = $derived(triggersSentence(settings));
   const chain = $derived(chainSentence(settings?.chain ?? [], pipeline.entity_id));
@@ -361,26 +364,31 @@
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
   const fallback = $derived(defaultBranch(settings));
 
+  /** *Run on <branch>* holds as what its write is doing, so a second press at once can't queue a second run (F-338). */
+  const runOnHold = new RunHold(() => id);
+
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
   function runOn(branch: string | null) {
     if (cannotRun !== null) return;
     const words = branch ?? fallback ?? "the default branch";
-    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`);
+    void runOnHold.press(() => queue({ RunBuild: { entity: id, branch, parameters: [] } }, `On ${words}, defaults`));
   }
 
   /**
    * Queue a run and draw it *queued* at the top at once (R-9.8). The toast
    * names it by the dialog's line, as prototype-6's `startRun` does.
    */
-  async function queue(payload: WriteOpPayload, summary: string): Promise<boolean> {
+  async function queue(payload: WriteOpPayload, summary: string): Promise<number | null> {
     try {
       const write = await ports.submitWrite(payload);
       echoRun(pipeline, write, runBranch(payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline));
-      return true;
+      // Pressed on the Runs tab the row is there already; from another tab, sent, the toast leads to it (F-350).
+      const where = tab === "runs" ? undefined : { label: "Show in runs", run: () => (location.hash = tabHash(id, "runs")) };
+      toastQueued(queuedRunWhat(pipeline, summary), pipelineSource(pipeline), { write, where });
+      return write.id;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return false;
+      return null;
     }
   }
 
@@ -394,7 +402,7 @@
 
   async function onrun(request: RunRequest) {
     dialog = null;
-    if (!(await queue(request.payload, request.summary)) || request.preset === null) return;
+    if ((await queue(request.payload, request.summary)) === null || request.preset === null) return;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
@@ -421,12 +429,22 @@
   if (filter.scope === null) filter.scope = "all";
   const config = $derived<FilterConfig>({
     id: "builds-runs",
-    placeholder: "Filter runs by number, branch, commit or person",
+    placeholder: "Filter runs",
     noun: "runs",
     one: "run",
     scopes: [
-      ...(job !== null ? [{ id: "job", label: "My job’s branches", query: "" }] : []),
-      { id: "mine", label: "Started by me", query: "" },
+      ...(job !== null
+        ? [
+            {
+              id: "job",
+              label: "This job",
+              count: all === null ? null : keptRuns(all, { text: "", scope: "job", results: [], branch: null }, jobBranches).length,
+              title: `Runs on ${job}'s branches`,
+              query: "",
+            },
+          ]
+        : []),
+      { id: "mine", label: "Mine", title: "Runs you started", query: "" },
       { id: "all", label: "All", query: "" },
     ],
     chips: [{ key: "result", label: "Result", options: RESULTS.map((value) => ({ value, label: value })) }],
@@ -439,7 +457,7 @@
           all,
           {
             text: filter.text,
-            // *My job's branches* is only offered with a job; a remembered one without reads as *All*.
+            // *This job* is only offered with a job; a remembered one without reads as *All*.
             scope: job !== null || filter.scope !== "job" ? filter.scope : "all",
             results: filter.chips["result"] ?? [],
             branch: filter.dropdowns["branch"] ?? null,
@@ -512,7 +530,7 @@
         source: pipeline.source_id,
       });
       editing = null;
-      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline));
+      toastQueued(`set ${setting.name} on ${pipeline.name}`, pipelineSource(pipeline), { write });
     } catch (cause) {
       push({ text: `Could not queue the change: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
@@ -527,7 +545,7 @@
   <div>
     <h1>{pipeline.name}</h1>
     <div class="tf-sub">
-      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{project !== "" ? ` in project ${project}` : ""}{#if repositories.length > 0}, builds
+      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{#if repositories.length > 0}, builds
         {#each repositories as repository, at (at)}{#if at > 0},{" "}{/if}{#if repository.entity_id !== null}<a
               class="tf-mono"
               href={`#/repo/${encodeURIComponent(repository.entity_id)}`}>{repository.name}</a
@@ -545,28 +563,30 @@
       <button
         type="button"
         class="tf-btn"
-        {...refusedAttrs(cannotRun)}
-        onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button
+        aria-disabled={runOnHold.word !== null ? "true" : undefined}
+        {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
+        onclick={() => runOn(jobBranch)}><span class="tf-keepw" data-keep="Run on {jobBranch}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on <span class="tf-mono">{jobBranch}</span>{/if}</span></span></button
       >
     {:else}
       <button
         type="button"
         class="tf-btn"
-        {...refusedAttrs(cannotRun)}
+        aria-disabled={runOnHold.word !== null ? "true" : undefined}
+        {...runOnHold.word === null ? refusedAttrs(cannotRun) : {}}
         onclick={() => runOn(null)}
-        >Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}</button
+        ><span class="tf-keepw" data-keep="Run on {fallback ?? 'the default branch'}"><span>{#if runOnHold.word !== null}{runOnHold.word}{:else}Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}{/if}</span></span></button
       >
     {/if}
     {#if onpin !== undefined}
       <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
     {/if}
     {#if pipeline.web_url !== null}
-      <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
+      <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={openInSource}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
     {/if}
-    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} />
+    <TfHeaderRefresh {detail} {refresh} reread={refreshRead} sync={syncNow} noun="pipeline" />
   </div>
 </header>
-{#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+{#if detail !== null}<TfDetailBanners {detail} {refresh} reread={refreshRead} />{/if}
 
 {#if stale !== null}
   <div class="tf-stale tf-bstale">
@@ -590,7 +610,7 @@
       >
         {#each history as run, at (run.entity_id)}
           {@const h = barHeight(run, max)}
-          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${resultWord(run)}`}>
+          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${stateWord(resultWord(run))}`}>
             <title>{barTip(run)}</title>
             <rect class={`tf-bar tf-run-${runTone(run)}`} x={at * (BAR_STEP)} y={CHART_HEIGHT - h} width={BAR_WIDTH} height={h} rx="2" />
           </a>
@@ -635,7 +655,11 @@
     {:else if all !== null && all.length === 0}
       <div class="tf-empty"><p>No runs yet.</p></div>
     {:else if all !== null && kept.length === 0}
-      <div class="tf-empty"><p>No run matches.</p></div>
+      <TfNoMatch noun="runs" {filter}>
+        {#if filter.scope !== "all"}
+          <button type="button" class="tf-btn tf-sm" onclick={() => (filter.scope = "all")}>Show all runs</button>
+        {/if}
+      </TfNoMatch>
     {/if}
     {#each days as day (day.label)}
       <h3 class="tf-dayh">{day.label}</h3>
@@ -653,21 +677,21 @@
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
                   <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet. -->
-                  <b>{run.state?.text ?? "queued"}</b>
+                  <b>{stateWord(run.state?.text ?? "queued")}</b>
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
-                {#if run.state !== null && !isStartedHere(run)}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : run.state.text}</span>{/if}
+                {#if run.state !== null && !isStartedHere(run)}<TfStateChip text={tone === "q" ? "Queued" : run.state.text} class={chipTone(run)} />{/if}
               </td>
+              <!-- A flex row, so the name takes the ellipsis: it is the chip that ties a run to the job, and an inline chip after the name is the first thing cut (F-357). -->
               <td class="tf-mono tf-run-br"
-                >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
-                    class="tf-chip tf-jobchip-sm">{job}</span
-                  >{/if}</td
+                ><span class="tf-run-brin"
+                  >{#if run.branch !== null}<span class="tf-run-brname" title={run.branch}><Marked text={run.branch} typed={filter.text} /></span>{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}<TfKey chip value={job} class="tf-jobchip-sm" />{/if}</span
+                ></td
               >
-              <td class="tf-dim tf-run-trig"><Marked text={triggerLabel(run)} typed={filter.text} /></td>
+              <td class="tf-dim tf-run-trig" title={triggerLabel(run)}><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-run-tests"
-                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{run.tests
-                    .passed} passed{#if run.tests.ignored > 0}, {run.tests.ignored} ignored{/if}{/if}</td
+                >{#if run.tests !== null}{#if run.tests.failed > 0}<span class="tf-tests-failed">{run.tests.failed} failed</span>,{" "}{/if}{testsWords({ ...run.tests, failed: 0 })}{/if}</td
               >
               <td class="tf-nowrap tf-num tf-run-dur">
                 {#if run.duration_seconds !== null}
@@ -680,18 +704,20 @@
                   waiting
                 {/if}
               </td>
-              <td class="tf-nowrap tf-dim tf-num tf-run-at">{run.started !== null ? shortTime(run.started) : ""}</td>
+              <td class="tf-nowrap tf-dim tf-num tf-run-at"><span class="tf-rowval">{run.started !== null ? timeLabel(run.started) : ""}</span></td>
               <td class="tf-nowrap tf-run-acts">
                 {#if !isStartedHere(run)}
-                  <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
-                  {#if run.finished !== null}
-                    <button
-                      type="button"
-                      class="tf-btn tf-sm tf-ghost"
-                      {...refusedAttrs(cannotRun)}
-                      onclick={() => runDialog(run)}>Run again…</button
-                    >
-                  {/if}
+                  <span class="tf-rowend"><span class="tf-rowacts">
+                    <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
+                    {#if run.finished !== null}
+                      <button
+                        type="button"
+                        class="tf-btn tf-sm tf-ghost"
+                        {...refusedAttrs(cannotRun)}
+                        onclick={() => runDialog(run)}>Run again…</button
+                      >
+                    {/if}
+                  </span></span>
                 {/if}
               </td>
             </tr>
@@ -700,7 +726,8 @@
       </table>
     {/each}
     {#if all !== null && all.length > 0}
-      <div class="tf-older" bind:this={sentinel}>
+      <!-- `hidden`, not gone: the sentinel keeps reading older runs while a filter has emptied the page. -->
+      <div class="tf-older" hidden={kept.length === 0} bind:this={sentinel}>
         {#if olderFailed !== null}
           <p class="tf-dim">Older runs could not be read: {olderFailed}</p>
           <button type="button" class="tf-btn tf-sm" onclick={() => ((olderFailed = null), void more())}>Try again</button>
@@ -759,11 +786,11 @@
                 {:else}
                   {(paramEcho(setting.name)?.text ?? setting.value) || "(empty)"}
                 {/if}
-                {#if paramEcho(setting.name) !== null}<span class="tf-chip tf-info">{paramEcho(setting.name)?.state}</span>{/if}
+                {#if paramEcho(setting.name) !== null}<TfStateChip text={paramEcho(setting.name)?.state} tone="info" />{/if}
               </td>
               <td class="tf-dim">
                 {field?.kindWord ?? "text"}
-                {#if !setting.secret && setting.inherited}<span class="tf-chip">inherited</span>{/if}
+                {#if !setting.secret && setting.inherited}<TfStateChip text="inherited" />{/if}
               </td>
               <td class="tf-nowrap">
                 {#if editing === setting.name}
@@ -798,7 +825,7 @@
           {#each settings.triggers as trigger, at (at)}
             <tr>
               <td
-                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<span class="tf-chip">disabled</span>{/if}{#if trigger.facts.length > 0}<span
+                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<TfStateChip text="disabled" />{/if}{#if trigger.facts.length > 0}<span
                     class="tf-sub">{triggerDetail(trigger)}</span
                   >{/if}</td
               >

@@ -21,6 +21,21 @@
  * - (g) an actions container other than the page header's (`.tf-fhead`, `.tf-stg-h`) is pushed to the
  *   end and laid out as a flex row by hand (`margin-left: auto` with `display: flex`): a strip's or a
  *   row's trailing group is `.tf-trail`;
+ * - (h) a `font-size` (or a `font` shorthand's size) is not a `--t-*` token, apart from the reading face and code, which
+ *   keep their own sizes (a rule that sets `--serif` or `--mono`, the `.tf-rd-title`, and the PDF's text layer);
+ * - (i) a pill toggle is drawn outside `.tf-fchips`: a class round enough to be a pill (`border-radius` of 9 px or more)
+ *   that also answers `aria-pressed`;
+ * - (j) a grid's label column is a literal `132px`: it is `var(--tf-label)`;
+ * - (k) `*` is the subject of a rule that sets a width, a height, `overflow` or `position`: a shared layout rule names
+ *   what it lays out;
+ * - (l) `role="menu"` appears outside `TfMenu.svelte`: a menu is `TfMenu`;
+ * - (m) a component draws the missing line by hand inside a `TfDialog` (it is `TfDialog`'s `why`), outside one in any
+ *   markup but `<p class="tf-dwhy" role="status">`, or says *(needed)* (a needed field is a `.tf-req` *required*);
+ * - (n) a `TfDialog`'s footer has a primary disabled for more than a send in flight, and the dialog passes no `why`;
+ * - (o) a box that narrows or finds (a placeholder or label starting *Filter* or *Find*) has no `filterKeys`: `Esc` means one
+ *   thing in all of them (the key table);
+ * - (p) a rule hides a row's value on `:focus-within`: focus on a row's link reveals nothing, and only `row-room.ts` knows
+ *   what the group covers;
  * - (d) an allowlist entry has no reason;
  * - (e) an allowlist entry matches nothing.
  *
@@ -46,7 +61,7 @@ const ALLOWLIST = join(ROOT, "lib/tf/controls/style-gate-exceptions");
 const CONTROLS_SHEET = "lib/tf/css/chrome.css";
 const SECTION = "docs/specs/2026-10-15-ticket-first-design-system.md, section Controls";
 
-type Rule = "a" | "b" | "c" | "f" | "g";
+type Rule = "a" | "b" | "c" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p";
 /** One breach: the rule, the file under `app/src/`, and the selector (a, c) or class (b) it is keyed on. */
 type Violation = { rule: Rule; file: string; key: string; detail: string };
 type Entry = { list: string; line: number; rule: string; file: string; key: string; reason: string };
@@ -80,6 +95,32 @@ const DIALOG = /\.(?:[\w-]*dialog[\w-]*|tf-steps)(?![\w-])/;
  * dialog's title-line cluster of actions and Close (`.tf-dctl`, #2415).
  */
 const BUTTON_ROW = /\.(?:tf-fbar|tf-fchips|tf-decide|tf-dctl|[\w-]+-btns)(?![\w-])/;
+
+/** The rooms UI's sheet, which keeps its own type until it goes (rule h does not read it). */
+const OLD_SHEET = "unported.css";
+/** What keeps its own sizes (rule h): the reading face's title, the PDF's text layer, and a box measured off-screen. */
+const OWN_TYPE = /\.(?:tf-rd-title|tf-pdf-text|tf-diagram-scratch)(?![\w-])/;
+
+/** The size a rule sets that is not on the type scale (rule h), or `null`. */
+function offScale(selector: string, decls: [string, string][]): string | null {
+  const face = decls.some(([prop, value]) => /^font(?:-family)?$/.test(prop) && /var\(--(?:serif|mono)\)/.test(value));
+  if (face || OWN_TYPE.test(selector)) return null;
+  for (const [prop, value] of decls) {
+    if (prop === "font-size" && !/^(?:var\(--t-|inherit$)/.test(value)) return `font-size: ${value}`;
+    if (prop === "font" && !/var\(--t-|^inherit$/.test(value) && /\d/.test(value)) return `font: ${value}`;
+  }
+  return null;
+}
+
+/** The classes on a selector's subject. */
+function subjectClasses(selector: string): string[] {
+  return [...(compounds(selector).at(-1) ?? "").matchAll(/\.([\w-]+)/g)].map((m) => m[1]!);
+}
+
+/** Is the rule's radius a pill's? */
+function roundRadius(decls: [string, string][]): boolean {
+  return decls.some(([prop, value]) => prop === "border-radius" && /^(?:9|[1-9]\d+)px$/.test(value));
+}
 
 /** Every `.css` and `.svelte` file under `root`, relative, sorted. */
 function files(root: string): string[] {
@@ -253,14 +294,86 @@ function markupClasses(text: string): Set<string> {
   return names;
 }
 
+/** The one component that may draw a `role="menu"` (rule l). */
+const MENU_COMPONENT = "lib/tf/TfMenu.svelte";
+/** The one component that draws a dialog's missing line (rule m). */
+const DIALOG_COMPONENT = "lib/tf/settings/TfDialog.svelte";
+/** What a shared layout rule may not set on `*` (rule k). */
+const LAYOUT = /^(?:(?:min-|max-)?(?:width|height)|overflow(?:-[xy])?|position)$/;
+
+/** Where the tag at `start` ends: its first `>` outside any `{…}`, so an arrow function in an attribute doesn't end it. */
+function tagEnd(markup: string, start: number): number {
+  let depth = 0;
+  for (let i = start; i < markup.length; i++) {
+    if (markup[i] === "{") depth++;
+    else if (markup[i] === "}") depth--;
+    else if (markup[i] === ">" && depth === 0) return i;
+  }
+  return markup.length;
+}
+
+/** What may disable a dialog's primary with no line: a send in flight, which its label or the dialog already shows. */
+const IN_FLIGHT = /^!?(?:(?:queue\.)?(?:busy|flushing)|sending|writing|saving|deleting|publishing|signingIn|testing)$/;
+
+/** The `disabled={…}` of each primary in `block`, as written. */
+function disabledPrimaries(block: string): string[] {
+  return [...block.matchAll(/<button\b/g)].flatMap((m) => {
+    const tag = block.slice(m.index, tagEnd(block, m.index));
+    if (!/\btf-primary\b/.test(tag) || /\bclass:tf-primary\b/.test(tag)) return [];
+    const at = tag.search(/(?<![\w-])disabled=\{/);
+    if (at === -1) return [];
+    let depth = 0;
+    for (let i = at + "disabled=".length; i < tag.length; i++) {
+      if (tag[i] === "{") depth++;
+      else if (tag[i] === "}" && --depth === 0) return [tag.slice(at + "disabled={".length, i)];
+    }
+    return [];
+  });
+}
+
+/** Rules (m) and (n): the missing line is `TfDialog`'s, and a disabled primary has one. */
+function missingLine(file: string, markup: string, add: (v: Violation) => void): void {
+  if (/\(needed\)/.test(markup)) add({ rule: "m", file, key: "(needed)", detail: "says (needed); a needed field is a `.tf-req` *required* in its label" });
+  const blocks = [...markup.matchAll(/<TfDialog\b[\s\S]*?<\/TfDialog>/g)].map((m) => m[0]);
+  for (const block of blocks) {
+    if (/\btf-dwhy\b/.test(block)) add({ rule: "m", file, key: "tf-dwhy in a dialog", detail: "draws the missing line by hand; it is `TfDialog`'s `why`" });
+    const passes = /\bwhy=/.test(block.slice(0, tagEnd(block, 0)));
+    for (const expr of disabledPrimaries(block)) {
+      const inFlight = expr.split("||").every((part) => IN_FLIGHT.test(part.trim()));
+      if (!inFlight && !passes) add({ rule: "n", file, key: expr, detail: `a primary is disabled={${expr}} and its dialog passes no \`why\`` });
+    }
+  }
+  const outside = blocks.reduce((rest, block) => rest.replace(block, ""), markup);
+  for (const [tag] of outside.matchAll(/<[a-z]+\b[^>]*\btf-dwhy\b[^>]*>/g)) {
+    if (tag !== '<p class="tf-dwhy" role="status">') add({ rule: "m", file, key: tag, detail: 'the missing line has one markup, `<p class="tf-dwhy" role="status">`' });
+  }
+}
+
 /** Every breach of rules (a), (b) and (c) under `root`, one per (rule, file, key). */
 function scan(root: string): Violation[] {
   const found = new Map<string, Violation>();
   const add = (v: Violation) => found.set(`${v.rule} ${v.file} ${v.key}`, found.get(`${v.rule} ${v.file} ${v.key}`) ?? v);
   for (const file of files(root)) {
     const text = readFileSync(join(root, file), "utf8");
-    for (const { selectors, decls } of rules(stylesheet(file, text))) {
+    const sheet = rules(stylesheet(file, text));
+    const pressable = new Set(sheet.flatMap(({ selectors }) => selectors.filter((s) => /\[aria-pressed/.test(compounds(s).at(-1) ?? "")).flatMap(subjectClasses)));
+    for (const { selectors, decls } of sheet) {
       for (const selector of selectors) {
+        const size = file === OLD_SHEET ? null : offScale(selector, decls);
+        if (size !== null) add({ rule: "h", file, key: selector, detail: `sets ${size}, which is not on the type scale; use a \`--t-*\` token` });
+        if (roundRadius(decls) && subjectClasses(selector).some((name) => pressable.has(name))) {
+          add({ rule: "i", file, key: selector, detail: "draws a pill toggle outside `.tf-fchips`; a pill is a `button` in `.tf-fchips`" });
+        }
+        if (decls.some(([prop, value]) => prop === "grid-template-columns" && /(?<![\d.])132px/.test(value))) {
+          add({ rule: "j", file, key: selector, detail: "sets a literal 132px label column; use `var(--tf-label)`" });
+        }
+        if (/:focus-within/.test(selector) && /\.tf-rowval/.test(selector)) {
+          add({ rule: "p", file, key: selector, detail: "hides a row's value on focus; `row-room.ts` measures what the group covers, and chrome.css hides `.tf-covered`" });
+        }
+        const laidOut = decls.filter(([prop]) => LAYOUT.test(prop)).map(([prop]) => prop);
+        if (file !== OLD_SHEET && laidOut.length > 0 && /^\*(?![\w-])/.test(compounds(selector).at(-1) ?? "")) {
+          add({ rule: "k", file, key: selector, detail: `sets ${laidOut.join(", ")} on \`*\`; a shared layout rule names what it lays out` });
+        }
         const disabled = DISABLED.test(compounds(selector).at(-1) ?? "");
         const sizing = decls.filter(([prop]) => SIZING.test(prop) || (disabled && DISABLED_LOOK.test(prop))).map(([prop]) => prop);
         if (file !== CONTROLS_SHEET && sizing.length > 0 && targetsControl(selector)) {
@@ -293,6 +406,16 @@ function scan(root: string): Violation[] {
       const used = markupClasses(text);
       for (const name of UNPORTED.filter((n) => used.has(n))) {
         add({ rule: "b", file, key: name, detail: `uses the unported button class ${name}` });
+      }
+      const markup = text.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/g, "").replace(/<!--[\s\S]*?-->/g, "");
+      if (file !== MENU_COMPONENT && /\brole=["']menu["']/.test(markup)) {
+        add({ rule: "l", file, key: 'role="menu"', detail: "draws a menu by hand; a menu is `TfMenu`, which draws in the float host" });
+      }
+      if (file !== DIALOG_COMPONENT) missingLine(file, markup, add);
+      for (const box of markup.matchAll(/<input\b/g)) {
+        const tag = markup.slice(box.index, tagEnd(markup, box.index));
+        const named = /\b(?:placeholder|aria-label)="(?:Filter|Find)\b/.test(tag) || /\bdata-filter\b/.test(tag);
+        if (named && !/filterKeys\(/.test(tag)) add({ rule: "o", file, key: tag.slice(0, 60), detail: "a box that narrows or finds answers `Esc` with `{@attach filterKeys()}`" });
       }
     }
   }
@@ -327,8 +450,8 @@ function gate(violations: Violation[], entries: Entry[]): string[] {
     const id = `${entry.rule} ${entry.file} ${entry.key}`;
     if (!/^\d+\.txt$/.test(entry.list)) {
       failures.push(`${at}: ${id} sits in a file that names no ticket; entries go in the cleanup ticket's \`<ticket>.txt\``);
-    } else if (!/^[abcfg]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
-      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g> <file> <selector or class>  <reason>\``);
+    } else if (!/^[abcfghijklmn]$/.test(entry.rule) || entry.file === "" || entry.key === "") {
+      failures.push(`${at}: "${id}" is not \`<rule a|b|c|f|g|h|i|j|k|l> <file> <selector or class>  <reason>\``);
     } else if (entry.reason === "") {
       failures.push(`(d) ${at}: ${id} has no reason; every exception says why it is one (${SECTION})`);
     } else if (listed.has(id)) {
@@ -383,13 +506,108 @@ function planted(sources: Record<string, string>, lists: Record<string, string> 
   }
 }
 
+test("(k) a rule that lays out `*` fails, and one that names its subject or sets something else passes", () => {
+  for (const css of [
+    ".tf-main > .tf-kept > * { width: 100vw; }",
+    ".tf-x > * { overflow: hidden; }",
+    "@media (max-width: 900px) { .tf-x * { position: absolute; } }",
+    ".tf-x > *:first-child { min-height: 10px; }",
+  ]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(k\) lib\/tf\/css\/view\.css /);
+  }
+  expect(
+    planted({
+      "lib/tf/css/view.css": [
+        ".tf-keptpage { width: 100vw; }",
+        ".tf-x > * { flex: none; }",
+        ".tf-x > * + * { margin-top: 4px; }",
+        ".tf-x > .tf-y { overflow: hidden; }",
+      ].join("\n"),
+    }),
+  ).toEqual([]);
+});
+
+test("(l) a `role=\"menu\"` outside `TfMenu` fails; `TfMenu`'s own and a word about one in a comment pass", () => {
+  const failures = planted({ "lib/tf/x/TfX.svelte": '<div class="tf-menu" role="menu"></div>' });
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatch(/^\(l\) lib\/tf\/x\/TfX\.svelte /);
+  expect(
+    planted({
+      [MENU_COMPONENT]: '<div class="tf-menu" role="menu"></div>',
+      "lib/tf/x/TfX.svelte": '<!-- a `role="menu"` is TfMenu -->\n<button role="menuitem">x</button>',
+    }),
+  ).toEqual([]);
+});
+
+/** The rules a component alone breaches. */
+const rulesFor = (file: string, markup: string): string[] => planted({ [file]: markup }).map((failure) => failure.slice(1, 2));
+
+test("(o) a filter or find box with no `filterKeys` fails, and one with it, or any other field, passes", () => {
+  expect(rulesFor("lib/x/Y.svelte", '<input placeholder="Filter changed files" />')).toEqual(["o"]);
+  expect(rulesFor("lib/x/Y.svelte", '<input aria-label="Find in log" value={typed} />')).toEqual(["o"]);
+  expect(rulesFor("lib/x/Y.svelte", '<input placeholder="Filter changed files" {@attach filterKeys()} />')).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", '<input placeholder="Name" />')).toEqual([]);
+});
+
+test("(p) a value hidden on focus within fails; the group's own hover and the marked value pass", () => {
+  const rule = (css: string) => rulesFor("lib/tf/css/x.css", css);
+  expect(rule("tr:is(:hover, :focus-within) .tf-rowval { visibility: hidden; }")).toEqual(["p"]);
+  expect(rule("tr:hover .tf-rowval.tf-covered { visibility: hidden; }")).toEqual([]);
+});
+
+test("(m) a hand-drawn missing line in a dialog, a second markup and *(needed)* fail; the page's one markup and `TfDialog`'s own pass", () => {
+  const dialog = (footer: string, open = "<TfDialog>") => `${open}{#snippet footer()}${footer}{/snippet}</TfDialog>`;
+  const m = (markup: string, file = "lib/x/Y.svelte") => {
+    expect(rulesFor(file, markup).filter((rule) => rule === "m").length, markup).toBeGreaterThan(0);
+  };
+  m(dialog('<p class="tf-dwhy" role="status">Name it first.</p><button class="tf-btn tf-primary">Add</button>'));
+  m('<span class="tf-dwhy">Name it first.</span>');
+  m("<label>Name (needed)</label>");
+  expect(rulesFor("lib/x/Y.svelte", '<p class="tf-dwhy" role="status">Name it first.</p>')).toEqual([]);
+  expect(rulesFor("lib/tf/settings/TfDialog.svelte", dialog('<p class="tf-dwhy" role="status">{why}</p>'))).toEqual([]);
+});
+
+test("(n) a dialog's primary disabled for more than a send needs `why`; a send in flight does not, nor a primary that can't be disabled", () => {
+  const dialog = (open: string, disabled: string) =>
+    `${open}{#snippet footer()}<button class="tf-btn tf-primary" onclick={() => { go(); }} disabled={${disabled}}>Add</button>{/snippet}</TfDialog>`;
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "!ready"))).toEqual(["n"]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", 'writing || name === ""'))).toEqual(["n"]);
+  expect(rulesFor("lib/x/Y.svelte", dialog('<TfDialog why={ready ? null : "Name it."}>', "!ready"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "writing"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", dialog("<TfDialog>", "sending || queue.busy"))).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", '<TfDialog>{#snippet footer()}<button class="tf-btn tf-primary">Add</button>{/snippet}</TfDialog>')).toEqual([]);
+  expect(rulesFor("lib/x/Y.svelte", '<button class="tf-btn tf-primary" disabled={!ready}>Add</button>')).toEqual([]);
+});
+
+/** The dialogs that arrive on a select, and why: picking it is what each is opened for. Any other marks its field `data-arrive`. */
+const ARRIVES_ON_A_SELECT: Record<string, string> = {
+  "lib/assets/ImportDialog.svelte": "*Import from* decides which fields follow, so it is the first question",
+  "lib/tf/builds/TfRunDialog.svelte": "*Start* chooses what the rest of the form holds",
+};
+
+test("a dialog that starts on a select marks the field it is for, or is listed as choosing to (F-453)", () => {
+  const onSelect = files(ROOT).flatMap((file) => {
+    if (!file.endsWith(".svelte")) return [];
+    const blocks = readFileSync(join(ROOT, file), "utf8").match(/<TfDialog\b[\s\S]*?<\/TfDialog>/g) ?? [];
+    return blocks.some((block) => {
+      const first = [...block.matchAll(/<(select|textarea|input)\b([\s\S]*?)\/?>/g)].find((field) => !/type="(checkbox|radio|hidden)"/.test(field[2]!));
+      return first?.[1] === "select" && !block.includes("data-arrive");
+    })
+      ? [file]
+      : [];
+  });
+  expect(onSelect.sort()).toEqual(Object.keys(ARRIVES_ON_A_SELECT).sort());
+});
+
 test("(a) a control sized outside the controls stylesheet fails, and the same rule in it passes", () => {
   for (const css of [
     ".tf-pr-head .tf-btn { padding: 2px 8px; }",
     ".tf-x .tf-btn.tf-sm { height: 24px; }",
     "@media (max-width: 900px) { .tf-x > .tf-iconbtn { min-height: 30px; } }",
-    ".tf-x .tf-lg { font: 500 12px var(--sans); }",
-    ".tf-x .tf-seg button { font-size: 11px; }",
+    ".tf-x .tf-lg { font: 500 var(--t-xs) var(--sans); }",
+    ".tf-x .tf-seg button { font-size: var(--t-2xs); }",
     ".tf-rvq .tf-fchips button { padding: 1px 9px; }",
     ".tf-y, .tf-x .tf-btn { border-radius: 2px; }",
     ".tf-rd-acts .tf-refresh { padding: 3px 8px; }",
@@ -401,14 +619,14 @@ test("(a) a control sized outside the controls stylesheet fails, and the same ru
   }
   expect(planted({ "lib/tf/css/view.css": ".tf-y, .tf-x .tf-btn { border-radius: 2px; }" })[0]).toContain("`.tf-x .tf-btn`");
   // The clean twins: in the controls stylesheet, not a sizing property, or not the control itself.
-  expect(planted({ [CONTROLS_SHEET]: ".tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: 13px; }" })).toEqual([]);
+  expect(planted({ [CONTROLS_SHEET]: ".tf-btn.tf-sm { height: var(--control-h-sm); padding: 0 8px; font-size: var(--t-sm); }" })).toEqual([]);
   expect(
     planted({
       "lib/tf/css/view.css": [
         ".tf-x .tf-btn { margin-left: auto; color: red; }",
         ".tf-iconbtn svg { width: 16px; height: 16px; }",
-        ".tf-btn kbd { font-size: 11px; padding: 0 3px; }",
-        ".tf-seg .tf-jobk { font-size: 11px; }",
+        ".tf-btn kbd { font-size: var(--t-2xs); padding: 0 3px; }",
+        ".tf-seg .tf-jobk { font-size: var(--t-2xs); }",
         ".tf-btns { padding: 4px; }",
         ".tf-x button { padding: 4px; }",
         "/* .tf-x .tf-btn { padding: 2px; } */",
@@ -430,6 +648,43 @@ test("(a) a disabled control's look set outside the controls stylesheet fails", 
   // The clean twins: in the controls stylesheet, a disabled control's placement, an enabled control's cursor.
   expect(planted({ [CONTROLS_SHEET]: ".tf-btn[disabled], .tf-iconbtn[disabled] { opacity: .55; cursor: not-allowed; }" })).toEqual([]);
   expect(planted({ "lib/tf/css/view.css": ".tf-x .tf-btn[disabled] { margin-left: auto; }\n.tf-x .tf-btn { cursor: grab; }" })).toEqual([]);
+});
+
+test("(h) a size off the type scale fails, and the reading face, code and tokens pass", () => {
+  for (const css of [".tf-x { font-size: 12.5px; }", ".tf-x { font-size: .85em; }", ".tf-x { font: 600 12px var(--sans); }"]) {
+    const failures = planted({ "lib/tf/css/view.css": css });
+    expect(failures, css).toHaveLength(1);
+    expect(failures[0], css).toMatch(/^\(h\) lib\/tf\/css\/view\.css `\.tf-x` sets font/);
+  }
+  expect(
+    planted({
+      "lib/tf/css/view.css": [
+        ".tf-x { font-size: var(--t-sm); }",
+        ".tf-x { font: 600 var(--t-xs) var(--mono); }",
+        ".tf-x { font: inherit; }",
+        ".tf-doc { font-family: var(--serif); font-size: 17.5px; }",
+        ".tf-x code { font: .88em var(--mono); font-size: round(.88em, 1px); }",
+        ".tf .tf-rd-title { font-size: 30px; }",
+      ].join("\n"),
+    }),
+  ).toEqual([]);
+  expect(planted({ "unported.css": ".row .k { font-size: 12px; }" })).toEqual([]);
+});
+
+test("(i) a pill toggle outside .tf-fchips fails, and the pill toggles themselves and a round badge pass", () => {
+  const failures = planted({ "lib/tf/css/view.css": '.tf-x-val { border-radius: 12px; }\n.tf-x-val[aria-pressed="true"] { color: red; }' });
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatch(/^\(i\) lib\/tf\/css\/view\.css `\.tf-x-val` draws a pill toggle/);
+  expect(planted({ "lib/tf/css/view.css": ".tf-count { border-radius: 9px; }" })).toEqual([]);
+  expect(planted({ "lib/tf/css/view.css": '.tf-x-val { border-radius: 4px; }\n.tf-x-val[aria-pressed="true"] { color: red; }' })).toEqual([]);
+  expect(planted({ [CONTROLS_SHEET]: '.tf-fchips button { border-radius: 12px; }\n.tf-fchips button[aria-pressed="true"] { color: red; }' })).toEqual([]);
+});
+
+test("(j) a literal 132px label column fails, and the token and a wider measure pass", () => {
+  const failures = planted({ "lib/tf/css/view.css": ".tf-x { grid-template-columns: 132px minmax(0, 1fr); }" });
+  expect(failures).toHaveLength(1);
+  expect(failures[0]).toMatch(/^\(j\) lib\/tf\/css\/view\.css `\.tf-x` sets a literal 132px label column/);
+  expect(planted({ "lib/tf/css/view.css": ".tf-x { grid-template-columns: var(--tf-label) minmax(0, 1fr); }\n.tf-y { grid-template-columns: 1132px 1fr; width: 132px; }" })).toEqual([]);
 });
 
 test("(a) a component's <style> block is a stylesheet too", () => {

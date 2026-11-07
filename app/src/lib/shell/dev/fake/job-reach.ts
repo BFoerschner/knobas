@@ -8,8 +8,8 @@
  *   from another source names it as `source`: fixture-only keys `mirrorRow`
  *   reads, since the mock adapter declares no state.
  * - `fakeReach`: `job_reach`, as a table rather than a walk. PAY-231 reaches
- *   its code, builds, pages, the testenv estate's Gitea container and what it
- *   runs on, and that container's monitors; PAY-232 and PAY-233, sub-tasks of PAY-231,
+ *   its code, builds, pages, the testenv estate's Gitea and Jira containers,
+ *   and those containers' monitors; PAY-232 and PAY-233, sub-tasks of PAY-231,
  *   reaches its parent's own links labelled "Parent PAY-231" (R-7.3), unless
  *   the switch is off. A restatement, which certifies nothing: the walk is
  *   witnessed in `knobas-core`'s `tests/it/reach.rs`.
@@ -81,33 +81,38 @@ export const JOB_ROWS = [
     chip: ok,
     source: "teamcity",
   }),
-  row("mock:flows-stage", "monitor", "flows-stage", "2026-08-22T12:40:00Z", {
-    cell: "HTTP",
+  // The roster's own monitors (`monitors.ts`), so the card's read and the roster's name one row.
+  row("kuma:3", "monitor", "jira", "2026-08-22T12:40:00Z", {
+    cell: "TCP",
     chip: { text: "down since 12:40", tone: "err" },
     source: "kuma",
   }),
-  row("mock:payouts-stage-health", "monitor", "payouts-stage /health", "2026-08-22T12:00:00Z", {
+  row("kuma:5", "monitor", "gitea", "2026-08-22T12:00:00Z", {
     cell: "HTTP",
-    chip: { text: "up", tone: "ok" },
+    chip: { text: "paused", tone: "muted" },
     source: "kuma",
   }),
-  row("mock:pg-payments-stage", "monitor", "pg-payments-stage", "2026-08-22T12:00:00Z", {
-    cell: "TCP",
-    chip: { text: "up", tone: "ok" },
-    source: "kuma",
+  row("confluence:psp-codes", "page", "PSP error codes", "2026-08-19T14:00:00Z", { path: "Engineering › Payments", source: "confluence" }),
+  row("mock:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry", "branch", "feature/PAY-231-sepa-retry", "2026-08-22T09:40:00Z", {
+    name: "feature/PAY-231-sepa-retry",
+    repository: "tidewater/payout-service",
+    path: "tidewater/payout-service",
   }),
-  row("mock:vm-pay-stage-01-ping", "monitor", "vm-pay-stage-01 ping", "2026-08-22T12:00:00Z", {
-    cell: "Ping",
-    chip: { text: "up", tone: "ok" },
-    source: "kuma",
+  row("mock:tidewater/payout-service@refs/heads/feature/PAY-231-temp-unavailable", "branch", "feature/PAY-231-temp-unavailable", "2026-08-22T09:40:00Z", {
+    name: "feature/PAY-231-temp-unavailable",
+    repository: "tidewater/payout-service",
+    path: "tidewater/payout-service",
   }),
-  row("confluence:psp-codes", "page", "PSP error codes", "2026-08-19T14:00:00Z", { path: "ENG › Payments" }),
+  row("confluence:manual-review", "page", "Manual review queue", "2026-08-18T10:00:00Z", { path: "Engineering › Payments", source: "confluence" }),
 ];
 
 /** What PAY-231 reaches, each entity with its first step. */
 const PAY_231: [id: string, kind: string, step: string][] = [
   ["mock:tidewater/payout-service", "repo", "mock:tidewater/payout-service"],
   ["mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry", "branch", "mock:payout-service#142"],
+  // The branches its runs are on (`builds.ts`), so a run's *This job* and the rail's *your branch* read one reach.
+  ["mock:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry", "branch", "mock:payout-service#142"],
+  ["mock:tidewater/payout-service@refs/heads/feature/PAY-231-temp-unavailable", "branch", "mock:payout-service#142"],
   ["mock:payout-service#142", "pr", "mock:payout-service#142"],
   ["mock:9f2c1ab", "commit", "mock:payout-service#142"],
   ["teamcity:build:Payout_Build-1188", "build", "mock:payout-service#142"],
@@ -119,15 +124,11 @@ const PAY_231: [id: string, kind: string, step: string][] = [
   ["teamcity:build:PspClient_Release-41", "build", "mock:tidewater/payout-service"],
   ["confluence:sepa", "page", "confluence:sepa"],
   ["confluence:psp-codes", "page", "confluence:psp-codes"],
-  // The Docs fixture's pages of the job (`docs.ts`, #863): the mock adapter
-  // emits no pages, so Docs' *This job* reads these, which no `list_entities`
-  // row answers to.
-  ["confluence:sepa", "page", "confluence:sepa"],
   ["confluence:manual-review", "page", "confluence:manual-review"],
   ["asset:knobas-gitea", "asset", "asset:knobas-gitea"],
-  ["mock:flows-stage", "monitor", "asset:knobas-gitea"],
-  ["mock:payouts-stage-health", "monitor", "asset:knobas-gitea"],
-  ["mock:pg-payments-stage", "monitor", "asset:knobas-gitea"],
+  ["kuma:5", "monitor", "asset:knobas-gitea"],
+  ["asset:knobas-jira", "asset", "asset:knobas-jira"],
+  ["kuma:3", "monitor", "asset:knobas-jira"],
 ];
 
 /** The parent each sub-task names (`fields.parent.key`). */
@@ -264,6 +265,10 @@ export function handlers(): Handlers {
     start_work_skip: (args) => {
       const step = stepById(Number(args["stepId"]));
       step.outcome = "skipped";
+      // `start_work::skip` settles the step and runs the flow on past it.
+      for (const other of flowOf(step)) {
+        if (other.outcome === "pending") other.outcome = other.step === "link_pull_request" ? "succeeded" : "queued";
+      }
       return flowOf(step);
     },
     start_work_amend: (args) => {

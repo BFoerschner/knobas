@@ -103,7 +103,7 @@ export interface StepSegment {
   name: string;
   /** `wait`: a step of a running run its log has not reached yet (#1016). */
   state: StepState | "wait";
-  /** The name and how long it took: "Checkout, 12 s", "cargo test, running", or "Publish, not started". */
+  /** The name and how long it took: "Checkout, 12s", "cargo test, running", or "Publish, not started". */
   tip: string;
   x: number;
   width: number;
@@ -128,6 +128,59 @@ function withFloor(raw: readonly number[]): number[] {
     if (under === -1) return shares;
     pinned.add(under);
   }
+}
+
+/**
+ * The bar's widths once its width is known: each step as wide as its time and,
+ * where the bar has room for every name, at least as wide as its own name, so
+ * a short step still says what it is. The steps that need more take it, and
+ * the rest share what is left by their time. With no room for every name, the
+ * short names stay whole and the longest give up their ends, on one width. A
+ * step's time is always in its tip.
+ */
+export function fitSteps<T extends Pick<StepSegment, "name" | "x" | "width">>(segments: readonly T[], barPx: number, room: (name: string) => number): T[] {
+  if (barPx <= 0 || segments.length === 0) return [...segments];
+  const needs = segments.map((segment) => (room(segment.name) / barPx) * 100);
+  const needed = needs.reduce((sum, need) => sum + need, 0);
+  let widths: number[];
+  if (needed >= 100) {
+    // The widest any step may be, so that the steps at it and those under it fill the bar.
+    const sorted = [...needs].sort((a, b) => a - b);
+    let left = 100;
+    let cap = 100 / needs.length;
+    for (let i = 0; i < sorted.length; i += 1) {
+      cap = left / (sorted.length - i);
+      if (sorted[i]! >= cap) break;
+      left -= sorted[i]!;
+    }
+    widths = needs.map((need) => Math.min(need, cap));
+  } else {
+    const pinned = new Set<number>();
+    for (;;) {
+      const free = 100 - needs.reduce((sum, need, i) => (pinned.has(i) ? sum + need : sum), 0);
+      const shared = segments.reduce((sum, segment, i) => (pinned.has(i) ? sum : sum + segment.width), 0);
+      const scale = shared === 0 ? 0 : free / shared;
+      const under = segments.findIndex((segment, i) => !pinned.has(i) && segment.width * scale < needs[i]!);
+      if (under === -1) {
+        widths = segments.map((segment, i) => (pinned.has(i) ? needs[i]! : segment.width * scale));
+        break;
+      }
+      pinned.add(under);
+    }
+  }
+  let x = 0;
+  return segments.map((segment, i) => {
+    const placed = { ...segment, x, width: widths[i]! };
+    x += widths[i]!;
+    return placed;
+  });
+}
+
+/** A step's name that is a command line, not words: it is drawn as code (design system, Type). */
+const COMMAND = /^(?:\.{0,2}\/|(?:cargo|npm|npx|pnpm|yarn|make|just|docker|go|gradle|mvn|pytest|python3?|node|bash|sh|kubectl|helm|terraform)\s)|\s--?[a-zA-Z]/;
+
+export function isCommand(name: string): boolean {
+  return COMMAND.test(name);
 }
 
 /**
@@ -256,7 +309,7 @@ export function historyLine(history: readonly TestOutcome[], branch: string | nu
   return `Failed in ${of}${where}.`;
 }
 
-/** A test's time: "42 ms", or "1m 02s" past a minute. */
+/** A test's time: "42 ms", or "1m 2s" past a minute. */
 export function testTime(ms: number | null): string | null {
   if (ms === null) return null;
   return ms < 60_000 ? `${ms} ms` : secondsLabel(Math.round(ms / 1000));

@@ -19,6 +19,8 @@
   * **Unlink asks nothing.** Re-linking a pair is one action (the unique index
     is partial), so removal is cheap to reverse, and a confirmation dialog for
     a reversible action is a dialog that trains people to dismiss dialogs.
+  * **It is one more group of the pane it stands in**: the pane's label and badge
+    and no way of its own to link, since the pane's actions already hold *Link to…*.
 -->
 <script lang="ts">
   import type { LinkEntry } from "../ipc/entity";
@@ -34,7 +36,6 @@
     links,
     onopen,
     onunlink,
-    onlink,
   }: {
     /** The entity whose detail this is — which end of each link is "here". */
     entityId: string;
@@ -42,8 +43,6 @@
     /** Navigate to an address (spec §2). The shell sets `location.hash`. */
     onopen: (hash: string) => void;
     onunlink: (entry: LinkEntry) => void;
-    /** Open *Link to…*. The empty state's invitation is the same action. */
-    onlink: () => void;
   } = $props();
 
   const groups = $derived(groupLinks(links, entityId));
@@ -71,27 +70,11 @@
   }
 </script>
 
-<div class="sec">
-  <div class="sec-h">
-    <span class="lab">Linked items</span>
-    <span class="k muted">{links.length}</span>
-    <span class="tf-trail">
-      <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
-    </span>
-  </div>
+<div class="sec links">
+  <h3 class="lab">Linked items <span class="tf-count">{links.length}</span></h3>
 
   {#if groups.length === 0}
-    <!--
-      The M1 caveat ("drawing links is M2 — knobas mirrors, it does not write")
-      is gone: it described a limitation that no longer exists, and an empty
-      state that explains why you cannot act is worse than one that offers the
-      action.
-    -->
-    <div class="empty">
-      <p>Nothing linked yet.</p>
-      <p>Link this to the ticket it implements, the build it broke, or the page that documents it.</p>
-      <button class="tf-btn tf-sm" onclick={onlink}>Link to…</button>
-    </div>
+    <p class="none">Nothing linked yet.</p>
   {:else}
     {#each groups as group (group.reading)}
       <div class="row hd lrow">
@@ -121,10 +104,10 @@
           </span>
           <button
             class="tf-btn tf-sm"
-            title="Remove this link. Linking again is one action."
+            title={entry.link.origin === "manual" ? "Remove this link. Linking again is one action." : "Remove this link. Asks first, because linking again would mark it as drawn by hand."}
             onclick={() => onunlink(entry)}
           >
-            Unlink
+            {entry.link.origin === "manual" ? "Unlink" : "Unlink…"}
           </button>
         </div>
         {#if entry.link.note}
@@ -146,31 +129,90 @@
 </div>
 
 <style>
-  /*
-    Four columns rather than the stylesheet's `g4`: the last one holds a
-    control, so it is sized by its content instead of by a fixed width that a
-    longer word would clip.
-  */
-  .lrow {
-    grid-template-columns: 34px 1fr auto auto;
+  /* A group of the pane it stands in: no box and no indent of its own, its label and its empty line the pane's. */
+  .links {
+    padding: 0;
+    border: 0;
   }
 
-  /* The whole title cell is the navigation target, not a link-coloured word. */
+  .links h3 {
+    margin: 0 0 6px;
+  }
+
+  .links .tf-count {
+    margin-left: 4px;
+  }
+
+  .none {
+    margin: 0;
+    font-size: var(--t-sm);
+    color: var(--ink-2);
+  }
+
+  /* A row is its tag, its title and *Unlink*, with its kind and age under the title: a 310 px pane has no room for four columns. */
+  .links .row {
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .links .row:hover {
+    background: none;
+  }
+
+  .links .row.hd {
+    display: block;
+    height: auto;
+    margin-top: 6px;
+    background: none;
+    color: var(--ink-2);
+    font: var(--t-xs) var(--sans);
+  }
+
+  .links .row.hd span:empty {
+    display: none;
+  }
+
+  .links .row.lrow:not(.hd) {
+    grid-template-columns: 26px minmax(0, 1fr) auto;
+    height: auto;
+    gap: 0 6px;
+    align-items: baseline;
+    padding: 4px 0;
+  }
+
+  .links .row.lrow:not(.hd) > :global(.tf-btn) {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: center;
+    overflow: visible;
+  }
+
+  /* The title is the way to it, underlined as a link made of words is (design system, Layout). */
   .lopen {
     text-align: left;
     width: 100%;
-    color: var(--text);
+    color: var(--ink);
+    font-size: var(--t-sm);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
-  .lopen:hover {
-    color: var(--link);
+  .links .row .r {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: left;
+    color: var(--ink-2);
+    font: var(--t-xs) var(--sans);
   }
 
   .wd {
+    display: inline-block;
     margin-left: 6px;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: var(--t-2xs);
+    font-weight: 600;
     color: var(--amber);
   }
 
@@ -183,16 +225,10 @@
     color: var(--faint);
   }
 
-  /* The empty state's invitation sits below its two lines: placement only, the
-     margin `unported.css`' deleted `.empty .btn` gave it (#2292). */
-  .empty .tf-btn {
-    margin-top: 8px;
-  }
-
   .lnote {
-    padding: 4px 0 6px 42px;
+    padding: 0 0 6px 32px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--t-xs);
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;

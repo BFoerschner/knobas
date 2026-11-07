@@ -122,7 +122,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    font-size: 11px;
+    font-size: var(--t-2xs, 11px);
   }
 
   .sub {

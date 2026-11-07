@@ -137,6 +137,12 @@ function open(
     mirrored?: boolean;
     /** What `refused_writes` answers (#2053, #2052); nothing refused when omitted. */
     refused?: (asks: WriteAsk[]) => Promise<RefusedWrite[]>;
+    /** The read's `changed_since`, `page_moved` and `again` (F-327). */
+    changed?: boolean;
+    moved?: boolean;
+    again?: Protocol["again"];
+    /** *Publish again* is refused with this sentence. */
+    againFails?: string;
   } = {},
 ) {
   const calls: {
@@ -150,9 +156,12 @@ function open(
     digests: string[];
     reads: number;
     writes: number;
+    /** Every *Publish again*. */
+    again: number;
   } = {
     reads: 0,
     writes: 0,
+    again: 0,
     saved: [],
     published: [],
     copied: [],
@@ -172,12 +181,18 @@ function open(
   let body = BODY;
   let release = () => {};
   const stalled = new Promise<void>((done) => (release = done));
+  const standing: Pick<Protocol, "changed_since" | "page_moved" | "again"> = {
+    changed_since: over.changed ?? false,
+    page_moved: over.moved ?? false,
+    again: over.again ?? null,
+  };
   const protocol = (publication: Protocol["publication"] = over.publication ?? null): Protocol => ({
     day: DAY,
     note_id: "note:p",
     page_title: DAY,
     publication,
     owed_tickets: mirror.held ? [] : (over.owed ?? []),
+    ...standing,
   });
   view = mount(TfStandup, {
     target,
@@ -221,6 +236,13 @@ function open(
           calls.published.push(chosen);
           return protocol({ write_id: 5, state: "pending", detail: null, page_entity_id: null, linked: false });
         },
+        publishStandupProtocolAgain: async () => {
+          calls.again += 1;
+          if (over.againFails) throw { code: "invalid", message: over.againFails, source_id: null };
+          standing.changed_since = false;
+          standing.again = { write_id: 7, state: "pending", detail: null };
+          return protocol();
+        },
         listProjects: async () => [{ source_id: "jira", key: "OPS", name: "Operations" }],
         createActionItemTicket: async (...args: unknown[]) => {
           calls.tickets.push(args);
@@ -249,7 +271,7 @@ function open(
       } as never,
     },
   });
-  return { calls, hears, mirror, emit, release: () => release(), stored: () => body };
+  return { calls, hears, mirror, emit, standing, release: () => release(), stored: () => body };
 }
 
 const text = () => target.textContent?.replace(/\s+/g, " ") ?? "";
@@ -261,7 +283,7 @@ test("the digest draws each list, every line with an item a link into the new sh
   await settle();
   expect(text()).toContain("Yesterday, Thursday 20");
   const links = [...target.querySelectorAll(".tf-su-dig a")].map((link) => link.getAttribute("href"));
-  expect(links).toEqual(["#/ticket/jira%3APAY-231", "#/page/confluence%3A98401", "#/monitors"]);
+  expect(links).toEqual(["#/ticket/jira%3APAY-231", "#/page/confluence%3A98401", "#/monitors/at/kuma%3Apayout-api"]);
   expect(text()).toContain("DB config (timer running)");
   expect(text()).toContain("Nothing of yours is blocked.");
 });
@@ -272,7 +294,7 @@ test("Infrastructure sits under Blockers, every alert a link to its monitor", as
   const headings = [...target.querySelectorAll(".tf-su-dig h4")].map((h) => h.textContent);
   expect(headings.slice(-2)).toEqual(["Blockers", "Infrastructure"]);
   const alert = [...target.querySelectorAll(".tf-su-dig a")].at(-1)!;
-  expect(alert.getAttribute("href")).toBe("#/monitors");
+  expect(alert.getAttribute("href")).toBe("#/monitors/at/kuma%3Apayout-api");
   expect(alert.textContent?.replace(/\s+/g, " ")).toBe("payout-api health check was down 12 min, from 03:10");
 });
 
@@ -298,7 +320,7 @@ test("each panel heading's action is a plain small button on the heading line, n
 test("the protocol draws who was there, their notes, and the action items, from the note's body", async () => {
   open();
   await settle();
-  const pressed = [...target.querySelectorAll<HTMLButtonElement>(".tf-su-val")].map((chip) => [
+  const pressed = [...target.querySelectorAll<HTMLButtonElement>(".tf-su-people .tf-fchips button")].map((chip) => [
     chip.textContent?.trim(),
     chip.getAttribute("aria-pressed"),
   ]);
@@ -334,7 +356,7 @@ test("a note typed under someone's name is saved as their bullet", async () => {
 test("Create ticket files the action item, shows it queued, then its key and status once it lands", async () => {
   const { calls, hears } = open();
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -343,18 +365,18 @@ test("Create ticket files the action item, shows it queued, then its key and sta
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
   await settle();
   expect(calls.tickets[0]).toEqual(["note:p", "jira:OPS", "Task", "Decide the manual-review SLA", `From the standup protocol of ${DAY}.`]);
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("Queued");
   hears.get(9)!(undefined);
   await settle();
   expect(target.querySelector(".tf-su-ai a")?.getAttribute("href")).toBe("#/ticket/jira%3AOPS-131");
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("To Do");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("To do");
 });
 
 test("Create ticket in a project the source's credential cannot file in is drawn disabled saying why, and files nothing (#2052)", async () => {
   const reason = "This Jira user cannot create tickets in OPS: it lacks the Create Issues permission";
   const { calls } = open({ refused: () => Promise.resolve([{ entity: "jira:OPS", op: "create_ticket", reason }]) });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -375,7 +397,12 @@ test("Publish goes to the stored page without asking, after saving", async () =>
   await settle();
   expect(calls.saved.length).toBe(1);
   expect(calls.published).toEqual([undefined]);
-  expect(text()).toContain("publishing");
+  // One button in one place: it says what its write is doing, and a second press lands on it.
+  const press = button("Queued");
+  expect(press.getAttribute("aria-disabled")).toBe("true");
+  press.click();
+  await settle();
+  expect(calls.published).toEqual([undefined]);
 });
 
 test("Publish under a page the credential cannot add pages to is drawn disabled saying why, and publishes nothing (#2053)", async () => {
@@ -410,7 +437,7 @@ test("the first Publish asks where protocols go", async () => {
   const { calls } = open({ stored: null });
   await settle();
   expect(text()).toContain("The first publish asks where.");
-  button("Publish to Confluence").click();
+  button("Publish to Confluence…").click();
   await settle();
   expect(document.querySelector(".tf-dialog h2")?.textContent).toBe("Where do standup protocols go?");
   expect(calls.published).toEqual([]);
@@ -419,8 +446,149 @@ test("the first Publish asks where protocols go", async () => {
 test("a published protocol links its page", async () => {
   open({ publication: { write_id: 5, state: "sent", detail: null, page_entity_id: "wiki:901", linked: true } });
   await settle();
-  const link = [...target.querySelectorAll("a")].find((found) => found.textContent?.trim() === "Published");
+  const link = [...target.querySelectorAll("a")].find((found) => found.textContent?.trim() === "Open the published page");
   expect(link?.getAttribute("href")).toBe("#/page/wiki%3A901");
+});
+
+const PUBLISHED: Protocol["publication"] = { write_id: 5, state: "sent", detail: null, page_entity_id: "wiki:901", linked: true };
+const pubLine = () => target.querySelector(".tf-su-publine span:not(.tf-off)")?.textContent?.trim();
+const typeNote = async (words: string) => {
+  const box = target.querySelector<HTMLTextAreaElement>(".tf-su-pn textarea")!;
+  box.value = words;
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+};
+
+test("once published it says so, and a change offers Publish again in the same box (F-327)", async () => {
+  const { standing } = open({ publication: PUBLISHED });
+  await settle();
+  expect(pubLine()).toContain("Published.");
+  expect(button("Publish again")).toBeUndefined();
+  expect(target.querySelector(".tf-su-foot")?.textContent).toContain("New protocols publish under");
+  const box = target.querySelector(".tf-su-publine");
+  standing.changed_since = true;
+  await typeNote("Something new");
+  expect(pubLine()).toContain("Changed since it was published");
+  expect(target.querySelector(".tf-su-publine"), "the same box: nothing moves under the caret").toBe(box);
+  expect(target.querySelectorAll(".tf-su-publine > span")).toHaveLength(3);
+  expect(button("Publish again").getAttribute("aria-disabled")).toBeNull();
+});
+
+test("the read says the note moved on, so it survives leaving the tab and coming back (F-327)", async () => {
+  open({ publication: PUBLISHED, changed: true });
+  await settle();
+  expect(pubLine()).toContain("Changed since it was published");
+  expect(button("Publish again")).toBeDefined();
+});
+
+test("words typed and taken back read as the page again, once the save says so (F-327)", async () => {
+  const { standing } = open({ publication: PUBLISHED });
+  await settle();
+  standing.changed_since = false;
+  await typeNote("Back as it was");
+  await vi.advanceTimersByTimeAsync(1);
+  await settle();
+  expect(pubLine()).toContain("Published.");
+  expect(button("Publish again")).toBeUndefined();
+});
+
+test("Publish again saves, sends once, holds as Queued, and pressed again does nothing (F-327)", async () => {
+  const { calls, hears, standing } = open({ publication: PUBLISHED, changed: true });
+  await settle();
+  const press = button("Publish again");
+  press.focus();
+  press.click();
+  await settle();
+  expect(calls.saved.length).toBe(1);
+  expect(calls.again).toBe(1);
+  expect(toasts.items.at(-1)?.text).toBe("Queued: publish the protocol again.");
+  expect(button("Queued"), "the same button, so focus stays on it").toBe(press);
+  expect(document.activeElement).toBe(press);
+  press.click();
+  await settle();
+  expect(calls.again).toBe(1);
+  // It lands: the press has nothing left to do, so focus is the keeper's, and a second Enter doesn't open the page (F-340).
+  standing.again = null;
+  hears.get(7)?.(undefined);
+  await settle();
+  expect(button("Queued")).toBeUndefined();
+  expect(pubLine()).toContain("Published.");
+  expect(document.activeElement?.textContent?.trim()).not.toBe("Open the published page");
+});
+
+test("a page edited in the source since says so, and offers no Publish again (F-327)", async () => {
+  open({ publication: PUBLISHED, changed: true, moved: true });
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Edited in Confluence since it was published");
+  expect(button("Publish again")).toBeUndefined();
+  expect([...target.querySelectorAll("a")].some((found) => found.textContent?.trim() === "Open the published page")).toBe(true);
+});
+
+test("a refused Publish again says why and may be pressed again (F-327)", async () => {
+  open({ publication: PUBLISHED, changed: true, again: { write_id: 7, state: "refused", detail: "version is out of date" } });
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Confluence refused it: version is out of date");
+  expect(button("Publish again").getAttribute("aria-disabled")).toBeNull();
+  expect(button("Show queue")).toBeDefined();
+});
+
+test("a held Publish again says so, and holds the press (F-327)", async () => {
+  open({ publication: PUBLISHED, again: { write_id: 7, state: "held", detail: "the page moved" } });
+  await settle();
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Held in the queue: the page moved");
+  expect(button("Held in the queue").getAttribute("aria-disabled")).toBe("true");
+});
+
+test("a press that fails says why and reads the page's standing again (F-327)", async () => {
+  const { calls, standing } = open({ publication: PUBLISHED, changed: true, againFails: "The page was edited in the source" });
+  await settle();
+  standing.page_moved = true;
+  button("Publish again").click();
+  await settle();
+  expect(calls.again).toBe(1);
+  expect(target.querySelector(".tf-tm-fail")?.textContent).toContain("The page was edited in the source");
+  expect(target.querySelector(".tf-su-pub.tf-stale")?.textContent).toContain("Edited in Confluence");
+});
+
+test("someone pressed off and on again keeps their place among the notes (F-348)", async () => {
+  open();
+  await settle();
+  const notes = () => [...target.querySelectorAll(".tf-su-pn > span")].map((name) => name.textContent);
+  const before = notes();
+  expect(before.length).toBeGreaterThan(1);
+  const first = [...target.querySelectorAll<HTMLButtonElement>(".tf-su-people [aria-pressed]")][0]!;
+  first.click();
+  await settle();
+  expect(notes()).toEqual(before.slice(1));
+  first.click();
+  await settle();
+  expect(notes()).toEqual(before);
+});
+
+test("Publish's toast is the queued write's, which says Sent in place once it has gone", async () => {
+  open();
+  await settle();
+  button("Publish to Confluence").click();
+  await settle();
+  expect(toasts.items.at(-1)?.text).toMatch(/^Queued: publish the protocol under Confluence/);
+});
+
+test("Enter adds and leaves the field open for the next, and Enter on the empty field gives focus back to the button", async () => {
+  open();
+  await settle();
+  button("Add someone").click();
+  await settle();
+  const field = document.activeElement as HTMLInputElement;
+  field.value = "Ana";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  expect(document.activeElement).toBe(field);
+  expect(field.value).toBe("");
+  expect(target.querySelector('.tf-su-people [aria-pressed="true"]:last-of-type')?.textContent?.trim()).toBe("Ana");
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  expect(document.activeElement?.textContent?.trim()).toBe("Add someone");
 });
 
 test("an item whose ticket the protocol already links shows its key and status, and no Create ticket (#1433)", async () => {
@@ -429,12 +597,12 @@ test("an item whose ticket the protocol already links shows its key and status, 
   const rows = [...target.querySelectorAll(".tf-su-ai")];
   expect(rows).toHaveLength(2);
   // The item with no link keeps its button.
-  expect(rows[0]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  expect(rows[0]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket…");
   // The linked one reads the ticket's key and status, as a create that landed in this session does.
   expect(rows[1]!.querySelector("button")).toBeNull();
   expect(rows[1]!.querySelector("a")?.getAttribute("href")).toBe("#/ticket/jira%3AOPS-131");
   expect(rows[1]!.querySelector("a")?.textContent).toBe("OPS-131");
-  expect(rows[1]!.querySelector(".tf-chip")?.textContent).toBe("To Do");
+  expect(rows[1]!.querySelector(".tf-chip")?.textContent).toBe("To do");
 });
 
 test("only a ticket titled exactly as the item answers for it: another kind, another title or a withdrawn ticket does not (#1433)", async () => {
@@ -447,7 +615,7 @@ test("only a ticket titled exactly as the item answers for it: another kind, ano
   });
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
-  expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+  expect(buttons).toEqual(["Create ticket…", "Create ticket…"]);
   expect(target.querySelector(".tf-su-ai a")).toBeNull();
 });
 
@@ -455,7 +623,7 @@ test("after a create, leaving the tab and coming back shows the ticket's key, no
   const links: LinkEntry[] = [];
   const { hears } = open({ links });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -474,7 +642,7 @@ test("after a create, leaving the tab and coming back shows the ticket's key, no
   const first = target.querySelector(".tf-su-ai")!;
   expect(first.querySelector("button")).toBeNull();
   expect(first.querySelector("a")?.textContent).toBe("OPS-131");
-  expect(first.querySelector(".tf-chip")?.textContent).toBe("To Do");
+  expect(first.querySelector(".tf-chip")?.textContent).toBe("To do");
 });
 
 /** A create the protocol's read names as owing its link: filed before the reload, its ticket not mirrored yet. */
@@ -492,9 +660,9 @@ test("a reload before the sync shows a filed item sent, not Create ticket (#1951
   await settle();
   const rows = [...target.querySelectorAll(".tf-su-ai")];
   expect(rows[0]!.querySelector("button")).toBeNull();
-  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("sent");
+  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("Sent");
   // The other item filed nothing and keeps its button.
-  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket…");
 });
 
 test("after a reload, the sync that brings the ticket in replaces sent with its key (#1951, #2104)", async () => {
@@ -502,14 +670,14 @@ test("after a reload, the sync that brings the ticket in replaces sent with its 
   await settle();
   synced(emit);
   await settle();
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("sent");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("Sent");
   mirror.held = true;
   synced(emit);
   await settle();
   const first = target.querySelector(".tf-su-ai")!;
   expect(first.querySelector("button")).toBeNull();
   expect(first.querySelector("a")?.textContent).toBe("OPS-131");
-  expect(first.querySelector(".tf-chip")?.textContent).toBe("To Do");
+  expect(first.querySelector(".tf-chip")?.textContent).toBe("To do");
   // Named, so the next sync asks nothing more.
   const asked = calls.asked.length;
   synced(emit);
@@ -520,7 +688,7 @@ test("after a reload, the sync that brings the ticket in replaces sent with its 
 test("a create whose ticket the post-write read missed reads sent and is named by a later sync (#1951, #2104)", async () => {
   const { hears, mirror, emit } = open({ mirrored: false });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -531,7 +699,7 @@ test("a create whose ticket the post-write read missed reads sent and is named b
   // The row left the queue before any sync mirrored the ticket.
   hears.get(9)!(undefined);
   await settle();
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("sent");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("Sent");
   mirror.held = true;
   synced(emit);
   await settle();
@@ -542,7 +710,7 @@ test("after a reload, a create held on drift or refused in the queue offers Crea
   open({ owed: [owed({ state: "held" }), owed({ write_id: 10, state: "refused", title: "Update the on-call runbook (Tomasz Wójcik)" })], mirrored: false });
   await settle();
   const buttons = [...target.querySelectorAll(".tf-su-ai button")].map((found) => found.textContent?.trim());
-  expect(buttons).toEqual(["Create ticket", "Create ticket"]);
+  expect(buttons).toEqual(["Create ticket…", "Create ticket…"]);
 });
 
 test("after a reload, a create held as unconfirmed is on its way and followed, and one held on drift is offered again (#1966)", async () => {
@@ -553,9 +721,9 @@ test("after a reload, a create held as unconfirmed is on its way and followed, a
   await settle();
   const rows = [...target.querySelectorAll(".tf-su-ai")];
   expect(rows[0]!.querySelector("button")).toBeNull();
-  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("queued");
+  expect(rows[0]!.querySelector(".tf-chip")?.textContent).toBe("Queued");
   // Held on drift: never sent, so the item offers the create again.
-  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket");
+  expect(rows[1]!.querySelector("button")?.textContent?.trim()).toBe("Create ticket…");
   // Followed, so the reader's discard in the queue is heard.
   expect(hears.has(9)).toBe(true);
 });
@@ -563,7 +731,7 @@ test("after a reload, a create held as unconfirmed is on its way and followed, a
 test("a filed ticket the queue holds as unconfirmed stays queued, told once, with no Edit and resend (#1966)", async () => {
   const { hears } = open({ mirrored: false });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -581,7 +749,7 @@ test("a filed ticket the queue holds as unconfirmed stays queued, told once, wit
   hears.get(9)!(unconfirmed);
   hears.get(9)!(unconfirmed);
   await settle();
-  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("queued");
+  expect(target.querySelector(".tf-su-ai .tf-chip")?.textContent).toBe("Queued");
   expect(toasts.items.map((t) => [t.text, (t.more ?? []).length])).toEqual([
     ["Ticket may have arrived: Jira did not answer. Check Jira, then send it again or discard it.", 0],
   ]);
@@ -589,8 +757,8 @@ test("a filed ticket the queue holds as unconfirmed stays queued, told once, wit
 });
 
 for (const [name, field] of [
-  ["+ Add someone", "Who else was there"],
-  ["+ Add an action item", "New action item"],
+  ["Add someone", "Who else was there"],
+  ["Add an action item", "New action item"],
 ] as const) {
   test(`${name} puts the cursor in its field even while a notes box holds it (#1511)`, async () => {
     open();
@@ -645,7 +813,7 @@ test("a refused save does not break the chain: the next save still lands (#1679)
 test("an action item's ticket echo says queued, then sent, and goes once the refresh event's read names the ticket (#2104)", async () => {
   const { hears, mirror, emit } = open({ mirrored: false });
   await settle();
-  button("Create ticket").click();
+  button("Create ticket…").click();
   await settle();
   const select = document.querySelector<HTMLSelectElement>("select[aria-label='Project the ticket goes in']")!;
   select.value = "jira:OPS";
@@ -654,14 +822,14 @@ test("an action item's ticket echo says queued, then sent, and goes once the ref
   [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find((found) => found.textContent?.trim() === "Create ticket")!.click();
   await settle();
   const first = () => target.querySelector(".tf-su-ai")!;
-  expect(first().querySelector(".tf-chip")?.textContent).toBe("queued");
+  expect(first().querySelector(".tf-chip")?.textContent).toBe("Queued");
   hears.get(9)!(undefined);
   await settle();
-  expect(first().querySelector(".tf-chip")?.textContent).toBe("sent");
+  expect(first().querySelector(".tf-chip")?.textContent).toBe("Sent");
   // The refresh after the create brought the ticket in: the write names it.
   mirror.held = true;
   emit("item:refreshed", { entity_id: "jira:OPS-131", write_id: 9, ended: "refreshed" });
   await settle();
   expect(first().querySelector("a")?.textContent).toBe("OPS-131");
-  expect(first().querySelector(".tf-chip")?.textContent).toBe("To Do");
+  expect(first().querySelector(".tf-chip")?.textContent).toBe("To do");
 });

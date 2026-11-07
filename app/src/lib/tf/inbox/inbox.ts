@@ -6,12 +6,13 @@
  * A row is an `inbox_items` entry. The view holds both shelves whole (the
  * inbox store reads them), so the filter runs in the browser (R-2.3's first
  * mode). Nothing here reads a payload: the sentence is the backend's own
- * `reason` and `title`.
+ * `title` and `reason`, subject first (F-115), and `detail` its second reading.
  */
 import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
+import { failedBuildLine } from "../builds/builds";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
-import { MENTION_TAB, ticketHash } from "../route";
+import { MENTION_TAB, monitorHash, sectionHash, ticketHash } from "../route";
 
 /** The word each category reads as: the kind chips' and the second line's. */
 const KIND: Record<InboxCategory, string> = {
@@ -28,7 +29,7 @@ const KIND: Record<InboxCategory, string> = {
  * The kind chips, in prototype-6's order. A credential expiry has none, and
  * neither has a failed sign-in (#1571): both are about a source, not work.
  */
-export const KIND_CHIPS = ["Review", "Mention", "Build", "Assignment", "Monitor"] as const;
+export const KIND_CHIPS = ["Review", "Mention", "Build", "Assignment", "Monitor", "Sign-in"] as const;
 
 /**
  * How many days before a credential expires its item arrives:
@@ -53,32 +54,45 @@ export function kindOf(category: InboxCategory): string {
 }
 
 /**
- * The item as one phrase, lower case as the backend writes it: the reason,
- * then the item after a colon, unless the reason already names it (a
- * credential expiry's reason names its source).
+ * The item as one phrase, its subject first (F-115): the title, then why it is
+ * here after a colon (*Payout CSV export: jonas asked for your review*), or the
+ * reason alone where it already names the subject (*knobas-jira is down*, *The
+ * Tidewater Jira credential expires on…*).
  */
 export function phrase(item: Pick<InboxItem, "reason" | "title">): string {
   const reason = item.reason.trim();
   const title = item.title.trim();
   if (title === "" || reason.toLowerCase().includes(title.toLowerCase())) return reason;
-  return `${reason}: ${title}`;
+  return `${title}: ${reason}`;
 }
 
 /**
- * Categories whose reason starts with a source's word: the reviewer's account
- * (`jonas asked for your review`) or the asset's path. Those are drawn as the
- * source spells them; only the backend's own opening words are capitalised.
+ * The categories whose phrase opens on knobas' own words (`the <source>
+ * credential…`, `no credential…`). Every other opens on a source's name for the
+ * subject, which is drawn as the source spells it.
  */
-const SOURCE_FIRST: readonly InboxCategory[] = ["review_request", "alert"];
-
-/** The backend's stand-in for a review request with no author (`knobas_core::inbox`): knobas' own word. */
-const NO_AUTHOR = "somebody ";
+const OWN_WORDS_FIRST: readonly InboxCategory[] = ["credential_expiry", "failed_sign_in"];
 
 /** The row's sentence: {@link phrase}, capitalised where the first word is knobas' own. */
 export function sentence(item: Pick<InboxItem, "category" | "reason" | "title">): string {
   const text = phrase(item);
-  if (SOURCE_FIRST.includes(item.category) && !text.startsWith(NO_AUTHOR)) return text;
-  return text.charAt(0).toUpperCase() + text.slice(1);
+  return OWN_WORDS_FIRST.includes(item.category) ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
+/**
+ * What a toast calls the item: its subject alone, since a toast already says
+ * what happened to it (*Done: Payout dashboard latency*), or the sentence where
+ * the reason names the subject.
+ */
+export function named(item: Pick<InboxItem, "category" | "reason" | "title">): string {
+  const title = item.title.trim();
+  return title === "" || item.reason.toLowerCase().includes(title.toLowerCase()) ? sentence(item) : title;
+}
+
+/** What a row's second line adds after its kind and job: a failed build's tests in the words Builds uses (F-010), else the source's own line. */
+export function detailOf(item: Pick<InboxItem, "category" | "detail">): string | null {
+  if (!item.detail) return null;
+  return item.category === "failed_build" ? failedBuildLine(item.detail) : item.detail;
 }
 
 /** A failure is drawn with an err dot (a failed build, a monitor down, a refused sign-in). */
@@ -97,6 +111,9 @@ export function untilLabel(at: Date, now: Date): string {
   return `${name} ${clock(at)}`;
 }
 
+/** What an alert's key starts with: the rest is its monitor's entity id. */
+const ALERT_KEY = "alert:";
+
 /** The link a row opens with: its word and its address. */
 export interface Opener {
   label: string;
@@ -104,19 +121,39 @@ export interface Opener {
 }
 
 /**
- * The row's first action, a link to the item's own view (R-4.10's
+ * A row's way to fix what it is about, for the button the sentence cannot be
+ * (F-132): a credential row says the fix in the status bar's words and goes where
+ * its link goes (`credentialFix`). `null` on any other row, and until the sources
+ * are read.
+ */
+export function fixOf(item: Pick<InboxItem, "category" | "source_id">, credentialFix?: (sourceId: string) => string | null): Opener | null {
+  if (item.category !== "credential_expiry" && item.category !== "failed_sign_in") return null;
+  const fix = credentialFix?.(item.source_id) ?? null;
+  return fix === null ? null : { label: `${fix}…`, href: `#/settings/source/${encodeURIComponent(item.source_id)}/reenter` };
+}
+
+/**
+ * Where a row opens: the sentence is the link on the Inbox page (F-132), and the
+ * launcher's sheet says the word. A link to the item's own view (R-4.10's
  * `itemHash`), worded by what it opens as prototype-6 words it. A ticket
  * assigned to the reader opens its ticket page (spec #2227), to read before
  * taking it on; a mention on a ticket opens the ticket's `/mention` address,
  * which draws the same page brought to the newest comment that mentions the
- * reader (`TfConversation`'s `toMention`).
+ * reader (`TfConversation`'s `toMention`). An alert's key names its monitor
+ * (`alert:<monitor id>`), so it opens Monitors with that row marked. A row about a
+ * credential opens its source's page, which holds *Re-enter* (`fixOf`).
  */
-export function opener(item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id">): Opener | null {
+export function opener(
+  item: Pick<InboxItem, "category" | "entity_id" | "kind" | "source_id"> & Partial<Pick<InboxItem, "key">>,
+): Opener | null {
   // Both are about the source itself, whose page holds *Re-enter* (#1571).
   if (item.category === "credential_expiry" || item.category === "failed_sign_in") {
-    return { label: "Open source", href: `#/settings/source/${encodeURIComponent(item.source_id)}` };
+    return { label: "Source settings", href: `#/settings/source/${encodeURIComponent(item.source_id)}` };
   }
-  if (item.category === "alert") return { label: "Open monitor", href: "#/monitors" };
+  if (item.category === "alert") {
+    const monitor = item.key?.startsWith(ALERT_KEY) ? item.key.slice(ALERT_KEY.length) : "";
+    return { label: "Open monitor", href: monitor === "" ? sectionHash("monitors") : monitorHash(monitor) };
+  }
   if (item.entity_id === null) return null;
   const kind = item.kind ?? "";
   const href = itemHash({ entity_id: item.entity_id, kind });
@@ -166,13 +203,15 @@ export function visible(entries: readonly InboxEntry[], filter: InboxFilter, ind
   });
 }
 
-/** The snoozed shelf as one line (R-12.3), or `null` when nothing is snoozed. */
-export function snoozedLine(entries: readonly InboxEntry[]): string | null {
-  if (entries.length === 0) return null;
-  const parts = entries.map(({ item }) => {
-    const back = item.snoozed_until ? new Date(item.snoozed_until) : null;
-    const date = back && !Number.isNaN(back.getTime()) ? ` (back ${day(back)})` : "";
-    return `${phrase(item)}${date}`;
-  });
-  return `Snoozed: ${parts.join(", ")}.`;
+/** When a snoozed item comes back, in the words a credential's own sentence dates itself in; `null` with no date. */
+export function backLabel(item: Pick<InboxItem, "snoozed_until">): string | null {
+  const back = item.snoozed_until ? new Date(item.snoozed_until) : null;
+  return back && !Number.isNaN(back.getTime()) ? sentenceDay(back) : null;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** A day as `knobas_core::inbox` writes one in a reason: *Thursday 3 Sep 2026*. */
+export function sentenceDay(at: Date): string {
+  return `${at.toLocaleDateString("en-GB", { weekday: "long" })} ${at.getDate()} ${MONTHS[at.getMonth()]} ${at.getFullYear()}`;
 }

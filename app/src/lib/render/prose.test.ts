@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { jiraWikiToMarkdown, proseMarkdown } from "./prose";
+import { jiraWikiToMarkdown, proseMarkdown, withoutAttachmentMarks } from "./prose";
+
+describe("withoutAttachmentMarks", () => {
+  it("says a wiki attachment's file name, and leaves other markup alone", () => {
+    expect(withoutAttachmentMarks("Trace: !psp-409.png|thumbnail! and [^codes.pdf].", "jira_wiki")).toBe("Trace: psp-409.png and codes.pdf.");
+    expect(withoutAttachmentMarks("!psp-409.png!", "jira_wiki")).toBe("psp-409.png");
+    expect(withoutAttachmentMarks("!psp-409.png! in Markdown", "markdown")).toBe("!psp-409.png! in Markdown");
+  });
+});
 
 describe("jiraWikiToMarkdown (#2308)", () => {
   it("turns headings, numbered and bulleted lists into Markdown's", () => {

@@ -6,7 +6,7 @@
  * link set that applies and one for the parent (#867, R-6.2), read by
  * `job_link_sets`; a set's rows hidden on this ticket go under *Hidden on KEY*.
  */
-import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow } from "../../ipc/entity";
+import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow, Tone } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 import { kindRegistry } from "../../shell/kind-registry.svelte";
 import { entityAddress } from "../address";
@@ -38,14 +38,46 @@ export function sectionOf(kind: string, runKinds: readonly string[] = runKindsOf
   return SECTION[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 }
 
+/** What a row is, one word for one thing: a link's kind, singular, where a section's name would say *Assets* of one asset. */
+const KIND_WORD: Record<string, string> = {
+  pr: "Pull request",
+  branch: "Branch",
+  commit: "Commit",
+  repo: "Repository",
+  build: "Build",
+  pipeline: "Pipeline",
+  build_config: "Pipeline",
+  page: "Page",
+  monitor: "Monitor",
+  asset: "Asset",
+  route: "Route",
+};
+
+export function kindWord(kind: string, runKinds: readonly string[] = runKindsOf(kindRegistry)): string {
+  if (runKinds.includes(kind)) return KIND_WORD.build!;
+  return KIND_WORD[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
+}
+
+/**
+ * Where a link came from, as *Unlink…* says it. `create_link` records whatever it draws as drawn by hand, so a link
+ * from anywhere else asks first (the removal rule) and only one drawn by hand has *Undo*.
+ */
+export const LINK_CAME_FROM: Record<LinkEntry["link"]["origin"], string> = {
+  manual: "you",
+  suggested: "a suggestion you accepted",
+  imported: "an import",
+  source: "the source",
+  implied: "a reference in a note",
+};
+
 /** The links drawn on the ticket whose far end still stands, newest first as the detail reads them. */
 export function linkedOn(detail: Pick<EntityDetail, "links">): LinkEntry[] {
   return detail.links.filter((entry) => entry.other.deleted_at === null);
 }
 
-/** The rows the drawer's filter keeps: every word in the title or the section. */
+/** The rows the drawer's filter keeps: every word in the title, what it is or the section it shows in. */
 export function filterLinks(links: readonly LinkEntry[], text: string): LinkEntry[] {
-  return links.filter((entry) => matchesAll(`${entry.other.title} ${sectionOf(entry.other.kind)}`, text));
+  return links.filter((entry) => matchesAll(`${entry.other.title} ${kindWord(entry.other.kind)} ${sectionOf(entry.other.kind)}`, text));
 }
 
 /**
@@ -71,6 +103,10 @@ export interface GroupRow {
   href: string | null;
   /** The job section it shows in. */
   section: string;
+  /** What it is, in one word. */
+  kind: string;
+  /** Its dot (F-036), where the entity says a state. */
+  state: { text: string; tone: Tone | null } | null;
 }
 
 /**
@@ -122,9 +158,11 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
       .filter((member) => !member.hidden)
       .map((member) => ({
         id: member.entity_id,
-        title: member.title ?? member.entity_id,
+        title: member.title ?? keyOf(member.entity_id),
         href: rowHash(member.entity_id, member.entity_kind, member.kind),
         section: sectionOf(member.kind),
+        kind: kindWord(member.kind),
+        state: member.state ?? null,
       })),
   }));
   if (read.parent === null) return sets;
@@ -139,9 +177,11 @@ export function groupsOf(read: JobLinkSets | null): JobGroup[] {
       setId: null,
       rows: read.parent.links.map((link) => ({
         id: link.entity_id,
-        title: link.title ?? link.entity_id,
+        title: link.title ?? keyOf(link.entity_id),
         href: rowHash(link.entity_id, link.kind, null),
         section: sectionOf(link.kind),
+        kind: kindWord(link.kind),
+        state: link.state ?? null,
       })),
     },
   ];
@@ -158,7 +198,7 @@ export function hiddenOf(read: JobLinkSets | null): HiddenRow[] {
   const out = new Map<string, string>();
   for (const set of read?.sets ?? []) {
     for (const member of set.members) {
-      if (member.hidden && !out.has(member.entity_id)) out.set(member.entity_id, member.title ?? member.entity_id);
+      if (member.hidden && !out.has(member.entity_id)) out.set(member.entity_id, member.title ?? keyOf(member.entity_id));
     }
   }
   return [...out].map(([id, title]) => ({ id, title }));

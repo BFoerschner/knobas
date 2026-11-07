@@ -72,7 +72,7 @@ test("a moved ticket is announced, and a pass that moved nothing says nothing", 
   syncEnded();
   await settled();
   expect(pushed.map((toast) => toast.text)).toEqual([
-    "Merged pull requests moved 2 tickets to In Review.",
+    "Merged pull requests moved 2 tickets to In review.",
   ]);
 
   syncEnded();
@@ -118,7 +118,7 @@ test("a failed pass is quiet and the next ending retries it", async () => {
   syncEnded();
   await settled();
   expect(pushed.map((toast) => toast.text)).toEqual([
-    "A merged pull request moved its ticket to In Review.",
+    "A merged pull request moved its ticket to In review.",
   ]);
   stop();
 });

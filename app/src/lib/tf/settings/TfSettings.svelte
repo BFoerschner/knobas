@@ -15,7 +15,11 @@
   status. Only the newest list read may land (`latestRead`, #107).
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
   import { pageVisible } from "../kept-pages.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import { everyWhileShown } from "../while-shown.svelte";
   import { ipcErrorMessage, EVENTS } from "../../ipc";
   import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
@@ -29,7 +33,9 @@
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
-  import { SETTINGS_SECTIONS, settingsHash, settingsPlace, sourceState } from "./settings";
+  import { sourceDrafts } from "./source-drafts.svelte";
+  import { SETTINGS_SECTIONS, settingsHash, settingsKnows, settingsPlace, sourceState } from "./settings";
+  import TfNothingHere from "../TfNothingHere.svelte";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
   import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
@@ -81,6 +87,8 @@
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
+  /** An address that names neither a section nor a source: the rail stays, so the way back is one click. */
+  const known = $derived(settingsKnows(rest));
 
   let sources = $state<SourceSummary[] | null>(null);
   let error = $state<string | null>(null);
@@ -188,33 +196,67 @@
     health.patch(next.health);
   }
 
+  /** What was typed on a source's page and left there (F-635): the rail says so from any section. */
+  const anyDraft = $derived(sources?.some((source) => sourceDrafts.has(source.id)) ?? false);
   const anyFailing = $derived(
     (sources ?? []).some((source) => sourceState(source, health.get(source.id), null).failed),
   );
   const current = $derived(sourceId === null ? null : (sources?.find((row) => row.id === sourceId) ?? null));
   const sectionName = $derived(SETTINGS_SECTIONS.find(([key]) => key === place.section)?.[1] ?? "Sources");
-  const crumbName = $derived(sourceId === null ? sectionName : (current?.display_name ?? sourceId));
+  /** `#/settings` itself: the *Settings* crumb would lead back to this page. */
+  const bareSettings = $derived(rest.length === 0);
+  const crumbName = $derived(!known ? "Nothing here" : sourceId === null ? sectionName : (current?.display_name ?? sourceId));
+  /** Below 900 px, whether the sections rail is unfolded under its bar. */
+  let railOpen = $state(false);
+  /** Which section or source is drawn: only a move between them starts the column at its top, not a dialog's own address. */
+  const shownPlace = $derived(`${place.section}/${sourceId ?? ""}`);
+  /**
+   * The section's column is the page's scroller, so moving to another section starts it at its top (F-650). After the
+   * flush: `keepScroll` on the kept page sets back what it noted before the move, and its effect runs after this one, which
+   * a section drawn at once showed as a page opened part way down.
+   */
+  function atTopOnMove(scroller: HTMLElement) {
+    void shownPlace;
+    void tick().then(() => (scroller.scrollTop = 0));
+  }
 </script>
 
-<div class="tf-full">
-  <TfCrumbs parts={[{ name: "Settings", href: "#/settings" }, { name: crumbName }]} {back} />
-  <div class="tf-stg">
-    <nav class="tf-stg-nav" aria-label="Settings">
+<div class="tf-full tf-stgpage">
+  <TfCrumbs parts={[bareSettings ? { name: "Settings" } : { name: "Settings", href: "#/settings" }, ...(sourceId === null ? [{ name: crumbName }] : [{ name: "Sources", href: "#/settings/sources" }, { name: crumbName }])]} {back} />
+  <TfRailBar label="Section" value={known ? sectionName : "None"} open={railOpen} controls="tf-settings-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} {layers} />
+  <div class="tf-stg" class:tf-rail-shut={!railOpen}>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+    <nav
+      id="tf-settings-rail"
+      class="tf-stg-nav tf-rail"
+      aria-label="Settings"
+      onclick={(event) => {
+        if ((event.target as Element).closest("a[href]")) railOpen = false;
+      }}
+    >
       {#each SETTINGS_SECTIONS as [key, label] (key)}
-        <a href={settingsHash(key)} aria-current={key === place.section ? "page" : undefined}>
+        <a href={settingsHash(key)} aria-current={known && key === place.section ? "page" : undefined}>
           {label}
           {#if key === "sources" && anyFailing}
             <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
+          {:else if key === "sources" && anyDraft}
+            <span class="tf-dot tf-warn" role="img" aria-label="A source has changes not saved" title="A source has changes not saved"></span>
           {/if}
         </a>
       {/each}
     </nav>
+    <TfScroller class="tf-stg-scroll" {@attach atTopOnMove}>
     <div class="tf-stg-body">
-      {#if place.section === "sources" && error !== null && sources !== null}
+      {#if !known}
+        <header class="tf-stg-h"><h1>Settings</h1></header>
+        <TfNothingHere message="Settings has no such section." href={settingsHash("sources")} action="Sources" />
+      {:else if place.section === "sources" && error !== null && sources !== null}
         <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
         <p class="tf-stg-p tf-stg-errt" role="status">Could not read the sources again: {error}</p>
       {/if}
-      {#if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
+      {#if !known}
+        <!-- Said above. -->
+      {:else if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
         <!-- Their reads wait for the database, as the source list does. -->
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
       {:else if place.section === "time"}
@@ -268,11 +310,8 @@
           onchanged={() => void loadAdapters()}
         />
       {:else if current === null}
-        <header class="tf-stg-h tf-stg-hline">
-          <h1>{sourceId}</h1>
-          <div class="tf-acts"><a class="tf-btn" href="#/settings">All sources</a></div>
-        </header>
-        <p class="tf-stg-p">There is no source called {sourceId}. It may have been removed.</p>
+        <header class="tf-stg-h"><h1>Settings</h1></header>
+        <TfNothingHere message="Settings has no such source. It may have been removed." href={settingsHash("sources")} action="Sources" />
       {:else}
         {#key current.id}
           <TfSourcePage
@@ -285,6 +324,7 @@
             {ports}
             {layers}
             add={"add" in place ? place.add : undefined}
+            reenter={"reenter" in place && place.reenter === true}
             onhealth={(next) => health.patch(next)}
             onchanged={replaceRow}
             onstarted={() => markStarted(current.id)}
@@ -297,12 +337,14 @@
         {/key}
       {/if}
     </div>
+    </TfScroller>
   </div>
 </div>
 {#if adding}
   <TfAddSource
     {ports}
     {layers}
+    taken={(sources ?? []).map((source) => source.id)}
     onclose={closeAdd}
     onsaved={() => {
       closeAdd();

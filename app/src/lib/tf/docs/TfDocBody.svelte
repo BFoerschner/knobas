@@ -2,7 +2,7 @@
   A page body by section (#859, #862; R-10.11, R-10.13). Section 0 is what
   comes before the first heading; each heading opens the next, numbered as
   prototype-6 numbers them, with its anchor (`#/page/<id>/<n>`) and, on hover,
-  *Edit section*.
+  `#`, which copies the section's link (F-450, because the app shows no address), and *Edit section*.
 
   *Edit section* turns a text-only section into a text box with *Save
   section* and *Cancel*; the backend says which sections are text-only
@@ -16,14 +16,21 @@
   *queued*, then *sent* (#1424, #2102), until a read of the page has a newer version; *Edit
   section* then starts from the queued text, and *Edit and resend* on a held
   or refused save opens the editor with it.
+
+  An open editor's words are a draft (`drafts`, `section:<page>:<section>`, F-430): `Esc` or
+  leaving the page closes the editor and keeps them, the section's heading says *Draft*, and
+  *Edit section…* opens on them. *Cancel* throws them away, and a save ends them.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
+  import { drafts } from "../drafts.svelte";
+  import { inlineEditor } from "../inline-editor";
   import type { DocBlock, DocSection } from "../../ipc/entity";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
   import { refusedAttrs } from "../../shell/refused-writes";
   import { echoOn, takeAgain } from "../queued.svelte";
-  import { pageHash, refusalReason, sectionKind, sectionsOf } from "./docs";
+  import { inlineWords, refusalReason, sectionKind, sectionsOf } from "./docs";
 
   let {
     blocks,
@@ -36,6 +43,7 @@
     stems = [],
     onopen,
     oncopy,
+    oncopylink,
     onsave,
   }: {
     blocks: DocBlock[];
@@ -51,6 +59,8 @@
     stems?: string[];
     onopen: (url: string) => void;
     oncopy: (code: string) => void;
+    /** The heading's `#`: copy section `number`'s link, and say which section it was. */
+    oncopylink?: ((number: number, heading: string) => void) | undefined;
     /** Queue the edit; `true` once it is queued. */
     onsave: (section: number, text: string) => Promise<boolean>;
   } = $props();
@@ -58,6 +68,9 @@
   let editing = $state<number | null>(null);
   let draft = $state("");
   let saving = $state(false);
+  /** The section the editor opened on, which focus goes back to once it has closed. */
+  let openedOn: number | null = null;
+  const draftKey = (number: number) => `section:${entityId}:${number}`;
 
   // Another page closes an open editor; the same page read again keeps it
   // (#2072). The `$derived` is what keeps it: the effect hears the id only when
@@ -74,6 +87,7 @@
       const again = takeAgain(entityId, sectionKind(section.number));
       if (again === null) continue;
       editing = section.number;
+      openedOn = section.number;
       draft = again;
     }
   });
@@ -87,8 +101,36 @@
     const section = sections.find((s) => s.number === number);
     if (!section || section.text === null || refusal !== null) return;
     editing = number;
-    draft = queuedText(number) ?? section.text;
+    openedOn = number;
+    draft = drafts.has(draftKey(number)) ? drafts.get(draftKey(number)) : (queuedText(number) ?? section.text);
   }
+
+  /** What was typed is the draft; words back at the section's own text are none. */
+  function typed(number: number, words: string) {
+    draft = words;
+    const start = queuedText(number) ?? sections.find((s) => s.number === number)?.text ?? null;
+    if (words === start) drafts.forget(draftKey(number));
+    else drafts.put(draftKey(number), words);
+  }
+
+  /** `Esc`, and anything else that only closes: the draft stays for *Edit section…*. */
+  function close() {
+    editing = null;
+  }
+
+  /** *Cancel*: the explicit discard. */
+  function cancel(number: number) {
+    drafts.forget(draftKey(number));
+    editing = null;
+  }
+
+  /** ⌘Enter: read when pressed, because the attachment outlives one read of the page. */
+  function saveOpen() {
+    if (editing !== null) void save(editing);
+  }
+
+  /** The heading's *Edit section…*, drawn again once the editor has closed. */
+  const backToEdit = () => (openedOn === null ? null : (document.getElementById(`s-${openedOn}`)?.querySelector<HTMLElement>(".tf-tools .tf-sec-open") ?? null));
 
   async function save(number: number) {
     // An editor can be open when the refusal lands: opened before the answer,
@@ -96,14 +138,13 @@
     if (saving || refusal !== null) return;
     saving = true;
     try {
-      if (await onsave(number, draft)) editing = null;
+      if (await onsave(number, draft)) {
+        drafts.forget(draftKey(number));
+        editing = null;
+      }
     } finally {
       saving = false;
     }
-  }
-
-  function focus(node: HTMLTextAreaElement) {
-    node.focus();
   }
 </script>
 
@@ -116,24 +157,27 @@
     <section data-sec={section.number}>
       <h2 id={`s-${section.number}`}>
         <TfDocInlines text={section.heading.text} {onopen} {stems} />
-        {#if queued !== null}<span class="tf-chip tf-info tf-queued-mark">{queuedState(section.number)}</span>{/if}
+        {#if queued !== null}<TfStateChip text={queuedState(section.number)} tone="info" class="tf-queued-mark" />{/if}
+        {#if editing !== section.number && drafts.has(draftKey(section.number))}<TfStateChip text="draft" tone="info" class="tf-queued-mark" />{/if}
         <span class="tf-tools">
-          <a href={pageHash(entityId, section.number)} title="Link to this section">#</a>
+          {#if oncopylink}
+            <button type="button" title="Copy link to this section" aria-label="Copy link to this section" onclick={() => oncopylink(section.number, inlineWords(section.heading?.text ?? []))}>#</button>
+          {/if}
           {#if editable && said}
             {#if said.refusal === null}
-              <button type="button" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section</button>
+              <button type="button" class="tf-sec-open" {...refusedAttrs(refusal)} onclick={() => open(section.number)}>Edit section…</button>
             {:else}
-              <button type="button" disabled title={refusalReason(said.refusal, sourceName)}>Edit section</button>
+              <button type="button" class="tf-sec-open" disabled title={refusalReason(said.refusal, sourceName)}>Edit section…</button>
             {/if}
           {/if}
         </span>
       </h2>
       {#if editing === section.number}
-        <div class="tf-sec-edit">
-          <textarea bind:value={draft} aria-label="Section text" use:focus></textarea>
+        <div class="tf-sec-edit" {@attach inlineEditor(close, { back: backToEdit, send: saveOpen, escCloses: true })}>
+          <textarea value={draft} aria-label="Section text" oninput={(event) => typed(section.number, event.currentTarget.value)}></textarea>
           <div class="tf-acts">
             <span class="tf-dim">Text, lists and panels. Saved to {sourceName} through the write queue.</span>
-            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => cancel(section.number)}>Cancel</button>
             <button
               type="button"
               class="tf-btn tf-sm tf-primary"

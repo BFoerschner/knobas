@@ -671,8 +671,13 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
     );
     assert_eq!(
         item.item.reason,
-        format!("knobas test estate / devs-MacBook-Pro / {CANARY_ASSET} is down"),
+        format!("{CANARY_ASSET} is down"),
         "the row is readable without opening it: which asset, and which trouble"
+    );
+    assert_eq!(
+        item.item.detail.as_deref(),
+        Some("knobas test estate / devs-MacBook-Pro"),
+        "and the path above the asset is on its second line (F-115)"
     );
     assert!(
         item.actions.is_empty(),

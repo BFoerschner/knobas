@@ -65,6 +65,7 @@
   read at; *More* (⋯) holds *Edit*, *History* and its page on the source.
 -->
 <script lang="ts">
+  import { filterKeys } from "../filter-keys";
   import { flushSync, tick, untrack } from "svelte";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
 
@@ -118,6 +119,7 @@
     type TextPlace,
   } from "./repo";
   import TfWaiting from "../TfWaiting.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import { pageVisible } from "../kept-pages.svelte";
   import { waitPhase } from "../waiting";
   import { inTextField } from "../../shell/keys";
@@ -215,6 +217,9 @@
   const parentOf = (full: string) => (full.includes("/") ? full.slice(0, full.lastIndexOf("/")) : "");
   const nameOf = (full: string) => full.slice(full.lastIndexOf("/") + 1);
 
+  /** A deep link's early read of its file has failed, or there is none: nothing but the listings can draw it now. */
+  let guessGone = $state(false);
+
   /** The entry `full` names in its parent's listing, once that is read. */
   function entryOf(full: string): TreeEntry | undefined {
     return listings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
@@ -303,8 +308,12 @@
     if (target === null) return;
     return untrack(() => {
       if (listings[parentOf(target)] !== undefined) return;
+      guessGone = false;
       const likely = likelySections(target, declared);
-      if (likely === null) return;
+      if (likely === null) {
+        guessGone = true;
+        return;
+      }
       for (const [dir, section] of Object.entries(likely.dirs))
         if (!asked.has(dir) && listings[dir] === undefined && !early.has(dirKey(dir))) askEarly(section, dirKey(dir));
       let live = true;
@@ -320,8 +329,11 @@
           if (file !== null && file.path === target) return;
           drawFile(read, fileSection ?? GUESSED);
         },
-        // Its directory's listing says whether there is such a file.
-        spent,
+        // Its directory's listing says whether there is such a file; one no listing holds has no directory to say so.
+        () => {
+          spent();
+          if (live && where === at && shown === target) guessGone = true;
+        },
       );
       return () => {
         live = false;
@@ -338,7 +350,12 @@
    * `missing` where the directory holds no such file.
    */
   const fileSection = $derived.by((): string | null => {
-    if (shown === null || listings[parentOf(shown)] === undefined) return null;
+    if (shown === null) return null;
+    // A directory on the way that its parent's listing does not hold: the file cannot be there, and its own listing never comes.
+    for (const dir of ancestors(shown)) {
+      if (dir !== "" && guessGone && listings[dir] === undefined && listings[parentOf(dir)] !== undefined && entryOf(dir) === undefined) return MISSING;
+    }
+    if (listings[parentOf(shown)] === undefined) return null;
     const entry = entryOf(shown);
     return entry === undefined || entry.section === null || entry.kind === "dir" ? MISSING : entry.section;
   });
@@ -434,6 +451,18 @@
    */
   const fromDefault = $derived(file === null || editing ? null : defaultPipeline(file.path, defaults.list, pipelines.list));
   const steps = $derived(file === null || editing ? null : (pipes.get(file.path) ?? fromDefault?.pipeline.steps ?? null));
+  /** What a closed bar held, by path: *Pipeline* brings the steps back, as the reader built them. */
+  const closedPipes = new SvelteMap<string, PipeStep[]>();
+  /** The panel the reader opened on this file, which *Close* or `Esc` puts away before `Esc` leaves the page. */
+  const pipeOpened = $derived(file !== null && !editing && pipes.has(file.path) ? file.path : null);
+  let pipeFace = $state<HTMLButtonElement | null>(null);
+  let suggestFace = $state<HTMLButtonElement | null>(null);
+
+  function closePipe(at: string) {
+    const held = pipes.get(at);
+    if (held !== undefined && held.length > 0) closedPipes.set(at, held);
+    pipes.delete(at);
+  }
   const shownDefault = $derived(
     file !== null && fromDefault !== null && !pipes.has(file.path) ? { name: fromDefault.pipeline.name, pattern: fromDefault.pattern } : null,
   );
@@ -955,10 +984,6 @@
     } else if (event.key === "ArrowDown") {
       event.preventDefault();
       tree?.querySelector<HTMLElement>(going ? "a.tf-gotof" : "[data-path]")?.focus();
-    } else if (event.key === "Escape" && goTyped !== "") {
-      event.preventDefault();
-      event.stopPropagation();
-      goTyped = "";
     }
   }
 
@@ -996,7 +1021,7 @@
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
       if (inTextField(event.target) || inTextField(document.activeElement)) return;
       // A dialog or the launcher over the page keeps its keys and its focus.
-      if (layers.open.length > 0 || goField === null) return;
+      if (layers.open.some((layer) => layer.kind !== "panel") || goField === null) return;
       event.preventDefault();
       goField.focus();
     };
@@ -1059,6 +1084,7 @@
           }}
           onfocus={readEvery}
           onkeydown={goKeys}
+          {@attach filterKeys({ aside: true })}
         />
         {#if !going}<kbd>T</kbd>{/if}
       </label>
@@ -1085,7 +1111,7 @@
           <p class="tf-gonote">The source lists no whole tree: searched the directories opened so far.</p>
         {/if}
         {#if goFound.length === 0 && !everyReading}
-          <p class="tf-gonote">No file matches “{goTyped.trim()}”.</p>
+          <p class="tf-gonote">No file matches “{goTyped.trim()}”. <button type="button" class="tf-linkish" onclick={() => (goTyped = "")}>Clear</button></p>
         {/if}
         {#if searched?.truncated}
           <p class="tf-gonote">The tree is larger than knobas reads at once: searched its first {searched.paths.length.toLocaleString("en-US")} files.</p>
@@ -1109,7 +1135,7 @@
     {#if file !== null && editing && editable && branch !== null && !fileReading}
       <header>
         <span class="tf-p">{file.path}</span>
-        <span class="tf-chip tf-warn">editing on {branch}</span>
+        <span class="tf-chip tf-warn">Editing on <span class="tf-mono">{branch}</span></span>
         <span class="tf-trail">
           <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, file.path)}>Cancel</a>
           <button type="button" class="tf-btn tf-sm tf-primary" onclick={openCommit}>Commit change…</button>
@@ -1130,6 +1156,8 @@
       </div>
     {:else if shown === null && listings[""] !== undefined}
       <div class="tf-empty"><p>Pick a file in the tree.</p></div>
+    {:else if fileSection === MISSING}
+      <TfNothingHere message="{branch ?? 'This branch'} has no file at this path." href={repoHash(repoId)} action="All files" />
     {:else}
       <TfWaiting phase={waitPhase({ drawn: file !== null || fileStranded, reading: fileReading && !fileStranded, failed: fileFailed !== null })} error={fileFailed} failClass="tf-fpad" shape="lines">
       {#if file !== null}
@@ -1150,7 +1178,7 @@
           {/if}
           {#if steps === null && ports.piped !== undefined && suggested === null}
             {@const at = file.path}
-            <button type="button" class="tf-btn tf-sm" onclick={() => pipes.set(at, [])}>+ Pipeline</button>
+            <button type="button" class="tf-btn tf-sm" bind:this={pipeFace} onclick={() => pipes.set(at, closedPipes.get(at) ?? [])}>Pipeline</button>
           {/if}
           <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
           <TfFileMore edit={editHash(repoId, file.path)} {notEditable} history={repoHash(repoId, "commits")} page={file.url} sourceName={sourceName(source)} />
@@ -1180,8 +1208,16 @@
           <b>These bytes look {chip.kind}.</b>
           <span>Nothing has been applied; you see the file as it is.</span>
           <span class="tf-trail">
-            <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
-            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => notNow.add(at)}>Not now</button>
+            <button type="button" class="tf-btn tf-sm tf-primary" bind:this={suggestFace} onclick={() => pipes.set(at, [chip.step])}>Unwrap with {stepName(chip.step)}</button>
+            <button
+              type="button"
+              class="tf-btn tf-sm tf-ghost"
+              onclick={() => {
+                notNow.add(at);
+                // The line goes with the press, and *Pipeline* takes its place.
+                void tick().then(() => pipeFace?.focus());
+              }}>Not now</button
+            >
           </span>
         </div>
       {/if}
@@ -1199,7 +1235,15 @@
           failedAt={pipeFailure?.index ?? null}
           running={piping}
           onchange={(next) => pipes.set(at, next)}
-          onreset={() => pipes.delete(at)}
+          onreset={() => {
+            closedPipes.delete(at);
+            // Back to the default where there is one, else an empty bar for new steps.
+            if (fromDefault !== null) pipes.delete(at);
+            else pipes.set(at, []);
+          }}
+          onclose={pipeOpened !== null && fromDefault === null && shownPage() ? () => closePipe(at) : null}
+          closeTo={() => pipeFace ?? suggestFace}
+          edited={pipes.has(at)}
         />
         {#if pipeFailure !== null}
           <div class="tf-stepfail" role="alert">
@@ -1233,7 +1277,7 @@
             <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
               ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
             >
-            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} />
+            <input placeholder="Find in file" aria-label="Find in file" value={typed} oninput={findIn} onkeydown={findKeys} {@attach filterKeys()} />
             <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
           </label>
           <span class="tf-nav2">

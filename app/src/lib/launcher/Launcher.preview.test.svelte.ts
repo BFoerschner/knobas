@@ -179,6 +179,37 @@ test("with Everything on the dialog grows and shows the pane beside the results"
   expect(target.querySelector('[aria-label="Results"]')).not.toBeNull();
 });
 
+test("Everything's first search finding nothing keeps the usual size; once it has found something it stays grown (F-625)", async () => {
+  const kept = storage("everything");
+  const nothing = (raw: string): SearchResponse => ({ ...response(raw), groups: [], total: 0 });
+  app = mount(Launcher, {
+    target,
+    props: {
+      open: true,
+      onnavigate: vi.fn(),
+      onclose: () => {},
+      ontimer: undefined,
+      scope: createScope(() => kept),
+      ports: {
+        search: async (query: SearchQuery) => (query.raw.startsWith("zz") ? nothing(query.raw) : response(query.raw)),
+        launcherHome: async () => HOME,
+        entityView: vi.fn(),
+      },
+    },
+  });
+  await settle();
+  expect(dialog().classList.contains("tf-launch-deep"), "the empty box is grown, so the usual search moves nothing").toBe(true);
+  await type("zzzqqq");
+  expect(dialog().classList.contains("tf-launch-deep"), "one sentence").toBe(false);
+  expect(pane()).toBeNull();
+  await type("retry");
+  expect(dialog().classList.contains("tf-launch-deep"), "an answer grows it").toBe(true);
+  await type("zzzqqq");
+  flushSync();
+  expect(dialog().classList.contains("tf-launch-deep"), "the box does not move back under the words").toBe(true);
+  expect(pane()).toBeNull();
+});
+
 test("with Titles on it is the single list at the usual size", async () => {
   const { searched } = open("titles");
   await settle();

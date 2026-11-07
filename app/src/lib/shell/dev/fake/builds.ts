@@ -341,7 +341,11 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
-/** `job_pipelines`: *your branch* first, then *PR check*, as the read orders them. */
+/**
+ * `job_pipelines`: *your branch* first, then *PR check*, as the read orders them.
+ * The crate's read starts from the job's reach, as the card's Builds count does, so
+ * only a configuration the job reaches (`job.checks`, `job-reach.ts`) has a reason.
+ */
 export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobPipeline[] {
   const job = JOBS[keyOf(entityId)];
   if (job === undefined) return [];
@@ -351,8 +355,9 @@ export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobP
       const config = pipeline.name;
       const reasons: PipelineReason[] = [];
       const built = new Set((runs.get(config) ?? []).map((run) => run.branch));
+      if (!job.checks.includes(config)) return { pipeline_id: pipeline.entity_id, reasons };
       for (const branch of job.branches) if (built.has(branch)) reasons.push({ kind: "branch", branch });
-      if (job.checks.includes(config)) reasons.push({ kind: "pr_check", pr: job.pr });
+      reasons.push({ kind: "pr_check", pr: job.pr });
       return { pipeline_id: pipeline.entity_id, reasons };
     })
     .filter((row) => row.reasons.length > 0);
@@ -476,7 +481,7 @@ function artifactRows(config: string, no: number) {
     chip: null,
     url: file ? `https://ci.tidewater.example/repository/download/${config}/${no}:id/${title}` : null,
   });
-  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 files", false)];
+  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 file", false)];
   if (/Build|Docker|Release/.test(config))
     return [
       row("payout-service-1.9.0-rc1-x86_64.tar.gz", "6.2 MB", true),

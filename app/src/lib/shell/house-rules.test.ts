@@ -678,6 +678,28 @@ test("the key-split rule reads an id's split, not a clock's", () => {
   }
 });
 
+/**
+ * A length has one spelling (design system, Words): `secondsLabel` and `minutesLabel`, `lib/time/format.ts`. A run read
+ * *4 m 12 s* where a worklog read *2h 10m* because each page wrote its own. Three places keep their own words on
+ * purpose: a sync's cadence in a sentence (*every 20 s*, #1188, in `settings.ts` and `diagnostics.ts`), and a developer's
+ * error with a fraction of a second in it (`d2.ts`, `port.ts`).
+ */
+const LENGTH_IN_PLACE = /\$\{[^{}]+\} [sm]\b|\{[^{}]+\} s</;
+const OWN_LENGTH_WORDS = ["tf/settings/settings.ts", "sources/diagnostics.ts", "render/d2.ts", "render/port.ts", "time/format.ts"];
+
+test("no module writes a length in place", () => {
+  expect(
+    offenders(
+      (text, file) =>
+        !/\.test\.(svelte\.)?ts$/.test(file) &&
+        !file.includes(join("shell", "dev")) &&
+        !OWN_LENGTH_WORDS.some((own) => file.endsWith(join(...own.split("/")))) &&
+        LENGTH_IN_PLACE.test(text),
+    ),
+    "a length is secondsLabel or minutesLabel from lib/time/format.ts",
+  ).toEqual([]);
+});
+
 test("no module splits an entity id into its key in place", () => {
   expect(
     offenders(

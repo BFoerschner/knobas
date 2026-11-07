@@ -2,8 +2,7 @@
 /* prototype-6's `.fbody`: the tab's body beside a 300px side column. */
 .tf-cbody.tf-pr { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-pr .tf-side { display: flex; flex-direction: column; gap: 14px; }
-.tf-pr .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
-.tf-prready, .tf-prlocal { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
+.tf-prready, .tf-prlocal { padding: 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
 .tf-prready > span { display: flex; gap: 6px; align-items: baseline; }
 .tf-prlocal { gap: 6px; }
 .tf-prlocal-acts { display: flex; gap: var(--control-gap); }
@@ -14,12 +13,6 @@
 .tf-prline { margin: 0; font-size: var(--t-sm); }
 .tf-prdesc p { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
 .tf-dialog.tf-pr-dialog { width: min(620px, calc(100vw - 32px)); }
-.tf-pra { display: flex; flex-direction: column; gap: 8px; }
-.tf-pra input[type="text"], .tf-pra textarea {
-  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); font: inherit; width: 100%;
-}
-.tf-pra textarea { resize: vertical; }
-.tf-pra fieldset { border: 0; padding: 0; margin: 0; }
 @media (max-width: 900px) {
   .tf-cbody.tf-pr { grid-template-columns: minmax(0, 1fr); }
 }
@@ -31,7 +24,6 @@
 .tf-appmenu b { font-weight: 600; }
 .tf-appmenu .tf-plain { font-weight: 400; }
 .tf-appmenu .tf-mono { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.tf-appmenu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
 .tf-appmenu-note { display: block; padding: 6px 12px; font-size: var(--t-sm); }
 .tf-dialog.tf-app-dialog { width: min(640px, calc(100vw - 32px)); }
 .tf-app-dialog .tf-body { display: flex; flex-direction: column; gap: 8px; }
@@ -55,10 +47,19 @@
 .tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
 
 /* ---------- Files changed, Submit review, Merge… (#842, #843, R-8.15, R-8.17-R-8.19) ---------- */
-/* *Submit review (N pending)*: prototype-6's warn-edged button. */
+/* A label in the meta line breaks between labels, never inside one. */
+.tf-fhead .tf-sub .tf-lab { white-space: nowrap; }
+/* What this session queued and the review waiting to go, at the tab row's right end (F-206, F-254): the row's height is the tabs', so nothing here moves anything. */
+/* A long chip ends in an ellipsis, with its whole words in its title, and never scrolls the tabs (F-261). The tabs keep their width because they don't wrap, and *Submit review…* keeps its own. */
+.tf-tabs .tf-prchips { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; align-self: center; margin-left: auto; padding-left: 16px; }
+.tf-prchips .tf-chip { display: block; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.tf-prchips .tf-btn { flex: none; }
+/* *Submit review… (N pending)*: prototype-6's warn-edged button. */
 .tf-btn.tf-warnbtn { border-color: var(--warn); color: var(--warn); }
 .tf-gone { margin: 12px 0 0; }
-.tf-prr-line { font-size: var(--t-sm); }
+.tf-prr-lines { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tf-prr-lines .tf-pane-h { margin: 0; }
+.tf-prr-line { font-size: var(--t-sm); overflow-wrap: anywhere; }
 .tf-prm-ready { padding: 0; }
 .tf-prm-blocked { flex-direction: column; align-items: flex-start; gap: 2px; }
 .tf-prm-note { margin: 0; font-size: var(--t-sm); }
@@ -76,18 +77,22 @@
 .tf-prck.tf-err .tf-prmk { color: var(--err); }
 .tf-prck.tf-info .tf-prmk, .tf-prck.tf-muted .tf-prmk { color: var(--info); }
 .tf-prwhy { display: block; color: var(--ink-2); font-size: var(--t-xs); }
-.tf-prlist { display: flex; flex-direction: column; padding: 0 0 6px; font-size: var(--t-sm); }
+.tf-prlist { display: flex; flex-direction: column; padding: 6px 0; font-size: var(--t-sm); }
 .tf-prit { display: flex; align-items: center; gap: 8px; padding: 5px 12px; min-height: 32px; }
 .tf-prgrow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tf-prreq { font: 600 var(--t-2xs) var(--sans); text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
-.tf-prnote { margin: 0; padding: 0 12px 10px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-prreviewers > header > .tf-acts { margin-left: auto; }
+.tf-prreq { font: 600 var(--t-2xs) var(--sans); color: var(--ink-2); border: 1px solid var(--rule); border-radius: 3px; padding: 0 4px; }
+.tf-prnote { margin: 0; padding: 10px 12px; font-size: var(--t-xs); color: var(--ink-2); }
 /* *Request…*'s picker (#2303): the people the source names, one button each, under the panel's header. */
-.tf-prpick { display: flex; flex-direction: column; margin: 0 12px 8px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); }
+.tf-prpick { display: flex; flex-direction: column; }
+/* It is a band of the panel's box, which its siblings continue, so a rule ends it and not a box of its own. */
+.tf-panel:has(> header) > .tf-prpick { border-bottom: 1px solid var(--rule-2); }
+.tf-prpick-h { margin: 0; padding: 6px 8px 4px; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
 .tf-prpick button {
   display: flex; align-items: center; gap: 8px; height: var(--control-h-sm); padding: 0 8px; border: 0; background: none;
   color: var(--ink); font: var(--t-sm) var(--sans); text-align: left; cursor: pointer;
 }
-.tf-prpick button + button { border-top: 1px solid var(--rule-2); }
+.tf-prpick button { border-top: 1px solid var(--rule-2); }
 .tf-prpick button:hover, .tf-prpick button:focus-visible { background: var(--sheet-2); }
 .tf-prnote.tf-prconflict { color: var(--err); }
 .tf-prbuilds > header .tf-dim { font-size: var(--t-xs); }

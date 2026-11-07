@@ -17,8 +17,9 @@
   import type { MiniBoardCard } from "../../ipc/entity";
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import Signals from "./Signals.svelte";
-  import { commentsLine, epicLine, initials } from "./tickets";
+  import { assigneeName, commentsLine, epicLine, initials, sentenceCase, shortKey } from "./tickets";
 
   let {
     card,
@@ -48,7 +49,7 @@
   /** Labels are shown only when a view asks for them, as in prototype-6. */
   const labels = $derived(fields?.includes("labels") ? card.labels : []);
 
-  const kind = $derived([card.issue_type, card.priority].filter(Boolean).join(", "));
+  const kind = $derived([card.issue_type, sentenceCase(card.priority)].filter(Boolean).join(", "));
   const epic = $derived(epicLine(card));
   const comments = $derived(commentsLine(card.comment_count));
 </script>
@@ -63,17 +64,19 @@
   onclick={onselect}
   ondblclick={onopen}
 >
-  <span class="tf-k"><Marked text={card.key} {needles} /></span>
+  <span class="tf-thead">
+    <span class="tf-k" title={card.key}><Marked text={shortKey(card.key)} {needles} /></span>
+    {#if kind && shows("type")}<span class="tf-dim tf-tkind" title={kind}>{kind}</span>{/if}
+  </span>
   {#if source}<span class="tf-dim tf-tsrc">{source}</span>{/if}
-  {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {needles} /></span>
-  {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
+  {#if epic && shows("epic")}<span class="tf-cep"><TfKeyed text={epic} /></span>{/if}
   <span class="tf-meta">
     {#if shows("signals")}<Signals signals={card.signals} />{/if}
     {#each labels as label (label)}<span class="tf-lab">{label}</span>{/each}
     {#if comments && shows("comments")}<span class="tf-signal tf-dim tf-comments">{comments}</span>{/if}
     {#if shows("assignee")}
-      <span class="tf-av" class:tf-me={card.mine} title={card.assignee ?? "Unassigned"}>{initials(card.assignee)}</span>
+      <span class="tf-av" class:tf-me={card.mine} title={assigneeName(card) ?? "Unassigned"}>{initials(assigneeName(card))}</span>
     {/if}
   </span>
 </button>

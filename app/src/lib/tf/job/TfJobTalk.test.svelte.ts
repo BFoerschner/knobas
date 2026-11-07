@@ -12,6 +12,7 @@ import type { EntityDetail, LinkEntry, Thread } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
 import type { Hear, WriteFollower } from "../../shell/follow-write";
 import { toasts } from "../../shell/toasts.svelte";
+import { drafts } from "../drafts.svelte";
 import { forgetEchoes } from "../queued.svelte";
 import { page as codeRowPage } from "../code-row/page";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -46,6 +47,7 @@ beforeEach(() => {
 
 /** What a page queued is held for the session (#1424), and each test is one. */
 afterEach(() => {
+  drafts.reset();
   forgetEchoes();
   if (job) unmount(job);
   job = null;
@@ -271,6 +273,23 @@ test("opened any other way, the page scrolls to no comment", async () => {
   expect(scrolled.filter((element) => element.closest(".tf-convo") !== null)).toEqual([]);
 });
 
+test("a send brings the whole composer into view, *Comment* too, since the comment took room above it (F-162)", async () => {
+  open();
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  const brought: Element[] = [];
+  const compose = box.closest<HTMLElement>(".tf-compose")!;
+  compose.scrollIntoView = function (this: Element) {
+    brought.push(this);
+  };
+  box.value = "Priya, can you decide the SLA?";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+  expect(brought).toEqual([compose]);
+});
+
 test("Comment queues a Comment write and clears the box; a refused one keeps the text", async () => {
   open();
   await settle();
@@ -284,6 +303,8 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   await settle();
   expect(calls.writes).toEqual([{ Comment: { entity: ID, body: "Priya, can you decide the SLA?" } }]);
   expect(box.value).toBe("");
+  // *Comment* goes off with its draft: focus goes to the box, as ⌘Enter leaves it there (F-266).
+  expect(document.activeElement).toBe(box);
   expect(toasts.items.map((t) => t.text)).toContain("Queued: comment on PAY-231.");
 
   job && unmount(job);
@@ -297,6 +318,20 @@ test("Comment queues a Comment write and clears the box; a refused one keeps the
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
   await settle();
   expect(again.value).toBe("kept");
+});
+
+test("the composer's words are the ticket's own draft, across a redraw, and ⌘Enter sends them (the key table)", async () => {
+  open({});
+  await settle();
+  const box = () => target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box().value = "half a thought";
+  box().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(drafts.get(`comment:${ID}`)).toBe("half a thought");
+  box().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+  await settle();
+  expect(drafts.has(`comment:${ID}`), "sent, the draft ends").toBe(false);
+  expect(box().value).toBe("");
 });
 
 test("a comment the source's credential cannot make draws Comment disabled saying why, and queues nothing (#2052)", async () => {
@@ -337,14 +372,14 @@ test("a sent comment is drawn at the end of the thread marked queued, and goes o
   open();
   await settle();
   await comment("Looking at the jitter now");
-  expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
+  expect(queuedShown()).toEqual(["ML YouQueued Looking at the jitter now"]);
   expect(target.querySelector(".tf-convo .tf-msg.tf-queued + .tf-compose, .tf-convo .tf-msg.tf-queued ~ .tf-compose")).not.toBeNull();
 
   // Opened again before the sync: still on its way.
   unmount(job!);
   open();
   await settle();
-  expect(queuedShown()).toEqual(["ML Youqueued Looking at the jitter now"]);
+  expect(queuedShown()).toEqual(["ML YouQueued Looking at the jitter now"]);
 
   // The sync brought it back.
   unmount(job!);
@@ -399,8 +434,8 @@ test("the drawer lists the ticket's links and its own proposals; the page draws 
   expect(squash(drawer.querySelector("h2"))).toBe("Connections of PAY-231");
   expect(squash(drawer.querySelector("h3"))).toBe("Linked on PAY-231 2");
   expect([...drawer.querySelectorAll(".tf-lk")].map((row) => squash(row))).toEqual([
-    "Idempotent retry window Code Unlink",
-    "SEPA payout retry design Pages Unlink",
+    "Idempotent retry window Pull request› Unlink",
+    "SEPA payout retry design Page› Unlink",
   ]);
   expect(squash(drawer), "proposals are not drawn (2026-11-05)").not.toContain("proposed");
   expect(squash(drawer)).toContain("Links and link sets stay in knobas and are never written to a source.");
@@ -441,7 +476,7 @@ test("the drawer's filter keeps the rows it matches", async () => {
   input.value = "pages";
   input.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
-  expect([...target.querySelectorAll(".tf-lk a")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
+  expect([...target.querySelectorAll(".tf-lk-name")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
 });
 
 test("a linked branch or commit opens its own address, which the repository page's redirect draws (#1440)", async () => {
@@ -469,7 +504,7 @@ test("Unlink withdraws the link in knobas only and Undo draws it again", async (
   target.querySelector<HTMLButtonElement>("button[aria-label='Unlink Idempotent retry window']")!.click();
   await settle();
   expect(calls.unlinks).toEqual(["link:1"]);
-  expect([...target.querySelectorAll(".tf-lk a")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
+  expect([...target.querySelectorAll(".tf-lk-name")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
   const toast = toasts.items.find((t) => t.text === "Unlinked in knobas only.")!;
   expect(toast.action?.label).toBe("Undo");
 
@@ -477,6 +512,29 @@ test("Unlink withdraws the link in knobas only and Undo draws it again", async (
   await settle();
   expect(calls.links).toEqual([[PR.link.from_id, ID, "implements", "why"]]);
   expect([...target.querySelectorAll(".tf-lk a")]).toHaveLength(2);
+});
+
+test("a link from a source asks first and has no Undo: create_link would redraw it as drawn by hand", async () => {
+  PR.link.origin = "source" as never;
+  try {
+    open();
+    await settle();
+    drawerOpen();
+    const press = target.querySelector<HTMLButtonElement>("button[aria-label='Unlink Idempotent retry window']")!;
+    expect(squash(press)).toBe("Unlink…");
+    press.click();
+    await settle();
+    expect(calls.unlinks, "nothing happens until it is confirmed").toEqual([]);
+    const dialog = target.querySelector<HTMLElement>(".tf-dialog")!;
+    expect(squash(dialog)).toContain("It came from the source.");
+    [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => squash(b) === "Unlink")!.click();
+    await settle();
+    expect(calls.unlinks).toEqual(["link:1"]);
+    expect(target.querySelector(".tf-dialog")).toBeNull();
+    expect(toasts.items.find((t) => t.text === "Unlinked in knobas only.")?.action).toBeUndefined();
+  } finally {
+    PR.link.origin = "manual" as never;
+  }
 });
 
 test("a link, an unlink and its Undo draw the card's sections again at once, the job not opened again", async () => {
@@ -546,7 +604,7 @@ test("Link to… opens a dialog over the drawer that says the link stays in knob
   [...target.querySelectorAll<HTMLButtonElement>(".tf-dacts button")].find((b) => squash(b) === "Link to…")!.click();
   flushSync();
   const dialog = target.querySelector("[role='dialog']")!;
-  expect(squash(dialog.querySelector("h2"))).toBe("Link PAY-231 to…");
+  expect(squash(dialog.querySelector("h2"))).toBe("Link PAY-231");
   expect(squash(dialog)).toContain("Links stay in knobas and are never written to a source.");
   expect(layers.open.map((layer) => layer.kind)).toEqual(["drawer", "dialog"]);
   // `Esc` closes the dialog first and leaves the drawer open.
@@ -620,12 +678,12 @@ test("the drawer draws a group per set and the parent; a linked row says which s
   ]);
   expect(drawer.querySelector("h3 a")?.getAttribute("href")).toBe("#/sets/payout-stack");
   expect([...drawer.querySelectorAll(".tf-lk")].map((row) => squash(row))).toEqual([
-    "Idempotent retry window Code Unlink",
-    "SEPA payout retry design Pages, also in Payout stack Unlink",
-    "SEPA payout retry design Pages Hide here",
-    "payout-service Code Hide here",
-    "Payout_Build Builds Hide here",
-    "Payout runbook Pages",
+    "Idempotent retry window Pull request› Unlink",
+    "SEPA payout retry design Page, also in Payout stack› Unlink",
+    "SEPA payout retry design Page› Hide here",
+    "payout-service Repository› Hide here",
+    "Payout_Build Pipeline› Hide here",
+    "Payout runbook Page›",
   ]);
   expect(drawer.querySelector("a[href='#/builds/teamcity%3APayout_Build']")).not.toBeNull();
 });

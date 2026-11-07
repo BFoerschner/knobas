@@ -228,7 +228,19 @@ pub struct InboxItem {
     /// be shown is not shippable.
     ///
     /// Also raw text.
+    ///
+    /// **It leads with the subject or stays short (F-115).** Where the reason
+    /// names the subject, the subject is its first word (*knobas-jira is down*,
+    /// *Payout_IntegrationTests #1187 failed*); what would bury it goes in
+    /// [`detail`](Self::detail).
     pub reason: String,
+    /// What the row says after the subject, on its second line: an alert's
+    /// asset path above the asset, a failed build's own status text. Reachable
+    /// without leading the row (F-115). Raw text; absent on the wire where a
+    /// rule has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub detail: Option<String>,
     /// When the item last moved. The stream's ordering, and what *done* is
     /// measured against.
     ///
@@ -294,7 +306,8 @@ macro_rules! review_request {
                     format('%s asked for your review',
                            coalesce(nullif(i.author, ''), 'somebody')) as reason,
                     coalesce(i.item_updated_at, i.synced_at)           as occurred_at,
-                    i.web_url                            as web_url
+                    i.web_url                            as web_url,
+                    null::text                           as detail
                from sync.item i
                cross join lateral ",
             $crate::declared_list!("$4", "reviewers"),
@@ -364,7 +377,7 @@ macro_rules! mention {
         concat!(
             r"select 'mention', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                      'you are mentioned here',
-                     m.at, i.web_url
+                     m.at, i.web_url, null::text
                 from sync.item i
                cross join lateral ",
             mentioned_at!(),
@@ -483,10 +496,10 @@ macro_rules! mention_of {
 ///
 /// **The configuration** is the build's declared `pipeline` (TeamCity's
 /// `buildTypeId`), resolved once a source as the CTE `pipeline_paths`. The
-/// one payload key read here at a literal path is `statusText`, the reason
-/// line's tail: no [`KindPaths`](crate::payload::KindPaths) role names it,
-/// and a record without it draws `this build failed` alone, a shorter line
-/// and never a wrong one.
+/// one payload key read here at a literal path is `statusText`, the item's
+/// `detail`: no [`KindPaths`](crate::payload::KindPaths) role names it, and a
+/// record without it draws `<title> failed` alone, a shorter line and never a
+/// wrong one.
 ///
 /// **What "on my work" means**, and it is two arms because a red build reaches
 /// you in two ways: either **you triggered it** -- `author` is the person who
@@ -546,8 +559,8 @@ macro_rules! failed_build {
             $crate::declared_candidates!("$4", "pipeline"),
             " c)
          select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
-                format('this build failed%s', coalesce(': ' || nullif(i.status_text, ''), '')),
-                i.at, i.web_url
+                format('%s failed', i.title),
+                i.at, i.web_url, nullif(i.status_text, '')
            from (select scored.*,
                         max(scored.at) filter (where scored.tone = 'ok')
                           over (partition by scored.source_id collate \"C\", scored.config collate \"C\")
@@ -638,7 +651,7 @@ macro_rules! new_assignment {
             ")
              select 'new_assignment', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                     'assigned to you',
-                    coalesce(i.item_updated_at, i.synced_at), i.web_url
+                    coalesce(i.item_updated_at, i.synced_at), i.web_url, null::text
                from assignee_paths p
                join sync.item i on i.source_id = p.source_id
               where ",
@@ -685,7 +698,7 @@ macro_rules! credential_expiry {
                     s.secret_expires_at - make_interval(days => ",
             window_days!(),
             "),
-                    null::text
+                    null::text, null::text
                from knobas.source_config s
               where s.enabled
                 and s.secret_expires_at is not null
@@ -735,7 +748,7 @@ macro_rules! failed_sign_in {
                   else format('the %s sign-in was rejected', s.display_name)
                 end,
                 coalesce(s.auth_failing_since, s.auth_checked_at, $2),
-                null::text
+                null::text, null::text
            from knobas.source_config s
           where s.enabled
             and s.auth_state in ('unauthorized', 'missing_secret')"
@@ -784,9 +797,11 @@ macro_rules! failed_sign_in {
 /// **not** `sync.live_item` -- a monitor paused in Kuma keeps its open alert
 /// (#444) and would otherwise fall out of the inbox while still counting in the
 /// top strip. `source_id` is the namespace half of the monitor's id, which is
-/// the source it came from, for the same reason. `reason` names the asset by
-/// its whole path and says which trouble it is in, which is what makes the row
-/// readable without opening it (story 7). `entity_id` is the **asset**, not the
+/// the source it came from, for the same reason. `reason` names the asset and
+/// says which trouble it is in, which is what makes the row readable without
+/// opening it (story 7), and a monitor's `warn` is the *slow* of its chips;
+/// `detail` is the path above the asset, the row's second line (F-115).
+/// `entity_id` is the **asset**, not the
 /// monitor: story 61 is *"opening an alert from the inbox lands in the Tree at
 /// the affected asset with the monitor in the pane"*, and an item that pointed
 /// at the monitor would land in a room detail instead. `web_url` is null --
@@ -797,14 +812,13 @@ macro_rules! alert {
         concat!(
             "select 'alert', a.entity_id, split_part(a.entity_id, ':', 1), watched.id,
                     'asset', e.title,
-                    format('%s is %s', watched.full_path, a.state),
-                    a.opened_at, null::text
+                    format('%s is %s', watched.name,
+                           case a.state when 'warn' then 'slow' else a.state end),
+                    a.opened_at, null::text, nullif(watched.path_text, '')
                from knobas.monitor_alert a
                join knobas.entity e on e.id = a.entity_id
                cross join lateral (
-                     select ast.id,
-                            case when nullif(ast.path_text, '') is null then ast.name
-                                 else ast.path_text || ' / ' || ast.name end as full_path
+                     select ast.id, ast.name, ast.path_text
                        from knobas.confirmed_link l
                        join knobas.asset ast
                          on ast.id = case when l.from_id = a.entity_id
@@ -858,7 +872,7 @@ macro_rules! shelved {
     ($($candidates:tt)*) => {
         concat!(
             "with candidate (category, subject, source_id, entity_id, kind,
-                             title, reason, occurred_at, web_url) as (\n",
+                             title, reason, occurred_at, web_url, detail) as (\n",
             $($candidates)*,
             "\n),
              answered as (
@@ -871,7 +885,7 @@ macro_rules! shelved {
              shelf as (
                select distinct on (category, subject)
                       key, category, source_id, entity_id, kind, title, reason,
-                      occurred_at, web_url,
+                      occurred_at, web_url, detail,
                       case when $3 then snoozed_until end as snoozed_until
                  from answered
                 where (done_at is null or done_at < occurred_at)
@@ -879,7 +893,7 @@ macro_rules! shelved {
                 order by category, subject, occurred_at desc
              )
              select key, category, source_id, entity_id, kind, title, reason,
-                    occurred_at, web_url, snoozed_until
+                    occurred_at, web_url, detail, snoozed_until
                from shelf
               order by occurred_at desc, key"
         )
@@ -1169,6 +1183,27 @@ where
     .bind(at)
     .execute(executor)
     .await?;
+    Ok(())
+}
+
+/// Forget an answer: no snooze and no *done*, so the item is what its rule says.
+///
+/// Deletes the row rather than nulling its columns: a row that decides nothing
+/// may not exist (`inbox_state_decision_chk`, migration `0009`). #446's ack is
+/// [`complete_with`]'s caller, and taking an ack back is this one's, in that
+/// write's transaction for the same reason.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the write fails.
+pub async fn reopen_with<'e, E>(executor: E, key: &str) -> Result<(), CoreError>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query("delete from knobas.inbox_state where item_key = $1")
+        .bind(key)
+        .execute(executor)
+        .await?;
     Ok(())
 }
 

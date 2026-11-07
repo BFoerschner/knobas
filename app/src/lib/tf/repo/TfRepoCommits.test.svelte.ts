@@ -113,3 +113,25 @@ test("a commit the mirror does not hold is never a pick's end, but sits inside o
   diffSelected().click();
   expect(location.hash).toBe(diffHash(REPO, `${SHAS[2]}^`, SHAS[0]!));
 });
+
+test("the reader's own commit reads You, by what code_facts says of it (F-221)", async () => {
+  unmount(view!);
+  const rows = SHAS.map((sha, n) => ({ ...commit(sha, `commit ${n}`), author: "mara" }));
+  const held = { ...VIEW, sections: [{ ...VIEW.sections[0]!, blocks: [{ type: "entities", rows }] }] } as unknown as SourceView;
+  const first = `${REPO}@${SHAS[0]}`;
+  view = mount(TfRepoCommits, {
+    target,
+    props: {
+      ports: { entityView: async () => held, codeFacts: async () => [{ entity_id: first, author: "mara", mine: true, language: null, teams: [] }] },
+      repoId: REPO,
+      at: REPO,
+      branch: "main",
+      defaultBranch: "main",
+    },
+  });
+  for (let n = 0; n < 5; n++) await tick();
+  flushSync();
+  const lines = [...target.querySelectorAll(".tf-rowval")].map((cell) => cell.textContent);
+  expect(lines[0]).toBe("You · 3 hours ago");
+  expect(lines[1], "the mirror does not call this one the reader's").toBe("mara · 3 hours ago");
+});

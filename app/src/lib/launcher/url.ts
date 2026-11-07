@@ -3,8 +3,9 @@
  *
  * The launcher's grammar gains **no URL branch** (spec #491): `>`, `#`, `@`,
  * `/` and `?` are the backend's parse and stay the backend's, per ruling P2.
- * This is the one thing the frontend decides for itself, and it decides it
- * *before* the query is sent — because a URL is not a search, and sending one
+ * This is one of two things the frontend decides for itself (`askedAs` in
+ * `session.svelte.ts` is the other), and it decides it *before* the query is
+ * sent — because a URL is not a search, and sending one
  * to the FTS engine would answer with whatever words happen to be in it.
  *
  * The precedent is `rows.ts`' `modeOf`, which says the same about the one

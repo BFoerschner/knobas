@@ -55,7 +55,7 @@ app=${KNOBAS_WITNESS_APP:?the harness passes this}
 # file that carries it by `just witness-unit`.
 readonly SETTINGS_BUTTON='Settings'                    # TfTopBar.svelte
 readonly SOURCES_SECTION='Sources'                     # settings/settings.ts
-readonly ADD_A_SOURCE='+ Add a source'                 # settings/TfSources.svelte
+readonly ADD_A_SOURCE='Add a source…'                 # settings/TfSources.svelte
 readonly ADAPTER_GITEA='Gitea'                         # knobas-source-gitea's descriptor name
 readonly ADDRESS_FIELD='Address'                       # settings/TfAddSource.svelte
 readonly TOKEN_FIELD='Token'
@@ -66,7 +66,7 @@ readonly ADD_SOURCE='Add source'
 readonly REMOVE_SOURCE='Remove…'                       # settings/TfSourcePage.svelte
 readonly DELETE_SYNCED='Delete what it synced'
 readonly REMOVE_CONFIRM='Remove'
-readonly CHECKOUTS_SECTION='Checkouts and Open in…'    # settings/settings.ts
+readonly CHECKOUTS_SECTION='Checkouts and Open in'    # settings/settings.ts
 readonly CHANGE_ROOT='Change…'                         # TfCheckoutsSection.svelte
 readonly CLONES_ROOT_FIELD='Clones root'
 readonly SAVE_ROOT='Save'

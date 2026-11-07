@@ -324,6 +324,8 @@ const CARDS: &str = concat!(
     " as issue_type, ",
     crate::declared_string!("$4", "assignee"),
     " as assignee, ",
+    crate::declared_string!("$4", "assignee_name"),
+    " as assignee_name, ",
     crate::path_line_read!("$4"),
     " as path, array(select l.value from ",
     crate::declared_list!("$4", "labels"),
@@ -577,6 +579,12 @@ pub struct MiniBoardCard {
     /// spelling the source uses for an account; `None` for an unassigned
     /// ticket and on a miss.
     pub assignee: Option<String>,
+    /// The name to call that account by, at the declared `assignee_name` path
+    /// (F-107), so the card's avatar is the one a ticket's page draws. Absent
+    /// where the account is the only name; never matched against anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub assignee_name: Option<String>,
     /// When the source last changed it, or `None` where it never said.
     ///
     /// RFC 3339 on the wire.
@@ -634,6 +642,7 @@ struct CardRow {
     priority: Option<String>,
     issue_type: Option<String>,
     assignee: Option<String>,
+    assignee_name: Option<String>,
     path: Option<String>,
     labels: Vec<String>,
     comment_count: Option<i64>,
@@ -896,6 +905,7 @@ pub async fn read_scoped(
                 identity.iter().any(|me| me.eq_ignore_ascii_case(assignee))
             }),
             assignee: row.assignee,
+            assignee_name: row.assignee_name,
             updated_at: row.updated_at,
             path: row.path,
             parent_title: row.parent_title,
@@ -1281,6 +1291,7 @@ mod tests {
             priority: None,
             issue_type: None,
             assignee: assignee.map(str::to_owned),
+            assignee_name: None,
             updated_at: None,
             path: None,
             parent_title: None,

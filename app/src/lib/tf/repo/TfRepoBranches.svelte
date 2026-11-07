@@ -3,7 +3,7 @@
   `renderRepo(...,'branches')`: the filter (text, *Mine*, *No PR*, *Merged*),
   then the default branch marked *default* and every other branch with ahead
   and behind it (or *merged*), its open pull request, who committed its tip
-  (*By*) and when; *Open PR* and *Delete…* where the source offers them.
+  (*By*) and when; *New pull request* and *Delete…* where the source offers them.
 
   *By* and *Mine* are the tip's declared author (`code_facts`, #986), never
   the listing's line.
@@ -15,6 +15,10 @@
   and why a delete is held back, are its view's actions, never a reading of
   its facts (ADR-0020 rule 4).
 
+  A pull request this session sent from a branch stands in its *Pull request*
+  cell, *Queued* then *Sent*, a link to the *Pull requests* tab (F-264), and
+  its *New pull request* goes, until the branch's view holds it (F-257).
+
   *Delete…* opens prototype-6's `openDeleteBranch` and queues `DeleteBranch`
   against the branch. A branch made or deleted this session is drawn at once
   with its echo (`tf/queued.svelte.ts`, #2105), *queued* and then *sent*,
@@ -22,15 +26,19 @@
   event and a run's end, not only as the tab opens.
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
+  import TfKey from "../TfKey.svelte";
   import { ipcErrorMessage } from "../../ipc";
   import type { CodeFacts, ViewRow } from "../../ipc/entity";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfNoMatch from "../filter/TfNoMatch.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
+  import { jumpAcross } from "../opener";
   import TfDialog from "../settings/TfDialog.svelte";
   import { untrack } from "svelte";
   import { echoWrite, echoesOn, settleEchoes, watchEchoes } from "../queued.svelte";
@@ -39,9 +47,12 @@
   import {
     DELETED,
     MADE,
+    MADE_PR,
     REPO_BRANCHES,
+    REPO_PRS,
     branchStanding,
     compareHash,
+    repoHash,
     sourceName,
     viewRows,
     visibleBranches,
@@ -93,6 +104,12 @@
   $effect(() => {
     const id = repoId;
     return untrack(() => watchEchoes(REPO_BRANCHES, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
+  });
+
+  // A pull request sent from here lands on the repository's *Pull requests*: its refresh brings the branch's standing with it.
+  $effect(() => {
+    const id = repoId;
+    return untrack(() => watchEchoes(REPO_PRS, () => readBranches(id, () => repoId === id, true), { listen: ports.listen }));
   });
 
   // A refresh of the page reads the listing again, over what the tab drew (#2135).
@@ -152,6 +169,9 @@
   /** A branch's row, or the note a cut listing ends on (no id, no line). */
   const isNote = (row: ViewRow) => row.entity_id === null && row.meta === null && row.chip !== "default";
 
+  /** Where each pull request this session sent stands, by the branch it proposes, until the branch's view holds it (F-257). */
+  const prSent = $derived(new Map(echoesOn(repoId, MADE_PR).flatMap((echo) => (echo.base === null ? [] : [[echo.base, echo.state] as const]))));
+
   /** Branches this session queued that the listing does not hold yet, by name, with their echo's word. */
   const made = $derived(new Map(echoesOn(repoId, MADE).map((echo) => [echo.text, echo.state])));
 
@@ -208,7 +228,7 @@
     try {
       const write = await ports.submitWrite({ DeleteBranch: { entity: row.entityId } });
       echoWrite(repoId, DELETED, row.name, { write, many: true, following: { name: `Delete of ${row.name}` }, surface: REPO_BRANCHES, source: source?.id ?? null });
-      toastQueued(`delete branch ${row.name}`, source);
+      toastQueued(`delete branch ${row.name}`, source, { write });
       deleting = null;
     } catch (cause) {
       push({ text: `Could not queue the delete: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -229,7 +249,7 @@
 </div>
 <TfWaiting phase={waitPhase({ drawn: listed !== null, reading, failed: failed !== null })} error={failed} columns={6}>
 {#if shown.length === 0}
-  <div class="tf-empty">No branches match.</div>
+  <TfNoMatch noun="branches" {filter} />
 {:else}
   <table class="tf-tbl tf-rbranches">
     <thead>
@@ -240,27 +260,25 @@
         {@const standing = row.standing}
         {@const gone = echoesOn(repoId, DELETED).find((echo) => echo.text === row.name)?.state ?? null}
         <tr>
-          <td class="tf-mono"
-            ><Marked text={row.name} typed={filter.text} />{#if row.isDefault}{" "}<span class="tf-chip">default</span>{/if}{#if made.has(row.name)}{" "}<span
-                class="tf-chip tf-info">{made.get(row.name)}</span
-              >{/if}{#if gone !== null}{" "}<span class="tf-chip tf-info">delete {gone}</span>{/if}</td
+          <td
+            ><span class="tf-mono"><Marked text={row.name} typed={filter.text} /></span>{#if row.isDefault}{" "}<TfStateChip text="default" />{/if}{#if made.has(row.name)}{" "}<TfStateChip text={made.get(row.name)} tone="info" />{/if}{#if gone !== null}{" "}<TfStateChip text="delete {gone}" tone="info" />{/if}</td
           >
           <td
-            >{#if standing?.merged}<span class="tf-chip tf-ok">merged</span>{:else}{against(standing)}{/if}</td
+            >{#if standing?.merged}<TfStateChip text="merged" tone="ok" />{:else}{against(standing)}{/if}</td
           >
           <td
             >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
-                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<span class="tf-chip tf-{standing.pr.tone ?? 'info'}"
-                  >{standing.pr.state}</span
-                >{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
+                >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<TfStateChip text={standing.pr.state} tone={standing.pr.tone ?? "info"} />{/if}{:else if prSent.has(row.name)}<a class="tf-sentlink" href={repoHash(repoId, "prs")} title="Show in Pull requests" onclick={(event) => jumpAcross(event, "Branches")}><TfStateChip text={prSent.get(row.name)} tone="info" /></a>{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
-          <td>{row.author ?? ""}</td>
-          <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
+          <td>{row.mine ? "you" : (row.author ?? "")}</td>
+          <td class="tf-dim tf-nowrap"><span class="tf-rowval">{row.meta ?? ""}</span></td>
           <td class="tf-nowrap tf-racts"
-            >{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}
-                  >Open PR</a
-                >{" "}{/if}{#if standing.deletable}<button
+            ><span class="tf-rowend">{#if standing !== null && !gone}{#if standing.canOpenPr && !prSent.has(row.name)}<a
+                  class="tf-btn tf-sm"
+                  href={compareHash(repoId, row.name)}
+                  onclick={(event) => jumpAcross(event, "Branches")}>New pull request</a
+                >{" "}{/if}{#if standing.deletable}<span class="tf-rowacts"><button
                   type="button"
                   class="tf-btn tf-sm tf-danger"
                   aria-disabled={standing.deleteBlocked !== null ? "true" : undefined}
@@ -268,7 +286,7 @@
                   onclick={() => {
                     if (standing.deleteBlocked === null) deleting = row;
                   }}>Delete…</button
-                >{/if}{/if}</td
+                ></span>{/if}{/if}</span></td
           >
         </tr>
       {/each}
@@ -283,7 +301,8 @@
 {#if deleting !== null && deleting.standing !== null}
   {@const standing = deleting.standing}
   {@const row = deleting}
-  <TfDialog title="Delete {row.name}?" onclose={() => (deleting = null)} className="tf-rdel">
+  <TfDialog onclose={() => (deleting = null)} className="tf-rdel">
+    {#snippet title()}Delete <TfKey value={row.name} />?{/snippet}
     {#snippet body()}
       {#if standing.merged}
         <p>Every commit on this branch is in {defaultName}. Nothing is lost.</p>

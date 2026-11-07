@@ -2,73 +2,93 @@
 .tf-rd { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
+.tf-dl-head:not(:has(*)) { display: none; }
 .tf-dl-head select {
-  font: 600 var(--t-md) var(--sans); border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px;
-  background: var(--paper); color: var(--ink); width: 100%;
+  font: 500 var(--t-sm) var(--sans); height: var(--control-h-sm); border: 1px solid var(--rule); border-radius: 4px; padding: 0 6px;
+  background: var(--field); color: var(--ink); width: 100%;
 }
-.tf-dl-body { overflow: auto; flex: 1; padding: 6px 0 12px; }
+.tf-dl-body { overflow: auto; flex: 1; padding: 6px 8px 12px; }
 .tf-dl-note { padding: 12px 14px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-doc .tf-dl-note { padding: 0; font-family: var(--sans); font-size: var(--t-md); }
 .tf-rd-tree a {
-  display: block; padding: 4px 12px; text-decoration: none; font-size: var(--t-sm);
+  display: block; padding: 4px 8px; border-radius: 4px; text-decoration: none; font-size: var(--t-sm);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree a:hover { background: var(--sheet-2); }
-.tf-rd-tree a[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf-rd-tree a[aria-current="true"] { background: var(--fill); color: var(--sheet); }
 .tf-rd-tree details > summary {
-  list-style: none; cursor: pointer; padding: 4px 12px; font-size: var(--t-sm);
+  list-style: none; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-size: var(--t-sm);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tf-rd-tree details > summary::-webkit-details-marker { display: none; }
-.tf-rd-tree details > summary::before { content: "▸ "; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-rd-tree details[open] > summary::before { content: "▾ "; }
 .tf-rd-tree details > summary:hover { background: var(--sheet-2); }
-.tf-rd-tree details > summary.tf-cur { background: var(--ink); color: var(--sheet); }
+.tf-rd-tree details > summary.tf-cur { background: var(--fill); color: var(--sheet); }
 .tf-rd-tree details > summary.tf-cur::before { color: inherit; }
 .tf-rd-tree summary a.tf-sl { display: inline; padding: 0; color: inherit; background: none; }
-.tf-rd-tree .tf-fold-in { padding-left: 16px; }
+/* A page with nothing under it keeps the chevron's column, so a level's titles start on one edge: 14 px is the chevron's 6 + its margins. */
+.tf-rd-tree a.tf-dl-leaf { padding-left: 22px; }
+.tf-rd-tree .tf-fold-in { padding-left: 12px; }
+/* Only what holds the tree's keys: the rows stay the column's. */
+.tf-dl-tree { display: contents; }
 /* A page queued under its parent (#1424): muted, with no link, until the tree holds it. */
 .tf-rd-tree .tf-dl-queued { display: block; padding: 3px 8px; color: var(--muted); font-style: italic; }
 .tf-rd-tree .tf-dl-queued .tf-chip { font-style: normal; }
 .tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
-.tf-rd-main { overflow: auto; min-height: 0; }
 .tf-rd-sheet {
   display: grid; grid-template-columns: minmax(0, 1fr) 268px; column-gap: 56px; align-items: start;
   padding: 22px clamp(16px, 3vw, 48px) 90px;
 }
-/* The page: nothing in it is capped in width (#2081). */
+/* The page runs the sheet's width beside the outline (#2081). With the outline folded, its body stops at `.tf-rd-solo`'s measure, at the end of this file. */
 .tf-rd-page { min-width: 0; }
-/* The breadcrumb row: below 900px the Pages button that opens the tree drawer starts it (#2084). */
-.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; }
+/* The breadcrumb row. Its left end is the title's, its right end every page's. It stays at the top of the page's scroll, under the find bar while that is open (F-443). */
+.tf-rd-crumbrow { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; position: sticky; top: 0; z-index: 2; }
+.tf-findbar ~ .tf-rd-crumbrow { top: 40px; }
+/* What a scroll to a heading or a press of Tab has to clear: the pinned row, and the find bar above it. */
+.tf-rd-main:has(.tf-rd-crumbrow) { scroll-padding-top: 38px; }
+.tf-rd-main:has(.tf-findbar):has(.tf-rd-crumbrow) { scroll-padding-top: 78px; }
+/* The box is pinned inside that padding, so while it holds focus each typed key would scroll the page up 66 px to "reveal" it (F-458). */
+.tf-rd-main:has(.tf-findbar input:focus) { scroll-padding-top: 0; }
 .tf-rd-pages svg { width: 15px; height: 15px; }
-.tf-rd-crumb { font-size: var(--t-sm); color: var(--ink-2); }
+.tf-rd-crumb { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: var(--t-sm); color: var(--ink); min-width: 0; }
+/* The path starts on the title's edge. *Back to* ends where it does on every page. */
+.tf-crumbs.tf-rd-crumbrow { padding-left: clamp(16px, 3vw, 48px); }
 .tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 /* *Back to <name>* beside `Esc`, at the row's end as on every breadcrumb (spec #2227). */
-.tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-rd-crumbrow .tf-esc { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); white-space: nowrap; }
+@media (max-width: 900px) { .tf-crumbs.tf-rd-crumbrow { padding-left: 16px; } }
+/* A space's row keeps its count: the name gives up its end first. */
+.tf-spc { display: flex; align-items: center; min-width: 0; }
+.tf-spc-n { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-spc .tf-count { flex: none; margin-left: 6px; }
 .tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
 .tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
 /* The reader's header (#2286): the title and, on its line, `.tf-acts` (the canonical header's, in dialogs.css),
    inside the sheet's own padding. The meta line under it closes the head with the rule. */
-.tf-fhead.tf-rd-head { padding: 0; margin: 8px 0 10px; }
+.tf-fhead.tf-rd-head { display: flex; gap: 12px 20px; align-items: flex-start; padding: 0; margin: 8px 0 10px; flex-wrap: wrap; }
+.tf-fhead.tf-rd-head > .tf-acts { justify-content: flex-start; margin-left: 0; }
+/* Where *Link to <job>* stood once the page is on the job: nothing to press, as tall as the buttons beside it. */
+.tf-rd-on { display: inline-flex; align-items: center; gap: 5px; min-height: var(--control-h); padding-right: 6px; color: var(--ink-2); white-space: nowrap; }
+.tf-rd-on .tf-key { color: var(--ink); }
+/* The one label size reaches its buttons through `.tf button { font: inherit }`. */
+.tf-rd-labels { display: inline-flex; flex-wrap: wrap; gap: 6px; font-size: var(--t-xs); }
 .tf .tf-rd-head .tf-rd-title { margin: 0; flex: 1 1 320px; min-width: 0; }
 .tf-rd-head + .tf-rd-meta { padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--rule); }
-/* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136). */
-.tf-rd-page > .tf-banner { margin: 10px 0 0; }
-.tf-rd-more { position: relative; display: inline-flex; }
-.tf-rd-more > button::after { content: "▾"; font-size: var(--t-2xs); color: var(--ink-2); margin-left: 4px; }
-.tf-rd-more .tf-menu { left: auto; right: 0; }
-.tf-rd-more .tf-menu button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
-.tf-rd-more .tf-menu svg { width: 14px; height: 14px; flex: none; }
+/* The withdrawn, turned-off and failed-refresh banners under the meta line (#2136), set apart from what follows like the page's other blocks. */
+.tf-rd-page > .tf-banner { margin: 10px 0 12px; border-bottom: 0; border-radius: 4px; }
+.tf-rd-more { display: inline-flex; }
+.tf-menu.tf-rd-m button { display: flex; align-items: center; gap: 8px; font: var(--t-sm) var(--sans); color: var(--ink); }
+.tf-rd-moresync { display: contents; }
 .tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
-.tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }
+/* 24 px under the scroller's padding, so a heading clears a crumb row that took two lines. */
+.tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 24px; }
 .tf-doc h2 .tf-tools {
   font-family: var(--sans); font-size: var(--t-xs); font-weight: 400; opacity: 0; margin-left: 10px;
   vertical-align: 4px; display: inline-flex; gap: 4px;
 }
-.tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:focus-within { opacity: 1; }
-.tf-doc h2 .tf-tools a, .tf-doc h2 .tf-tools button {
+.tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:has(:focus-visible) { opacity: 1; }
+.tf-doc h2 .tf-tools button {
   border: 1px solid var(--rule); background: var(--sheet); border-radius: 3px; padding: 1px 7px;
   color: var(--ink-2); text-decoration: none; font: inherit; cursor: pointer;
 }
@@ -77,7 +97,7 @@
 .tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
 .tf-doc li { margin: 4px 0; }
 .tf-doc li > p:last-child, .tf-doc li.tf-task > div > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
-.tf-doc code { font: .82em var(--mono); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
+.tf-doc code { font: .82em var(--mono); font-size: round(.82em, 1px); font-variant-ligatures: none; background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
 /* A code block: its language and Copy in a strip above the code, so neither covers a long line (#2083). */
 .tf-pre { margin: 0 0 18px; }
 .tf-doc li > p:has(+ .tf-pre) { margin-bottom: 8px; }
@@ -111,8 +131,6 @@
 .tf-collapse { margin: 0 0 18px; border: 1px solid var(--rule); border-radius: 6px; }
 .tf-collapse > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: var(--control-h-sm); padding: 0 12px; font-family: var(--sans); font-size: var(--t-lg); font-weight: 600; }
 .tf-collapse > summary::-webkit-details-marker { display: none; }
-.tf-collapse > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-collapse[open] > summary::before { content: "▾"; }
 .tf-collapse > div { padding: 4px 14px 0 30px; }
 .tf-collapse > div > :last-child { margin-bottom: 14px; }
 .tf-macro {
@@ -133,14 +151,20 @@
 }
 .tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); font-variant-ligatures: none; }
 .tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
-.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 4px; border-radius: 3px; }
-.tf-ment.tf-me { background: var(--card); color: var(--card-ink); }
+.tf-ment { font-family: var(--sans); font-size: var(--t-sm); font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 2px; margin-right: -1px; border-radius: 3px; }
+.tf-ment.tf-me { background: var(--mark); color: var(--ink); }
+/* A callout, the comments, a table and what the page belongs to are Archivo in the serif page: they take the interface's spacing back. */
+.tf-doc :is(.tf-callout, .tf-cmts, td, th) :is(p, li, h2, h3), .tf-doc :is(td, th), .tf-rd-foot :is(h3, p, li, dd, dt), .tf-doc > .tf-dl-note, .tf-doc h2 .tf-tools { letter-spacing: .006em; word-spacing: .06em; }
+/* A match on the row you are on keeps the normal mark's pair, in both themes. */
+.tf-rd-tree a[aria-current="true"] mark { background: var(--mark); color: var(--ink); }
+.tf-cmts { font-size: var(--t-md); }
 .tf-doc a.tf-pgl, .tf-doc .tf-doc-link {
   color: var(--info); text-decoration: underline; text-underline-offset: 2px;
 }
 .tf-doc .tf-doc-link { border: 0; background: none; padding: 0; font: inherit; cursor: pointer; }
 .tf-cmts { border-top: 1px solid var(--rule); margin-top: 44px; padding-top: 18px; font-family: var(--sans); }
-.tf-cmts h2 { font-family: var(--sans); font-size: var(--t-xl); margin: 0 0 12px; }
+/* The heading step (design system, Heading steps): Comments, Work it belongs to, Linked from and On this page are one level. */
+.tf-cmts h2 { font-family: var(--sans); font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; line-height: 1.3; margin: 0 0 12px; }
 .tf-cmts .tf-msg { margin-bottom: 10px; font-size: var(--t-md); line-height: 1.5; }
 .tf-cmts .tf-av { width: 28px; height: 28px; }
 .tf-cmts .tf-who { color: var(--ink-2); font-size: var(--t-sm); }
@@ -163,80 +187,108 @@
   display: flex; flex-direction: column; gap: 2px; padding: 9px 14px; white-space: normal; overflow: visible;
   border-bottom: 1px solid var(--rule-2); text-decoration: none;
 }
-.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--paper); color: var(--ink); box-shadow: inset 3px 0 0 var(--ink); }
+.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--fill); color: var(--sheet); }
+.tf-rd-tree a.tf-dl-hit[aria-current="true"] :is(.tf-pth, .tf-n, .tf-sn b) { color: inherit; }
+/* A hit's title and snippet are the reading face, which keeps its own spacing; the label before a snippet is the interface's. */
+.tf-dl-hit :is(.tf-t, .tf-sn) { letter-spacing: normal; word-spacing: normal; }
 .tf-dl-hit .tf-t { font-family: var(--serif); font-size: var(--t-lg); font-weight: 600; line-height: 1.3; }
 .tf-dl-hit .tf-pth, .tf-dl-hit .tf-n { font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-dl-hit .tf-sn { font-family: var(--serif); font-size: var(--t-sm); line-height: 1.45; }
-.tf-dl-hit .tf-sn b { font-family: var(--sans); font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-dl-hit .tf-sn b { font-family: var(--sans); font-size: var(--t-2xs); color: var(--ink-2); letter-spacing: .006em; word-spacing: .06em; }
 .tf-dl-for { padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
-.tf-dl-for h4 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 6px 12px 2px; }
+.tf-dl-for h4 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 6px 8px 2px; }
+
 .tf-rd-tree .tf-dl-for a { white-space: normal; }
-.tf-dl-for .tf-why { display: block; font-size: var(--t-2xs); color: var(--warn); font-weight: 600; }
+.tf-dl-for .tf-why { display: block; font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-rd-tree a[aria-current="true"] .tf-why { color: inherit; }
-.tf-rd-meta button.tf-chip { border: 0; background: var(--muted-bg); color: var(--muted); font-family: inherit; cursor: pointer; }
-/* 38px high: the sticky outline sits that far down while it is open (.tf-rd-outline, #2081). */
+/* A tag sits on paper, where `--muted-bg` vanishes in light: a sheet with a rule shows in both themes. */
+.tf-rd-meta button.tf-lab { background: var(--sheet); font-family: inherit; cursor: pointer; }
+.tf-rd-meta button.tf-lab:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-dl-head .tf-seg button { white-space: nowrap; }
+@media (max-width: 1240px) { .tf-dl-head .tf-jobk { display: none; } }
+/* 40 px high: the crumb row and the sticky outline sit that far lower while it is open (.tf-rd-outline, #2081). */
 .tf-findbar {
-  position: sticky; top: 0; z-index: 3; display: flex; gap: 8px; align-items: center; background: var(--card);
-  color: var(--card-ink); padding: 6px 16px; font-size: var(--t-sm);
+  position: sticky; top: 0; z-index: 3; display: flex; gap: 8px; align-items: center; background: var(--sheet-2);
+  color: var(--ink); padding: 6px 16px; font-size: var(--t-sm);
 }
-.tf-findbar input {
-  border: 1px solid var(--card-ink-2); background: var(--paper); border-radius: 4px; padding: 3px 8px;
+.tf-findbar > input {
+  border: 1px solid var(--rule); background: var(--field); border-radius: 4px; padding: 3px 8px;
   color: var(--ink); min-width: 200px;
 }
+/* About 8 px between the word and the focus ring around the box (F-461). */
+.tf-findbar > span:first-child { margin-right: 6px; }
 .tf-findbar button {
-  border: 1px solid var(--card-ink-2); background: transparent; border-radius: 3px; cursor: pointer;
+  border: 1px solid var(--rule); background: transparent; border-radius: 3px; cursor: pointer;
   min-width: 26px; height: 26px; color: inherit;
 }
+.tf-findbar button:disabled { opacity: .45; cursor: default; }
 .tf-findbar .tf-findx { margin-left: auto; }
-.tf mark.tf-cur { outline: 2px solid var(--card-ink); }
+/* As wide as its longest words, so the arrows after it hold their place (F-436). */
+.tf-findbar .tf-findn { flex: none; width: 14ch; white-space: nowrap; }
+/* The bar on a page with no box (`TfFindBar`): it floats at its scroller's top right and takes no room, so nothing moves as it opens. */
+.tf-findhold { position: sticky; top: 0; z-index: 7; height: 0; display: flex; justify-content: flex-end; align-items: flex-start; }
+.tf-findhold > .tf-findbar { position: static; border: 1px solid var(--rule); border-top: 0; border-radius: 0 0 4px 4px; margin-right: 12px; }
+.tf-findhold > .tf-findbar .tf-findx { margin-left: 0; }
+.tf-findbar.tf-findwide .tf-findn { width: 22ch; }
+::highlight(tf-find) { background-color: var(--mark); }
+::highlight(tf-find-now) { background-color: var(--fill); color: var(--sheet); }
+/* A comment that names the reader, edged as a ticket's is, where *For you* brings the page (F-431). */
+.tf-msg.tf-mention .tf-cmt-body { box-shadow: inset 3px 0 0 var(--mark); padding-left: 10px; }
+/* The title takes focus only by script: a closed find bar hands it there, with nothing to draw. */
+.tf-rd-title:focus { outline: none; }
+/* Beside a ticket's status in the page's foot. */
+.tf-rd-foot .tf-rd-unlink { margin-left: 8px; }
+/* `--ink`, not the card's: the ring stands on the page's ground in either theme, and in dark `--card-ink` is as dark as that ground. */
+.tf mark.tf-cur { outline: 2px solid var(--ink); }
 /*
   No taller than the window, with a scroll of its own, so a long outline's last section is in reach
   at any scroll (#2091): the window less the shell's top bar and status bar (about 76px) and a margin.
+  It sticks where it starts, under the 38 px crumb row and the sheet's 22 px, so its heading never moves as the page scrolls.
 */
 .tf-rd-outline {
-  position: sticky; top: 0; padding-top: 30px; font-size: var(--t-sm);
-  max-height: calc(100vh - 96px); overflow-y: auto;
+  position: sticky; top: 60px; padding-top: 30px; font-size: var(--t-sm);
+  max-height: calc(100vh - 156px); overflow-y: auto;
 }
 /* The find bar sticks to the top of the same scroll, so the outline sticks below it, as much shorter. */
-.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 38px; max-height: calc(100vh - 134px); }
-.tf .tf-rd-outline h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 8px; }
+.tf-findbar ~ .tf-rd-sheet .tf-rd-outline { top: 100px; max-height: calc(100vh - 196px); }
+.tf .tf-rd-outline h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--ink); margin: 0 0 8px; }
 .tf-toc a {
   display: block; padding: 5px 0 5px 12px; border-left: 2px solid var(--rule); text-decoration: none;
   color: var(--ink-2); font-size: var(--t-md);
 }
+.tf-toc a:hover { border-left-color: var(--ink-2); color: var(--ink); }
 .tf-toc a.tf-on { border-left-color: var(--ink); color: var(--ink); font-weight: 600; }
 .tf-toc .tf-hits, .tf-rd-fold > summary .tf-hits {
-  font-size: var(--t-2xs); font-weight: 700; color: var(--card-ink); background: var(--card); border-radius: 8px;
+  font-size: var(--t-2xs); font-weight: 700; color: var(--ink); background: var(--mark); border-radius: 8px;
   padding: 0 5px; margin-left: 4px;
 }
-/* Below 1240px the outline is a fold between the meta line and the first section, closed (#2081). */
+/* Where the header's actions would not fit beside it, the outline is a fold between the meta line and the first section, closed (#2081). */
 .tf-rd-fold { margin: 16px 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet); font-family: var(--sans); }
 .tf-rd-fold > summary {
   list-style: none; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px;
-  font-size: var(--t-sm); font-weight: 600;
+  font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88;
 }
+.tf-rd-fold > summary :is(.tf-count, .tf-hits) { font-variation-settings: normal; }
 .tf-rd-fold > summary::-webkit-details-marker { display: none; }
-.tf-rd-fold > summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-rd-fold[open] > summary::before { content: "▾"; }
 .tf-rd-fold > summary .tf-hits { margin-left: 0; }
 .tf-rd-fold .tf-toc { padding: 0 12px 10px; }
 /* The page foot (#2080): Work it belongs to, then Linked from, one closed fold per space. */
 .tf-rd-foot { margin-top: 32px; font-family: var(--sans); font-size: var(--t-sm); line-height: 1.5; color: var(--ink-2); }
 .tf-rd-foot + .tf-rd-foot { margin-top: 22px; }
-.tf .tf-rd-foot h3 { font-size: var(--t-sm); font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.tf .tf-rd-foot h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; color: var(--ink); margin: 0 0 6px; }
 .tf-doc .tf-rd-foot ul { margin: 0; padding-left: 18px; line-height: 1.7; }
 .tf-doc .tf-rd-foot li { margin: 0; }
 .tf-rd-foot li::marker { color: var(--ink-2); }
 .tf-rd-foot a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .tf-rd-foot .tf-s { font-size: var(--t-xs); margin-left: 6px; }
 .tf-doc .tf-rd-linked ul { padding: 0 0 4px 32px; }
+/* Listed outright (`LINKED_FLAT`), the list takes *Work it belongs to*'s indent, above it. */
+.tf-doc .tf-rd-linked > ul { padding: 0 0 0 18px; }
 .tf-rd-linked summary {
   list-style: none; cursor: pointer; display: inline-flex; align-items: baseline; gap: 6px; padding: 2px 6px 2px 2px;
   border-radius: 3px; font-size: var(--t-xs);
 }
 .tf-rd-linked summary::-webkit-details-marker { display: none; }
-.tf-rd-linked summary::before { content: "▸"; width: 10px; color: var(--ink-2); font-size: var(--t-2xs); }
-.tf-rd-linked details[open] > summary::before { content: "▾"; }
 .tf-rd-linked summary:hover { background: var(--sheet-2); }
 .tf-rd-linked summary b { color: var(--ink); font-weight: 600; }
 .tf-rd-linked details + details { margin-top: 2px; }
@@ -246,19 +298,69 @@
 }
 .tf-sec-edit textarea {
   width: 100%; min-height: 150px; font: 17.5px/1.65 var(--serif); border: 1px solid var(--rule); border-radius: 4px;
-  padding: 10px; background: var(--paper); color: var(--ink); resize: vertical;
+  padding: 10px; background: var(--field); color: var(--ink); resize: vertical;
 }
 .tf-sec-edit .tf-acts { display: flex; gap: var(--control-gap); justify-content: flex-end; margin-top: 8px; align-items: center; }
 .tf-sec-edit .tf-acts .tf-dim { font-size: var(--t-xs); margin-right: auto; }
 .tf-cmts .tf-compose { margin-top: 12px; }
-.tf-np-text {
+/* The line beside the footer that says what is missing (the enabled rule). */
+.tf-formgrid .tf-np-text {
   width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
-  background: var(--paper); color: var(--ink); resize: vertical;
+  background: var(--field); color: var(--ink); resize: vertical;
 }
-/* The band `READER_NARROW` (docs/docs.ts) names: the component folds the outline in it (#2081). */
-@media (max-width: 1239px) {
+/* The Docs home (`TfDocsHome`): a centred column beside the tree (design system, Layout), its own width deciding how its
+   lists sit. Page titles keep the reading face, as a search hit's do. */
+.tf-dh { max-width: 980px; margin: 0 auto; container: dhome / inline-size; }
+.tf-dh-body { display: flex; flex-direction: column; gap: 16px; padding: 0 22px 32px; }
+/* A row of panels ends on one line: the panels stretch and their boxes fill them. */
+.tf-dh-two { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.tf-dh .tf-panel > :not(header) { flex: 1 1 auto; }
+@container dhome (min-width: 680px) { .tf-dh-two:has(> :nth-child(2)) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tf-dh .tf-panel > header { padding-bottom: 8px; }
+.tf-dh .tf-panel > header .tf-dh-also { margin-left: auto; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-dh .tf-panel > header .tf-count { margin-left: auto; }
+.tf-dh-rows { display: flex; flex-direction: column; overflow: hidden; border-radius: 0 0 6px 6px; }
+.tf-dh-row { display: block; padding: 8px 12px; border-top: 1px solid var(--rule-2); text-decoration: none; }
+.tf-dh-row:first-child { border-top: 0; }
+.tf-dh-row:hover { background: var(--sheet-2); }
+.tf-dh-rows :focus-visible { outline-offset: -2px; }
+.tf-dh-t { display: block; font-family: var(--serif); font-size: var(--t-lg); font-weight: 600; line-height: 1.3; letter-spacing: normal; word-spacing: normal; overflow-wrap: anywhere; }
+.tf-dh-row .tf-why { display: block; margin-top: 2px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-dh-rowt { padding: 6px 12px; }
+.tf-dh-rowt .tf-dh-t { font-size: var(--t-md); font-weight: 400; }
+.tf .tf-dh-none { padding: 9px 12px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf .tf-dh-rest { border-top: 1px solid var(--rule-2); font-size: var(--t-xs); }
+/* The one *Sync now* of an empty home, under its sentence (chrome.css starts a Sync now on its column's edge). */
+.tf-dh .tf-empty .tf-syncnow { align-self: center; }
+/* A search's empty answer, above the home's lists, and with hits the line that says how many. */
+.tf-dh-answer { padding: 18px 22px 22px; }
+.tf-dh-found { margin: 0; padding: 0 22px 14px; font-size: var(--t-md); color: var(--ink-2); }
+:is(.tf-dh-answer, .tf-dh-found) b { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+/* The crumb bar above the home's and a space's centred column: its path starts on the column's edge, its hint ends where every page's does. */
+.tf-dh-crumb .tf-crumbs { padding-left: max(22px, calc((100cqw - 980px) / 2 + 22px)); }
+@media (max-width: 900px) { .tf-dh-crumb .tf-crumbs { padding-left: 16px; } }
+.tf-dh-spaces { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+/* The tile's one link is its head row: its name, its count and the chevron a ticket card's rows have. */
+.tf-dh-spacelink { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; border-radius: 3px; }
+.tf-dh-spacelink:hover h3 { text-decoration: underline; text-underline-offset: 2px; }
+.tf-dh-spacelink h3 { min-width: 0; overflow-wrap: anywhere; }
+.tf-dh-spacelink .tf-count { margin-left: auto; }
+.tf-dh-spacelink .tf-chev { color: var(--ink-2); font-size: var(--t-lg); line-height: 1; }
+.tf-dh-spacelink:hover .tf-chev { color: var(--ink); }
+/* A page that holds others, in a space's list: heavier, with more room above it, so forty rows read as groups. */
+.tf-dh-rows .tf-dh-holds { padding-top: 14px; }
+.tf-dh-rows .tf-dh-holds:first-child { padding-top: 6px; }
+.tf-dh-rowt.tf-dh-holds .tf-dh-t { font-weight: 600; }
+.tf-dh-d1 { padding-left: 28px; } .tf-dh-d2 { padding-left: 44px; } .tf-dh-d3 { padding-left: 60px; } .tf-dh-d4 { padding-left: 76px; }
+.tf-dh-wait { padding: 8px 22px; }
+.tf-fhead .tf-rd-pages svg { width: 15px; height: 15px; }
+@media (max-width: 900px) { .tf-dh-body, .tf-dh-found { padding-left: 16px; padding-right: 16px; } .tf-dh-wait { padding-left: 16px; padding-right: 16px; } }
+/* The outline folded (`readerFit`, docs/docs.ts): the sheet's own width decides, not the window's (#2081).
+   The body and the fold above it stop at 730 px, what the column is beside the outline at 1440, so a line stays about 80 characters (F-432). */
+.tf-rd-sheet.tf-rd-solo { grid-template-columns: minmax(0, 1fr); }
+.tf-rd-solo :is(.tf-doc, .tf-rd-fold) { max-width: 730px; }
+@media (max-width: 1240px) {
   .tf-rd { grid-template-columns: 220px minmax(0, 1fr); }
-  .tf-rd-sheet { grid-template-columns: minmax(0, 1fr); }
 }
 /*
   The band `READER_DRAWER` (docs/docs.ts) names: the tree leaves the grid and is a drawer that slides

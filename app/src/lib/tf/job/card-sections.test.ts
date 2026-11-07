@@ -68,9 +68,24 @@ const asset = (id: string): AssetLine => ({ id, name: id, type: "service", envir
 
 test("the Assets row opens the asset tree at the ticket's first asset, its id encoded", () => {
   const { rows } = cardSections({ ...NOTHING, assets: [asset("asset:a/1"), asset("asset:b")] });
-  expect(rows.map((row) => [row.name, row.count, row.href, row.opens])).toEqual([["Assets", 2, "#/asset/asset%3Aa%2F1", null]]);
+  expect(rows.map((row) => [row.name, row.count, row.href, row.opens])).toEqual([["Assets", 2, "#/asset/asset%3Aa%2F1", "assets"]]);
 });
 
 test("a ticket that reaches no asset draws no Assets row, and has no first asset to open", () => {
   expect(cardSections({ ...NOTHING, assets: [] }).rows).toEqual([]);
+});
+
+const coded = (kind: string, n: number, state = "open"): EntityRow[] =>
+  Array.from({ length: n }, (_, i) => ({ entity_id: `${kind}-${i}`, kind, chip: { text: state, tone: "info" }, payload: {} }) as unknown as EntityRow);
+
+test("Code counts what its two tabs land on, names both kinds, and leaves a branch and a commit out", () => {
+  const { rows } = cardSections({ ...NOTHING, code: [...coded("repo", 2), ...coded("pr", 1), ...coded("branch", 1), ...coded("commit", 1)] });
+  expect(rows[0]?.count).toBe(3);
+  expect(rows[0]?.words).toContain("2 repositories, 1 pull request");
+});
+
+test("Code with one kind lets the count say it; with only a branch it still draws a row", () => {
+  const repos = cardSections({ ...NOTHING, code: coded("repo", 2) }).rows[0];
+  expect([repos?.count, repos?.note, repos?.words]).toEqual([2, undefined, "2 repositories"]);
+  expect(cardSections({ ...NOTHING, code: coded("branch", 1) }).rows[0]?.count).toBe(1);
 });

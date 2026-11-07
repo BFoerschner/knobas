@@ -1,7 +1,9 @@
 <!--
   Docs (#859 to #862, requirements §10): one screen for `#/docs`,
   `#/docs/space/[<source>:]<key>` and `#/page/<id>[/<section>]`, as prototype-6's
-  `renderDocs` → `renderPage`.
+  `renderDocs` → `renderPage`. `#/docs` is the Docs home (`TfDocsHome.svelte`):
+  the tree on the left and no page open, and it is where the crumb and *Back to
+  Docs* lead.
 
   **Left**, the space picker (*All spaces (N)*, then every space with its page
   count; it follows the open page's space until you pick one or a search
@@ -9,30 +11,34 @@
   on, its words with *Clear* and the hits (R-10.1 to R-10.4, R-10.8). Docs
   draws no search field (#2425): `/` opens the launcher on `#d`, whose
   *Search Docs for …* row opens `#/docs/search/<words>`, a search over every
-  space; a label chip searches for itself. *New page* is at the
+  space; a label chip searches for itself. A search's address opens no page: the
+  home stays in the main column until a hit is opened, and says there how many
+  pages match, or that none does; arriving, the first hit takes focus. *New page* is at the
   bottom. Below 900px (`READER_DRAWER`, through `MediaQuery`) it is a drawer
   over the page (#2084, R-10.9): *Pages* at the start of the breadcrumb row
   and a label chip open it; `Esc` (it is a `drawer` layer), the backdrop
   and a page picked in it close it, and focus goes back to what opened it.
 
-  **Right**, the page in the reading face, nothing in it capped in width
-  (#2081, R-10.9): the breadcrumb, the title, who edited it when, who created it (#2080), the
+  **Right**, the page in the reading face, as wide as the sheet beside the outline
+  (#2081, R-10.9), its body stopping at about 730 px once the outline folds (F-432): the breadcrumb, pinned
+  to the top of the scroll (F-443), the title, who edited it when, who created it (#2080), the
   version, the reading time and the labels (each searches for itself). The
   title line is the canonical header (#2286): on its right the actions with
   *More ▾* (#2082), "Open in <source>" as a ghost, the page's *Refresh* or
   *Sync now* (#2136: `TfDetailRefresh` over `get_entity` of the page), and last
   the view's *Sync now* (the role frame's `sync`, #2106), left out while the
-  page's own button is a *Sync now* (one per header, #2287). A reader pane
-  with no page draws the view's *Sync now* in a plain *Docs* header. The withdrawn, turned-off and
+  page's own button is a *Sync now* (one per header, #2287), and in *More* beside
+  *Refresh page*, whose meaning is too near (F-448, amending #2287), and where the
+  row has no room for it (`readerFit`). The withdrawn, turned-off and
   failed-refresh banners sit under the meta line, then the blocks by section (*Edit section*),
   the page foot (*Work it belongs to*, *Linked from*, `TfDocFoot`) and the
   comments with the composer (R-10.9 to R-10.15). A page opened from a hit
   keeps the query: every match is marked and the find bar steps through them
-  (R-10.5, R-10.12). The outline (`TfDocOutline`, R-10.15) is the page's own
-  right column, sticking while the page scrolls; below 1240px
-  (`READER_NARROW`, read through Svelte's `MediaQuery`) it folds between the meta
-  line and the first section instead. `#/docs` opens the page read last, and every
-  page opened is a visit (`visit_entity`), which is what "read last" reads.
+  (R-10.5, R-10.12); ⌘F opens that bar on any page (F-456). The outline (`TfDocOutline`, R-10.15) is the page's own
+  right column, sticking while the page scrolls; where the header's actions would
+  stop fitting one row beside it (`readerFit`, by the sheet's own width) it folds
+  between the meta line and the first section instead. Every page opened is a visit
+  (`visit_entity`), which is what the home's *Continue reading* reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
   `docs_search`, and `get_entity` of the open page for its *Refresh* (#2136);
@@ -53,15 +59,38 @@
   write is sent, and gone on the read that shows it, which the end of every
   run and a refresh naming the write or its page bring. Held or refused, the echo goes and a toast offers *Edit and
   resend*, which opens the section editor, the composer or *New page* again
-  with what was typed.
+  with what was typed. A queued page's row opens the folds around it and shows the
+  space it went to, and the read that holds the page says so on a toast with *Open* (F-449).
 -->
+<script lang="ts" module>
+  import { SvelteSet } from "svelte/reactivity";
+
+  /** The spaces folded open in the rail by the reader, and each space's folds, for the session: a return finds them as left, whichever of the rail's trees draws them. */
+  const openSpaces = new SvelteSet<string>();
+  const openFolds = new Map<string, SvelteSet<string>>();
+
+  function foldsOf(space: string): SvelteSet<string> {
+    const held = openFolds.get(space) ?? new SvelteSet<string>();
+    openFolds.set(space, held);
+    return held;
+  }
+
+  /** A new session: what each test is. */
+  export function forgetDocFolds(): void {
+    openSpaces.clear();
+    openFolds.clear();
+  }
+</script>
+
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel } from "../../time/format";
   import { tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
   import { MediaQuery } from "svelte/reactivity";
+  import { sourceRoles, WIKI } from "../roles.svelte";
 
-  import { ipcErrorMessage } from "../../ipc";
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     docsCreatePage as realDocsCreatePage,
     docsEditSection as realDocsEditSection,
@@ -77,6 +106,7 @@
     type DocsHits,
     type DocsTree,
     type EntityDetail,
+    type LinkEntry,
     type NewPage,
     type Reached,
   } from "../../ipc/entity";
@@ -86,17 +116,26 @@
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
-  import { push } from "../../shell/toasts.svelte";
+  import { dismiss, push, undoable } from "../../shell/toasts.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { resolveTicket } from "../job/job";
+  import { resolveTicket, username } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
   import { askAgain, echoWrite, echoesOn, sameWords, settleEchoes, takeAgain, watchEchoes, type Echo } from "../queued.svelte";
   import { createDetailRefresh, DETAIL_REFRESH_BRIDGE, type DetailRefreshPorts } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
   import TfBareHeader from "../TfBareHeader.svelte";
+  import TfScope from "../filter/TfScope.svelte";
+  import TfBackHint from "../TfBackHint.svelte";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import TfDocsSpace from "./TfDocsSpace.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
+  import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
+  import TfKey from "../TfKey.svelte";
   import { initials } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
   import TfDocBody from "./TfDocBody.svelte";
@@ -104,7 +143,10 @@
   import TfDocHits from "./TfDocHits.svelte";
   import TfDocMore from "./TfDocMore.svelte";
   import TfDocOutline from "./TfDocOutline.svelte";
+  import TfDocsHome from "./TfDocsHome.svelte";
   import TfDocTree from "./TfDocTree.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import { counted } from "../counted";
   import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
@@ -112,20 +154,25 @@
     createdBy,
     LINK_RELATION,
     blockWords,
-    firstPage,
     firstName,
+    forYouHash,
     forYouIn,
     forYouWhy,
     inlineWords,
     jobPageGroups,
+    mentionsMe,
+    noteReading,
     pageHash,
     pageToOpen,
+    spaceAt,
     READER_DRAWER,
-    READER_NARROW,
+    readerFit,
     person,
     placeOf,
     reachedPages,
+    readingAt,
     readingMinutes,
+    matchLine,
     revealMatch,
     scopeName,
     SEARCH_PAUSE_MS,
@@ -140,7 +187,13 @@
   } from "./docs";
   import { replaceAddress } from "../opener";
   import { namePage } from "../page-name.svelte";
+  import { pageVisible } from "../kept-pages.svelte";
+  import { linkedOn } from "../job/connections";
   import type { EscTarget } from "../escape";
+  import { addFindBar, filterKeys } from "../filter-keys";
+  import { selectedWords } from "../find-text";
+  import { drafts } from "../drafts.svelte";
+  import { sendKey } from "../inline-editor";
 
   /** The page's own reads and writes; *Link to…* uses the job's ports. */
   export interface DocsPorts {
@@ -172,7 +225,7 @@
     searchPause?: number;
   }
 
-  type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "search" | "launcherHome">;
+  type LinkPorts = Pick<JobPorts, "listSources" | "getEntity" | "createLink" | "unlink" | "search" | "launcherHome">;
 
   let {
     ready,
@@ -230,15 +283,22 @@
   let page = $state<DocPage | null>(null);
   // Whether the open page's source runs its embeds, for every embed drawn below (#2440).
   provideEmbeds(() => page?.run_embeds ?? true);
-  // What *Back to <name>* calls a doc page once it is left: its title (spec #2227).
-  namePage(() => page?.title ?? null);
+  // What *Back to <name>* calls Docs once it is left: the page's title, the space's name or the search, as the crumb
+  // says (spec #2227). One name, here, because a read answering after the crumb drew would otherwise clear the crumb's.
+  namePage(() => page?.title ?? spaceHere?.name ?? spaceHere?.key ?? (place.kind === "search" ? "Search" : null));
   let pageError = $state<string | null>(null);
+  /** The reader's own accounts, as the last page read names them; until a page is read, as the sources' settings do, so a hit's line says *you* from the start (F-428). */
+  let me = $state<string[]>([]);
+  /** The page could not be opened because no such page is held. */
+  let pageMissing = $state(false);
   /** The picked space (`spaceId`), `*` for all, or `null` to follow the page. */
   let picked = $state<string | null>(null);
 
   /** The search's words (#860): the address's (#2425) or a label chip's. */
   let query = $state("");
   let found = $state<DocsHits | null>(null);
+  /** The words `found` answers, which an earlier search's list may not be until the new one is in. */
+  let foundFor = $state<string | null>(null);
   let searchError = $state<string | null>(null);
   /** What the find bar marks: the needles a hit was opened with. */
   let find = $state("");
@@ -246,7 +306,9 @@
 
   // ---- *This job* (#863) ----
   const filter = sessionFilter("docs");
-  const jobOn = $derived(job !== null && filter.scope === "job");
+  /** The read answered, and with no space: there is nothing to narrow, so *This job* is not offered and does not hold. */
+  const nothingHeld = $derived(tree !== null && tree.spaces.length === 0);
+  const jobOn = $derived(job !== null && filter.scope === "job" && !nothingHeld);
   /** What the job's ticket reaches, `null` until the read answers. */
   let reach = $state<Reached[] | null>(null);
   /** The titles of the first steps a page is reached through, for *Via …*. */
@@ -297,7 +359,22 @@
   );
 
   const place = $derived(placeOf(rest));
-  const target = $derived(tree === null ? null : pageToOpen(place, tree));
+  /** The last visit on its way: a read of the tree that overtook it would name the page before it. */
+  let visited: Promise<unknown> = Promise.resolve();
+  // *Continue reading* is the tree's: back on the home, it is read again once the visit is in, so it names the page read last.
+  let wasHome = false;
+  $effect(() => {
+    const now = place.kind === "home";
+    if (now && !wasHome && ready && untrack(() => tree) !== null) untrack(() => void visited.then(() => readTree(true)));
+    wasHome = now;
+  });
+  const target = $derived(tree === null ? null : pageToOpen(place));
+  /** `#/docs/space/<key>`: the space's own page, which lists its pages. */
+  const spaceHere = $derived(tree === null ? undefined : spaceAt(place, tree));
+  /** `#/docs`, and a search until one of its hits is opened: the Docs home, which opens no page. */
+  const home = $derived(place.kind === "home" || place.kind === "search");
+  /** Whether some source that is turned on fills the wiki role: what an empty tree is waiting for. */
+  const hasSource = $derived(sourceRoles.syncs(WIKI));
 
   /** The reads asked so far; an answer to an older one than the last is dropped. */
   let treeAsked = 0;
@@ -313,32 +390,49 @@
     try {
       const read = await io.docsTree();
       if (mine !== treeAsked) return;
+      // A row of the home's that holds focus can move: the page read last goes up into *Continue reading* (F-438).
+      const held = document.activeElement?.closest("a.tf-dh-row")?.getAttribute("href") ?? null;
       tree = read;
       treeError = null;
       settlePages(read);
+      if (held !== null) void tick().then(() => keepRow(held));
     } catch (cause) {
       if (mine === treeAsked && (!quiet || tree === null)) treeError = ipcErrorMessage(cause);
     }
+  }
+
+  /** The home's row for `href` takes focus back, when the read that moved it left focus on nothing. */
+  function keepRow(href: string): void {
+    const at = document.activeElement;
+    if (at !== null && at !== document.body && at.isConnected) return;
+    [...(main?.querySelectorAll<HTMLElement>("a.tf-dh-row") ?? [])].find((row) => row.getAttribute("href") === href)?.focus({ preventScroll: true });
   }
 
   /**
    * Read page `id`. Opening it records the visit; a `quiet` read (a sync
    * run's, #2072) records none, and one that fails leaves the page as drawn.
    * A quiet read that dropped the opening read before `id` was drawn opens it
-   * in that read's place: visit and error as an opening read.
+   * in that read's place: visit and error as an opening read. Answers whether
+   * what it read is what is drawn now.
    */
-  function readPage(id: string, quiet: boolean): Promise<void> {
+  function readPage(id: string, quiet: boolean): Promise<boolean> {
     const mine = ++pageAsked;
     return io.docsPage(id).then(
       (answer) => {
-        if (mine !== pageAsked) return;
+        if (mine !== pageAsked) return false;
         const opens = !quiet || page?.entity_id !== id;
         page = answer;
+        me = answer.me;
         pageError = null;
-        if (opens) void io.visitEntity(id).catch(() => {});
+        if (opens) visited = io.visitEntity(id).catch(() => {});
+        return true;
       },
       (cause: unknown) => {
-        if (mine === pageAsked && (!quiet || page?.entity_id !== id)) pageError = ipcErrorMessage(cause);
+        if (mine === pageAsked && (!quiet || page?.entity_id !== id)) {
+          pageError = ipcErrorMessage(cause);
+          pageMissing = isIpcError(cause) && cause.code === "not_found";
+        }
+        return false;
       },
     );
   }
@@ -348,9 +442,9 @@
    * refresh: no visit, and nothing once the reader has opened another page
    * (#2072, #2136).
    */
-  function rereadPage(id: string | null): Promise<void> {
-    if (id === null || id !== target) return Promise.resolve();
-    return Promise.all([readPage(id, true), readDetail(id, true)]).then(() => {});
+  function rereadPage(id: string | null): Promise<boolean> {
+    if (id === null || id !== target) return Promise.resolve(false);
+    return Promise.all([readPage(id, true), readDetail(id, true)]).then(([read]) => read);
   }
 
   // ---- *Refresh* (#2136, #2107) ----
@@ -373,13 +467,29 @@
     );
   }
 
+  /** *Try again* in the failed line: that line goes while it asks, so focus lands on what stands in its place after. */
   /**
    * A refresh's re-read: the tree, the open page and its row, each over what
    * Docs drew (#2072's quiet reads), so the picked space, the search, an open
-   * section editor and the composer keep what they hold.
+   * section editor and the composer keep what they hold. A press of *Refresh*
+   * gets its answer here, because nothing on the page need change (F-445); a
+   * run's end reads the same way and has its own word in the button.
    */
   function reread(): Promise<void> {
-    return Promise.all([readTree(true), rereadPage(target)]).then(() => {});
+    const pressed = refresh.reading;
+    const was = page;
+    return Promise.all([readTree(true), rereadPage(target)]).then(([, read]) => {
+      if (pressed && read && was !== null && page?.entity_id === was.entity_id) sayRefreshed(was.version, page);
+      else if (pressed) refresh.answer(null);
+    });
+  }
+
+  /** What a press of *Refresh* found, which the press ends in. */
+  function sayRefreshed(before: DocPage["version"], now: DocPage): void {
+    const version = now.version === null ? "" : `version ${now.version}`;
+    const moved = now.version !== before;
+    const text = moved ? `Refreshed${version === "" ? "" : `, now ${version}`}` : `Page is up to date${version === "" ? "" : `, ${version}`}`;
+    refresh.answer(text);
   }
 
   $effect(() => {
@@ -389,9 +499,15 @@
 
   $effect(() => {
     const id = target;
-    if (!ready || id === null) return;
+    if (!ready) return;
     pageError = null;
     detail = null;
+    revealed = [];
+    // No page to open: what was open goes, or the home would draw under its header.
+    if (id === null) {
+      page = null;
+      return;
+    }
     untrack(() => {
       refresh.reset();
       void readPage(id, false);
@@ -432,9 +548,10 @@
   const shownSpace = $derived.by(() => {
     if (tree === null || picked === "*") return undefined;
     if (picked !== null) return tree.spaces.find((s) => spaceId(s) === picked);
-    return pageSpace ?? tree.spaces[0];
+    // The home shows every space, a space's page that space, and a page its own: one the tree does not hold shows them all.
+    return place.kind === "page" ? spaceOfPage(tree, place.id) : spaceHere;
   });
-  const pickerValue = $derived(picked === "*" ? "*" : shownSpace ? spaceId(shownSpace) : "*");
+  const pickerValue = $derived(shownSpace ? spaceId(shownSpace) : "*");
   const total = $derived(tree?.spaces.reduce((n, s) => n + s.pages.length, 0) ?? 0);
   const parent = $derived(page?.ancestors.at(-1));
   const current = $derived(page?.entity_id ?? target);
@@ -444,7 +561,10 @@
   // The search asks once typing pauses (#2200), for what was typed last; an
   // answer to an older keystroke is dropped.
   let asked = 0;
+  /** Bumped by *Try again* on a search that could not ask (F-439). */
+  let searchAttempt = $state(0);
   $effect(() => {
+    void searchAttempt;
     const text = query;
     const scope = !jobOn && shownSpace ? { source_id: shownSpace.source_id, key: shownSpace.key } : null;
     if (!ready || text.trim() === "") {
@@ -459,6 +579,7 @@
         (answer) => {
           if (mine !== asked) return;
           found = answer;
+          foundFor = text;
           searchError = null;
         },
         (cause: unknown) => {
@@ -474,6 +595,23 @@
     return () => clearTimeout(timer);
   });
 
+  // A search before any page is read: nothing has named the reader yet, and a hit would change from a name to *you* once opened.
+  let meAsked = false;
+  $effect(() => {
+    const sources = linkPorts?.listSources;
+    if (!searching || meAsked || sources === undefined || me.length > 0) return;
+    meAsked = true;
+    untrack(() =>
+      void sources().then(
+        (rows) => {
+          const names = rows.flatMap((row) => username(row) ?? []);
+          if (me.length === 0 && names.length > 0) me = names;
+        },
+        () => {},
+      ),
+    );
+  });
+
   /** The hits as read, kept to the job's pages while *This job* is on. */
   const hits = $derived.by((): DocsHits | null => {
     if (found === null || !jobOn) return found;
@@ -482,15 +620,29 @@
   });
   const searchScope = $derived(jobOn ? `${job}'s pages` : scopeName(shownSpace));
 
+  /** What the search can widen to: the whole of Docs from a space, every page from the job's. */
+  const searchKept = $derived(jobOn ? ("job" as const) : shownSpace !== undefined ? ("space" as const) : null);
+
+  /**
+   * The Space picker. While a search is on it narrows the search. Otherwise a space goes to that space's page, which
+   * opens no page (design system, Layout), and the address then says what the rail shows.
+   * *All spaces* widens the rail on a page, and from a space's page goes back to the home.
+   */
   function pick(event: Event): void {
     const value = (event.currentTarget as HTMLSelectElement).value;
-    picked = value;
-    if (value === "*" || tree === null || searching) return;
-    const space = tree.spaces.find((s) => spaceId(s) === value);
-    if (space && space !== pageSpace) {
-      const first = firstPage(space);
-      if (first) location.hash = pageHash(first.entity_id);
+    if (searching || tree === null) {
+      picked = value;
+      return;
     }
+    if (value === "*") {
+      picked = "*";
+      if (place.kind === "space") location.hash = "#/docs";
+      return;
+    }
+    const space = tree.spaces.find((s) => spaceId(s) === value);
+    if (space === undefined) return;
+    picked = null;
+    location.hash = spaceHash(tree.spaces, space);
   }
 
   // `#/docs/search/<words>` (#2425): the address's words are the search, over
@@ -500,30 +652,97 @@
     if (place.kind !== "search") return;
     const words = place.words;
     untrack(() => {
+      // Coming back from a hit is no arrival: the way back puts focus on the hit that was opened.
+      arriving = query !== words;
       query = words;
-      find = "";
+      setFind("");
       picked = "*";
     });
   });
 
-  /** End the search: the tree is back, the highlighting gone, and a search's address becomes the page's. */
-  function clearSearch(): void {
+  // The home and a space's page say what the rail shows: nothing picked outlives the trip, and the home ends a search,
+  // or `Esc` from a search's address would change nothing on screen.
+  $effect(() => {
+    const kind = place.kind;
+    if (kind !== "home" && kind !== "space") return;
+    untrack(() => {
+      picked = null;
+      if (kind === "home") endSearch();
+    });
+  });
+
+  /** The search is over: the tree is back, and the highlighting and the search's *All spaces* gone. */
+  function endSearch(): void {
     query = "";
-    find = "";
+    setFind("");
+    picked = null;
+    fromChip = null;
+  }
+
+  /** *Try again* on a search that could not ask: the words stay, and what it finds takes focus, as on arriving. */
+  function retrySearch(): void {
+    arriving = place.kind === "search";
+    searchAttempt += 1;
+  }
+
+  // Leaving a search's address by anything but one of its hits leaves the search, as `Esc` does a row's narrowing.
+  let onSearch = false;
+  let openingHit = false;
+  $effect(() => {
+    const now = place.kind === "search";
+    if (onSearch && !now && !openingHit) untrack(endSearch);
+    onSearch = now;
+    openingHit = false;
+  });
+
+  /** End the search, and a search's address becomes the page's. */
+  function clearSearch(): void {
+    endSearch();
     if (place.kind === "search") replaceAddress(current === null ? "#/docs" : pageHash(current));
   }
 
   /** Open a hit with its query carried over. */
   function openHit(entityId: string): void {
-    find = found?.needles.join(" ") ?? "";
+    setFind(found?.needles.join(" ") ?? "");
+    fromChip = null;
+    openingHit = true;
     location.hash = pageHash(entityId);
   }
 
+  /** Widen a search kept to the job's pages or to one space. */
+  function widenSearch(): void {
+    if (jobOn) filter.scope = "all";
+    else picked = "*";
+  }
+
+  /** A search's address that found nothing, or could not ask: the main column says so, where a page would be. */
+  const answerHere = $derived(place.kind === "search" && (searchError !== null || hits?.hits.length === 0));
+  /** A search's address that found pages: they are in the rail, and the main column says how many, so it does not read as nothing happened. */
+  const hitsHere = $derived(place.kind === "search" && foundFor === place.words && (hits?.hits.length ?? 0) > 0);
+
   function searchLabel(label: string, chip: HTMLElement): void {
     query = label;
-    find = "";
+    setFind("");
+    fromChip = chip;
     openTree(chip);
   }
+
+  /** The label chip a search on a page came from: `Esc` ends that search and goes back to it, and leaves the page only after (F-437). */
+  let fromChip = $state.raw<HTMLElement | null>(null);
+  const shown = pageVisible();
+  $effect(() => {
+    if (fromChip === null || !shown()) return;
+    return untrack(() =>
+      layers.add({
+        kind: "panel",
+        close: () => {
+          const chip = fromChip;
+          clearSearch();
+          chip?.focus();
+        },
+      }),
+    );
+  });
 
   // ---- below 900px the tree is a drawer over the page (#2084) ----
   /** A window narrower than 900px, where the tree leaves the grid and the Pages button opens it. */
@@ -557,6 +776,28 @@
     if (drawerBand.current) return;
     drawer = false;
     opener = null;
+  });
+
+  /** A search's address just arrived at, whose first hit takes focus once the list is in: after the launcher, focus is on nothing. */
+  let arriving = false;
+  /** Whether the reader went somewhere of their own while the search was asked: a field or a dialog keeps its focus. */
+  const focusTaken = () => document.activeElement?.closest("input, textarea, select, [role='dialog']") != null;
+
+  // Below 900 px a search's hits are in the closed drawer: a search that found some opens it, once per address.
+  let drewHitsFor: string | null = null;
+  $effect(() => {
+    const words = place.kind === "search" ? place.words : null;
+    if (words === null) drewHitsFor = null;
+    if (words === null || !hitsHere || drewHitsFor === words) return;
+    drewHitsFor = words;
+    untrack(() => {
+      if (drawerBand.current) openDrawer(main?.querySelector(".tf-railbar button") ?? null);
+      if (!arriving) return;
+      arriving = false;
+      void tick().then(() => {
+        if (!focusTaken()) treeNav?.querySelector<HTMLElement>("a.tf-dl-hit")?.focus();
+      });
+    });
   });
 
   // Open, the drawer is a layer of the shell's, so `Esc` closes it wherever focus is (rung 2).
@@ -604,10 +845,64 @@
     const current = all[at];
     if (current) revealMatch(current);
     current?.scrollIntoView?.({ block: "center" });
+    // A match stepped to is where the reader meant to go: `Esc` stays here, and words typed next search from here.
+    if (findPlace !== null && current && article !== null) findPlace = { top: null, line: matchLine(current, article), landed: main?.scrollTop ?? 0 };
+  }
+
+  /**
+   * Where a bar ⌘F opened started, to read like a browser's find (F-458). `line` is how far down the article the reader
+   * was, which typed words search from, so a longer word never walks on past the place it began. `top` is where the article's
+   * top sat on screen, which `Esc` puts back, or `null` once there is nothing to put back. `landed` is where the scroller was
+   * last put: read somewhere else, the reader scrolled there, and that is their place now.
+   */
+  let findPlace: { top: number | null; line: number; landed: number } | null = null;
+
+  /** Where the page shows from: the scroller's top, below the bar and the crumbs pinned there. */
+  function pinnedBottom(): number {
+    const pinned = [main, main?.querySelector(".tf-findbar"), main?.querySelector(".tf-rd-crumbrow")];
+    return Math.max(...pinned.map((box, at) => (box ? box.getBoundingClientRect()[at === 0 ? "top" : "bottom"] : 0)));
+  }
+
+  /** How far down the article the line being read sits. */
+  function readingLine(): number {
+    return article === null ? 0 : pinnedBottom() - article.getBoundingClientRect().top;
+  }
+
+  const scrolledByHand = (): boolean => findPlace !== null && main !== null && Math.abs(main.scrollTop - findPlace.landed) > 1;
+
+  /** Words typed in the bar: the first match at or below the reading line, past the last back to the first. The page moves only if that match is out of view. */
+  function findFromLine(): void {
+    if (findPlace === null || scrolledByHand()) findPlace = { top: null, line: readingLine(), landed: main?.scrollTop ?? 0 };
+    const all = matches();
+    if (all.length === 0 || article === null || main === null) return;
+    const { line } = findPlace;
+    const box = article;
+    at = Math.max(all.findIndex((match) => matchLine(match, box) >= line - 1), 0);
+    markCurrent(all);
+    const current = all[at]!;
+    revealMatch(current);
+    const seen = current.getBoundingClientRect();
+    if (seen.top < pinnedBottom() || seen.bottom > main.getBoundingClientRect().bottom) current.scrollIntoView?.({ block: "center" });
+    findPlace.landed = main.scrollTop;
   }
 
   /** The page and the query the find bar last started on. */
   let started: { id: string; stems: string[] } | null = null;
+  /** *Continue reading* pressed: the page it names, drawn, goes back to where it was left (F-431). */
+  let resuming: { id: string; top: number } | null = null;
+
+  /** A page opened at its mention: the newest comment that names the reader, else the first mention in its body. */
+  function toMention(): void {
+    const comments = article?.querySelectorAll<HTMLElement>(".tf-msg.tf-mention");
+    const at = comments?.[comments.length - 1] ?? article?.querySelector<HTMLElement>(".tf-ment.tf-me");
+    at?.scrollIntoView?.({ block: "center" });
+  }
+
+  /** *For you*'s row on the page it names changes no address once it is there, so it jumps from here too. */
+  const mentionHere = $derived(place.kind === "page" && place.mention === true && page?.entity_id === place.id);
+  $effect(() => {
+    if (mentionHere) void tick().then(toMention);
+  });
 
   // A page drawn with a query marks its first match, unless the address names
   // a section, which is scrolled to instead. The same page read again (a sync
@@ -617,8 +912,23 @@
     const query = stems;
     if (p === null) return;
     const again = started?.id === p.entity_id && started.stems === query;
+    // Only a page newly drawn lands on the section its address names, or its first match.
+    const samePage = started?.id === p.entity_id;
+    if (!samePage) findPlace = null;
+    // A bar nobody typed in doesn't follow the reader to the next page.
+    if (started !== null && !samePage && untrack(() => find) === "") findTyped = false;
     started = { id: p.entity_id, stems: query };
     void tick().then(() => {
+      if (resuming?.id === p.entity_id) {
+        const { top } = resuming;
+        resuming = null;
+        // A frame on too: opening an address sets the page's scroller back to the top as it shows the page.
+        const back = () => {
+          if (main !== null) main.scrollTop = top;
+        };
+        back();
+        requestAnimationFrame(back);
+      }
       if (again) {
         const all = matches();
         at = Math.min(at, all.length - 1);
@@ -627,11 +937,13 @@
         return;
       }
       at = -1;
-      if (place.kind === "page" && place.section !== null) {
+      if (place.kind === "page" && place.section !== null && !samePage) {
         document.getElementById(`s-${place.section}`)?.scrollIntoView?.();
         matches();
-      } else if (stems.length > 0) jump(1);
-      else marks = 0;
+      } else if (stems.length > 0) {
+        if (samePage && findTyped) findFromLine();
+        else jump(1);
+      } else marks = 0;
       follow();
     });
   });
@@ -642,24 +954,174 @@
     jump(event.shiftKey ? -1 : 1);
   }
 
+  /** Set by typing in the box: emptied by hand, the bar stays, because the next word is on its way. */
+  let findTyped = $state(false);
+  const findOpen = $derived((find !== "" || findTyped) && page !== null);
+
+  /** What the find bar marks, from anything but the bar's own box. */
+  function setFind(words: string): void {
+    find = words;
+    findTyped = false;
+    findPlace = null;
+  }
+
+  let findBox = $state<HTMLInputElement | null>(null);
+  /** What held focus when ⌘F opened the bar, which it goes back to when the bar closes. */
+  let findFrom: HTMLElement | null = null;
+
+  /** The bar comes in or goes above the page, and the line being read holds still, in a webview that doesn't anchor a scroll too. With `to`, the article's top goes back there instead. */
+  function holdingPlace(change: () => void, to: number | null = null): void {
+    const from = to ?? (main !== null && article !== null && main.scrollTop > 0 ? article.getBoundingClientRect().top : null);
+    change();
+    if (from !== null) void tick().then(() => {
+      if (main !== null && article !== null) main.scrollTop += article.getBoundingClientRect().top - from;
+    });
+  }
+
+  /**
+   * The bar closes, and focus left in it, or on nothing, goes back to what held it before ⌘F, else the page's title rather than the body (F-436).
+   * The page goes back to where the bar opened, unless the reader stepped to a match or scrolled, which says they mean to stay (F-458).
+   */
+  function closeFind(): void {
+    const at = document.activeElement;
+    const free = at === null || at === document.body || at.closest(".tf-findbar") !== null;
+    const from = findFrom;
+    findFrom = null;
+    holdingPlace(() => setFind(""), scrolledByHand() ? null : (findPlace?.top ?? null));
+    if (free) (from?.isConnected ? from : article?.querySelector<HTMLElement>(".tf-rd-title"))?.focus({ preventScroll: true });
+  }
+
+  /** ⌘F: the bar on any page, with focus in its box, starting from the selected text if there is any. Pressed again, or on a bar a hit opened, it selects the box's words (F-456, F-465). */
+  function openFind(): void {
+    const at = document.activeElement;
+    const seed = at?.closest(".tf-findbar") ? null : selectedWords();
+    if (!findOpen) findFrom = at instanceof HTMLElement && at !== document.body ? at : null;
+    const top = !findOpen && article !== null ? article.getBoundingClientRect().top : null;
+    const seedLine = seed !== null && article !== null ? seed.range.getBoundingClientRect().top - article.getBoundingClientRect().top : null;
+    holdingPlace(() => {
+      findTyped = true;
+      if (seed !== null) find = seed.words;
+    });
+    void tick().then(() => {
+      if (top !== null) findPlace = { top, line: seedLine ?? readingLine(), landed: main?.scrollTop ?? 0 };
+      else if (seedLine !== null && findPlace !== null) findPlace.line = seedLine;
+      findBox?.focus({ preventScroll: true });
+      findBox?.select();
+    });
+  }
+
+  // On ⌘F's ladder, with a dialog or the tree's drawer owning the key over it. A page keep-alive holds hidden takes no keys.
+  $effect(() => addFindBar({ here: () => shown() && page !== null, open: openFind }));
+
+  // On the layer stack, so `Esc` closes the bar before it leaves the page, wherever focus is.
+  $effect(() => {
+    if (!findOpen || !shown()) return;
+    return untrack(() => layers.add({ kind: "panel", close: closeFind }));
+  });
+
+
+  // ---- what the reader's width makes of its header (`readerFit`) ----
+  let sheet = $state<HTMLElement | null>(null);
+  let headActs = $state<HTMLElement | null>(null);
+  /** The header's actions would not fit one row beside the outline, which folds above the page. */
+  let outlineFolds = $state(false);
+  /** The row does not fit even so: the view's *Sync now* is in *More*. */
+  let syncInMore = $state(false);
+  /** What *Sync now* takes of the row, measured while it is in it. */
+  let syncRoom = 0;
+
+  function fitHeader(): void {
+    if (sheet === null || headActs === null) return;
+    const inner = getComputedStyle(sheet);
+    const room = sheet.clientWidth - (parseFloat(inner.paddingLeft) || 0) - (parseFloat(inner.paddingRight) || 0);
+    // Not laid out: a page keep-alive holds hidden says nothing about its width.
+    if (room <= 0) return;
+    const gap = parseFloat(getComputedStyle(headActs).columnGap) || 0;
+    const items = [...headActs.children] as HTMLElement[];
+    const drawn = items.find((item) => item.classList.contains("tf-syncnow"));
+    if (drawn) syncRoom = drawn.offsetWidth + gap;
+    else if (!syncInMore || beside) syncRoom = 0;
+    const row = items.reduce((sum, item) => sum + item.offsetWidth, 0) + gap * Math.max(0, items.length - 1) + (drawn ? 0 : syncRoom);
+    const fit = readerFit(room, row, syncRoom);
+    outlineFolds = fit.outlineFolds;
+    syncInMore = fit.syncInMore;
+  }
+
+  // The width and what the row holds both decide. The observer answers before the page paints.
+  $effect(() => {
+    if (sheet === null || headActs === null) return;
+    void page;
+    void detail;
+    untrack(fitHeader);
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => fitHeader());
+    seen.observe(sheet);
+    seen.observe(headActs);
+    return () => seen.disconnect();
+  });
+
+  /** Beside a page's own *Refresh page*, the view's *Sync now* is always in *More*: the two mean nearly the same (F-448). */
+  const beside = $derived(sync !== undefined && detail !== null && refresh.offer(detail) === "refresh");
+  /** The view's *Sync now* for *More*: never beside a page whose own button is one (#2287). */
+  const syncForMore = $derived((syncInMore || beside) && (detail === null || refresh.offer(detail) !== "sync") ? sync : undefined);
+
   // ---- the outline follows the scrolling ----
-  /** A window narrower than 1240px, where the outline folds above the page. */
-  const narrow = new MediaQuery(READER_NARROW);
   let active = $state<number | null>(null);
   function follow(): void {
     if (!main || !article) return;
-    const top = main.getBoundingClientRect().top + 90;
+    // Where the reader is on this page, for *Continue reading*. Only with its own page drawn: another's scroll is not this one's.
+    // And only while shown: a page keep-alive hides reads 0, which isn't where the reader left it.
+    if (shown() && place.kind === "page" && page?.entity_id === place.id) noteReading(place.id, main.scrollTop);
+    // A section is the one you are in once its heading is in the column's top third, with its body in view under it.
+    const top = main.getBoundingClientRect().top + main.clientHeight / 3;
     let now: number | null = null;
+    let last: number | null = null;
     for (const h of article.querySelectorAll<HTMLElement>("h2[id^='s-']")) {
       if (h.getBoundingClientRect().top < top) now = Number(h.id.slice(2));
+      last = Number(h.id.slice(2));
     }
+    // At the end of the page the last section is the one you are in, however short it is.
+    if (last !== null && main.scrollTop > 0 && main.scrollTop + main.clientHeight >= main.scrollHeight - 4) now = last;
     active = now;
+  }
+
+  /** The outline's entry the reader clicked: it stays marked until they scroll by hand. */
+  let pickedSection = $state<number | null>(null);
+  $effect(() => {
+    if (place.kind === "page" && place.section !== null) pickedSection = place.section;
+  });
+  const marked = $derived(pickedSection ?? active);
+
+  /** Scroll to section `number`, where the page is drawn. */
+  function toSection(number: number): void {
+    void tick().then(() => article?.querySelector(`#s-${number}`)?.scrollIntoView?.());
+  }
+
+  // An outline entry changes the address on the page already open: nothing is read again, so the scroll is here.
+  // By the section's number, so another route's draw of the same address does not undo where the reader scrolled to.
+  const sectionHere = $derived(place.kind === "page" ? place.section : null);
+  $effect(() => {
+    if (sectionHere !== null) toSection(sectionHere);
+  });
+
+  /** An entry pressed: the one the address already names changes no address, so it scrolls from here too. */
+  function pickSection(number: number): void {
+    pickedSection = number;
+    toSection(number);
+  }
+
+  const SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "]);
+  /** The reader moves the page by hand: the outline follows the scrolling again. */
+  function releaseSection(event: KeyboardEvent): void {
+    if (SCROLL_KEYS.has(event.key)) pickedSection = null;
   }
 
   // ---- actions ----
   let linking = $state(false);
   let newPage = $state<{ space: string | null; parent: string | null; title?: string; text?: string } | null>(null);
-  let comment = $state("");
+  /** Each page's composer holds its own words, so a draft never lands on the next page (F-429). */
+  const commentKey = (entityId: string) => `comment:${entityId}`;
+  const comment = $derived(page === null ? "" : drafts.get(commentKey(page.entity_id)));
   let commenting = $state(false);
 
   /** The page's writes its source's credential cannot make, asked once the page is drawn (#2053). */
@@ -722,7 +1184,12 @@
     return found?.row.entity_id ?? null;
   }
 
+  /** A press of *Link to <job>* still on its way, so a second press links nothing twice. */
+  let linkingJob = $state(false);
+
   async function linkToJob(p: DocPage, ref: string, key: string): Promise<void> {
+    if (linkingJob) return;
+    linkingJob = true;
     try {
       const ticket = await jobTicket(ref);
       if (ticket === null) {
@@ -730,11 +1197,62 @@
         return;
       }
       const row = drawn(LINK_RELATION, p.entity_id, ticket);
-      await linkPorts!.createLink(row.fromId, row.toId, row.relation);
-      push({ text: `Linked to ${key}` });
-      void rereadPage(p.entity_id);
+      const made = await linkPorts!.createLink(row.fromId, row.toId, row.relation);
+      toastLinked(`Linked to ${key}`, p.entity_id, made.id);
+      await rereadPage(p.entity_id);
     } catch (cause) {
       push({ text: `Could not link it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      linkingJob = false;
+    }
+  }
+
+  /** A link just made says so with a way back, from where it was made (F-433). */
+  function toastLinked(text: string, pageId: string, linkId: string): void {
+    undoable(text, () =>
+      void linkPorts!
+        .unlink(linkId)
+        .then(() => rereadPage(pageId))
+        .catch((cause: unknown) => push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" })),
+    );
+  }
+
+  /** The heading's `#`: the address is not on screen in the app, so the link goes to the clipboard, and the toast names the section (F-450). */
+  async function copySection(p: DocPage, section: number, heading: string): Promise<void> {
+    try {
+      await io.copy(copyLinkText(p, section));
+      // The clipboard holds one link, so one toast says which.
+      push({ text: `Copied link to ${heading}`, subject: "copy-section" });
+    } catch (cause) {
+      push({ text: `Could not copy: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  /** A press of *Unlink* still on its way, so a second press withdraws and toasts nothing twice. */
+  let unlinking = false;
+
+  /**
+   * The foot's *Unlink*: a link drawn by hand goes at once, with *Undo*, as the ticket's drawer has it. The page read
+   * again says what the toast says: a page whose text still names the ticket keeps it listed, and says why (F-447).
+   */
+  async function unlinkWork(pageId: string, link: LinkEntry["link"]): Promise<void> {
+    if (!linkPorts || unlinking) return;
+    unlinking = true;
+    const ports = linkPorts;
+    try {
+      await ports.unlink(link.id);
+      await rereadPage(pageId);
+      const kept = page?.entity_id === pageId ? page.work.find((work) => !work.linked && (work.entity_id === link.to_id || work.entity_id === link.from_id)) : undefined;
+      undoable(kept === undefined ? "Unlinked in knobas only." : `Link removed. The page still names ${kept.key}, so it stays listed.`, () =>
+        void ports
+          .createLink(link.from_id, link.to_id, link.relation, link.note ?? undefined)
+          .then(() => rereadPage(pageId))
+          .catch((cause: unknown) => push({ text: `Could not link it again: ${ipcErrorMessage(cause)}`, tone: "err" })),
+      );
+    } catch (cause) {
+      push({ text: `Could not unlink: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      unlinking = false;
     }
   }
 
@@ -743,14 +1261,55 @@
   /** The surface Docs' echoes are tagged with, for `watchEchoes`. */
   const DOCS = "docs";
 
-  /** A tree read drops each queued page it holds: a page of that title under that parent. */
+  /** What a queued page's *Sent* row sits under. The tree keeps those folds open until another page opens, so the row is seen, and the page once it lands (F-449). */
+  let revealed = $state<string[]>([]);
+  /** The toast each *Create page* raised, by parent and title, which the read that holds the page takes the place of. */
+  const pageToasts = new Map<string, number>();
+  const pageKey = (parent: string, title: string) => `${parent}\0${title}`;
+
+  /** A tree read drops each queued page it holds: a page of that title under that parent. Now it exists, it can be opened. */
   function settlePages(read: DocsTree): void {
-    const under = new Map<string, Set<string>>();
+    const under = new Map<string, Map<string, string>>();
     for (const node of read.spaces.flatMap((s) => s.pages)) {
       if (node.parent === null) continue;
-      under.set(node.parent, (under.get(node.parent) ?? new Set()).add(node.title.trim()));
+      under.set(node.parent, (under.get(node.parent) ?? new Map<string, string>()).set(node.title.trim(), node.entity_id));
     }
-    for (const [parent, titles] of under) settleEchoes(parent, (echo) => echo.kind === "page" && titles.has(echo.text.trim()));
+    for (const [parent, titles] of under) {
+      for (const echo of echoesOn(parent, "page")) {
+        const id = titles.get(echo.text.trim());
+        if (id !== undefined) sayCreated(parent, echo.text.trim(), id);
+      }
+      settleEchoes(parent, (echo) => echo.kind === "page" && titles.has(echo.text.trim()));
+    }
+  }
+
+  /** The new page is in the tree: *Open* is offered only from here, because until now there is nothing to open. */
+  function sayCreated(parent: string, title: string, id: string): void {
+    const key = pageKey(parent, title);
+    const raised = pageToasts.get(key);
+    pageToasts.delete(key);
+    // In place of the *Sent* toast. Dismissed rather than amended, because that toast's own follow can still say *Sent* over it.
+    if (raised !== undefined) dismiss(raised);
+    push({
+      text: `Created page ${title}.`,
+      action: {
+        label: "Open",
+        run: () => {
+          location.hash = pageHash(id);
+        },
+      },
+    });
+  }
+
+  /** The *Sent* row in view: the folds around it open, and the rail on its space, unless the rail is showing a search or the job's pages. */
+  function showQueuedPage(parent: string, title: string): void {
+    revealed = [...revealed, parent];
+    const space = tree === null ? undefined : spaceOfPage(tree, parent);
+    if (space !== undefined && shownSpace !== undefined && space !== shownSpace && !jobOn && !searching) picked = spaceId(space);
+    void tick().then(() => {
+      const rows = [...(treeNav?.querySelectorAll(".tf-dl-queued") ?? [])];
+      rows.find((row) => row.textContent?.startsWith(title))?.scrollIntoView?.({ block: "nearest" });
+    });
   }
 
   // A page read drops a section edit once the version moved, and a comment it holds:
@@ -784,7 +1343,7 @@
     if (page === null) return;
     const words = takeAgain(page.entity_id, "comment");
     if (words === null) return;
-    comment = words;
+    drafts.put(commentKey(page.entity_id), words);
     void tick().then(() => composer?.focus());
   });
 
@@ -807,6 +1366,7 @@
       const name = heading ? inlineWords(heading.text) : "";
       const id = p.entity_id;
       const kind = sectionKind(section);
+      toastQueued(`edit section “${name}” of ${p.title}`, sourceOf(p), { write });
       echoWrite(id, kind, text, {
         write,
         base: String(p.version),
@@ -821,7 +1381,6 @@
         },
         follower,
       });
-      toastQueued(`edit section “${name}” of ${p.title}`, sourceOf(p));
       return true;
     } catch (cause) {
       push({ text: `Could not queue the edit: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -830,12 +1389,15 @@
   }
 
   async function sendComment(p: DocPage): Promise<void> {
-    if (comment.trim() === "" || commenting || refusal("comment") !== null) return;
+    const body = drafts.get(commentKey(p.entity_id));
+    if (body.trim() === "" || commenting || refusal("comment") !== null) return;
     commenting = true;
+    // *Comment* goes off with its draft, so focus stays in the box, whichever way this was sent (F-266).
+    composer?.focus({ preventScroll: true });
     try {
-      const body = comment;
       const id = p.entity_id;
       const write = await io.submitWrite({ Comment: { entity: id, body } });
+      toastQueued(`comment on ${p.title}`, sourceOf(p), { write });
       echoWrite(id, "comment", body, {
         write,
         many: true,
@@ -850,13 +1412,20 @@
         },
         follower,
       });
-      toastQueued(`comment on ${p.title}`, sourceOf(p));
-      comment = "";
+      drafts.forget(commentKey(id));
     } catch (cause) {
       push({ text: `Could not queue the comment: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
       commenting = false;
     }
+    // The comment has just taken room above the box, which focus came back to: all of it in view, *Comment* too (F-162).
+    await tick();
+    composer?.closest(".tf-compose")?.scrollIntoView?.({ block: "nearest" });
+  }
+
+  /** ⌘Enter in the composer: read when pressed, because the attachment outlives one read of the page. */
+  function sendOpenComment(): void {
+    if (page !== null) void sendComment(page);
   }
 
   async function createPage(next: NewPage, linkToJob: boolean): Promise<boolean> {
@@ -871,6 +1440,7 @@
       }
       const write = await io.docsCreatePage(next, ticket);
       const title = next.title.trim();
+      pageToasts.set(pageKey(next.parent, title), toastQueued(`create page ${title}`, under ? sourceOf(under) : null, { write }));
       echoWrite(next.parent, "page", title, {
         write,
         many: true,
@@ -885,7 +1455,7 @@
         },
         follower,
       });
-      toastQueued(`create page ${title}`, under ? sourceOf(under) : null);
+      showQueuedPage(next.parent, title);
       return true;
     } catch (cause) {
       push({ text: `Could not queue the page: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -907,18 +1477,17 @@
     onclick={ondrawerclick}
   >
     <div class="tf-dl-head">
-      {#if job !== null}
-        <div class="tf-seg tf-dl-scope" role="group" aria-label="Scope">
-          <button type="button" aria-pressed={jobOn} onclick={() => (filter.scope = "job")}
-            >This job <span class="tf-jobk">{job}</span>{#if jobIds !== null && jobIds.size > 0}{" "}{jobIds.size}{/if}</button
-          >
-          <button type="button" aria-pressed={!jobOn} onclick={() => (filter.scope = "all")}>All pages</button>
-        </div>
+      {#if job !== null && tree !== null && !nothingHeld}
+        <TfScope
+          scopes={[{ id: "job", label: "This job", count: jobIds?.size ?? null, title: `The pages ${job} reaches` }, { id: "all", label: "All" }]}
+          scope={jobOn ? "job" : "all"}
+          onpick={(id) => (filter.scope = id)}
+        />
       {/if}
-      {#if !jobOn}
-        <select aria-label="Space" value={pickerValue} onchange={pick}>
+      {#if !jobOn && tree !== null && tree.spaces.length > 0}
+        <select aria-label="Space" value={pickerValue} title={shownSpace?.name ?? undefined} onchange={pick}>
           <option value="*">All spaces ({total})</option>
-          {#each tree?.spaces ?? [] as space (spaceId(space))}
+          {#each tree.spaces as space (spaceId(space))}
             <option value={spaceId(space)}>{spaceLabel(space)}</option>
           {/each}
         </select>
@@ -932,25 +1501,23 @@
         <p class="tf-dl-note">Could not read the page tree: {treeError}</p>
       {:else if searching}
         {#if searchError !== null}
-          <p class="tf-dl-note">Could not search: {searchError}</p>
+          <p class="tf-dl-note">Could not search: {searchError} <button type="button" class="tf-linkish" onclick={retrySearch}>Try again</button></p>
         {:else if hits !== null}
           <TfDocHits
             found={hits}
             {current}
             scope={searchScope}
-            kept={jobOn ? "job" : shownSpace !== undefined ? "space" : null}
-            me={page?.me ?? []}
-            onall={() => {
-              if (jobOn) filter.scope = "all";
-              else picked = "*";
-            }}
+            kept={searchKept}
+            {me}
+            answered={answerHere}
+            onall={widenSearch}
             onpick={openHit}
           />
         {/if}
-      {:else if jobOn}
+      {:else if jobOn && tree !== null}
         {#each jobGroups as group (group.reason)}
           <div class="tf-dl-for">
-            <h4>{group.reason}</h4>
+            <h4><TfKeyed text={group.reason} /></h4>
             {#each group.pages as item (item.entity_id)}
               <a href={pageHash(item.entity_id)} aria-current={item.entity_id === current ? "true" : undefined}
                 >{item.title}<span class="tf-why">{item.where}</span></a
@@ -960,33 +1527,51 @@
         {:else}
           {#if jobIds !== null}
             <p class="tf-dl-note">
-              Nothing in Docs is on {job} yet. Use Link to {job} on a page.
+              Nothing in Docs is on <TfKey value={job ?? ""} /> yet. Use Link to <TfKey value={job ?? ""} /> on a page.
               <button type="button" class="tf-linkish" onclick={() => (filter.scope = "all")}>Search all pages</button>
             </p>
           {/if}
         {/each}
       {:else}
-        {#if forYou.length > 0}
+        <!-- The home lists *For you* itself. -->
+        {#if forYou.length > 0 && !home}
           <div class="tf-dl-for">
             <h4>For you</h4>
             {#each forYou as item (item.entity_id)}
-              <a href={pageHash(item.entity_id)} aria-current={item.entity_id === current ? "true" : undefined}
-                >{item.title}<span class="tf-why">{forYouWhy(item)}</span></a
+              <!-- On the page it names, the row still jumps to the mention. The tree's row is the rail's one mark of the open page (F-451). -->
+              <a
+                href={forYouHash(item.entity_id)}
+                onclick={() => {
+                  if (mentionHere && item.entity_id === current) toMention();
+                }}>{item.title}<span class="tf-why">{forYouWhy(item)}</span></a
               >
             {/each}
           </div>
         {/if}
-        {#if tree !== null && tree.spaces.length === 0}
-          <p class="tf-dl-note">No pages are synced yet. A source with pages, such as Confluence, fills this tree.</p>
-        {:else if tree !== null && picked === "*"}
+        {#if tree === null}
+          {#if treeError === null}
+            <div class="tf-skel tf-skel-lines" aria-hidden="true">
+              {#each [0, 1, 2, 3, 4, 5] as line (line)}<span class="tf-skel-bar"></span>{/each}
+            </div>
+          {/if}
+        {:else if tree.spaces.length === 0}
+          <p class="tf-dl-note">{hasSource ? "No pages have synced yet." : "No wiki source is set up yet."}</p>
+        {:else if shownSpace === undefined}
           {#each tree.spaces as space (spaceId(space))}
-            <details open={current !== null && space.pages.some((p) => p.entity_id === current)}>
-              <summary class="tf-spc">{space.key} {space.name ?? ""} <span class="tf-count">{space.pages.length}</span></summary>
-              <TfDocTree {space} {current} />
+            {@const holds = space.pages.some((p) => p.entity_id === current || revealed.includes(p.entity_id))}
+            <details
+              open={holds || openSpaces.has(spaceId(space))}
+              ontoggle={(event) => {
+                if (!event.currentTarget.open) openSpaces.delete(spaceId(space));
+                else if (!holds) openSpaces.add(spaceId(space));
+              }}
+            >
+              <summary class="tf-spc"><span class="tf-spc-n" title={space.name ?? space.key}>{space.name ?? space.key}</span> <span class="tf-count">{space.pages.length}</span></summary>
+              <div class="tf-fold-in"><TfDocTree {space} {current} reveal={revealed} opened={foldsOf(spaceId(space))} /></div>
             </details>
           {/each}
         {:else if shownSpace}
-          <TfDocTree space={shownSpace} {current} />
+          <TfDocTree space={shownSpace} {current} reveal={revealed} opened={foldsOf(spaceId(shownSpace))} />
         {/if}
       {/if}
     </div>
@@ -1002,7 +1587,7 @@
             const space = shownSpace ?? pageSpace;
             newPage = { space: space ? spaceId(space) : null, parent: p.entity_id };
           }}
-          >New page</button>
+          >New page…</button>
       </div>
     {/if}
   </nav>
@@ -1012,67 +1597,115 @@
     <div class="tf-rd-backdrop" onclick={closeDrawer}></div>
   {/if}
 
-  <section class="tf-rd-main" bind:this={main} onscroll={follow}>
-    {#if find !== "" && page !== null}
+  <TfScroller class="tf-rd-main" bind:ref={main} onscroll={follow} onwheel={() => (pickedSection = null)} onpointerdown={(event) => { if (event.target === event.currentTarget) pickedSection = null; }} onkeydown={releaseSection}>
+    <!-- The one fold bar below 900 px. The tree it opens is a drawer, because the page does not reflow under it. -->
+    {#if drawerBand.current}
+      <TfRailBar
+        label={place.kind === "search" ? "Search" : spaceHere !== undefined ? "Space" : "Page"}
+        value={place.kind === "search" ? place.words : (page?.title ?? spaceHere?.name ?? spaceHere?.key ?? "Docs home")}
+        open={drawer} controls="tf-docs-tree" onpress={(event) => openTree(event.currentTarget as Element)} />
+    {/if}
+    {#if findOpen}
       <div class="tf-findbar" role="search">
-        <span>Matches for</span>
-        <input value={find} oninput={(e) => (find = e.currentTarget.value)} onkeydown={onfindkey} aria-label="Find in page" />
-        <span>{marks === 0 ? "none on this page" : `${Math.max(at, 0) + 1} of ${marks}`}</span>
-        <button type="button" onclick={() => jump(-1)} aria-label="Previous">↑</button>
-        <button type="button" onclick={() => jump(1)} aria-label="Next">↓</button>
-        <button type="button" class="tf-findx" onclick={() => (find = "")} aria-label="Stop highlighting">✕</button>
+        <span>Find</span>
+        <input
+          bind:this={findBox}
+          value={find}
+          oninput={(e) => {
+            findTyped = true;
+            find = e.currentTarget.value;
+          }}
+          onkeydown={onfindkey}
+          aria-label="Find in page"
+          {@attach filterKeys({ close: closeFind })}
+        />
+        <!-- A held width: the arrows beside it do not move as the words change. -->
+        <span class="tf-findn">{find.trim() === "" ? "" : marks === 0 ? "none on this page" : `${Math.max(at, 0) + 1} of ${marks}`}</span>
+        <button type="button" disabled={marks === 0} onclick={() => jump(-1)} aria-label="Previous">↑</button>
+        <button type="button" disabled={marks === 0} onclick={() => jump(1)} aria-label="Next">↓</button>
+        <button type="button" class="tf-findx" onclick={closeFind} aria-label="Stop highlighting">✕</button>
       </div>
     {/if}
-    {#if page === null && (pageError !== null || treeError !== null || (tree !== null && target === null))}
-      <!-- No page to head (#2286): the view's own header, so *Sync now* is still where every view puts it. -->
-      <TfBareHeader title="Docs" {sync} />
-    {/if}
-    {#if pageError !== null}
-      <div class="tf-empty"><p>Could not open this page: {pageError}</p></div>
-    {:else if page !== null}
+    {#if home}
+      <!-- A search's address, or a ticket card's row that opened the home narrowed to that ticket: the same bar its other rows land under. -->
+      {#if place.kind === "search"}
+        <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: "Search" }]} {back} /></div>
+      {:else if back !== null}
+        <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs" }]} {back} /></div>
+      {/if}
+      <TfDocsHome
+        {tree}
+        failed={treeError}
+        {job}
+        groups={jobGroups}
+        jobFirst={jobOn}
+        {sync}
+        notice={answerHere || hitsHere ? searchAnswer : undefined}
+        onretry={() => void readTree(false)}
+        onresume={(id) => (resuming = { id, top: readingAt(id) })}
+      />
+    {:else if spaceHere !== undefined}
+      <div class="tf-dh-crumb"><TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: spaceHere.name ?? spaceHere.key }]} {back} /></div>
+      <TfDocsSpace space={spaceHere} {sync} />
+    {:else if tree === null}
+      {#if treeError !== null}
+        <!-- No tree to place the address in: the view's own header, so *Sync now* is still where every view puts it (#2286). -->
+        <TfBareHeader title="Docs" {sync} />
+        <TfNothingHere message="Could not read Docs: {treeError}" onretry={() => void readTree(false)} />
+      {:else}
+        <div class="tf-skel tf-skel-lines tf-dh-wait" aria-label="Reading Docs" role="status">
+          {#each [0, 1, 2, 3, 4, 5] as line (line)}<span class="tf-skel-bar"></span>{/each}
+        </div>
+      {/if}
+    {:else if place.kind === "space"}
+      <TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: "Space" }]} {back} />
+      <TfNothingHere message="knobas does not hold this space. It may not have synced yet." href="#/docs" action="Docs home" />
+    {:else if pageError !== null}
+      <TfCrumbs parts={[{ name: "Docs", href: "#/docs" }, { name: "Page" }]} {back} />
+      {#if pageMissing}
+        <TfNothingHere message="knobas does not hold this page. It may not have synced yet." href="#/docs" action="Docs home" />
+      {:else}
+        <TfNothingHere message="This page could not be opened: {pageError}" onretry={target === null ? undefined : () => void readPage(target, false)} />
+      {/if}
+    {:else if page === null}
+      <div class="tf-skel tf-skel-lines tf-dh-wait" aria-label="Reading the page" role="status">
+        {#each [0, 1, 2, 3, 4, 5] as line (line)}<span class="tf-skel-bar"></span>{/each}
+      </div>
+    {:else}
       {@const p = page}
       {@const created = createdBy(p)}
-      <div class="tf-rd-sheet">
+    <nav class="tf-crumbs tf-rd-crumbrow" aria-label="Breadcrumb">
+      <div class="tf-rd-crumb">
+        <a href="#/docs">Docs</a>
+        {#if p.space}
+          › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
+        {/if}
+        {#if parent}
+          › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
+        {/if}
+        › <strong><TfMarked text={p.title} {stems} /></strong>
+      </div>
+      <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
+      {#if back !== null}<TfBackHint {back} />{/if}
+    </nav>
+      <div class="tf-rd-sheet" class:tf-rd-solo={outlineFolds} bind:this={sheet}>
         <article class="tf-rd-page" bind:this={article}>
-          <div class="tf-rd-crumbrow">
-            {#if drawerBand.current}
-              <button
-                type="button"
-                class="tf-btn tf-sm tf-rd-pages"
-                aria-controls="tf-docs-tree"
-                aria-expanded={drawer}
-                onclick={(event) => openTree(event.currentTarget)}
-                ><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"
-                  ><path d="M2.5 3.5h11M5 8h8.5M5 12.5h8.5M2.5 8h.5M2.5 12.5h.5" /></svg
-                >Pages</button
-              >
-            {/if}
-            <div class="tf-rd-crumb">
-              <a href="#/docs">Docs</a>
-              {#if p.space}
-                › <a href={crumbSpace ?? undefined}>{p.space.name ?? p.space.key}</a>
-              {/if}
-              {#if parent}
-                › {#if parent.entity_id}<a href={pageHash(parent.entity_id)}>{parent.title}</a>{:else}{parent.title}{/if}
-              {/if}
-            </div>
-            <!-- Where `Esc` goes, as every breadcrumb names it (spec #2227, story 35). -->
-            {#if back !== null}<span class="tf-esc">Back to {back.name} <kbd>Esc</kbd></span>{/if}
-          </div>
           <!-- The canonical header (#2238, #2286): the title, and on its line the actions in the
                Controls order, "Open in" a ghost, the page's Refresh and the view's Sync now last. -->
           <div class="tf-fhead tf-rd-head">
-            <h1 class="tf-rd-title">
+            <h1 class="tf-rd-title" tabindex="-1">
               <TfMarked text={p.title} {stems} />
             </h1>
-            <div class="tf-acts">
+            <div class="tf-acts" bind:this={headActs}>
               {#if job !== null && linkPorts}
                 {@const key = job}
                 {@const ref = jobAt ?? job}
-                <button type="button" class="tf-btn" onclick={() => linkToJob(p, ref, key)}>Link to {key}</button>
-              {/if}
-              {#if linkPorts}
-                <button type="button" class="tf-btn" onclick={() => (linking = true)}>Link to…</button>
+                {#if p.work.some((work) => work.key === key && work.linked)}
+                  <!-- Already on the job: nothing to press, and the page says so where the button was. -->
+                  <span class="tf-rd-on" title="This page is linked to {key}">On <TfKey value={key} /></span>
+                {:else}
+                  <button type="button" class="tf-btn" disabled={linkingJob} onclick={() => linkToJob(p, ref, key)}>Link to <TfKey value={key} /></button>
+                {/if}
               {/if}
               {#if p.writes.includes("create_page")}
                 <button
@@ -1082,17 +1715,23 @@
                   onclick={() => {
                     if (refusal("create_page") === null) newPage = { space: pageSpace ? spaceId(pageSpace) : null, parent: p.entity_id };
                   }}
-                  >New page here</button>
+                  >New page…</button>
               {/if}
-              <button type="button" class="tf-btn" onclick={() => copyLink(p)}>Copy link</button>
-              {#if p.readable}
-                <TfDocMore onexport={() => exportMarkdown(p)} />
-              {/if}
+              <TfDocMore
+                onlink={linkPorts ? () => (linking = true) : undefined}
+                oncopy={() => copyLink(p)}
+                onexport={p.readable ? () => exportMarkdown(p) : undefined}
+                sync={syncForMore}
+              />
               {#if p.web_url}
                 {@const url = p.web_url}
                 <button type="button" class="tf-btn tf-ghost" onclick={() => open(url)}>Open in {p.source_name}</button>
               {/if}
-              <TfHeaderRefresh {detail} {refresh} {reread} {sync} />
+              {#if !syncInMore && !beside}
+                <TfHeaderRefresh {detail} {refresh} {reread} {sync} noun="page" />
+              {:else if detail !== null}
+                <TfDetailRefresh {detail} {refresh} {reread} page noun="page" />
+              {/if}
             </div>
           </div>
           <div class="tf-rd-meta">
@@ -1104,15 +1743,20 @@
             {/if}
             {#if p.version !== null}<span>version {p.version}</span>{/if}
             {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
-            {#each p.labels as label (label)}
-              <button type="button" class="tf-chip" title="Search for {label}" onclick={(event) => searchLabel(label, event.currentTarget)}
-                >{label}</button>
-            {/each}
+            {#if p.labels.length > 0}
+              <!-- The labels wrap as one group, so none is left alone on a line. -->
+              <span class="tf-rd-labels">
+                {#each p.labels as label (label)}
+                  <button type="button" class="tf-lab" title="Search for {label}" onclick={(event) => searchLabel(label, event.currentTarget)}
+                    >{label}</button>
+                {/each}
+              </span>
+            {/if}
           </div>
-          {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
-          {#if narrow.current}
+          {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
+          {#if outlineFolds}
             {#key p.entity_id}
-              <TfDocOutline page={p} {stems} {active} folded />
+              <TfDocOutline page={p} {stems} active={marked} folded onpick={pickSection} />
             {/key}
           {/if}
           <div class="tf-doc">
@@ -1128,19 +1772,20 @@
                 {stems}
                 onopen={open}
                 oncopy={copy}
+                oncopylink={(section, heading) => copySection(p, section, heading)}
                 onsave={(section, text) => saveSection(p, section, text)}
               />
             {:else}
               <p class="tf-dl-note">knobas cannot read this page's body. Open it in {p.source_name}.</p>
             {/if}
             {#key p.entity_id}
-              <TfDocFoot page={p} spaces={tree?.spaces ?? []} />
+              <TfDocFoot page={p} spaces={tree.spaces} links={detail === null ? [] : linkedOn(detail)} onunlink={linkPorts ? (link) => unlinkWork(p.entity_id, link) : undefined} />
             {/key}
             <div class="tf-cmts">
-              <h2>Comments {#if p.comments.length > 0}<span class="tf-count">{p.comments.length}</span>{/if}</h2>
+              <h2>Comments {#if p.comments.length + queuedComments.length > 0}<span class="tf-count">{p.comments.length + queuedComments.length}</span>{/if}</h2>
               {#each p.comments as c, i (i)}
                 {@const mine = c.author !== null && p.me.includes(c.author)}
-                <div class="tf-msg">
+                <div class="tf-msg" class:tf-mention={c.blocks.some(mentionsMe)}>
                   <span class="tf-av" class:tf-me={mine}>{initials(c.author)}</span>
                   <div class="tf-cmt-body">
                     <div class="tf-who">
@@ -1163,7 +1808,7 @@
                 <div class="tf-msg tf-queued">
                   <span class="tf-av tf-me">{initials(p.me[0] ?? null)}</span>
                   <div class="tf-cmt-body">
-                    <div class="tf-who"><b>You</b> <span class="tf-chip tf-info">{echo.state}</span></div>
+                    <div class="tf-who"><b>You</b> <TfStateChip text={echo.state} tone="info" /></div>
                     <p class="tf-cmt-queued">{echo.text}</p>
                   </div>
                 </div>
@@ -1172,13 +1817,19 @@
                 <p class="tf-dl-note">No comments yet.</p>
               {/if}
               {#if p.writes.includes("comment")}
-                <div class="tf-compose">
-                  <textarea bind:this={composer} bind:value={comment} placeholder="Comment on this page" aria-label="Comment on this page"
+                <div class="tf-compose" tabindex="-1">
+                  <textarea
+                    bind:this={composer}
+                    value={comment}
+                    oninput={(event) => drafts.put(commentKey(p.entity_id), event.currentTarget.value)}
+                    placeholder="Comment on this page"
+                    aria-label="Comment on this page"
+                    {@attach sendKey(sendOpenComment)}
                   ></textarea>
                   <div class="tf-acts">
                     <button
                       type="button"
-                      class="tf-btn tf-primary"
+                      class="tf-btn tf-sm tf-primary"
                       disabled={commenting || comment.trim() === ""}
                       {...refusedAttrs(refusal("comment"))}
                       onclick={() => sendComment(p)}>Comment</button>
@@ -1188,15 +1839,36 @@
             </div>
           </div>
         </article>
-        {#if !narrow.current}
-          <TfDocOutline page={p} {stems} {active} folded={false} />
+        {#if !outlineFolds}
+          <TfDocOutline page={p} {stems} active={marked} folded={false} onpick={pickSection} />
         {/if}
       </div>
-    {:else if tree !== null && target === null}
-      <div class="tf-empty"><p>Nothing to read yet. Pages appear here once a docs source has synced.</p></div>
     {/if}
-  </section>
+  </TfScroller>
 </div>
+
+{#snippet searchAnswer()}
+  {#if hitsHere && !answerHere}
+    {@const total = hits?.total ?? 0}
+    <p class="tf-dh-found" role="status">
+      {counted(total, "page", "pages")} {total === 1 ? "matches" : "match"} <b>{query.trim()}</b>{#if drawerBand.current}. <button type="button" class="tf-linkish" onclick={(event) => openTree(event.currentTarget)}>Show them</button>{:else}, listed on the left.{/if}
+    </p>
+  {:else}
+  <div class="tf-empty tf-dh-answer">
+    {#if searchError !== null}
+      <p>Could not search: {searchError}</p>
+      <button type="button" class="tf-btn tf-sm" onclick={retrySearch}>Try again</button>
+    {:else}
+      <p>No page matches <b>{query.trim()}</b>. Every word has to appear in the page or its comments.</p>
+    {/if}
+    {#if searchKept !== null}
+      <button type="button" class="tf-btn tf-sm" onclick={widenSearch}>{searchKept === "job" ? "Search all pages" : "Search all spaces"}</button>
+    {:else}
+      <button type="button" class="tf-btn tf-sm" onclick={clearSearch}>Clear search</button>
+    {/if}
+  </div>
+  {/if}
+{/snippet}
 
 {#if linking && page !== null && linkPorts}
   {@const p = page}
@@ -1205,10 +1877,11 @@
     entityId={p.entity_id}
     ports={linkPorts}
     {layers}
+    linked={[...p.work.filter((work) => work.linked).map((work) => work.entity_id), ...(detail === null ? [] : linkedOn(detail).map((entry) => entry.other.entity_id))]}
     onclose={() => (linking = false)}
-    onlinked={() => {
+    onlinked={(target, made) => {
       linking = false;
-      push({ text: "Linked in knobas" });
+      toastLinked(`Linked to ${target.title} in knobas`, p.entity_id, made.id);
       void rereadPage(p.entity_id);
     }}
   />

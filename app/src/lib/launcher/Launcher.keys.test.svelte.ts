@@ -104,6 +104,8 @@ function mountIt(backend = keyBackend()) {
     target,
     props: {
       open: true,
+      // These tests type a kind's word to reach its row; *Go to* has its own.
+      places: [],
       onnavigate: calls.navigate,
       onclose: () => {},
       ontimer: vi.fn(),
@@ -112,7 +114,7 @@ function mountIt(backend = keyBackend()) {
       ports: { search: async (query: SearchQuery) => response(query.raw), launcherHome: async () => HOME },
       sheetPorts: {
         createLink: calls.createLink,
-        submitWrite: calls.submitWrite,
+        submitWrite: calls.submitWrite as never,
         copyText: vi.fn(async () => {}),
         openCheckout: calls.openCheckout,
         checkoutSettings: calls.checkoutSettings,
@@ -276,13 +278,28 @@ test("the box's own chords are refused with a message, and none of them does its
   press("?", { code: "Slash", metaKey: true, shiftKey: true });
   expect(refused()).toBe("⌘? is the launcher's own");
   // ⌘D did not switch to Everything, and ⌘? opened no filters.
-  expect(target.querySelector(".tf-ln-scope button")?.textContent).toBe("Titles");
+  expect(target.querySelector(".tf-launch-deep")).toBeNull();
   expect(modeLabel()).toBe("Keys");
   // A free chord is taken and the message goes.
   chord("o", { metaKey: true, shiftKey: true });
   expect(refused()).toBeNull();
   expect(bigKeys()).toEqual(["⌘", "⇧", "O"]);
   expect(calls.backend.bindActionKey).not.toHaveBeenCalled();
+});
+
+test("the Titles chip and ⌘D go where they change no results, and come back with a search (F-643)", async () => {
+  mountIt();
+  await settle();
+  await type("repo");
+  const chip = () => target.querySelector(".tf-ln-scope button");
+  const hint = () => [...target.querySelectorAll(".tf-launch > footer kbd")].some((kbd) => kbd.textContent === "⌘D");
+  expect(chip()?.textContent).toBe("Titles");
+  expect(hint()).toBe(true);
+  await sheetOn("repo");
+  expect(chip()).toBeNull();
+  expect(hint()).toBe(false);
+  expect(chord("d").defaultPrevented, "still not the webview's bookmark").toBe(true);
+  expect(target.querySelector(".tf-launch-deep"), "the sheet does not widen").toBeNull();
 });
 
 test("an action's chord runs it on the selected row of its kind without opening the sheet", async () => {

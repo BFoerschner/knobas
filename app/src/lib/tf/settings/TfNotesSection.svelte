@@ -22,6 +22,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { CaptureShortcut, PublishTarget } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources, type PublishableSource } from "../../standup/protocol";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
@@ -105,7 +106,7 @@
     try {
       const queued = await ports.moveNotes(chosen.parent);
       moving = false;
-      push({ text: `Queued ${pageCount(queued.length)} in Confluence. Your notes stay in knobas.` });
+      push({ text: `Queued ${pageCount(queued.length)} in Confluence. Your notes stay in knobas.`, action: { label: "Show queue", run: openWriteQueue } });
     } catch (cause) {
       push({ text: `Could not move the notes: ${ipcErrorMessage(cause)}`, tone: "err" });
     } finally {
@@ -209,7 +210,7 @@
       {:else}
         {#each keyCaps(view.accelerator) as cap, index (index)}<kbd>{cap}</kbd>{/each}
       {/if}
-      <button class="tf-btn tf-ghost tf-sm" aria-label="Change capture shortcut" onclick={openShortcut}>Change…</button>
+      <button class="tf-btn tf-sm" aria-label="Change capture shortcut" onclick={openShortcut}>Change…</button>
     </div>
   </div>
   <div class="tf-stg-row">
@@ -219,7 +220,7 @@
 {/if}
 
 {#if editing}
-  <TfDialog title="Capture shortcut" onclose={() => (editing = false)} {layers}>
+  <TfDialog why={saving ? null : typed === "" ? (view?.accelerator != null ? "Type a shortcut, or press Clear." : "Type a shortcut.") : typed === (view?.accelerator ?? "") ? "This is the shortcut already." : null} title="Change the capture shortcut" onclose={() => (editing = false)} {layers}>
     {#snippet body()}
       <p class="tf-dsub">
         Written the way <code>CmdOrCtrl+Shift+N</code> is: modifiers (<code>CmdOrCtrl</code>, <code>Shift</code>,
@@ -254,7 +255,7 @@
 {/if}
 
 {#if moving}
-  <TfDialog title="Move notes to Confluence" onclose={() => (moving = false)} {layers}>
+  <TfDialog why={sending || chosen !== null ? null : "Choose a page first."} title="Move notes to Confluence" onclose={() => (moving = false)} {layers}>
     {#snippet body()}
       <p class="tf-dsub">Each note becomes a page under the one you pick. Your notes stay in knobas.</p>
       <div class="tf-stg-pick">

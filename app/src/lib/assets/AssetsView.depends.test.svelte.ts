@@ -91,7 +91,7 @@ const NOTHING: DependsOnThis = { assets: [], routes: [] };
  * and every relation on screen comes from the panel's own answer rather than
  * from what holds what.
  */
-function bridge(answers: Answers) {
+function bridge(answers: Answers, extra: Partial<AssetDetail> = {}) {
   const asked: string[] = [];
   /**
    * Set by {@link holdNext}: the next walk answers this promise's resolver and
@@ -135,6 +135,7 @@ function bridge(answers: Answers) {
         monitors: [],
         monitoring: [],
         monitor_targets: [],
+        ...extra,
       });
     },
     dependsOnThis: (assetId: string): Promise<DependsOnThis> => {
@@ -156,10 +157,10 @@ function bridge(answers: Answers) {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(hash: string, answers: Answers) {
+function render(hash: string, answers: Answers, extra: Partial<AssetDetail> = {}) {
   location.hash = hash;
   const nav = createTestNav();
-  const ports = bridge(answers);
+  const ports = bridge(answers, extra);
   app = mount(AssetsView, {
     target,
     props: { nav, now: () => NOW, ports: ports as never },
@@ -200,11 +201,11 @@ afterEach(() => {
  * Story 51 and story 54 on screen: how many break, and, per line, where it
  * sits and why it is there.
  *
- * The three lines are the three ways onto the list — a `depends-on` link, a
+ * There are three ways onto the list — a `depends-on` link, a
  * `runs-on` link, and containment — and each is read in the vocabulary's own
  * words rather than as the stored key: `depends-on` is a key and *depends on*
  * is a sentence. The null is the tree, which is a `parent_id` field and not a
- * link (ADR-0014), and it reads *inside*.
+ * link (ADR-0014), and it waits in the fold the next test opens.
  */
 test("the panel counts what breaks and says where each one sits and why", async () => {
   render("#/asset/asset:knobas-gitea", {
@@ -223,8 +224,45 @@ test("the panel counts what breaks and says where each one sits and why", async 
   expect(lines()).toEqual([
     "knobas-teamcity depends on knobas test estate / Hetzner Cloud nbg1",
     "knobas-teamcity-agent runs on knobas test estate / knobas-teamcity",
-    "Docker engine (knobas-teamcity) inside",
   ]);
+});
+
+/**
+ * F-551: what only sits inside repeats the column beside the pane, so it waits
+ * in a closed fold with a count. The panel's own count still holds every row,
+ * and the rows *depends on* stay open above the fold.
+ */
+test("what sits inside waits in a closed fold, and opening it lists it under the same count", async () => {
+  render("#/asset/asset:knobas-gitea", {
+    [GITEA.id]: {
+      assets: [
+        { asset: TEAMCITY, path: null, relation: "depends-on" },
+        { asset: ENGINE, path: "knobas test estate / knobas-gitea / knobas-teamcity", relation: null },
+      ],
+      routes: [],
+    },
+  });
+
+  await waitFor(() => expect(count()).toBe("2"));
+  const fold = target.querySelector<HTMLDetailsElement>(".breaks details.inside")!;
+  expect(fold.open).toBe(false);
+  expect(fold.querySelector("summary")?.textContent?.replace(/\s+/g, " ").trim()).toBe("Everything inside it 1");
+  expect(lines()).toEqual(["knobas-teamcity depends on"]);
+
+  fold.open = true;
+  fold.dispatchEvent(new Event("toggle"));
+  await waitFor(() => expect(lines()).toHaveLength(2));
+  expect(lines()[1]).toContain("Docker engine (knobas-teamcity)");
+  expect(lines()[1]).not.toContain("inside");
+});
+
+test("an asset nothing sits inside draws no fold", async () => {
+  render("#/asset/asset:knobas-gitea", {
+    [GITEA.id]: { assets: [{ asset: TEAMCITY, path: null, relation: "depends-on" }], routes: [] },
+  });
+
+  await waitFor(() => expect(count()).toBe("1"));
+  expect(target.querySelector(".breaks details.inside")).toBeNull();
 });
 
 /**
@@ -243,12 +281,25 @@ test("the routes that would break are listed beneath and are not in the count", 
   });
 
   await waitFor(() => expect(count()).toBe("1"));
-  expect(text()).toContain("Reachable via routes that would break");
+  expect(text()).toContain("Other routes that would break");
   expect(lines()).toEqual([
     "knobas-teamcity depends on",
     "Gitea http://127.0.0.1:3000/",
     "gitea (reverse tunnel) http://gitea.test:3000/",
   ]);
+});
+
+/** The pane says a route once: one already under *Reachable via* isn't listed again, and a line says it breaks too (F-509). */
+test("a route already under Reachable via is not listed again under the routes that would break", async () => {
+  render(
+    "#/asset/asset:knobas-gitea",
+    { [GITEA.id]: { assets: [], routes: [TUNNEL, REVERSE] } },
+    { reachable_via: [TUNNEL] },
+  );
+
+  await waitFor(() => expect(text()).toContain("Other routes that would break"));
+  expect(lines()).toEqual(["gitea (reverse tunnel) http://gitea.test:3000/"]);
+  expect(text()).toContain("The routes under Reachable via would break too.");
 });
 
 /**
@@ -362,11 +413,25 @@ test("a route's name is left-aligned and its URL wraps beneath it (#1606)", asyn
 });
 
 test("a long Depends on this list draws the lines near the viewport and counts them all (#2210)", async () => {
-  const many = Array.from({ length: 2000 }, (_, at) => ({ asset: row(`asset:bulk-${at}`, `bulk-${at}`, null), path: null, relation: null }));
+  const many = Array.from({ length: 2000 }, (_, at) => ({ asset: row(`asset:bulk-${at}`, `bulk-${at}`, null), path: null, relation: "depends-on" }));
   render("#/asset/asset:knobas-gitea", { [GITEA.id]: { assets: many, routes: [] } });
 
   await waitFor(() => expect(count()).toBe("2000"));
   expect(lines().length).toBeGreaterThan(5);
   expect(lines().length).toBeLessThan(100);
-  expect(lines()[0]).toBe("bulk-0 inside");
+  expect(lines()[0]).toBe("bulk-0 depends on");
+});
+
+test("a long list inside draws nothing until its fold opens, then the lines near the viewport (#2210, F-551)", async () => {
+  const many = Array.from({ length: 2000 }, (_, at) => ({ asset: row(`asset:bulk-${at}`, `bulk-${at}`, null), path: null, relation: null }));
+  render("#/asset/asset:knobas-gitea", { [GITEA.id]: { assets: many, routes: [] } });
+
+  await waitFor(() => expect(count()).toBe("2000"));
+  expect(lines()).toEqual([]);
+  const fold = target.querySelector<HTMLDetailsElement>(".breaks details.inside")!;
+  fold.open = true;
+  fold.dispatchEvent(new Event("toggle"));
+  await waitFor(() => expect(lines().length).toBeGreaterThan(5));
+  expect(lines().length).toBeLessThan(100);
+  expect(lines()[0]).toBe("bulk-0");
 });

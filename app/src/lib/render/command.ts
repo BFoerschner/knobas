@@ -17,6 +17,7 @@
  *   runs nothing and keeps the SVG's own styles. {@link frameDocument} builds
  *   the frame's document.
  */
+import { secondsLabel } from "../time/format";
 import { runRenderer, type RenderContent, type RenderRun, type UserRenderer } from "../ipc/app";
 import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import { mount, unmount } from "svelte";
@@ -101,7 +102,7 @@ export function failureLine(run: RenderRun): string | null {
     case "failed":
       return run.status === null ? "The command was stopped by a signal." : `The command exited with status ${run.status}.`;
     case "timed_out":
-      return `The command took longer than its timeout of ${run.seconds} s and was stopped.`;
+      return `The command took longer than its timeout of ${secondsLabel(run.seconds)} and was stopped.`;
     case "too_large":
       return `The command wrote more than ${Math.round(run.cap_bytes / (1024 * 1024))} MB and was stopped.`;
     case "not_started":

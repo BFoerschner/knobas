@@ -46,12 +46,24 @@ export function everyWhileShown(shown: () => boolean, ms: number, run: () => voi
  * inside a `display: none` subtree loses its own scroll, so each is noted as
  * the page or tab is hidden (before the DOM changes) and set back once it is
  * shown again (after it is drawn).
+ *
+ * `address` says what the page holds. Shown at another address than it was left at, it holds something the reader has not
+ * read, so everything noted goes to the top instead (F-454, F-067). A return by `Esc`, ⌘[ or a nav press then sets its own place, and a
+ * page's own landing (*Continue reading*, a section) comes after this.
+ *
+ * This runs on a move inside a shown page too, because the host hands the page a new entry at each address: only a real hide
+ * counts, or a press on a run or a tree's row would send the page's rail or column to its top.
  */
-export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => boolean): void {
+export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => boolean, address: () => string = () => ""): void {
   let saved: [Element, number, number][] | null = null;
+  let leftAt = "";
+  let hid = false;
   $effect.pre(() => {
-    if (!shown()) return;
-    // Runs as `shown` turns false, before the hide is drawn.
+    if (!shown()) {
+      hid = true;
+      return;
+    }
+    // Runs as `shown` turns false, before the hide is drawn, and on a new entry at another address.
     return () => {
       const at = untrack(anchor);
       if (at === undefined) return;
@@ -62,14 +74,17 @@ export function keepScroll(anchor: () => HTMLElement | undefined, shown: () => b
         if (el.scrollTop !== 0 || el.scrollLeft !== 0) scrolled.push([el, el.scrollTop, el.scrollLeft]);
       }
       saved = scrolled;
+      leftAt = untrack(address);
     };
   });
   $effect(() => {
     if (!shown() || saved === null) return;
+    const same = !hid || untrack(address) === leftAt;
     for (const [el, top, left] of saved) {
-      el.scrollTop = top;
-      el.scrollLeft = left;
+      el.scrollTop = same ? top : 0;
+      el.scrollLeft = same ? left : 0;
     }
     saved = null;
+    hid = false;
   });
 }

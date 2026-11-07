@@ -1,5 +1,5 @@
 <!--
-  *New route* / *Edit route* — the pane's route editor (issue #432, spec #427
+  *Add a route* / *Edit route* — the pane's route editor (issue #432, spec #427
   stories 12, 13 and 14).
 
   One dialog for both, because they ask for the same four things and a second
@@ -11,10 +11,11 @@
 
   A route lands on an asset, and an asset is a tree of unknown depth — so the
   picker is `MoveDialog`'s: one read per level, `assetTree(parentId)`, standing
-  where the route is exposed because that is where its target usually is. What
-  differs is that choosing and walking are the same click here: clicking a row
-  makes it the target *and* opens what it holds, so landing on a container two
-  levels down is two clicks and no mode.
+  where the route is exposed because that is where its target usually is: inside
+  the asset, or among its neighbours when it holds nothing. What differs is that
+  choosing and walking are the same click here: clicking a row makes it the target
+  *and* opens what it holds, so landing on a container two levels down is two
+  clicks and no mode. A row that holds nothing is only picked, and the list stays.
 
   **Landing on nothing is a first-class choice**, not an empty field: an
   endpoint that lands on nothing knobas knows is a route the model holds on
@@ -43,6 +44,11 @@
   instead*, so a reader who empties a field means the key to go.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
+  import { levelKeys } from "./level-keys";
+  import PickerCrumb from "./PickerCrumb.svelte";
+  import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type {
     assetTree,
@@ -58,6 +64,7 @@
   } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
   import TfDialog from "../tf/settings/TfDialog.svelte";
+  import TfTick from "../tf/TfTick.svelte";
   import { inputTypeFor, parseProperty, propertyEdit, PROPERTY_KINDS } from "./editing";
 
   let {
@@ -134,16 +141,24 @@
 
   // svelte-ignore state_referenced_locally
   // The picker opens where the route is exposed, which is where its target
-  // usually is — `MoveDialog`'s reason for seeding these two together.
-  let crumb = $state<AssetRow[]>([...heldBy, asset]);
+  // usually is — `MoveDialog`'s reason for seeding these two together. An asset
+  // that holds nothing has no list to open on, so it opens on its neighbours.
+  let crumb = $state<AssetRow[]>(asset.has_children ? [...heldBy, asset] : [...heldBy]);
   // svelte-ignore state_referenced_locally
-  let at = $state<string | null>(asset.id);
+  let at = $state<string | null>(asset.has_children ? asset.id : (heldBy.at(-1)?.id ?? null));
   let rows = $state<AssetRow[]>([]);
   let loaded = $state(false);
   let failure = $state<string | null>(null);
   let writing = $state(false);
+  /** Whether *Delete route…*'s confirmation is open over this dialog. */
+  let confirming = $state(false);
 
   const columnRead = latestRead<AssetRow[]>();
+  let walk = $state<HTMLElement | null>(null);
+  /** A walk asked for this read, so focus goes on to the level it draws. */
+  let walked = false;
+  /** Going up, the row walked out of, which focus goes back to. */
+  let cameFrom: string | null = null;
 
   const editing = $derived(route !== null);
   /** Unique per instance, so two stacked dialogs cannot share a field id. */
@@ -155,6 +170,13 @@
       ok: (answer) => {
         rows = answer;
         loaded = true;
+        if (walked) {
+          void tick().then(() => {
+            const options = [...(walk?.querySelectorAll<HTMLElement>(".opt") ?? [])];
+            (options.find((option) => option.dataset.row === cameFrom) ?? options[0])?.focus();
+          });
+        }
+        walked = false;
       },
       fail: (cause) => {
         rows = [];
@@ -165,7 +187,9 @@
   });
 
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
-  function stand(path: AssetRow[]) {
+  function stand(path: AssetRow[], from: string | null = null) {
+    walked = true;
+    cameFrom = from;
     crumb = path;
     at = path.at(-1)?.id ?? null;
     failure = null;
@@ -174,8 +198,17 @@
   /** One click: this row is the target, and what it holds is the next level. */
   function choose(row: AssetRow) {
     target = { id: row.id, name: row.name };
-    stand([...crumb, row]);
+    if (row.has_children) stand([...crumb, row]);
   }
+
+  /** Back to no target. The button goes with it, so focus goes on to the list it was about. */
+  function clear() {
+    target = null;
+    void tick().then(() => walk?.querySelector<HTMLElement>(".opt[tabindex='0']")?.focus());
+  }
+
+  /** `Tab`'s one stop on the level: the row that is the target, else the first. */
+  const stop = $derived(rows.some((row) => row.id === target?.id) ? target?.id : rows[0]?.id);
 
   function onfieldkeydown(event: KeyboardEvent) {
     if (event.key !== "Enter") return;
@@ -270,6 +303,7 @@
 
   async function drop() {
     if (writing || route === null) return;
+    confirming = false;
     writing = true;
     failure = null;
     try {
@@ -283,11 +317,10 @@
   }
 </script>
 
-<TfDialog closeButton title={editing ? "Edit route" : "New route"} subtitle={`On ${asset.name}`} {onclose}>
+<TfDialog why={name.trim() === "" ? (url.trim() === "" ? "Name it, and say where it answers." : "Name it first.") : url.trim() === "" ? "Say where it answers." : null} closeButton title={route === null ? `Add a route to ${asset.name}` : `Edit route ${route.name}`} subtitle={route === null ? null : `On ${asset.name}`} {onclose}>
   {#snippet body()}
-    <div class="fields">
-      <div class="fld">
-        <label class="l" for="{fieldId}-name">Name</label>
+    <div class="tf-formgrid form">
+        <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -298,10 +331,7 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-url">URL or endpoint</label>
+        <label for="{fieldId}-url">URL or endpoint <small class="tf-req">required</small></label>
         <input
           class="inp"
           id="{fieldId}-url"
@@ -320,56 +350,56 @@
           the markup and lands on `<`, which is no reserved host. The rule is
           worth keeping either way, and it costs three characters here.
         -->
-        <p class="hint">Any scheme — <code>https</code>, <code>postgres</code>, <code>ssh</code>; a bare host is refused.</p>
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-vis">Visibility</label>
+        <span class="hint">Any scheme: <code>https</code>, <code>postgres</code>, <code>ssh</code>. A bare host is refused.</span>
+        <label for="{fieldId}-vis">Visibility</label>
         <select class="inp" id="{fieldId}-vis" bind:value={visibility} onkeydown={onfieldkeydown}>
           <option value="internal">Internal</option>
           <option value="public">Public</option>
         </select>
-      </div>
 
-      <div class="fld">
-        <span class="l">Lands on</span>
+      <span>Lands on</span>
+      <div class="tf-fwide wide">
         <p class="lands">
           {#if target}
-            <span class="nm">{target.name}</span>
-            <button class="link" onclick={() => (target = null)}>Clear</button>
+            <span class="tf-chosen"><TfTick /><span class="tf-chosent">{target.name}</span></span>
+            <button class="tf-btn tf-sm tf-ghost" onclick={clear}>Clear</button>
           {:else}
-            <span class="faint">Nothing — an endpoint knobas has no asset for</span>
+            <span class="faint">No asset yet. Leave it for an endpoint knobas has no asset for.</span>
           {/if}
         </p>
 
-        <p class="crumb mono">
-          <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
-            Estate
-          </button>
-          {#each crumb as step, index (step.id)}
-            <span class="sep" aria-hidden="true">/</span>
-            <button
-              class="link"
-              disabled={index === crumb.length - 1}
-              onclick={() => stand(crumb.slice(0, index + 1))}
-            >
-              {step.name}
-            </button>
-          {/each}
-        </p>
+        <div class="crumbline"><PickerCrumb {crumb} onstand={(path) => stand(path)} /></div>
 
-        <div class="lvl">
-          <ul class="opts" aria-label="Where it lands">
+        <div class="lvl" bind:this={walk}>
+          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+          <ul
+            class="opts"
+            aria-label="Where it lands"
+            onkeydown={(event) =>
+              levelKeys(event, {
+                // Walks without choosing: an arrow is not a press, so the target stays as it was.
+                into: (id) => {
+                  const row = rows.find((candidate) => candidate.id === id);
+                  if (row?.has_children) stand([...crumb, row]);
+                },
+                up: () => {
+                  if (crumb.length > 0) stand(crumb.slice(0, -1), crumb.at(-1)?.id ?? null);
+                },
+              })}
+          >
             {#each rows as row (row.id)}
               <li>
                 <button
                   class="opt"
+                  data-row={row.id}
                   class:on={target?.id === row.id}
                   title="Land on {row.name}"
+                  tabindex={row.id === stop ? 0 : -1}
                   onclick={() => choose(row)}
                 >
-                  <span class="mg">{row.monogram}</span>
+                  <span class="mg">{kindTag(row.monogram)}</span>
                   <span class="nm">{row.name}</span>
+                  {#if target?.id === row.id}<TfTick />{/if}
                   {#if row.has_children}
                     <span class="chev" aria-hidden="true">›</span>
                   {/if}
@@ -378,15 +408,15 @@
             {/each}
           </ul>
           {#if loaded && rows.length === 0}
-            <p class="empty">Nothing here.</p>
+            <p class="empty">No assets at this level.</p>
           {/if}
         </div>
       </div>
 
-      <div class="fld">
-        <span class="l">Properties</span>
+      <span>Properties</span>
+      <div class="tf-fwide wide">
         <p class="hint">
-          A route declares no keys, so these are yours — the certificate expiry among
+          A route declares no keys, so these are yours, the certificate expiry among
           them. Emptying a value clears the property.
         </p>
         {#each properties as property, index (index)}
@@ -418,6 +448,7 @@
             <button
               class="tf-btn tf-sm"
               title="Remove {property.key || 'this property'}"
+              aria-label="Remove {property.key || 'this property'}"
               onclick={() => properties.splice(index, 1)}
             >
               ×
@@ -428,7 +459,7 @@
           class="tf-btn tf-sm"
           onclick={() => properties.push({ key: "", kind: "text", value: "" })}
         >
-          Add a property
+          Add a property…
         </button>
       </div>
 
@@ -440,7 +471,7 @@
 
   {#snippet footer()}
     {#if editing}
-      <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => void drop()}>Delete</button>
+      <button class="tf-btn tf-ghost tf-danger tf-first" disabled={writing} onclick={() => (confirming = true)}>Delete route…</button>
     {/if}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button
@@ -448,30 +479,47 @@
       disabled={writing || name.trim() === "" || url.trim() === ""}
       onclick={() => void submit()}
     >
-      {writing ? "Saving…" : editing ? "Save" : "Expose"}
+      {writing ? "Saving…" : editing ? "Save" : "Add route"}
     </button>
   {/snippet}
 </TfDialog>
 
+{#if confirming && route !== null}
+  <TfDialog title="Delete route {route.name}?" onclose={() => (confirming = false)}>
+    {#snippet body()}
+      <p class="ask">{asset.name} stops exposing it. Links to it stay, marked deleted.</p>
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn tf-ghost" onclick={() => (confirming = false)}>Cancel</button>
+      <button class="tf-btn tf-primary tf-danger" onclick={() => void drop()}>Delete route</button>
+    {/snippet}
+  </TfDialog>
+{/if}
+
 <style>
-  .fields {
-    display: grid;
-    gap: 12px;
+  /* *URL or endpoint required* on one line, 141 px: a dialog of long names widens the token (design system, Forms). */
+  .form {
+    --tf-label: 148px;
   }
 
-  .fld .l {
-    display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
-    margin-bottom: 4px;
+  /* A note on the field above it, in the field's column. */
+  .tf-formgrid > .hint {
+    grid-column: 2;
+    margin-top: -2px;
   }
 
   .hint {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
+    font-size: var(--t-xs);
+    color: var(--ink-2);
+  }
+
+  .wide .hint {
+    margin: 0 0 6px;
+  }
+
+  .ask {
+    margin: 0;
+    font-size: var(--t-md);
   }
 
   .prow {
@@ -483,29 +531,14 @@
 
   .lands {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     gap: 8px;
     margin: 0 0 6px;
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
-  .lands .nm {
-    color: var(--text);
-  }
-
-  .crumb {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px;
+  .crumbline {
     margin: 0 0 6px;
-    font-size: 11px;
-    color: var(--muted);
-  }
-
-  .crumb button:disabled {
-    color: var(--text);
-    cursor: default;
   }
 
   /* Bounded, for `MoveDialog`'s reason: a level with fifty rows must not push
@@ -514,13 +547,19 @@
     max-height: 200px;
     overflow: auto;
     border: 1px solid var(--hair);
-    border-radius: 2px;
+    border-radius: 4px;
   }
 
   .opts {
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  /* Inside the list, as `MoveDialog` draws it. */
+  .opt:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
   }
 
   .opt {
@@ -532,7 +571,7 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
   .opt:hover {
@@ -540,8 +579,7 @@
   }
 
   .opt.on {
-    background: var(--raised);
-    box-shadow: inset 2px 0 0 var(--link);
+    box-shadow: inset 0 0 0 1px var(--ink);
   }
 
   .opt .nm {
@@ -554,7 +592,8 @@
 
   .opt .mg {
     flex: none;
-    font: 500 10px var(--mono);
+    font-size: var(--t-2xs);
+    font-weight: 500;
     color: var(--faint);
   }
 
@@ -565,7 +604,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--t-sm);
     color: var(--muted);
   }
 </style>

@@ -62,7 +62,7 @@ test("a renderer past its timeout shows the source and says it timed out", async
 
   expect(target.querySelector("iframe")).toBeNull();
   expect(target.querySelector(".tf-stepfail")?.textContent).toContain("Cat could not draw this");
-  expect(target.querySelector(".tf-stepfail")?.textContent).toContain("longer than its timeout of 1 s");
+  expect(target.querySelector(".tf-stepfail")?.textContent).toContain("longer than its timeout of 1s");
   expect([...target.querySelectorAll(".tf-code .tf-l")].map((l) => l.textContent)).toEqual(["1@startuml", "2A -> B", "3@enduml"]);
 });
 

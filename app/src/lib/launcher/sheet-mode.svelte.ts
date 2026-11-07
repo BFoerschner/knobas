@@ -9,12 +9,15 @@
  * panel when a key is let go. The host's getters are read when they are used,
  * so a prop that changes is seen.
  */
+import { leftTheInbox } from "../inbox/inbox.svelte";
 import { tick } from "svelte";
 
-import { ipcErrorMessage } from "../ipc";
+import { ipcErrorMessage, isIpcError } from "../ipc";
 import type { LinkSetRow, ViewAction } from "../ipc/entity";
 import { drawn } from "../detail/relations";
 import { linkFailureMessage } from "../detail/links";
+import type { QueuedWrite } from "../ipc/sources";
+import { toastQueued } from "../shell/queued-toast";
 import { push } from "../shell/toasts.svelte";
 import { JOB_LINK_RELATIONS } from "../tf/job/link-relations";
 import { argvText, menuOrder } from "../tf/openin/openin";
@@ -153,12 +156,12 @@ export class SheetMode {
   /** What the empty box says while a sheet is open. */
   readonly placeholder = $derived(
     this.current?.panel
-      ? "press the keys"
+      ? "Press the keys"
       : this.current?.renaming != null
-        ? "the list's new name"
+        ? "The list's new name"
         : this.current?.flow
-          ? "narrow the choices"
-          : "narrow the actions",
+          ? "Narrow the choices"
+          : "Narrow the actions",
   );
   /** What the box holds while a sheet is open. */
   readonly text = $derived(this.current ? (this.current.panel ? "" : (this.current.renaming ?? this.current.filter)) : "");
@@ -366,7 +369,7 @@ export class SheetMode {
     if (!at) return;
     const { subject, relation } = at;
     const { io, session, focus, close, navigate } = this.#host;
-    const settled = (work: () => Promise<unknown>, said: () => string) => void this.#settled(work, said);
+    const settled = (work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string) => void this.#settled(work, said, undo, name);
     switch (does.kind) {
       case "go":
         close();
@@ -374,9 +377,9 @@ export class SheetMode {
       case "copy":
         return settled(() => io.copyText(does.text), () => does.said);
       case "write":
-        return settled(() => io.submitWrite(does.payload), () => does.said);
+        return void this.#queued(() => io.submitWrite(does.payload), does.said, subject.kind === "entity" ? subject.sourceId : null, does.where);
       case "ack":
-        return settled(() => io.ackAlert(does.monitorId), () => does.said);
+        return settled(() => io.ackAlert(does.monitorId), () => does.said, () => io.unackAlert(does.monitorId), subject.kind === "entity" ? subject.title : undefined);
       case "link": {
         const job = this.#host.job;
         if (!job || subject.kind !== "entity") return;
@@ -398,7 +401,7 @@ export class SheetMode {
       case "timer": {
         const { ontimer } = this.#host;
         if (subject.kind !== "entity" || !ontimer) return;
-        ontimer(subject.entityId, subject.title);
+        ontimer(subject.entityId, nameOf(subject));
         return close();
       }
       case "open-in": {
@@ -466,25 +469,65 @@ export class SheetMode {
         if (subject.kind !== "inbox") return;
         const { item } = subject;
         if (does.op === "rerun") {
-          return settled(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), () => `Re-run queued for ${item.title}`);
+          return void this.#queued(() => io.submitWrite({ RerunBuild: { entity: item.entity_id ?? "" } }), `re-run ${item.title}`, item.source_id);
         }
         if (does.op === "ack") {
-          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.");
+          return settled(() => io.inboxAck(item.key), () => "Acked. The alert stays open until the monitor recovers.", () => io.inboxUnack(item.key), item.title);
         }
         return settled(() => io.inboxDone(item.key), () => `Done: ${item.title}`);
       }
     }
   }
 
+  /**
+   * *Undo* on a toast: its own failure is said too, since nothing else is looking. A monitor that recovered meanwhile has
+   * no alert left to take back, which is news and no fault: said as the Inbox says it, never the backend's `no open alert`.
+   */
+  #undone(undo: () => Promise<unknown>, name?: string): void {
+    undo().catch((cause: unknown) => push(this.#refusal(cause, name)));
+  }
+
+  /** What a write's refusal says: an alert that left at its source in words, anything else as the backend put it. */
+  #refusal(cause: unknown, name?: string): { text: string; tone?: "err" } {
+    if (name !== undefined && isIpcError(cause) && cause.code === "not_found") return { text: leftTheInbox(name) };
+    return { text: ipcErrorMessage(cause), tone: "err" };
+  }
+
+  /** A write or a read is out: a second press before it answers sends nothing (F-340's trip, by key). */
+  #sending = false;
+
   /** A write or a read that answers: said in a toast and the launcher closed, or the reason said and the sheet kept. */
-  async #settled(work: () => Promise<unknown>, said: () => string): Promise<void> {
+  async #settled(work: () => Promise<unknown>, said: () => string, undo?: () => Promise<unknown>, name?: string): Promise<void> {
+    if (this.#sending) return;
+    this.#sending = true;
     try {
       await work();
-      push({ text: said() });
+      push({ text: said(), ...(undo === undefined ? {} : { action: { label: "Undo", run: () => this.#undone(undo, name) } }) });
       this.#host.close();
     } catch (cause) {
-      push({ text: ipcErrorMessage(cause), tone: "err" });
+      push(this.#refusal(cause, name));
       this.#host.focus();
+    } finally {
+      this.#sending = false;
+    }
+  }
+
+  /** A write: the one queued toast every page raises, which says *Sent* in place once it has gone, and the launcher closed. */
+  async #queued(work: () => Promise<QueuedWrite>, what: string, source: string | null, where?: { label: string; hash: string }): Promise<void> {
+    if (this.#sending) return;
+    this.#sending = true;
+    const { navigate } = this.#host;
+    try {
+      toastQueued(what, source === null ? null : { id: source, display_name: "" }, {
+        write: await work(),
+        ...(where === undefined ? {} : { where: { label: where.label, run: () => navigate(where.hash) } }),
+      });
+      this.#host.close();
+    } catch (cause) {
+      push(this.#refusal(cause));
+      this.#host.focus();
+    } finally {
+      this.#sending = false;
     }
   }
 

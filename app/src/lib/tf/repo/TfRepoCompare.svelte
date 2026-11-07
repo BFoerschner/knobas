@@ -14,20 +14,28 @@
     request* queues `CreatePullRequest` in the repository and lands on its
     pull requests.
   - **A pull request already open** from the branch is the source's overview's
-    row: the page says so and offers *Open PR #N* instead.
+    row: *Into* and *From* stay, so another branch can be picked, and one line
+    with *Open PR #N* stands where the rest of the form would.
+  - **A pull request this session sent** from the branch (F-257): the same,
+    with the line saying so and the way to its row, so a second press can't
+    send it again. A write that won't go drops its echo, and the form is back
+    with what was typed.
+  - **One branch**: nothing to compare, so one empty state with *New branch…*.
   - **What it changes**: the diff from *Into* to *From* (#2271), the
     repository's `compare:<into>...<from>` section, drawn by the one diff
-    component (`TfDiffView`): picking another *Into* reads it against that
-    base. *Open as diff* opens the same diff at its own address. Beside it,
-    from the branch's own view, what it carries over the default branch (its
-    *Commits*).
+    component (`TfDiffView`), across the page under the form and *Commits*:
+    picking another *Into* reads it against that base. *Open as diff* opens the
+    same diff at its own address. Beside the form, from the branch's own view,
+    what it carries over the default branch (its *Commits*).
+  - **Into and From the same**: nothing to compare, so one line says so where the
+    form ends, and there is no diff, no *Commits* and no open pull request's line.
 
   A branch the mirror does not hold yet (one this session's edit queued) has
   no view to read: the form still opens, since the pull request names the
   branch by name, and the change says when it will show.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import { proseMarkdown } from "../../render/prose";
@@ -35,10 +43,15 @@
   import { toastQueued, type WriteSource } from "../../shell/queued-toast";
   import { push } from "../../shell/toasts.svelte";
   import TfDiffView from "../diff/TfDiffView.svelte";
+  import { escThroughUntouched } from "../escape";
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
   import TfOpenObject from "../openin/TfOpenObject.svelte";
   import { compareSection, diffHash, rangeDiffVia } from "../diff/address";
   import { rangeContext } from "../diff/context";
   import { itemHash, resolveTicket } from "../job/job";
+  import { echoWrite, echoesOn, watchEchoes } from "../queued.svelte";
+  import { placeRestoring } from "../return-place";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { onRefreshed } from "./refreshed.svelte";
   import TfWaiting from "../TfWaiting.svelte";
@@ -47,7 +60,9 @@
     branchStanding,
     compareHash,
     keyIn,
+    MADE_PR,
     proposal,
+    REPO_PRS,
     repoHash,
     sourceName,
     type BranchOption,
@@ -64,8 +79,12 @@
     base: named = null,
     defaultBranch,
     refreshed = 0,
+    branchRefused = null,
+    shown = true,
+    guessed = null,
+    onNewBranch = () => {},
   }: {
-    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff">;
+    ports: Pick<RepoPorts, "entityView" | "getEntity" | "listSources" | "submitWrite" | "fileBytes" | "piped" | "rangeDiff" | "listen">;
     /** The repository's source: where the write goes, named in its toast when its sign-in fails. */
     source?: WriteSource | null;
     repoId: string;
@@ -77,8 +96,18 @@
     defaultBranch: string | null;
     /** The page's refreshes (#2135): each reads the branch's standing and diff again over what the page drew. */
     refreshed?: number;
+    /** Why the source draws *New branch…* disabled, where it does. */
+    branchRefused?: string | null;
+    /** Whether this tab is the one shown: arriving on it, *Title* takes focus if nothing else has it. */
+    shown?: boolean;
+    /** The branch the header's *New pull request* chose for the reader, and why, which the page says above the form (F-063). */
+    guessed?: { branch: string; why: string } | null;
+    /** Opens *New branch…*, which is what a repository of one branch can do here. */
+    onNewBranch?: () => void;
   } = $props();
 
+  /** One branch or none, and the address names no other: there is nothing to compare. */
+  const lone = $derived(branches.length <= 1 && (head === null || branches.some((option) => option.name === head)));
   const listed = $derived(branches.find((option) => option.name === head) ?? null);
   /** The branch's entity: a refresh's new listing of the same branch reads nothing again on its own. */
   const listedId = $derived(listed?.entityId ?? null);
@@ -104,6 +133,8 @@
     const asked = addressed;
     if (asked !== null) untrack(() => (base = asked));
   });
+  /** *Into* and *From* are one branch: there is nothing to compare, and no diff, commits or open pull request to speak of. */
+  const same = $derived(base === head);
   let title = $state("");
   let body = $state("");
   /** The ticket the branch's key names, and that key: what *Link the PR to <key>* links to (#984). */
@@ -111,8 +142,8 @@
   let link = $state(true);
   let busy = $state(false);
 
-  /** The diff read: from *Into* to the branch, once the mirror holds the branch. */
-  const section = $derived(listedId === null || head === null || base === "" ? null : compareSection(base, head));
+  /** The diff read: from *Into* to the branch, once the mirror holds the branch and they are two branches. */
+  const section = $derived(listedId === null || head === null || base === "" || base === head ? null : compareSection(base, head));
   /**
    * What *Open as diff* and *Open in…* name (Spec 5 of the review of spec #2234): the two commits the source settled
    * the drawn compare between, so the diff page can read it at a checkout that holds both (ADR-0036; a branch name is
@@ -154,6 +185,28 @@
       if (id === null || asked === null) return Promise.resolve();
       return Promise.all([readStanding(id, () => listedId === id, true), readDiff(asked, () => section === asked, true)]);
     },
+  );
+
+  /**
+   * The pull request this session sent from this branch, until the source's view holds it (F-257). Not while its own press is
+   * leaving: the form stays as the tab hides, so *Pull requests* can take focus from it for the row it landed on (F-242).
+   */
+  const sentFrom = $derived(head === null || busy ? undefined : echoesOn(repoId, MADE_PR).find((echo) => echo.base === head));
+  $effect(() => {
+    if (!shown) busy = false;
+  });
+  // Its landing reads the branch again, so the line it leaves is the source's own *Open PR*, not the form.
+  $effect(() =>
+    untrack(() =>
+      watchEchoes(
+        REPO_PRS,
+        () => {
+          const id = listedId;
+          if (id !== null) void readStanding(id, () => listedId === id, true);
+        },
+        { listen: ports.listen },
+      ),
+    ),
   );
 
   /** The branch's standing; `again` keeps what the page drew when a read fails. */
@@ -214,6 +267,7 @@
         const from: ProposedFrom = { key, summary: found.row.title, description };
         ({ title, body } = proposal(name, from));
         ticket = { key, id: found.row.entity_id };
+        selectTitle();
       } catch {
         // No ticket to propose from: the branch's own name stands.
       }
@@ -233,7 +287,53 @@
   );
   /** Why the source draws the pull request disabled (#2030): its words, on the button. */
   const refused = $derived(standing?.prBlocked ?? null);
-  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null);
+  const ready = $derived(head !== null && title.trim() !== "" && base !== "" && base !== head && !busy && refused === null && sentFrom === undefined);
+  /** What the primary waits for, in words beside it (design system, the enabled rule). */
+  const needs = $derived(same ? "Into and From are the same branch, so there is nothing to compare." : (refused ?? (title.trim() === "" ? "Give it a title." : null)));
+  const commits = $derived(standing?.commits ?? []);
+
+  // One commit says what the change is better than its branch's name does (F-241). Only over the name proposed: typed words stay.
+  $effect(() => {
+    const only = commits.length === 1 ? (commits[0]?.title ?? "") : "";
+    if (only === "" || ticket !== null) return;
+    untrack(() => {
+      if (title === proposal(head ?? "", null).title) {
+        title = only;
+        selectTitle();
+      }
+    });
+  });
+
+  /** *Title*, ready to type over, unless the reader already has focus somewhere of their own. A press on *New pull request* leaves it on nothing. */
+  let titleField = $state<HTMLInputElement | null>(null);
+  function selectTitle(): void {
+    void tick().then(() => {
+      if (placeRestoring()) return;
+      const at = document.activeElement;
+      const free = at === null || at === document.body || at === titleField || at.closest("[inert], [hidden]") !== null;
+      if (!free || titleField === null || titleField.getClientRects().length === 0 || !untrack(() => shown)) return;
+      titleField.focus({ preventScroll: true });
+      titleField.select();
+      titleGivenAt = performance.now();
+    });
+  }
+  /**
+   * *New pull request* by key lands here with *Title* focused, so the second `Enter` of a double press would send the form. A
+   * pull request is not undone by a toast, so an `Enter` this soon after the app gave it focus, or one held down, is not taken as sending it.
+   */
+  const ARRIVING_MS = 800;
+  let titleGivenAt = -ARRIVING_MS;
+  function holdArrivingEnter(form: HTMLFormElement) {
+    const hold = (event: KeyboardEvent) => {
+      if (event.key === "Enter" && event.target === titleField && (event.repeat || performance.now() - titleGivenAt < ARRIVING_MS)) event.preventDefault();
+    };
+    form.addEventListener("keydown", hold);
+    return () => form.removeEventListener("keydown", hold);
+  }
+  // On arriving at the form, and again if a ticket's words replace the proposal below.
+  $effect(() => {
+    if (shown && titleField !== null) untrack(selectTitle);
+  });
 
   async function create() {
     if (!ready || head === null) return;
@@ -241,9 +341,13 @@
     const words = title.trim();
     try {
       const linkTo = ticket !== null && link ? ticket.id : undefined;
-      await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
-      toastQueued(`open PR ${words}`, source);
-      location.hash = repoHash(repoId, "prs");
+      const write = await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
+      const prs = repoHash(repoId, "prs");
+      // The press lands on the tab that shows it, so the toast has nowhere to offer.
+      toastQueued(`open PR ${words}`, source, { write });
+      // The row it lands on, so the tab doesn't read as if nothing happened (F-242).
+      echoWrite(repoId, MADE_PR, words, { write, base: head, many: true, following: { name: `Pull request ${words}` }, surface: REPO_PRS, source: source?.id ?? null });
+      location.hash = prs;
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
       busy = false;
@@ -251,11 +355,32 @@
   }
 </script>
 
+{#if lone}
+  <div class="tf-empty">
+    {#if branches.length === 0}
+      <p>This repository has no branches yet, so there is nothing to compare.</p>
+    {:else}
+      <p>This repository has one branch, <TfKey value={branches[0]!.name} />, so there is nothing to compare.</p>
+      <button
+        type="button"
+        class="tf-btn tf-sm"
+        aria-disabled={branchRefused !== null ? "true" : undefined}
+        title={branchRefused ?? undefined}
+        onclick={() => {
+          if (branchRefused === null) onNewBranch();
+        }}>New branch…</button>
+    {/if}
+  </div>
+{:else}
 <div class="tf-compare">
   <div>
-    <h2 class="tf-cgroup-h">New pull request</h2>
+    <h2 class="tf-cgroup-h">{standing?.pr || sentFrom !== undefined ? "Compare" : "New pull request"}</h2>
+    {#if guessed !== null && guessed.branch === head && !standing?.pr && sentFrom === undefined}
+      <p class="tf-cstart">Starting from <span class="tf-mono">{guessed.branch}</span>, {guessed.why}.</p>
+    {/if}
     <form
       class="tf-panel tf-cform"
+      {@attach holdArrivingEnter}
       onsubmit={(event) => {
         event.preventDefault();
         void create();
@@ -263,46 +388,72 @@
     >
       <div class="tf-formgrid">
         <label for="tf-cmp-into">Into</label>
-        <select id="tf-cmp-into" bind:value={base}>
+        <select id="tf-cmp-into" class="tf-cbranch" bind:value={base}>
           {#each branches as option (option.name)}<option value={option.name}>{option.name}</option>{/each}
         </select>
         <label for="tf-cmp-from">From</label>
         <select
           id="tf-cmp-from"
+          class="tf-cbranch"
           value={head ?? ""}
           onchange={(event) => (location.hash = compareHash(repoId, (event.currentTarget as HTMLSelectElement).value, base === into ? null : base))}
         >
           {#each heads as name (name)}<option value={name}>{name}</option>{/each}
         </select>
-        <label for="tf-cmp-title">Title</label>
-        <input id="tf-cmp-title" type="text" autocomplete="off" bind:value={title} />
-        <label for="tf-cmp-body" class="tf-ctop">Description</label>
-        <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
-        {#if ticket !== null}
-          <span></span><label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to {ticket.key} in knobas</label>
+        {#if !standing?.pr && sentFrom === undefined}
+          <label for="tf-cmp-title">Title</label>
+          <input id="tf-cmp-title" type="text" autocomplete="off" bind:this={titleField} bind:value={title} {@attach escThroughUntouched} />
+          <label for="tf-cmp-body">Description</label>
+          <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
+          {#if ticket !== null}
+            <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to <TfKey value={ticket.key} /> in knobas</label>
+          {/if}
+          <span class="tf-fwide tf-dim tf-small">Reviewers are asked on {sourceName(source)} after it opens.</span>
         {/if}
-        <span></span><span class="tf-dim tf-small">Reviewers are asked on {sourceName(source)} after it opens.</span>
       </div>
       <div class="tf-cgo">
-        {#if standing?.pr}
-          <span class="tf-chip tf-info">PR {standing.pr.number ?? ""} is already open from this branch</span>
+        {#if same && standing?.pr}
+          <p class="tf-dwhy" role="status">{needs}</p>
+        {:else if sentFrom !== undefined && !standing?.pr}
+          <span class="tf-cexists">A pull request from this branch is on its way: {sentFrom.text}.</span>
+          <a class="tf-btn tf-sm" href={repoHash(repoId, "prs")}>Show in Pull requests</a>
+        {:else if standing?.pr}
+          <span class="tf-cexists">PR {standing.pr.number ?? ""} is already open from this branch.</span>
           {#if standing.pr.entityId !== null}
-            <a class="tf-btn" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
+            <a class="tf-btn tf-sm" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
           {/if}
         {:else}
           <button
             type="submit"
-            class="tf-btn tf-primary"
+            class="tf-btn tf-sm tf-primary"
             disabled={!ready && refused === null}
             aria-disabled={refused !== null ? "true" : undefined}
             title={refused ?? undefined}>Create pull request</button>
+          {#if needs !== null}<p class="tf-dwhy" role="status">{needs}</p>{/if}
         {/if}
-        {#if changed !== null}
+        {#if changed !== null && !same}
           <span class="tf-dim tf-small tf-cfiles">{changed} {changed === 1 ? "file" : "files"} changed against {base}</span>
         {/if}
       </div>
     </form>
-    <h2 class="tf-cgroup-h tf-cchanges">
+  </div>
+  {#if !same}
+  <aside class="tf-side">
+    <div class="tf-panel">
+      <header><h3>Commits</h3></header>
+      {#if commits.length > 0}
+        <div class="tf-rows">
+          {#each commits as commit, n (n)}
+            <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t tf-t2" title={commit.title}><TfKeyed text={commit.title} /></span></div>
+          {/each}
+        </div>
+      {:else if standing !== null}
+        <p class="tf-prnote tf-cnone">Nothing that {defaultBranch ?? "the default branch"} lacks.</p>
+      {/if}
+    </div>
+  </aside>
+  <section class="tf-cdiff">
+    <h2 class="tf-cgroup-h">
       What it changes
       {#if section !== null && head !== null}
         <span class="tf-trail"
@@ -321,7 +472,7 @@
           <div class="tf-empty">This branch has no commits that {base} lacks.</div>
         {:else if files !== null}
           {#if range === null}
-            <p class="tf-cnote" data-testid="no-range">Context does not expand here: the source did not settle which two commits this diff is between, as for a range from the repository's first commit or a branch that merged its base back in.</p>
+            <p class="tf-cnote" data-testid="no-range" title="As for a range from the repository's first commit, or a branch that merged its base back in.">Context does not expand here: the source did not settle which two commits this diff is between.</p>
           {/if}
           {#key `${filesFor}\n${range?.base}\n${range?.head}`}
             <TfDiffView {files} {cut} {context} openAt={head === null ? null : { entityId: repoId, at: head }} />
@@ -329,15 +480,7 @@
         {/if}
       </TfWaiting>
     {/if}
-  </div>
-  <aside class="tf-side">
-    <div class="tf-panel">
-      <header><h3>Commits</h3></header>
-      <div class="tf-rows">
-        {#each standing?.commits ?? [] as commit, n (n)}
-          <div class="tf-r"><span class="tf-mono tf-dim">{commit.chip ?? ""}</span><span class="tf-t">{commit.title}</span></div>
-        {/each}
-      </div>
-    </div>
-  </aside>
+  </section>
+  {/if}
 </div>
+{/if}

@@ -22,6 +22,8 @@ import { toasts } from "../../shell/toasts.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 import { sourceRoles } from "../roles.svelte";
 import { LANE_FIELDS, laneOf } from "./tickets";
+import { scopedTicket } from "../job/scoped.svelte";
+import { layers } from "../layers.svelte";
 import { until } from "../../shell/test-wait";
 
 // Every command that reaches the bridge past the page's ports, by name: the
@@ -102,6 +104,7 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
       path: "PAY-300",
       comment_count: 0,
       assignee: "mara.lindqvist",
+      assignee_name: "Mara Lindqvist",
       signals: [
         { kind: "failing-build", text: "build failed", tone: "err" },
         { kind: "open-pr", text: "PR #142 open", tone: "info" },
@@ -323,7 +326,7 @@ const columns = () =>
   }));
 const count = () => target.querySelector(".tf-fcount")!.textContent;
 const preview = () => target.querySelector<HTMLElement>(".tf-preview")!;
-const field = () => target.querySelector<HTMLInputElement>("input[data-filter]")!;
+const field = () => target.querySelector<HTMLInputElement>(".tf-fbar input[data-filter]")!;
 
 function type(input: HTMLInputElement, char: string) {
   const at = input.selectionStart ?? input.value.length;
@@ -332,13 +335,27 @@ function type(input: HTMLInputElement, char: string) {
   input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+test("an open View fold is a panel: Esc folds it first, and focus returns to its bar (F-619)", async () => {
+  await open(harness());
+  const before = layers.open.length;
+  const bar = target.querySelector<HTMLButtonElement>(".tf-railbar button")!;
+  bar.click();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("true");
+  layers.open.at(-1)!.close();
+  flushSync();
+  expect(bar.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(bar);
+  expect(layers.open).toHaveLength(before);
+});
+
 test("every synced ticket on the board: a column per status, eight cards then Show N more, Done three", async () => {
   const h = harness();
   await open(h);
   expect(h.reads[0]).toEqual({ perColumn: 8, query: null });
   expect(columns()).toEqual([
-    { head: "To Do 12", cards: 8, more: "Show 4 more" },
-    { head: "In Progress 1", cards: 1, more: null },
+    { head: "To do 12", cards: 8, more: "Show 4 more" },
+    { head: "In progress 1", cards: 1, more: null },
     { head: "Done 5", cards: 3, more: "Show 2 more done" },
   ]);
   expect(count()).toBe("18 tickets");
@@ -355,14 +372,15 @@ test("the first card is selected: outlined, and the preview shows it with Start 
   // No job is chosen, so nothing is yellow (spec #2396, #2398).
   expect(target.querySelectorAll(".tf-tcard.tf-card")).toHaveLength(0);
   expect(first.textContent).toContain("Story, High");
-  expect(first.querySelector(".tf-av")!.textContent).toBe("ML");
+  expect(first.querySelector(".tf-av")!.textContent).toBe("MA");
   expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
 
   expect(preview().querySelector("h2")!.textContent).toBe("Retry failed SEPA payouts");
   expect(preview().textContent).toContain("The description of jira:PAY-1.");
   const button = preview().querySelector<HTMLAnchorElement>(".tf-go .tf-primary")!;
   expect(button.textContent).toBe("Start work");
-  expect(button.getAttribute("href")).toBe("#/job/jira%3APAY-1");
+  // It opens the ticket on its steps and chooses nothing until they run (F-130).
+  expect(button.getAttribute("href")).toBe("#/ticket/jira%3APAY-1");
 });
 
 test("selecting another card moves the outline and the preview's button follows its state", async () => {
@@ -377,7 +395,7 @@ test("selecting another card moves the outline and the preview's button follows 
 
   pick("PAY-2").click();
   await settle();
-  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open job");
+  expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Open ticket");
   // Somebody else's ticket is only read from here (spec #2396): its page, not the job's address.
   expect(preview().querySelector(".tf-go .tf-primary")!.getAttribute("href")).toBe("#/ticket/jira%3APAY-2");
   expect(preview().textContent).toContain("Assigned to jonas.becker.");
@@ -395,7 +413,7 @@ test("typing filters on the server, keeps focus and the caret, shows the matches
   }
   expect(input.selectionStart).toBe(4);
   expect(h.reads.at(-1)).toEqual({ perColumn: 50, query: "sepa" });
-  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+  expect(columns()).toEqual([{ head: "To do 1", cards: 1, more: null }]);
   expect(count()).toBe("1 of 18 tickets");
   expect(target.querySelector(".tf-tcard mark")!.textContent).toBe("SEPA");
 
@@ -416,7 +434,7 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
   for (const char of "bulk") type(field(), char);
   await settle();
   expect(columns()).toEqual([
-    { head: "To Do 60", cards: 50, more: "Show 10 more" },
+    { head: "To do 60", cards: 50, more: "Show 10 more" },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
   ]);
   expect(count()).toBe("115 of 133 tickets");
@@ -424,7 +442,7 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
   expect(columns()).toEqual([
-    { head: "To Do 60", cards: 60, more: null },
+    { head: "To do 60", cards: 60, more: null },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
   ]);
 });
@@ -451,7 +469,7 @@ test("a chip and a dropdown are sent as the grammar's keys", async () => {
   await settle();
   expect(h.reads.at(-1)!.query).toBe("issuetype:Bug");
   const select = target.querySelector<HTMLSelectElement>(".tf-fsel select")!;
-  expect([...select.options].map((o) => o.textContent)).toEqual(["Any", "Me"]);
+  expect([...select.options].map((o) => o.textContent).slice(0, 2)).toEqual(["Any", "Me"]);
   select.value = "@me";
   select.dispatchEvent(new Event("change", { bubbles: true }));
   await settle();
@@ -463,7 +481,7 @@ test("Show N more reads the column whole and draws all of it", async () => {
   await open(h);
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
-  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 12, more: null });
+  expect(columns()[0]).toEqual({ head: "To do 12", cards: 12, more: null });
   expect(columns()[2]!.cards).toBe(3);
 });
 
@@ -482,6 +500,30 @@ test("the list draws the same tickets newest first, the selected row outlined", 
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
 });
 
+test("*Assignee* draws the name the column draws, and offers the people on the cards it read (F-161, F-165)", async () => {
+  const h = harness();
+  const asked = h.ports.suggestions;
+  h.ports.suggestions = (...args) =>
+    asked(...args).then((answer) => ({
+      ...answer,
+      fields: [...answer.fields, { key: "assignee", value: "mara.lindqvist", detail: "" }, { key: "assignee", value: "someone.else", detail: "" }],
+    }));
+  await open(h);
+  const select = [...target.querySelectorAll<HTMLSelectElement>(".tf-fsel select")].find((one) => [...one.options].some((option) => option.value === "@me"))!;
+  expect([...select.options].map((one) => one.textContent)).toEqual(["Any", "Me", "Jonas", "Mara", "Someone"]);
+});
+
+test("the list calls an assignee by first name, with the whole name in its title (F-144)", async () => {
+  await open(harness());
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')]
+    .find((b) => b.textContent === "List")!
+    .click();
+  await settle();
+  const named = [...target.querySelectorAll<HTMLElement>(".tf-tbl td.tf-c-assignee")].filter((td) => td.title.includes(" "));
+  expect(named.length).toBeGreaterThan(0);
+  for (const cell of named) expect(cell.textContent).toBe(cell.title.split(" ")[0]);
+});
+
 test("the list's Show N more reads every ticket, and the board keeps its caps", async () => {
   const h = harness();
   await open(h);
@@ -496,7 +538,7 @@ test("the list's Show N more reads every ticket, and the board keeps its caps", 
   expect(target.querySelector(".tf-list-more")).toBeNull();
   layout("Board");
   await settle();
-  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 8, more: "Show 4 more" });
+  expect(columns()[0]).toEqual({ head: "To do 12", cards: 8, more: "Show 4 more" });
   expect(columns()[2]!.cards).toBe(3);
 });
 
@@ -512,7 +554,7 @@ test("an ad-hoc context draws no Not a ticket group and is never read for", asyn
   expect(h.contextReads).toBe(0);
 });
 
-const around = () => [...preview().querySelectorAll(".tf-rollup > div")].map((d) => d.textContent);
+const around = () => [...preview().querySelectorAll(".tf-tktable > a")].map((row) => [...row.children].map((part) => part.textContent).join("|"));
 
 // #1030: the preview counts what the job's sections show, from the job-reach
 // read, whether or not anybody has opened the ticket's job yet.
@@ -520,7 +562,7 @@ test("Around this ticket counts what the ticket reaches, with no context stored 
   const h = harness();
   h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
   await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing or down"]);
+  expect(around()).toEqual(["Code|1||›", "Builds|1|1 failing|›"]);
   // Builds is counted as the job reads it: asked for the CI role, naming no kinds (#1295).
   const builds = h.lists.filter((filter) => filter.order === "latest_per_parent");
   expect(builds).toHaveLength(1);
@@ -537,7 +579,7 @@ test("Around this ticket counts a parent's link the reach brings in and the cont
   ];
   h.members["ctx:2"] = [PR.entity_id, BUILD_OK.entity_id];
   await open(h);
-  expect(around()).toEqual(["Code1 pull request", "Builds2 builds, 1 failing or down"]);
+  expect(around()).toEqual(["Code|1||›", "Builds|2|1 failing|›"]);
 });
 
 test("Around this ticket says Nothing connected yet only when the reach is empty", async () => {
@@ -548,7 +590,7 @@ test("Around this ticket says Nothing connected yet only when the reach is empty
   expect(preview().textContent).toContain("Nothing connected yet.");
   target.querySelector<HTMLButtonElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.click();
   await settle();
-  expect(around()).toEqual(["Code1 pull request"]);
+  expect(around()).toEqual(["Code|1||›"]);
 });
 
 test("selecting a card never creates a context", async () => {
@@ -559,7 +601,7 @@ test("selecting a card never creates a context", async () => {
     target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!.click();
     await settle();
   }
-  expect(around()).toEqual(["Code1 pull request"]);
+  expect(around()).toEqual(["Code|1||›"]);
   expect(bridged).not.toContain("promote_context");
   expect(h.lists.every((filter) => filter.context === null)).toBe(true);
 });
@@ -617,24 +659,24 @@ test("lanes split the board into bands by size, each with its columns and count,
     {
       head: "jonas.becker 11",
       columns: [
-        { head: "To Do 11", cards: 8, more: "Show 3 more" },
-        { head: "In Progress 0", cards: 0, more: null },
+        { head: "To do 11", cards: 8, more: "Show 3 more" },
+        { head: "In progress 0", cards: 0, more: null },
         { head: "Done 0", cards: 0, more: null },
       ],
     },
     {
       head: "Unassigned 5",
       columns: [
-        { head: "To Do 0", cards: 0, more: null },
-        { head: "In Progress 0", cards: 0, more: null },
+        { head: "To do 0", cards: 0, more: null },
+        { head: "In progress 0", cards: 0, more: null },
         { head: "Done 5", cards: 3, more: "Show 2 more done" },
       ],
     },
     {
       head: "mara.lindqvist 2",
       columns: [
-        { head: "To Do 1", cards: 1, more: null },
-        { head: "In Progress 1", cards: 1, more: null },
+        { head: "To do 1", cards: 1, more: null },
+        { head: "In progress 1", cards: 1, more: null },
         { head: "Done 0", cards: 0, more: null },
       ],
     },
@@ -936,7 +978,7 @@ test("the board head is the canonical header: title left, one group right with t
   expect(acts!.matches(".tf-acts")).toBe(true);
   expect(acts!.firstElementChild!.matches('.tf-seg[aria-label="Layout"]')).toBe(true);
   const buttons = [...acts!.querySelectorAll<HTMLButtonElement>(":scope > button, :scope > * > button")].filter((b) => !b.closest(".tf-seg"));
-  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view", "⋯", "Sync now"]);
+  expect(buttons.map((b) => b.textContent!.trim())).toEqual(["Edit view…", "⋯", "Sync now"]);
   for (const b of buttons) {
     expect(b.classList.contains("tf-btn")).toBe(true);
     expect(b.classList.contains("tf-sm")).toBe(false);
@@ -990,8 +1032,19 @@ test("a view whose text the grammar cannot read opens as text with a line naming
   expect(target.querySelector(".tf-vw-warn")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
     "The search cannot read sprint:next in this view, so it shows no tickets.",
   );
-  expect(target.querySelector("input[data-filter]")).toBeNull();
+  expect(target.querySelector(".tf-fbar input[data-filter]")).toBeNull();
   expect(target.querySelector(".tf-views .tf-vw-row .tf-count")).toBeNull();
+});
+
+test("Save as a view stands in the header, and only while a filter is on: with none there is nothing to save", async () => {
+  const h = harness([], [view("pay", "Payments (PAY)", "Projects", 0, { query: "project:PAY" })]);
+  await open(h, null, "pay");
+  const offered = () => [...target.querySelectorAll(".tf-board-head .tf-acts button")].some((b) => b.textContent === "Save as a view…");
+  expect(offered()).toBe(false);
+  type(field(), "r");
+  await settle();
+  expect(offered()).toBe(true);
+  expect(target.querySelector(".tf-fbar")!.textContent).not.toContain("Save as a view");
 });
 
 test("Save as a view saves the view's text plus the chips, dropdowns and words, with how the tickets show", async () => {
@@ -1001,7 +1054,7 @@ test("Save as a view saves the view's text plus the chips, dropdowns and words, 
   type(field(), "r");
   target.querySelector<HTMLButtonElement>('[aria-label="Layout"] button:last-child')!.click();
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector("code")!.textContent).toBe("project:PAY issuetype:Story r");
@@ -1052,7 +1105,7 @@ test("Duplicate opens New view on a copy called Copy of …, with the view's tex
   await open(harness([], VIEWS));
   menuOf("My work").click();
   await settle();
-  menuItem("Duplicate").click();
+  menuItem("Duplicate…").click();
   await settle();
   expect(dialog()!.querySelector<HTMLInputElement>("input")!.value).toBe("Copy of My work");
   expect(dialog()!.querySelector("code")!.textContent).toBe("assignee:@me");
@@ -1092,7 +1145,7 @@ test("a view's list columns and card fields are what it was saved with", async (
 test("an address naming no view says so and offers All tickets", async () => {
   const h = harness([], VIEWS);
   await open(h, null, "gone");
-  expect(target.querySelector(".tf-empty")!.textContent).toContain("No view is called gone.");
+  expect(target.querySelector(".tf-empty")!.textContent).toContain("This view does not exist.");
   expect(h.reads).toEqual([]);
 });
 
@@ -1125,7 +1178,7 @@ function input(element: HTMLInputElement | HTMLSelectElement, value: string) {
 test("+ New view opens the editor: conditions write the search line, the preview counts and draws, Create view saves it", async () => {
   const h = harness();
   await open(h);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.textContent).toContain("Kept in knobas. No source sees it.");
@@ -1133,10 +1186,10 @@ test("+ New view opens the editor: conditions write the search line, the preview
   expect(searchLine().textContent).toBe("every synced ticket");
   // Every ticket, one column per status of the board.
   expect(dialog()!.querySelector(".tf-vw-n b")!.textContent).toBe("18");
-  expect(previewCols()).toEqual(["To Do12", "In Progress1", "Done5"]);
+  expect(previewCols()).toEqual(["To do12", "In progress1", "Done5"]);
   expect(inDialog("Create view").disabled).toBe(true);
 
-  inDialog("+ Add a condition").click();
+  inDialog("Add a condition").click();
   await settle();
   // The first field is Project; pick Issue type, Bug, then is not.
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "issuetype");
@@ -1164,7 +1217,7 @@ test("+ New view opens the editor: conditions write the search line, the preview
 test("Edit view opens the text as conditions, saves over the view under its id, and keeps a text left alone as typed", async () => {
   const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: 'issuetype:Bug   assignee:me "sepa retry"' })]);
   await open(h, null, "bugs");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   expect(dialog()!.querySelector("h2")!.textContent).toBe("Edit Bugs");
   const fields = [...dialog()!.querySelectorAll<HTMLSelectElement>('select[aria-label="Field"]')].map((s) => s.value);
@@ -1182,7 +1235,7 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
   // Changed, it writes new text.
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   inDialog("Story").click();
   await settle();
@@ -1194,27 +1247,27 @@ test("Edit view opens the text as conditions, saves over the view under its id, 
 test("each status sits on one column, an over-limit column is err, tickets on no column are called out, and One column per status resets", async () => {
   const h = harness();
   await open(h);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   const cols = () => [...dialog()!.querySelectorAll<HTMLElement>(".tf-vw-col")];
   const pressed = (col: HTMLElement) =>
-    [...col.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
+    [...col.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
   // In Progress onto the first column leaves its own.
-  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "In Progress")!.click();
+  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "In progress")!.click();
   await settle();
-  expect(cols().map(pressed)).toEqual([["To Do", "In Progress"], [], ["Done"]]);
+  expect(cols().map(pressed)).toEqual([["To do", "In progress"], [], ["Done"]]);
   input(cols()[0]!.querySelector<HTMLInputElement>('input[aria-label="At most"]')!, "10");
   // Done off its column: on no column.
-  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "Done")!.click();
+  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Done")!.click();
   // Columns and limits redraw the answer already read; only the query reads again.
   await settle();
   expect(dialog()!.textContent).toContain("Done is on no column, so those tickets do not show on the board.");
-  expect(previewCols()).toEqual(["To Do13 of 10", "In Progress0", "Done0"]);
+  expect(previewCols()).toEqual(["To do13 of 10", "In progress0", "Done0"]);
   expect(dialog()!.querySelector(".tf-vw-mcol")!.classList.contains("tf-vw-over")).toBe(true);
   expect(dialog()!.textContent).toContain("5 of them sit in a status on no column.");
   inDialog("One column per status").click();
   await settle();
-  expect(cols().map(pressed)).toEqual([["To Do"], ["In Progress"], ["Done"]]);
+  expect(cols().map(pressed)).toEqual([["To do"], ["In progress"], ["Done"]]);
   expect(dialog()!.textContent).not.toContain("on no column");
 });
 
@@ -1223,7 +1276,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   await open(h, null, "odd");
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   expect([...searchLine().querySelectorAll(".tf-vw-newq")].map((s) => s.textContent)).toEqual(["sprint:next", "-under:PAY-200"]);
   expect(searchLine().textContent).toBe("sprint:next -under:PAY-200 label:sepa");
@@ -1243,7 +1296,7 @@ test("the search line underlines what the grammar does not read, and Signal is a
   await open(h, null, "odd");
   menuOf("this view").click();
   await settle();
-  menuItem("Edit view").click();
+  menuItem("Edit view…").click();
   await previewed(h);
   expect(options()).toContain("Signal");
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "signal");
@@ -1256,10 +1309,10 @@ test("the search line underlines what the grammar does not read, and Signal is a
 test("Delete view in the editor deletes it, with Undo in the toast", async () => {
   const h = harness([], VIEWS);
   await open(h, null, "backlog");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view…")!.click();
   await previewed(h);
   // #2289: an extra action that starts a destructive one, drawn by the Controls classes alone.
-  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger");
+  expect(inDialog("Delete view").className).toBe("tf-btn tf-ghost tf-danger tf-first");
   inDialog("Delete view").click();
   await settle();
   expect(dialog()).toBeNull();
@@ -1364,7 +1417,7 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   ]);
   expect(target.querySelector(".tf-board-head .tf-q")).toBeNull();
   const settings = [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find(
-    (b) => b.textContent === "View settings",
+    (b) => b.textContent === "View settings…",
   );
   expect(settings).toBeDefined();
 
@@ -1372,8 +1425,8 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "View settingslanes, cards and list columns",
-    "Make an editable copyyour own view, starting from this board",
+    "View settings…lanes, cards and list columns",
+    "Make an editable copy…your own view, starting from this board",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
 });
@@ -1384,7 +1437,7 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
   // PAY-1 is To Do and mine, under *Ready*.
   expect(columns()[0]!.head).toBe("Ready 12");
   const facts = [...preview().querySelectorAll(".tf-facts dt")].map((dt) => [dt.textContent, dt.nextElementSibling!.textContent]);
-  expect(facts).toContainEqual(["Status", "To Do"]);
+  expect(facts).toContainEqual(["Status", "To do"]);
   expect(preview().querySelector(".tf-go .tf-primary")!.textContent).toBe("Start work");
 
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
@@ -1393,7 +1446,7 @@ test("on a Jira view the preview and the list read the ticket's status, the colu
   const status = (key: string) =>
     [...target.querySelectorAll(".tf-tbl tbody tr")].find((tr) => tr.querySelector("td")!.textContent === key)!.children[statusAt]!
       .textContent;
-  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To Do", "In Progress", "Done"]);
+  expect([status("PAY-1"), status("PAY-40"), status("PAY-50")]).toEqual(["To do", "In progress", "Done"]);
 });
 
 test("two sources holding PAY-1: each card and row names its source and opens by it; a unique key names none (#1476)", async () => {
@@ -1478,12 +1531,12 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
 test("View settings on a Jira view says how much a copy keeps and offers Make an editable copy", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain(
     "To change which tickets it holds, change it in Jira, or make your own copy. A copy keeps 1 of 2 parts of the query.",
   );
-  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(fromLine()).toBe(COPIED);
@@ -1499,19 +1552,19 @@ test("a saved view from a source without translate_query offers no editable copy
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
   expect(items).toEqual([
-    "View settingslanes, cards and list columns",
+    "View settings…lanes, cards and list columns",
     "Hide from the listit keeps syncing, so you can show it again",
   ]);
   menuOf("Payments and Ops flow").click();
   flushSync();
-  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view")).toBe(false);
+  expect([...target.querySelectorAll("button")].some((b) => b.textContent === "Save as a view…")).toBe(false);
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const text = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(text).toContain("To change which tickets it holds, change it in Jira.");
   expect(text).not.toContain("copy");
-  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy")).toBe(false);
+  expect([...dialog()!.querySelectorAll("button")].some((b) => b.textContent === "Make an editable copy…")).toBe(false);
   expect(h.translated).toEqual([]);
 });
 
@@ -1537,7 +1590,7 @@ test("Save as a view on a Jira view is a copy too: the JQL it could test, then t
   [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Story")!.click();
   type(field(), "r");
   await settle();
-  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view…")!.click();
   await settle();
   expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
   expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("");
@@ -1617,7 +1670,7 @@ test("Hide from the list moves a Jira view to one hidden line, with Undo, and Sh
 test("View settings on a Jira view says Jira decides, locks its columns, and saves only how it shows", async () => {
   const { h } = jiraHarness();
   await open(h, null, "jira-board-21");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const box = target.querySelector<HTMLElement>(".tf-vw-dialog")!;
   expect(box.querySelector("h2")!.textContent).toBe("Settings for Payments and Ops flow");
@@ -1741,7 +1794,7 @@ test("a second ticket system's view says where it comes from, what decides it, a
   noJira(target.querySelector(".tf-board-head")!.textContent);
   noJira(srcLines().join(" "));
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const settings = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(settings).toContain(
@@ -1752,7 +1805,7 @@ test("a second ticket system's view says where it comes from, what decides it, a
   expect(settings).toContain("Only how it looks here. Kestrel still decides which tickets.");
   noJira(settings);
 
-  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy…")!.click();
   await settle();
   expect(fromLine()).toBe(
     "Copied from the Kestrel board Customs flow. It no longer follows Kestrel. Left out, because knobas cannot test it: fixVersion is EMPTY (knobas does not sync fix versions).",
@@ -1771,7 +1824,7 @@ test("a saved view with no query says what decides it with no dangling query, in
   ]);
   expect(target.querySelector(".tf-vw-srcline code")).toBeNull();
 
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   const settings = dialog()!.textContent!.replace(/\s+/g, " ");
   expect(settings).toContain(
@@ -1787,7 +1840,7 @@ test("a saved view's own query and sub-query show in its source line and View se
   expect(srcLines()).toEqual([
     "Kestrel decides which tickets, from the Scrum board Customs flow: is:open milestone:train and label:ops. Read again at every sync, last 4 min ago. Open in Kestrel",
   ]);
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings…")!.click();
   await settle();
   expect(dialog()!.querySelector(".tf-vw-source-query")!.textContent).toBe("is:open milestone:train\nlabel:ops");
   expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain("knobas runs its query at every sync and keeps Kestrel's order.");
@@ -1800,7 +1853,7 @@ test("with two ticket systems the list's foot and a view of your own name both",
   expect(target.querySelector(".tf-vw-foot")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
     "Boards and favourite filters come in with the Jira and Kestrel sources at every sync. Choose which",
   );
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await settle();
   expect(dialog()!.textContent).toContain("Kept in knobas. Jira and Kestrel never see it.");
 });
@@ -1809,7 +1862,7 @@ test("a count of one reads in the singular: the filter bar's ticket and the edit
   const h = harness([], [], [CORPUS[0]!]);
   await open(h);
   expect(count()).toBe("1 ticket");
-  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "New view…")!.click();
   await previewed(h);
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!, "priority");
   await previewed(h);
@@ -1910,7 +1963,7 @@ test("a source of any adapter kind that fills the ticket system has its tickets 
   expect(listed.map((cells) => cells[0]).sort()).toEqual(["TRK-1", "TRK-2"]);
   const bare = listed.find((cells) => cells[0] === "TRK-2")!;
   // Key, Summary, Status, Priority, Signals, Assignee, Updated: nothing declared, nothing drawn.
-  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In Progress", "", "", "Unassigned", "never"]);
+  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In progress", "", "", "Unassigned", "never"]);
 });
 
 test("every board read asks for the ticket system, and the shell's source list answering reads nothing again (#1299)", async () => {
@@ -1935,9 +1988,7 @@ test("with no source filling the ticket system the board is read, empty, and say
   const { h, roles } = trackerHarness([]);
   await open(h);
   expect(roles[0]).toBe("ticket-system");
-  expect(target.querySelector(".tf-empty")!.textContent).toBe(
-    "No tickets synced yet. Add a ticket system in Settings and they appear here.",
-  );
+  expect(target.querySelector(".tf-empty p")!.textContent).toBe("No tickets synced yet. Add a ticket system in Settings and they appear here.");
 });
 
 test("a long list draws the rows near the viewport, and j/k walk past them, drawing and focusing each row they reach (#2209)", async () => {
@@ -1975,4 +2026,39 @@ test("a long list draws the rows near the viewport, and j/k walk past them, draw
   expect(selectedKey()).toBe("PAY-0001");
   expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-0001");
   expect(drawn()[0]).toBe("jira:PAY-0001");
+});
+
+test("*Back to All tickets* is a link that does what Esc does (F-153)", async () => {
+  const h = harness();
+  await open(h);
+  scopedTicket.openSubtasks("jira:PAY-1");
+  flushSync();
+  await settle();
+  const link = target.querySelector<HTMLAnchorElement>("a.tf-esc")!;
+  expect(link.textContent).toContain("Back to All tickets");
+  const press = new MouseEvent("click", { bubbles: true, cancelable: true });
+  link.dispatchEvent(press);
+  flushSync();
+  await settle();
+  expect(press.defaultPrevented, "it has no address of its own to go to").toBe(true);
+  expect(scopedTicket.subtasksOf).toBeNull();
+  expect(target.querySelector("h1")!.textContent).toContain("All tickets");
+});
+
+test("the preview's Sub-tasks row narrows the page where it stands, and Esc undoes it, with the bar saying so", async () => {
+  const h = harness();
+  await open(h);
+  scopedTicket.openSubtasks("jira:PAY-1");
+  flushSync();
+  await settle();
+  expect(target.querySelector("h1")!.textContent).toContain("Sub-tasks of");
+  expect(target.querySelector(".tf-esc")!.textContent).toContain("Back to All tickets");
+  const layer = layers.open.at(-1)!;
+  expect(layer.kind).toBe("panel");
+  layer.close();
+  flushSync();
+  await settle();
+  expect(scopedTicket.subtasksOf).toBeNull();
+  expect(target.querySelector("h1")!.textContent).toContain("All tickets");
+  expect(layers.open, "the way out goes with the narrowing").not.toContain(layer);
 });

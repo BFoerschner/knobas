@@ -23,6 +23,14 @@ preview) is reversed for the page. Each row of the card's sections table opens t
 view on *This job* for this ticket, and a *Sub-tasks* row opens Tickets on `under:<key>`. The
 Tickets preview keeps its count lines; aligning it with the card is a later ticket.
 
+**Amended 2026-11-06 (UX polish, F-130, under Björn's "how it feels wins").** *Start work* no longer
+chooses on its press, at the card's foot or in the Tickets preview: it shows the steps on the card's
+sheet, with *Cancel*, and *Run all steps* (or a *Skip* that runs the flow on) is what chooses. Looking at
+the steps and leaving changed the job with no word of it, which is the quiet choice this ruling was
+against. *Resume work*, *Work on this* and a `#/job/…` address still choose, now with a toast naming the
+job they replaced. The Tickets preview's rows are now the card's own (F-109), which is the later ticket
+this ruling left open.
+
 ## Why
 
 The two pages looked almost the same and differed in the wrong things. To see which build failed

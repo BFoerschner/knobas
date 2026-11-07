@@ -1,6 +1,9 @@
 <!--
   What the backend made of the box (`.tf-ln-fbar`/`.tf-ln-fchip` in `tf/css/launcher.css`).
 
+  The prefix the box opened with is not here: a mode is said in front of the box
+  (`modeName`, F-626), and this bar is what narrows it.
+
   **`response.interpreted` is the only source of these chips.** The frontend
   never re-parses the box: ruling P2 puts the whole grammar in
   `crates/knobas-search/src/query.rs`, and a second implementation here would
@@ -22,6 +25,7 @@
     interpreted,
     sources,
     sourcesRead = true,
+    hiddenKinds = [],
   }: {
     interpreted: ParsedQuery;
     sources: CredentialHealth[];
@@ -31,19 +35,9 @@
      * the sources are not read yet.
      */
     sourcesRead?: boolean;
+    /** The kinds the chip in front of the box already names (a section's filter), not said again here. */
+    hiddenKinds?: readonly string[];
   } = $props();
-
-  /** The prefix chip, in the words the `?` card uses. */
-  const PREFIX_LABEL: Record<string, string> = {
-    action: "actions",
-    person: "people",
-    source: "source",
-    time: "time",
-    note: "notes",
-    list: "smart list",
-    asset: "assets",
-    help: "help",
-  };
 
   /**
    * A kind chip in the word the `?` card gives its `#` letter (#2420): `#rl`
@@ -51,7 +45,8 @@
    * its own spelling.
    */
   function kindLabel(kind: string): string {
-    return SYNTAX.find((entry) => entry.kind === kind)?.summary ?? kind;
+    const word = SYNTAX.find((entry) => entry.kind === kind)?.summary ?? kind;
+    return word.charAt(0).toUpperCase() + word.slice(1);
   }
 
   /** The keys that name a source (`apply_key_value`). */
@@ -94,14 +89,6 @@
 
   const chips = $derived.by(() => {
     const out: { key: string; text: string; title: string; fail: boolean }[] = [];
-    if (interpreted.prefix) {
-      out.push({
-        key: `prefix:${interpreted.prefix}`,
-        text: PREFIX_LABEL[interpreted.prefix] ?? interpreted.prefix,
-        title: "the prefix the box opened with",
-        fail: false,
-      });
-    }
     for (const id of interpreted.filters.sources) {
       const state = health(id)?.state;
       out.push({
@@ -118,6 +105,7 @@
       });
     }
     for (const kind of interpreted.filters.kinds) {
+      if (hiddenKinds.includes(kind)) continue;
       out.push({ key: `kind:${kind}`, text: kindLabel(kind), title: "kind", fail: false });
     }
     if (interpreted.filters.updated_within_days !== null) {

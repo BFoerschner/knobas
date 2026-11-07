@@ -13,15 +13,16 @@ import type { MonitorKind } from "../../ipc/sources";
 import { bar, chipOf as chipStateOf } from "../../assets/monitors";
 import { matchesAll } from "../filter/filter";
 import { stampLabel } from "../../time/format";
+import { stateWord } from "../state-word";
 import type { JobIndex } from "../job/open-jobs";
 
 /** A chip's tone; `null` is the muted chip (paused, no reading). */
 export type ChipTone = "ok" | "warn" | "err" | "info" | null;
 
-/** Where each chip sorts: down, warning, then what is neither up nor broken, paused, up. */
+/** Where each chip sorts: down, slow, then what is neither up nor broken, paused, up. */
 const RANK: Record<string, number> = { down: 0, warn: 1, pending: 2, other: 3, paused: 4, up: 5 };
 
-/** The roster in prototype-6's order: down, warning, paused, up; by name inside each. */
+/** The roster in prototype-6's order: down, slow, paused, up; by name inside each. */
 export function sorted(rows: readonly MonitorRow[]): MonitorRow[] {
   return [...rows].sort(
     (a, b) => (RANK[chipStateOf(a)] ?? 3) - (RANK[chipStateOf(b)] ?? 3) || a.name.localeCompare(b.name),
@@ -58,23 +59,22 @@ function downSince(row: MonitorRow): Date | null {
 }
 
 /**
- * The state chip: its words, as prototype-6 words them, and its tone. *down
- * since 12:40* today, else *yesterday 12:40* or *2026-10-12 12:40*
- * (`stampLabel`, #1986).
+ * The state chip: the word and its tone. A chip holds the state alone, so it
+ * never gives up its end: how long a monitor has been down is `since`, plain
+ * text beside it (*since 12:40* today, else *since yesterday 12:40* or *since
+ * 2026-10-12 12:40*, `stampLabel`, #1986), and a slow monitor's time is the
+ * row's Response.
  */
-export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone } {
+export function stateChip(row: MonitorRow, now: Date = new Date()): { label: string; tone: ChipTone; since?: string } {
   switch (chipStateOf(row)) {
     case "paused":
       return { label: "paused", tone: null };
     case "down": {
       const since = downSince(row);
-      return { label: since ? `down since ${stampLabel(since.toISOString(), now, true)}` : "down", tone: "err" };
+      return since ? { label: "down", tone: "err", since: `since ${stampLabel(since.toISOString(), now, true)}` } : { label: "down", tone: "err" };
     }
     case "warn":
-      return {
-        label: row.response_time_ms !== null ? `slow, ${responseText(row.response_time_ms)}` : "warning",
-        tone: "warn",
-      };
+      return { label: "slow", tone: "warn" };
     case "up":
       return { label: "up", tone: "ok" };
     case "pending":
@@ -99,6 +99,31 @@ export function segments(row: MonitorRow, now: number): Segment[] {
   });
 }
 
+const WORST: readonly Segment[] = ["down", "warn", "paused", "up", "gap"];
+
+/** A bar to draw: its state, its key, and what its title says. */
+export interface Bar {
+  state: Segment;
+  at: number;
+  title: string;
+}
+
+/** What each state is called in a bar's title; a pale gap is a half-hour with no reading. */
+const SEGMENT_WORD: Record<Segment, string> = { up: "up", warn: "slow", down: "down", paused: "paused", gap: "no data" };
+
+/** The bars the roster draws: the 48 half-hours, or below the narrow width one bar an hour, each worst-of. */
+export function barsOf(all: readonly Segment[], hourly: boolean): Bar[] {
+  const step = hourly ? 2 : 1;
+  const bars: Bar[] = [];
+  for (let at = 0; at < all.length; at += step) {
+    const part = all.slice(at, at + step);
+    const state = WORST.find((word) => part.includes(word)) ?? "gap";
+    const hoursAgo = (all.length - at) / 2;
+    bars.push({ state, at, title: `${hoursAgo} h ago: ${SEGMENT_WORD[state]}` });
+  }
+  return bars;
+}
+
 /**
  * The kind of check in prototype-6's words. The roster carries Uptime Kuma's
  * own `monitor_type`; a word with no entry here is drawn as the source spells
@@ -111,9 +136,11 @@ export function kindWord(type: string | null): string {
   return KIND_WORDS[type] ?? type;
 }
 
-/** The state chips of the filter bar, and which chip of a row each keeps. */
-export const STATE_CHIPS = ["Down", "Warning", "Up", "Paused"] as const;
-const CHIP_STATE: Record<string, string> = { Down: "down", Warning: "warn", Up: "up", Paused: "paused" };
+/**
+ * The state pills of the filter bar: the words a row's chip says, so a pill keeps the rows that read as it does. *No
+ * reading* has no pill, because it is not a state to look for: such a row shows while no pill is on.
+ */
+export const STATE_CHIPS = ["Down", "Slow", "Up", "Paused", "Pending", "Maintenance"] as const;
 
 /** What the filter bar has set. */
 export interface MonitorFilter {
@@ -150,7 +177,7 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
     if (filter.scope === "mine" && !idsOf(row).some((id) => index.jobOf({ entity_id: id, kind: null }) !== null)) {
       return false;
     }
-    if (filter.states.length > 0 && !filter.states.some((chip) => CHIP_STATE[chip] === chipStateOf(row))) return false;
+    if (filter.states.length > 0 && !filter.states.includes(stateWord(stateChip(row).label))) return false;
     if (filter.type !== "" && kindWord(row.monitor_type) !== filter.type) return false;
     const haystack = [row.name, kindWord(row.monitor_type), ...row.assets.flatMap((a) => [a.name, a.type_label])].join(" ");
     return matchesAll(haystack, filter.text);

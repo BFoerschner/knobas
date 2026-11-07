@@ -11,6 +11,5 @@ type TreeRoute = Extract<TfRoute, { view: "full" }> & { section: "assets" };
 export const page = definePage({
   matches: (route): route is TreeRoute => route.view === "full" && route.section === "assets",
   component: TfAssetTree,
-  crumbs: true,
-  props: ({ route }) => ({ head: route.head, rest: route.rest }),
+  props: ({ route, back }) => ({ head: route.head, rest: route.rest, back }),
 });

@@ -33,11 +33,25 @@
   to draws it disabled with the reason. The first publish's picker asks
   about every page it offers.
 
+  A date has one page. The form stays editable once published, and the read
+  says whether the note has moved on from what the queue last carried to the
+  page (`Protocol.changed_since`, F-327), so it survives leaving the tab. Then
+  *Publish again* sends the whole note onto that page
+  (`publish_standup_protocol_again`). One line under the heading says where it
+  stands. Its usual words share one box, so the first keystroke after a publish
+  moves nothing under the caret; a page edited in the source since
+  (`page_moved`), and a write the queue held or refused, say so there too.
+
+  The press stays one button in one place from *Publish* to *Queued* to *Sent*,
+  so a second press lands on it and focus has somewhere to stay.
+
   `date` is the day the address names (`#/time/standup/<date>`, #1504), today
   without one.
 -->
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import TfStateChip from "../TfStateChip.svelte";
+  import { onDestroy, tick, untrack } from "svelte";
   import { listen as tauriListen } from "@tauri-apps/api/event";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -48,6 +62,7 @@
     getNote as realGetNote,
     listProjects as realListProjects,
     publishStandupProtocol as realPublish,
+    publishStandupProtocolAgain as realPublishAgain,
     saveNote as realSaveNote,
     standupDigest as realStandupDigest,
     standupProtocol as realStandupProtocol,
@@ -61,8 +76,11 @@
   import { search as realSearch } from "../../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources, type QueuedWrite } from "../../ipc/sources";
   import { toastStopped, unconfirmedTeller, willNotGo, writeFollower, type WriteFollower } from "../../shell/follow-write";
+  import { toastQueued } from "../../shell/queued-toast";
+  import { heldByPointer, holdUnderPointer } from "../row-hold";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort } from "../../shell/refused-writes";
   import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources } from "../../standup/protocol";
   import { digestWindows, LOOKBACK_DAYS } from "../../standup/standup";
@@ -96,6 +114,7 @@
     getNote: typeof realGetNote;
     saveNote: typeof realSaveNote;
     publishStandupProtocol: typeof realPublish;
+    publishStandupProtocolAgain: typeof realPublishAgain;
     standupPublishTarget: typeof realPublishTarget;
     createActionItemTicket: typeof realCreateTicket;
     actionItemTicket: typeof realActionItemTicket;
@@ -141,6 +160,7 @@
     getNote: realGetNote,
     saveNote: realSaveNote,
     publishStandupProtocol: realPublish,
+    publishStandupProtocolAgain: realPublishAgain,
     standupPublishTarget: realPublishTarget,
     createActionItemTicket: realCreateTicket,
     actionItemTicket: realActionItemTicket,
@@ -204,6 +224,12 @@
 
   const form = $derived(readProtocol(bodyMd));
   const publication = $derived(protocol?.publication ?? null);
+  const published = $derived(publication !== null && publication.page_entity_id !== null && publication.linked);
+  /** Typed since the last read: the read compares what was saved, and the line can't wait for the save. */
+  let edited = $state(false);
+  const changedSince = $derived(published && (edited || (protocol?.changed_since ?? false)));
+  const moved = $derived(protocol?.page_moved ?? false);
+  const again = $derived(protocol?.again ?? null);
 
   async function openProtocol() {
     try {
@@ -217,6 +243,7 @@
       drafts = { ...read.notes };
       failure = null;
       followPublication();
+      followAgain();
       readOwed(opened);
       void readLinked(note.links, read.items);
     } catch (cause) {
@@ -257,6 +284,7 @@
   /** A new body: drawn at once, saved after a pause. */
   function edit(next: string) {
     bodyMd = next;
+    edited = true;
     if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => void save(), saveAfterMs);
   }
@@ -278,6 +306,8 @@
       try {
         await io.saveNote(current.note_id, title, bodyMd);
         failure = null;
+        // The read says whether the note still differs: words typed and taken back read as the page again.
+        if (protocol?.publication) void readStanding();
         return true;
       } catch (cause) {
         failure = ipcErrorMessage(cause);
@@ -288,9 +318,10 @@
     return turn;
   }
 
+  /** The notes read in the pills' order, so someone pressed off and on again keeps their place. */
   function toggle(name: string) {
     const present = form.attendees;
-    edit(withAttendees(bodyMd, present.includes(name) ? present.filter((other) => other !== name) : [...present, name]));
+    edit(withAttendees(bodyMd, present.includes(name) ? present.filter((other) => other !== name) : known.filter((other) => other === name || present.includes(other))));
   }
 
   function addPerson(name: string) {
@@ -322,13 +353,38 @@
     node.focus();
   }
 
-  /** Enter adds what was typed; Esc drops it without closing the view. */
+  /** The add field is gone, so focus goes back to the button that opened it, and `Enter` adds the next. */
+  function focusAdd(which: "person" | "item") {
+    void tick().then(() => document.querySelector<HTMLElement>(`.tf-kept:not([hidden]) [data-su-add="${which}"], [data-su-add="${which}"]`)?.focus());
+  }
+
+  /**
+   * Enter adds what was typed and the field stays, empty, for the next name or item: a standup has several. Enter on the
+   * empty field closes it, as Esc does, without closing the view; held back, or the key would press the button focus lands on.
+   */
   function addKey(event: KeyboardEvent) {
-    if (event.key === "Enter") finishAdding();
+    const which = adding;
+    if (which === null) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (addText.trim() !== "") {
+        if (which === "person") addPerson(addText);
+        else edit(withActionItem(bodyMd, addText));
+        addText = "";
+        // What was added has just taken room above the field, which keeps focus: all of it in view for the next one, as a composer after a send (F-372).
+        const field = event.currentTarget as HTMLElement;
+        void tick().then(() => field.scrollIntoView?.({ block: "nearest" }));
+        return;
+      }
+      adding = null;
+      addText = "";
+      focusAdd(which);
+    }
     if (event.key === "Escape") {
       event.stopPropagation();
       addText = "";
       adding = null;
+      focusAdd(which);
     }
   }
 
@@ -340,10 +396,117 @@
   /** Whether the stored target's source refuses its credential a page under it (#2053), asked once it is read. */
   let refused = $state<RefusedWrite[]>([]);
   const storedParent = $derived(target?.stored.parent ?? null);
+  const pageId = $derived(publication?.page_entity_id ?? null);
   $effect(() =>
-    askInto(storedParent === null ? [] : [{ entity: storedParent, op: "create_page" }], io.refusedWrites, (answer) => (refused = answer)),
+    askInto(
+      [...(storedParent === null ? [] : [{ entity: storedParent, op: "create_page" }]), ...(pageId === null ? [] : [{ entity: pageId, op: "update_page" }])],
+      io.refusedWrites,
+      (answer) => (refused = answer),
+    ),
   );
   const publishRefusal = $derived(refusalOf(refused, storedParent, "create_page"));
+  const againRefusal = $derived(refusalOf(refused, pageId, "update_page"));
+
+  /** What the press says while its write is on its way, `null` when it is not. */
+  const going = $derived.by(() => {
+    if (publication !== null && !published) return publication.state === "held" ? "Held in the queue" : publication.state === "sent" ? "Sent" : "Queued";
+    if (again?.state === "held") return "Held in the queue";
+    if (again?.state === "pending" || (publishing && publication !== null)) return "Queued";
+    return null;
+  });
+  const canAgain = $derived(published && changedSince && !moved && going === null);
+  /** The press: a publish, *Publish again*, or either on its way, in one place. */
+  let press = $state<HTMLButtonElement | null>(null);
+  let pageLink = $state<HTMLAnchorElement | null>(null);
+
+  /**
+   * Take a new read of the protocol. Focus on the press stays there while it says *Queued*; with the write landed and
+   * nothing to send, the press goes and the keeper gives focus to what held it, so a second `Enter` doesn't open the page (F-340).
+   */
+  function take(answer: Protocol) {
+    protocol = answer;
+    edited = timer !== null;
+  }
+
+  /** Bumped per read, so one answering late does not put an older protocol back. */
+  let reads = 0;
+  async function readStanding() {
+    const mine = (reads += 1);
+    let answer: Protocol;
+    try {
+      answer = await io.standupProtocol(day);
+    } catch {
+      return;
+    }
+    if (mine === reads) take(answer);
+  }
+
+  /**
+   * A mouse's first publish: the press stays under the pointer as *Sent* once the page exists, until the pointer leaves it. The
+   * link can then stand beside it, so a second press where the pointer rests can't open the page nobody aimed at (F-138's rule).
+   */
+  let pressHeld = $state(false);
+  $effect(() => {
+    if (!pressHeld) return;
+    return holdUnderPointer(() => press, () => {
+      const had = document.activeElement === press;
+      press?.style.removeProperty("min-width");
+      pressHeld = false;
+      if (had) void tick().then(() => (press === null || !press.isConnected) && pageLink?.focus({ preventScroll: true }));
+    });
+  });
+
+  function pressed(event: MouseEvent) {
+    if (publishing) return;
+    if (publication === null && heldByPointer(event)) {
+      pressHeld = true;
+      // *Queued* and *Sent* are shorter than *Publish to Confluence*: the box stays under the pointer as it was pressed.
+      const box = event.currentTarget as HTMLElement;
+      box.style.setProperty("min-width", `${box.getBoundingClientRect().width}px`);
+    }
+    if (publication === null) void publish();
+    else if (canAgain && againRefusal === null) void publishAgain();
+  }
+
+  /** Where a publish's write goes, named in its toast. */
+  /** What this date's publishing is about: *Publish again* takes the last toast's place (F-360). */
+  const publishSubject = () => `standup-publish:${day}`;
+  const publishSource = () => (target === null ? null : { id: target.stored.source_id, display_name: target.reading.split(" › ")[0] ?? "" });
+  /** Where a sent publish shows. */
+  const openThePage = {
+    label: "Open the page",
+    run: () => {
+      if (pageId !== null) location.hash = `#/page/${encodeURIComponent(pageId)}`;
+    },
+  };
+
+  /** *Publish again* (F-327): what the note says now, onto the page. A press beside a write still going queues nothing. */
+  async function publishAgain() {
+    if (publishing) return;
+    publishing = true;
+    try {
+      if (!(await save())) return;
+      reads += 1;
+      take(await io.publishStandupProtocolAgain(day));
+      failure = null;
+      const source = publishSource();
+      const write = protocol?.again ?? null;
+      const page = pageId;
+      const where = page === null ? undefined : openThePage;
+      if (write === null) push({ text: "Sent: publish the protocol again.", subject: publishSubject(), ...(where === undefined ? {} : { action: where }) });
+      // Already held or refused, the line under the heading says why.
+      else if (write.state === "pending") {
+        toastQueued("publish the protocol again", source, { write: { id: write.write_id, state: write.state }, follower: io.follower, where, subject: publishSubject() });
+        followAgain();
+      }
+    } catch (cause) {
+      // Most often the page moved since the last read, which the read now says.
+      failure = ipcErrorMessage(cause);
+      void readStanding();
+    } finally {
+      publishing = false;
+    }
+  }
 
   async function publish() {
     if (publishRefusal !== null) return;
@@ -376,10 +539,13 @@
       // Save first and stop if it did not land: the page is made from the body
       // the backend holds, and a page cannot be taken back.
       if (!(await save())) return;
-      protocol = await io.publishStandupProtocol(day, chosen);
+      reads += 1;
+      take(await io.publishStandupProtocol(day, chosen));
       dialog = null;
       failure = null;
-      push({ text: target ? `Publishing to Confluence under ${target.reading}` : "Publishing to Confluence" });
+      const queued = protocol?.publication ?? null;
+      const what = target ? `publish the protocol under ${target.reading}` : "publish the protocol to Confluence";
+      toastQueued(what, publishSource(), queued === null ? { subject: publishSubject() } : { write: { id: queued.write_id, state: queued.state }, follower: io.follower, where: openThePage, subject: publishSubject() });
       if (chosen) void readTarget();
       followPublication();
     } catch (cause) {
@@ -423,14 +589,35 @@
     );
   }
 
+  /** A *Publish again* on its way: refused or held, it says so; settled, the read says what the page holds. */
+  function followAgain() {
+    const current = protocol?.again;
+    if (!current || current.state !== "pending" || following.has(current.write_id)) return;
+    const id = current.write_id;
+    let told = false;
+    const unconfirmed = unconfirmedTeller({ name: "Publish again" });
+    following.set(
+      id,
+      io.follower.follow(id, (row) => {
+        if (!unconfirmed(row) && willNotGo(row) && !told) {
+          told = true;
+          toastStopped(row, { name: "Publish again" });
+        }
+        void readStanding();
+        if (row === undefined || willNotGo(row)) unfollow(id);
+      }),
+    );
+  }
+
   async function reread(id: number) {
+    const mine = (reads += 1);
     let answer: Protocol;
     try {
       answer = await io.standupProtocol(day);
     } catch {
       return;
     }
-    protocol = answer;
+    if (mine === reads) take(answer);
     const latest = answer.publication;
     if (latest === null || latest.write_id !== id || latest.linked || latest.state === "held") unfollow(id);
   }
@@ -607,10 +794,10 @@
               {@const href = lineHash(line)}
               {@const key = lineKey(line)}
               {#snippet words()}
-                {#if key}<span class="tf-mono">{key}</span>{" "}{/if}{line.title}{#if alert}{" "}{line.reason}<span
+                {#if key}<span class="tf-mono">{key}</span>{" "}{/if}{line.title}{#if alert}{" "}<TfKeyed text={line.reason} /><span
                     class="tf-dim">{`, ${alertSince(line)}`}</span
-                  >{:else if yesterday}{`: ${line.reason}`}{:else}{" "}<span
-                    class="tf-dim">({line.reason})</span
+                  >{:else if yesterday}: <TfKeyed text={line.reason} />{:else}{" "}<span
+                    class="tf-dim">(<TfKeyed text={line.reason} />)</span
                   >{/if}
               {/snippet}
               <li>
@@ -636,36 +823,70 @@
     <header>
       <h3>Protocol</h3>
       <span class="tf-dim tf-su-day">{protocolDay(day)}</span>
-      {#if publication === null}
-        <button
-          class="tf-btn tf-sm tf-primary"
-          disabled={!loaded || publishing || protocol === null}
-          {...refusedAttrs(publishRefusal)}
-          onclick={() => void publish()}
-        >
-          Publish to Confluence
-        </button>
-      {:else if publication.page_entity_id !== null && publication.linked}
-        <a class="tf-btn tf-sm tf-ghost" href="#/page/{encodeURIComponent(publication.page_entity_id)}">Published</a>
-      {:else}
-        <span class="tf-chip tf-open">{publication.state === "held" ? "held in the queue" : "publishing"}</span>
-      {/if}
+      <span class="tf-trail" class:tf-su-held={pressHeld}>
+        <!-- The press stands before the link, so the link stays put when the press goes and a second press can't land on it. -->
+        {#if publication === null || going !== null || canAgain || pressHeld}
+          <button
+            class="tf-btn tf-sm tf-primary"
+            bind:this={press}
+            disabled={publication === null && (!loaded || protocol === null)}
+            aria-disabled={going !== null || pressHeld || (publication === null && publishing) ? "true" : undefined}
+            {...going === null ? refusedAttrs(publication === null ? publishRefusal : againRefusal) : {}}
+            onclick={pressed}
+          >
+            <!-- The first publish asks where, so it has the ellipsis; with a target stored it acts at once. -->
+            {going ?? (pressHeld && published ? "Sent" : publication === null ? `Publish to Confluence${target === null ? "…" : ""}` : "Publish again")}
+          </button>
+        {/if}
+        {#if published && publication?.page_entity_id}
+          <a class="tf-btn tf-sm tf-ghost" bind:this={pageLink} href="#/page/{encodeURIComponent(publication.page_entity_id)}">Open the published page</a>
+        {/if}
+      </span>
     </header>
     <div class="tf-su-body">
       {#if failure}
         <p class="tf-tm-fail" role="alert">{failure}</p>
       {/if}
-      {#if publication?.detail}
-        <p class="tf-su-none">{publication.detail}</p>
+      {#if publication !== null}
+        {@const stopped = published && moved ? "moved" : going === "Held in the queue" ? "held" : again?.state === "refused" ? "refused" : null}
+        {#if stopped !== null}
+          <div class="tf-stale tf-su-pub" role="status">
+            {#if stopped === "moved"}
+              Edited in Confluence since it was published, so knobas won't replace it. Open the page and copy your change across.
+            {:else if stopped === "held"}
+              <span>Held in the queue{(again?.detail ?? publication.detail) ? `: ${again?.detail ?? publication.detail}` : "."}</span>
+              <button type="button" class="tf-btn tf-sm" onclick={openWriteQueue}>Show queue</button>
+            {:else}
+              <span>Confluence refused it{again?.detail ? `: ${again.detail}` : "."} The page keeps the earlier version.</span>
+              <button type="button" class="tf-btn tf-sm" onclick={openWriteQueue}>Show queue</button>
+            {/if}
+          </div>
+        {:else}
+          <!-- One box for all three, as wide as the longest takes: the words change under the caret and nothing moves. -->
+          <div class="tf-su-pub tf-su-publine" class:tf-su-pubchanged={published && changedSince} role="status">
+            <span class:tf-off={published}>Queued. The page shows this once it lands.</span>
+            <span class:tf-off={!published || changedSince}>Published. Change something and you can publish it again.</span>
+            <span class:tf-off={!published || !changedSince}>Changed since it was published. The page still shows the earlier version.</span>
+          </div>
+        {/if}
       {/if}
 
-      <div class="tf-pane-h">Who was there</div>
-      <div class="tf-su-people">
-        {#each known as name (name)}
-          <button class="tf-su-val" aria-pressed={form.attendees.includes(name)} onclick={() => toggle(name)}>
-            {name}
+      <div class="tf-su-h">
+        <div class="tf-pane-h">Who was there</div>
+        {#if adding !== "person"}
+          <button class="tf-btn tf-sm tf-ghost" data-su-add="person" disabled={!loaded || protocol === null} onclick={() => (adding = "person")}>
+            Add someone
           </button>
-        {/each}
+        {/if}
+      </div>
+      <div class="tf-su-people">
+        <div class="tf-fchips" role="group" aria-label="Who was there">
+          {#each known as name (name)}
+            <button type="button" aria-pressed={form.attendees.includes(name)} onclick={() => toggle(name)}>
+              {name}
+            </button>
+          {/each}
+        </div>
         {#if adding === "person"}
           <input
             class="tf-su-add"
@@ -676,10 +897,6 @@
             onkeydown={addKey}
             onblur={finishAdding}
           />
-        {:else}
-          <button class="tf-btn tf-sm tf-ghost" disabled={!loaded || protocol === null} onclick={() => (adding = "person")}>
-            + Add someone
-          </button>
         {/if}
       </div>
 
@@ -690,19 +907,26 @@
         </label>
       {/each}
 
-      <div class="tf-pane-h tf-su-gap">Action items</div>
+      <div class="tf-su-h tf-su-gap">
+        <div class="tf-pane-h">Action items</div>
+        {#if adding !== "item"}
+          <button class="tf-btn tf-sm tf-ghost" data-su-add="item" disabled={!loaded || protocol === null} onclick={() => (adding = "item")}>
+            Add an action item
+          </button>
+        {/if}
+      </div>
       {#each form.items as item, index (index)}
         {@const made = filedFor(item.text)}
         {@const owner = ownerOf(item.text)}
         <div class="tf-su-ai">
           <span class:tf-su-done={item.done}>{owner.what}{#if owner.who}{" "}<span class="tf-dim">{owner.who}</span>{/if}</span>
           {#if made === null}
-            <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket</button>
+            <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket…</button>
           {:else if made.ticket === null}
-            <span class="tf-chip tf-info">{made.state}</span>
+            <TfStateChip text={made.state} tone="info" />
           {:else}
             <a class="tf-mono" href={entityAddress("ticket", made.ticket)}>{keyOf(made.ticket)}</a>
-            {#if made.status}<span class="tf-chip">{made.status}</span>{/if}
+            {#if made.status}<TfStateChip text={made.status} />{/if}
           {/if}
         </div>
       {/each}
@@ -716,14 +940,12 @@
           onkeydown={addKey}
           onblur={finishAdding}
         />
-      {:else}
-        <button class="tf-btn tf-sm tf-ghost" disabled={!loaded || protocol === null} onclick={() => (adding = "item")}>
-          + Add an action item
-        </button>
       {/if}
 
       <p class="tf-su-foot">
-        {#if target}
+        {#if target && publication !== null}
+          New protocols publish under <b>{target.reading}</b>. Change it in <a href="#/settings/standup">Settings › Standup</a>.
+        {:else if target}
           Publishes under <b>{target.reading}</b>. Change it in <a href="#/settings/standup">Settings › Standup</a>.
         {:else}
           The first publish asks where. Change it in <a href="#/settings/standup">Settings › Standup</a>.
@@ -734,7 +956,7 @@
 </div>
 
 {#if dialog}
-  <TfDialog title="Where do standup protocols go?" {layers} onclose={() => (dialog = null)}>
+  <TfDialog why={dialog!.chosen === null && !publishing ? "Choose a page first." : null} title="Where do standup protocols go?" {layers} onclose={() => (dialog = null)}>
     {#snippet body()}
       <PublishTargetPicker
         sources={dialog!.sources}

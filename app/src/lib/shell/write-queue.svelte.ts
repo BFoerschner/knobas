@@ -632,7 +632,7 @@ export interface WriteQueue {
   readonly answered: boolean;
   /** True while an action is in flight, so a button cannot be double-fired. */
   readonly busy: boolean;
-  /** True while a *Flush now* is out, so its button cannot be double-fired (#1671). */
+  /** True while a *Retry waiting writes* is out, so its button cannot be double-fired (#1671). */
   readonly flushing: boolean;
   refresh(): Promise<void>;
   flush(sourceId: string | null): Promise<void>;
@@ -692,7 +692,7 @@ export function createWriteQueue(): WriteQueue {
   }
 
   /**
-   * *Flush now* (#775): the send, so it takes no `busy` -- the panel's other
+   * *Retry waiting writes* (#775): the send, so it takes no `busy` -- the panel's other
    * answers stay pressable while it is out -- and the re-read follows it as
    * `act`'s does, failure included. Its own `flushing` flag (#1671) keeps a
    * second click from sending a second `flush_writes`: one invoke per click

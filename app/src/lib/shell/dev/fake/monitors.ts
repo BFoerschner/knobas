@@ -98,7 +98,7 @@ export function fakeOpenAlerts(): OpenAlert[] {
       state: row.state as OpenAlert["state"],
       opened_at: new Date(now - (index + 1) * 37 * 60_000).toISOString(),
       acked_at:
-        index === 0 || FIXTURE_ACKED.has(row.entity_id)
+        (index === 0 && !FIXTURE_UNACKED.has(row.entity_id)) || FIXTURE_ACKED.has(row.entity_id)
           ? new Date(now - 12 * 60_000).toISOString()
           : null,
       assets: row.assets,
@@ -183,6 +183,8 @@ const FIXTURE_OPS: Record<string, string> = {
  * here. Cleared by a reload, which is what a fixture is.
  */
 const FIXTURE_ACKED = new Set<string>();
+/** The seed's acked alert once taken back. */
+const FIXTURE_UNACKED = new Set<string>();
 
 /**
  * `ack_alert`: mark one monitor's open alert seen, and answer with it.
@@ -199,7 +201,20 @@ function fakeAck(args: Record<string, unknown>) {
     throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
   }
   FIXTURE_ACKED.add(monitorId);
+  FIXTURE_UNACKED.delete(monitorId);
   return { ...alert, acked_at: new Date().toISOString() };
+}
+
+/** `unack_alert`: the alert asks again; `not_found` for a monitor with nothing open, as the real command answers. */
+function fakeUnack(args: Record<string, unknown>) {
+  const monitorId = typeof args.monitorId === "string" ? args.monitorId : "";
+  const alert = fakeOpenAlerts().find((row) => row.monitor_id === monitorId);
+  if (!alert) {
+    throw { code: "not_found", message: `no open alert on ${monitorId}`, source_id: null };
+  }
+  FIXTURE_ACKED.delete(monitorId);
+  FIXTURE_UNACKED.add(monitorId);
+  return { ...alert, acked_at: null };
 }
 
 /** The monitors a reader hid this session (`set_monitor_hidden`); a reload clears it. */
@@ -413,6 +428,7 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     // reader makes themselves — a fixture that answered the same list after
     // the click would make the button look broken.
     ack_alert: (args) => fakeAck(args),
+    unack_alert: (args) => fakeUnack(args),
     // The row's *Hide* / *Unhide*: knobas-local, so remembered here.
     set_monitor_hidden: (args) => fakeSetHidden(args),
     // The Monitors tab's *Not monitored* roster (#449), derived from the same
@@ -422,4 +438,4 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
   };
 }
 
-keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_HIDDEN);
+keepSeed(FIXTURE_CREATES, FIXTURE_ACKED, FIXTURE_UNACKED, FIXTURE_HIDDEN);

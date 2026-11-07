@@ -20,6 +20,7 @@
     error* reveal a line before scrolling to it.
 -->
 <script lang="ts">
+  import { filterKeys } from "../filter-keys";
   import { flushSync, tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
@@ -27,6 +28,7 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { marks } from "../filter/filter";
   import type { RunPorts } from "./pipeline-ports";
+  import { isCommand } from "./run-reads";
   import {
     findCount,
     hitsIn,
@@ -211,13 +213,14 @@
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
       ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
     >
-    <input placeholder="Find in log" aria-label="Find in log" value={typed} oninput={find} onkeydown={keys} />
+    <input placeholder="Find in log" aria-label="Find in log" value={typed} oninput={find} onkeydown={keys} {@attach filterKeys()} />
     <span class="tf-dim tf-lqn" aria-live="polite">{findCount(typed, hits.total, current)}</span>
   </label>
   <span class="tf-nav2">
-    <button type="button" aria-label="Previous match" onclick={() => jump(-1)}>↑</button><button
+    <button type="button" aria-label="Previous match" disabled={hits.total === 0} onclick={() => jump(-1)}>↑</button><button
       type="button"
       aria-label="Next match"
+      disabled={hits.total === 0}
       onclick={() => jump(1)}>↓</button
     >
   </span>
@@ -261,7 +264,7 @@
           {@attach win.row(row.key)}
         >
           <summary
-            ><span class={`tf-dot tf-${st}`}></span>{block.step.name}<span class="tf-d">{stepSummary(block.step, st)}</span></summary
+            ><span class={`tf-dot tf-${st}`}></span><span class:tf-mono={isCommand(block.step.name)}>{block.step.name}</span><span class="tf-d">{stepSummary(block.step, st)}</span></summary
           >
         </details>
       {:else}

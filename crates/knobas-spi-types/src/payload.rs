@@ -321,6 +321,17 @@ pub struct KindPaths {
     /// rule that never fires.
     #[serde(default)]
     pub assignee: Vec<PayloadPath>,
+    /// The name to call that account by, where the source keeps one beside it
+    /// (F-107): Jira's `fields.assignee.displayName`. Only ever drawn, and
+    /// never matched against an identity. Empty where the account is the only
+    /// name a source has, and the account is drawn.
+    ///
+    /// Off the wire when empty, so a source that declares none stores the
+    /// declaration it stored before (`sync.parent_declaration`), and nothing of
+    /// its is recomputed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<PayloadPath>>", optional)]
+    pub assignee_name: Vec<PayloadPath>,
     /// The accounts a review has been requested from.
     #[serde(default)]
     pub reviewers: Vec<ListPath>,
@@ -442,6 +453,12 @@ pub struct KindPaths {
     /// every kind with no reporter, and a miss draws no row.
     #[serde(default)]
     pub reporter: Vec<PayloadPath>,
+    /// The name to call the reporter by, as [`assignee_name`](Self::assignee_name)
+    /// is the assignee's: Jira's `fields.reporter.displayName`. Off the wire
+    /// when empty, for the same reason.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(as = "Option<Vec<PayloadPath>>", optional)]
+    pub reporter_name: Vec<PayloadPath>,
     /// When a ticket was filed (#2403), an ISO 8601 instant as
     /// [`started`](Self::started) is written: Jira's `fields.created`,
     /// Gitea's `created_at`. Empty for every kind with no such date.

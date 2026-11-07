@@ -169,7 +169,7 @@ test("Esc empties Go to file and the tree is drawn again; nothing typed draws no
   typeIn(field(), "zzz");
   await settle();
   expect(found()).toEqual([]);
-  expect(target.querySelector(".tf-gonote")?.textContent).toBe("No file matches “zzz”.");
+  expect(target.querySelector(".tf-gonote")?.textContent).toBe("No file matches “zzz”. Clear");
   press("Escape", field());
   expect(field().value).toBe("");
   expect(row("README.md")).not.toBeNull();

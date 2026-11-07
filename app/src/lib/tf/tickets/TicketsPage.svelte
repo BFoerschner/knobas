@@ -102,7 +102,10 @@
 
 <script lang="ts">
   import { clockLabel } from "../../time/format";
-  import { flushSync, onMount, untrack } from "svelte";
+  import { flushSync, onMount, tick, untrack } from "svelte";
+  import { stamped, stampOf } from "../opener";
+  import { rowInView } from "../return-place";
+  import { parseTfHash } from "../route";
   import type { RoleFrameProps } from "../page-entry";
 
   import {
@@ -127,6 +130,9 @@
   import { Windowed } from "../../shell/windowed.svelte";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
   import FilterBar from "../filter/FilterBar.svelte";
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { sourceHash } from "../settings/settings";
@@ -137,7 +143,7 @@
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
-  import { columnName, LANE_FIELDS, moreLanesLine, moreLine, nextSort, sharedKeys, sortRows, statusOrder, ticketAddress, type LaneField, type SortColumn } from "./tickets";
+  import { assigneeName, assigneeOptions, columnHead, columnName, LANE_FIELDS, listName, moreLanesLine, moreLine, nextSort, sentenceCase, sharedKeys, shortKey, sortRows, statusOrder, ticketAddress, type CardPerson, type LaneField, type SortColumn } from "./tickets";
   import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
@@ -162,6 +168,13 @@
   } from "./views";
   import { pageVisible } from "../kept-pages.svelte";
   import { chosenJob } from "../job/chosen.svelte";
+  import { scopedTicket } from "../job/scoped.svelte";
+  import { layers } from "../layers.svelte";
+  import { keyOf } from "../job/job";
+  import TfCrumbs from "../TfCrumbs.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
+  import type { EscTarget } from "../escape";
+  import { filterKeys } from "../filter-keys";
 
   let {
     ready,
@@ -183,6 +196,7 @@
     },
     viewId = null,
     typingPause = 90,
+    back = null,
     sync,
     syncRevision = 0,
   }: {
@@ -195,7 +209,52 @@
     viewId?: string | null;
     /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
     typingPause?: number;
+    /** Where `Esc` goes, which the sub-tasks bar's hint names. */
+    back?: EscTarget | null;
   } & RoleFrameProps = $props();
+
+  /** The key whose sub-tasks a ticket card's row narrowed this view to (`job/scoped.svelte.ts`), or `null`. */
+  const subtasksOf = $derived(viewId === null && scopedTicket.subtasksOf !== null ? keyOf(scopedTicket.subtasksOf) : null);
+  /**
+   * The preview's *Sub-tasks* row narrows this page where it stands, so no history entry holds the way back that a
+   * ticket card's row has. `Esc` still undoes it, here as a panel on the layer stack, and the bar says so.
+   */
+  const narrowedHere = $derived(subtasksOf !== null && back === null);
+  $effect(() => {
+    if (!narrowedHere || !pageShown()) return;
+    return untrack(() =>
+      layers.add({
+        kind: "panel",
+        close: () => {
+          scopedTicket.clear();
+          // The list is read again and its rows drawn anew, so a keyboard's place goes to the page's heading.
+          shownHeading()?.focus({ preventScroll: true });
+        },
+      }),
+    );
+  });
+  const shownHeading = () => [...document.querySelectorAll<HTMLElement>(".tf-board-title h1")].find((heading) => !heading.closest(".tf-kept[hidden]"));
+  /**
+   * Narrowed where it stands, the page's own history entry says so, as an entry a card's row opened does, so a ticket
+   * opened from here and `Esc` come back to the same narrowed list (F-141). The shell reads this stamp on arriving.
+   */
+  $effect(() => {
+    const trip = subtasksOf !== null ? scopedTicket.trip : null;
+    if (back !== null || !pageShown() || parseTfHash(location.hash).view !== "tickets") return;
+    const had = stampOf(history.state);
+    if (had === null || (had.trip?.entityId ?? null) === (trip?.entityId ?? null)) return;
+    history.replaceState(stamped(history.state, { ...had, trip }), "");
+  });
+  // Arriving narrowed, the press's own control has gone or is hidden: focus takes the page's heading, so Tab starts here (F-148).
+  // A mouse's press left focus on its link, in a page now hidden, which the browser only drops at the next frame.
+  $effect(() => {
+    if (subtasksOf === null || !pageShown()) return;
+    void tick().then(() => {
+      const at = document.activeElement;
+      if (at !== document.body && at !== null && at.closest("[hidden]") === null) return;
+      shownHeading()?.focus({ preventScroll: true });
+    });
+  });
 
   // ---- the views ----
   let views = $state<TicketViewRow[] | null>(null);
@@ -276,7 +335,7 @@
     ...new Set([...OWN_GROUPS, ...(views ?? []).map((row) => row.group)]),
   ]);
   /** The base query the board is read with: the view's text, `null` when there is nothing to read. */
-  const base = $derived(view === null ? "" : view === undefined || view.unreadable !== null ? null : view.query);
+  const base = $derived(view === null ? (subtasksOf === null ? "" : `under:${subtasksOf}`) : view === undefined || view.unreadable !== null ? null : view.query);
   const sessionKey = $derived(viewId ?? "");
   /** The saved view the board reads (#877), or `null`: its source decides its tickets and their order. */
   const savedViewId = $derived(view?.saved_view_source ? view.saved_view : null);
@@ -321,6 +380,7 @@
   /** What the server read from the typed text, marked on the cards (#1903). */
   const needles = $derived(readNeedles(filter.text));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
+  let cardPeople = $state.raw<ReadonlyMap<string, CardPerson>>(new Map());
 
   /** At most this many chips a group; past it a field has too many values for chips. */
   const CHIPS_AT_MOST = 6;
@@ -329,10 +389,10 @@
     const values = (key: string): FilterOption[] =>
       (suggested?.fields ?? [])
         .filter((field) => field.key === key)
-        .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : field.value }));
+        .map((field) => ({ value: field.value, label: field.value }));
     return {
       id: filterId,
-      placeholder: "Filter by key, summary, epic or person",
+      placeholder: "Filter tickets",
       noun: "tickets",
       one: "ticket",
       base: base ?? "",
@@ -341,7 +401,7 @@
         { key: "priority", label: "Priority", options: values("priority").slice(0, CHIPS_AT_MOST) },
       ],
       dropdowns: [
-        { key: "assignee", label: "Assignee", options: values("assignee") },
+        { key: "assignee", label: "Assignee", options: assigneeOptions(values("assignee").map((option) => option.value), cardPeople) },
         {
           key: "under",
           label: "Epic",
@@ -454,6 +514,14 @@
   // ---- what is drawn, and the selection ----
   /** The board's columns as read, before the view's own gather them. */
   const boardColumns = $derived(reader.board?.columns ?? []);
+  // Who the cards name, so *Assignee* says what the rows say and offers who they show (F-161). Kept as a filter narrows the cards.
+  $effect(() => {
+    const known = untrack(() => cardPeople);
+    const found = reader.bands
+      .flatMap(({ drawn }) => drawn.flatMap((column) => column.cards))
+      .filter((card) => card.assignee != null && (!known.has(card.assignee) || (card.assignee_name != null && known.get(card.assignee)?.name !== card.assignee_name)));
+    if (found.length > 0) cardPeople = new Map([...known, ...found.map((card): [string, CardPerson] => [card.assignee ?? "", { name: card.assignee_name ?? null, mine: card.mine }])]);
+  });
   /** The list's rows: every card read, in the header's order; each card says its own status (#1423). */
   const rows = $derived(
     sortRows(
@@ -472,6 +540,8 @@
   const listColumns = $derived(
     LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
   );
+  /** How many characters of a key `.tf-c-key` holds in the code face. */
+  const KEY_ROOM = 12;
   const SORTABLE: readonly SortColumn[] = ["key", "summary", "status", "priority", "assignee", "updated"];
   const sortable = (column: string): column is SortColumn => (SORTABLE as readonly string[]).includes(column);
   const listCut = $derived(boardColumns.some((column) => column.cards.length < column.total));
@@ -527,6 +597,37 @@
     });
   });
 
+  /** The sticky table head sits under the filter bar, however many rows the bar wrapped to. */
+  function fbarHeight(wrap: HTMLElement) {
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => {
+      const bar = wrap.querySelector<HTMLElement>(":scope .tf-sbody > .tf-fbar");
+      if (bar) wrap.style.setProperty("--tf-fbar-h", `${bar.offsetHeight}px`);
+    });
+    seen.observe(wrap);
+    return () => seen.disconnect();
+  }
+
+  /** A long key gives up its middle, so `payout-service#143` and `#138` stay told apart: what the Key column's width holds, with the number whole. */
+  function keepsItsEnd(key: string): string {
+    if (key.length <= KEY_ROOM) return key;
+    const number = key.lastIndexOf("#");
+    const end = key.slice(number < 0 ? -5 : number);
+    return `${key.slice(0, KEY_ROOM - 1 - end.length)}…${end}`;
+  }
+
+  /** The other layout, on the same ticket: the one the preview shows, even where nothing was picked yet. */
+  function switchLayout(next: "board" | "list") {
+    if (current !== null) session.selected = current.card.entity_id;
+    reader.chooseLayout(next);
+  }
+
+  /** At 1240 px and below there is no preview to fill (design system, *Layout*), so a click opens the ticket. */
+  function clicked(card: MiniBoardCard) {
+    select(card);
+    if (window.matchMedia("(max-width: 1240px)").matches) openTicket(card);
+  }
+
   function select(card: MiniBoardCard) {
     session.selected = card.entity_id;
   }
@@ -538,14 +639,26 @@
   }
 
   /** `j`/`k` and the arrows (R-3.10): the next or previous card on screen, selected and focused. */
+  /** With nothing selected and the first ticket scrolled away, a walk starts from what is in view, so its first key keeps the place (F-075). */
+  function walkStart(by: 1 | -1): number | null {
+    if (session.selected !== null) return null;
+    const cards = [...document.querySelectorAll<HTMLElement>(".tf-tickets [data-entity]")];
+    const first = cards.find((card) => card.dataset.entity === current?.card.entity_id);
+    if (first === undefined || rowInView([first], by) !== null) return null;
+    const seen = rowInView(cards, by) as HTMLElement | null;
+    const found = visible.findIndex((entry) => entry.card.entity_id === seen?.dataset.entity);
+    return found < 0 ? null : found;
+  }
+
   function step(by: 1 | -1) {
     if (visible.length === 0) return;
     const at = current === null ? 0 : visible.findIndex((entry) => entry.card.entity_id === current.card.entity_id);
-    const to = Math.min(visible.length - 1, Math.max(0, at + by));
+    const seen = walkStart(by);
+    const to = seen ?? Math.min(visible.length - 1, Math.max(0, at + by));
     const next = visible[to]!;
     session.selected = next.card.entity_id;
-    // A list row past the drawn ones is drawn first; the board's cards are all drawn.
-    if (showing.layout !== "board") win.reveal(to);
+    // A list row past the drawn ones is drawn first; the board's cards are all drawn, and so is a row in view.
+    if (showing.layout !== "board" && seen === null) win.reveal(to);
     flushSync();
     const element = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(next.card.entity_id)}"]`);
     element?.focus();
@@ -584,18 +697,33 @@
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);
   });
+
+  /** Below 900 px, whether the views rail is unfolded under its bar. */
+  let railOpen = $state(false);
 </script>
 
-<div class="tf-tickets">
-  <nav class="tf-views" aria-label="Ticket views">
-    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" /></div>
+<div class="tf-tickets" class:tf-rail-shut={!railOpen}>
+  <!-- Narrowed to a ticket's sub-tasks the page is a trip, named by its title with *Back to <key>* above it: stacked, a bar saying the same again only pushes the title down. -->
+  {#if subtasksOf === null}
+    <TfRailBar label="View" value={view?.name ?? "All tickets"} open={railOpen} controls="tf-views-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
+  {/if}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+  <nav
+    id="tf-views-rail"
+    class="tf-views tf-rail"
+    aria-label="Ticket views"
+    onclick={(event) => {
+      if ((event.target as Element).closest("a[href]")) railOpen = false;
+    }}
+  >
+    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" {@attach filterKeys({ aside: true })} /></div>
     <div class="tf-vlist">
       <div class="tf-vw-acts">
-        <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>+ New view</button>
+        <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>New view…</button>
       </div>
       {#if find.trim() === ""}
-        <a href="#/tickets" aria-current={viewId === null ? "true" : undefined}
-          >All tickets {#if viewId === null && reader.total !== null}<span class="tf-count">{reader.total}</span>{/if}</a
+        <a href="#/tickets" aria-current={viewId === null && subtasksOf === null ? "true" : undefined} onclick={() => subtasksOf !== null && scopedTicket.clear()}
+          >All tickets {#if viewId === null && subtasksOf === null && reader.total !== null}<span class="tf-count">{reader.total}</span>{/if}</a
         >
       {/if}
       {#each groups as group (group.name)}
@@ -605,7 +733,7 @@
         {#each group.views as row (row.id)}
           <div class="tf-vw-row">
             <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
-              ><span class="tf-vw-name"><Marked text={row.name} typed={find} /></span
+              ><span class="tf-vw-name" title={row.name}><Marked text={row.name} typed={find} /></span
               >{#if row.saved_view_source?.new}<span class="tf-vw-new">new</span>{/if}{#if row.count !== null && row.count > 0}{" "}<span
                   class="tf-count">{row.count}</span
                 >{/if}</a
@@ -650,10 +778,16 @@
     </div>
   </nav>
 
-  <section class="tf-board-wrap">
+  <TfScroller class="tf-board-wrap" {@attach fbarHeight}>
+    {#if subtasksOf !== null || back !== null}
+      <!-- A card's *Sub-tasks* row lands here narrowed, under the same bar the card's other rows land under. A launcher jump has a way back to say too (F-047). -->
+      <TfCrumbs parts={[{ name: "Tickets" }]} back={back ?? { name: "All tickets" }} />
+    {/if}
     <header class="tf-fhead tf-board-head">
       <div class="tf-board-title">
-        <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
+        <h1 tabindex="-1">
+          {#if subtasksOf !== null}Sub-tasks of <TfKey value={subtasksOf} />{:else}{view?.name ?? (viewId === null ? "All tickets" : "This view")}{/if}
+        </h1>
         {#if view && view.saved_view_source === null}<span class="tf-q"
             >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
           >{/if}
@@ -661,17 +795,21 @@
       <div class="tf-acts">
         {#if view !== undefined && (view === null || view.unreadable === null)}
           <div class="tf-seg" role="group" aria-label="Layout">
-            <button type="button" aria-pressed={showing.layout === "board"} onclick={() => reader.chooseLayout("board")}
+            <button type="button" aria-pressed={showing.layout === "board"} onclick={() => switchLayout("board")}
               >Board</button
             >
-            <button type="button" aria-pressed={showing.layout === "list"} onclick={() => reader.chooseLayout("list")}
+            <button type="button" aria-pressed={showing.layout === "list"} onclick={() => switchLayout("list")}
               >List</button
             >
           </div>
         {/if}
+        <!-- With nothing to save it is not offered. On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
+        {#if isFiltering(filter) && (!view?.saved_view_source || offersCopy(view))}
+          <button type="button" class="tf-btn tf-ghost" onclick={() => void saveAsView()}>Save as a view…</button>
+        {/if}
         {#if view}
           <button type="button" class="tf-btn" onclick={() => editView(view)}
-            >{view.saved_view_source === null ? "Edit view" : "View settings"}</button
+            >{view.saved_view_source === null ? "Edit view…" : "View settings…"}</button
           >
           <ViewMenu
             name="this view"
@@ -696,6 +834,23 @@
       />
     {/if}
     {#if base !== null}
+      {#snippet lanesSwitch()}
+        <!-- prototype-6 offers lanes on the ticket board only. -->
+        {#if showing.layout === "board"}
+          <label class="tf-fsel">
+            Lanes
+            <select
+              aria-label="Lanes"
+              value={showing.lanes}
+              onchange={(event) => reader.chooseLanes(event.currentTarget.value as LaneField)}
+            >
+              {#each LANE_FIELDS as [value, label] (value)}
+                <option {value}>{label}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+      {/snippet}
       <FilterBar
         {config}
         {filter}
@@ -703,36 +858,12 @@
         total={reader.total}
         onchange={() => reader.setFilter(filterNow())}
         extra={lanesSwitch}
-        after={saveButton}
       />
     {/if}
-    {#snippet lanesSwitch()}
-      <!-- prototype-6 offers lanes on the ticket board only. -->
-      {#if showing.layout === "board"}
-        <label class="tf-fsel">
-          Lanes
-          <select
-            aria-label="Lanes"
-            value={showing.lanes}
-            onchange={(event) => reader.chooseLanes(event.currentTarget.value as LaneField)}
-          >
-            {#each LANE_FIELDS as [value, label] (value)}
-              <option {value}>{label}</option>
-            {/each}
-          </select>
-        </label>
-      {/if}
-    {/snippet}
-    {#snippet saveButton()}
-      <!-- On a saved view it is a copy, so a source that translates no query offers none (#1208). -->
-      {#if !view?.saved_view_source || offersCopy(view)}
-        <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
-      {/if}
-    {/snippet}
 
     {#if viewId !== null && views !== null && view === undefined}
       <div class="tf-empty">
-        <p>No view is called {viewId}. It may have been deleted.</p>
+        <p>This view does not exist. It may have been deleted.</p>
         <a class="tf-btn tf-sm" href="#/tickets">All tickets</a>
       </div>
     {:else if view && view.unreadable !== null}
@@ -751,12 +882,27 @@
         <button type="button" class="tf-btn tf-sm" onclick={clearFilter}>Clear the filter</button>
       </div>
     {:else if reader.shown === 0}
-      <div class="tf-empty"><p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p></div>
+      {#if view}
+        <!-- A view that matches nothing is not an empty mirror. -->
+        <div class="tf-empty">
+          <p>No tickets match this view.</p>
+          {#if view.saved_view_source === null}
+            <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}>Edit view…</button>
+          {:else}
+            <a class="tf-btn tf-sm" href="#/tickets">All tickets</a>
+          {/if}
+        </div>
+      {:else}
+        <div class="tf-empty">
+          <p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p>
+          <a class="tf-btn tf-sm" href="#/settings/sources">Open Settings › Sources</a>
+        </div>
+      {/if}
     {:else if showing.layout === "board"}
       {#each reader.bands as { lane, drawn } (lane.key ?? "")}
-        <div class="tf-lane">
+        <div class="tf-lane" class:tf-laned={reader.laned}>
           {#if lane.key !== null}
-            <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
+            <h2><TfKeyed text={lane.title} lead /> <span class="tf-count">{lane.count}</span></h2>
           {/if}
           <div class="tf-cols">
             {#each drawn as { column, cards, done } (columnKey(column))}
@@ -764,7 +910,7 @@
               {@const limit = columnLimit(view?.columns ?? [], column.status)}
               <div class="tf-col">
                 <h3>
-                  {columnName(column.status)}
+                  {columnHead(column.status, view?.columns ?? [])}
                   <span
                     class="tf-count"
                     class:tf-err={limit !== null && column.total > limit}
@@ -781,7 +927,7 @@
                       {needles}
                       selected={current?.card.entity_id === card.entity_id}
                       chosen={chosenJob.id === card.entity_id}
-                      onselect={() => select(card)}
+                      onselect={() => clicked(card)}
                       onopen={() => openTicket(card)}
                     />
                   {:else}
@@ -798,7 +944,7 @@
       {/each}
       {@const moreLanesText = reader.laned && reader.board !== null ? moreLanesLine(reader.board.more_lanes) : null}
       {#if moreLanesText}
-        <button type="button" class="tf-btn tf-sm" onclick={reader.moreLanes}>{moreLanesText}</button>
+        <button type="button" class="tf-btn tf-sm tf-lanes-more" onclick={reader.moreLanes}>{moreLanesText}</button>
       {/if}
     {:else}
       <div class="tf-list">
@@ -807,11 +953,11 @@
             <tr>
               {#each listColumns as [column, label] (column)}
                 {#if sortable(column)}
-                  <th aria-sort={showing.sort.column === column ? showing.sort.direction : undefined}
+                  <th class="tf-c-{column}" aria-sort={showing.sort.column === column ? showing.sort.direction : undefined}
                     ><button type="button" onclick={() => sortBy(column)}>{label}</button></th
                   >
                 {:else}
-                  <th>{label}</th>
+                  <th class="tf-c-{column}">{label}</th>
                 {/if}
               {/each}
             </tr>
@@ -829,35 +975,35 @@
                 aria-current={current?.card.entity_id === card.entity_id ? "true" : undefined}
                 data-entity={card.entity_id}
                 tabindex="0"
-                onclick={() => select(card)}
+                onclick={() => clicked(card)}
                 ondblclick={() => openTicket(card)}
               >
                 {#each listColumns as [column] (column)}
                   {#if column === "key"}
                     {@const source = sourceOf(card)}
-                    <td class="tf-mono tf-nowrap"
-                      ><Marked text={card.key} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
+                    <td class="tf-mono tf-nowrap tf-keycell" title={source ? `${card.key}, ${source}` : card.key}
+                      ><Marked text={keepsItsEnd(shortKey(card.key))} {needles} />{#if source}<span class="tf-sub">{source}</span>{/if}</td
                     >
                   {:else if column === "summary"}
-                    <td
+                    <td class="tf-c-summary"
                       ><Marked text={card.title} {needles} />{#if card.path}<span class="tf-sub"
-                          >{card.path}</span
+                          ><TfKeyed text={card.path} /></span
                         >{/if}</td
                     >
                   {:else if column === "status"}
-                    <td class="tf-nowrap">{columnName(card.status)}</td>
+                    <td class="tf-nowrap" title={columnName(card.status)}>{columnName(card.status)}</td>
                   {:else if column === "priority"}
-                    <td>{card.priority ?? ""}</td>
+                    <td class="tf-c-priority" title={sentenceCase(card.priority) ?? undefined}>{sentenceCase(card.priority) ?? ""}</td>
                   {:else if column === "signals"}
-                    <td><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
+                    <td class="tf-c-signals"><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                   {:else if column === "assignee"}
-                    <td>{card.assignee ?? "Unassigned"}</td>
+                    <td class="tf-c-assignee" title={assigneeName(card) ?? undefined}>{listName(card) ?? "Unassigned"}</td>
                   {:else if column === "updated"}
-                    <td class="tf-dim">{clockLabel(card.updated_at)}</td>
+                    <td class="tf-dim tf-nowrap">{clockLabel(card.updated_at)}</td>
                   {:else if column === "epic"}
-                    <td class="tf-mono tf-nowrap">{card.path ?? ""}</td>
+                    <td class="tf-c-epic tf-mono tf-nowrap" title={card.path ?? undefined}>{card.path ?? ""}</td>
                   {:else}
-                    <td>{card.labels.join(", ")}</td>
+                    <td class="tf-c-labels" title={card.labels.join(", ") || undefined}>{card.labels.join(", ")}</td>
                   {/if}
                 {/each}
               </tr>
@@ -872,7 +1018,7 @@
         {/if}
       </div>
     {/if}
-  </section>
+  </TfScroller>
 
   {#if drafting !== null}
     {@const editing = drafting.editing}
@@ -903,8 +1049,10 @@
       description={reader.description}
       around={reader.around}
       timerOnIt={timedTicket === current.card.key}
+      chosen={chosenJob.id === current.card.entity_id}
     />
   {:else}
-    <aside class="tf-preview" aria-label="Selected ticket"><p>Select a ticket to see what is around it.</p></aside>
+    <!-- The first ticket on screen is always selected, so no ticket here means there is none to choose. -->
+    <aside class="tf-preview" aria-label="Selected ticket">{#if reader.board !== null || base === null}<p class="tf-dim tf-small">No ticket to show here.</p>{/if}</aside>
   {/if}
 </div>

@@ -239,7 +239,7 @@ test("a chained pipeline's header names its step and the chain (R-9.13)", async 
   await settle();
   const sub = target.querySelector(".tf-bhead .tf-sub")!;
   expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "TeamCity build configuration in project Payments › Payouts, builds payout-service. Triggered by VCS and Schedule. " +
+    "TeamCity build configuration, builds payout-service. Triggered by VCS and Schedule. " +
       "Step 2 of the chain Payout_Build › Payout_IntegrationTests › Payout_Deploy_Staging.",
   );
 });
@@ -250,7 +250,7 @@ test("the header says what it is in the source's word, the repository it builds 
   expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
   const sub = target.querySelector(".tf-bhead .tf-sub")!;
   expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
-    "TeamCity build configuration in project Payments › Payouts, builds payout-service. Triggered by VCS and Schedule.",
+    "TeamCity build configuration, builds payout-service. Triggered by VCS and Schedule.",
   );
   expect(sub.querySelector("a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Atidewater%2Fpayout-service");
   expect(button("Run…")).toBeDefined();
@@ -275,7 +275,7 @@ test("with no job branch it built, Run on names the default branch; a failing si
   expect(button("Run on main")).toBeDefined();
   const stale = target.querySelector(".tf-stale")!;
   expect(stale.textContent).toContain("TeamCity data is 38 min old: sign-in failing. Runs you start wait in the queue until it works again.");
-  expect(stale.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
+  expect(stale.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity/reenter");
 });
 
 test("the chart draws the last thirty runs as links to each run, with Passed, Usual duration and Last passing", async () => {
@@ -286,8 +286,8 @@ test("the chart draws the last thirty runs as links to each run, with Passed, Us
   // The newest is the right-most, and says what it was.
   const newest = bars[29]!;
   expect(newest.getAttribute("href")).toBe("#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187");
-  expect(newest.getAttribute("aria-label")).toBe("Run 1187, FAILURE");
-  expect(newest.querySelector("title")?.textContent).toContain("#1187 FAILURE, feature/PAY-231-sepa-retry · 4 m 12 s");
+  expect(newest.getAttribute("aria-label")).toBe("Run 1187, Failed");
+  expect(newest.querySelector("title")?.textContent).toContain("#1187 Failed, feature/PAY-231-sepa-retry · 4m 12s");
   const facts = target.querySelector(".tf-facts2")!.textContent!.replace(/\s+/g, " ");
   expect(facts).toContain("Passed32 of the last 34");
   expect(facts).toContain("Last passing#1186");
@@ -319,12 +319,11 @@ test("each run says how it was started; Started by me keeps the reader's; the wo
   expect(rows()[0]!.querySelector(".tf-run-trig")?.textContent).toBe("VCS change a41f2c");
   expect(rows()[1]!.querySelector(".tf-run-trig")?.textContent).toBe("you");
   const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
-  expect(input.placeholder).toBe("Filter runs by number, branch, commit or person");
+  expect(input.placeholder).toBe("Filter runs");
   const scopes = [...target.querySelectorAll(".tf-runbar button")].map((b) => b.textContent?.trim());
-  expect(scopes.indexOf("My job’s branches")).toBeLessThan(scopes.indexOf("Started by me"));
-  expect(scopes.indexOf("Started by me")).toBeLessThan(scopes.indexOf("All"));
+  expect(scopes.indexOf("Mine")).toBeLessThan(scopes.indexOf("All"));
 
-  button("Started by me")!.click();
+  button("Mine")!.click();
   flushSync();
   expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1186"]);
 
@@ -380,7 +379,7 @@ test("Run on queues one run on that branch and draws it queued at once, never as
     { RunBuild: { entity: PIPELINE.entity_id, branch: "feature/PAY-231-sepa-retry", parameters: [] } },
   ]);
   const first = target.querySelector(".tf-runs tbody tr")!;
-  expect(first.querySelector(".tf-run-no")?.textContent).toContain("queued");
+  expect(first.querySelector(".tf-run-no")?.textContent).toContain("Queued");
   expect(first.textContent).toContain("waiting");
   expect(first.textContent).toContain("feature/PAY-231-sepa-retry");
 });
@@ -433,7 +432,7 @@ test("a sync of the pipeline's source finishing reads the runs again: a running 
   await settle();
   expect(drawn.reads).toBe(2);
   expect(firstRow().textContent).toContain("#1188");
-  expect(firstRow().textContent).toContain("5 m");
+  expect(firstRow().textContent).toContain("5m");
   expect(firstRow().textContent).not.toContain("running");
 });
 
@@ -508,26 +507,26 @@ test("a run queued on the run page is one queued row at the top; another pipelin
   echoWrite(PIPELINE.entity_id, QUEUED_RUN, "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   const drawn = draw();
   await settle();
-  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+  expect(runNos().slice(0, 2)).toEqual(["Queued", "#1187"]);
   expect(firstRow().textContent).toContain("feature/PAY-231-sepa-retry");
   expect(firstRow().textContent).toContain("waiting");
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
 
   drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
   await settle();
-  expect(runNos()).not.toContain("queued");
+  expect(runNos()).not.toContain("Queued");
 });
 
 test("the queued row goes once a read holds the run, and is never drawn beside it", async () => {
   echoWrite(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   const drawn = draw();
   await settle();
-  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+  expect(runNos().slice(0, 2)).toEqual(["Queued", "#1187"]);
 
   // A sync that has not brought it yet keeps it queued.
   drawn.sync!(synced("teamcity"));
   await settle();
-  expect(runNos().slice(0, 2)).toEqual(["queued", "#1187"]);
+  expect(runNos().slice(0, 2)).toEqual(["Queued", "#1187"]);
 
   drawn.next = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, trigger: "person", started_by_me: true }), ...RUNS];
   drawn.sync!(synced("teamcity"));
@@ -543,12 +542,12 @@ test("Run on keeps its queued row through a visit elsewhere, and the queue refus
   await settle();
   button("Run on feature/PAY-231-sepa-retry")!.click();
   await settle();
-  expect(runNos()[0]).toBe("queued");
+  expect(runNos()[0]).toBe("Queued");
   drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
   await settle();
   drawn.goPipeline(PIPELINE);
   await settle();
-  expect(runNos()[0], "the read holds no new run yet").toBe("queued");
+  expect(runNos()[0], "the read holds no new run yet").toBe("Queued");
 
   heard[0]!({ id: 41, state: "refused", detail: "no such branch" } as QueuedWrite);
   flushSync();
@@ -641,7 +640,7 @@ test("Parameters: each default with the kind its spec gives; a secret is never d
     "text",
   ]);
   // *inherited* is a chip of its own, never a word in the kind's list (#1564); a secret draws none.
-  expect(rows.map((r) => kindCell(r).querySelector(".tf-chip")?.textContent ?? null)).toEqual([null, "inherited", null, "inherited"]);
+  expect(rows.map((r) => kindCell(r).querySelector(".tf-chip")?.textContent ?? null)).toEqual([null, "Inherited", null, "Inherited"]);
   expect(rows[2]!.textContent).toContain("(hidden)");
 });
 
@@ -661,7 +660,7 @@ test("Change… on a fixed list draws a select of it, the unlisted default first
   await settle();
   expect(drawn.writes).toEqual([{ SetParameter: { entity: PIPELINE.entity_id, name: "env", value: "prod-dryrun", base: "qa" } }]);
   expect(rows[0]!.textContent).toContain("prod-dryrun");
-  expect(rows[0]!.textContent).toContain("queued");
+  expect(rows[0]!.textContent).toContain("Queued");
   expect(toasts.items.at(-1)?.text).toBe(`Queued: set env on ${PIPELINE.name}.`);
   expect(toasts.items.at(-1)?.action?.label).toBe("Show queue");
 });
@@ -775,7 +774,31 @@ test("Run… opens the dialog on the job's branch with each parameter typed by i
     },
   ]);
   const first = target.querySelector(".tf-runs tbody tr")!;
-  expect(first.querySelector(".tf-run-no")?.textContent).toContain("queued");
+  expect(first.querySelector(".tf-run-no")?.textContent).toContain("Queued");
+});
+
+/** F-041: the combo box's rung is its list. With none drawn, one `Esc` goes on to the dialog. */
+test("Esc in the branch combobox closes its list first, and with no list drawn it goes on to the dialog", async () => {
+  draw();
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  const branch = field<HTMLInputElement>("Branch");
+  const esc = () => {
+    const press = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    branch.dispatchEvent(press);
+    flushSync();
+  };
+  branch.dispatchEvent(new FocusEvent("focus"));
+  flushSync();
+  expect(dialog()!.querySelector('[role="listbox"]')).not.toBeNull();
+  esc();
+  expect(dialog()!.querySelector('[role="listbox"]')).toBeNull();
+
+  type(branch, "nothing-like-this");
+  expect(dialog()!.querySelector('[role="listbox"]'), "open, with nothing to draw").toBeNull();
+  esc();
+  expect(dialog()).toBeNull();
 });
 
 test("the branch combobox: type-ahead with the default and the job's branch marked, arrows and Enter pick; the default runs as no branch", async () => {
@@ -1146,9 +1169,9 @@ test("a run queued here says queued, then sent, and goes on the refresh event's 
   await settle();
   button("Run on feature/PAY-231-sepa-retry")!.click();
   await settle();
-  expect(runNos()[0]).toBe("queued");
+  expect(runNos()[0]).toBe("Queued");
   sent(41);
-  expect(runNos()[0]).toBe("sent");
+  expect(runNos()[0]).toBe("Sent");
   drawn.next = [run(1188, "ok", today(0, 30), { finished: null, duration_seconds: null, trigger: "person", started_by_me: true, branch: "feature/PAY-231-sepa-retry" }), ...RUNS];
   await events.refreshed(PIPELINE.entity_id, 41);
   expect(runNos().slice(0, 2)).toEqual(["#1188", "#1187"]);
@@ -1166,16 +1189,16 @@ test("a parameter change says queued, then sent, and goes once the read shows th
   button("Save")!.click();
   await settle();
   const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
-  expect(chip()).toBe("queued");
+  expect(chip()).toBe("Queued");
   sent(41);
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   // A run's end whose read still holds the old value keeps it.
   await events.ended("teamcity");
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   // Somebody else's change to another value is not this one landing.
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "staging" } : p)) };
   await events.ended("teamcity");
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
   await events.refreshed(PIPELINE.entity_id, 41);
   expect(chip()).toBeNull();
@@ -1237,7 +1260,7 @@ test("a pipeline whose refresh failed keeps its runs and says why under the head
   await settle();
   refreshButton()!.click();
   await settle();
-  expect(target.querySelector(".tf-bhead ~ .tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 401 from TeamCity");
+  expect(target.querySelector(".tf-bhead ~ .tf-refresh-failed")?.textContent).toBe("Couldn't refresh: 401 from TeamCity. Try again");
   expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
 });
 
@@ -1264,7 +1287,7 @@ const headerActs = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-bhe
 test("the view's Sync now ends the header after Refresh, and gives way to a detail's own Sync now: one per header (#2287)", async () => {
   draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports }, undefined, viewSync);
   await settle();
-  expect(headerActs().slice(-2)).toEqual(["Refresh", "Sync now"]);
+  expect(headerActs().slice(-2)).toEqual(["Refresh pipeline", "Sync now"]);
   unmount(page!);
   page = null;
   draw([PIPELINE.entity_id], "PAY-231", { refresh: refreshProbe().ports, getEntity: (id) => Promise.resolve(detailOf(id, { refreshes: false })) }, undefined, viewSync);
@@ -1292,11 +1315,11 @@ test("a parameter change's echo goes on a refresh's read of the settings that sh
   await settle();
   const chip = () => paramRows()[0]!.querySelector("td:nth-child(2) .tf-chip")?.textContent ?? null;
   sent(41);
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   // A refresh whose read still holds the old value keeps the echo.
   refreshButton()!.click();
   await settle();
-  expect(chip()).toBe("sent");
+  expect(chip()).toBe("Sent");
   read = { ...KINDS, parameters: KINDS.parameters.map((p) => (p.name === "env" ? { ...p, value: "prod-dryrun" } : p)) };
   refreshButton()!.click();
   await settle();
@@ -1312,4 +1335,17 @@ test("⌘R on a pipeline runs its Refresh, as a click does (#2156)", async () =>
   expect(pressRefreshKey().defaultPrevented).toBe(true);
   await settle();
   expect(probe.refreshed).toEqual([PIPELINE.entity_id]);
+});
+
+test("This job with no run on its branches says so, and offers the way back to all runs", async () => {
+  draw([PIPELINE.entity_id], "PAY-231", { jobBranches: () => Promise.resolve([]) });
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-runbar button")].find((b) => b.textContent?.trim().startsWith("This job"))!.click();
+  await settle();
+  expect(target.querySelector(".tf-runs .tf-empty")?.textContent).toContain("No runs match.");
+  expect(button("Clear the filter")).toBeUndefined();
+  button("Show all runs")!.click();
+  await settle();
+  expect(target.querySelector(".tf-runs .tf-empty")).toBeNull();
+  expect(button("Show all runs")).toBeUndefined();
 });

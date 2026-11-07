@@ -112,7 +112,7 @@
 
 <script lang="ts">
   import { untrack } from "svelte";
-  import { EVENTS, ipcErrorMessage } from "../../ipc";
+  import { EVENTS, ipcErrorMessage, isIpcError } from "../../ipc";
   import {
     codeFacts,
     entityCheckout,
@@ -139,7 +139,10 @@
     changedPaths,
     checkoutSentence,
     headLine,
+    branchStanding,
+    knowsRepoTab,
     litTab,
+    MADE_PR,
     readAllRows,
     mirrorDefault,
     readRepoRoute,
@@ -149,6 +152,7 @@
     repoRefusals,
     REPO_TABS,
     type BranchOption,
+    type BranchStanding,
     type RepoTab,
     type RepoTabId,
   } from "./repo";
@@ -163,12 +167,17 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { clones } from "../openin/clones.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
   import TfDetailRefresh from "../TfDetailRefresh.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import { provideTabRereads } from "./refreshed.svelte";
   import { NO_TABS, readShown, SLOTS, slotOf, tabHref, visit, type TabSlot } from "./repo-tabs";
   import TfRepoTab from "./TfRepoTab.svelte";
-  import { namePage } from "../page-name.svelte";
+  import { parentPage } from "../page-name.svelte";
+  import { itemHash } from "../job/job";
+  import { jumpAcross } from "../opener";
+  import { echoesOn } from "../queued.svelte";
   import { providePageVisible } from "../kept-pages.svelte";
   import { onFocusWhileShown, onShownAgain } from "../while-shown.svelte";
 
@@ -226,6 +235,10 @@
   /** The repository's source: where its writes go, named in their toasts. */
   const source = $derived<WriteSource | null>(detail?.source ?? null);
   let failed = $state<string | null>(null);
+  /** The read failed because no such repository is held, not because the read broke. */
+  let missing = $state(false);
+  /** Bumped by *Try again*. */
+  let attempt = $state(0);
   /** `null` while the *Branches* section has not answered. */
   let branches = $state<BranchOption[] | null>(null);
   /**
@@ -255,11 +268,13 @@
 
   $effect(() => {
     if (!ready || repoId === null) return;
+    void attempt;
     const id = repoId;
     let live = true;
     const alive = () => live;
     detail = null;
     failed = null;
+    missing = false;
     branches = null;
     branchRefused = null;
     checkout = undefined;
@@ -375,7 +390,10 @@
     try {
       found = await ports.getEntity(id);
     } catch (error) {
-      if (alive() && !again) failed = ipcErrorMessage(error);
+      if (alive() && !again) {
+        failed = ipcErrorMessage(error);
+        missing = isIpcError(error) && error.code === "not_found";
+      }
       return;
     }
     if (!alive()) return;
@@ -407,6 +425,12 @@
     tabs = readShown(tabs);
     writesAsked += 1;
     await Promise.all([readRepo(id, () => repoId === id, true), tabRereads.settled()]);
+  }
+
+  /** The pull requests again, for one this session queued. */
+  function rereadPrs(): void {
+    const id = repoId;
+    if (id !== null) void readRow(id, () => repoId === id, true);
   }
 
   /** The checkout, and its diff when it has changes: for the `M` marks. */
@@ -469,6 +493,8 @@
   const changed = $derived(changedPaths(local));
   const sentence = $derived(checkoutSentence(checkout));
   const tab = $derived<RepoTabId>(litTab(route.tab));
+  /** The address names a tab the page has; one it does not have is said under the tabs, not drawn as Files. */
+  const tabKnown = $derived(knowsRepoTab(rest));
 
   /** The tab bodies held for the visit (#2248). */
   let tabs = $state(NO_TABS);
@@ -497,17 +523,73 @@
   /** A tab's count, drawn only above zero once its read answered. */
   function countOf(id: RepoTabId): { n: number; warn: boolean } | null {
     if (id === "branches" && branches !== null && branches.length > 0) return { n: branches.length, warn: false };
-    if (id === "prs" && openPrs > 0) return { n: openPrs, warn: false };
+    // One on its way counts as its row does, so the tab agrees with the list under it (F-242).
+    const onTheWay = id === "prs" && repoId !== null ? echoesOn(repoId, MADE_PR).length : 0;
+    if (id === "prs" && openPrs + onTheWay > 0) return { n: openPrs + onTheWay, warn: false };
     if (id === "local" && localCount > 0) return { n: localCount, warn: true };
     return null;
   }
 
-  /** What *New pull request* proposes: the branch picked, or the newest other one. */
+  /** The branches a pull request was sent from this session, which *New pull request* doesn't start on again (F-257). */
+  const sentFrom = $derived(new Set(repoId === null ? [] : echoesOn(repoId, MADE_PR).map((echo) => echo.base)));
+  /** What *New pull request* proposes: the branch picked, or the newest other one, past those a pull request was just sent from. */
   const proposed = $derived(
     selected && !selected.isDefault
       ? selected.name
-      : (branches?.find((option) => !option.isDefault)?.name ?? branchName),
+      : (branches?.find((option) => !option.isDefault && !sentFrom.has(option.name))?.name ?? branches?.find((option) => !option.isDefault)?.name ?? branchName),
   );
+
+  /** How many branches the header asks before it gives up on finding one with nothing open: a source's burst stays small. */
+  const ASKED = 8;
+  /** The branch *New pull request* starts on, once the header has found one with nothing open from it (F-243). */
+  let toPropose = $state<string | null>(null);
+  /** Where every branch it could start on has a pull request open: the loudest button goes there, as a form saying so offers nothing to create. */
+  let openedFrom = $state<BranchStanding["pr"]>(null);
+  $effect(() => {
+    const choice = selected !== null && !selected.isDefault ? selected : null;
+    const asking = (choice === null ? (branches ?? []).filter((option) => !option.isDefault && !sentFrom.has(option.name)) : [choice]).flatMap((option) => (option.entityId === null ? [] : [{ name: option.name, id: option.entityId }]));
+    void writesAsked;
+    let live = true;
+    void (async () => {
+      let first: BranchStanding["pr"] = null;
+      for (const { name, id } of ready ? asking.slice(0, ASKED) : []) {
+        const standing = await ports.entityView(id, null).then(branchStanding, () => null);
+        if (!live) return;
+        // A branch that can't be read says nothing about what stands: *proposed* stays, as it was before anything was asked.
+        if (standing === null) break;
+        if (standing.pr === null && (choice !== null || standing.canOpenPr)) {
+          toPropose = name;
+          openedFrom = null;
+          return;
+        }
+        first ??= standing.pr;
+      }
+      toPropose = null;
+      openedFrom = first;
+    })();
+    return () => {
+      live = false;
+    };
+  });
+
+  /** *New pull request*'s branch: the header's search's while it stands, else the plain proposal. */
+  const starting = $derived(toPropose !== null && !sentFrom.has(toPropose) ? toPropose : proposed);
+  /**
+   * A pull request sent from here that no read holds yet, with nothing else to start: the primary stays out, as it would otherwise name
+   * another pull request right after this one was made, or start this one again (F-263). A branch picked by hand still says what stands on it.
+   */
+  const sentWaits = $derived(sentFrom.size > 0 && (selected === null || selected.isDefault) && (toPropose === null || sentFrom.has(toPropose)));
+  /** What Compare says above its form about the branch this press chose (F-063): nothing, where the reader picked it. */
+  let guessed = $state<{ branch: string; why: string } | null>(null);
+  /**
+   * The header's press goes to another of the page's tabs: an opening, so `Esc` comes back to the tab it was pressed on (F-259, F-065).
+   * The page's name is the repository, which Compare is on too, so the bar names the tab.
+   */
+  function pressNewPr(event: MouseEvent, branch: string) {
+    guessed = selected !== null && !selected.isDefault ? null : { branch, why: toPropose === branch ? "the newest branch with nothing open" : "the newest branch" };
+    // A commit is a page of its own, which already names itself.
+    jumpAcross(event, route.commit !== null ? undefined : REPO_TABS.find((entry) => entry.id === tab)?.label);
+  }
 
   function pick(event: Event) {
     if (repoId === null) return;
@@ -516,39 +598,55 @@
     chosen[repoId] = { name, entityId: option?.entityId ?? null };
   }
 
+  /** A repository holding one branch has nothing to propose from. */
+  const oneBranch = $derived(branches !== null && branches.length === 1);
+
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
 
-  // What *Back to <name>* calls this page once it is left: its breadcrumb's own name (spec #2227).
-  namePage(() => (route.commit !== null && repoId !== null ? "Commit" : (repo?.title ?? null)));
+  // Its last part is what *Back to <name>* calls this page once it is left (spec #2227).
+  const crumbs = $derived.by((): Crumb[] => {
+    const code = { name: "Code", href: "#/code" };
+    if (route.commit !== null && repoId !== null) {
+      return [code, repo === null ? { name: "Repository", href: repoHash(repoId) } : { name: repo.title, href: repoHash(repoId), code: true }, { name: "Commit" }];
+    }
+    return [code, repo === null ? { name: "Repository" } : { name: repo.title, code: true }];
+  });
+  // A commit sits under its repository, by the title its crumb gives it.
+  parentPage(() => (route.commit !== null && repoId !== null && repo !== null ? { hash: repoHash(repoId), name: repo.title } : null));
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
+
+  /** Whether the header's actions sit under its title. A width query can't tell, because the branch's name changes how wide they are. */
+  let stacked = $state(false);
+  function watchStack(header: HTMLElement) {
+    const title = header.firstElementChild;
+    const acts = header.querySelector(":scope > .tf-acts");
+    if (title === null || acts === null) return;
+    const read = () => {
+      const box = title.getBoundingClientRect();
+      stacked = box.height > 0 && acts.getBoundingClientRect().top >= box.bottom;
+    };
+    read();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(read);
+    watch.observe(header);
+    watch.observe(acts);
+    return () => watch.disconnect();
+  }
 </script>
 
 <div class="tf-full">
-  <nav class="tf-crumbs" aria-label="Breadcrumb">
-    <a class="tf-crumb" href="#/code">Code</a><span class="tf-sep">›</span>
-    <a class="tf-crumb" href="#/code/repos">Repositories</a><span class="tf-sep">›</span>
-    {#if route.commit !== null && repoId !== null}
-      <a class="tf-crumb" href={repoHash(repoId)}>{repo?.title ?? ""}</a><span class="tf-sep">›</span>
-      <strong>Commit</strong>
-    {:else}
-      <strong>{repo?.title ?? ""}</strong>
-    {/if}
-    {#if back !== null}
-      <!-- The shell names a repository's page *Repository*; this page knows its title. -->
-      <span class="tf-esc"
-        >Back to {repoId !== null && back.hash === repoHash(repoId) && repo !== null ? repo.title : back.name} <kbd>Esc</kbd></span
-      >
-    {/if}
-  </nav>
+  <TfCrumbs parts={crumbs} {back} />
 
   {#if repoId === null || failed !== null}
-    <div class="tf-cbody">
-      <p class="tf-cfail">{failed ?? "No repository is named in the address."}</p>
-    </div>
+    {#if failed !== null && !missing}
+      <TfNothingHere message="This repository could not be read: {failed}" onretry={() => attempt++} />
+    {:else}
+      <TfNothingHere message="knobas does not hold this repository. It may not have synced yet." href="#/code" action="All repositories" />
+    {/if}
   {:else}
-    <header class="tf-fhead">
+    <header class="tf-fhead tf-repohead" {@attach watchStack}>
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
@@ -562,20 +660,33 @@
       </div>
       <!-- #2238's order, as the mockup (#2252) draws it: the primary, the others, Open in, Refresh last. -->
       <div class="tf-acts">
-        {#if proposed !== null}
-          <a class="tf-btn tf-primary" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
-        {/if}
-        <label class="tf-bsel"
-          ><svg viewBox="0 0 16 16" aria-hidden="true"
-            ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
-              d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
-            /></svg
-          ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
-            {#each branches ?? [] as option (option.name)}
-              <option value={option.name}>{option.name}</option>
-            {/each}
-          </select></label
-        >
+        <!-- Compare is this form, with a primary and *Into* and *From* of its own, so these would say it twice. They keep their room,
+             hidden and out of the Tab order, because a shorter row lets the tabs under it jump between tabs (F-249). Where the row
+             stacks under the title it starts at the page's edge, so the hidden room goes after what shows (F-256). -->
+        <span class="tf-repohold" class:tf-held={tab === "compare"} class:tf-stacked={stacked} inert={tab === "compare"}>
+          {#if oneBranch}
+            <button type="button" class="tf-btn tf-primary" aria-disabled="true" title="This repository has one branch: make another first">New pull request</button>
+          {:else if sentWaits}
+            <!-- Its room, unseen, so the tabs under the header hold still until the read brings it back (F-249). -->
+            <span class="tf-btn tf-primary tf-repoheld" aria-hidden="true">New pull request</span>
+          {:else if openedFrom?.entityId}
+            <a class="tf-btn tf-primary" href={itemHash({ entity_id: openedFrom.entityId, kind: "pr" })}>Open PR {openedFrom.number ?? ""}</a>
+          {:else if starting !== null}
+            {@const href = repoHash(repoId, "compare", encodeURIComponent(starting))}
+            <a class="tf-btn tf-primary" {href} onclick={(event) => pressNewPr(event, starting)}>New pull request</a>
+          {/if}
+          <label class="tf-bsel"
+            ><svg viewBox="0 0 16 16" aria-hidden="true"
+              ><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path
+                d="M4.5 5v6M11.5 6.5c0 3-7 2-7 4.5"
+              /></svg
+            ><select aria-label="Branch" value={branchName ?? ""} onchange={pick} disabled={branches === null || branches.length === 0}>
+              {#each branches ?? [] as option (option.name)}
+                <option value={option.name}>{option.name}</option>
+              {/each}
+            </select></label
+          >
+        </span>
         <button
           type="button"
           class="tf-btn"
@@ -589,17 +700,20 @@
         {#if detail !== null}<TfDetailRefresh {detail} {refresh} {reread} page />{/if}
       </div>
     </header>
-    {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+    {#if detail !== null}<TfDetailBanners {detail} {refresh} {reread} />{/if}
     <nav class="tf-tabs" aria-label="Repository">
       {#each REPO_TABS as entry, n (entry.id)}
         {@const count = countOf(entry.id)}
         {#if n > 0 && REPO_TABS[n - 1]!.group !== entry.group}<span class="tf-tabgrp" aria-hidden="true"></span>{/if}
-        <a href={tabHref(held, repoId, entry.id)} aria-current={tab === entry.id ? "page" : undefined}
+        <a href={tabHref(held, repoId, entry.id)} aria-current={tabKnown && tab === entry.id ? "page" : undefined}
           >{entry.label}{#if count !== null}{" "}<span class="tf-count" class:tf-warn={count.warn}>{count.n}</span
             >{/if}</a
         >
       {/each}
     </nav>
+    {#if !tabKnown}
+      <TfNothingHere message="This repository has no such tab." href={repoHash(repoId)} action="Files" />
+    {:else}
     <div class="tf-cbody">
       {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
@@ -646,17 +760,22 @@
                   base={placeOf(one).base}
                   defaultBranch={defaultBranch?.name ?? null}
                   {refreshed}
+                  {branchRefused}
+                  shown={one === slot}
+                  {guessed}
+                  onNewBranch={() => (newBranch = { from: null })}
                 />
               {:else if one === "commits"}
                 <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} {refreshed} />
               {:else if one === "prs"}
-                <TfRepoPrs {ports} {repoId} rows={prs} {job} />
+                <TfRepoPrs {ports} {repoId} rows={prs} {job} {now} newPr={proposed === null || oneBranch ? null : repoHash(repoId, "compare", encodeURIComponent(proposed))} reread={rereadPrs} />
               {/if}
             </TfRepoTab>
           {/if}
         {/each}
       {/if}
     </div>
+    {/if}
   {/if}
 </div>
 

@@ -123,7 +123,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 ## Filter keys
 
-- A *This job* scope names the job's key after its label, in mono (`FilterScope.tag`), as prototype-6's `jobk`. (#835)
+- A *This job* scope is `filter/TfScope.svelte`: its count as a badge, the key in its title, the top bar naming the job. (#835; design system, Controls, 2026-11-05)
 - A link that opens a view on *This job* writes the view's `sessionFilter` scope before the link is followed, and the view reads it from there. (#863; the job's section panels that first did it went with #2399)
 - A ticket page card's sections row opens its view on *This job* for that ticket, chosen or not: it writes the view's `sessionFilter` scope and holds the ticket with the section (`tf/job/scoped.svelte.ts`); the shell hands that section's views the held ticket as their job while the section is on screen, else the chosen job, and forgets it once the reader leaves the section. Reading still chooses nothing. Assets opens the asset tree at the ticket's first asset (`#/asset/<id>`); Sub-tasks writes `under:<key>` in the Tickets view's search line (`tickets-all`). (#2401)
 - A view's *This job* reads `job_reach` once for the job's ticket and filters its own list, search answers included; a reason heading is the reach's origin: *Linked to <key>*, *Parent <key>*, or *Via <first step's title>*. (#863)

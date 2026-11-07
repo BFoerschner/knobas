@@ -40,7 +40,7 @@ function render(over: Record<string, unknown> = {}) {
 test("a row is the monogram, the key cell and the title, and nothing else", () => {
   const { target, done } = render();
   const row = target.querySelector(".tf-ln-res")!;
-  expect([...row.children].map((cell) => cell.textContent)).toEqual(["PG", "Engineering", "SEPA payout retry design"]);
+  expect([...row.children].map((cell) => cell.textContent)).toEqual(["Pg", "Engineering", "SEPA payout retry design"]);
   done();
 });
 

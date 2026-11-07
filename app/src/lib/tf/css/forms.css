@@ -1,0 +1,11 @@
+/* ---------- form fields: one height (design system, Controls) ----------
+   A form's fields are `--control-h`, with its rows' controls beside them; a field in a compact row, such as a Start
+   work step, is `--control-h-sm`. Last in the sheet so a form's own padding rule cannot make a field taller. */
+:is(.tf-dialog .tf-body > input, .tf-field select, .tf-field input, .tf-formgrid select, .tf-formgrid input, .tf-combo input, .tf-stg-in, .tf-stg-pick select, .tf-stg-pick input, .tf-compare select, .tf-compare input, .tf-vw-edit input[type="text"]):not([type="checkbox"], [type="radio"]) {
+  height: var(--control-h); padding-block: 0;
+}
+/* A select's text starts 4 px further in than an input's at the same padding, so beside one it asks for 4 px less. */
+:is(.tf-field, .tf-formgrid, .tf-stg-pick, .tf-compare) select { padding-inline-start: 4px; }
+:is(.tf-rule select, .tf-step input, .tf-step select, .tf-run-save input[type="text"], .tf-isnooze input):not([type="checkbox"], [type="radio"]) {
+  height: var(--control-h-sm); padding-block: 0;
+}

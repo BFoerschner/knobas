@@ -12,19 +12,21 @@
   and *Move into …* puts the asset there, which makes the top of the estate an
   ordinary destination (walk back to *Estate*) rather than a special button.
 
-  ## The picker does not hide the moves the backend refuses
+  ## The asset's own row cannot be walked into
 
-  A reader can walk into the asset's own subtree and press *Move into …*, and
-  `move_asset` refuses it with the sentence it has for exactly this — naming
-  both ends **and the asset that closes the loop**. Two reasons that is right
-  rather than lazy:
-
-  * Hiding those rows means walking the ancestors in the frontend, which is a
-    second copy of `assets::cycle_through` — and the copy that goes stale.
-  * The refusal is the only place the loop is *explained*. A row that quietly
-    was not there teaches a reader nothing about why.
+  It stays in the list, marked *this asset*, and it is not a button that does
+  anything: walking into it is the only way to reach its subtree, so one
+  disabled row closes every move that would make a loop, with no walk over the
+  ancestors here. `assets::cycle_through` stays the rule. If the estate changes
+  under an open picker, `move_asset` refuses in its own words and the sentence
+  lands in the dialog.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
+
+  import { levelKeys } from "./level-keys";
+  import PickerCrumb from "./PickerCrumb.svelte";
+  import { kindTag } from "./tree";
   import { ipcErrorMessage } from "../ipc";
   import type { assetTree, AssetRow, moveAsset } from "../ipc/assets";
   import { latestRead } from "../shell/latest-read";
@@ -45,8 +47,8 @@
     tree: typeof assetTree;
     move: typeof moveAsset;
     onclose: () => void;
-    /** The move was written. The Tree re-reads at the new path. */
-    onmoved: (row: AssetRow) => void;
+    /** The move was written, into the place named in words. The Tree re-reads at the new path. */
+    onmoved: (into: string) => void;
   } = $props();
 
   // svelte-ignore state_referenced_locally
@@ -62,11 +64,18 @@
   let writing = $state(false);
   /** Nothing has come back yet — told apart from a level holding nothing. */
   let loaded = $state(false);
+  let picker = $state<HTMLElement | null>(null);
+  /** A walk asked for this read, so focus goes on to the level it draws. */
+  let walked = false;
+  /** Going up, the row walked out of, which focus goes back to. */
+  let cameFrom: string | null = null;
 
   const columnRead = latestRead<AssetRow[]>();
 
   /** Where the picker is standing, in words. */
   const here = $derived(crumb.at(-1)?.name ?? "the top of the estate");
+  /** Standing on the asset's own parent: moving it there would change nothing. */
+  const alreadyHere = $derived(at === asset.parent_id);
 
   /**
    * The level the picker is standing on.
@@ -82,6 +91,8 @@
         rows = answer;
         failure = null;
         loaded = true;
+        if (walked) void tick().then(() => land(cameFrom));
+        walked = false;
       },
       fail: (cause) => {
         rows = [];
@@ -91,13 +102,27 @@
     });
   });
 
+  /** Focus on the level just drawn: the row walked out of, else its first, else the list when the level holds nothing, so focus never falls out of it. */
+  function land(row: string | null) {
+    const options = [...(picker?.querySelectorAll<HTMLElement>(".opt:not(:disabled)") ?? [])];
+    const spot = options.find((option) => option.dataset.row === row) ?? options[0] ?? picker?.querySelector<HTMLElement>(".opts");
+    spot?.focus();
+  }
+
   /** Stand on `row`: it becomes the destination and the level below is drawn. */
   function into(row: AssetRow) {
     stand([...crumb, row]);
   }
 
+  /** `←`: up a level, back on the row walked out of. */
+  function up() {
+    if (crumb.length > 0) stand(crumb.slice(0, -1), crumb.at(-1)?.id ?? null);
+  }
+
   /** Stand at the foot of `path` — the top of the estate when it is empty. */
-  function stand(path: AssetRow[]) {
+  function stand(path: AssetRow[], from: string | null = null) {
+    walked = true;
+    cameFrom = from;
     crumb = path;
     at = path.at(-1)?.id ?? null;
     failure = null;
@@ -108,7 +133,8 @@
     writing = true;
     failure = null;
     try {
-      onmoved(await move(asset.id, at));
+      await move(asset.id, at);
+      onmoved(here);
     } catch (rejection) {
       // The cycle refusal lands here, in the words `assets::move_to` chose:
       // it names the asset that closes the loop, which is the fact a reader
@@ -120,27 +146,16 @@
   }
 </script>
 
-<TfDialog closeButton title="Move to…" subtitle={asset.name} {onclose}>
+<TfDialog why={alreadyHere ? "Open the place it should go." : null} title="Move {asset.name}" {onclose}>
   {#snippet body()}
-    <div class="picker">
-      <p class="crumb mono">
-        <button class="link" disabled={crumb.length === 0} onclick={() => stand([])}>
-          Estate
-        </button>
-        {#each crumb as step, index (step.id)}
-          <span class="sep" aria-hidden="true">/</span>
-          <button
-            class="link"
-            disabled={index === crumb.length - 1}
-            onclick={() => stand(crumb.slice(0, index + 1))}
-          >
-            {step.name}
-          </button>
-        {/each}
-      </p>
+    <div class="picker" bind:this={picker}>
+      <PickerCrumb {crumb} onstand={(path) => stand(path)} />
 
       <div class="lvl">
-        <ul class="opts" aria-label="Where to move it">
+        <!-- The list is the one `Tab` stop, and where the dialog arrives: a press there walks it, and none of its keys sends anything. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <ul class="opts" aria-label="Where to move it" tabindex="0" onkeydown={(event) => levelKeys(event, { into: (id) => { const row = rows.find((candidate) => candidate.id === id); if (row) into(row); }, up })}>
           {#each rows as row (row.id)}
             <li>
               <!--
@@ -149,13 +164,21 @@
                 there is, and a picker that only opened branches could not do
                 it. The chevron still says which rows have a level under them.
               -->
-              <button class="opt" title="Open {row.name}" onclick={() => into(row)}>
-                <span class="mg">{row.monogram}</span>
-                <span class="nm">{row.name}</span>
-                {#if row.has_children}
-                  <span class="chev" aria-hidden="true">›</span>
-                {/if}
-              </button>
+              {#if row.id === asset.id}
+                <button class="opt" disabled title="{row.name} can't move inside itself">
+                  <span class="mg">{kindTag(row.monogram)}</span>
+                  <span class="nm">{row.name}</span>
+                  <span class="faint">this asset</span>
+                </button>
+              {:else}
+                <button class="opt" data-row={row.id} title="Open {row.name}" tabindex="-1" onclick={() => into(row)}>
+                  <span class="mg">{kindTag(row.monogram)}</span>
+                  <span class="nm">{row.name}</span>
+                  {#if row.has_children}
+                    <span class="chev" aria-hidden="true">›</span>
+                  {/if}
+                </button>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -172,31 +195,18 @@
 
   {#snippet footer()}
     <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button class="tf-btn tf-primary" disabled={writing} onclick={() => void submit()}>
-      {writing ? "Moving…" : `Move into ${here}`}
+    <button class="tf-btn tf-primary" disabled={writing || alreadyHere} title={alreadyHere ? `${asset.name} is already here` : undefined} onclick={() => void submit()}>
+      {writing ? "Moving…" : alreadyHere ? "Already here" : `Move into ${here}`}
     </button>
   {/snippet}
 </TfDialog>
 
 <style>
+  /* `minmax(0, 1fr)`: an automatic track would take the nowrap crumb's width and push the list out of the dialog (F-543). */
   .picker {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
-  }
-
-  .crumb {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px;
-    margin: 0;
-    font-size: 11px;
-    color: var(--muted);
-  }
-
-  .crumb button:disabled {
-    color: var(--text);
-    cursor: default;
   }
 
   /* Bounded: a level with fifty rows must not push the footer buttons out of
@@ -205,13 +215,20 @@
     max-height: 240px;
     overflow: auto;
     border: 1px solid var(--hair);
-    border-radius: 2px;
+    border-radius: 4px;
   }
 
   .opts {
     margin: 0;
     padding: 0;
     list-style: none;
+  }
+
+  /* Inside the list, which scrolls: a ring outside it is cut to a line along the row's edge (F-537). */
+  .opts:focus-visible,
+  .opt:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
   }
 
   .opt {
@@ -223,11 +240,21 @@
     padding: 0 8px 0 10px;
     text-align: left;
     color: var(--text);
-    font-size: 12px;
+    font-size: var(--t-sm);
   }
 
-  .opt:hover {
+  .opt:hover:not(:disabled) {
     background: var(--raised);
+  }
+
+  .opt:disabled {
+    color: var(--ink-2);
+    cursor: not-allowed;
+  }
+
+  .opt .faint {
+    flex: none;
+    font-size: var(--t-xs);
   }
 
   .opt .nm {
@@ -240,7 +267,8 @@
 
   .opt .mg {
     flex: none;
-    font: 500 10px var(--mono);
+    font-size: var(--t-2xs);
+    font-weight: 500;
     color: var(--faint);
   }
 
@@ -251,7 +279,7 @@
 
   .empty {
     padding: 8px 10px;
-    font-size: 12px;
+    font-size: var(--t-sm);
     color: var(--muted);
   }
 </style>

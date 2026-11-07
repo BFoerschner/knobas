@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { PipeRun, PipeStep, SourceView } from "../../ipc/entity";
+import { layers } from "../layers.svelte";
 import TfRepoFiles from "./TfRepoFiles.svelte";
 import type { HighlightHandlers, HighlightRequest, RenderPort } from "../../render/port";
 import { createRendererDefaults, type RendererDefaults } from "../../render/defaults.svelte";
@@ -113,7 +114,7 @@ const button = (label: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === label || b.getAttribute("aria-label") === label) ?? null;
 
 async function addStep(label: string) {
-  button("+ Add step")!.click();
+  button("Add step…")!.click();
   flushSync();
   const row = [...target.querySelectorAll<HTMLButtonElement>(".tf-pmenu [role=menuitem]")].find((b) => text(b).startsWith(label));
   expect(row, label).toBeDefined();
@@ -132,7 +133,7 @@ test("a gzipped file has no pipeline until one is added; then gunzip → jq runs
   expect(target.querySelector(".tf-pipe")).toBeNull();
   expect(asked).toEqual([]);
 
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   expect(text(target.querySelector(".tf-psteps"))).toContain("bytes→");
   await addStep("gzip · zstd · bzip2 · xz decompress");
@@ -149,7 +150,7 @@ test("a changed jq filter runs again once typing rests, and at once on Enter", a
   const { asked, piped } = pipedPort((steps) => done(JSON.stringify(steps)));
   draw(piped);
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   await addStep("jq");
@@ -181,7 +182,7 @@ test("a failed step is named, marked, and shown with what it said and the input 
   }));
   draw(piped);
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   await addStep("jq");
@@ -196,11 +197,11 @@ test("a failed step is named, marked, and shown with what it said and the input 
   expect(text(target.querySelector(".tf-empty"))).toBe("A binary file, not drawn.");
 });
 
-test("a step is moved with its grip's arrow keys and removed with its ×; Reset drops the pipeline", async () => {
+test("a step is moved with its grip's arrow keys and removed with its ×; Reset takes the steps and leaves the bar open", async () => {
   const { asked, piped } = pipedPort(() => done("x"));
   draw(piped);
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   await addStep("Hex dump");
@@ -212,8 +213,55 @@ test("a step is moved with its grip's arrow keys and removed with its ×; Reset 
   expect(asked.at(-1)?.steps).toEqual([{ step: "gunzip" }]);
   button("Reset")!.click();
   await settle();
+  expect(text(target.querySelector(".tf-psteps"))).not.toContain("gunzip");
+  expect(button("Reset")).toBeNull();
+  expect(document.activeElement).toBe(button("Add step…"));
+  button("Close")!.click();
+  await settle();
   expect(target.querySelector(".tf-pipe")).toBeNull();
-  expect(button("+ Pipeline")).not.toBeNull();
+  expect(button("Pipeline")).not.toBeNull();
+});
+
+test("an untouched bar has nothing to lose: no Not saved and no Reset, a plain Close, and focus goes back on each way out (F-227)", async () => {
+  const { piped } = pipedPort(() => done("x"));
+  draw(piped);
+  await settle();
+  button("Pipeline")!.click();
+  await settle();
+  const said = () => text(target.querySelector(".tf-pipe > .tf-acts"));
+  expect(said()).toBe("Close");
+  expect(document.activeElement).toBe(button("Add step…"));
+  button("Close")!.click();
+  await settle();
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  expect(document.activeElement).toBe(button("Pipeline"));
+
+  button("Pipeline")!.click();
+  await settle();
+  expect(layers.open.at(-1)?.kind).toBe("panel");
+  layers.open.at(-1)!.close();
+  await settle();
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  expect(document.activeElement).toBe(button("Pipeline"));
+});
+
+test("Close keeps what was built: Pipeline brings the steps back, and Not saved speaks once there is a step (F-227)", async () => {
+  const { asked, piped } = pipedPort(() => done("x"));
+  draw(piped);
+  await settle();
+  button("Pipeline")!.click();
+  await settle();
+  await addStep("gzip");
+  expect(text(target.querySelector(".tf-pipe > .tf-acts"))).toContain("Not saved");
+  expect(button("Reset")).not.toBeNull();
+  button("Close")!.click();
+  await settle();
+  // The file is as read again.
+  expect(target.querySelector(".tf-pipe")).toBeNull();
+  button("Pipeline")!.click();
+  await settle();
+  expect(asked.at(-1)?.steps).toEqual([{ step: "gunzip" }]);
+  expect(text(target.querySelector(".tf-psteps"))).toContain("gunzip");
 });
 
 const GZ_BYTES = Uint8Array.of(0x1f, 0x8b, 0x08, 0, 0, 0, 0, 0);
@@ -304,7 +352,7 @@ test("Save as default for *.json.gz… stores the pipeline by name and points th
   const pipelines = storedPipelines([]);
   draw(piped, undefined, { defaults: defaults.store, pipelines: pipelines.store });
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
   await addStep("gzip");
   button("Save as default for *.json.gz…")!.click();
@@ -314,11 +362,33 @@ test("Save as default for *.json.gz… stores the pipeline by name and points th
   expect(pattern.value).toBe("*.json.gz");
   name.value = "Events";
   name.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
   button("Save")!.click();
   await settle();
   expect(pipelines.saves).toEqual([[{ id: null, name: "Events", steps: [{ step: "gunzip" }] }]]);
   expect(defaults.saves).toEqual([[{ pattern: "*.json.gz", renderer: "", pipeline: "events" }]]);
   expect(text(target.querySelector(".tf-pipe .tf-acts"))).toContain("Events, the default for *.json.gz");
+});
+
+test("Save stays off with a reason until the pipeline has a name, and the sentence about replacing has its own line (F-237)", async () => {
+  const { piped } = pipedPort(() => done("x"));
+  draw(piped, undefined, { defaults: storedDefaults([]).store, pipelines: storedPipelines([]).store });
+  await settle();
+  button("Pipeline")!.click();
+  await settle();
+  await addStep("gzip");
+  button("Save as default for *.json.gz…")!.click();
+  await settle();
+  const form = target.querySelector(".tf-psave")!;
+  expect(button("Save")!.disabled).toBe(true);
+  expect(form.querySelector(".tf-dwhy")?.textContent).toBe("Name it first.");
+  const name = target.querySelector<HTMLInputElement>("input[aria-label='Pipeline name']")!;
+  name.value = "Events";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(button("Save")!.disabled).toBe(false);
+  expect(form.querySelector(".tf-dwhy")).toBeNull();
+  expect(form.querySelector(".tf-psave-note")).not.toBeNull();
 });
 
 test("the person's command steps are in the Add step menu, under Your commands", async () => {
@@ -327,12 +397,12 @@ test("the person's command steps are in the Add step menu, under Your commands",
   stepCommands.hold([{ id: "upper", name: "Upper", command: "tr a-z A-Z", timeout_secs: 10 }]);
   draw(piped, undefined, { stepCommands });
   await settle();
-  button("+ Pipeline")!.click();
+  button("Pipeline")!.click();
   await settle();
-  button("+ Add step")!.click();
+  button("Add step…")!.click();
   flushSync();
   expect(text(target.querySelector(".tf-pmenu .tf-menu"))).toContain("Your commands");
-  button("+ Add step")!.click();
+  button("Add step…")!.click();
   flushSync();
   await addStep("Upper");
   expect(asked.at(-1)?.steps).toEqual([{ step: "command", id: "upper" }]);

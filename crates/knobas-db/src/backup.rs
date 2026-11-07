@@ -186,8 +186,7 @@ pub enum BackupError {
     /// second says this machine's settings and Dependencies layers and views
     /// may now be missing.
     #[error(
-        "the restore failed ({load}), and putting this knobas's settings and Dependencies \
-         layers back failed too: {source}"
+        "the restore failed ({load}), and putting this knobas's settings back failed too: {source}"
     )]
     NotPutBack {
         load: Box<BackupError>,

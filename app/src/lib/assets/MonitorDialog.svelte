@@ -131,11 +131,10 @@
   }
 </script>
 
-<TfDialog closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
+<TfDialog why={writing ? null : name.trim() === "" ? "Name it first." : url.trim() === "" ? "Say what to check." : target === null ? "Needs a source that can create monitors." : null} closeButton title="Create monitor" subtitle={`For ${detail.asset.name}`} {onclose}>
   {#snippet body()}
-    <div class="fields">
-      <div class="fld">
-        <label class="l" for="{fieldId}-name">Name</label>
+    <div class="tf-formgrid form">
+        <label for="{fieldId}-name">Name <small class="tf-req">required</small></label>
         <!-- `TfDialog` focuses the first field, which is this one. -->
         <input
           class="inp"
@@ -146,14 +145,11 @@
           bind:value={name}
           onkeydown={onfieldkeydown}
         />
-        <p class="hint">
-          What it is called in Uptime Kuma — and what attaches it here. The next poll
+        <span class="hint">
+          What it is called in Uptime Kuma, and what attaches it here. The next poll
           finds a monitor of this name and draws the <em>monitored-by</em> link.
-        </p>
-      </div>
-
-      <div class="fld">
-        <label class="l" for="{fieldId}-url">URL to check</label>
+        </span>
+        <label for="{fieldId}-url">URL to check <small class="tf-req">required</small></label>
         <input
           class="inp"
           id="{fieldId}-url"
@@ -163,15 +159,13 @@
           bind:value={url}
           onkeydown={onfieldkeydown}
         />
-        <p class="hint">
+        <span class="hint">
           An HTTP check, once a minute. Uptime Kuma reaches it from where <em>it</em> runs,
           which is not always where you are.
-        </p>
-      </div>
+        </span>
 
       {#if targets.length > 1}
-        <div class="fld">
-          <label class="l" for="{fieldId}-src">Create it in</label>
+          <label for="{fieldId}-src">Create it in</label>
           <select
             class="inp"
             id="{fieldId}-src"
@@ -183,7 +177,6 @@
               <option value={row.source_id}>{row.display_name}</option>
             {/each}
           </select>
-        </div>
       {:else if target}
         <p class="in">In <span class="nm">{target.display_name}</span></p>
       {/if}
@@ -203,32 +196,18 @@
 </TfDialog>
 
 <style>
-  .fields {
-    display: grid;
-    gap: 12px;
-  }
-
-  .fld .l {
-    display: block;
-    font: 500 10px var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--faint);
-    margin-bottom: 4px;
-  }
-
-  /* `.inp` and `.fail` are `unported.css`' and the buttons are `.tf-btn`
-     (`chrome.css`) -- redeclaring any of them here is how two dialogs come to
-     look different. */
+  /* A note on the field above it, in the field's column. `.inp` and `.fail` are `unported.css`' and the buttons are
+     `.tf-btn` (`chrome.css`): redeclaring any of them here is how two dialogs come to look different. */
   .hint {
-    margin-top: 6px;
-    font-size: 11px;
-    color: var(--muted);
+    grid-column: 2;
+    margin-top: -2px;
+    font-size: var(--t-xs);
+    color: var(--ink-2);
   }
 
   .in {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--t-sm);
     color: var(--muted);
   }
 

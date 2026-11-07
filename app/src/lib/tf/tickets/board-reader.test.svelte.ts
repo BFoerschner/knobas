@@ -75,6 +75,8 @@ function fakes() {
       reaches.push(id);
       return Promise.resolve([]);
     },
+    ticketBoard: () => Promise.resolve({ columns: [], more_lanes: 0 } as unknown as MiniBoard),
+    entityCheckout: () => Promise.reject(new Error("no checkout")),
   };
   const sessions: ViewSessions = $state({ views: {} });
   const view: BoardView = $state({ columns: [], layout: "board", lanes: "none" });
@@ -278,7 +280,7 @@ test("the preview reads once per ticket and drops the answer of one no longer pr
   details[0]!.answer("One.");
   await flush();
   expect(reader.description).toEqual({ text: "One.", markup: "jira_wiki" });
-  expect(reader.around).toEqual([]);
+  expect(reader.around).toEqual({ rows: [], settled: true });
 
   reader.preview("jira:PAY-2");
   expect(reader.description).toBeNull();

@@ -148,7 +148,7 @@
 {/if}
 
 {#if asking}
-  <TfDialog title="Where is {name} cloned?" onclose={() => (asking = false)}>
+  <TfDialog why={typed.trim() === "" ? "Type the path." : null} title="Where is {name} cloned?" onclose={() => (asking = false)}>
     {#snippet body()}
       <form
         class="tf-formgrid"
@@ -158,7 +158,7 @@
           void save();
         }}
       >
-        <label for="tf-spp">Path</label>
+        <label for="tf-spp">Path <small class="tf-req">required</small></label>
         <input id="tf-spp" class="tf-mono" type="text" autocomplete="off" spellcheck="false" placeholder="/Users/you/work/{name}" bind:value={typed} />
       </form>
       <p class="tf-dsub">A path you set wins over the clones-root scan.</p>

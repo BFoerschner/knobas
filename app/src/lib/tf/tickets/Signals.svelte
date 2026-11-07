@@ -5,10 +5,11 @@
 -->
 <script lang="ts">
   import type { Signal } from "../../ipc/entity";
+  import TfKeyed from "../TfKeyed.svelte";
 
   let { signals }: { signals: Signal[] } = $props();
 </script>
 
 {#each signals as signal (signal.kind + signal.text)}
-  <span class="tf-signal"><span class="tf-dot tf-{signal.tone}"></span>{signal.text}</span>
+  <span class="tf-signal"><span class="tf-dot tf-{signal.tone}"></span><span><TfKeyed text={signal.text} /></span></span>
 {/each}

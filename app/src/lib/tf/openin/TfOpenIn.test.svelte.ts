@@ -150,7 +150,7 @@ const items = () => [...target.querySelectorAll<HTMLButtonElement>("[role='menui
 test("the whole button opens the menu: the default first, marked and focused, then Add and Manage", async () => {
   await draw(view("/Users/mara/code/payout-service"));
   const face = target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!;
-  expect(text(face)).toBe("Open in… ▾");
+  expect(text(face)).toBe("Open in…");
   face.click();
   await settle();
   expect(items().map(text)).toEqual([
@@ -481,7 +481,7 @@ test("Try it on an application being edited saves the edit over it and opens it 
 
 test("Manage applications: the radio picks the default, ↑ moves one up, Edit… opens it with Remove", async () => {
   const dialog = await openDialog("Manage applications…");
-  expect(text(dialog.querySelector("h2"))).toBe("Applications for Open in…");
+  expect(text(dialog.querySelector("h2"))).toBe("Applications for Open in");
   // #2289: the extra action on the far left, then the primary.
   expect([...dialog.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b), b.className])).toEqual([
     ["Add an application…", "tf-btn tf-first"],
@@ -506,7 +506,7 @@ test("Manage applications: the radio picks the default, ↑ moves one up, Edit�
   expect(edit.querySelector<HTMLInputElement>("#tf-app-name")!.value).toBe("VS Code");
   // #2289: the extra actions on the far left, *Remove* drawn as a destructive start; then ghost Cancel, then the primary.
   expect([...edit.querySelectorAll<HTMLElement>("footer .tf-btn")].map((b) => [text(b).replace(/ on .*/, " on …"), b.className])).toEqual([
-    ["Remove", "tf-btn tf-ghost tf-danger"],
+    ["Remove", "tf-btn tf-ghost tf-danger tf-first"],
     ["Try it on …", "tf-btn tf-first"],
     ["Cancel", "tf-btn tf-ghost"],
     ["Save", "tf-btn tf-primary"],
@@ -515,4 +515,6 @@ test("Manage applications: the radio picks the default, ↑ moves one up, Edit�
   await settle();
   expect(calls.saved.at(-1)![0].map((draft) => draft.id)).toEqual(["terminal"]);
   expect(toasts.items.map((toast) => toast.text)).toContain("Removed the application");
+  // The removal rule: it acted at once, so its toast offers the way back.
+  expect(toasts.items.find((toast) => toast.text === "Removed the application")?.action?.label).toBe("Undo");
 });

@@ -10,10 +10,17 @@
  * view whose rows are not re-read on a run's end by themselves re-reads on it.
  *
  * Nothing here decides who fills a role: the answer's runs are the runs.
+ *
+ * A press ends in one toast, replaced by the next press's (F-448), and it names the source, never the role (F-455, F-068):
+ * *Synced Tidewater Confluence*, *Tidewater TeamCity is up to date*, *Could not sync Tidewater TeamCity: the sign-in failed*.
+ * Several runs read *Synced 2 sources*, and a run that failed is named whichever the others did. The ask refused keeps its
+ * *Could not sync: <why>*, which the button raises.
  */
 import { EVENTS, ipcErrorMessage } from "../ipc";
 import { syncNow, syncRole, syncStatus, type RoleRun, type SourceSyncStatus } from "../ipc/sources";
 import { listen as tauriListen } from "@tauri-apps/api/event";
+import { push } from "../shell/toasts.svelte";
+import { sourceRoles } from "./roles.svelte";
 
 export interface RoleSyncPorts {
   syncRole: (role: string) => Promise<RoleRun[]>;
@@ -22,6 +29,15 @@ export interface RoleSyncPorts {
   syncStatus: () => Promise<SourceSyncStatus[]>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
 }
+
+/** Why a run that ended didn't sync, in the words after *Could not sync <name>:*. */
+const WHY = { unauthorized: "the sign-in failed", unreachable: "the source can't be reached", error: "the run failed" } as const;
+
+/** A run an ask answered. *Sync all* is told no source: each run's ending says whose it was. */
+type AskedRun = { source_id: string | null; run_id: number };
+
+/** What {@link createRoleSync} holds a run under while it goes. */
+const runKey = (runId: number | null) => `run:${runId}`;
 
 /** One role's *Sync now*. */
 export interface RoleSync {
@@ -34,8 +50,8 @@ export interface RoleSync {
   readonly revision: number;
   /** Why the last ask was refused, or `null`. */
   readonly failed: string | null;
-  /** Ask for the runs; nothing while they still go. */
-  start(): Promise<void>;
+  /** Ask for the runs; nothing while they still go. `name` is what the answer calls a single run: else its source's name. */
+  start(name?: string): Promise<void>;
 }
 
 export interface RoleSyncs {
@@ -64,12 +80,20 @@ export function createRoleSyncs(ports: RoleSyncPorts): RoleSyncs {
  * `sync_now` joins a run already in flight rather than starting a second.
  * {@link RoleSync.role} is the source's id here.
  */
-export function createSourceSyncs(ports: RoleSyncPorts): RoleSyncs {
+export function createSourceSyncs(ports: Omit<RoleSyncPorts, "syncRole">): RoleSyncs {
   return createSyncs(ports, async (sourceId) => [{ source_id: sourceId, run_id: await ports.syncNow(sourceId) }]);
 }
 
+/**
+ * Settings' *Sync all* (F-652): the runs `sync_all` started or joined, which it answers by id alone. Its answer is on the
+ * one subject `sync:all`. One for each press, so a press while some still go starts what has ended.
+ */
+export function createAllSync(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, syncAll: () => Promise<number[]>): RoleSync {
+  return createRoleSync(ports, "all", async () => (await syncAll()).map((run_id) => ({ source_id: null, run_id })));
+}
+
 /** The runs asked for under one name, the same ones each time it is asked for. */
-function createSyncs(ports: RoleSyncPorts, ask: (name: string) => Promise<RoleRun[]>): RoleSyncs {
+function createSyncs(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, ask: (name: string) => Promise<RoleRun[]>): RoleSyncs {
   const held = new Map<string, RoleSync>();
   return {
     of(name) {
@@ -86,7 +110,7 @@ function createSyncs(ports: RoleSyncPorts, ask: (name: string) => Promise<RoleRu
   };
 }
 
-function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<RoleRun[]>): RoleSync {
+function createRoleSync(ports: Pick<RoleSyncPorts, "syncStatus" | "listen">, role: string, ask: () => Promise<AskedRun[]>): RoleSync {
   const state = $state<{ asking: boolean; pending: Record<string, number>; revision: number; failed: string | null }>({
     asking: false,
     pending: {},
@@ -94,8 +118,21 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
     failed: null,
   });
   let stop: (() => void) | null = null;
+  /** What this ask's runs have said so far, for its answer. */
+  let said: { name: string | undefined; runs: number; last: string; failed: Map<string, string[]>; changed: boolean } = { name: undefined, runs: 0, last: role, failed: new Map(), changed: false };
 
   const going = () => Object.keys(state.pending).length;
+
+  /** What the press ends in, once every run has. */
+  function answer() {
+    const { runs, last, failed, changed } = said;
+    const subject = `sync:${role}`;
+    if (failed.size > 0) {
+      const lines = [...failed].map(([why, names]) => `Could not sync ${new Intl.ListFormat("en").format(names)}: ${why}`);
+      push({ text: lines.join(". "), tone: "err", subject });
+    } else if (runs === 1) push({ text: changed ? `Synced ${last}` : `${last} is up to date`, subject });
+    else push({ text: changed ? `Synced ${runs} sources` : `${runs} sources are up to date`, subject });
+  }
 
   function finish(ended: boolean) {
     stop?.();
@@ -107,11 +144,21 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
 
   /** One status heard: a run of ours that is no longer going has ended. */
   function heard(row: SourceSyncStatus) {
-    const ours = state.pending[row.source_id];
+    const key = row.source_id in state.pending ? row.source_id : runKey(row.run_id);
+    const ours = state.pending[key];
     if (ours === undefined || row.running || row.run_id === null || row.run_id < ours) return;
-    const { [row.source_id]: _ended, ...rest } = state.pending;
+    const { [key]: _ended, ...rest } = state.pending;
     state.pending = rest;
-    if (!state.asking && going() === 0) finish(true);
+    said.last = said.name ?? sourceRoles.nameOf(row.source_id);
+    if (row.last_outcome !== null && row.last_outcome !== "ok") {
+      const why = WHY[row.last_outcome];
+      said.failed.set(why, [...(said.failed.get(why) ?? []), said.last]);
+    }
+    if (row.last_changed !== false) said.changed = true;
+    if (!state.asking && going() === 0) {
+      answer();
+      finish(true);
+    }
   }
 
   return {
@@ -128,18 +175,21 @@ function createRoleSync(ports: RoleSyncPorts, role: string, ask: () => Promise<R
     get failed() {
       return state.failed;
     },
-    async start() {
+    async start(name) {
       if (state.asking || going() > 0) return;
       state.asking = true;
       state.failed = null;
+      said = { name, runs: 0, last: role, failed: new Map(), changed: false };
       try {
         // Listening first, so an ending sent while the answer travels is heard.
         const off = await ports.listen(EVENTS.syncState, ({ payload }) => heard(payload as SourceSyncStatus));
         stop = off;
         const runs = await ask();
-        state.pending = Object.fromEntries(runs.map((run) => [run.source_id, run.run_id]));
+        state.pending = Object.fromEntries(runs.map((run) => [run.source_id ?? runKey(run.run_id), run.run_id]));
+        said.runs = runs.length;
         state.asking = false;
         if (runs.length === 0) {
+          push({ text: "Nothing to sync", subject: `sync:${role}` });
           finish(false);
           return;
         }

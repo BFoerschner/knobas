@@ -52,7 +52,7 @@
     type ConditionField,
     type EditColumn,
   } from "./editor";
-  import { columnName, LANE_FIELDS, splitLanes } from "./tickets";
+  import { assigneeName, columnHead, columnName, LANE_FIELDS, shortKey, splitLanes } from "./tickets";
   import { counted } from "../counted";
   import { copyKeeps, drawnSavedViewColumns, LIST_COLUMN_ORDER, ownViewKept, savedViewKindWords, savedViewQueries, type CopiedFrom } from "./views";
 
@@ -133,6 +133,8 @@
   const saveLabel = $derived(editing ? "Save view" : "Create view");
   /** Fixed for the dialog's life: a saved view stays one. */
   const fixedSource = untrack(() => savedViewSource);
+  /** A preview column's head, as the board will draw it. */
+  const headOf = (name: string) => (statuses.includes(name) ? columnName(name) : columnHead(name, columns ?? []));
   /** The saved view's query and sub-query, each only when it has one (#2050). */
   const fixedQueries = fixedSource === null ? [] : savedViewQueries(fixedSource);
   const title = $derived(fixedSource ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
@@ -241,7 +243,7 @@
   }
   const loose = $derived(looseStatuses(columns ?? [], statuses));
   const looseLine = $derived(
-    `${loose.join(", ")} ${loose.length > 1 ? "are" : "is"} on no column, so those tickets do not show on the board.`,
+    `${loose.map(columnName).join(", ")} ${loose.length > 1 ? "are" : "is"} on no column, so those tickets do not show on the board.`,
   );
 
   const CARD_FIELDS: [CardField, string][] = [
@@ -356,7 +358,7 @@
   }
 </script>
 
-<TfDialog {title} className="tf-vw-dialog" {onclose}>
+<TfDialog why={named ? null : "Give the view a name."} {title} className="tf-vw-dialog" {onclose}>
   {#snippet body()}
     <div class="tf-vw-body">
       <form
@@ -382,7 +384,7 @@
             </p>
             {#if oncopy}
               <div class="tf-vw-btns">
-                <button type="button" class="tf-btn tf-sm" onclick={oncopy}>Make an editable copy</button>
+                <button type="button" class="tf-btn tf-sm" onclick={oncopy}>Make an editable copy…</button>
               </div>
             {/if}
           </section>
@@ -390,13 +392,13 @@
         <section class="tf-vw-sec">
           <div class="tf-vw-two">
             <label>
-              <span>Name</span>
+              <span>Name <small class="tf-req">required</small></span>
               <input
                 type="text"
                 class="tf-vw-name-in"
                 aria-label="Name"
                 bind:value={name}
-                placeholder="For example, Payments bugs this sprint"
+                placeholder="Payments bugs this sprint"
               />
             </label>
             <label>
@@ -458,11 +460,10 @@
                   aria-label="Remove this condition"
                   onclick={() => (conditions = conditions.filter((_, i) => i !== at))}>✕</button
                 >
-                <div class="tf-vw-vals">
+                <div class="tf-fchips tf-vw-vals">
                   {#each options(condition) as [value, label] (value)}
                     <button
                       type="button"
-                      class="tf-vw-val"
                       aria-pressed={condition.values.some((v) => same(v, value))}
                       onclick={() => toggleValue(at, value)}>{label}</button
                     >
@@ -472,7 +473,7 @@
             {/each}
           </div>
           <div class="tf-vw-btns">
-            <button type="button" class="tf-btn tf-sm" onclick={addCondition}>+ Add a condition</button>
+            <button type="button" class="tf-btn tf-sm" onclick={addCondition}>Add a condition</button>
             <span class="tf-dim">Every condition has to hold. Values in one condition mean any of them.</span>
           </div>
           <label class="tf-vw-words">
@@ -516,14 +517,13 @@
                       disabled={fixedSource !== null}
                       oninput={(event) => setColumn(at, { name: event.currentTarget.value })}
                     />
-                    <div class="tf-vw-vals">
+                    <div class="tf-fchips tf-vw-vals">
                       {#each statuses as status (status)}
                         <button
                           type="button"
-                          class="tf-vw-val"
                           aria-pressed={column.statuses.includes(status)}
                           disabled={fixedSource !== null}
-                          onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{status}</button
+                          onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{columnName(status)}</button
                         >
                       {/each}
                     </div>
@@ -572,7 +572,7 @@
                   type="button"
                   class="tf-btn tf-sm"
                   onclick={() => (columns = [...(columns ?? []), { name: "New column", statuses: [], limit: null }])}
-                  >+ Add a column</button
+                  >Add a column</button
                 >
                 <button type="button" class="tf-btn tf-sm tf-ghost" onclick={resetColumns}>One column per status</button>
               </div>
@@ -637,16 +637,18 @@
               {#each shown.columns as column, at (at)}
                 <div class="tf-vw-mcol" class:tf-vw-over={column.over}>
                   <div class="tf-vw-mh">
-                    <span>{column.name || "Unnamed"}</span><b
+                    <span title={column.name ? headOf(column.name) : undefined}>{column.name ? headOf(column.name) : "Unnamed"}</span><b
                       >{column.total}{#if column.limit !== null}{" "}of {column.limit}{/if}</b
                     >
                   </div>
-                  {#each column.cards as card (card.entity_id)}
-                    <div class="tf-vw-stub"><span class="tf-mono">{card.key}</span>{card.title}</div>
-                  {/each}
-                  {#if column.total > column.cards.length}
-                    <div class="tf-vw-stub tf-vw-stub-more">{column.total - column.cards.length} more</div>
-                  {/if}
+                  <div class="tf-vw-stubs">
+                    {#each column.cards as card (card.entity_id)}
+                      <div class="tf-vw-stub" title="{card.key} {card.title}"><span class="tf-mono">{shortKey(card.key)}</span>{card.title}</div>
+                    {/each}
+                    {#if column.total > column.cards.length}
+                      <div class="tf-vw-stub tf-vw-stub-more">{column.total - column.cards.length} more</div>
+                    {/if}
+                  </div>
                 </div>
               {/each}
             </div>
@@ -672,7 +674,7 @@
                       {:else if column === "status"}<td>{columnName(card.status)}</td>
                       {:else if column === "priority"}<td>{card.priority ?? ""}</td>
                       {:else if column === "signals"}<td>{card.signals.length}</td>
-                      {:else if column === "assignee"}<td>{card.assignee ?? "Unassigned"}</td>
+                      {:else if column === "assignee"}<td>{assigneeName(card) ?? "Unassigned"}</td>
                       {:else if column === "updated"}<td>{clockLabel(card.updated_at)}</td>
                       {:else if column === "epic"}<td>{card.path ?? ""}</td>
                       {:else}<td>{card.labels.join(", ")}</td>{/if}
@@ -691,7 +693,7 @@
   {/snippet}
   {#snippet footer()}
     {#if editing && ondelete && fixedSource === null}
-      <button type="button" class="tf-btn tf-ghost tf-danger" onclick={ondelete}>Delete view</button>
+      <button type="button" class="tf-btn tf-ghost tf-danger tf-first" onclick={ondelete}>Delete view</button>
     {/if}
     <span class="tf-first tf-dim tf-vw-store"
       >{fixedSource !== null

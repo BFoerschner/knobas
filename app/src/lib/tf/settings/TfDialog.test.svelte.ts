@@ -98,10 +98,57 @@ test("Escape closes it exactly once and does not reach the shell", () => {
   target.remove();
 });
 
-test("a click on the scrim closes it; a click inside the dialog does not", () => {
+/** A person's press can't be sent from here (`isTrusted`), so the trips press it with real keys. These say what holds nothing. */
+function holdsOnClose(close: () => void): boolean {
+  const target = host();
+  let app: ReturnType<typeof mount> | null = null;
+  const onclose = () => {
+    if (app) void unmount(app);
+    app = null;
+  };
+  app = mount(Modal, { target, props: { onclose } });
+  flushSync();
+  const listening = vi.spyOn(window, "addEventListener");
+  close();
+  flushSync();
+  const held = (listening.mock.calls as unknown[][]).some(([type]) => type === "click");
+  listening.mockRestore();
+  if (app) void unmount(app);
+  target.remove();
+  return held;
+}
+
+test("a dialog closed by a script, or by Esc, holds no press behind it", () => {
+  expect(holdsOnClose(() => document.querySelector<HTMLButtonElement>(".tf-dclose")!.click())).toBe(false);
+  expect(holdsOnClose(() => press("Escape"))).toBe(false);
+});
+
+/** F-616: what was typed is not lost to a click beside the sheet. A dialog with a footer has something to lose. */
+test("a click on the scrim leaves a dialog with a footer open, and focus where it was", () => {
   const onclose = vi.fn();
   const target = host();
-  const app = mount(Modal, { target, props: { onclose } });
+  const app = mount(Modal, { target, props: { onclose, content: "input" } });
+  flushSync();
+  const field = target.querySelector<HTMLInputElement>(".tf-body input")!;
+  expect(document.activeElement).toBe(field);
+
+  const scrim = target.querySelector<HTMLElement>(".tf-modal")!;
+  const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+  scrim.dispatchEvent(down);
+  expect(down.defaultPrevented, "the press does not take focus off the field").toBe(true);
+  scrim.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+  expect(onclose).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(field);
+
+  unmount(app);
+  target.remove();
+});
+
+test("a viewer has no footer and nothing to lose: a click on the scrim closes it, a click inside does not", () => {
+  const onclose = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose, viewer: true } });
   flushSync();
 
   target.querySelector<HTMLElement>(".tf-dialog")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -112,6 +159,154 @@ test("a click on the scrim closes it; a click inside the dialog does not", () =>
 
   unmount(app);
   target.remove();
+});
+
+/** F-035: `Enter` on arrival must not press what the dialog is asking about. */
+test("focus never arrives on a button in the body: with no other control it goes to the ×", () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "button" } });
+  flushSync();
+
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Close");
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test("the first field is the first of any kind, a select or a textarea too, ahead of a button in the body", () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "select" } });
+  flushSync();
+
+  expect(document.activeElement?.tagName).toBe("SELECT");
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test("a field marked data-arrive takes focus ahead of a select above it, and shift-Tab still reaches the select (F-453)", () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "arrive" } });
+  flushSync();
+
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Title");
+  const fields = [...target.querySelectorAll<HTMLElement>(".tf-body :is(select, input)")];
+  expect(fields.indexOf(document.activeElement as HTMLElement), "the select stays above it in the tab order").toBeGreaterThan(0);
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test("with no field, a radio takes focus ahead of a button, and Enter on it presses the primary, once (the key table, F-240)", () => {
+  const behind = opener();
+  const onsubmit = vi.fn();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onsubmit, onprimary } });
+  flushSync();
+
+  const radio = target.querySelector<HTMLInputElement>("input[type=radio]")!;
+  expect(document.activeElement).toBe(radio);
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  radio.dispatchEvent(enter);
+  expect(enter.defaultPrevented, "implicit submission is the keydown's default").toBe(true);
+  expect(onprimary).toHaveBeenCalledOnce();
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test("⌘Enter presses the primary from anywhere in the dialog (the key table)", () => {
+  const behind = opener();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onprimary } });
+  flushSync();
+  const send = new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true });
+  target.querySelector("input")!.dispatchEvent(send);
+  expect(send.defaultPrevented).toBe(true);
+  expect(onprimary).toHaveBeenCalledOnce();
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test.each(["danger", "guarded", "off"] as const)("⌘Enter doesn't reach a primary that is %s", (primary) => {
+  const behind = opener();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onprimary, primary } });
+  flushSync();
+  target.querySelector("input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
+  expect(onprimary).not.toHaveBeenCalled();
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+test.each(["danger", "guarded", "off"] as const)("Enter on a radio doesn't reach a primary that is %s", (primary) => {
+  const behind = opener();
+  const onprimary = vi.fn();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "radios", onprimary, primary } });
+  flushSync();
+
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  target.querySelector<HTMLInputElement>("input[type=radio]")!.dispatchEvent(enter);
+  expect(enter.defaultPrevented).toBe(true);
+  expect(onprimary).not.toHaveBeenCalled();
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+/** F-030: a control removed while it held focus drops it on the body, and `Tab` from there walks the page behind. */
+test("focus lost to a removed control comes back into the dialog", async () => {
+  const behind = opener();
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, content: "rows" } });
+  flushSync();
+
+  const row = target.querySelector<HTMLButtonElement>("[data-row]")!;
+  row.focus();
+  row.click();
+  flushSync();
+  await Promise.resolve();
+
+  expect(target.querySelector("[data-row]")).toBeNull();
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Close");
+
+  unmount(app);
+  behind.remove();
+  target.remove();
+});
+
+/** The enabled rule: `why` is the one markup for what a disabled primary waits for, just left of *Cancel*. */
+test("why draws the missing line in the footer, and nothing when there is none", () => {
+  const target = host();
+  const app = mount(Modal, { target, props: { onclose: () => {}, why: "Name it first." } });
+  flushSync();
+
+  const line = target.querySelector("footer > p.tf-dwhy[role=status]");
+  expect(line?.textContent).toBe("Name it first.");
+
+  unmount(app);
+  target.remove();
+
+  const clear = host();
+  const none = mount(Modal, { target: clear, props: { onclose: () => {} } });
+  flushSync();
+  expect(clear.querySelector(".tf-dwhy")).toBeNull();
+  unmount(none);
+  clear.remove();
 });
 
 test("Tab cycles within the dialog instead of escaping to the page behind", () => {

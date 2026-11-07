@@ -26,6 +26,7 @@
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import TfKey from "../TfKey.svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
@@ -176,7 +177,10 @@
     return cannotOverride !== null ? field.default : (values[field.name] ?? "");
   }
   const shownBranch = $derived(branch.trim() || fallback || "the default branch");
-  const summary = $derived(summaryOf(shownBranch, overrides));
+  const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
+  /** The footer's word for a run with no overrides is *Start from*'s, so the two lines can't disagree. */
+  const startWord = $derived(start === "from" ? (from?.number != null ? fromLabel : "this run’s settings") : pickedPreset !== null ? `preset ${pickedPreset.name}` : "defaults");
+  const summary = $derived(summaryOf(shownBranch, overrides, startWord));
 
   // -- the branch combobox -----------------------------------------------------
 
@@ -204,7 +208,7 @@
     } else if (event.key === "Enter" && open && shown[active] !== undefined) {
       choose(shown[active]!.name);
       event.preventDefault();
-    } else if (event.key === "Escape" && open) {
+    } else if (event.key === "Escape" && open && shown.length > 0) {
       // The list closes first; the dialog stays.
       open = false;
       event.stopPropagation();
@@ -217,7 +221,6 @@
   const title = $derived(
     from !== null ? `Run ${pipeline.name} again, from ${from.number !== null ? `#${from.number}` : "this run"}` : `Run ${pipeline.name}`,
   );
-  const fromLabel = $derived(from !== null && from.number !== null ? `#${from.number} settings` : "This run’s settings");
 
   function run() {
     const options = { clean_checkout: clean, first_in_queue: firstInQueue };
@@ -296,7 +299,7 @@
       <p class="tf-dim tf-run-refused">{cannotOverride}</p>
     {/if}
     {#if fields.length > 0}
-      <div class="tf-prm">
+      <div class="tf-formgrid">
         {#each fields as field (field.name)}
           {@const id = `tf-run-p-${uid}-${field.name}`}
           <label class="tf-k" for={id} title={field.label !== null ? field.name : undefined}>{field.label ?? field.name}</label>
@@ -326,7 +329,7 @@
       </div>
     {/if}
     {#if extra.length > 0 && cannotOverride === null}
-      <div class="tf-prm">
+      <div class="tf-formgrid">
         {#each extra as row, at (at)}
           <input class="tf-k" type="text" placeholder="name" aria-label={`Name of added parameter ${at + 1}`} bind:value={row.name} />
           <input type="text" placeholder="value" aria-label={`Value of added parameter ${at + 1}`} bind:value={row.value} />
@@ -336,7 +339,7 @@
     {/if}
     <button
       type="button"
-      class="tf-linkish tf-run-add"
+      class="tf-btn tf-sm tf-run-add"
       {...refusedAttrs(cannotOverride)}
       onclick={() => {
         if (cannotOverride === null) extra = [...extra, { name: "", value: "" }];
@@ -364,7 +367,7 @@
     {/if}
   {/snippet}
   {#snippet footer()}
-    <span class="tf-runsum">{summary}</span>
+    <span class="tf-runsum">On <TfKey value={shownBranch} />{summary.slice(`On ${shownBranch}`.length)}</span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="button" class="tf-btn tf-primary" onclick={run}>Run</button>
   {/snippet}

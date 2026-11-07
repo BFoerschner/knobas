@@ -60,7 +60,7 @@ function record(at: Date, bytes: number): BackupRecord {
 /** The fake's declared state words per kind, in declared order, and the Jira statuses it has seen. */
 const DECLARED_STATES: [string, [string, Tone | null][]][] = [
   ["build", [["running", "info"], ["queued", "info"], ["SUCCESS", "ok"], ["FAILURE", "err"], ["UNKNOWN", "muted"]]],
-  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "warn"], ["maintenance", "muted"]]],
+  ["monitor", [["up", "ok"], ["down", "err"], ["pending", "info"], ["maintenance", "muted"]]],
   ["pr", [["merged", "ok"], ["open", "info"], ["closed", "muted"]]],
   ["ticket", [["Done", "ok"], ["Resolved", "ok"], ["In Progress", "info"], ["In Review", "info"], ["Closed", "muted"]]],
 ];
@@ -218,8 +218,8 @@ export function handlers(params: URLSearchParams = new URLSearchParams()): Handl
     monitoring_settings: () => monitoring,
     set_monitoring_settings: (args) => {
       const next = args["settings"] as MonitoringSettings;
-      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 1)) {
-        throw { code: "invalid", message: "both numbers must be at least 1", source_id: null };
+      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 0)) {
+        throw { code: "invalid", message: "retention must be at least 1 day", source_id: null };
       }
       monitoring = next;
       return monitoring;

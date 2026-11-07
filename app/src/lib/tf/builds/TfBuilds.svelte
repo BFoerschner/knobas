@@ -31,6 +31,9 @@
 -->
 <script lang="ts" module>
   import { SvelteMap } from "svelte/reactivity";
+  import TfKey from "../TfKey.svelte";
+  import TfKeyed from "../TfKeyed.svelte";
+  import { stateWord } from "../state-word";
   import { replaceAddress } from "../opener";
 
   import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
@@ -57,6 +60,10 @@
 </script>
 
 <script lang="ts">
+  import TfScope from "../filter/TfScope.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import TfRailBar from "../TfRailBar.svelte";
+  import TfScroller from "../TfScroller.svelte";
   import TfBareHeader from "../TfBareHeader.svelte";
   import { flushSync, tick, untrack } from "svelte";
   import type { RoleFrameProps } from "../page-entry";
@@ -72,7 +79,7 @@
   import { listSources } from "../../ipc/sources";
   import { resolveTicket } from "../job/job";
   import { Windowed } from "../../shell/windowed.svelte";
-  import { sessionFilter } from "../filter/filter-state.svelte";
+  import { sessionFilter, sessionValue } from "../filter/filter-state.svelte";
   import type { EscTarget } from "../escape";
   import TfCrumbs, { type Crumb } from "../TfCrumbs.svelte";
   import TfPipeline from "./TfPipeline.svelte";
@@ -127,6 +134,7 @@
   } & RoleFrameProps = $props();
 
   const filter = sessionFilter("builds-pipelines");
+  const lastPipeline = sessionValue("builds-last-pipeline");
   const chips = $derived(filter.chips["state"] ?? []);
 
   /**
@@ -173,8 +181,8 @@
     void untrack(() => rereadPipelines());
   });
 
-  // *This job* (#850): on by default while a job is current.
-  const scope = $derived<Scope>(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
+  // One default on every page (design system, Layout): *All*. A ticket card's row turns *This job* on.
+  const scope = $derived<Scope>(job !== null && filter.scope === "job" ? "job" : "all");
   let reasons = $state<Map<string, PipelineReason[]> | null>(null);
   /** What the job's ticket is read by: the address it was opened at (#1537), else its key. */
   const jobRef = $derived(job === null ? null : (jobAt ?? job));
@@ -194,26 +202,37 @@
       },
     );
   });
-  /** The job's pipelines, before the words and chips narrow them. */
-  const onJob = $derived(
-    all === null || scope !== "job" || reasons === null ? [] : all.filter((p) => reasons!.has(p.entity_id)),
-  );
+  /** The job's pipelines, whatever the scope: a bare `#/builds` with nothing remembered opens the job's first. */
+  const jobsOwn = $derived(all === null || reasons === null ? [] : all.filter((p) => reasons!.has(p.entity_id)));
+  /** The pipelines *This job* narrows the list to, before the words and chips narrow them. */
+  const onJob = $derived(scope === "job" ? jobsOwn : []);
   const kept = $derived(
     all === null ? [] : keptPipelines(scope === "job" ? onJob : all, chips),
   );
   /** The pipeline on the right: the one the list picks, or on a run's address the run's own. */
   function selectedOf(list: PipelineRow[]): PipelineRow | null {
-    if (head === "builds") return pipelineOf(list, rest, onJob);
-    return list.find((p) => p.entity_id === rest[0]) ?? null;
+    if (head !== "builds") return list.find((p) => p.entity_id === rest[0]) ?? null;
+    // A bare `#/builds` is the pipeline you were on: going back to Builds never changes the page under you.
+    const had = rest.length === 0 && lastPipeline.value !== null && list.find((p) => p.entity_id === lastPipeline.value);
+    return had || pipelineOf(list, rest, jobsOwn);
   }
   const selected = $derived(all === null ? null : selectedOf(all));
+  $effect(() => {
+    if (selected !== null && (rest.length > 0 || head !== "builds")) lastPipeline.value = selected.entity_id;
+  });
+  /** The page you are on where the rail's filter leaves it out; `null` while the job's reasons are still being read. */
+  const outside = $derived(
+    selected === null || (scope === "job" && reasons === null) || kept.some((p) => p.entity_id === selected.entity_id) ? null : selected,
+  );
 
   // `#/build/<run id>` (a job's or the inbox's row) names the run alone: its
   // pipeline is the one whose recent runs hold it, else the one its view names.
   /** A bare run address no pipeline was found for. */
   let lost = $state<string | null>(null);
   $effect(() => {
-    if (all === null || head !== "build" || rest.length !== 1 || selected !== null) return;
+    if (all === null || head !== "build" || rest.length !== 1) return;
+    // A run's address that names a pipeline and no run is the pipeline's page.
+    if (selected !== null) return replaceAddress(pipelineHash(selected.entity_id));
     const id = rest[0]!;
     const owner = all.find((p) => p.recent.some((r) => r.entity_id === id));
     if (owner !== undefined) {
@@ -300,8 +319,13 @@
   });
 
 
+  /** A 240 px rail: the time goes short and moves to the ticks' line, so the name has the row (`builds.css`). Stacked, the rail is wide again. */
+
+  /** Below 900 px, whether the pipelines rail is unfolded under its bar. */
+  let railOpen = $state(false);
+
   function stateText(run: RunRow): string {
-    return run.state?.text ?? "";
+    return stateWord(run.state?.text ?? "");
   }
 </script>
 
@@ -324,8 +348,8 @@
     title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
     {@attach win.row(key)}
   >
-    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}>{pipeline.name}</span>
-    <span class="tf-pi-when">{latestTime(pipeline)}</span>
+    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)} title={pipeline.name}>{pipeline.name}</span>
+    <span class="tf-pi-when" title={latestTime(pipeline)}>{latestTime(pipeline)}</span>
     <span
       class="tf-strip"
       role="img"
@@ -335,7 +359,7 @@
     >
       {#each strip as run (run.entity_id)}<i class={`tf-run-${runTone(run)}`}></i>{/each}
     </span>
-    {#if why !== ""}<span class="tf-pi-why">{why}</span>{/if}
+    {#if why !== ""}<span class="tf-pi-why"><TfKeyed text={why} /></span>{/if}
   </a>
 {/snippet}
 
@@ -349,16 +373,24 @@
   </details>
 {/snippet}
 
-<div class="tf-bv">
-  <nav class="tf-pl" aria-label="Pipelines">
+<div class="tf-bv" class:tf-rail-shut={!railOpen}>
+  <TfRailBar label="Pipeline" value={selected?.name ?? "All"} open={railOpen} controls="tf-pipelines-rail" onpress={() => (railOpen = !railOpen)} onclose={() => (railOpen = false)} />
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+  <nav
+    id="tf-pipelines-rail"
+    class="tf-pl tf-rail"
+    aria-label="Pipelines"
+    onclick={(event) => {
+      if ((event.target as Element).closest("a[href]")) railOpen = false;
+    }}
+  >
     <div class="tf-pl-top">
       {#if job !== null}
-        <div class="tf-seg" role="group" aria-label="Scope">
-          <button type="button" aria-pressed={scope === "job"} onclick={() => setScope("job")}
-            >This job <span class="tf-jobk">{job}</span></button
-          >
-          <button type="button" aria-pressed={scope === "all"} onclick={() => setScope("all")}>All</button>
-        </div>
+        <TfScope
+          scopes={[{ id: "job", label: "This job", count: reasons === null ? null : jobsOwn.length, title: `The pipelines ${job} reaches` }, { id: "all", label: "All" }]}
+          {scope}
+          onpick={(id) => setScope(id as Scope)}
+        />
       {/if}
       <div class="tf-fchips" role="group" aria-label="Show only">
         {#each CHIPS as chip (chip)}
@@ -373,7 +405,7 @@
         <p class="tf-pl-note">No pipelines yet. A CI source's pipelines show here once it has synced.</p>
       {:else if all !== null && scope === "job" && reasons !== null}
         <p class="tf-scope-note">
-          {kept.length} of {all.length} pipelines are relevant to <span class="tf-mono">{job}</span>.
+          {onJob.length} of {all.length} pipelines are relevant to <span class="tf-mono">{job}</span>{#if kept.length !== onJob.length}, {kept.length} shown{/if}.
           <button type="button" class="tf-linkish" onclick={() => setScope("all")}>Show all</button>
         </p>
       {/if}
@@ -382,6 +414,15 @@
           No pipeline matches.
           {#if scope === "job"}<button type="button" class="tf-linkish" onclick={() => setScope("all")}>Search all pipelines</button>{/if}
         </p>
+      {/if}
+      {#if outside !== null}
+        <!-- The filter hides the page you are on, so the rail would show no place at all: it stays, until you leave it. -->
+        <div class="tf-pl-pin">
+          <a class="tf-pi" href={pipelineHash(outside.entity_id)} aria-current="true" title={outside.name}>
+            <span class="tf-pi-nm" class:tf-bad={isFailing(outside)}>{outside.name}</span>
+            <span class="tf-pi-why">{#if scope === "job" && !jobsOwn.some((p) => p.entity_id === outside.entity_id)}Not in <TfKey value={job ?? ""} />{:else}Hidden by the filter{/if}</span>
+          </a>
+        </div>
       {/if}
       <div class="tf-pl-rows" {@attach win.list}>
         {#each win.slice(rows) as row (row.key)}
@@ -396,21 +437,18 @@
       </div>
     </div>
   </nav>
-  <section class="tf-bmain">
+  <TfScroller class="tf-bmain">
     {#if head === "build" && selected !== null && rest.length >= 2}
       <TfRun pipeline={selected} {rest} {job} runs={ports.runs} {crumbs} {sync} />
     {:else if head === "build"}
       {@render crumbs([{ name: "Builds", href: "#/builds" }, { name: "Run" }])}
       {@render bare()}
       {#if all !== null && (rest.length !== 1 || lost === rest[0])}
-        <div class="tf-empty"><p>No run at this address. Pick a pipeline on the left.</p></div>
+        <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href="#/builds" action="All pipelines" />
       {/if}
     {:else if selected !== null}
-      {@render crumbs([
-        { name: "Builds", href: "#/builds" },
-        ...(selected.group !== null ? [{ name: selected.group, href: "#/builds" }] : []),
-        { name: selected.name },
-      ])}
+      <!-- One crumb at both of a pipeline's addresses: `#/builds` draws this page already, so nothing above it links. -->
+      {@render crumbs([{ name: "Builds" }, ...(selected.group !== null ? [{ name: selected.group }] : []), { name: selected.name }])}
       <TfPipeline
         pipeline={selected}
         {rest}
@@ -421,12 +459,12 @@
         {sync}
       />
     {:else if all !== null && all.length > 0}
-      {@render crumbs([{ name: "Builds" }])}
+      {@render crumbs([{ name: "Builds" }, { name: "Pipeline" }])}
       {@render bare()}
-      <div class="tf-empty"><p>No pipeline at this address. Pick one on the left.</p></div>
+      <TfNothingHere message="knobas does not hold this pipeline. It may not have synced yet." href="#/builds" action="All pipelines" />
     {:else}
       {@render crumbs([{ name: "Builds" }])}
       {@render bare()}
     {/if}
-  </section>
+  </TfScroller>
 </div>

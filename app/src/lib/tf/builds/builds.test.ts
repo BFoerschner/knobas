@@ -6,6 +6,8 @@ import { expect, test } from "vitest";
 
 import type { PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import {
+  failedBuildLine,
+  testsWords,
   foldOpen,
   pinnedOf,
   reasonsLine,
@@ -96,7 +98,7 @@ test("the latest time reads as prototype-6 writes it: a time today, yesterday an
   const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
   expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
   expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
-  expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("2026-08-19");
+  expect(latestTime(at(new Date(2026, 7, 19, 9, 0)), now)).toBe("Wed 09:00");
   expect(latestTime(pipeline("B", []), now)).toBe("");
   // A queued run has not started: its time is when the source last touched it.
   const waiting = run({ started: null, finished: null, updated_at: new Date(2026, 7, 22, 14, 20).toISOString() });
@@ -205,4 +207,25 @@ test("with This job on, a bare #/builds selects the job's failing pipeline, else
   expect(pipelineOf(list, [], [list[1]!, list[2]!])?.name).toBe("MineBad");
   expect(pipelineOf(list, [], [list[1]!])?.name).toBe("Mine");
   expect(pipelineOf(list, [], [])?.name).toBe("Elsewhere");
+});
+
+test("the rail's time climbs the one ladder at every width (F-049): the clock today, yesterday, the weekday this past week, else the date", () => {
+  const now = new Date(2026, 7, 22, 15, 0);
+  const at = (d: Date) => pipeline("A", [run({ started: d.toISOString(), updated_at: d.toISOString() })]);
+  expect(latestTime(at(new Date(2026, 7, 22, 11, 45)), now)).toBe("11:45");
+  expect(latestTime(at(new Date(2026, 7, 21, 16, 20)), now)).toBe("yesterday 16:20");
+  expect(latestTime(at(new Date(2026, 7, 16, 9, 0)), now)).toBe("Sun 09:00");
+  expect(latestTime(at(new Date(2026, 7, 15, 9, 0)), now)).toBe("15 Aug");
+  expect(latestTime(pipeline("B", []), now)).toBe("");
+});
+
+test("a run's tests read one way, and only TeamCity's own failed-build line is read as counts (F-010)", () => {
+  expect(testsWords({ failed: 1, passed: 41, ignored: 0 })).toBe("1 failed, 41 passed");
+  expect(testsWords({ failed: 0, passed: 41, ignored: 2 })).toBe("41 passed, 2 ignored");
+  expect(testsWords({ failed: 0, passed: 0, ignored: 0 })).toBe("0 passed");
+  expect(failedBuildLine("Tests failed: 3 (3 new), passed: 212")).toBe("3 failed, 212 passed");
+  expect(failedBuildLine("Tests failed: 3")).toBe("3 failed");
+  expect(failedBuildLine("Tests failed: 1, passed: 9, ignored: 2")).toBe("1 failed, 9 passed, 2 ignored");
+  expect(failedBuildLine("Tests failed: 1, passed: 9, muted: 2"), "a shape it doesn't know stays the source's").toBe("Tests failed: 1, passed: 9, muted: 2");
+  expect(failedBuildLine("Compilation error")).toBe("Compilation error");
 });

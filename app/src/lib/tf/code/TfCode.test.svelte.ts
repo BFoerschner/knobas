@@ -153,7 +153,7 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   await draw([]);
 
   expect(text(target.querySelector("h1"))).toBe("Code");
-  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, what asks for you first.");
+  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, yours first.");
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   expect(tabs.map(text)).toEqual(["Repositories 3", "Pull requests 4"]);
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
@@ -162,14 +162,14 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
   expect(rows.map(cells)).toEqual([
     // A repository holding a merged pull request of yours is yours too (#966).
     ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
-    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in… ▾"],
+    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "Thu 12:00", "Open in…"],
     // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
     ["tidewater/fx-rates", "Platform", "Go", "0", "not on this machine", "today 11:00", "Clone"],
   ]);
   expect(rows[1]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
   expect([...target.querySelectorAll("thead th")].map(text).slice(0, 3)).toEqual(["Repository", "Team", "Language"]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter 3 repositories by name, team or language",
+    "Filter repositories",
   );
 });
 
@@ -203,13 +203,13 @@ test("Pull requests are grouped in the attention read's order, then merged or cl
   ]);
   const rows = [...target.querySelectorAll("tbody tr")].map(cells);
   expect(rows).toEqual([
-    ["#144", `Add payout CSV export${PAYOUT}, tom`, "open", "", "today 10:20"],
-    ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "open", "PAY-231", "today 10:20"],
-    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "merged", "", "today 10:20"],
-    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "open", "", "2026-08-10"],
+    ["#144", `Add payout CSV export${PAYOUT}, tom`, "Open", "", "today 10:20"],
+    ["#142", `SEPA retry with exponential backoff${PAYOUT}, you`, "Open", "PAY-231", "today 10:20"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, you", "Merged", "", "today 10:20"],
+    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "Open", "", "10 Aug"],
   ]);
   expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
-    "Filter pull requests by title, repo, author or number",
+    "Filter PRs",
   );
   const attention = reads.find((filter) => filter.order === "attention");
   expect(attention?.kinds).toEqual(["pr"]);
@@ -221,7 +221,7 @@ test("a pull request whose state word has no tone draws its word in the neutral 
     filter.kinds.includes("repo") ? page(REPOS) : filter.kinds.includes("branch") ? page([]) : page([draft]);
   await draw(["prs"], null, ports({ listEntities }));
 
-  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "draft");
+  const chip = [...target.querySelectorAll("tbody .tf-chip")].find((el) => text(el) === "Draft");
   expect(chip?.getAttribute("class")?.trim()).toBe("tf-chip");
 });
 
@@ -245,8 +245,23 @@ test("Waiting on me keeps the review asked of you; This job with nothing held of
   expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#139"]);
 });
 
-test("New pull request opens the compare page for the job's branch; with no job it cannot", async () => {
+test("the primary opens the job's open pull request, not a compare page that only says one is open (F-243)", async () => {
   await draw([]);
+  const primary = target.querySelector<HTMLAnchorElement>(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("Open PR #142");
+  expect(primary.getAttribute("href")).toMatch(/^#\/pr\//);
+});
+
+test("New pull request opens the compare page for the job's branch; with no job there is no off button, as a repository's page offers it (F-252)", async () => {
+  const base = ports();
+  await draw([], "PAY-231", {
+    ...base,
+    // The job's branch stands, and no pull request of the job's is open.
+    listEntities: async (filter, limit, offset) => {
+      const page = await base.listEntities(filter, limit, offset);
+      return filter.kinds?.includes("pr") ? { ...page, rows: page.rows.map((row) => ({ ...row, state: { ...row.state!, text: "Merged" } })) } : page;
+    },
+  });
   const link = [...target.querySelectorAll("a")].find((a) => text(a) === "New pull request");
   expect(link?.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2FPAY-231-sepa-retry",
@@ -255,8 +270,7 @@ test("New pull request opens the compare page for the job's branch; with no job 
   view = null;
 
   await draw([], null);
-  const button = [...target.querySelectorAll("button")].find((b) => text(b) === "New pull request");
-  expect(button?.getAttribute("aria-disabled")).toBe("true");
+  expect([...target.querySelectorAll(".tf-fhead a, .tf-fhead button")].map(text)).not.toContain("New pull request");
   expect(target.querySelector(".tf-chip-job")).toBeNull();
 });
 

@@ -56,6 +56,7 @@ describe("applying by hand", () => {
 
   test("the toast counts every item the set holds, patterns' matches included", () => {
     expect(applyToast(SET, "PAY-231")).toBe("Payout stack applied to PAY-231. 4 items show on the job.");
+    expect(applyToast({ ...SET, members: SET.members.slice(0, 1), patterns: [] }, "PAY-231")).toBe("Payout stack applied to PAY-231. 1 item shows on the job.");
   });
 });
 

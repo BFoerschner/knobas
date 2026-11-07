@@ -28,12 +28,11 @@ import { writeQueuePanel } from "../../shell/write-queue.svelte";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes } from "../queued.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
-import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
 import { createKindRegistry } from "../../shell/kind-registry.svelte";
 import type { FrameKinds } from "./job";
-import { reachTally } from "./sections";
-import { chosenJob } from "./chosen.svelte";
+import { cardSections, readCardReads } from "./card-sections";
+import { chosenJob, pageAsk } from "./chosen.svelte";
 import TfJob from "./TfJob.svelte";
 import { sourceFacts } from "./source-facts.fixture";
 
@@ -241,7 +240,7 @@ test("a key opens its ticket and promotes it once; the card shows the key and th
   ]);
   expect(card.querySelector("dl.tf-facts .tf-av.tf-me")).toBeNull();
   expect(target.querySelector(".tf-tkread .tf-tkdesc")?.textContent).toContain("Payouts to two SEPA banks fail with a 409 on retry.");
-  expect(card.querySelector(".tf-chip")?.textContent, "the status is the card's chip").toBe("In Progress");
+  expect(card.querySelector(".tf-chip")?.textContent, "the status is the card's chip").toBe("In progress");
   expect(card.querySelector("select"), "no status select on the card (spec #2396)").toBeNull();
 });
 
@@ -303,7 +302,7 @@ test("a key nothing answers to says so and offers the way back", async () => {
   open("NOPE-1");
   await settle();
   expect(calls.promote).toEqual([]);
-  expect(text()).toContain("No ticket NOPE-1 in the mirror.");
+  expect(text()).toContain("knobas does not hold this ticket.");
   expect(target.querySelector(".tf-btn")?.getAttribute("href")).toBe("#/tickets");
   expect(target.querySelector(".tf-btn kbd")).toBeNull();
 });
@@ -313,7 +312,7 @@ test("a read that fails for another reason than a miss says it failed, not that 
     ports: ports({ getEntity: () => Promise.reject({ code: "not_ready", message: "the database is starting", source_id: null }) }),
   });
   await settle();
-  expect(text()).toContain("Could not open PAY-231: the database is starting");
+  expect(text()).toContain("This ticket could not be opened: the database is starting");
   expect(text()).not.toContain("in the mirror");
   expect(calls.promote).toEqual([]);
 });
@@ -323,7 +322,7 @@ test("the pinned card's foot offers Start timer, and Stop and log while the time
   await settle();
   const start = [...target.querySelectorAll("button")].find((button) => button.textContent === "Start timer")!;
   start.click();
-  expect(calls.start).toEqual([[ID, "Retry failed SEPA payouts"]]);
+  expect(calls.start).toEqual([[ID, "PAY-231"]]);
   unmount(job!);
 
   const current: RunningTimer = {
@@ -335,7 +334,7 @@ test("the pinned card's foot offers Start timer, and Stop and log while the time
   await settle();
   expect(text(), "the running time is the top bar chip's alone").not.toContain("12:04");
   expect(text()).not.toContain("since 13:58");
-  const stop = [...target.querySelectorAll("button")].find((button) => button.textContent === "Stop and log")!;
+  const stop = [...target.querySelectorAll("button")].find((button) => button.textContent === "Stop and log…")!;
   stop.click();
   expect(calls.stop).toBe(1);
 });
@@ -449,6 +448,32 @@ function steps(): [string | undefined, string | undefined][] {
   return [...target.querySelectorAll(".tf-step")].map((row) => [row.querySelector("strong")?.textContent ?? undefined, row.querySelector(".tf-state")?.textContent ?? undefined]);
 }
 
+test("one person reads one way on the page: the card and Conversation name the reader alike (F-107)", async () => {
+  const { follower } = echoFollower();
+  open("PAY-231", {
+    follower,
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve({ ...TODO_MINE(), author_name: "Mara Lindqvist", reporter: "lena", reporter_name: "Lena Hoffmann" }) : Promise.reject({ code: "not_found" })),
+      submitWrite: () => Promise.resolve({ id: 72 } as never),
+    }),
+  });
+  await settle();
+  const card = target.querySelector("[aria-label='Job card']")!;
+  const row = (term: string) => [...card.querySelectorAll("dl.tf-facts > dt")].find((each) => each.textContent === term)!.nextElementSibling!;
+  expect(squash(row("Assignee"))).toBe("MLMara Lindqvist (you)");
+  expect(squash(row("Reporter"))).toBe("LHLena Hoffmann");
+
+  // Before they have commented, the thread knows only their account; the composer's echo still reads ML.
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  box.value = "Looking at the jitter now";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+  expect(squash(target.querySelector(".tf-convo .tf-msg.tf-queued .tf-av")!)).toBe("ML");
+});
+
 test("a To Do ticket of mine shows Start work, proposed in the suggested repository, above the description", async () => {
   const asked: (string | null)[] = [];
   let stored: StartWorkStep[] = [];
@@ -478,11 +503,11 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   const picker = calls.list.filter((filter) => filter.reach === null && filter.kinds.join() === "repo");
   expect(picker.map((filter) => filter.role)).toEqual(["code-host"]);
   expect(steps()).toEqual([
-    ["Create branch", "ready"],
-    ["Open pull request", "ready"],
-    ["Link PR to ticket", "ready"],
-    ["Move ticket", "ready"],
-    ["Start timer", "ready"],
+    ["Create branch", "Ready"],
+    ["Open pull request", "Ready"],
+    ["Link PR to ticket", "Ready"],
+    ["Move ticket", "Ready"],
+    ["Start timer", "Ready"],
   ]);
   const select = target.querySelector<HTMLSelectElement>(".tf-step select[aria-label='Repository']")!;
   expect([...select.options].map((option) => option.textContent)).toEqual(["tidewater/payout-service (suggested)", "tidewater/ledger"]);
@@ -490,7 +515,7 @@ test("a To Do ticket of mine shows Start work, proposed in the suggested reposit
   // A step nothing has sent yet is the reader's to edit (#1707).
   expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")?.disabled).toBe(false);
   expect(select.disabled).toBe(false);
-  expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To Do to In Progress");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To do → In progress");
   const stepper = target.querySelector(".tf-tkread .tf-steps")!;
   expect(stepper.compareDocumentPosition(target.querySelector(".tf-tkdesc")!) & Node.DOCUMENT_POSITION_FOLLOWING, "the steps sit above the description").toBeTruthy();
 });
@@ -526,7 +551,7 @@ test("each step's state follows the flow as its writes move through the queue, a
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
   await settle();
   expect(acted).toEqual(["run"]);
-  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "queued", "ready", "ready"]);
+  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["Done", "Queued", "Ready", "Ready"]);
   const queued = target.querySelector(".tf-step[data-step='pr']")!;
   // A queued step's write is still open: it is amended in the write queue,
   // not here (#1707). A step that landed is not edited either.
@@ -541,7 +566,7 @@ test("each step's state follows the flow as its writes move through the queue, a
   [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Skip")!.click();
   await settle();
   expect(acted).toEqual(["run", "retry 2", "skip 2"]);
-  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "skipped", "done", "done"]);
+  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["Done", "Skipped", "Done", "Done"]);
   // A step that already landed offers neither.
   const done = target.querySelector(".tf-step[data-step='branch']")!;
   expect([...done.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
@@ -568,7 +593,7 @@ test("a failed step keeps Retry, which runs it again (#1998)", async () => {
   });
   await settle();
   const failed = target.querySelector(".tf-step[data-step='pr']")!;
-  expect(failed.querySelector(".tf-state")?.textContent).toBe("failed");
+  expect(failed.querySelector(".tf-state")?.textContent).toBe("Failed");
   expect([...failed.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry", "Skip"]);
   [...failed.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
   await settle();
@@ -598,7 +623,7 @@ test("Check again on a queued step whose write was discarded redraws it failed, 
   const row = target.querySelector(".tf-step[data-step='pr']")!;
   [...row.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Check again")!.click();
   await settle();
-  expect(row.querySelector(".tf-state")?.textContent).toBe("failed");
+  expect(row.querySelector(".tf-state")?.textContent).toBe("Failed");
   expect([...row.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Retry", "Skip"]);
   expect(row.querySelector(".tf-swdetail")?.textContent).toBe("the write was discarded before it went");
 });
@@ -679,7 +704,7 @@ test("Start work's move the source's credential cannot make is drawn saying why,
   expect(ran).toEqual(["skip 4"]);
   // Skipped, the row still says why: the reader did not choose the skip.
   const skipped = target.querySelector(".tf-step[data-step='status']")!;
-  expect(skipped.querySelector(".tf-state")!.textContent).toBe("skipped");
+  expect(skipped.querySelector(".tf-state")!.textContent).toBe("Skipped");
   expect(skipped.textContent).toContain(reason);
 });
 
@@ -708,7 +733,8 @@ async function runWith(after: StartWorkStep["outcome"][]) {
 test("Run all steps says how many writes it queued, with Show queue (#1426)", async () => {
   const items = await runWith(["queued", "queued", "queued", "pending"]);
   const started = items.find((toast) => toast.text.startsWith("Started work on"))!;
-  expect(started.text).toBe("Started work on PAY-231. 3 writes queued.");
+  // One press, one line: the timer it started is the toast's last words (F-145).
+  expect(started.text).toBe("Started work on PAY-231. 3 writes queued. Timer running.");
   expect(started.action?.label).toBe("Show queue");
   started.action!.run();
   expect(writeQueuePanel.open).toBe(true);
@@ -716,13 +742,13 @@ test("Run all steps says how many writes it queued, with Show queue (#1426)", as
 
 test("Run all steps with one queued step says '1 write queued.', with none no count (#1426)", async () => {
   expect((await runWith(["succeeded", "queued", "pending", "pending"])).map((toast) => toast.text)).toContain(
-    "Started work on PAY-231. 1 write queued.",
+    "Started work on PAY-231. 1 write queued. Timer running.",
   );
   unmount(job!);
   job = null;
   const items = await runWith(["succeeded", "succeeded", "skipped", "succeeded"]);
   const started = items.find((toast) => toast.text.startsWith("Started work on"))!;
-  expect(started.text).toBe("Started work on PAY-231.");
+  expect(started.text).toBe("Started work on PAY-231. Timer running.");
   expect(started.action).toBeUndefined();
 });
 
@@ -738,7 +764,7 @@ test("Start work's footer is the canonical one: its note first, the primary last
   const footer = target.querySelector(".tf-steps > footer")!;
   expect([...footer.children].map((each) => [squash(each), each.className])).toEqual([
     ["A failed step can be retried, skipped or amended.", "tf-dim tf-small tf-swhint"],
-    ["Run all steps", "tf-btn tf-primary"],
+    ["Run all steps", "tf-btn tf-primary tf-lg"],
   ]);
 });
 
@@ -760,6 +786,220 @@ test("the stepper leaves once the ticket no longer offers Start work: its move l
   await settle();
   expect(target.querySelector(".tf-steps")).toBeNull();
   expect(target.querySelector(".tf-tkdesc"), "the description stays").not.toBeNull();
+});
+
+/** PAY-231 with its stepper up and nothing run; the flow's run answers `after`. */
+function stepping(after: StartWorkStep["outcome"][], timer?: { current: RunningTimer | null; elapsed: string | null }, layers?: Layers) {
+  open("PAY-231", {
+    ...(timer ? { timer } : {}),
+    ...(layers ? { layers } : {}),
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      startWork: {
+        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        run: () => Promise.resolve(flow(after)),
+        retry: () => Promise.resolve([]),
+        skip: () => Promise.resolve(flow(after)),
+        amend: () => Promise.resolve([]),
+      },
+    }),
+  });
+}
+const named = (word: string) => [...target.querySelectorAll<HTMLElement>(".tf-steps footer button, .tf-go button")].find((b) => b.textContent === word);
+
+test("once the steps ran, the primary says what they wait on and the foot is back with the timer (F-125)", async () => {
+  stepping(["succeeded", "queued", "queued", "queued"], { current: { target: { kind: "entity", entity_id: ID }, started_at: new Date().toISOString() } as RunningTimer, elapsed: "0:00:01" });
+  await settle();
+  expect(target.querySelector(".tf-go"), "the foot steps aside while nothing has run").toBeNull();
+  named("Run all steps")!.click();
+  await settle();
+  const primary = named("Waiting on 3 writes")!;
+  expect(primary.getAttribute("aria-disabled")).toBe("true");
+  expect(primary.classList.contains("tf-lg"), "large only while the steps are unrun").toBe(false);
+  expect(named("Show queue")).toBeDefined();
+  expect(named("Stop and log…"), "the foot stops the timer again").toBeDefined();
+});
+
+test("Start work chooses nothing until its steps run, and Cancel leaves everything as it was (F-130)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  stepping(["queued", "queued", "queued", "queued"]);
+  await settle();
+  const start = named("Start work")!;
+  expect(target.querySelector(".tf-steps"), "nothing shows the steps yet").toBeNull();
+  start.click();
+  await settle();
+  expect(target.querySelector(".tf-steps"), "the press shows the steps").not.toBeNull();
+  expect(chosenJob.id, "a look chooses nothing").toBe("jira:PAY-99");
+  expect(target.querySelector("article")!.classList.contains("tf-sheetcard")).toBe(true);
+
+  named("Cancel")!.click();
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  expect(chosenJob.id).toBe("jira:PAY-99");
+  expect(document.activeElement, "focus goes back to Start work").toBe(named("Start work"));
+
+  named("Start work")!.click();
+  await settle();
+  toasts.items.length = 0;
+  named("Run all steps")!.click();
+  await settle();
+  expect(chosenJob.id, "the run is what chooses").toBe(ID);
+  expect(toasts.items.map((toast) => toast.text)).toContain("Started work on PAY-231, in place of PAY-99. 4 writes queued. Timer running.");
+  expect(target.querySelector(".tf-steps footer")!.textContent, "nothing to cancel once it ran").not.toContain("Cancel");
+});
+
+/** PAY-231's stepper, with what reached the backend; its first step can be skipped before the run. */
+function skipping(refused: string | null = null) {
+  const sent: string[] = [];
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      ...(refused === null ? {} : { refusedWrites: () => Promise.resolve([{ entity: ID, op: "transition", reason: refused }]) }),
+      startWork: {
+        flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+        run: () => {
+          sent.push("run");
+          return Promise.resolve(flow(["queued", "queued", "queued", "queued"]));
+        },
+        retry: () => Promise.resolve([]),
+        skip: (id) => {
+          sent.push(`skip ${id}`);
+          return Promise.resolve(flow(["skipped", "queued", "queued", "queued"]));
+        },
+        amend: () => Promise.resolve([]),
+      },
+    }),
+  });
+  return sent;
+}
+const inStep = (step: string, word: string) => [...target.querySelectorAll<HTMLButtonElement>(`.tf-step[data-step='${step}'] button`)].find((b) => b.textContent === word);
+const stateOfStep = (step: string) => target.querySelector(`.tf-step[data-step='${step}'] .tf-state`)!.textContent;
+
+test("Skip before the first run only marks the step, Include takes it back, and nothing is sent or chosen (F-137)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const sent = skipping();
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  toasts.items.length = 0;
+
+  const press = inStep("branch", "Skip")!;
+  press.focus();
+  press.click();
+  await settle();
+  expect(sent, "a mark sends nothing").toEqual([]);
+  expect(stateOfStep("branch")).toBe("Skipped");
+  expect(chosenJob.id, "a mark chooses nothing").toBe("jira:PAY-99");
+  expect(toasts.items).toEqual([]);
+  expect(named("Cancel"), "nothing has run, so it can still be left").toBeDefined();
+  expect(document.activeElement, "the same button, so a keyboard's place stays").toBe(press);
+  expect(press.textContent).toBe("Include");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")!.disabled, "a step that won't run takes no edits").toBe(true);
+
+  press.click();
+  await settle();
+  expect(stateOfStep("branch")).toBe("Ready");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")!.disabled).toBe(false);
+  expect(sent).toEqual([]);
+});
+
+test("Run all steps sends the marked step through skip, once, and that is what chooses (F-137)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const sent = skipping();
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  inStep("branch", "Skip")!.click();
+  await settle();
+  named("Run all steps")!.click();
+  await settle();
+  expect(sent).toEqual(["skip 1"]);
+  expect(chosenJob.id).toBe(ID);
+  expect(stateOfStep("branch")).toBe("Skipped");
+});
+
+test("with a refused move, the first step's Skip is off and says why, since one step can sit out a run (F-137)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const sent = skipping("This Jira user cannot move tickets in PAY");
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  const skip = inStep("branch", "Skip")!;
+  expect(skip.getAttribute("aria-disabled")).toBe("true");
+  expect(target.querySelector(".tf-step[data-step='branch']")!.textContent).toContain("Only one step can sit out a run");
+  skip.click();
+  await settle();
+  expect(stateOfStep("branch"), "the press does nothing").toBe("Ready");
+  named("Run all steps")!.click();
+  await settle();
+  expect(sent).toEqual(["skip 4"]);
+});
+
+test("the timer step's Skip can be taken back too, and the run then starts it", async () => {
+  chosenJob.choose("jira:PAY-99");
+  stepping(["queued", "queued", "queued", "queued"]);
+  await settle();
+  named("Start work")!.click();
+  await settle();
+  inStep("timer", "Skip")!.click();
+  await settle();
+  expect(stateOfStep("timer")).toBe("Skipped");
+  inStep("timer", "Include")!.click();
+  await settle();
+  expect(stateOfStep("timer")).toBe("Ready");
+  named("Run all steps")!.click();
+  await settle();
+  expect(calls.start.map(([id]) => id)).toEqual([ID]);
+});
+
+test("the steps opened on this page are a panel for Esc until something runs (F-139)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  const layers = createLayers();
+  stepping(["queued", "queued", "queued", "queued"], undefined, layers);
+  await settle();
+  expect(layers.open).toHaveLength(0);
+  named("Start work")!.click();
+  await settle();
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["panel"]);
+  layers.open[0]!.close();
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  expect(layers.open).toHaveLength(0);
+  expect(document.activeElement, "as Cancel does").toBe(named("Start work"));
+
+  named("Start work")!.click();
+  await settle();
+  named("Run all steps")!.click();
+  await settle();
+  expect(layers.open, "once something ran, Esc leaves the page").toHaveLength(0);
+});
+
+test("the Tickets preview's Start work opens the ticket on its steps, once (F-130)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  pageAsk.ask(ID, "steps");
+  stepping(["queued", "queued", "queued", "queued"]);
+  await settle();
+  expect(target.querySelector(".tf-steps")).not.toBeNull();
+  expect(pageAsk.current).toBeNull();
+  expect(chosenJob.id).toBe("jira:PAY-99");
+});
+
+test("a press that takes the choice from another ticket says so, with the way back (F-130)", async () => {
+  chosenJob.choose("jira:PAY-99");
+  open("PAY-231", {
+    ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "In Progress", author: "mara" })) : Promise.reject({ code: "not_found" })) }),
+  });
+  await settle();
+  toasts.items.length = 0;
+  named("Resume work")!.click();
+  await settle();
+  expect(chosenJob.id).toBe(ID);
+  const said = toasts.items.find((toast) => toast.text === "On PAY-231 now.")!;
+  expect(said.action?.label).toBe("Back to PAY-99");
+  said.action!.run();
+  expect(chosenJob.id).toBe("jira:PAY-99");
 });
 
 test("a To Do ticket of somebody else's, or mine in progress, shows no Start work", async () => {
@@ -797,6 +1037,15 @@ const RUN = { ...build("forge:run#77", "ci.yml #77", "err", "failure", "forge"),
 const MOCK_REPO = { ...code("mock:demo-repo", "repo", "demo-repo", "2026-10-15T13:00:00Z", null, null), source_id: "mock" };
 const MOCK_BUILD = build("mock:build#1", "Mock_Build #1", "err", "failed", "mock");
 
+/** The Tickets preview's read of the same rows (F-109): no sub-tasks and no checkouts in these tests. */
+const previewPorts = (p: JobPorts) => ({
+  listEntities: p.listEntities,
+  jobReach: p.jobReach,
+  getAsset: p.getAsset,
+  ticketBoard: () => Promise.reject(new Error("no board")),
+  entityCheckout: () => Promise.reject(new Error("no checkout")),
+});
+
 test("the job's Builds read asks for the CI role, and a run of a kind that is not build counts under Builds", async () => {
   const p = ports({ others: [B_OK, RUN], jobReach: () => Promise.resolve([own(B_OK.entity_id, "build"), own(RUN.entity_id, "workflow_run")]) });
   const registry = claimsRegistry();
@@ -806,10 +1055,9 @@ test("the job's Builds read asks for the CI role, and a run of a kind that is no
   const runs = calls.list.find((filter) => filter.order === "latest_per_parent")!;
   expect(runs).toMatchObject({ role: "ci", kinds: [] });
 
-  const tally = await reachTally(p, ID);
-  expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1, section: "builds" });
   // Counted under Builds because the Builds read answered it, not because the shell knows the run kind.
-  expect(aroundLines(tally).find((line) => line.section === "Builds")?.count).toBe("2 items");
+  const table = cardSections(await readCardReads(previewPorts(p), ID));
+  expect(table.rows.find((row) => row.name === "Builds")).toMatchObject({ count: 2, state: { tone: "err", text: "1 failing" } });
 });
 
 test("the job's section reads keep none by source: each read asked for its role (#1295-#1298)", async () => {
@@ -817,10 +1065,10 @@ test("the job's section reads keep none by source: each read asked for its role 
   open("PAY-231", { ports: p, registry: claimsRegistry() });
   await settle();
 
-  const tally = await reachTally(p, ID);
-  const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
+  const reads = await readCardReads(previewPorts(p), ID);
+  const count = (rows: readonly EntityRow[] | null, kind: string) => (rows ?? []).filter((row) => row.kind === kind).length;
   // The counts are the sections' rows, as read.
-  expect([count("repo"), count("build")]).toEqual([2, 2]);
+  expect([count(reads.code, "repo"), count(reads.builds, "build")]).toEqual([2, 2]);
   expect(calls.list.every((filter) => typeof filter.role === "string")).toBe(true);
 });
 
@@ -832,7 +1080,7 @@ test("with no CI claim known, Builds still asks for the CI role and names no kin
   expect(calls.list.find((filter) => filter.order === "latest_per_parent")).toMatchObject({ role: "ci", kinds: [] });
 
   calls.list.length = 0;
-  await reachTally(p, ID);
+  await readCardReads(previewPorts(p), ID);
   const tallied = calls.list.find((filter) => filter.order === "latest_per_parent");
   expect(tallied).toMatchObject({ role: "ci", kinds: [], reach: ID });
 });
@@ -859,10 +1107,10 @@ test("a comment's echo says queued, then sent, and goes on the refresh event's r
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
   await settle();
   const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
-  expect(echoed()).toEqual(["queued"]);
+  expect(echoed()).toEqual(["Queued"]);
 
   sent(72);
-  expect(echoed()).toEqual(["sent"]);
+  expect(echoed()).toEqual(["Sent"]);
 
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];
   await sync.refreshed(ID, 72);
@@ -964,7 +1212,7 @@ test("a failed refresh on the job says why at the top of the reading column and 
   calls.read.length = 0;
   pressRefreshKey();
   await settle();
-  expect(jobBanners()).toEqual(["Couldn't refresh: connection refused"]);
+  expect(jobBanners()).toEqual(["Couldn't refresh: connection refused. Try again"]);
   expect(target.querySelector(".tf-tkread h1")?.textContent).toBe("Retry failed SEPA payouts");
   expect(calls.read).toEqual([]);
   expect(refreshButton()).toBeNull();
@@ -1032,7 +1280,7 @@ test("a comment's echo goes on a Refresh's read of the thread (#2103)", async ()
   [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
   await settle();
   const echoed = () => [...target.querySelectorAll(".tf-convo .tf-msg.tf-queued .tf-chip")].map((chip) => squash(chip));
-  expect(echoed()).toEqual(["queued"]);
+  expect(echoed()).toEqual(["Queued"]);
 
   status = "In Review";
   said = [{ author: "Mara Lindqvist", at: "2026-10-15T13:00:00Z", body: "Looking at the jitter now", mine: true, mentions_me: false, markup: "text" }];

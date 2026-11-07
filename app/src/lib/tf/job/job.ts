@@ -259,7 +259,7 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind"> & { title?: 
     case "asset":
       return `#/asset/${id}`;
     case "monitor":
-      return "#/monitors";
+      return `#/monitors/at/${id}`;
     case "jira_view":
       return `#/tickets/${jiraViewSlug(row.entity_id)}`;
     // A pipeline under the shell's word (#2422, the launcher's kind) or the
@@ -528,7 +528,7 @@ export function footAction(ticket: {
   timerOnIt: boolean;
 }): { label: string; does: FootDoes } | null {
   if (ticket.pinned) {
-    return ticket.timerOnIt ? { label: "Stop and log", does: "stop" } : { label: "Start timer", does: "start-timer" };
+    return ticket.timerOnIt ? { label: "Stop and log…", does: "stop" } : { label: "Start timer", does: "start-timer" };
   }
   if ((ticket.status?.toLowerCase() ?? "") === "done") return null;
   if (offersStartWork(ticket.status, ticket.mine)) return { label: "Start work", does: "start-work" };

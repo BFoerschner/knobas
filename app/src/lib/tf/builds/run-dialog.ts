@@ -147,8 +147,8 @@ export function overridesOf(fields: readonly RunField[], values: Record<string, 
 }
 
 /** The footer's line: *On feature/x, with test.filter=sepa::retry*, or *On main, defaults*. */
-export function summaryOf(branch: string, overrides: readonly BuildParameter[]): string {
-  if (overrides.length === 0) return `On ${branch}, defaults`;
+export function summaryOf(branch: string, overrides: readonly BuildParameter[], start = "defaults"): string {
+  if (overrides.length === 0) return `On ${branch}, ${start}`;
   return `On ${branch}, with ${overrides.map((p) => `${p.name}=${p.value === "" ? "(empty)" : p.value}`).join(", ")}`;
 }
 

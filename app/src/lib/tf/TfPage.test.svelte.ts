@@ -180,7 +180,7 @@ test("an address with no page hides every kept page", () => {
   go("#/nowhere");
   expect(shownPages()).toEqual([]);
   expect(held()?.sort()).toEqual(["builds", "inbox"]);
-  expect(target.textContent).toContain("Nothing lives at");
+  expect(target.textContent).toContain("knobas has no such page.");
 });
 
 test("when what every page drew goes stale, the hidden pages are dropped and each mounts afresh on its return; the shown one stays", () => {

@@ -21,6 +21,7 @@
     small = false,
     ghost = false,
     button = true,
+    noun,
   }: {
     detail: RefreshSubject;
     refresh: DetailRefresh;
@@ -42,6 +43,8 @@
      * page, whose Refresh is the keybind's alone (#2401).
      */
     button?: boolean;
+    /** The one thing *Refresh* reads, where the view's *Sync now* stands beside it. */
+    noun?: string | undefined;
   } = $props();
   /** The button's classes: the Controls button at its size and look, and `tf-refresh`, which tests find it by. */
   const classes = $derived(["tf-btn", small && "tf-sm", ghost && "tf-ghost", "tf-refresh"].filter(Boolean).join(" "));
@@ -59,8 +62,8 @@
   });
 
   async function syncNow(run: NonNullable<typeof sync>) {
-    await run.start();
-    if (run.failed !== null) push({ text: `Could not sync: ${run.failed}`, tone: "err" });
+    await run.start(detail.source.display_name);
+    if (run.failed !== null) push({ text: `Could not sync ${detail.source.display_name}: ${run.failed}`, tone: "err" });
   }
 
   /** *Refreshing…* or *Syncing…*: the button is disabled, and ⌘R presses nothing. */
@@ -90,7 +93,7 @@
     class={classes}
     disabled={busy}
     title="Read this item from {detail.source.display_name} again"
-    onclick={press}>{refresh.reading ? "Refreshing…" : "Refresh"}</button
+    onclick={press}>{refresh.reading ? "Refreshing…" : noun === undefined ? "Refresh" : `Refresh ${noun}`}</button
   >
 {:else if sync !== null}
   <button

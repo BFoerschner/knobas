@@ -288,11 +288,12 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe(
     "Payments, Rust, last push today 12:30. Cloned at /Users/mara/src/payout-service, main, 1 ahead, 1 changed.",
   );
-  expect([...target.querySelectorAll(".tf-crumbs a.tf-crumb, .tf-crumbs strong")].map(text)).toEqual([
+  expect([...target.querySelectorAll(".tf-crumbs > a:not(.tf-esc), .tf-crumbs strong")].map(text)).toEqual([
     "Code",
-    "Repositories",
     "tidewater/payout-service",
   ]);
+  // A repository's name is a code value in the crumb too.
+  expect(target.querySelector(".tf-crumbs strong .tf-mono")).not.toBeNull();
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
   // Two groups (#2257): the repository at a ref, then work in flight, split by a rule.
   expect(tabs.map(text)).toEqual(["Files", "Commits", "Branches 2", "Compare", "Pull requests 1", "Local changes 1"]);
@@ -304,7 +305,7 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect([...select.options].map((o) => o.textContent)).toEqual(["main", "feature/PAY-231-sepa-retry"]);
   expect(select.value).toBe("main");
   // #2238's order, as the mockup draws it: the primary, the others, Open in, Refresh last.
-  const acts = [...target.querySelector(".tf-fhead > .tf-acts")!.children];
+  const acts = [...target.querySelector(".tf-fhead > .tf-acts")!.children].flatMap((el) => (el.matches(".tf-repohold") ? [...el.children] : [el]));
   expect(acts[0]!.matches("a.tf-btn.tf-primary")).toBe(true);
   expect(text(acts[0]!)).toBe("New pull request");
   expect(acts[1]!.querySelector("select")).toBe(select);
@@ -314,6 +315,45 @@ test("the header names the repository, its last push and its checkout; the tabs 
   expect(text(openIn)).toMatch(/^Open in/);
   expect(openIn.matches(".tf-btn.tf-ghost:not(.tf-sm):not(.tf-primary)")).toBe(true);
   expect(text(acts.at(-1)!)).toBe("Refresh");
+});
+
+// F-243: the header's primary never lands on a form saying one is already open.
+const WITH_PR = () => section("overview", [{ type: "entities", title: null, rows: [vrow("gitea:tidewater/payout-service#142", "SEPA retry")] }]);
+
+test("New pull request starts on a branch with nothing open, past one that has (F-243)", async () => {
+  const base = ports();
+  const other = "gitea:tidewater/payout-service@refs/heads/spike/y";
+  await draw(
+    [REPO],
+    ports({
+      entityView: async (id, sectionId) => {
+        if (id === REPO && sectionId === "branches") return section("branches", [{ type: "entities", title: null, rows: [vrow(MAIN, "main", "default"), vrow(FEATURE, "feature/PAY-231-sepa-retry"), vrow(other, "spike/y")] }]);
+        if (id === FEATURE && sectionId === null) return WITH_PR();
+        if (id === other && sectionId === null) return { ...section("overview", []), actions: [{ write_op: "create_pull_request", disabled: null } as ViewAction] };
+        return base.entityView(id, sectionId);
+      },
+    }),
+  );
+  const primary = target.querySelector(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("New pull request");
+  expect(primary.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/compare/${encodeURIComponent("spike/y")}`);
+});
+
+test("a branch picked with a pull request open from it makes the primary Open PR #N, as Code's does (F-243)", async () => {
+  const base = ports();
+  await draw(
+    [REPO],
+    ports({
+      entityView: async (id, sectionId) => (id === FEATURE && sectionId === null ? WITH_PR() : base.entityView(id, sectionId)),
+    }),
+  );
+  const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
+  select.value = "feature/PAY-231-sepa-retry";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  const primary = target.querySelector(".tf-fhead .tf-primary")!;
+  expect(text(primary)).toBe("Open PR #142");
+  expect(primary.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
 });
 
 test("the compare page lights its own tab, Compare, and Pull requests stays dark (#2257)", async () => {
@@ -417,7 +457,7 @@ test("Commits lists sha, message and who and when; the filter narrows; a mirrore
   await draw([REPO, "commits"]);
   const rows = [...target.querySelectorAll(".tf-cbody tbody tr")];
   // A mirrored commit ends in its *Open in…* (#2274); one the mirror lacks has no sha to open.
-  expect(rows.map(text)).toEqual(["c90d11a2b3PAY-231: jitter in backoffmara · 3 hours agoOpen in… ▾", "a41f2c0000Bump depsjonas · 2 days ago"]);
+  expect(rows.map(text)).toEqual(["c90d11a2b3PAY-231: jitter in backoffmara · 3 hours agoOpen in…", "a41f2c0000Bump depsjonas · 2 days ago"]);
   expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/commits/gitea%3Atidewater%2Fpayout-service%40c90d11a2b3c4",
   );
@@ -448,7 +488,7 @@ test("Commits' Author: Mine keeps the commits whose declared author is mine (#97
   mine.click();
   flushSync();
   expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual([
-    "c90d11a2b3PAY-231: jitter in backoffmara · 3 hours agoOpen in… ▾",
+    "c90d11a2b3PAY-231: jitter in backoffmara · 3 hours agoOpen in…",
   ]);
 });
 
@@ -456,7 +496,7 @@ test("a commit draws its sha, message, author and time, its diff per file, and N
   await draw([REPO, "commits", C1]);
   expect(text(target.querySelector(".tf-cgroup-h"))).toContain("c90d11a2b3 PAY-231: jitter in backoff mara, today 11:42");
   const diff = target.querySelector(".tf-diff")!;
-  expect(text(diff.querySelector(".tf-fh"))).toBe("M src/retry.rs +1 −1 Open in… ▾");
+  expect(text(diff.querySelector(".tf-fh"))).toBe("M src/retry.rs +1 −1 Open in…");
   // A context line carries its old and its new number (#2266): `1` `1`.
   expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["11 fn retry() {", "2− 3", "2+ 5"]);
   expect(diff.querySelector(".tf-ln.tf-del")).not.toBeNull();
@@ -480,25 +520,61 @@ test("a commit the checkout holds is read there, offers Ignore whitespace, and t
     }),
   );
   expect(asked).toEqual([[REPO, C1, "c90d11a2b3c4", false]]);
-  expect(text(target.querySelector(".tf-diff .tf-fh"))).toBe("M src/retry.rs +1 −1 Open in… ▾");
+  expect(text(target.querySelector(".tf-diff .tf-fh"))).toBe("M src/retry.rs +1 −1 Open in…");
   // The whole view is read for its toolbar and parent; its diff is never asked of the source.
   expect(viewReads.filter(([id]) => id === C1)).toEqual([[C1, null]]);
-  const ws = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const ws = target.querySelector<HTMLInputElement>(".tf-dtool .tf-wsbox input")!;
   expect(ws.disabled).toBe(false);
-  expect(target.querySelector("[data-testid=ws-why]")).toBeNull();
+  expect(target.querySelector(".tf-wsbox")!.getAttribute("title")).toBeNull();
   ws.click();
   await settle();
   expect(asked.at(-1)).toEqual([REPO, C1, "c90d11a2b3c4", true]);
   expect(text(target.querySelector(".tf-empty"))).toBe("This commit changes no file.");
+  // With nothing drawn the tick can still come off.
+  expect(target.querySelector<HTMLInputElement>(".tf-diffws .tf-wsbox input")!.checked).toBe(true);
 });
 
 test("a commit no checkout holds is the source's diff, one read, and says why whitespace stays (#2319)", async () => {
   await draw([REPO, "commits", C1]);
   expect(viewReads.filter(([id]) => id === C1)).toEqual(expect.arrayContaining([[C1, null], [C1, "diff"]]));
   expect(viewReads.filter(([id, s]) => id === C1 && s === "diff").length).toBe(1);
-  const ws = target.querySelector<HTMLInputElement>(".tf-diffws input[type=checkbox]")!;
+  const ws = target.querySelector<HTMLInputElement>(".tf-dtool .tf-wsbox input")!;
   expect(ws.disabled).toBe(true);
-  expect(text(target.querySelector("[data-testid=ws-why]"))).toContain("A checkout holding this commit can.");
+  expect(ws.title).toContain("A checkout holding this commit can.");
+});
+
+test("an address that names no commit draws the nothing-here block under the tabs, no raw words and no header (F-231)", async () => {
+  const bad = "5d77e1a2c3";
+  const refusing = (id: string) => id === bad;
+  const base = ports();
+  await draw(
+    [REPO, "commits", bad],
+    {
+      ...base,
+      getEntity: async (id: string) => {
+        if (refusing(id)) throw { code: "invalid", message: `entity id ${id} has no ':' separating namespace from key` };
+        return base.getEntity(id);
+      },
+    },
+  );
+  expect(text(target.querySelector(".tf-nohere p"))).toBe("knobas does not hold this commit. It may not have synced yet.");
+  expect(target.querySelector(".tf-nohere a")!.getAttribute("href")).toContain("/commits");
+  expect(target.textContent).not.toContain("namespace");
+  expect(target.querySelector(".tf-tabs")).not.toBeNull();
+  expect(target.querySelector(".tf-cgroup-h")).toBeNull();
+});
+
+test("the branch selector holds its room unseen on Compare, whose Into and From already say it (F-230, F-249)", async () => {
+  await draw([REPO, "compare"]);
+  const held = () => target.querySelector<HTMLElement>("select[aria-label=Branch]")!.closest<HTMLElement>(".tf-repohold")!;
+  expect(held().classList.contains("tf-held")).toBe(true);
+  expect(held().inert).toBe(true);
+  expect(target.querySelector("#tf-cmp-from")).not.toBeNull();
+  unmount(view!);
+  view = null;
+  await draw([REPO, "commits"]);
+  expect(held().classList.contains("tf-held")).toBe(false);
+  expect(held().inert).toBe(false);
 });
 
 test("Pull requests lists this repository's, with a state filter", async () => {
@@ -528,9 +604,9 @@ test("Local changes draws the checkout line, the uncommitted diff with the PR's 
   expect(line.querySelector("button[aria-haspopup='menu']")).not.toBeNull();
   expect(text(target.querySelector(".tf-cbody"))).toContain("knobas never commits, stashes or pushes here");
   // The pull request's diff block (`TfDiffView`, #2266), each file marked.
-  expect([...target.querySelectorAll(".tf-cbody .tf-diff .tf-fh .tf-mono")].map(text)).toEqual([
-    "src/retry.rs (modified, not staged)",
-    "src/sepa/mod.rs (modified, staged)",
+  expect([...target.querySelectorAll(".tf-cbody .tf-diff .tf-fh")].map((head) => [text(head.querySelector(".tf-mono")), text(head.querySelector(".tf-state"))])).toEqual([
+    ["src/retry.rs", "modified, not staged"],
+    ["src/sepa/mod.rs", "modified, staged"],
   ]);
   expect([...target.querySelectorAll(".tf-untracked li")].map(text)).toEqual(["notes.txt", "scratch/"]);
 
@@ -581,7 +657,7 @@ test("Local changes for a repository not on this machine offers Clone and settin
 
 test("a repository the mirror does not hold says so", async () => {
   await draw(["gitea:tidewater/nowhere"]);
-  expect(text(target.querySelector(".tf-cbody"))).toContain("gitea:tidewater/nowhere is not in the mirror");
+  expect(text(target.querySelector(".tf-nohere"))).toContain("repository");
 });
 
 // -- Refresh (#2135) -----------------------------------------------------------
@@ -676,7 +752,7 @@ test("a repository whose refresh failed keeps its page and says why", async () =
   );
   refreshButton()!.click();
   await settle();
-  expect(text(target.querySelector(".tf-refresh-failed"))).toBe("Couldn't refresh: 502 Bad Gateway");
+  expect(text(target.querySelector(".tf-refresh-failed"))).toBe("Couldn't refresh: 502 Bad Gateway. Try again");
   expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
   expect(target.querySelectorAll(".tf-cbody tbody tr").length).toBe(2);
 });
@@ -1035,7 +1111,7 @@ test("New branch… is the source's refused_writes answer, asked with the commit
       { entity: REPO, op: "commit_file" },
     ],
   ]);
-  expect(viewReads.filter(([, sectionId]) => sectionId === null)).toEqual([]);
+  expect(viewReads.filter(([id, sectionId]) => id === REPO && sectionId === null)).toEqual([]);
 });
 
 test("a toolbar the app could not ask about is asked again on a refresh and when the page is shown again (#2306)", async () => {
@@ -1151,4 +1227,27 @@ test("the compare page's diff expands context read whole at the shas the source 
   await settle();
   expect(asked).toEqual(expect.arrayContaining([`file@${HEAD}:src/retry.rs`, `file@${FORK}:src/retry.rs`]));
   expect(text(target.querySelector(".tf-cbody .tf-diff"))).toMatch(/22 line 2/);
+});
+
+test("an address with a tab the repository does not have says so under its header and tabs, and lights none", async () => {
+  await draw([REPO, "nope"]);
+  expect(text(target.querySelector(".tf-fhead h1"))).toBe("tidewater/payout-service");
+  expect(text(target.querySelector(".tf-nohere"))).toContain("This repository has no such tab.");
+  expect(target.querySelector(".tf-nohere a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}`);
+  expect(target.querySelector(".tf-tabs a[aria-current]")).toBeNull();
+  expect(target.querySelector(".tf-cbody")).toBeNull();
+});
+
+test("Compare's header does not offer New pull request again, though it holds its room: the form below is it", async () => {
+  await draw([REPO, "compare"]);
+  const reachable = [...target.querySelectorAll(".tf-fhead .tf-acts .tf-btn")].filter((node) => node.closest(".tf-held") === null);
+  expect(reachable.map(text)).not.toContain("New pull request");
+  expect(target.querySelector(".tf-held .tf-btn")?.textContent).toContain("New pull request");
+});
+
+test("Pull requests draws Code's row: the title over its author, the state, and when it last moved", async () => {
+  await draw([REPO, "prs"]);
+  const row = target.querySelector(".tf-rprs tbody tr")!;
+  expect(row.closest("table")!.classList.contains("tf-cprs")).toBe(true);
+  expect(row.querySelectorAll("td")).toHaveLength(5);
 });

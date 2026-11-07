@@ -12,6 +12,8 @@
  * it wrote them.
  */
 import type { SourceView, Tone, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../ipc/entity";
+import { viewStamp } from "../../time/format";
+import { stateWord } from "../state-word";
 
 /** The page's tabs, in prototype-6's order; *Files changed* is #842's. */
 export const PR_TABS = [
@@ -36,6 +38,11 @@ export interface PrRoute {
 export function readPrRoute(rest: readonly string[]): PrRoute {
   const tab = rest[1] ?? "";
   return { prId: rest[0] || null, tab: (TABS.has(tab) ? tab : "overview") as PrTab };
+}
+
+/** Whether what follows `pr` in the address is a tab the page has. */
+export function knowsPrTab(rest: readonly string[]): boolean {
+  return rest[1] === undefined || TABS.has(rest[1]);
 }
 
 /** The address of the page, or of one of its tabs; Overview is the bare address. */
@@ -162,7 +169,26 @@ function opening(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+const RUN_COUNTS = /^(\d+) passed, (\d+) failed/;
+
+/**
+ * A row's second cell in the Checks table: its state as the chips word it, then the source's line. Where that line
+ * counts tests it is said as Builds says it, failed first, and the counts stand for the state, so a run never reads
+ * *Failed, 41 passed, 1 failed* here and *1 failed, 41 passed* there (F-010).
+ */
+export function checkReading(row: ViewRow): string {
+  const meta = row.meta ?? "";
+  const counts = RUN_COUNTS.exec(meta);
+  if (counts !== null) return `${counts[2] === "0" ? "" : `${counts[2]} failed, `}${counts[1]} passed${meta.slice(counts[0].length)}`;
+  return [row.chip === null ? "" : stateWord(row.chip), meta].filter((bit) => bit !== "").join(", ");
+}
+
 const LOUDNESS: Tone[] = ["err", "warn", "info", "muted", "ok"];
+
+/** A check in a sentence: its name, then its state as the chips word it, *failed* whatever the source wrote. */
+function checkWords(row: ViewRow): string {
+  return `${row.title} ${stateWord(row.chip ?? "").toLowerCase()}`.trim();
+}
 
 /**
  * The checks as one line: *all checks passing* when every one is ok, else
@@ -175,7 +201,7 @@ export function checksLine(rows: readonly ViewRow[]): ReadyLine | null {
   const open = rows.filter((row) => row.tone !== "ok");
   if (open.length === 0) return { text: "Checks: all checks passing", tone: "ok" };
   const tone = LOUDNESS.find((candidate) => open.some((row) => (row.tone ?? "muted") === candidate)) ?? "muted";
-  return { text: `Checks: ${open.map((row) => `${row.title} ${row.chip ?? ""}`.trim()).join(", ")}`, tone };
+  return { text: `Checks: ${open.map(checkWords).join(", ")}`, tone };
 }
 
 /**
@@ -219,7 +245,7 @@ export function readyLines(view: SourceView | null): ReadyLine[] {
 function requiredLine(view: SourceView | null, value: string, tone: Tone): ReadyLine {
   const open = railChecks(view).filter((check) => check.required && check.standing !== "ok");
   const line: ReadyLine = { text: `Required checks: ${value}`, tone };
-  if (open.length > 0) line.why = open.map((check) => `${check.row.title} ${check.row.chip ?? ""}`.trim()).join(", ");
+  if (open.length > 0) line.why = open.map((check) => checkWords(check.row)).join(", ");
   return line;
 }
 
@@ -282,7 +308,8 @@ export interface ReadyVerdict {
  * the source offers *Merge…*, a verdict over them. Ready only where every
  * line is met and the source does not refuse the merge: *Merge…*'s reason is
  * the source's one decision (`land.rs`), so a line the page cannot draw (a
- * head behind a protected base) still holds the verdict back, saying why.
+ * head behind a protected base, a token that may not merge) still holds the
+ * verdict back, saying why. The verdict's box says only what no row says.
  */
 export function readiness(view: SourceView | null): { verdict: ReadyVerdict | null; lines: ReadyLine[] } {
   const lines = readyLines(view);
@@ -290,9 +317,23 @@ export function readiness(view: SourceView | null): { verdict: ReadyVerdict | nu
   if (merge === null || lines.length === 0) return { verdict: null, lines };
   const met = lines.filter((line) => line.tone === "ok").length;
   const counted = `${met} of ${lines.length} met`;
-  if (met === lines.length && merge.disabled === null) return { verdict: { text: `Ready: ${counted}`, tone: "ok", why: null }, lines };
+  if (met === lines.length) {
+    if (merge.disabled === null) return { verdict: { text: `Ready: ${counted}`, tone: "ok", why: null }, lines };
+    return { verdict: { text: "Can't merge from here", tone: "warn", why: opening(merge.disabled) }, lines };
+  }
   const tone: Tone = lines.some((line) => line.tone === "err") ? "err" : "warn";
-  return { verdict: { text: `Not yet: ${counted}`, tone, why: merge.disabled }, lines };
+  return { verdict: { text: `Not yet: ${counted}`, tone, why: unsaid(merge, lines) }, lines };
+}
+
+/** What each of the rows speaks for, in the words of the source's reasons. */
+const ROW_WORDS = ["approval", "check", "conflict"];
+
+/** The source's reasons no unmet row already gives, or `null`: the box and the rows do not say one thing twice. */
+function unsaid(merge: ViewAction, lines: readonly ReadyLine[]): string | null {
+  const open = lines.filter((line) => line.tone !== "ok").map((line) => line.text.toLowerCase());
+  const said = (reason: string) => ROW_WORDS.some((word) => reason.toLowerCase().includes(word) && open.some((text) => text.includes(word)));
+  const left = mergeReasons(merge).filter((reason) => !said(reason));
+  return left.length === 0 ? null : opening(left.join("; "));
 }
 
 /** One reviewer in the side rail and where their review stands. */
@@ -343,6 +384,43 @@ export function mergeReasons(merge: ViewAction | null): string[] {
 
 /** The verdicts a review can carry, in prototype-6's order. */
 export type Verdict = "comment" | "approve" | "request_changes";
+
+/** A review on its way: what its chip says while queued (*Approving, queued*), and the state its chip says once sent (*Approved, sent*) and its row draws until the read holds it (F-251, F-262). */
+export const REVIEW_SENT: Record<Verdict, { act: string; state: string }> = {
+  approve: { act: "Approving", state: "Approved" },
+  request_changes: { act: "Requesting changes", state: "Changes requested" },
+  comment: { act: "Commenting", state: "Commented" },
+};
+
+/** The echo kind of a review request queued from the rail (#2303), one per reviewer. */
+export const REQUESTED = "reviewer";
+/** How the echo kind of a source's own action starts: `source:<its id>`. Nothing the app queues itself starts so. */
+export const SOURCE_ACTION = "source:";
+/** The app's own toolbar writes, as their chips say them: words the app wrote, one by one. *Close sent* reads as if something was sent to close (F-236). */
+const ACTS: Readonly<Record<string, string>> = {
+  merge: "Merging",
+  close: "Closing",
+  reopen: "Reopening",
+  update: "Updating branch",
+  edit: "Saving edit",
+};
+
+/**
+ * What a write's chip names, or `null` for an echo the chip row doesn't draw. This is an allow-list of what `TfPr`'s toolbar queues:
+ * a thread's reply and resolve draw in their thread, and a comment in the conversation (F-261). No word here is inflected or
+ * otherwise rewritten, because an echo's `text` can be a reader's reply or a source's label. A source's own action keeps its button's words.
+ */
+export function chipAct(echo: { kind: string; text: string }): string | null {
+  if (echo.kind === "review") return Object.hasOwn(REVIEW_SENT, echo.text) ? REVIEW_SENT[echo.text as Verdict].act : null;
+  if (echo.kind.startsWith(SOURCE_ACTION)) return echo.text;
+  return Object.hasOwn(ACTS, echo.kind) ? (ACTS[echo.kind] ?? null) : null;
+}
+
+/** A chip's whole words: what it names, then where its write is. A sent review says what it did, as *Approving, sent* sounds unfinished (F-262). */
+export function chipWords(echo: { kind: string; text: string; state: string }): string {
+  const sent = echo.kind === "review" && echo.state === "sent" && Object.hasOwn(REVIEW_SENT, echo.text) ? REVIEW_SENT[echo.text as Verdict].state : null;
+  return `${sent ?? chipAct(echo)}, ${echo.state}`;
+}
 
 /** One choice of *Submit review* (R-8.18): its verdict, its words, and the source's action that sends it. */
 export interface ReviewChoice {
@@ -412,7 +490,7 @@ export function conversationParts(view: SourceView | null): (Line | { message: P
       parts.push({
         message: {
           who: said.label,
-          at: said.value,
+          at: viewStamp(said.value),
           verdict: review ? { text: review.value, tone: review.tone } : null,
           body: "",
           markdown: false,

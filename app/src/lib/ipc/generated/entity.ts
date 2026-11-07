@@ -1239,7 +1239,7 @@ export type DocsTree = {
 spaces: Array<DocSpace>, 
 /**
  * The page the reader opened most recently (`visit_entity`), while it is
- * still a live page; `#/docs` opens it.
+ * still a live page; the Docs home's *Continue reading* opens it.
  */
 last_read: string | null, 
 /**
@@ -1369,6 +1369,17 @@ estimate_seconds: number | null,
  * the reader. Absent on the wire on a miss (ADR-0007).
  */
 reporter?: string, 
+/**
+ * The name to call the reporter by (F-107), through the declared
+ * `reporter_name` path. Absent where the account is the only name.
+ */
+reporter_name?: string, 
+/**
+ * The name to call [`author`](Self::author) by on a ticket, its assignee
+ * (F-107), through the declared `assignee_name` path: what the ticket's
+ * comments call the same person. Absent where the account is the only name.
+ */
+author_name?: string, 
 /**
  * When a ticket was filed (#2403), through the declared `created` path.
  * Absent on the wire on a miss.
@@ -1852,8 +1863,20 @@ title: string,
  * be shown is not shippable.
  *
  * Also raw text.
+ *
+ * **It leads with the subject or stays short (F-115).** Where the reason
+ * names the subject, the subject is its first word (*knobas-jira is down*,
+ * *Payout_IntegrationTests #1187 failed*); what would bury it goes in
+ * [`detail`](Self::detail).
  */
 reason: string, 
+/**
+ * What the row says after the subject, on its second line: an alert's
+ * asset path above the asset, a failed build's own status text. Reachable
+ * without leading the row (F-115). Raw text; absent on the wire where a
+ * rule has none.
+ */
+detail?: string, 
 /**
  * When the item last moved. The stream's ordering, and what *done* is
  * measured against.
@@ -1892,7 +1915,12 @@ export type InboxShelf = "stream" | "snoozed";
 /**
  * One of a parent ticket's own links: the far end.
  */
-export type JobLink = { entity_id: string, kind: string, title: string | null, };
+export type JobLink = { entity_id: string, kind: string, title: string | null, 
+/**
+ * The state dot on its drawer row (F-036). Absent on the wire where the
+ * entity says none.
+ */
+state?: StateChip, };
 
 /**
  * What a job shows beside its own links (#867): the sets that apply, by
@@ -1925,7 +1953,12 @@ entity_kind: string | null, title: string | null,
 /**
  * Hidden on this ticket by *Hide here* (R-7.5).
  */
-hidden: boolean, };
+hidden: boolean, 
+/**
+ * The state dot on its drawer row (F-036), as the set's editor reads it.
+ * Absent on the wire where the entity says none.
+ */
+state?: StateChip, };
 
 /**
  * The parent whose own links a sub-task shows (R-7.3).
@@ -2163,7 +2196,15 @@ title: string,
  * RFC 3339 on the wire. Not a reason to hide the row: §5a keeps the entity
  * so a link never dangles, and the panel marks it instead.
  */
-deleted_at: string | null, };
+deleted_at: string | null, 
+/**
+ * The state dot on its row in the Connections drawer (F-036): what the far
+ * end's own declared state says, or an asset's health. Not read here,
+ * because [`entries_of`] binds no declarations and most of its readers
+ * draw no dot; `get_entity` fills it for a ticket. Absent on the wire
+ * otherwise, and where the far end declares no state.
+ */
+state?: StateChip, };
 
 /**
  * One link, as a detail view draws it: the record, and its other end.
@@ -2602,6 +2643,12 @@ issue_type: string | null,
  * ticket and on a miss.
  */
 assignee: string | null, 
+/**
+ * The name to call that account by, at the declared `assignee_name` path
+ * (F-107), so the card's avatar is the one a ticket's page draws. Absent
+ * where the account is the only name; never matched against anything.
+ */
+assignee_name?: string, 
 /**
  * When the source last changed it, or `None` where it never said.
  *
@@ -3236,7 +3283,23 @@ publication: Publication | null,
  * #1966) rather than offering *Create ticket* again; the read links
  * each one whose ticket the mirror now holds, and names it no more.
  */
-owed_tickets: Array<ActionItemTicket>, };
+owed_tickets: Array<ActionItemTicket>, 
+/**
+ * Whether the note says something the page was not last sent (F-327):
+ * [`to_storage`] of its body against the newest body the queue carried to
+ * the page. `false` with no publication.
+ */
+changed_since: boolean, 
+/**
+ * Whether the mirror holds the page at a later version than knobas last
+ * wrote, so somebody edited it at the source since (F-327). *Publish
+ * again* would replace their edit, so it is refused while this is true.
+ */
+page_moved: boolean, 
+/**
+ * The newest *Publish again*, while it has not landed (F-327).
+ */
+again: Republication | null, };
 
 /**
  * What became of a date's publication, as far as knobas can tell.
@@ -3387,6 +3450,24 @@ export type RefusedWrite = { entity: string, op: string,
  * The [`WriteAsk::field`] refused, or `None` for the write itself.
  */
 field?: string, reason: string, };
+
+/**
+ * A *Publish again* that has not landed (F-327): the newest `UpdatePage` on the
+ * date's page, pending, held or refused. A sent one is simply the page.
+ */
+export type Republication = { 
+/**
+ * The write queue row that carries it.
+ */
+write_id: number, 
+/**
+ * The queue's own word for where the write stands.
+ */
+state: WriteState, 
+/**
+ * The queue's or the source's sentence. Untrusted source text.
+ */
+detail: string | null, };
 
 /**
  * A ticket a rule or a set applies to.

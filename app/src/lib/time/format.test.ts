@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "vitest";
 
-import { ageLabel, clockLabel, keyOf, minutesLabel, secondsLabel, stampLabel } from "./format";
+import { ageLabel, clockLabel, dayHeadingLabel, keyOf, minutesLabel, secondsLabel, stampLabel, timeLabel, utcDateWords, viewDate, viewStamp } from "./format";
 import { minutesOf } from "./week";
 
 describe("minutesLabel: Day, Week, Log all, the launcher board, the draft button", () => {
@@ -33,17 +33,20 @@ describe("minutesLabel: Day, Week, Log all, the launcher board, the draft button
 
 describe("secondsLabel: a run's length", () => {
   test.each([
-    [38, "38 s"],
-    [252, "4 m 12 s"],
-    [65, "1 m 05 s"],
+    [38, "38s"],
+    [252, "4m 12s"],
+    [65, "1m 5s"],
+    [240, "4m"],
+    [3725, "1h 2m"],
+    [7200, "2h"],
   ])("%d seconds reads %s", (seconds, text) => {
     expect(secondsLabel(seconds)).toBe(text);
   });
 
-  // CHANGED: Settings said "3 min 12 s" for a run Builds called "3 m 12 s".
-  test("Builds and Settings agree on a run's length: 192 s is 3 m 12 s on both", () => {
-    expect(secondsLabel(192)).toBe("3 m 12 s");
-    expect(secondsLabel(180)).toBe("3 m 00 s");
+  // CHANGED: a run read "4 m 12 s" where a worklog read "2h 10m" (F-037).
+  test("a run and a worklog read alike: 192 s is 3m 12s, and 3 minutes is minutesLabel's 3m", () => {
+    expect(secondsLabel(192)).toBe("3m 12s");
+    expect(secondsLabel(180)).toBe(minutesLabel(3));
   });
 });
 
@@ -54,14 +57,18 @@ describe("clockLabel: the ticket board, the inbox, builds", () => {
   test("the ticket board's reading", () => {
     expect(clockLabel(at(22, 11, 48), now)).toBe("today 11:48");
     expect(clockLabel(at(21, 16, 5), now)).toBe("yesterday 16:05");
-    expect(clockLabel(at(18, 10, 0), now)).toBe("2026-08-18");
+    expect(clockLabel(at(18, 10, 0), now)).toBe("Tue 10:00");
+    expect(clockLabel(at(16, 10, 0), now)).toBe("Sun 10:00");
+    expect(clockLabel(at(15, 10, 0), now)).toBe("15 Aug");
+    expect(clockLabel(new Date(2025, 10, 4, 10, 0).toISOString(), now)).toBe("4 Nov 2025");
     expect(clockLabel(null, now)).toBe("never");
     expect(clockLabel("not a date", now)).toBe("");
   });
 
   test("the inbox column drops the word on today", () => {
     expect(clockLabel(at(22, 13, 50), now, true)).toBe("13:50");
-    expect(clockLabel(at(18, 9, 5), now, true)).toBe("2026-08-18");
+    expect(clockLabel(at(18, 9, 5), now, true)).toBe("Tue 09:05");
+    expect(clockLabel(at(1, 9, 5), now, true)).toBe("1 Aug");
   });
 
   // CHANGED: the inbox and builds said "yest. 16:30" for the instant the board calls "yesterday 16:30".
@@ -72,6 +79,18 @@ describe("clockLabel: the ticket board, the inbox, builds", () => {
   });
 });
 
+describe("a row under a date heading (F-049)", () => {
+  test("says the time alone, and the heading names the day", () => {
+    const now = new Date(2026, 10, 6, 15, 0);
+    expect(timeLabel(new Date(2026, 10, 4, 14, 32).toISOString())).toBe("14:32");
+    expect(timeLabel("not a date")).toBe("");
+    expect(dayHeadingLabel(new Date(2026, 10, 6, 9, 0), now)).toBe("Today");
+    expect(dayHeadingLabel(new Date(2026, 10, 5, 9, 0), now)).toBe("Yesterday");
+    expect(dayHeadingLabel(new Date(2026, 10, 4, 9, 0), now)).toBe("Wed 4 Nov");
+    expect(dayHeadingLabel(new Date(2025, 10, 4, 9, 0), now)).toBe("Tue 4 Nov 2025");
+  });
+});
+
 describe("stampLabel: the conversation, the last backup, a source's sync runs (#1986)", () => {
   const now = new Date(2026, 7, 22, 15, 0);
   const at = (day: number, hour: number, minute: number) => new Date(2026, 7, day, hour, minute).toISOString();
@@ -79,7 +98,8 @@ describe("stampLabel: the conversation, the last backup, a source's sync runs (#
   test("an older day keeps its clock, in clockLabel's date", () => {
     expect(stampLabel(at(22, 9, 35), now)).toBe("today 09:35");
     expect(stampLabel(at(21, 17, 41), now)).toBe("yesterday 17:41");
-    expect(stampLabel(at(12, 9, 14), now)).toBe("2026-08-12 09:14");
+    expect(stampLabel(at(18, 9, 14), now)).toBe("Tue 09:14");
+    expect(stampLabel(at(12, 9, 14), now)).toBe("12 Aug 09:14");
     expect(stampLabel(at(12, 9, 14), now).startsWith(clockLabel(at(12, 9, 14), now))).toBe(true);
     expect(stampLabel("not a date", now)).toBe("");
   });
@@ -87,13 +107,13 @@ describe("stampLabel: the conversation, the last backup, a source's sync runs (#
   test("bare drops the word on today only", () => {
     expect(stampLabel(at(22, 9, 0), now, true)).toBe("09:00");
     expect(stampLabel(at(21, 17, 41), now, true)).toBe("yesterday 17:41");
-    expect(stampLabel(at(12, 9, 14), now, true)).toBe("2026-08-12 09:14");
+    expect(stampLabel(at(12, 9, 14), now, true)).toBe("12 Aug 09:14");
   });
 
   test("yesterday across a month's first day", () => {
     const first = new Date(2026, 9, 1, 8, 0);
     expect(stampLabel(new Date(2026, 8, 30, 23, 10).toISOString(), first)).toBe("yesterday 23:10");
-    expect(stampLabel(new Date(2026, 8, 29, 23, 10).toISOString(), first)).toBe("2026-09-29 23:10");
+    expect(stampLabel(new Date(2026, 8, 29, 23, 10).toISOString(), first)).toBe("Tue 23:10");
   });
 });
 
@@ -117,4 +137,30 @@ test("keyOf is the key half of an entity id, and the whole string when there is 
   expect(keyOf("jira:PAY-231")).toBe("PAY-231");
   expect(keyOf("confluence:ENG:SEPA payout")).toBe("ENG:SEPA payout");
   expect(keyOf("PAY-231")).toBe("PAY-231");
+});
+
+describe("a date a view writes (F-049, F-221)", () => {
+  const now = new Date("2026-08-22T14:32:00Z");
+
+  test.each([
+    ["2026-08-21", "21 Aug"],
+    ["mara · 2026-08-21", "mara · 21 Aug"],
+    ["41 passed, 1 failed · 2026-08-21", "41 passed, 1 failed · 21 Aug"],
+    ["2025-12-30", "30 Dec 2025"],
+    ["5 h ago", "5 h ago"],
+    ["just now", "just now"],
+    ["release-2026-08-21-rc", "release-2026-08-21-rc"],
+    ["2026-13-45", "2026-13-45"],
+  ])("%s reads %s", (meta, want) => expect(viewDate(meta, now)).toBe(want));
+
+  test("the date is UTC's on either side of midnight", () => {
+    expect(utcDateWords(new Date("2026-08-21T23:59:00Z"), now)).toBe("21 Aug");
+    expect(utcDateWords(new Date("2026-08-22T00:01:00Z"), now)).toBe("22 Aug");
+  });
+
+  test("a time to the minute climbs the ladder, and anything else stays as written", () => {
+    expect(viewStamp("2026-08-12 09:14", now)).toBe("12 Aug 09:14");
+    expect(viewStamp("2026-08-12 09:14 +00:00", now)).toBe(stampLabel("2026-08-12T09:14:00+00:00", now));
+    expect(viewStamp("commented by jonas", now)).toBe("commented by jonas");
+  });
 });

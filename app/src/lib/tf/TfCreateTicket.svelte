@@ -9,6 +9,13 @@
   A project the source's credential cannot file in (`refused_writes`, #2052,
   asked about every project drawn) stays pickable, and picked draws *Create
   ticket* disabled with the reason above it: another project may take it.
+
+  It arrives on what it waits on. A failed run fills the title in and asks only for a project, so it arrives on *Project*, and typing
+  there is choosing one: nothing is filed until *Create ticket*, and the field shows what was chosen. With a project chosen or no title,
+  it arrives on *Title* (F-453), so typing doesn't move the project, and shift-`Tab` reaches *Type* and *Project*.
+
+  A surface that names a `draftKey` keeps what was changed through `Esc` and ×, as *New page* does (F-647). *Cancel* is the
+  explicit discard, and filing ends the draft too.
 -->
 <script lang="ts">
   import { untrack } from "svelte";
@@ -16,6 +23,7 @@
   import type { Project } from "../ipc/entity";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../shell/refused-writes";
   import { canFile, projectEntity, type TicketDraft } from "./create-ticket";
+  import { drafts } from "./drafts.svelte";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import TfDialog from "./settings/TfDialog.svelte";
 
@@ -25,9 +33,12 @@
     words = false,
     layers = sharedLayers,
     refusedWrites,
+    draftKey,
     onclose,
     onfile,
   }: {
+    /** Where what was typed outlives the dialog; with none, it goes with the dialog. */
+    draftKey?: string | undefined;
     /** What the dialog opens with. */
     draft: TicketDraft;
     projects: readonly Project[];
@@ -40,7 +51,27 @@
     onfile: (draft: TicketDraft & { project: string }) => void;
   } = $props();
 
-  let editing = $state<TicketDraft>(untrack(() => ({ ...draft })));
+  const uid = $props.id();
+
+  let editing = $state<TicketDraft>(
+    untrack(() => ({ ...draft, ...(draftKey !== undefined && drafts.has(draftKey) ? (JSON.parse(drafts.get(draftKey)) as TicketDraft) : {}) })),
+  );
+  /** Read once: choosing a project mustn't change where a field that went away would hand focus. */
+  const arriveOnProject = untrack(() => editing.project === null && editing.title.trim() !== "");
+
+  // Only what differs from what the dialog opened with is a draft, so one opened and left holds nothing back.
+  $effect(() => {
+    if (draftKey === undefined) return;
+    const same = editing.project === draft.project && editing.type === draft.type && editing.title === draft.title && editing.body === draft.body;
+    const words = same ? "" : JSON.stringify(editing);
+    untrack(() => drafts.put(draftKey, words));
+  });
+
+  /** *Cancel*: the explicit discard. */
+  function discard(): void {
+    if (draftKey !== undefined) drafts.forget(draftKey);
+    onclose();
+  }
 
   let refused = $state<RefusedWrite[]>([]);
   /** As a string, so the same projects drawn again ask nothing again. */
@@ -49,13 +80,15 @@
   const cannot = $derived(refusalOf(refused, editing.project, "create_ticket"));
 </script>
 
-<TfDialog title="Create a ticket" {layers} {onclose}>
+<TfDialog why={editing.project === null ? "Choose a project." : editing.type.trim() === "" ? "Say what type it is." : editing.title.trim() === "" ? "Give it a title." : null} title="Create a ticket" {layers} {onclose}>
   {#snippet body()}
     {#if !words}<p class="tf-dlg-note">{editing.title}</p>{/if}
     <div class="tf-formgrid">
-      <span>Project</span>
+      <label for="tf-ct-project-{uid}">Project <small class="tf-req">required</small></label>
       <select
+        id="tf-ct-project-{uid}"
         aria-label="Project the ticket goes in"
+        data-arrive={arriveOnProject ? "" : undefined}
         value={editing.project ?? ""}
         onchange={(event) => (editing.project = event.currentTarget.value || null)}
       >
@@ -64,42 +97,50 @@
           <option value={projectEntity(project)}>{project.name ?? project.key}</option>
         {/each}
       </select>
-      <span>Type</span>
+      <label for="tf-ct-type-{uid}">Type <small class="tf-req">required</small></label>
       <input
+        id="tf-ct-type-{uid}"
         type="text"
         aria-label="Ticket type"
         value={editing.type}
         oninput={(event) => (editing.type = event.currentTarget.value)}
       />
       {#if words}
-        <span>Title</span>
+        <label for="tf-ct-title-{uid}">Title <small class="tf-req">required</small></label>
         <input
+          id="tf-ct-title-{uid}"
           type="text"
           aria-label="Ticket title"
+          data-arrive
           value={editing.title}
           oninput={(event) => (editing.title = event.currentTarget.value)}
         />
       {/if}
+      {#if words}
+        <label for="tf-ct-body-{uid}">Description</label>
+        <textarea
+          id="tf-ct-body-{uid}"
+          aria-label="Ticket description"
+          rows="8"
+          value={editing.body}
+          oninput={(event) => (editing.body = event.currentTarget.value)}
+        ></textarea>
+      {/if}
     </div>
     {#if cannot !== null}<p class="tf-dlg-note tf-fail">{cannot}</p>{/if}
-    {#if words}
-      <textarea
-        aria-label="Ticket description"
-        rows="8"
-        value={editing.body}
-        oninput={(event) => (editing.body = event.currentTarget.value)}
-      ></textarea>
-    {/if}
   {/snippet}
   {#snippet footer()}
-    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn tf-ghost" onclick={discard}>Cancel</button>
     <button
       class="tf-btn tf-primary"
       {...refusedAttrs(cannot)}
       disabled={!canFile(editing)}
       onclick={() => {
         const filed = { ...editing };
-        if (canFile(filed) && cannot === null) onfile(filed);
+        if (canFile(filed) && cannot === null) {
+          if (draftKey !== undefined) drafts.forget(draftKey);
+          onfile(filed);
+        }
       }}
     >
       Create ticket

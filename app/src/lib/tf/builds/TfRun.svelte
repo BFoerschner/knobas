@@ -41,6 +41,7 @@
     button is itself a *Sync now* (its source reads no one item).
 -->
 <script lang="ts">
+  import TfStateChip from "../TfStateChip.svelte";
   import { clockLabel, secondsLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
@@ -53,9 +54,14 @@
   import { settleEchoes } from "../queued.svelte";
   import { createDetailRefresh } from "../refresh.svelte";
   import TfDetailBanners from "../TfDetailBanners.svelte";
+  import TfNothingHere from "../TfNothingHere.svelte";
+  import { jumpAcross } from "../opener";
+  import { parentPage } from "../page-name.svelte";
   import TfHeaderRefresh from "../TfHeaderRefresh.svelte";
   import { commitHash, fileHash } from "../repo/repo";
-  import { pipelineHash, runTone } from "./builds";
+  import { fitLabel } from "../time/day-view";
+  import { RunHold } from "./run-hold.svelte";
+  import { pipelineHash, runTone, stateWord } from "./builds";
   import {
     chipTone,
     defaultBranch,
@@ -81,9 +87,10 @@
   import TfRunLog from "./TfRunLog.svelte";
   import TfRunTests from "./TfRunTests.svelte";
   import TfRunTicket from "./TfRunTicket.svelte";
-  import { downloadAndSay, stepSegments } from "./run-reads";
+  import { downloadAndSay, fitSteps, isCommand, stepSegments } from "./run-reads";
   import {
     RUN_TABS,
+    noSuchRunTab,
     artifactsOf,
     builtCommit,
     repositoryOfCommit,
@@ -127,6 +134,7 @@
   const pipelineId = $derived(pipeline.entity_id);
   const runId = $derived(rest[1] ?? "");
   const tab = $derived(runTabOf(rest));
+  const noTab = $derived(noSuchRunTab(rest));
 
   /** How many older pages a run not among the latest is looked for in. */
   const OLDER_PAGES = 5;
@@ -366,11 +374,37 @@
   const inFlight = $derived(run !== null && run.finished === null);
   const stale = $derived(staleLine(pipeline, sources, sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
-  const segments = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
+  const read = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
+  /** A step's name at what its segment holds: whole, or ended with an ellipsis, never cut mid-letter. */
+  let barPx = $state(0);
+  let pen: CanvasRenderingContext2D | null = null;
+  function measureBar(bar: HTMLElement) {
+    if (typeof ResizeObserver === "undefined") return;
+    const seen = new ResizeObserver(() => (barPx = bar.clientWidth));
+    seen.observe(bar);
+    return () => seen.disconnect();
+  }
+  /** A name's width as `.tf-stepsbar text` draws it: 12 px, or 11 px of code; 0 with no canvas to measure on. */
+  function nameWidth(name: string, text = name): number {
+    pen ??= document.createElement("canvas").getContext("2d");
+    if (pen === null) return 0;
+    const face = isCommand(name) ? "--mono" : "--sans";
+    pen.font = `400 ${isCommand(name) ? 11 : 12}px ${getComputedStyle(document.documentElement).getPropertyValue(face)}`;
+    return pen.measureText(text).width;
+  }
+  /** What a label's inset takes from its segment: 10 px before it, 8 px after. */
+  const STEP_INSET = 18;
+  /** A px over its measure, so percentages rounding on the way back cannot cost a name its end. */
+  const segments = $derived(fitSteps(read, barPx, (name) => nameWidth(name) + STEP_INSET + 1));
+  function stepLabel(name: string, widthPct: number): string | null {
+    if (barPx === 0) return name;
+    return fitLabel(name, (widthPct / 100) * barPx - STEP_INSET, (text) => nameWidth(name, text));
+  }
+
   function chipWord(r: RunRow): string {
-    return r.finished === null ? resultWord(r) : (r.state?.text ?? "");
+    return stateWord(r.finished === null ? resultWord(r) : (r.state?.text ?? ""));
   }
 
   // -- the writes ---------------------------------------------------------------
@@ -380,21 +414,25 @@
    * The page draws no queued row of its own (#853); the pipeline page draws
    * it at the top of its runs until a read holds it (#1449).
    */
-  async function queue(request: RunRequest) {
+  async function queue(request: RunRequest): Promise<number | null> {
+    let id: number;
     try {
       const write = await ports.submitWrite(request.payload);
+      id = write.id;
       echoRun(pipeline, write, runBranch(request.payload), held, ports.follower());
-      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline));
+      // Once sent, the way to the run it started: the page's own runs, where it is drawn (F-338, F-350).
+      toastQueued(queuedRunWhat(pipeline, request.summary), pipelineSource(pipeline), { write, where: { label: "Show in runs", run: () => (location.hash = pipelineHash(pipelineId)) } });
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return;
+      return null;
     }
-    if (request.preset === null) return;
+    if (request.preset === null) return id;
     try {
       await ports.savePreset(request.preset);
     } catch (cause) {
       push({ text: `Could not save the preset: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
+    return id;
   }
 
   /**
@@ -409,9 +447,12 @@
         ? fieldRefusals.cannotOverride
         : null),
   );
+  /** *Re-run* holds as what its write is doing for about two seconds, so a second press can't queue a second run (F-338). */
+  const rerunHold = new RunHold(() => pipelineId);
   function rerun() {
     if (rerunning === null || cannotRerun !== null) return;
-    void queue(rerunning);
+    const request = rerunning;
+    void rerunHold.press(() => queue(request));
   }
 
   let dialog = $state(false);
@@ -420,6 +461,9 @@
     dialog = false;
     void queue(request);
   }
+
+  // A run sits under its pipeline, by the name its crumb gives it.
+  parentPage(() => ({ hash: pipelineHash(pipelineId), name: pipeline.name }));
 
   /** A top-level artifact file into the downloads folder (D8, #856). */
   const downloadFile = (name: string) => downloadAndSay(ports.download, runId, { kind: "file", path: name }, name);
@@ -434,27 +478,25 @@
 </script>
 
 {@render crumbs([
-  { name: "Builds", href: "#/builds" },
+  { name: "Builds" },
+  ...(pipeline.group !== null ? [{ name: pipeline.group }] : []),
   { name: pipeline.name, href: pipelineHash(pipelineId) },
   { name: run?.number != null ? `#${run.number}` : "Run" },
 ])}
 
 {#if runsFailed !== null && held === null}
-  <div class="tf-empty"><p>Runs could not be read: {runsFailed}</p></div>
+  <TfNothingHere message="This pipeline's runs could not be read: {runsFailed}" />
 {:else if held === null}
   <p class="tf-dim tf-runs">Reading the run…</p>
 {:else if run === null}
-  <div class="tf-empty">
-    <p>No run of {pipeline.name} at this address.</p>
-    <a class="tf-btn" href={pipelineHash(pipelineId)}>Back to the pipeline</a>
-  </div>
+  <TfNothingHere message="knobas does not hold this run. It may not have synced yet." href={pipelineHash(pipelineId)} action="All runs of {pipeline.name}" />
 {:else}
   {@const at = run.started ?? run.updated_at}
   <header class="tf-fhead tf-bhead">
     <div>
       <h1>
         {pipeline.name} #{run.number ?? ""}
-        {#if run.state !== null}<span class={`tf-chip tf-run-chip ${chipTone(run)}`}>{chipWord(run)}</span>{/if}
+        {#if run.state !== null}<TfStateChip text={chipWord(run)} class={`tf-run-chip ${chipTone(run)}`} />{/if}
       </h1>
       <div class="tf-sub">
         {#if run.branch !== null}<span class="tf-mono">{run.branch}</span>{/if}{startedBy !== null ? `, started by ${startedBy}` : ""}{at !== null
@@ -468,29 +510,29 @@
           type="button"
           class="tf-btn tf-primary"
           disabled={view === null}
-          aria-disabled={cannotRerun !== null ? "true" : undefined}
+          aria-disabled={cannotRerun !== null || rerunHold.word !== null ? "true" : undefined}
           title={cannotRerun ?? (view === null && viewRead ? "The run's settings could not be read" : undefined)}
-          onclick={rerun}>Re-run</button
+          onclick={rerun}><span class="tf-keepw" data-keep="Queued"><span>{rerunHold.word ?? "Re-run"}</span></span></button
         >
         <button
           type="button"
           class="tf-btn"
           {...refusedAttrs(cannotRun)}
-          onclick={runAgain}>Run again with changes…</button
+          onclick={runAgain}><span>Run again<span class="tf-wide">{" "}with changes</span>…</span></button
         >
       {:else}
         <button type="button" class="tf-btn" aria-disabled="true" title="Needs a new write">Stop</button>
       {/if}
       {#if run.web_url !== null}
-        <button type="button" class="tf-btn tf-ghost" onclick={() => openExternal(run.web_url)}>Open in {pipeline.source_name}</button>
+        <button type="button" class="tf-btn tf-ghost" aria-label="Open in {pipeline.source_name}" title="Open in {pipeline.source_name}" onclick={() => openExternal(run.web_url)}><span class="tf-wide">Open in {pipeline.source_name}</span><svg class="tf-narrow" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 3.5H3.5v9h9v-3M9 3h4v4M13 3 7.5 8.5" /></svg></button>
       {/if}
-      <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} />
+      <TfHeaderRefresh {detail} {refresh} reread={rereadRun} sync={syncNow} noun="run" />
     </div>
   </header>
-  {#if detail !== null}<TfDetailBanners {detail} failed={refresh.failed} />{/if}
+  {#if detail !== null}<TfDetailBanners {detail} {refresh} reread={rereadRun} />{/if}
 
   {#if segments.length > 0}
-    <div class="tf-stepsbar">
+    <div class="tf-stepsbar" {@attach measureBar}>
       <svg role="group" aria-label="Steps" width="100%" height="30">
         {#each segments as segment (segment.index)}
           <a
@@ -502,7 +544,7 @@
             <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
               <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
               {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
-              <text x="10" y="19">{segment.name}</text>
+              {#if stepLabel(segment.name, segment.width) !== null}<text class:tf-sbcmd={isCommand(segment.name)} x="10" y="19">{stepLabel(segment.name, segment.width)}</text>{/if}
             </svg>
           </a>
         {/each}
@@ -522,7 +564,7 @@
 
   <nav class="tf-tabs" aria-label="Run">
     {#each RUN_TABS as entry (entry.id)}
-      <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab ? "page" : undefined}
+      <a href={runTabHash(pipelineId, runId, entry.id)} aria-current={entry.id === tab && !noTab ? "page" : undefined}
         >{entry.name}{#if entry.id === "tests" && testsCount > 0}{" "}<span class="tf-count tf-err">{testsCount} failed</span
           >{:else if entry.id === "artifacts" && artifacts.total > 0}{" "}<span class="tf-count">{artifacts.total}</span>{/if}</a
       >
@@ -530,17 +572,19 @@
   </nav>
 
   <div class="tf-runbody">
-    {#if viewFailed !== null && (tab === "overview" || tab === "changes" || tab === "params")}
+    {#if viewFailed !== null && !noTab && (tab === "overview" || tab === "changes" || tab === "params")}
       <p class="tf-dim">The run could not be read from {pipeline.source_name}: {viewFailed}</p>
     {/if}
-    {#if tab === "overview"}
+    {#if noTab}
+      <TfNothingHere message="A run has no such tab." href={runTabHash(pipelineId, runId, "overview")} action="Overview" />
+    {:else if tab === "overview"}
       <div class="tf-runov">
         {#if failed && failure !== null}
           <div class="tf-problem">
             <h3>{failureHeading(failure)}</h3>
             {#if failure.details !== null}<pre>{failure.details}</pre>{/if}
             <div class="tf-acts">
-              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")}>Show it in the log</a>
+              <a class="tf-btn tf-sm" href={runTabHash(pipelineId, runId, "log")} onclick={(event) => jumpAcross(event, "Overview")}>Show in log</a>
               {#if failure.location !== null && repoId !== null}
                 <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, failure.location.path)}>Open the test file</a>
               {/if}
@@ -585,16 +629,16 @@
           <section class="tf-panel" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>
-              {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All {artifacts.total}</a>{/if}
+              {#if artifacts.total > 0}<a class="tf-open" href={runTabHash(pipelineId, runId, "artifacts")}>All artifacts</a>{/if}
             </header>
             <div class="tf-rows">
               {#each artifacts.first as artifact, i (i)}
                 <div class="tf-r">
                   <span class="tf-t tf-mono">{artifact.title}</span>
                   <span class="tf-rend">
-                    {#if artifact.meta !== null}<span class="tf-dim">{artifact.meta}</span>{/if}
+                    {#if artifact.meta !== null}<span class="tf-dim tf-rowval">{artifact.meta}</span>{/if}
                     {#if artifact.url !== null}
-                      <button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button>
+                      <span class="tf-rowend"><span class="tf-rowacts"><button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button></span></span>
                     {/if}
                   </span>
                 </div>
