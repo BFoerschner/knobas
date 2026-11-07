@@ -2695,12 +2695,66 @@ Retina to points), `press <label> [n]`, `focus <label> [n]`, `click-at
 | `./live-shot.sh` | Screenshots of the real app against live products (#1483): `just demo` with in-memory secrets, a steps file of `shot`/`press`/`focus`/`click-at`/`type`/`key`, the knobas window only. Takes the screen and the witness's lock; not part of `just check`. See *Screenshots of the real app*. |
 | `./desktop-witness-test.sh` | The witness's own unit tests, over `desktop-witness-lib.sh` -- the Launch Services path comparison, the accessibility probe's reading, and the pure halves of the `open-in-editor` and `capture` drivers, and that every driver's landing has its DOM replay in `App.test.svelte.ts` (#1968). No screen, no bundle, no macOS. `just witness-unit`, and part of `just check`. |
 | `./reset` | `down -v` every profile, and delete the seed's outputs. |
+| `./ui-checks/` | The press trips, the screenshot comparison and the real-window driver, from the UX polish loop. Not part of `just check`. See *UI checks*. |
 
 One script outside this folder belongs to the same family, since it measures the app rather than a product:
 
 | Script | Does |
 |---|---|
 | `scripts/keep-alive-budget.sh <slot>` | Keep-alive's budget and memory witness (#2250): `just keep-alive-budget <slot>`. Headless Chrome against the `?fake-ipc` dev server on `5300 + slot` (reused when one is up), debug port `9400 + slot`. Times the return to the repository page's Files tab, a 10,000-line file open (`?fake-file-lines=10000`), after Commits: 7 runs, exit 1 when the median is over 50 ms (`KEEP_ALIVE_RETURNS`, `KEEP_ALIVE_BUDGET_MS`). Then the JS heap after a forced garbage collection and the DOM node count with five pages held (that page, Inbox, Builds, Docs, Time), at *Pages kept open* 0 and 5 (`?fake-pages-kept-open=<n>`), twice each. It prints `scripts/machine-load.sh`'s line first: a timing on a machine that line calls over is quoted beside it. Starts no product; not part of `just check`. |
+
+## UI checks
+
+`testenv/ui-checks/` holds three checks the UX polish loop (#2479) ran on every round. They caught regressions that the
+suite and the screenshots missed, so they are kept, but none is a gate and none starts a product: all three use the mock
+corpus under `?fake-ipc`.
+
+**The press trips** (`trips.mjs`, with `chrome.mjs` beside it): about 210 trips a person makes, written by hand in the
+table at the top of `trips.mjs`, in headless Chrome against a built app. A press twice by key and by pointer, a walk down
+a list by mouse, a leave and a return while a toast is up, an *Undo* on a stale toast, typing into a dialog, `Esc` in
+every field, the way back by the nav, ⌘F. Each kind and what fails it is in the file's header. Build the app in
+development mode (so `?fake-ipc` is there), serve it for the one command, and run:
+
+```sh
+testenv/ui-checks/build-app.sh . "$TMPDIR/knobas-built"
+testenv/ui-checks/with-built.sh "$TMPDIR/knobas-built" 5340 node testenv/ui-checks/trips.mjs "$TMPDIR/trips" --port 5340 --strict
+```
+
+It writes `trips.json` and `trips.md` to the out folder and exits 1 if a trip fails or can no longer find its control.
+`--only a,b` runs the trips whose id, kind, finding, page or route holds one of the words, `--workers n` sets the
+Chromes (2), and `--strict` adds the trips marked strict, which is how the loop ran it. `KNOBAS_CHROME` names another
+Chrome. `with-built.sh` serves the folder on 127.0.0.1 for the length of the command and refuses a port already taken.
+
+**The screenshot comparison** (`pixel-same.py`): given two folders of screenshots taken of the same screens on two
+heads, and the manifest that named them, it lists the screens whose pixels changed that nobody meant to change, most
+changed first. "Meant to" is a screen with `arrows` in the manifest, or one named as a whole word in a text passed with
+`--names-from`. It reads the PNGs with zlib alone, prints only, and exits 0 whatever it finds. The same build shot twice
+differs by up to about 540 px on a screen (a clock, a caret), so it draws a line at 600 px.
+
+```sh
+testenv/ui-checks/pixel-same.py <old shots> <new shots> <manifest.json> [--workers n] [--names-from notes.md ...]
+```
+
+**The real window** (`real-window.sh`, macOS): the debug app in its own window, its WKWebView and its menu, on the mock
+corpus, driven by real CGEvent input: pointer moves with real `movementX`, presses, drags, wheels and keys. It is what
+reaches the parts headless Chrome can't: a hover, a glide, a press guard that reads `movementX`, macOS's own text
+checking in a field, which key the app's menu takes, a link a press doesn't focus. A probe on the dev server's HMR
+socket reads the page back. The page's IPC bridge is renamed in the served modules, so the fake installs where the
+real one can't be replaced, and the window never talks to the demo profile's sources.
+
+```sh
+testenv/ui-checks/real-window.sh start                 # dev server on 1420 and target/debug/knobas-app --demo, window at 1440 x 900
+testenv/ui-checks/real-window.sh js 'location.hash'    # a value from the page
+testenv/ui-checks/real-window.sh ev move 400 225 click 1378 221 key f cmd type retry
+testenv/ui-checks/real-window.sh keys '#/page/confluence%3Asepa' .tf-doc .tf-rd-main
+testenv/ui-checks/real-window.sh tabs '#/inbox' 12
+testenv/ui-checks/real-window.sh stop
+```
+
+It needs a debug build (`just demo` once), `swiftc`, an Accessibility grant for the terminal, and port 1420 free; it
+refuses while another knobas runs. It takes the screen and the pointer while it runs, so it isn't for a Mac someone is
+using. `real-window/page-helpers.js` is what `js` can call as `window.__q` (where to press, what has focus, how far a
+box scrolled). A changed system setting such as Full Keyboard Access is read at launch: `restart` after changing one.
 
 ## mockd's documented deviations
 
