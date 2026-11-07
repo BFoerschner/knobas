@@ -1,7 +1,7 @@
 /** `focus-keep`: a control that goes away doesn't drop the reader's place on the body. */
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { installFocusKeep } from "./focus-keep";
+import { installFocusKeep, installKeysHere } from "./focus-keep";
 import { restorePlace } from "./return-place";
 
 let off: () => void = () => {};
@@ -361,4 +361,148 @@ test("a button whose whole group went gives focus to the heading rather than a p
   await settle();
   expect(document.activeElement).toBe(heading);
   expect(scroller.hasAttribute("tabindex")).toBe(false);
+});
+
+/** A press leaves a pointer here; a box leaves the keys here. */
+function pressOn(el: Element, type = "pointerdown"): void {
+  el.dispatchEvent(new Event(type, { bubbles: true }));
+}
+
+const readingKey = (key: string): KeyboardEvent => new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+
+function scroller(): { main: HTMLElement; box: HTMLElement; pane: HTMLElement; text: HTMLElement } {
+  const { row } = page();
+  const main = document.querySelector<HTMLElement>(".tf-main")!;
+  const box = document.createElement("section");
+  box.className = "tf-scroller";
+  box.tabIndex = -1;
+  const text = document.createElement("p");
+  text.textContent = "Words to read";
+  box.append(text);
+  const pane = document.createElement("aside");
+  pane.className = "pane";
+  pane.tabIndex = -1;
+  row(0).closest(".tf-kept")!.append(box, pane);
+  return { main, box, pane, text };
+}
+
+test("a scroller with focus counts as nothing: what falls in it still hands focus on", async () => {
+  const { box } = scroller();
+  const held = document.createElement("button");
+  held.textContent = "Sync now";
+  box.append(held);
+  held.focus();
+  box.focus();
+  held.remove();
+  await settle();
+  expect(document.activeElement, "the page's heading, as from the page scroller").toBe(document.querySelector("h1"));
+});
+
+test("a press a webview gave to the box around a control still hands focus on when the control falls", async () => {
+  const { pane } = scroller();
+  const group = document.createElement("div");
+  const pressed = document.createElement("button");
+  pressed.textContent = "Delete…";
+  const beside = document.createElement("button");
+  beside.textContent = "Move…";
+  group.append(pressed, beside);
+  pane.append(group);
+  // WebKit's press: focus to the nearest box that takes it, and a click on the button.
+  pane.focus();
+  pressed.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  pressed.remove();
+  await settle();
+  expect(document.activeElement).toBe(group);
+});
+
+test("a press in a box's words leaves no place to hand on from", async () => {
+  const { box, text } = scroller();
+  pressOn(text);
+  box.focus();
+  text.remove();
+  await settle();
+  expect(document.activeElement).toBe(box);
+});
+
+describe("the box you pressed in holds the keys", () => {
+  let offKeys: () => void = () => {};
+  beforeEach(() => {
+    offKeys = installKeysHere();
+  });
+  afterEach(() => offKeys());
+
+  test("a reading key with focus on nothing goes to the shown page's scroller", () => {
+    const { box } = scroller();
+    window.dispatchEvent(readingKey("PageDown"));
+    expect(document.activeElement).toBe(box);
+  });
+
+  test("a page with no inner scroller gets its page scroller, so the tree's arrows still walk", () => {
+    const { main } = (() => {
+      page();
+      return { main: document.querySelector<HTMLElement>(".tf-main")! };
+    })();
+    window.dispatchEvent(readingKey("ArrowDown"));
+    expect(document.activeElement).toBe(main);
+  });
+
+  test("a wheel over the pane names it, and a wheel elsewhere takes that back", () => {
+    const { main, box, pane } = scroller();
+    pressOn(pane, "wheel");
+    window.dispatchEvent(readingKey("ArrowDown"));
+    expect(document.activeElement).toBe(pane);
+    pane.blur();
+    pressOn(main, "wheel");
+    window.dispatchEvent(readingKey("ArrowDown"));
+    expect(document.activeElement).toBe(box);
+  });
+
+  test("a nav entry that kept focus hands over to the page on the first reading key, and not on Esc", () => {
+    const { box } = scroller();
+    const top = document.createElement("header");
+    top.className = "tf-top";
+    const entry = document.createElement("a");
+    entry.href = "#/docs";
+    top.append(entry);
+    document.body.append(top);
+    entry.focus();
+    window.dispatchEvent(readingKey("Escape"));
+    expect(document.activeElement).toBe(entry);
+    window.dispatchEvent(readingKey("PageDown"));
+    expect(document.activeElement).toBe(box);
+  });
+
+  test("a control or a field keeps its keys", () => {
+    const { box } = scroller();
+    const field = document.createElement("input");
+    box.append(field);
+    field.focus();
+    window.dispatchEvent(readingKey(" "));
+    expect(document.activeElement).toBe(field);
+    const pressed = buttonIn(document.querySelector("tr")!, "Hide");
+    pressed.focus();
+    window.dispatchEvent(readingKey("ArrowDown"));
+    expect(document.activeElement).toBe(pressed);
+  });
+
+  test("an open dialog owns the keys, and a modified key is not a reading key", () => {
+    const { main } = scroller();
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", metaKey: true, bubbles: true }));
+    expect(document.activeElement).toBe(document.body);
+    const dialog = document.createElement("div");
+    dialog.className = "tf-modal";
+    main.append(dialog);
+    window.dispatchEvent(readingKey("PageDown"));
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  test("a heading is nothing too, but one inside the box stays", () => {
+    const { box } = scroller();
+    const inside = document.createElement("h1");
+    inside.tabIndex = -1;
+    box.append(inside);
+    inside.focus();
+    window.dispatchEvent(readingKey("PageDown"));
+    expect(document.activeElement).toBe(inside);
+  });
 });

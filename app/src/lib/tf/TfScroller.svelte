@@ -10,6 +10,9 @@
   `class` names the scroller, not the host, because `TfDiffView` and the tests look a scroller up by its name. A
   container name goes on the host from the stylesheet (`.tf-shost:has(> .tf-bmain)`). Attributes and attachments reach
   the scroller. `ref` is the scroller's element.
+
+  It takes focus without being a stop on the way through the page, so a press in its text leaves PageDown, Space and the
+  arrows here (*The box you pressed in holds the keys*, `focus-keep.ts`). It draws no ring (`chrome.css`).
 -->
 <script lang="ts">
   import type { Snippet } from "svelte";
@@ -29,7 +32,7 @@
 </script>
 
 <div class="tf-shost">
-  <section class="tf-scroller {scroller}" bind:this={ref} {...rest}>
+  <section class="tf-scroller {scroller}" tabindex="-1" bind:this={ref} {...rest}>
     <div class="tf-sclip"><div class="tf-sbody">{@render children()}</div></div>
   </section>
 </div>

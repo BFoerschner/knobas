@@ -648,12 +648,6 @@
       </div>
     </div>
   {/if}
-  {#if report !== null}
-    {@const note = connectionNote(report)}
-    <div class="tf-stg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
-      <b>Found when tested:</b> {connectionLine(report)}{note ? `. ${note}` : ""}
-    </div>
-  {/if}
   <div class="tf-stg-acts">
     <button class="tf-btn tf-sm" disabled={testing} onclick={() => void test()}>Test connection</button>
     <button class="tf-btn tf-sm tf-primary" disabled={!dirty || saving} onclick={() => void save()}>Save connection</button>
@@ -662,6 +656,13 @@
       <button class="tf-btn tf-sm tf-ghost" aria-label="Reset the connection" onclick={resetConnection}>Reset</button>
     {/if}
   </div>
+  <!-- Under the buttons, so what a test found doesn't move them from under the pointer that pressed one (F-658). -->
+  {#if report !== null}
+    {@const note = connectionNote(report)}
+    <div class="tf-stg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
+      <b>Found when tested:</b> {connectionLine(report)}{note ? `. ${note}` : ""}
+    </div>
+  {/if}
 </section>
 
 <section class="tf-stg-sec">

@@ -18,6 +18,9 @@
  *
  * A pressed button doesn't take focus in every webview, so a press counts as being on that control. A dialog it opened
  * then has nothing to give focus back to, and the keeper does that once the dialog has gone (`shared-radio-enter`).
+ * Such a webview gives focus to the nearest box that takes it, so a box that holds what fell counts as nothing here.
+ *
+ * **The box you pressed in holds the keys** (design system, Keys) is {@link installKeysHere}, below.
  */
 import { placeRestoring } from "./return-place";
 
@@ -30,6 +33,10 @@ const CONTROL = 'a[href], button:not([disabled]), input:not([disabled]), select:
 const WAIT_FOR_HEADING = 1500;
 /** What a control with no row can hand focus back to stops here: the page has its heading for that, and a pane's scroller would draw a clipped ring (F-649). */
 const PAGE = ".tf-main, .tf-kept, .tf-scroller, body";
+/** What holds the keys after a press in its text or a wheel over it: a page's inner scroller, and the asset pane. */
+const BOX = ".tf-scroller, .pane";
+/** What a page moves by, with no modifier but `Shift`. */
+const READING_KEYS = new Set(["PageDown", "PageUp", " ", "Home", "End", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]);
 
 const later = (run: () => void): number => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : (setTimeout(run, 16) as unknown as number));
 const stop = (handle: number): void => {
@@ -165,10 +172,49 @@ function nextFor(held: Held): HTMLElement | null {
 function focusFree(held: HTMLElement | null = null): boolean {
   const at = document.activeElement;
   if (at === null || at === document.body || at === document.documentElement || at === held) return true;
-  return at.matches(".tf-main") || at.closest("[hidden]") !== null;
+  return at.matches(".tf-main, .tf-scroller") || at.closest("[hidden]") !== null;
 }
 
 const dialogUp = (): boolean => document.querySelector(".tf-modal") !== null;
+
+/** The shown page's box for reading keys when no press or wheel named one: its inner scroller, the one with somewhere to go first, else the page scroller. */
+function readingBox(): HTMLElement | null {
+  const inner = [...(shownPage()?.querySelectorAll<HTMLElement>(".tf-scroller") ?? [])];
+  return inner.find((el) => el.scrollHeight > el.clientHeight) ?? inner[0] ?? document.querySelector<HTMLElement>(".tf-main");
+}
+
+/**
+ * **The box you pressed in holds the keys** (design system, Keys). A press in a box's text focuses it by itself, since it
+ * takes focus (F-564, F-463). This covers what that leaves: a wheel over a box, a page opened by a tile or an address, a
+ * nav press, whose focus stays on the entry, and a webview that gave the press no focus. The first reading key with focus
+ * on nothing moves focus to the box last pressed in or wheeled over, else to the shown page's, before the key acts.
+ *
+ * Asked at the key and not at the wheel or the opening, so a page that puts focus somewhere itself is never raced, and a
+ * selection isn't touched by a wheel. It stops at a control or a field, which keep their keys, at an open dialog or drawer,
+ * and at a press or a wheel outside a box, so a wheel over a tree's column leaves `↓` to the walk.
+ */
+export function installKeysHere(): () => void {
+  let aimed: HTMLElement | null = null;
+  const aim = (event: Event) => {
+    aimed = event.target instanceof Element ? event.target.closest<HTMLElement>(BOX) : null;
+  };
+  const onkey = (event: KeyboardEvent) => {
+    if (!READING_KEYS.has(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+    const at = document.activeElement;
+    const nothing = at === null || at === document.body || at.matches('.tf-main, .tf-scroller, .tf-top a, h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
+    if (!nothing || document.querySelector(".tf-modal, .tf-drawer") !== null) return;
+    const box = aimed?.isConnected && aimed.closest("[hidden]") === null ? aimed : readingBox();
+    if (box !== null && !box.contains(at)) box.focus({ preventScroll: true });
+  };
+  window.addEventListener("pointerdown", aim, true);
+  window.addEventListener("wheel", aim, { capture: true, passive: true });
+  window.addEventListener("keydown", onkey, true);
+  return () => {
+    window.removeEventListener("pointerdown", aim, true);
+    window.removeEventListener("wheel", aim, true);
+    window.removeEventListener("keydown", onkey, true);
+  };
+}
 
 /** Keeps focus on the page through presses and moves. Returns what takes it off. */
 export function installFocusKeep(): () => void {
@@ -191,7 +237,7 @@ export function installFocusKeep(): () => void {
       if (closed && byKey && focusFree()) headingOf(shownPage())?.focus({ preventScroll: true });
       return;
     }
-    if (!focusFree(held.control)) return;
+    if (!focusFree(held.control) && !held.above.includes(document.activeElement as HTMLElement)) return;
     const gone = fell(held);
     if (!gone && !closed) return;
     const next = gone ? nextFor(held) : held.control;
@@ -208,6 +254,8 @@ export function installFocusKeep(): () => void {
     const target = event.target;
     // A dialog drawn inside a page gives focus back itself. What stays noted is what opened it, in case that goes with the answer.
     if (!(target instanceof HTMLElement) || target.closest(KEPT) === null || target.closest(".tf-modal") !== null) return;
+    // A box is no place of the reader's to hand on from: what it holds is the page's.
+    if (target.matches(BOX)) return;
     held = note(target);
   };
   // Focus went because the reader moved it: a click on nothing, or `Esc` out of a field. Asked once the DOM work of this

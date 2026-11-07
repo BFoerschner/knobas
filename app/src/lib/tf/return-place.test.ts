@@ -180,3 +180,20 @@ test("a return with nothing to focus lets go of focus after a first look, and a 
   expect(document.activeElement).toBe(page.querySelector("a"));
   end();
 });
+
+test("an inner scroller holding focus is free to take: a press in a run's text, then Esc, still lands on the run's row (F-564)", () => {
+  const { main, page } = draw(`<section class="tf-scroller" tabindex="-1"><table><tr><td><a id="run" href="#/run/1">Run</a></td></tr></table></section>`);
+  const box = page.querySelector<HTMLElement>(".tf-scroller")!;
+  const place = capturePlace(main, page, page.querySelector("#run"), "#/run/1");
+  box.focus();
+  restorePlace(place, page)();
+  expect(document.activeElement?.id).toBe("run");
+});
+
+test("a box that holds the keys is not what was pressed: a press in its words finds the row, not the whole of its text", () => {
+  const { main, page } = draw(`<section class="tf-scroller" tabindex="-1"><table><tr><td id="cell">name</td><td><a id="own" href="#/pr/1">PR</a></td></tr></table></section>`);
+  const place = capturePlace(main, page, page.querySelector("#cell"), "#/pr/1");
+  expect(place.said).toBeNull();
+  restorePlace(place, page)();
+  expect(document.activeElement?.id).toBe("own");
+});

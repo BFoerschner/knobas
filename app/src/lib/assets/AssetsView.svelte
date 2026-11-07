@@ -2121,7 +2121,7 @@
       {/each}
     </svg>
 
-    <aside class="pane" bind:this={paneEl}>
+    <aside class="pane" tabindex="-1" bind:this={paneEl}>
       {#if detail === null}
         <p class="empty paneempty">
           {loaded ? "Select an asset to see what it holds." : "Reading…"}

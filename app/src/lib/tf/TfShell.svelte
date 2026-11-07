@@ -85,7 +85,7 @@
   import { PAGES } from "./pages";
   import { capturePlace, resetScrolls, restorePlace, type Place } from "./return-place";
   import { installRowRoom } from "./row-room";
-  import { installFocusKeep } from "./focus-keep";
+  import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { installFindKey } from "./filter-keys";
   import { installPressGuard } from "./press-guard";
   import { isTopPage, parentOf, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
@@ -724,6 +724,7 @@
   onMount(() => installFindKey(() => onsearch(sectionFilter(route))));
   onMount(() => installRowRoom());
   onMount(() => installFocusKeep());
+  onMount(() => installKeysHere());
   onMount(() => {
     const onhash = () => arrive();
     window.addEventListener("hashchange", onhash);

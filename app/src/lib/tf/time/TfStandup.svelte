@@ -371,6 +371,9 @@
         if (which === "person") addPerson(addText);
         else edit(withActionItem(bodyMd, addText));
         addText = "";
+        // What was added has just taken room above the field, which keeps focus: all of it in view for the next one, as a composer after a send (F-372).
+        const field = event.currentTarget as HTMLElement;
+        void tick().then(() => field.scrollIntoView?.({ block: "nearest" }));
         return;
       }
       adding = null;
