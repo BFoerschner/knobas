@@ -199,8 +199,10 @@ export function installKeysHere(): () => void {
     aimed = event.target instanceof Element ? event.target.closest<HTMLElement>(BOX) : null;
   };
   const onkey = (event: KeyboardEvent) => {
-    if (!READING_KEYS.has(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
     const at = document.activeElement;
+    // `Tab` starts where it starts from the page scroller, or it would throw a scrolled column back to its first control.
+    if (event.key === "Tab" && at?.matches(".tf-scroller")) document.querySelector<HTMLElement>(".tf-main")?.focus({ preventScroll: true });
+    if (!READING_KEYS.has(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
     const nothing = at === null || at === document.body || at.matches('.tf-main, .tf-scroller, .tf-top a, h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
     if (!nothing || document.querySelector(".tf-modal, .tf-drawer") !== null) return;
     const box = aimed?.isConnected && aimed.closest("[hidden]") === null ? aimed : readingBox();
@@ -306,8 +308,9 @@ export function installFocusKeep(): () => void {
         if (performance.now() - started < WAIT_FOR_HEADING) waiting = later(step);
         return;
       }
-      // The nav link it was pressed on is no place to read from: `Tab` goes on into the page (F-052).
-      if (!focusFree() && document.activeElement?.closest(".tf-nav") == null) return;
+      // The nav link it was pressed on is no place to read from: `Tab` goes on into the page (F-052). Nor is the pane a move by key left behind: at `#/assets` it holds nothing, and `↓` would be dead.
+      const at = document.activeElement;
+      if (!focusFree() && at?.closest(".tf-nav") == null && !at?.matches(".pane")) return;
       if (placeRestoring()) {
         started = performance.now();
         waiting = later(step);

@@ -152,12 +152,13 @@ function reworded(place: Place): boolean {
 }
 
 /**
- * Whether focus is free to take: on nothing, on the page scroller or an inner one a press in empty space left it on, on the heading the focus
+ * Whether focus is free to take: on nothing, on the page scroller, an inner one or the asset pane a press in empty space left it on, on the heading the focus
  * keeper puts it on while a return has nothing to focus yet, or left behind on a page now hidden. A dialog or a field the reader went to is not.
+ * The pane keeps `↓` while the reader stays, but a return has moved on: at `#/assets` it holds nothing, and `↓` would be dead.
  */
 function focusIsFree(main: Element): boolean {
   const at = document.activeElement;
-  return at === null || at === document.body || at === main || at.matches('.tf-scroller, h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
+  return at === null || at === document.body || at === main || at.matches('.tf-scroller, .pane, h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
 }
 
 const later = (run: () => void): void => {

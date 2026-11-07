@@ -193,7 +193,7 @@
 .tf-su-publine.tf-su-pubchanged { border-left-color: var(--warn); color: var(--ink); }
 .tf-su-people { display: flex; flex-wrap: wrap; gap: var(--control-gap); align-items: center; margin-bottom: 8px; }
 .tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--field); color: var(--ink); font-size: var(--t-sm); }
-.tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
+.tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; scroll-margin-block: 8px; }
 .tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }
 .tf-su-pn textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--field); color: var(--ink); font: inherit; font-size: var(--t-md); resize: vertical; }
 .tf .tf-su-gap { margin-top: 12px; }

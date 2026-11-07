@@ -190,6 +190,14 @@ test("an inner scroller holding focus is free to take: a press in a run's text, 
   expect(document.activeElement?.id).toBe("run");
 });
 
+test("the asset pane holding focus is free to a return: Esc from it lands on the row, so the next key isn't dead", () => {
+  const { main, page } = draw(`<ol><li><a id="row" href="#/asset/a">A</a></li></ol><aside class="pane" tabindex="-1">Words</aside>`);
+  const place = capturePlace(main, page, page.querySelector("#row"), "#/asset/a");
+  page.querySelector<HTMLElement>(".pane")!.focus();
+  restorePlace(place, page)();
+  expect(document.activeElement?.id).toBe("row");
+});
+
 test("a box that holds the keys is not what was pressed: a press in its words finds the row, not the whole of its text", () => {
   const { main, page } = draw(`<section class="tf-scroller" tabindex="-1"><table><tr><td id="cell">name</td><td><a id="own" href="#/pr/1">PR</a></td></tr></table></section>`);
   const place = capturePlace(main, page, page.querySelector("#cell"), "#/pr/1");

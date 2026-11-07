@@ -424,6 +424,15 @@ test("a press in a box's words leaves no place to hand on from", async () => {
   expect(document.activeElement).toBe(box);
 });
 
+test("a move by key leaves no focus behind on the asset pane, which may hold nothing at the new address", async () => {
+  const { pane } = scroller();
+  window.dispatchEvent(readingKey("Escape"));
+  pane.focus();
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  await settle();
+  expect(document.activeElement).toBe(document.querySelector("h1"));
+});
+
 describe("the box you pressed in holds the keys", () => {
   let offKeys: () => void = () => {};
   beforeEach(() => {
@@ -494,6 +503,16 @@ describe("the box you pressed in holds the keys", () => {
     main.append(dialog);
     window.dispatchEvent(readingKey("PageDown"));
     expect(document.activeElement).toBe(document.body);
+  });
+
+  test("Tab from a scroller starts from the page scroller, and from the pane it stays in the pane", () => {
+    const { main, box, pane } = scroller();
+    box.focus();
+    window.dispatchEvent(readingKey("Tab"));
+    expect(document.activeElement).toBe(main);
+    pane.focus();
+    window.dispatchEvent(readingKey("Tab"));
+    expect(document.activeElement).toBe(pane);
   });
 
   test("a heading is nothing too, but one inside the box stays", () => {
