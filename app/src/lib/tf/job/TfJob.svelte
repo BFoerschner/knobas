@@ -620,7 +620,7 @@
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
   <div class="tf-full tf-ticketpage">
-  <!-- While the steps are a panel, `Esc` closes them and stays on this ticket, so the hint names the ticket with no link. -->
+  <!-- While the steps are a panel, `Esc` closes them and stays on this ticket, so the hint names the ticket, and a press closes them too (F-153). -->
   <TfCrumbs parts={[{ name: "Tickets", href: sectionHash("tickets") }, { name: key }]} back={stepsArePanel ? { name: key } : back} />
   <div class="tf-ws" {@attach cardSide}>
     <TfJobCard
