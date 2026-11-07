@@ -87,6 +87,7 @@
   import { installRowRoom } from "./row-room";
   import { installFocusKeep, installKeysHere } from "./focus-keep";
   import { installFindKey } from "./filter-keys";
+  import { installPlainTyping } from "./plain-typing";
   import { installPressGuard } from "./press-guard";
   import { isTopPage, itemOf, parentOf, parseTfHash, reopens, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
@@ -752,6 +753,7 @@
   onMount(() => installPressGuard());
   onMount(() => installFindKey(() => onsearch(sectionFilter(route))));
   onMount(() => installRowRoom());
+  onMount(() => installPlainTyping());
   onMount(() => installFocusKeep());
   onMount(() => installKeysHere());
   onMount(() => {

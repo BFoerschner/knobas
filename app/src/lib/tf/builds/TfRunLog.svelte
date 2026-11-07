@@ -156,11 +156,46 @@
     if (open !== (toggled[index] ?? null)) toggled[index] = open;
   }
 
+  let bar: HTMLDivElement | undefined = $state();
+
+  /** The top of what is in view: under the find row while it sticks, else the scroller's own top. */
+  function viewTop(): number {
+    const scroller = viewer?.closest<HTMLElement>(".tf-scroller, .tf-main");
+    return Math.max(scroller?.getBoundingClientRect().top ?? 0, bar?.getBoundingClientRect().bottom ?? 0);
+  }
+
+  /** The number of the first drawn line at or below the reading line, as the find bar reads it; 0 at the log's top. */
+  function readingLine(): number {
+    const top = viewTop();
+    const line = [...(viewer?.querySelectorAll<HTMLElement>(".tf-ll") ?? [])].find((el) => el.getBoundingClientRect().bottom > top + 1);
+    return Number(line?.dataset["n"] ?? 0);
+  }
+
   function find(event: Event) {
+    const from = readingLine();
     typed = (event.currentTarget as HTMLInputElement).value;
-    current = 0;
     // A new find opens every step with a match: the reader's folds give way.
     toggled = {};
+    // The design system's find (Round 17): typed words go to the first match at or below the reading line, past the last
+    // back to the first, and the page moves only if that match is out of view.
+    let at = 0;
+    let line: number | undefined;
+    for (const [number, first] of hits.first) {
+      if (number >= from) {
+        at = first;
+        line = number;
+        break;
+      }
+    }
+    line ??= hits.first.keys().next().value;
+    current = at;
+    const found = line === undefined ? undefined : log?.lines.find((l) => l.number === line);
+    if (found === undefined) return;
+    void tick().then(() => {
+      const mark = viewer?.querySelector("mark.tf-curm")?.getBoundingClientRect();
+      const bottom = viewer?.closest<HTMLElement>(".tf-scroller, .tf-main")?.getBoundingClientRect().bottom ?? innerHeight;
+      if (mark === undefined || mark.top < viewTop() || mark.bottom > bottom) show("mark.tf-curm", found);
+    });
   }
 
   /** Opens `line`'s step, draws the line if the window left it out, and scrolls `selector` to the middle. */
@@ -208,7 +243,7 @@
   </div>
 {/snippet}
 
-<div class="tf-logbar">
+<div class="tf-logbar" bind:this={bar}>
   <label class="tf-fsearch">
     <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
       ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg

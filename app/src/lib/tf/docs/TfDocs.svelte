@@ -1471,6 +1471,7 @@
     id="tf-docs-tree"
     class="tf-rd-tree"
     aria-label="Docs"
+    data-reading-rail
     tabindex="-1"
     bind:this={treeNav}
     onkeydown={ondrawerkey}

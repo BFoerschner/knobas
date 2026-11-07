@@ -63,6 +63,7 @@ export function phrase(item: Pick<InboxItem, "reason" | "title">): string {
   const reason = item.reason.trim();
   const title = item.title.trim();
   if (title === "" || reason.toLowerCase().includes(title.toLowerCase())) return reason;
+  if (reason === "") return title;
   return `${title}: ${reason}`;
 }
 

@@ -34,6 +34,8 @@
 .tf-bsel:has(select:disabled) { opacity: .55; }
 /* *New pull request* and the branch picker sit in the header's row as its own items. On Compare they hold their room unseen, so the tabs under the header hold still (F-249). */
 .tf-repohold { display: contents; }
+/* A rendered file's words, for its find bar; it draws nothing of its own. */
+.tf-rendered { display: contents; }
 /* A pull request on its way: its title dimmed as a queued thing is, and nothing to open yet (F-242). */
 .tf-rsent .tf-rowt { color: var(--ink-2); font-weight: 500; }
 .tf-repohold.tf-held { visibility: hidden; }

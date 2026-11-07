@@ -495,6 +495,25 @@ describe("the box you pressed in holds the keys", () => {
     expect(document.activeElement).toBe(box);
   });
 
+  test("a reading rail's row hands PageDown and Space to the page it opened, and keeps the arrows for its walk (Round 17)", () => {
+    const { box } = scroller();
+    const rail = document.createElement("nav");
+    rail.setAttribute("data-reading-rail", "");
+    const row = document.createElement("a");
+    row.href = "#/page/one";
+    rail.append(row);
+    document.body.append(rail);
+    pressOn(row, "pointerdown");
+    row.focus();
+    window.dispatchEvent(readingKey("ArrowDown"));
+    expect(document.activeElement).toBe(row);
+    window.dispatchEvent(readingKey("PageDown"));
+    expect(document.activeElement).toBe(box);
+    row.focus();
+    window.dispatchEvent(readingKey(" "));
+    expect(document.activeElement).toBe(box);
+  });
+
   test("a control or a field keeps its keys", () => {
     const { box } = scroller();
     const field = document.createElement("input");

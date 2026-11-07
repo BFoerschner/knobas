@@ -126,6 +126,7 @@
   import { layers } from "../layers.svelte";
   import { fileMeta, goToFile, treeKey, treeRows } from "./file-tree";
   import TfFileMore from "./TfFileMore.svelte";
+  import TfFindBar from "../TfFindBar.svelte";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -591,6 +592,8 @@
   // A line is 13 px at 1.6.
   const win = new Windowed<number>({ count: () => lines.length, key: (i) => i, estimate: 20.8, from: WHOLE_UP_TO + 1 });
   let code = $state<HTMLElement | null>(null);
+  /** A rendered file's words (a README, a diagram, a command's output), for ⌘F's find bar: a person reading it means words, not *Go to file*'s names (Round 17). */
+  let rendered = $state<HTMLElement | null>(null);
 
   /** What takes the file and what it opens with (#2254, #2263): the default for its pattern, else the registry's first. */
   const opened = $derived(drawn === null ? null : openWith(drawn, allRenderers(), defaults.list));
@@ -1266,11 +1269,13 @@
       {:else if image !== null}
         <TfBytesImage read={image.read} path={drawn.path} size={image.bytes.length} />
       {:else if drawAs === "markdown"}
-        <TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} />
+        <div class="tf-rendered" bind:this={rendered}><TfMarkdown text={drawn.text} base={parentOf(file.path)} {fileLink} {render} image={imageRead} /></div>
+        <TfFindBar root={() => rendered} within="in this file" />
       {:else if drawAs === "mermaid" || drawAs === "d2" || drawAs === "graphviz"}
         <TfDiagram engine={drawAs} code={drawn.text} {render} />
       {:else if renderer !== null && drawAs === renderer.id && commandIdOf(renderer) !== null}
-        <TfCommandOutput {renderer} text={drawn.text} {commands} />
+        <div class="tf-rendered" bind:this={rendered}><TfCommandOutput {renderer} text={drawn.text} {commands} /></div>
+        <TfFindBar root={() => rendered} within="in this file" />
       {:else}
         <div class="tf-findbar">
           <label class="tf-fsearch">

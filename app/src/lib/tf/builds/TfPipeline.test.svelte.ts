@@ -12,6 +12,7 @@ import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
 import { health } from "../../shell/health.svelte";
 import { toasts } from "../../shell/toasts.svelte";
+import { reset as resetWriteQueue, writeQueuePanel } from "../../shell/write-queue.svelte";
 import { echoEvents, echoFollower } from "../echo-events.fixture";
 import { forgetEchoes, echoWrite, echoesOn } from "../queued.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
@@ -380,7 +381,7 @@ test("Run on queues one run on that branch and draws it queued at once, never as
   ]);
   const first = target.querySelector(".tf-runs tbody tr")!;
   expect(first.querySelector(".tf-run-no")?.textContent).toContain("Queued");
-  expect(first.textContent).toContain("waiting");
+  expect(first.textContent).toContain("in the write queue");
   expect(first.textContent).toContain("feature/PAY-231-sepa-retry");
 });
 
@@ -501,7 +502,7 @@ test("the page stops listening when it goes", async () => {
 
 // -- runs queued on the run page (#1449) ------------------------------------------
 
-const runNos = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.querySelector("b")?.textContent);
+const runNos = () => [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no")].map((td) => td.querySelector("b, .tf-chip")?.textContent);
 
 test("a run queued on the run page is one queued row at the top; another pipeline draws none for it", async () => {
   echoWrite(PIPELINE.entity_id, QUEUED_RUN, "feature/PAY-231-sepa-retry", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
@@ -509,7 +510,7 @@ test("a run queued on the run page is one queued row at the top; another pipelin
   await settle();
   expect(runNos().slice(0, 2)).toEqual(["Queued", "#1187"]);
   expect(firstRow().textContent).toContain("feature/PAY-231-sepa-retry");
-  expect(firstRow().textContent).toContain("waiting");
+  expect(firstRow().textContent).toContain("in the write queue");
   expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
 
   drawn.goPipeline({ ...PIPELINE, entity_id: "teamcity:buildType:Payout_Build", name: "Payout_Build" });
@@ -572,14 +573,19 @@ test("a click anywhere on a run row opens the run; its Log link and Run again…
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
 });
 
-test("a click on a queued row opens nothing: there is no run yet", async () => {
+test("a click on a queued row opens the write queue, where it is: there is no run yet (F-352)", async () => {
   location.hash = "#/builds";
+  resetWriteQueue();
   echoWrite(PIPELINE.entity_id, QUEUED_RUN, "", { write: { id: 77 }, base: "teamcity:build:1187", many: true });
   draw();
   await settle();
+  expect(writeQueuePanel.open).toBe(false);
   (firstRow() as HTMLElement).querySelector<HTMLElement>(".tf-run-br")!.click();
   expect(location.hash).toBe("#/builds");
-  expect(firstRow().classList.contains("tf-row")).toBe(false);
+  expect(writeQueuePanel.open).toBe(true);
+  expect(firstRow().querySelector(".tf-chip")?.textContent).toBe("Queued");
+  expect(firstRow().textContent).toContain("in the write queue");
+  resetWriteQueue();
 });
 
 test("the run number stays the keyboard's link to the run", async () => {

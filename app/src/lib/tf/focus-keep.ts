@@ -37,6 +37,10 @@ const PAGE = ".tf-main, .tf-kept, .tf-scroller, body";
 const BOX = ".tf-scroller, .pane";
 /** What a page moves by, with no modifier but `Shift`. */
 const READING_KEYS = new Set(["PageDown", "PageUp", " ", "Home", "End", "ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]);
+/** What turns a page, which a row in a reading rail hands on: the arrows stay the rail's, to walk its rows. */
+const PAGE_KEYS = new Set(["PageDown", "PageUp", " "]);
+/** A rail of links beside what they open, as Docs' tree and its search hits are: a press there opens a page to read. */
+const READING_RAIL = "[data-reading-rail] a[href]";
 
 const later = (run: () => void): number => (typeof requestAnimationFrame === "function" ? requestAnimationFrame(run) : (setTimeout(run, 16) as unknown as number));
 const stop = (handle: number): void => {
@@ -203,9 +207,11 @@ export function installKeysHere(): () => void {
     // `Tab` starts where it starts from the page scroller, or it would throw a scrolled column back to its first control.
     if (event.key === "Tab" && at?.matches(".tf-scroller")) document.querySelector<HTMLElement>(".tf-main")?.focus({ preventScroll: true });
     if (!READING_KEYS.has(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
-    const nothing = at === null || at === document.body || at.matches('.tf-main, .tf-scroller, .tf-top a, h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
+    // A row of a reading rail keeps `↓` for its walk and hands the page keys on (Round 17: PageDown after opening a Docs page from its tree moved nothing).
+    const railRow = at?.matches(READING_RAIL) === true && PAGE_KEYS.has(event.key);
+    const nothing = at === null || at === document.body || railRow || at.matches('.tf-main, .tf-scroller, .tf-top a, h1[tabindex="-1"]') || at.closest("[hidden]") !== null;
     if (!nothing || document.querySelector(".tf-modal, .tf-drawer") !== null) return;
-    const box = aimed?.isConnected && aimed.closest("[hidden]") === null ? aimed : readingBox();
+    const box = !railRow && aimed?.isConnected && aimed.closest("[hidden]") === null ? aimed : readingBox();
     if (box !== null && !box.contains(at)) box.focus({ preventScroll: true });
   };
   window.addEventListener("pointerdown", aim, true);

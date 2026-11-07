@@ -15,6 +15,7 @@ import type { EntityRow, InboxItem } from "../ipc/entity";
 import { type LauncherAction, matchingPlaces } from "./actions";
 import type { SyntaxEntry } from "./syntax";
 import { keyOf } from "../time/format";
+import { detailOf, kindOf, sentence } from "../tf/inbox/inbox";
 
 /**
  * The shell's live inbox (#1418): the count the top bar reads and the stream's
@@ -210,9 +211,11 @@ export function ticketsFirst(response: SearchResponse): SearchResponse["groups"]
  * The inbox's lines (#2423, spec #2419 story 15): an answer the engine read
  * as `#i` (kind `inbox`, which nothing in the index emits) draws the shell's
  * inbox store, newest first, narrowed by the parse's words. A line is kept
- * when every word is in its title, ignoring case; under *Everything*
- * (`titles` off) its reason and its category count too, as a body does
- * (story 51): `#i review` finds the review requests either way. The kind is
+ * when every word is in what its Inbox row prints, its sentence and its second
+ * line's kind and detail (not its job, which the open jobs decide), ignoring case, so a word read on the row finds it (Round 17:
+ * a bare title is *jira* for "knobas-jira is down"). Under *Everything*
+ * (`titles` off) its category counts too, as a body does (story 51): `#i
+ * review` finds the review requests either way. The kind is
  * read off the backend's parse, never the box (ruling P2); the words are the
  * store's to match, since an inbox line is no entity the index holds (ruled
  * on the review of spec #2419, S4).
@@ -221,7 +224,8 @@ function inboxRows(response: SearchResponse, inbox: InboxPreview | null, titles:
   if (!inbox || !response.interpreted.filters.kinds.includes("inbox")) return [];
   const words = response.interpreted.text.toLowerCase().split(/\s+/u).filter(Boolean);
   const holds = (item: InboxItem) => {
-    const text = (titles ? item.title : `${item.title} ${item.reason} ${item.detail ?? ""} ${item.category.replaceAll("_", " ")}`).toLowerCase();
+    const printed = `${sentence(item)} ${kindOf(item.category)} ${detailOf(item) ?? ""}`;
+    const text = (titles ? printed : `${printed} ${item.title} ${item.reason} ${item.detail ?? ""} ${item.category.replaceAll("_", " ")}`).toLowerCase();
     return words.every((word) => text.includes(word));
   };
   return inbox.items

@@ -13,6 +13,7 @@
   import { aimed } from "./aim";
   import Row from "./Row.svelte";
   import { stateWord } from "../tf/state-word";
+  import { sentence } from "../tf/inbox/inbox";
   import { cellsOf } from "./cells";
   import { authorGaps, underGaps } from "./coverage";
   import { holdsAnswer, ticketsFirst, type LauncherRow } from "./rows";
@@ -164,7 +165,7 @@
       kindName="Inbox line"
       cell={clockLabel(row.item.occurred_at, now ?? new Date(), true)}
       mono
-      title={row.item.title}
+      title={sentence(row.item)}
       id={optionId(index)}
       selected={index === selected}
       onopen={() => onopen(row)}

@@ -1554,10 +1554,11 @@ test("hash i lists the inbox lines newest first and enter opens one", async () =
 });
 
 /**
- * Under *Titles* a word only in a line's reason or category finds nothing;
- * under *Everything* it finds the line (spec #2419 story 51, the titles flag).
+ * Under *Titles* a word printed on the line's Inbox row finds it, its reason as
+ * much as its title, since the row reads as one sentence (Round 17: *down* on
+ * "knobas-jira is down" found nothing); a word on no row finds nothing.
  */
-test("hash i under Titles matches the line's title alone, under Everything its reason too", async () => {
+test("hash i under Titles matches what the line's row prints, its reason too", async () => {
   const failed = { ...INBOX.items[1]!, reason: "Step deploy-staging exited 1" };
   open({
     inbox: { count: 1, items: [failed] },
@@ -1569,13 +1570,11 @@ test("hash i under Titles matches the line's title alone, under Everything its r
   await settle();
   const titles = () => [...target.querySelectorAll(".tf-ln-res")].map((row) => row.querySelector(".tf-ln-t")?.textContent);
   await search("#i staging");
+  expect(titles()).toEqual(["Build #1187 failed: Step deploy-staging exited 1"]);
+  await search("#i nowhere");
   expect(titles()).toEqual([]);
   await search("#i build");
-  expect(titles()).toEqual(["Build #1187 failed"]);
-  await search("#i staging");
-  press("d", { metaKey: true });
-  await settle();
-  expect(titles()).toEqual(["Build #1187 failed"]);
+  expect(titles()).toEqual(["Build #1187 failed: Step deploy-staging exited 1"]);
 });
 
 /**

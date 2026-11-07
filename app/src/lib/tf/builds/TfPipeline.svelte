@@ -37,6 +37,7 @@
   import { stateWord } from "../state-word";
   import TfKey from "../TfKey.svelte";
   import TfStateChip from "../TfStateChip.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { secondsLabel, timeLabel } from "../../time/format";
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
@@ -473,7 +474,14 @@
    * in the row does its own, a selection of the row's words is not a click,
    * and a queued row has no run yet.
    */
+  /** A run started here and still in the write queue: a press on its row opens the queue, where it is (F-352). Once sent, the source holds it and there is nothing to open until a sync reads it. */
+  const inQueue = (run: RunRow): boolean => isStartedHere(run) && run.state?.text !== "sent";
+
   function openRow(event: MouseEvent, run: RunRow) {
+    if (inQueue(run)) {
+      if (!(event.target as Element | null)?.closest("a, button, input, select, label")) openWriteQueue();
+      return;
+    }
     if (isStartedHere(run)) return;
     if ((event.target as Element | null)?.closest("a, button, input, select, label")) return;
     if ((window.getSelection()?.toString() ?? "") !== "") return;
@@ -673,11 +681,11 @@
         <tbody>
           {#each day.runs as run (run.entity_id)}
             {@const tone = runTone(run)}
-            <tr class:tf-row={!isStartedHere(run)} onclick={(event) => openRow(event, run)}>
+            <tr class:tf-row={!isStartedHere(run) || inQueue(run)} onclick={(event) => openRow(event, run)}>
               <td class="tf-nowrap tf-run-no">
                 {#if isStartedHere(run)}
-                  <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet. -->
-                  <b>{stateWord(run.state?.text ?? "queued")}</b>
+                  <!-- The run's echo (#2104): *queued*, then *sent*; no source state yet, so its chip is the write's (F-352). -->
+                  <TfStateChip text={stateWord(run.state?.text ?? "queued")} class="tf-info" />
                 {:else}
                   <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
                 {/if}
@@ -700,6 +708,9 @@
                   >{secondsLabel(run.duration_seconds)}
                 {:else if tone === "run"}
                   <progress class="tf-progress" aria-label="Running"></progress> running
+                {:else if isStartedHere(run)}
+                  <!-- Why it waits (F-352): in the queue, or sent and not yet read back. -->
+                  <span class="tf-dim">{inQueue(run) ? "in the write queue" : "until the next sync"}</span>
                 {:else}
                   waiting
                 {/if}
