@@ -72,7 +72,7 @@
 
 <script lang="ts">
   import TfStateChip from "../TfStateChip.svelte";
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage, isIpcError } from "../../ipc";
   import {
@@ -697,6 +697,9 @@
     } finally {
       sending = false;
     }
+    // The comment has just taken room above the box, which focus came back to: all of it in view, *Comment* too (F-162).
+    await tick();
+    composer?.closest(".tf-compose")?.scrollIntoView?.({ block: "nearest" });
   }
 
   /** A check's row opens its run where the mirror holds it. */

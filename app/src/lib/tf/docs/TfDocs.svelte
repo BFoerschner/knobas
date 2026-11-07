@@ -1400,6 +1400,9 @@
     } finally {
       commenting = false;
     }
+    // The comment has just taken room above the box, which focus came back to: all of it in view, *Comment* too (F-162).
+    await tick();
+    composer?.closest(".tf-compose")?.scrollIntoView?.({ block: "nearest" });
   }
 
   /** ⌘Enter in the composer: read when pressed, because the attachment outlives one read of the page. */

@@ -773,6 +773,29 @@ test("Builds' entry comes back to the pipeline it holds, a run's own from a run,
   last.value = null;
 });
 
+test("a run pressed on bare Builds: the entry comes back to that place by the pipeline's own address (F-370)", async () => {
+  start({ nav: windowNav });
+  await at("#/builds");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  const page = target.querySelector<HTMLElement>(".tf-kept:not([hidden])")!;
+  const run = page.appendChild(document.createElement("a"));
+  run.href = "#/build/pipe%3Aa/run-1";
+  main.scrollTop = 300;
+  run.addEventListener("click", (event) => event.preventDefault());
+  run.click();
+  const last = sessionValue("builds-last-pipeline");
+  last.value = "pipe:a";
+  await at("#/build/pipe%3Aa/run-1");
+  run.remove();
+  main.scrollTop = 0;
+  expect(entry("Builds").getAttribute("href")).toBe("#/builds/pipe%3Aa");
+  entry("Builds").click();
+  await settle();
+  await vi.waitFor(() => expect(main.scrollTop).toBe(300));
+  last.value = null;
+});
+
 test("a tab the page does not have is not what its nav entry comes back to", async () => {
   start({ nav: windowNav });
   await at("#/code/prs");

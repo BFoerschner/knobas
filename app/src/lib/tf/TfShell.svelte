@@ -88,7 +88,7 @@
   import { installFocusKeep } from "./focus-keep";
   import { installFindKey } from "./filter-keys";
   import { installPressGuard } from "./press-guard";
-  import { isTopPage, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
+  import { isTopPage, parentOf, parseTfHash, sectionHash, sectionOf, sectionTabOf, type Section } from "./route";
   import { sectionFilter } from "../launcher/section";
   import { chordOf, refusalOf } from "../launcher/keys";
   import { launcherKeys, type KeyStore } from "../launcher/keys.svelte";
@@ -235,7 +235,11 @@
     const page = shownKept();
     if (!mainEl || page === null) return;
     places.delete(from);
-    places.set(from, capturePlace(mainEl, page, pressed, to));
+    const place = capturePlace(mainEl, page, pressed, to);
+    places.set(from, place);
+    // A run pressed on bare `#/builds`: the entry comes back by the pipeline's own address, and that is this page.
+    const pipeline = from === sectionHash("builds") && place.pressed?.closest("a")?.getAttribute("href") === to ? parentOf(parseTfHash(to)) : null;
+    if (pipeline?.startsWith("#/builds/")) places.set(pipeline, place);
     if (places.size > PLACES) places.delete(places.keys().next().value!);
     pressed = null;
   }

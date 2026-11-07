@@ -1780,6 +1780,10 @@ test("Edit section opens the text, saves it through the queue against the versio
 test("a comment goes through the queue; copy link and the actions a source does not take", async () => {
   const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
+  const brought: Element[] = [];
+  box.closest<HTMLElement>(".tf-compose")!.scrollIntoView = function (this: Element) {
+    brought.push(this);
+  };
   box.value = "Done.";
   box.dispatchEvent(new Event("input", { bubbles: true }));
   await settle();
@@ -1788,6 +1792,7 @@ test("a comment goes through the queue; copy link and the actions a source does 
   expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "Done." } });
   // *Comment* goes off with its draft: focus goes to the box, as ⌘Enter leaves it there (F-266).
   expect(document.activeElement).toBe(box);
+  expect(brought, "all of the box in view, *Comment* too (F-162)").toEqual([box.closest(".tf-compose")]);
   button("More")!.click();
   await settle();
   button("Copy link")!.click();

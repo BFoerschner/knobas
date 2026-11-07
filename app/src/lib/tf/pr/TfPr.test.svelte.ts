@@ -586,6 +586,10 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(box.placeholder).toBe("Comment on PR #142");
   // In the page body, so small (#2238 Controls).
   expect(button("Comment")!.classList.contains("tf-sm")).toBe(true);
+  const brought: Element[] = [];
+  box.closest<HTMLElement>(".tf-compose")!.scrollIntoView = function (this: Element) {
+    brought.push(this);
+  };
   box.value = "Thanks, looks good.";
   box.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
@@ -596,6 +600,7 @@ test("Conversation: each entry's who, when and verdict, then a comment queued an
   expect(box.value).toBe("");
   // *Comment* goes off with its draft: focus goes to the box, as ⌘Enter leaves it there (F-266).
   expect(document.activeElement).toBe(box);
+  expect(brought, "all of the box in view, *Comment* too (F-162)").toEqual([box.closest(".tf-compose")]);
   expect(toasts.items.at(-1)!.text).toBe("Queued: comment on PR #142.");
   expect(toasts.items.at(-1)!.action?.label).toBe("Show queue");
 });
