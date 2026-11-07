@@ -48,7 +48,7 @@ export function everyWhileShown(shown: () => boolean, ms: number, run: () => voi
  * shown again (after it is drawn).
  *
  * `address` says what the page holds. Shown at another address than it was left at, it holds something the reader has not
- * read, so everything noted goes to the top instead (F-454, F-067). A return by `Esc` or ⌘[ then sets its own place, and a
+ * read, so everything noted goes to the top instead (F-454, F-067). A return by `Esc`, ⌘[ or a nav press then sets its own place, and a
  * page's own landing (*Continue reading*, a section) comes after this.
  *
  * This runs on a move inside a shown page too, because the host hands the page a new entry at each address: only a real hide

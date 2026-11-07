@@ -8,7 +8,7 @@
  * one before it hid. Closing the window inside those seconds sends nothing, and the block is simply there next time.
  */
 import { ipcErrorMessage } from "../../ipc";
-import { heldWrite, push } from "../../shell/toasts.svelte";
+import { amend, heldWrite, push, toasts } from "../../shell/toasts.svelte";
 
 interface Hold {
   id: number;
@@ -28,10 +28,10 @@ export function forgetSent(): void {
 }
 
 /** Hide block `id` and send `write` when the toast saying `text` ends, unless its *Undo* was pressed. `after` runs once the write has answered. */
-export function holdBlock(id: number, text: string, write: () => Promise<void>, after: () => unknown, ms: number): void {
+export function holdBlock(id: number, text: string, write: () => Promise<void>, after: () => unknown, ms: number): number {
   held = [...held, { id, sent: false }];
   const release = () => (held = held.filter((hold) => hold.id !== id));
-  heldWrite(
+  return heldWrite(
     text,
     () => {
       void write()
@@ -49,7 +49,25 @@ export function holdBlock(id: number, text: string, write: () => Promise<void>, 
   );
 }
 
+/** The live toast of *Dismiss*es and how many rows it stands for. */
+let dismissals: { toast: number; rows: number } | null = null;
+
+/**
+ * {@link holdBlock} for *Dismiss*. A press while the toast stands is that toast again, its one *Undo* taking back all of them,
+ * so it says how many (F-365).
+ */
+export function holdDismissal(id: number, write: () => Promise<void>, after: () => unknown, ms: number): void {
+  const counted = dismissals;
+  const live = counted === null ? undefined : toasts.items.find((toast) => toast.id === counted.toast);
+  const rows = counted !== null && live !== undefined ? counted.rows + 1 : 1;
+  const text = rows === 1 ? "Dismissed. knobas will not offer it again." : `Dismissed ${rows} rows. knobas will not offer them again.`;
+  // The words first, so the press below finds a toast already saying them and adds to it.
+  if (live?.action !== undefined) amend(live.id, { text, action: live.action });
+  dismissals = { toast: holdBlock(id, text, write, after, ms), rows };
+}
+
 /** Each test starts with nothing held. */
 export function resetHeldBlocks(): void {
   held = [];
+  dismissals = null;
 }

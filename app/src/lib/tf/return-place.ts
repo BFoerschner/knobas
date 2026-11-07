@@ -4,7 +4,7 @@
  *
  * The shell takes a {@link Place} of the shown page as an address is left, before
  * that page hides, and {@link restorePlace} sets it back on a return: an `Esc` or
- * *Back to* step, or a step through history. Keep-alive's own `keepScroll` holds a
+ * *Back to* step, a step through history, or a press on a nav entry. Keep-alive's own `keepScroll` holds a
  * page across a hide, but a place is more than that: a pipeline's runs and a run,
  * the link sets and a set, or a space and a page are one kept page whose scroller
  * stays while what is in it changes.
@@ -184,15 +184,16 @@ export function placeRestoring(): boolean {
 /**
  * Put `place` back on `page`: the scroll now and on each frame until it stays, the
  * focus once its row is there, and again if a redraw takes that row away. Returns
- * what ends it early, as a new address does.
+ * what ends it early, as a new address does. A nav press takes the scroll only
+ * (`withFocus` false): focus stays with the press, and the focus keeper's way is free.
  */
-export function restorePlace(place: Place, page: Element): () => void {
+export function restorePlace(place: Place, page: Element, withFocus = true): () => void {
   const main = place.scrolls[0]?.el ?? page;
   let over = false;
   let stayed = 0;
   let focused: HTMLElement | null = null;
   let looks = 0;
-  let holdsFocus = true;
+  let holdsFocus = withFocus;
   const letGo = () => {
     if (holdsFocus) restoring -= 1;
     holdsFocus = false;
@@ -204,7 +205,7 @@ export function restorePlace(place: Place, page: Element): () => void {
     letGo();
     for (const type of READER_MOVES) window.removeEventListener(type, end, true);
   };
-  restoring += 1;
+  if (withFocus) restoring += 1;
   for (const type of READER_MOVES) window.addEventListener(type, end, true);
   const step = () => {
     if (over) return;
@@ -215,13 +216,14 @@ export function restorePlace(place: Place, page: Element): () => void {
     // A pane may reuse what took it for something else once its read lands, which is not what was pressed.
     // A windowed list draws its rows a frame late, and until then the last press stood in for the ticket's own row (F-152).
     const stale = focused !== null && document.activeElement === focused && ((place.said !== null && textOf(focused) !== place.said.text) || (ticketRow(place, page) ?? focused) !== focused);
-    if (focusIsFree(main) || stale) {
+    if (withFocus && (focusIsFree(main) || stale)) {
       focused = focusTarget(place, page);
       focused?.focus({ preventScroll: true });
     }
     looks += 1;
     if (focused === null && looks > FIRST_LOOK) letGo();
     const lasted = performance.now() - started;
+    if (!withFocus && stayed >= STAYED && lasted > AT_LEAST) return end();
     if (stayed >= STAYED && lasted > AT_LEAST && focused !== null && document.activeElement === focused) return end();
     if (stayed >= STAYED && lasted > HOLD_FOR / 2) return end();
     later(step);

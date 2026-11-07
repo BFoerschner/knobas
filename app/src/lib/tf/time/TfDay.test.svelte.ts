@@ -15,7 +15,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { EntityRow } from "../../ipc/entity";
 import type { SearchHit, SearchQuery, SearchResponse } from "../../ipc/search";
 import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget, Week } from "../../ipc/time";
-import { toasts } from "../../shell/toasts.svelte";
+import { dismiss, toasts } from "../../shell/toasts.svelte";
 import { until } from "../../shell/test-wait";
 import { createLayers } from "../layers.svelte";
 import TfDay from "./TfDay.svelte";
@@ -674,7 +674,7 @@ test("Dismiss hides the offer at once and sends when the toast's Undo has had it
   }
 });
 
-test("a mouse's Dismiss leaves the row's words at its height until the pointer leaves the list, and a key's closes at once (F-138, F-064, F-159)", async () => {
+test("a mouse's Dismiss leaves the row's words at its height until the pointer has left the list and the toast has gone, and a key's closes at once (F-138, F-064, F-159, F-163)", async () => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     render();
@@ -688,11 +688,46 @@ test("a mouse's Dismiss leaves the row's words at its height until the pointer l
     expect(rowsOf().indexOf(held), "where it stood").toBe(at);
     expect(held.querySelector("button, a"), "a second press lands on nothing").toBeNull();
     expect(held.textContent, "it still says what it was").toContain("knobas saw");
+    expect(held.querySelector(".tf-tm-state")?.textContent?.trim(), "and what became of it (F-366)").toBe("Dismissed");
     expect(rowsOf()).toHaveLength(before);
+    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+    await settle();
+    expect(target.querySelector(".tf-tm-rowheld"), "*Undo* is on the toast, and the way to it leaves the list").not.toBeNull();
+    vi.advanceTimersByTime(6_500);
     window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
     await settle();
     expect(target.querySelector(".tf-tm-rowheld")).toBeNull();
     expect(rowsOf()).toHaveLength(before - 1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("Dismisses during one toast are counted on it, its Undo takes back all of them, and the next press starts again (F-365)", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    const sent = render({ blocks: jobPrJob(), offers: linked("linked_to_target"), open: [] });
+    await settle();
+    const press = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-tm-row button")].find((b) => b.textContent === "Dismiss")!.click();
+    press();
+    await settle();
+    expect(toasts.items.map((toast) => toast.text)).toEqual(["Dismissed. knobas will not offer it again."]);
+    press();
+    await settle();
+    press();
+    await settle();
+    expect(toasts.items.map((toast) => toast.text)).toEqual(["Dismissed 3 rows. knobas will not offer them again."]);
+    const before = target.querySelectorAll(".tf-tm-row button").length;
+    toasts.items[0]!.action!.run();
+    dismiss(toasts.items[0]!.id);
+    await settle();
+    expect(target.querySelectorAll(".tf-tm-row button").length, "all three back").toBeGreaterThan(before);
+    vi.advanceTimersByTime(6_500);
+    await settle();
+    expect(sent.dismissals, "and nothing was sent").toEqual([]);
+    press();
+    await settle();
+    expect(toasts.items.map((toast) => toast.text)).toEqual(["Dismissed. knobas will not offer it again."]);
   } finally {
     vi.useRealTimers();
   }
@@ -862,7 +897,7 @@ test("rows dismissed down a run each hold, its group stands where it stood, and 
     expect(shape(), "with one row left it still keeps its room").toEqual(["group", "held", "held", "row"]);
     expect(list.querySelector(".tf-tm-group button"), "and adds nothing").toBeNull();
 
-    window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+    window.dispatchEvent(new WheelEvent("wheel"));
     await settle();
     expect(shape()).toEqual(["row"]);
   } finally {

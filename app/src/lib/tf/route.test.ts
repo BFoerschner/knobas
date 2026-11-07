@@ -99,7 +99,8 @@ test("a nav entry comes back to a section's tab or saved view, and to no deeper 
   expect(sectionTabOf(parseTfHash("#/time/week"))).toBe("time");
   expect(sectionTabOf(parseTfHash("#/monitors/unmonitored"))).toBe("monitors");
   expect(sectionTabOf(parseTfHash("#/tickets/view-1"))).toBe("tickets");
-  for (const place of ["#/monitors/at/kuma%3A3", "#/sets/payout-stack", "#/docs/space/ENG", "#/pr/gh:1", "#/builds/pipe-1", "#/ticket/jira:PAY-1"]) {
+  expect(sectionTabOf(parseTfHash("#/builds/pipe-1"))).toBe("builds");
+  for (const place of ["#/monitors/at/kuma%3A3", "#/sets/payout-stack", "#/docs/space/ENG", "#/pr/gh:1", "#/build/pipe-1/run-2", "#/ticket/jira:PAY-1"]) {
     expect(sectionTabOf(parseTfHash(place)), place).toBeNull();
   }
 });

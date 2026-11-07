@@ -17,7 +17,7 @@ import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { entityAddress } from "./address";
 import { sourceRoles } from "./roles.svelte";
-import { sessionFilter } from "./filter/filter-state.svelte";
+import { sessionFilter, sessionValue } from "./filter/filter-state.svelte";
 import { scopedTicket } from "./job/scoped.svelte";
 import { goAcross, goLaunched, goVisiting, goWithoutOpener, replaceAddress } from "./opener";
 import type { SettingsPorts } from "./settings/ports";
@@ -707,6 +707,70 @@ test("a nav entry returns to the tab the section was left on, opened by nothing,
   await settle();
   expect(event.defaultPrevented).toBe(false);
   expect(location.hash).toBe("#/code/prs");
+});
+
+test("a nav press is a return: the page's scroll comes back through its read, focus stays on the entry, and the first page drawn counts (F-370, F-071)", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  main.scrollTop = 200;
+  entry("Docs").click();
+  await settle();
+  expect(location.hash).toBe("#/docs");
+  entry("Inbox").focus();
+  entry("Inbox").click();
+  await settle();
+  // The page redraws what it holds, and the browser clamps its scroller to what is there for now.
+  main.scrollTop = 0;
+  await vi.waitFor(() => expect(main.scrollTop).toBe(200));
+  expect(document.activeElement).toBe(entry("Inbox"));
+  expect(press("Escape").defaultPrevented, "it opened nothing").toBe(false);
+  expect(location.hash).toBe("#/inbox");
+});
+
+test("a link to a kept page is an opening, not a return: at another address it starts at the top (F-454)", async () => {
+  start({ nav: windowNav });
+  await at("#/code/prs");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  main.scrollTop = 200;
+  await at("#/inbox");
+  await at("#/code/repos");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(main.scrollTop).toBe(0);
+});
+
+test("a wheel during a nav return's hold wins: the scroll is the reader's from there (F-370)", async () => {
+  start({ nav: windowNav });
+  await at("#/inbox");
+  const main = target.querySelector<HTMLElement>(".tf-main")!;
+  const entry = (name: string) => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === name)!;
+  main.scrollTop = 200;
+  entry("Docs").click();
+  await settle();
+  entry("Inbox").click();
+  await settle();
+  window.dispatchEvent(new WheelEvent("wheel"));
+  main.scrollTop = 350;
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(main.scrollTop).toBe(350);
+});
+
+test("Builds' entry comes back to the pipeline it holds, a run's own from a run, and never to an address it doesn't hold (F-370)", async () => {
+  start({ nav: windowNav });
+  const builds = () => seen<HTMLAnchorElement>(".tf-nav a").find((a) => a.firstChild?.textContent?.trim() === "Builds")!.getAttribute("href");
+  const last = sessionValue("builds-last-pipeline");
+  await at("#/builds/nope");
+  expect(builds(), "no such pipeline").toBe("#/builds");
+  last.value = "pipe:a";
+  await at("#/builds/pipe%3Aa");
+  expect(builds()).toBe("#/builds/pipe%3Aa");
+  last.value = "pipe:b";
+  await at("#/build/pipe%3Ab/run-1");
+  expect(builds()).toBe("#/builds/pipe%3Ab");
+  await at("#/builds/nope");
+  expect(builds(), "the last it held").toBe("#/builds/pipe%3Ab");
+  last.value = null;
 });
 
 test("a tab the page does not have is not what its nav entry comes back to", async () => {

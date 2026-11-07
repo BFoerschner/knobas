@@ -231,14 +231,14 @@ export function monitorHash(entityId: string): string {
 
 /**
  * The section whose nav entry should come back to `route`, or `null`: a saved
- * view on Tickets, and the tabs of Code, Monitors and Time. A deeper address (a
- * set, a Docs space, a marked monitor) is a place, and the entry is the way to the
- * section's own page. Builds keeps its pipeline itself (`lastPipeline`).
+ * view on Tickets, the tabs of Code, Monitors and Time, and a pipeline on Builds,
+ * so the address says what the page shows. A deeper address (a set, a Docs space,
+ * a marked monitor) is a place, and the entry is the way to the section's own page.
  */
 export function sectionTabOf(route: TfRoute): Section | null {
   if (route.view === "tickets") return "tickets";
   if (route.view !== "full" || route.head !== route.section) return null;
-  if (route.section === "code" || route.section === "time") return route.section;
+  if (route.section === "code" || route.section === "time" || route.section === "builds") return route.section;
   return route.section === "monitors" && route.rest[0] !== MONITOR_AT ? "monitors" : null;
 }
 

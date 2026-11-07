@@ -43,7 +43,7 @@
   import type { SessionPorts } from "../../launcher/session.svelte";
   import { askInto, refusalOf, refusedAttrs, type RefusedWrite, type RefusedWritesPort, type WriteAsk } from "../../shell/refused-writes";
   import { push, undoable } from "../../shell/toasts.svelte";
-  import { forgetSent, holdBlock, isHeld } from "./held-blocks.svelte";
+  import { forgetSent, holdBlock, holdDismissal, isHeld } from "./held-blocks.svelte";
   import { heldByPointer, heldHeight, holdUnderPointer, withHolds } from "../row-hold";
   import { targetReading } from "../../shell/timer";
   import type { Timer } from "../../shell/timer.svelte";
@@ -443,7 +443,7 @@
 
   /** A row of the list, or one a press took away, which `height` says. */
   type Drawn = { row: DayRow; height: number | null };
-  /** The rows mouse presses on *Dismiss* took away, still holding their places until the pointer leaves the list (F-138, F-159). */
+  /** The rows mouse presses on *Dismiss* took away, still holding their places until the pointer has left the list and the toast has gone (F-138, F-159, F-163). */
   let holding = $state.raw<readonly { id: number; at: number; entry: Drawn }[]>([]);
   /** Those still away. An *Undo* or a refused write brings the row itself back, and that is drawn instead. */
   const standing = $derived(holding.filter((hold) => !rows.some((row) => row.block?.block.id === hold.id)));
@@ -466,7 +466,7 @@
       holding = [];
       return;
     }
-    return holdUnderPointer(() => document.querySelector(".tf-tm-list"), () => (holding = []));
+    return holdUnderPointer(() => document.querySelector(".tf-tm-list"), () => (holding = []), true);
   });
 
   /** Nothing to draw: not while the last row a press took away still holds its place, or what stands under the pointer would move. */
@@ -497,7 +497,7 @@
     const id = block.block.id;
     const box = heldByPointer(event) ? (event.currentTarget as Element).closest(".tf-tm-row")?.getBoundingClientRect() : undefined;
     if (box !== undefined) holding = [...standing, { id, at: drawn.findIndex((one) => one.row.key === row.key), entry: { row, height: box.height } }];
-    holdBlock(id, "Dismissed. knobas will not offer it again.", () => io.dismissBlock(id), reread, UNDO_MS);
+    holdDismissal(id, () => io.dismissBlock(id), reread, UNDO_MS);
   }
 
   /** *Delete block* (#1429). */
@@ -647,7 +647,7 @@
             {#if target !== null && target.kind === "entity"}<span class="tf-mono">{targetReading(target)}</span> {titleOf(row)}{:else if target !== null}{target.label} (label){/if}
             {#if target !== null}<small>{targetReading(target)} was in front of you.</small>{/if}
           </span>
-          <span class="tf-tm-state"><TfStateChip text="offered" /></span>
+          <span class="tf-tm-state"><TfStateChip text="dismissed" /></span>
           <span class="tf-tm-acts"></span>
         </div>
       {/snippet}

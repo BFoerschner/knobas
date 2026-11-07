@@ -379,7 +379,7 @@ test("a plain press on the sentence lifts its href until the button comes up, so
   expect(link.getAttribute("href"), "⌘-click stays the browser's").toBe(href);
 });
 
-test("a row a mouse press took away keeps its height and its words, with no controls, until the pointer leaves the list (F-138, F-064, F-159)", async () => {
+test("a row a mouse press took away keeps its height and its words, with no controls, until the pointer has left the list and the toast has gone (F-138, F-064, F-159, F-163)", async () => {
   await open();
   const row = rowOf("dashboard");
   const at = rows().indexOf(row);
@@ -394,11 +394,15 @@ test("a row a mouse press took away keeps its height and its words, with no cont
 
   window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
   await settle();
+  expect(target.querySelector(".tf-ib-held"), "*Undo* is on the toast, and the way to it leaves the list").not.toBeNull();
+  dismiss(toasts.items.at(-1)!.id);
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 5000 }));
+  await settle();
   expect(target.querySelector(".tf-ib-held")).toBeNull();
   expect(rows()).toHaveLength(3);
 });
 
-test("rows pressed down a list by mouse each hold where they stood, and close together when the pointer leaves it (F-159)", async () => {
+test("rows pressed down a list by mouse each hold where they stood, and close together once the pointer has left it, the gutter being no way out (F-159, F-164)", async () => {
   await open();
   const keys = () => rows().map((row) => (row as HTMLElement).dataset["row"]);
   const before = keys();
@@ -420,10 +424,48 @@ test("rows pressed down a list by mouse each hold where they stood, and close to
   expect(calls[1], "the row aimed at finished").toContain(String(before[1]));
   expect(rows()[0]!.classList.contains("tf-ib-held") && rows()[1]!.classList.contains("tf-ib-held")).toBe(true);
 
+  dismiss(toasts.items.at(-1)!.id);
   window.dispatchEvent(new PointerEvent("pointermove", { clientX: 5000, clientY: 70 }));
+  await settle();
+  expect(target.querySelectorAll(".tf-ib-held"), "right of the list, level with its rows").toHaveLength(2);
+
+  window.dispatchEvent(new PointerEvent("pointermove", { clientX: 700, clientY: 5000 }));
   await settle();
   expect(target.querySelector(".tf-ib-held")).toBeNull();
   expect(keys()).toEqual(before.slice(2));
+});
+
+test("a press on a Snoozed row during a hold is a press in the list, so nothing closes under it; a press elsewhere closes once it has landed (F-163)", async () => {
+  await open();
+  const list = target.querySelector<HTMLElement>(".tf-inbox")!;
+  list.getBoundingClientRect = () => new DOMRect(0, 0, 800, 600);
+  button(rows()[0]!, "Done").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+  await settle();
+  const at = (type: string, clientX: number, clientY: number) => window.dispatchEvent(new PointerEvent(type, { clientX, clientY }));
+  const fold = document.createElement("details");
+  fold.className = "tf-ishelf";
+  fold.open = true;
+  const shelf = document.createElement("div");
+  shelf.className = "tf-ishelf-rows";
+  shelf.getBoundingClientRect = () => new DOMRect(0, 700, 800, 100);
+  fold.append(shelf);
+  target.append(fold);
+  at("pointermove", 400, 750);
+  at("pointerdown", 400, 750);
+  at("pointerup", 400, 750);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await settle();
+  expect(target.querySelector(".tf-ib-held"), "on a row of the shelf").not.toBeNull();
+
+  at("pointermove", 400, 900);
+  at("pointerdown", 400, 900);
+  await settle();
+  expect(target.querySelector(".tf-ib-held"), "not under the press").not.toBeNull();
+  at("pointerup", 400, 900);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await settle();
+  expect(target.querySelector(".tf-ib-held")).toBeNull();
+  fold.remove();
 });
 
 test("a wheel or a key closes the held rows together, and a row a press took above a held one keeps both in their places (F-159)", async () => {

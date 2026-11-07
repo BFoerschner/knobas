@@ -120,6 +120,24 @@ test("the reader moving ends the hold: their scroll stands", async () => {
   end();
 });
 
+test("a nav press takes the scroll only: focus stays where the press left it, and the focus keeper's way stays free (F-370)", async () => {
+  const { main, page } = draw(`<a id="row" href="#/pr/1">PR</a>`);
+  main.scrollTop = 60;
+  const place = capturePlace(main, page, page.querySelector("#row"), "#/pr/1");
+  main.scrollTop = 0;
+  document.body.insertAdjacentHTML("beforeend", `<a id="nav" href="#/inbox">Inbox</a>`);
+  document.querySelector<HTMLElement>("#nav")!.focus();
+  const end = restorePlace(place, page, false);
+  expect(placeRestoring()).toBe(false);
+  // The page redraws its rows, and the scroller falls back to the top.
+  main.scrollTop = 0;
+  await frames();
+  expect(main.scrollTop, "held through the page's read").toBe(60);
+  expect(document.activeElement?.id).toBe("nav");
+  end();
+  expect(placeRestoring(), "and nothing left owed").toBe(false);
+});
+
 test("a link in a closed fold can't take focus, so a redrawn row goes to the one outside it (F-438)", async () => {
   const { main, page } = draw(`<details><summary>Space</summary><a href="#/page/1">Booking</a></details><a class="row" href="#/page/1">Booking</a>`);
   const place = { ...capturePlace(main, page, null, "#/page/1"), said: { text: "Booking", nth: 0 } };

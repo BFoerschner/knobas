@@ -273,6 +273,23 @@ test("opened any other way, the page scrolls to no comment", async () => {
   expect(scrolled.filter((element) => element.closest(".tf-convo") !== null)).toEqual([]);
 });
 
+test("a send brings the whole composer into view, *Comment* too, since the comment took room above it (F-162)", async () => {
+  open();
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  const brought: Element[] = [];
+  const compose = box.closest<HTMLElement>(".tf-compose")!;
+  compose.scrollIntoView = function (this: Element) {
+    brought.push(this);
+  };
+  box.value = "Priya, can you decide the SLA?";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!.click();
+  await settle();
+  expect(brought).toEqual([compose]);
+});
+
 test("Comment queues a Comment write and clears the box; a refused one keeps the text", async () => {
   open();
   await settle();

@@ -15,7 +15,7 @@
 
   **A row leaving under a pointer holds its place (F-138, F-064, F-159).** After a mouse press takes
   a row away, it keeps its height and its words, dimmed and with no controls, until the pointer
-  leaves the list, so a second press where the pointer rests lands on nothing and a press on the next row lands
+  has left the list and the toast with its *Undo* has gone (F-163), so a second press where the pointer rests lands on nothing and a press on the next row lands
   on that row. Several rows hold at once, and the list closes up together. A key
   press closes at once and moves focus to the same action on the next row. A second `Enter`
   repeats what the first did or does nothing, and never opens a row: a next row with no such
@@ -42,7 +42,7 @@
   import { inlineEditor } from "../inline-editor";
   import { snoozeFloat, spentAt } from "./snooze-float";
   import { clockLabel } from "../../time/format";
-  import { flushSync, onDestroy, onMount, tick, untrack } from "svelte";
+  import { flushSync, onDestroy, onMount, tick } from "svelte";
   import type { Attachment } from "svelte/attachments";
   import { SvelteSet } from "svelte/reactivity";
 
@@ -214,15 +214,23 @@
     node.style.setProperty("--tf-row-held-acts", `${width}px`);
   };
 
-  // Held until the pointer leaves the list, the page is left, or a wheel or key takes the reader on. A hold whose row came back is done.
+  // Held until the pointer has left the list and the toast has gone, the page is left, or a wheel or key takes the reader on. A hold whose row came back is done.
   $effect(() => {
     if (!anyHeld || !shown()) {
       holding = [];
       return;
     }
-    const list = untrack(() => (streamHolds.length > 0 ? ".tf-inbox" : ".tf-ishelf-rows"));
-    return holdUnderPointer(() => document.querySelector(list), () => (holding = []));
+    return holdUnderPointer(bothLists, () => (holding = []), true);
   });
+
+  /** The stream and the open shelf as one box: a press on a shelf's row during a stream's hold is a press in the list, and adds its own (F-163). */
+  function bothLists(): { getBoundingClientRect: () => DOMRect } | null {
+    const boxes = [...document.querySelectorAll(".tf-inbox, .tf-ishelf[open] > .tf-ishelf-rows")].map((list) => list.getBoundingClientRect());
+    if (boxes.length === 0) return null;
+    const [left, top] = [Math.min(...boxes.map((box) => box.left)), Math.min(...boxes.map((box) => box.top))];
+    const box = new DOMRect(left, top, Math.max(...boxes.map((box) => box.right)) - left, Math.max(...boxes.map((box) => box.bottom)) - top);
+    return { getBoundingClientRect: () => box };
+  }
 
   /**
    * A click on the row that made no selection follows its sentence's link (F-142). The link, the key, the buttons and the

@@ -103,6 +103,8 @@
   import { scopedTicket } from "./job/scoped.svelte";
   import { cardWidth } from "./job/card-width.svelte";
   import { selectTicket } from "./tickets/TicketsPage.svelte";
+  import { pipelineHash } from "./builds/builds";
+  import { sessionValue } from "./filter/filter-state.svelte";
   import TfPage from "./TfPage.svelte";
   import { roleSyncs as sharedRoleSyncs, type RoleSyncs } from "./role-sync.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
@@ -219,6 +221,8 @@
   const PLACES = 60;
   /** The next address change is the way back: `Esc` or *Back to*. A step through history says so itself. */
   let stepping = false;
+  /** The address a press on a nav entry is on its way to: a return to the section as it was left, which opens nothing. */
+  let navTo: string | null = null;
   /** The kept pages drawn so far: one shown for the first time starts at the top, not at the last page's scroll. */
   const drawnPages = new WeakSet<Element>();
   /** Ends the return under way when another address comes. */
@@ -241,8 +245,11 @@
     return [...places].reverse().find(([left, place]) => place.to === from && samePage(left, to))?.[1];
   }
 
-  /** Once `to` is drawn: back to its place on a return; a new place in a kept page, or a page never shown, at the top. */
-  function settlePlace(to: string, from: string, returning: boolean, opening: boolean, left: Element | null) {
+  /**
+   * Once `to` is drawn: back to its place on a return, or on a nav press, which leaves focus where it is; a new place in a
+   * kept page, or a page never shown, at the top.
+   */
+  function settlePlace(to: string, from: string, returning: boolean, opening: boolean, left: Element | null, nav: boolean) {
     endReturn?.();
     endReturn = null;
     void tick().then(() => {
@@ -250,8 +257,8 @@
       if (!mainEl || page === null || location.hash !== to) return;
       const first = !drawnPages.has(page);
       drawnPages.add(page);
-      const place = returning ? (places.get(to) ?? openingPlace(from, to)) : undefined;
-      if (place !== undefined) endReturn = restorePlace(place, page);
+      const place = returning ? (places.get(to) ?? openingPlace(from, to)) : nav ? places.get(to) : undefined;
+      if (place !== undefined) endReturn = restorePlace(place, page, !nav);
       else if (opening && page === left) resetScrolls(mainEl, page);
       else if (opening && first) mainEl.scrollTop = 0;
     });
@@ -280,6 +287,10 @@
     const how = takeTold(now);
     const had = stampOf(history.state);
     const left = shownKept();
+    // The page the app first drew was never shown by an address change, and it has been drawn all the same.
+    if (left !== null) drawnPages.add(left);
+    const nav = navTo === now;
+    navTo = null;
     if (how !== "replace") notePlace(hash, now);
     // A stamped entry is one history stepped to, which is a return as `Esc` is. A tab switch is neither that nor a new place.
     const returning = how !== "replace" && (stepping || had !== null);
@@ -294,7 +305,7 @@
     if (how !== "replace") scopedTicket.hold(here.trip);
     const was = hash;
     hash = now;
-    if (how !== "replace") settlePlace(now, was, returning, opening, left);
+    if (how !== "replace") settlePlace(now, was, returning, opening, left, nav);
   }
 
   /**
@@ -321,9 +332,16 @@
   // ---- section memory: a nav entry returns to the section as you left it (design system, the return contract) ----
   /** The address of each section's tab or saved view it was last on, outside a card row's narrowing. */
   const sectionTabs = $state<Partial<Record<Section, string>>>({});
+  const lastPipeline = sessionValue("builds-last-pipeline");
   $effect(() => {
-    const section = sectionTabOf(route);
+    const onRun = route.view === "full" && route.head === "build";
+    const section = onRun ? "builds" : sectionTabOf(route);
     if (section === null || untrack(() => scopedTicket.section) === section) return;
+    // Builds remembers only a pipeline it holds, so an address it doesn't is nothing to come back to, and a run leads back to its own.
+    if (section === "builds" && route.view === "full" && route.rest[0] !== undefined) {
+      if (route.rest[0] === lastPipeline.value) sectionTabs.builds = onRun ? pipelineHash(route.rest[0]) : hash;
+      return;
+    }
     // A tab the page does not have is said so, and is nothing to come back to.
     if (PAGES.find((candidate) => candidate.matches(route))?.knows?.(route) === false) return;
     sectionTabs[section] = hash;
@@ -331,15 +349,18 @@
   const navHref = (section: Exclude<Section, "job">) => sectionTabs[section] ?? sectionHash(section);
 
   /**
-   * A press on a nav entry: the section as it was left, opened by nothing, so `Esc` never jumps from one section to
-   * another by way of a tab. It ends a card row's narrowing, wherever that was: a nav entry starts a new trip.
+   * A press on a nav entry: the section as it was left, each scroller included, opened by nothing, so `Esc` never jumps from
+   * one section to another by way of a tab. It ends a card row's narrowing, wherever that was: a nav entry starts a new trip.
    */
   function onnav(_section: Exclude<Section, "job">, target: string) {
     if (location.hash === target) {
       here = { ...NOT_OPENED, prev: here.prev };
       history.replaceState(stamped(history.state, here), "");
       scopedTicket.clear();
-    } else goWithoutOpener(target);
+    } else {
+      navTo = target;
+      goWithoutOpener(target);
+    }
   }
 
   /**
