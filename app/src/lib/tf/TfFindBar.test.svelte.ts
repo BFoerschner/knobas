@@ -112,6 +112,22 @@ test("what the page draws next is counted, and the count says what it covers", a
   expect(count()).toBe("1 of 4 in open files");
 });
 
+test("the page going takes the bar with it, moved up to the scroller as it is", async () => {
+  const main = document.createElement("main");
+  main.className = "tf-main";
+  main.style.overflowY = "auto";
+  main.append(page);
+  document.body.append(main);
+  draw();
+  await pressFind();
+  expect(document.querySelector(".tf-findhold")?.parentElement).toBe(main);
+  unmount(view!);
+  view = null;
+  await tick();
+  expect(document.querySelector(".tf-findhold")).toBeNull();
+  expect(layers.open).toEqual([]);
+});
+
 test("a hidden page's bar takes no key", async () => {
   draw(() => false);
   await pressFind();

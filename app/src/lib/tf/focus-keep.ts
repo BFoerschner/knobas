@@ -257,7 +257,11 @@ export function installFocusKeep(): () => void {
     // A dialog drawn inside a page gives focus back itself. What stays noted is what opened it, in case that goes with the answer.
     if (!(target instanceof HTMLElement) || target.closest(KEPT) === null || target.closest(".tf-modal") !== null) return;
     // A box is no place of the reader's to hand on from: what it holds is the page's.
-    if (target.matches(BOX)) return;
+    if (target.matches(BOX)) {
+      // A find bar closing gave focus back to the box ⌘F was pressed in, so what goes with the bar is no place to hand on from either.
+      if (held?.control.closest(".tf-findbar")) held = null;
+      return;
+    }
     held = note(target);
   };
   // Focus went because the reader moved it: a click on nothing, or `Esc` out of a field. Asked once the DOM work of this

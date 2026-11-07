@@ -398,6 +398,20 @@ test("a scroller with focus counts as nothing: what falls in it still hands focu
   expect(document.activeElement, "the page's heading, as from the page scroller").toBe(document.querySelector("h1"));
 });
 
+test("a find bar closing gives focus back to the box ⌘F was pressed in, and it stays there", async () => {
+  const { box } = scroller();
+  const bar = document.createElement("div");
+  bar.className = "tf-findbar";
+  const input = document.createElement("input");
+  bar.append(input);
+  box.prepend(bar);
+  input.focus();
+  box.focus();
+  bar.remove();
+  await settle();
+  expect(document.activeElement).toBe(box);
+});
+
 test("a press a webview gave to the box around a control still hands focus on when the control falls", async () => {
   const { pane } = scroller();
   const group = document.createElement("div");

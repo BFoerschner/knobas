@@ -252,10 +252,11 @@
     };
   });
 
-  /** To the top of the scroller, whose first line the bar stands over wherever on the page it was asked for. */
-  function hoist(el: HTMLElement): void {
+  /** To the top of the scroller, whose first line the bar stands over wherever on the page it was asked for. Moved out of its parent, it goes by itself when the page around it goes (a pull request's *Files changed* tab has its own bar), or it would stay on the scroller, dead. */
+  function hoist(el: HTMLElement): () => void {
     hold = el;
     scroller?.prepend(el);
+    return () => el.remove();
   }
 </script>
 
