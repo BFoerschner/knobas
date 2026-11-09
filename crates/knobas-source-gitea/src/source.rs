@@ -649,6 +649,20 @@ impl Source for GiteaSource {
     fn view_standing(&self, entity: &str, section: Option<&str>) -> knobas_source::view::Standing {
         crate::view::standing(self, entity, section)
     }
+
+    /// A pull request's whole view from the record the mirror holds (ADR-0042):
+    /// see [`crate::view::pr::from_record`].
+    fn mirror_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<knobas_source::view::SourceView> {
+        match (self.key_of(entity).ok()?, section) {
+            (crate::keys::GiteaKey::Pr { .. }, None) => crate::view::pr::from_record(payload),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

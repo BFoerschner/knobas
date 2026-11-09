@@ -115,6 +115,54 @@ pub(super) async fn draw(
     Ok(SourceView { sections, actions })
 }
 
+/// A pull request's whole view from its record as the mirror holds it
+/// (ADR-0042), reading nothing: *Overview*'s state, author, branches, times
+/// and description, and *Files*' count. What only Gitea's other reads hold --
+/// reviews, checks, whether it can be merged, its commits and conversation --
+/// is left out, the two tabs saying so in a muted line, and no action is
+/// offered. `None` for a record that is not a pull request.
+pub(crate) fn from_record(payload: &serde_json::Value) -> Option<SourceView> {
+    // Every field of [`Pull`] is optional: a record is one that names its
+    // number and its head.
+    payload.get("number")?.as_u64()?;
+    payload.get("head")?.as_object()?;
+    let pull: Pull = serde_json::from_value(payload.clone()).ok()?;
+    let mut blocks = vec![Block::Facts {
+        facts: overview_facts(&pull, Vec::new()),
+    }];
+    let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
+    if !body.trim().is_empty() {
+        blocks.push(Block::Text {
+            text: body.to_owned(),
+            markdown: true,
+        });
+    }
+    let waiting = |id: &str, title: &str, what: &str| ViewSection {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        count: None,
+        deferred: false,
+        blocks: vec![super::rows::muted_line(format!(
+            "The {what} are read from Gitea; the last sync holds none."
+        ))],
+    };
+    Some(SourceView {
+        sections: vec![
+            ViewSection {
+                id: OVERVIEW.to_owned(),
+                title: "Overview".to_owned(),
+                count: None,
+                deferred: false,
+                blocks,
+            },
+            files_stub(&pull),
+            waiting(COMMITS, "Commits", "commits"),
+            waiting(CONVERSATION, "Conversation", "reviews and comments"),
+        ],
+        actions: Vec::new(),
+    })
+}
+
 /// The pull request one view is about.
 struct PullView<'a> {
     source: &'a GiteaSource,

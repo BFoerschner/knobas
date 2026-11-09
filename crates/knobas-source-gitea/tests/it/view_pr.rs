@@ -3707,3 +3707,55 @@ async fn people_are_named_by_their_profiles_and_keep_their_logins() {
         Some("2026-08-23 08:00 +00:00 by Priya Nair")
     );
 }
+
+/// **From the mirror's record** (ADR-0042): a pull request opened for the
+/// first time is drawn from the record the sync wrote, with no request --
+/// its state, author, branches, times and description, and *Files*' count --
+/// and says the tabs only Gitea's reads fill are not held. No action.
+#[tokio::test]
+async fn a_pull_request_is_drawn_from_its_record_with_no_request() {
+    let server = MockServer::start().await;
+    let source = knobas_source_gitea::build(instance(server.uri(), TOKEN, json!({}))).unwrap();
+    let view = source
+        .mirror_view(PR, None, &open_pull())
+        .expect("a pull request's record draws");
+    assert!(
+        server
+            .received_requests()
+            .await
+            .unwrap_or_default()
+            .is_empty()
+    );
+    assert!(view.actions.is_empty(), "no write before Gitea is read");
+    let ids: Vec<&str> = view.sections.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["overview", "files", "commits", "conversation"]);
+    let Block::Facts { facts } = &view.sections[0].blocks[0] else {
+        panic!("facts first: {:?}", view.sections[0]);
+    };
+    let value = |label: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| f.value.clone())
+    };
+    assert_eq!(value("State").as_deref(), Some("open"));
+    assert_eq!(
+        value("Branches").as_deref(),
+        Some("feature/PAY-231-sepa-retry → main")
+    );
+    assert!(
+        matches!(&view.sections[0].blocks[1], Block::Text { text, .. } if text.starts_with("Refs PAY-231")),
+        "the description"
+    );
+    assert_eq!(view.sections[1].count, Some(2), "Files' count");
+    assert!(
+        source
+            .mirror_view(PR, Some("files"), &open_pull())
+            .is_none()
+    );
+    assert!(
+        source
+            .mirror_view(PR, None, &json!({ "not": "a pull request" }))
+            .is_none()
+    );
+}
