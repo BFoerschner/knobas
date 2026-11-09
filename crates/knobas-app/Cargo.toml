@@ -213,7 +213,7 @@ wat = "=1.258.3"
 # nothing new goes in. It brings no `reqwest` of its own; `cargo tree -i
 # reqwest` must stay at one.
 wiremock = "0.6"
-tokio.workspace = true
+tokio = { workspace = true, features = ["net", "io-util"] }
 # Per-test source ids: the database is shared across a test binary, and a
 # hardcoded id would make two tests each other's fixture. For the same reason a
 # corpus assertion has to be scoped to a token nothing else in the binary can
