@@ -4,6 +4,8 @@ status: accepted
 
 # knobas reads a branch's tree at its checkout, and fetches its tip there
 
+*Amended 2026-11-09 (the second smoothness pass, ADR-0042): *New pull request* fetches a branch tip its checkout lacks too, behind the source's compare, as *Files* does, so a branch pushed elsewhere reads at the clone from its next open. Found in the app's own window on the live Gitea.*
+
 Amends [ADR-0016](0016-a-spawned-command-takes-no-argument-from-the-mirror.md), [ADR-0021](0021-knobas-reads-a-checkouts-state-with-read-only-git.md), [ADR-0023](0023-knobas-clones-a-repository-into-the-clones-root.md) and [ADR-0036](0036-knobas-reads-any-diff-at-a-checkout-that-holds-both-commits.md).
 
 *Files* and *New pull request* waited on the source for every first read of a session: the tip, then the top directory, then the README; the compare of two branch names. Measured through a proxy holding each request to the testenv Gitea (PR #2479), opening *Files* cost 4.2 s at 1 s a request, 20 s at 5 s, and 90 s with a source that never answers; the compare 1.1 s, 5.1 s and 45 s. A checkout on this disk holds the same tree. Decided 2026-11-09 (Björn: "make everything use local clone files first and then have a warning if something you did doesn't work or is differently than the app predicted"; the smoothness pass of PR #2479): **knobas reads a branch's tree, its files and the diff between two branches at the repository's checkout, at the tips the mirror holds for them, and fetches a tip the checkout lacks into its object store, writing no ref.**
