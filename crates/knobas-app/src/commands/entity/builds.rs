@@ -441,12 +441,52 @@ async fn run_adapter(
     live: &crate::sources::live::LiveSources,
     run_id: &str,
 ) -> Result<(EntityRef, std::sync::Arc<dyn knobas_source::Source>), IpcError> {
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    Ok((entity, lent.source))
+}
+
+/// [`run_adapter`], lent as the read cache keys what it reads.
+async fn run_lent(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    live: &crate::sources::live::LiveSources,
+    run_id: &str,
+) -> Result<(EntityRef, crate::sources::live::Lent), IpcError> {
     let entity = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
-    let source =
-        crate::sources::crud::run_source(pool, secrets, registry, live, &entity.to_string())
+    let lent = live
+        .source(pool, secrets, registry, &entity.to_string())
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
+    Ok((entity, lent))
+}
+
+/// Whether the mirror says run `run` has finished: its declared `finished`
+/// instant is set (ADR-0042). A finished run's log, tests and artifacts can
+/// no longer change, so a page reads them from what knobas kept or held. A
+/// run the mirror lacks, or whose kind declares no `finished`, has not.
+async fn run_finished(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run: &EntityRef,
+) -> bool {
+    let row: Option<(String, serde_json::Value)> =
+        sqlx::query_as("select kind, payload from sync.item where entity_id = $1")
+            .bind(run.to_string())
+            .fetch_optional(pool)
             .await
-            .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
-    Ok((entity, source))
+            .ok()
+            .flatten();
+    let Some((kind, payload)) = row else {
+        return false;
+    };
+    let Ok(declarations) = crate::sources::paths::declared_paths(pool, registry).await else {
+        return false;
+    };
+    declarations
+        .get(&run.namespace, &kind)
+        .and_then(|paths| knobas_core::payload::resolve_string(&payload, &paths.finished))
+        .is_some()
 }
 
 /// A source's failure on a run read, as [`crate::sources::to_ipc`] maps it.
@@ -473,14 +513,23 @@ pub async fn run_log_inner(
     from: Option<u64>,
     count: Option<u32>,
 ) -> Result<Option<knobas_source::run::RunLog>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
+    let whole = from.is_none() && count.is_none();
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
     let count = count
         .unwrap_or(knobas_source::run::LOG_LINES_MAX)
         .clamp(1, knobas_source::run::LOG_LINES_MAX);
-    source
-        .run_log(&entity.to_string(), from, count)
-        .await
-        .map_err(|error| run_read_failed(&entity, error))
+    let id = entity.to_string();
+    // A finished run's whole log is kept and held (ADR-0042).
+    let fixed = whole && run_finished(pool, registry.as_ref(), &entity).await;
+    live.fixed_read(
+        &lent,
+        &id,
+        "run:log",
+        fixed,
+        lent.source.run_log(&id, from, count),
+    )
+    .await
+    .map_err(|error| run_read_failed(&entity, error))
 }
 
 /// Run `run_id`'s tests, failed first (#855). Errors as [`run_log_inner`].
@@ -495,9 +544,10 @@ pub async fn run_tests_inner(
     live: &crate::sources::live::LiveSources,
     run_id: &str,
 ) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
-    source
-        .run_tests(&entity.to_string())
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    let id = entity.to_string();
+    let fixed = run_finished(pool, registry.as_ref(), &entity).await;
+    live.fixed_read(&lent, &id, "run:tests", fixed, lent.source.run_tests(&id))
         .await
         .map_err(|error| run_read_failed(&entity, error))
 }
@@ -550,11 +600,19 @@ pub async fn run_artifacts_inner(
 ) -> Result<Option<Vec<knobas_source::run::ArtifactEntry>>, IpcError> {
     let path = path.unwrap_or_default();
     artifact_path(path)?;
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
-    source
-        .run_artifacts(&entity.to_string(), path)
-        .await
-        .map_err(|error| run_read_failed(&entity, error))
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    let id = entity.to_string();
+    let fixed = run_finished(pool, registry.as_ref(), &entity).await;
+    let ask = format!("run:artifacts:{path}");
+    live.fixed_read(
+        &lent,
+        &id,
+        &ask,
+        fixed,
+        lent.source.run_artifacts(&id, path),
+    )
+    .await
+    .map_err(|error| run_read_failed(&entity, error))
 }
 
 /// The head of one text artifact of run `run_id`, for *Preview* (#856).
@@ -571,11 +629,19 @@ pub async fn artifact_preview_inner(
     path: &str,
 ) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
     artifact_path(path)?;
-    let (entity, source) = run_adapter(pool, secrets, registry, live, run_id).await?;
-    source
-        .artifact_preview(&entity.to_string(), path)
-        .await
-        .map_err(|error| run_read_failed(&entity, error))
+    let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
+    let id = entity.to_string();
+    let fixed = run_finished(pool, registry.as_ref(), &entity).await;
+    let ask = format!("run:preview:{path}");
+    live.fixed_read(
+        &lent,
+        &id,
+        &ask,
+        fixed,
+        lent.source.artifact_preview(&id, path),
+    )
+    .await
+    .map_err(|error| run_read_failed(&entity, error))
 }
 
 /// The media type a data URL draws an artifact under: its name's, the viewer's

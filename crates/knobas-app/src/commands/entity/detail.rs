@@ -394,19 +394,44 @@ pub async fn attachment_bytes_inner(
     if let Some(size) = file.size.filter(|size| *size > ATTACHMENT_CAP) {
         return Err(too_large(&file.name, size));
     }
-    let read = source
-        .attachment_bytes(entity_id, &file.content_url, ATTACHMENT_CAP)
+    // An attachment's address names one file, which never changes: kept and
+    // held once read (ADR-0042), so a second look sends nothing. As JSON:
+    // `{"data": base64}`, `{"too_large": size}` or `{}` for a source that
+    // reads none.
+    let lent = live
+        .source(pool, secrets, registry, entity_id)
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&from.id)))?;
+    let read = async {
+        Ok(
+            match source
+                .attachment_bytes(entity_id, &file.content_url, ATTACHMENT_CAP)
+                .await?
+            {
+                Some(FileBytes::Read(bytes)) => serde_json::json!({
+                    "data": base64::engine::general_purpose::STANDARD.encode(bytes)
+                }),
+                Some(FileBytes::TooLarge { size }) => serde_json::json!({ "too_large": size }),
+                None => serde_json::json!({}),
+            },
+        )
+    };
+    let ask = format!("attachment:{}", file.content_url);
+    let read: serde_json::Value = live
+        .fixed_read(&lent, entity_id, &ask, true, read)
         .await
         .map_err(|error| attachment_failed(&from, &file, error))?;
-    match read {
-        Some(FileBytes::Read(bytes)) => Ok(AttachmentBytes {
+    if let Some(data) = read.get("data").and_then(serde_json::Value::as_str) {
+        return Ok(AttachmentBytes {
             mime: file
                 .mime
                 .clone()
                 .unwrap_or_else(|| "application/octet-stream".to_owned()),
-            data: base64::engine::general_purpose::STANDARD.encode(bytes),
-        }),
-        Some(FileBytes::TooLarge { size }) => Err(too_large(&file.name, size)),
+            data: data.to_owned(),
+        });
+    }
+    match read.get("too_large").and_then(serde_json::Value::as_u64) {
+        Some(size) => Err(too_large(&file.name, size)),
         None => Err(IpcError::invalid(format!(
             "{}'s source reads no attachments",
             from.display_name

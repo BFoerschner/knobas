@@ -2144,6 +2144,25 @@ pub trait Source: Send + Sync {
         let _ = (entity, section);
         view::Standing::Live
     }
+    /// The view of `entity` at `section` as far as the mirror's own record of
+    /// it can draw it, reading nothing (ADR-0042, the second smoothness pass
+    /// on PR #2479): what a page shows the first time it is opened, before
+    /// the source's read lands over it, said to be from the last sync. Only
+    /// what the record holds is drawn; a section it cannot fill says so in a
+    /// muted line, and no action is offered.
+    ///
+    /// `payload` is the record the mirror holds for `entity`, as the sync
+    /// wrote it. `None`, the default, is a source that draws nothing from it:
+    /// the page waits for the source, as before. Pure.
+    fn mirror_view(
+        &self,
+        entity: &str,
+        section: Option<&str>,
+        payload: &serde_json::Value,
+    ) -> Option<view::SourceView> {
+        let _ = (entity, section, payload);
+        None
+    }
     /// The bytes of the file at `path` in `entity`'s tree (#2256, spec #2234
     /// step 5), read whole up to `cap` bytes: a README's image, a PDF.
     ///

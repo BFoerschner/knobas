@@ -16,7 +16,8 @@
 //!
 //! # The read cache (#2239)
 //!
-//! In memory only, never in the database or on disk. A view the adapter says
+//! In memory, never in the mirror's tables; a page's reads are also held
+//! between sessions (below, ADR-0042). A view the adapter says
 //! is [`Standing::Fixed`] before it is read (`Source::view_standing`: a file
 //! at a whole commit sha) is kept for the session, keyed by the built
 //! instance, the entity and the section, and the same ask again is answered
@@ -40,6 +41,18 @@
 //! way where the adapter says they move (`Source::refusal_standing`): Gitea's
 //! probe is asked once per repository, not once per file opened.
 //!
+//! # Pages show what knobas last read (ADR-0042)
+//!
+//! A page's view ([`LiveSources::shown`]) that is not fixed -- moving, or
+//! live -- is answered from what knobas last read whenever it holds one: the
+//! cache above first, then the held reads kept between sessions
+//! (`sync.held_read`, [`super::held`]), each with when it was read; and read
+//! again behind the answer, as a moving view is. Only a view knobas has never
+//! read waits for the source. A read behind that lands is held for the next
+//! session too. The shell is told (`view:fresh`) when the answer moved, and
+//! also when an answer older than [`HELD_AFTER`] was confirmed or could not
+//! be, with the source's failure, so the page can say from when it is.
+//!
 //! # Bytes (#2256)
 //!
 //! A file's bytes ([`LiveSources::bytes`]: a README's image, a PDF) are kept
@@ -56,6 +69,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
+use chrono::{DateTime, Utc};
 
 use knobas_secrets::SecretStore;
 use knobas_source::grants::{RefusedWrite, WriteAsk};
@@ -97,9 +112,29 @@ struct Inner {
     idle: tokio::sync::Notify,
     /// Told of a read behind whose answer moved.
     fresh: Mutex<Option<Listener>>,
+    /// Where reads are held between sessions, once the app says
+    /// ([`LiveSources::hold_in`]); none in a test that does not.
+    store: Mutex<Option<PgPool>>,
+    /// By build: the source's id and what it was built from short of its
+    /// credential, which a held read is keyed by.
+    recipes: Mutex<HashMap<u64, (String, serde_json::Value)>>,
 }
 
+/// How old an answer a page was given from what knobas held must be for the
+/// shell to be told how its read behind went (ADR-0042): a younger one is the
+/// read a moment ago, and says nothing.
+pub const HELD_AFTER: chrono::TimeDelta = chrono::TimeDelta::seconds(30);
+
 type Listener = Arc<dyn Fn(ViewFresh) + Send + Sync>;
+
+/// A moving read, made again behind its answer: the source asked once more,
+/// its answer as JSON ([`LiveSources::moving_read`]).
+pub(crate) type ReadAgain = Arc<
+    dyn Fn() -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<serde_json::Value, SourceError>> + Send>,
+        > + Send
+        + Sync,
+>;
 
 /// The payload of the shell's `view:fresh` event (#2242): a view the shell
 /// was answered from memory was read again behind, and its answer moved, so
@@ -109,6 +144,28 @@ type Listener = Arc<dyn Fn(ViewFresh) + Send + Sync>;
 pub struct ViewFresh {
     pub entity_id: String,
     pub section: Option<String>,
+    /// The source's failure, where the read behind an answer older than
+    /// [`HELD_AFTER`] failed (ADR-0042): the page keeps what it drew, says
+    /// from when it is and why it was not read now, and reads nothing again.
+    /// Absent on every other telling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub failed: Option<String>,
+}
+
+/// A page's view as [`LiveSources::shown`] answers it (ADR-0042): the view,
+/// and when it was read where it is what knobas held rather than a read made
+/// now. On the wire it is the view's own object with `held_at` beside its
+/// fields, absent for a read made now.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
+pub struct ShownView {
+    #[serde(flatten)]
+    pub view: SourceView,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub held_at: Option<DateTime<Utc>>,
 }
 
 /// A source as built, and what it was built from.
@@ -154,6 +211,8 @@ impl LiveSources {
             pending: AtomicUsize::new(0),
             idle: tokio::sync::Notify::new(),
             fresh: Mutex::new(None),
+            store: Mutex::new(None),
+            recipes: Mutex::new(HashMap::new()),
         }))
     }
 
@@ -161,6 +220,26 @@ impl LiveSources {
     /// `view:fresh`, where the app wires it.
     pub fn on_fresh(&self, listener: impl Fn(ViewFresh) + Send + Sync + 'static) {
         *self.0.fresh.lock().expect("the listener") = Some(Arc::new(listener));
+    }
+
+    /// Hold pages' reads between sessions in `pool`'s `sync.held_read`
+    /// (ADR-0042): what the app does at bring-up.
+    pub fn hold_in(&self, pool: PgPool) {
+        *self.0.store.lock().expect("the store") = Some(pool);
+    }
+
+    fn store(&self) -> Option<PgPool> {
+        self.0.store.lock().expect("the store").clone()
+    }
+
+    /// The source id and recipe build `generation` was made from.
+    fn recipe_of(&self, generation: u64) -> Option<(String, serde_json::Value)> {
+        self.0
+            .recipes
+            .lock()
+            .expect("the recipes")
+            .get(&generation)
+            .cloned()
     }
 
     /// Once every read behind under way has ended: for a test that counts
@@ -257,6 +336,18 @@ impl LiveSources {
         if self.0.forgets.load(Ordering::SeqCst) != forgets {
             return Ok(Lent { source, generation });
         }
+        self.0.recipes.lock().expect("the recipes").insert(
+            generation,
+            (
+                id.clone(),
+                serde_json::json!({
+                    "adapter": recipe.adapter_kind,
+                    "base_url": recipe.base_url,
+                    "method": recipe.method,
+                    "config": recipe.config,
+                }),
+            ),
+        );
         *slot = Some(Built {
             recipe,
             generation,
@@ -311,6 +402,291 @@ impl LiveSources {
         let view = lent.source.view(entity, section).await?;
         self.reads().put(key, Answer::View(view.clone()));
         Ok(view)
+    }
+
+    /// The view of `entity` at `section` a page draws (ADR-0042): from what
+    /// knobas last read when it holds one -- this cache first, then the reads
+    /// held between sessions -- with when it was read, and read again behind
+    /// the answer; a fixed one is never read behind nor said to be from
+    /// earlier. A view never read is drawn from the mirror's record where the
+    /// adapter draws anything from it (`Source::mirror_view`), as of the sync
+    /// that wrote it, and read behind. Only a view knobas holds nothing of is
+    /// read now, and waited for; its answer is kept, and held.
+    ///
+    /// # Errors
+    ///
+    /// The adapter's, on a read made now; a failed read is never kept.
+    pub(crate) async fn shown(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        section: Option<&str>,
+    ) -> Result<(Option<SourceView>, Option<DateTime<Utc>>), SourceError> {
+        // A fixed view cannot move: kept and held like any other, never read
+        // behind, and never said to be from earlier.
+        let fixed = lent.source.view_standing(entity, section) == Standing::Fixed;
+        let key = Key {
+            generation: lent.generation,
+            entity: entity.to_owned(),
+            ask: Ask::View(section.map(str::to_owned)),
+        };
+        let kept = self.reads().get_at(&key);
+        if let Some((Answer::View(kept), at)) = kept {
+            if fixed {
+                return Ok((kept, None));
+            }
+            self.read_behind(&lent.source, vec![key]);
+            return Ok((kept, Some(at)));
+        }
+        let recipe = self.recipe_of(lent.generation);
+        let store = self.store();
+        if let (Some(pool), Some((id, recipe))) = (store.as_ref(), recipe.as_ref())
+            && let Some((at, answer)) =
+                super::held::get(pool, id, entity, &super::held::view_ask(section), recipe).await
+            && let Ok(view) = serde_json::from_value::<Option<SourceView>>(answer)
+        {
+            self.reads()
+                .put_at(key.clone(), Answer::View(view.clone()), at);
+            if fixed {
+                return Ok((view, None));
+            }
+            self.read_behind(&lent.source, vec![key]);
+            return Ok((view, Some(at)));
+        }
+        // Never read: what the mirror's own record draws, where the adapter
+        // draws anything from it, as of the sync that wrote it; never held.
+        if !fixed
+            && let Some(pool) = store.as_ref()
+            && let Ok(Some((payload, synced_at))) =
+                sqlx::query_as::<_, (serde_json::Value, DateTime<Utc>)>(
+                    "select payload, synced_at from sync.item where entity_id = $1",
+                )
+                .bind(entity)
+                .fetch_optional(pool)
+                .await
+            && let Some(view) = lent.source.mirror_view(entity, section, &payload)
+        {
+            self.reads()
+                .put_at(key.clone(), Answer::View(Some(view.clone())), synced_at);
+            self.read_behind(&lent.source, vec![key]);
+            return Ok((Some(view), Some(synced_at)));
+        }
+        let view = lent.source.view(entity, section).await?;
+        let read_at = Utc::now();
+        self.reads().put(key.clone(), Answer::View(view.clone()));
+        self.hold(&key, &view, read_at).await;
+        Ok((view, None))
+    }
+
+    /// Hold `view`, read at `read_at` under `key`, for the next session,
+    /// where the app holds reads at all.
+    async fn hold(&self, key: &Key, view: &Option<SourceView>, read_at: DateTime<Utc>) {
+        let Ask::View(section) = &key.ask else {
+            return;
+        };
+        let (Some(pool), Some((id, recipe))) = (self.store(), self.recipe_of(key.generation))
+        else {
+            return;
+        };
+        let Ok(answer) = serde_json::to_value(view) else {
+            return;
+        };
+        super::held::put(
+            &pool,
+            &id,
+            &key.entity,
+            &super::held::view_ask(section.as_deref()),
+            &recipe,
+            read_at,
+            &answer,
+        )
+        .await;
+    }
+
+    /// A source read other than a view, named `ask` (`run:log`, an
+    /// attachment's id), that cannot change once `fixed` says so -- a finished
+    /// run's log -- answered from what knobas kept or held when it has it, with
+    /// no request, and read with `read` otherwise, then kept and held
+    /// (ADR-0042). Not fixed, it is read every time and kept nowhere.
+    ///
+    /// # Errors
+    ///
+    /// `read`'s; a failed read is never kept.
+    pub(crate) async fn fixed_read<T, F>(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        ask: &str,
+        fixed: bool,
+        read: F,
+    ) -> Result<T, SourceError>
+    where
+        T: serde::Serialize + serde::de::DeserializeOwned,
+        F: std::future::Future<Output = Result<T, SourceError>>,
+    {
+        if !fixed {
+            return read.await;
+        }
+        let key = Key {
+            generation: lent.generation,
+            entity: entity.to_owned(),
+            ask: Ask::Read(ask.to_owned()),
+        };
+        if let Some(Answer::Json(kept)) = self.reads().get(&key)
+            && let Ok(answer) = serde_json::from_value::<T>((*kept).clone())
+        {
+            return Ok(answer);
+        }
+        let recipe = self.recipe_of(lent.generation);
+        if let (Some(pool), Some((id, recipe))) = (self.store(), recipe.as_ref())
+            && let Some((at, json)) = super::held::get(&pool, id, entity, ask, recipe).await
+            && let Ok(answer) = serde_json::from_value::<T>(json.clone())
+        {
+            self.reads().put_at(key, Answer::Json(Arc::new(json)), at);
+            return Ok(answer);
+        }
+        let answer = read.await?;
+        if let Ok(json) = serde_json::to_value(&answer) {
+            self.reads()
+                .put(key.clone(), Answer::Json(Arc::new(json.clone())));
+            self.hold_json(&key, ask, &json, Utc::now()).await;
+        }
+        Ok(answer)
+    }
+
+    /// A source read other than a view, named `ask`, that moves (a run's
+    /// chain, a pipeline's settings): answered from what knobas kept or held
+    /// when it has it, with when it was read, and read again behind with
+    /// `read`, as a moving view is (ADR-0042). The shell is told on
+    /// `view:fresh`, with `ask` as the section, as for a view. Held nothing of,
+    /// it is read now and waited for.
+    ///
+    /// # Errors
+    ///
+    /// `read`'s, on a read made now; a failed read is never kept.
+    pub(crate) async fn moving_read<T>(
+        &self,
+        lent: &Lent,
+        entity: &str,
+        ask: &str,
+        read: ReadAgain,
+    ) -> Result<(T, Option<DateTime<Utc>>), SourceError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let key = Key {
+            generation: lent.generation,
+            entity: entity.to_owned(),
+            ask: Ask::Read(ask.to_owned()),
+        };
+        let kept = self.reads().get_at(&key);
+        if let Some((Answer::Json(kept), at)) = kept
+            && let Ok(answer) = serde_json::from_value::<T>((*kept).clone())
+        {
+            self.read_again_behind(key, read);
+            return Ok((answer, Some(at)));
+        }
+        let recipe = self.recipe_of(lent.generation);
+        if let (Some(pool), Some((id, recipe))) = (self.store(), recipe.as_ref())
+            && let Some((at, json)) = super::held::get(&pool, id, entity, ask, recipe).await
+            && let Ok(answer) = serde_json::from_value::<T>(json.clone())
+        {
+            self.reads()
+                .put_at(key.clone(), Answer::Json(Arc::new(json)), at);
+            self.read_again_behind(key, read);
+            return Ok((answer, Some(at)));
+        }
+        let json = read().await?;
+        let answer = serde_json::from_value::<T>(json.clone())
+            .map_err(|error| SourceError::protocol(format!("{ask}: {error}")))?;
+        self.reads()
+            .put(key.clone(), Answer::Json(Arc::new(json.clone())));
+        self.hold_json(&key, ask, &json, Utc::now()).await;
+        Ok((answer, None))
+    }
+
+    /// [`Self::moving_read`]'s read behind: one per key at a time, as a
+    /// view's; a moved answer, or one older than [`HELD_AFTER`] confirmed or
+    /// failed, is told.
+    fn read_again_behind(&self, key: Key, read: ReadAgain) {
+        {
+            let mut behind = self.0.behind.lock().expect("the reads behind");
+            if let Some(again) = behind.get_mut(&key) {
+                *again = true;
+                return;
+            }
+            behind.insert(key.clone(), false);
+        }
+        self.0.pending.fetch_add(1, Ordering::SeqCst);
+        let this = self.clone();
+        let work = async move {
+            loop {
+                let Ask::Read(ask) = &key.ask else { break };
+                let held = this
+                    .reads()
+                    .at_of(&key)
+                    .is_some_and(|at| Utc::now() - at > HELD_AFTER);
+                let told = |failed| ViewFresh {
+                    entity_id: key.entity.clone(),
+                    section: Some(ask.clone()),
+                    failed,
+                };
+                match read().await {
+                    Ok(json) => {
+                        let moved = this
+                            .reads()
+                            .replace(&key, Answer::Json(Arc::new(json.clone())));
+                        this.hold_json(&key, ask, &json, Utc::now()).await;
+                        if moved || held {
+                            this.tell(told(None));
+                        }
+                    }
+                    Err(error) => {
+                        tracing::debug!(entity = %key.entity, %error, "a read behind failed; the kept answer stands");
+                        if held {
+                            this.tell(told(Some(error.to_string())));
+                        }
+                    }
+                }
+                let again = {
+                    let mut behind = this.0.behind.lock().expect("the reads behind");
+                    match behind.get_mut(&key) {
+                        Some(again) if *again => {
+                            *again = false;
+                            true
+                        }
+                        _ => {
+                            behind.remove(&key);
+                            false
+                        }
+                    }
+                };
+                if !again {
+                    break;
+                }
+            }
+            if this.0.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
+                this.0.idle.notify_waiters();
+            }
+        };
+        #[cfg(feature = "test-util")]
+        let work = knobas_http::counted::inherit(work);
+        tokio::spawn(work);
+    }
+
+    /// Hold a read's JSON `answer` to `ask`, read at `read_at` under `key`.
+    async fn hold_json(
+        &self,
+        key: &Key,
+        ask: &str,
+        answer: &serde_json::Value,
+        read_at: DateTime<Utc>,
+    ) {
+        let (Some(pool), Some((id, recipe))) = (self.store(), self.recipe_of(key.generation))
+        else {
+            return;
+        };
+        super::held::put(&pool, &id, &key.entity, ask, &recipe, read_at, answer).await;
     }
 
     /// The bytes of the file at `path` in `entity`'s tree, at `commit`, as
@@ -514,22 +890,40 @@ impl LiveSources {
                             field: field.clone(),
                         },
                     )),
-                    // Kept only where fixed, so never read behind.
-                    Ask::Bytes { .. } | Ask::Piped { .. } => {}
+                    // Kept only where fixed, so never read behind; a read
+                    // other than a view is read behind by its own closure.
+                    Ask::Bytes { .. } | Ask::Piped { .. } | Ask::Read(_) => {}
                 }
             }
             for (key, section) in views {
+                // An answer older than `HELD_AFTER` was drawn with when it was
+                // read: its page is told how this read went, either way.
+                let held = this
+                    .reads()
+                    .at_of(key)
+                    .is_some_and(|at| Utc::now() - at > HELD_AFTER);
                 match source.view(&key.entity, section.as_deref()).await {
                     Ok(view) => {
-                        if this.reads().replace(key, Answer::View(view)) {
+                        let read_at = Utc::now();
+                        let moved = this.reads().replace(key, Answer::View(view.clone()));
+                        this.hold(key, &view, read_at).await;
+                        if moved || held {
                             this.tell(ViewFresh {
                                 entity_id: key.entity.clone(),
                                 section,
+                                failed: None,
                             });
                         }
                     }
                     Err(error) => {
                         tracing::debug!(entity = %key.entity, %error, "a read behind failed; the kept answer stands");
+                        if held {
+                            this.tell(ViewFresh {
+                                entity_id: key.entity.clone(),
+                                section,
+                                failed: Some(error.to_string()),
+                            });
+                        }
                     }
                 }
             }
@@ -582,6 +976,11 @@ impl LiveSources {
 
     fn drop_reads(&self, generation: u64) {
         self.0
+            .recipes
+            .lock()
+            .expect("the recipes")
+            .remove(&generation);
+        self.0
             .reads
             .lock()
             .expect("the read cache")
@@ -627,6 +1026,8 @@ enum Ask {
         commit: Option<String>,
         pipeline: String,
     },
+    /// A source read other than a view, by its name (ADR-0042).
+    Read(String),
 }
 
 impl Key {
@@ -650,6 +1051,8 @@ enum Answer {
     Refused(Option<RefusedWrite>),
     Bytes(Option<Arc<FileBytes>>),
     Piped(Arc<crate::file_pipeline::PipeRun>),
+    /// A read other than a view, as JSON (ADR-0042).
+    Json(Arc<serde_json::Value>),
 }
 
 impl Answer {
@@ -660,6 +1063,7 @@ impl Answer {
     fn measure(&self) -> Option<(usize, u64)> {
         let json = match self {
             Self::View(view) => serde_json::to_vec(view).ok()?,
+            Self::Json(json) => serde_json::to_vec(json.as_ref()).ok()?,
             // Refused with no words is not the same answer as taken.
             Self::Refused(refused) => refused.as_ref().map_or_else(
                 || b"taken".to_vec(),
@@ -691,6 +1095,9 @@ struct Reads {
 
 struct Kept {
     answer: Answer,
+    /// When the answer was read: now for a read made now, a held read's own
+    /// time for one taken from `sync.held_read`.
+    at: DateTime<Utc>,
     bytes: usize,
     /// Its JSON's hash, against which a read behind is compared.
     digest: u64,
@@ -720,16 +1127,27 @@ impl Reads {
     }
 
     fn get(&mut self, key: &Key) -> Option<Answer> {
+        self.get_at(key).map(|(answer, _)| answer)
+    }
+
+    /// [`Self::get`], and when the answer was read.
+    fn get_at(&mut self, key: &Key) -> Option<(Answer, DateTime<Utc>)> {
         let now = self.tick();
         let kept = self.entries.get_mut(key)?;
         self.order.remove(&kept.used);
         kept.used = now;
         self.order.insert(now, key.clone());
-        Some(kept.answer.clone())
+        Some((kept.answer.clone(), kept.at))
+    }
+
+    /// When `key`'s answer was read, where it is kept; its use unchanged.
+    fn at_of(&self, key: &Key) -> Option<DateTime<Utc>> {
+        self.entries.get(key).map(|kept| kept.at)
     }
 
     /// Replace `key`'s answer where it is still kept (a forget or the bound
-    /// may have dropped it since), and say whether the answer moved.
+    /// may have dropped it since), and say whether the answer moved. An
+    /// answer that did not move is read now all the same.
     fn replace(&mut self, key: &Key, answer: Answer) -> bool {
         let Some(before) = self.entries.get(key).map(|kept| kept.digest) else {
             return false;
@@ -737,11 +1155,18 @@ impl Reads {
         let moved = answer.measure().map(|(_, digest)| digest) != Some(before);
         if moved {
             self.put(key.clone(), answer);
+        } else if let Some(kept) = self.entries.get_mut(key) {
+            kept.at = Utc::now();
         }
         moved
     }
 
     fn put(&mut self, key: Key, answer: Answer) {
+        self.put_at(key, answer, Utc::now());
+    }
+
+    /// [`Self::put`], read at `at`.
+    fn put_at(&mut self, key: Key, answer: Answer, at: DateTime<Utc>) {
         let Some((bytes, digest)) = answer.measure() else {
             return;
         };
@@ -757,6 +1182,7 @@ impl Reads {
             key,
             Kept {
                 answer,
+                at,
                 bytes,
                 digest,
                 used,

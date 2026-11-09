@@ -3862,6 +3862,24 @@ inherited: boolean, secret: boolean,
 editable: boolean, description: string | null, };
 
 /**
+ * A page's view as [`LiveSources::shown`] answers it (ADR-0042): the view,
+ * and when it was read where it is what knobas held rather than a read made
+ * now. On the wire it is the view's own object with `held_at` beside its
+ * fields, absent for a read made now.
+ */
+export type ShownView = { held_at?: string, sections: Array<ViewSection>, 
+/**
+ * What a reader can do to the entity, drawn as a toolbar between the
+ * detail's header and the tabs, on every tab (issue #702, spec #701).
+ * Empty draws no toolbar. Absent on the wire reads as empty, so a view
+ * drawn before the toolbar decodes.
+ *
+ * A [`Block::Actions`] is for an action that belongs to one section; an
+ * action is in one place or the other, never both.
+ */
+actions: Array<ViewAction>, };
+
+/**
  * One signal on one ticket: what the card and the list row draw.
  *
  * Issue #815.
@@ -4584,7 +4602,14 @@ commit: string | null, };
  * was answered from memory was read again behind, and its answer moved, so
  * a page showing it reads it again (from memory, now the fresh answer).
  */
-export type ViewFresh = { entity_id: string, section: string | null, };
+export type ViewFresh = { entity_id: string, section: string | null, 
+/**
+ * The source's failure, where the read behind an answer older than
+ * [`HELD_AFTER`] failed (ADR-0042): the page keeps what it drew, says
+ * from when it is and why it was not read now, and reads nothing again.
+ * Absent on every other telling.
+ */
+failed?: string, };
 
 /**
  * One row of an [`Block::Entities`] list.

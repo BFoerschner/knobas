@@ -319,6 +319,11 @@ pub async fn reachable_transitions<R: tauri::Runtime>(
 /// *Showing the mirror: <message>*. An entity-list row keeps its address only
 /// where the mirror holds that entity (rule 7, `sources::crud::view`).
 ///
+/// **What knobas last read, at once** (ADR-0042): the answer is what knobas
+/// held where it holds one, with `held_at` saying when it was read, and the
+/// source is read behind it and told on `view:fresh`; only a view never read
+/// waits for the source ([`crate::sources::crud::shown`]).
+///
 /// # Errors
 ///
 /// `invalid` if `entity_id` is not an entity id, `not_found` if its namespace
@@ -330,9 +335,9 @@ pub async fn entity_view<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     entity_id: String,
     section: Option<String>,
-) -> Result<Option<knobas_source::view::SourceView>, IpcError> {
+) -> Result<Option<crate::sources::live::ShownView>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::crud::view(
+    crate::sources::crud::shown(
         &state.pool,
         &state.secrets,
         &state.registry,

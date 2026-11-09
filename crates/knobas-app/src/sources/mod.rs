@@ -7,6 +7,7 @@
 
 pub mod crud;
 pub mod demo;
+pub mod held;
 pub mod install;
 pub mod installed;
 pub mod live;
@@ -663,6 +664,8 @@ pub async fn bring_up<R: tauri::Runtime>(
     )
     .await?;
     let live = live::LiveSources::default();
+    // Pages show what knobas last read, from the session before too (ADR-0042).
+    live.hold_in(deps.pool.clone());
     let fresh_to = app.clone();
     live.on_fresh(move |fresh| {
         crate::events::emit(&fresh_to, None, crate::events::VIEW_FRESH, fresh);

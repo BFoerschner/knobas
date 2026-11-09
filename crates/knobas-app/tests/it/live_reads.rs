@@ -643,7 +643,9 @@ async fn the_least_recently_used_view_is_dropped_past_the_bound() {
     assert_eq!(f.seen.reads(), 6);
 }
 
-/// Nothing a view held in memory says is written anywhere in the database.
+/// Nothing a view held in memory says is written anywhere in the database,
+/// where the app holds no reads between sessions (ADR-0042: a page's reads
+/// go to `sync.held_read` alone, `a_held_read_is_in_held_read_alone`).
 #[tokio::test]
 async fn nothing_the_cache_holds_reaches_the_database() {
     let f = fixture().await;
@@ -659,7 +661,17 @@ async fn nothing_the_cache_holds_reaches_the_database() {
     .await
     .unwrap();
     assert!(tables.len() > 10, "the schema is there: {tables:?}");
+    let held: i64 = sqlx::query_scalar("select count(*) from sync.held_read where source_id = $1")
+        .bind(&f.id)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+    assert_eq!(held, 0, "no page asked, so nothing is held");
     for (schema, table) in tables {
+        // Other tests' pages hold their reads there, in this shared database.
+        if (schema.as_str(), table.as_str()) == ("sync", "held_read") {
+            continue;
+        }
         // The names are the catalogue's own, quoted.
         let found: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "select count(*) from \"{schema}\".\"{table}\" t where t::text like '%' || $1 || '%'"
@@ -1288,4 +1300,190 @@ async fn a_commit_with_no_checkout_is_one_read_of_its_diff() {
         *f.seen.reads.lock().unwrap(),
         [(commit, Some("diff".to_owned()))]
     );
+}
+
+// -- pages show what knobas last read (ADR-0042) ------------------------------
+
+impl Fixture {
+    /// A page's read of `key` through `live` (`entity_view`): its text and
+    /// when it was read, where it was answered from what knobas held.
+    async fn shown_through(
+        &self,
+        live: &LiveSources,
+        key: &str,
+        section: Option<&str>,
+    ) -> Result<(String, Option<chrono::DateTime<chrono::Utc>>), SourcesError> {
+        let shown = sources::crud::shown(
+            &self.pool,
+            &self.secrets,
+            &self.registry,
+            live,
+            &self.entity(key),
+            section,
+        )
+        .await?
+        .expect("the fake draws every entity");
+        match &shown.view.sections[0].blocks[0] {
+            Block::Text { text, .. } => Ok((text.clone(), shown.held_at)),
+            other => panic!("one text block, not {other:?}"),
+        }
+    }
+
+    /// A session as the app starts one: its reads held in the database.
+    fn session(&self) -> LiveSources {
+        let live = LiveSources::default();
+        live.hold_in(self.pool.clone());
+        live
+    }
+
+    /// Every held read of this source, made `ago` older.
+    async fn age_held(&self, ago: chrono::TimeDelta) {
+        sqlx::query("update sync.held_read set read_at = read_at - $2 where source_id = $1")
+            .bind(&self.id)
+            .bind(ago)
+            .execute(&self.pool)
+            .await
+            .unwrap();
+    }
+}
+
+/// **The next session answers at once** (ADR-0042): a live view a page read
+/// is held, and a page in the next session is answered from it, with when it
+/// was read, while the source is read behind it once.
+#[tokio::test]
+async fn a_live_view_a_page_read_is_the_next_sessions_answer_at_once() {
+    let f = fixture().await;
+    let first = f.session();
+    let (text, held) = f.shown_through(&first, "pr/1", None).await.unwrap();
+    assert!(held.is_none(), "read now");
+    assert_eq!(f.seen.reads(), 1);
+
+    let next = f.session();
+    let started = std::time::Instant::now();
+    let (again, held) = f.shown_through(&next, "pr/1", None).await.unwrap();
+    assert!(started.elapsed() < CACHED_BUDGET, "{:?}", started.elapsed());
+    assert_eq!(again, text, "what the first session read");
+    assert!(held.is_some(), "said to be what knobas held");
+    next.settled().await;
+    assert_eq!(f.seen.reads(), 2, "and the source read once behind it");
+}
+
+/// A held answer older than `HELD_AFTER` is told when its read behind
+/// confirms it, so the page drops its line, and told with the source's
+/// failure when it cannot be confirmed.
+#[tokio::test]
+async fn an_old_held_answer_is_told_confirmed_or_not() {
+    let f = fixture().await;
+    f.shown_through(&f.session(), "pr/2", None).await.unwrap();
+    f.age_held(chrono::TimeDelta::hours(2)).await;
+
+    let next = f.session();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    next.on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    let (_, held) = f.shown_through(&next, "pr/2", None).await.unwrap();
+    let held = held.expect("held");
+    assert!(chrono::Utc::now() - held > chrono::TimeDelta::hours(1));
+    next.settled().await;
+    let told = heard.lock().unwrap().clone();
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(told[0].entity_id, f.entity("pr/2"));
+    assert_eq!(told[0].failed, None, "confirmed");
+    let (_, now) = f.shown_through(&next, "pr/2", None).await.unwrap();
+    assert!(
+        chrono::Utc::now() - now.expect("kept") < chrono::TimeDelta::seconds(5),
+        "the confirmed answer is read now"
+    );
+    next.settled().await;
+
+    // The next session, with the source down.
+    f.age_held(chrono::TimeDelta::hours(2)).await;
+    let down = f.session();
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let ear = heard.clone();
+    down.on_fresh(move |fresh| ear.lock().unwrap().push(fresh));
+    f.seen.failing.store(true, Ordering::SeqCst);
+    let (text, held) = f.shown_through(&down, "pr/2", None).await.unwrap();
+    assert!(text.contains(MARK) && held.is_some(), "still drawn");
+    down.settled().await;
+    let told = heard.lock().unwrap().clone();
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0]
+            .failed
+            .as_deref()
+            .is_some_and(|why| why.contains("down")),
+        "{told:?}"
+    );
+}
+
+/// A new credential may read less: nothing held through the old one is
+/// answered after it.
+#[tokio::test]
+async fn a_new_credential_drops_what_was_held() {
+    let f = fixture().await;
+    f.shown_through(&f.session(), "pr/3", None).await.unwrap();
+    sources::crud::set_secret(
+        &f.pool,
+        &f.secrets,
+        &f.registry,
+        &f.live,
+        &f.id,
+        SecretInput::of("second-pat"),
+    )
+    .await
+    .unwrap();
+    let (text, held) = f.shown_through(&f.session(), "pr/3", None).await.unwrap();
+    assert!(held.is_none(), "read now, through the new credential");
+    assert!(text.contains("second-pat"), "{text}");
+}
+
+/// A fixed view is held between sessions too, and never read behind.
+#[tokio::test]
+async fn a_fixed_view_is_held_and_never_read_behind() {
+    let f = fixture().await;
+    f.shown_through(&f.session(), "commit/abc", Some("file:a"))
+        .await
+        .unwrap();
+    let next = f.session();
+    let (_, held) = f
+        .shown_through(&next, "commit/abc", Some("file:a"))
+        .await
+        .unwrap();
+    assert!(
+        held.is_none(),
+        "a fixed view is never said to be from earlier"
+    );
+    next.settled().await;
+    assert_eq!(f.seen.reads(), 1, "read once, ever");
+}
+
+/// What a page's reads hold goes to `sync.held_read` and nowhere else: never
+/// the mirror's tables, never the `knobas` schema a backup carries.
+#[tokio::test]
+async fn a_held_read_is_in_held_read_alone() {
+    let f = fixture().await;
+    f.shown_through(&f.session(), "pr/4", None).await.unwrap();
+    let tables: Vec<(String, String)> = sqlx::query_as(
+        "select table_schema::text, table_name::text from information_schema.tables
+          where table_type = 'BASE TABLE'
+            and table_schema not in ('pg_catalog', 'information_schema')",
+    )
+    .fetch_all(&f.pool)
+    .await
+    .unwrap();
+    for (schema, table) in tables {
+        let found: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "select count(*) from \"{schema}\".\"{table}\" t where t::text like '%' || $1 || '%'"
+        )))
+        .bind(MARK)
+        .fetch_one(&f.pool)
+        .await
+        .unwrap();
+        if (schema.as_str(), table.as_str()) == ("sync", "held_read") {
+            assert!(found >= 1, "the read is held");
+        } else {
+            assert_eq!(found, 0, "{schema}.{table} holds a page's read");
+        }
+    }
 }
