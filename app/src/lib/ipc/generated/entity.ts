@@ -847,7 +847,9 @@ source: string,
  */
 verb: string, 
 /**
- * Why this line is here, as a sentence naming the source and the verb.
+ * Why this line is here, as a person says it, naming the source by its
+ * display name: *you merged it in Tidewater Gitea*, never an op code or
+ * a source id.
  */
 reason: string, 
 /**
