@@ -20,7 +20,9 @@
 //                 the list and focus took the next row's same words (the keeper's rule), which needs the trip's `rows`.
 //                 `leaves`: the first Enter is meant to change the address. The second must still write and open nothing, and stay there.
 //                 `returns`: the press closes a dialog or an editor and focus goes back to the control with these words, as the spec asks.
-//                 That landing is accepted; a second Enter that writes, reopens or moves still fails. These trips press again after `gap`
+//                 That landing is accepted; a second Enter that writes, reopens or moves still fails.
+//                 `returnsCounting`: the control focus goes back to counts as it goes (*Cloning 3 of 9…*), so `returns` is its start.
+//                 `opens`: the first Enter is meant to open a dialog (*Clone all…*, PR #2479). The second must leave it open and send nothing. These trips press again after `gap`
 //                 ms (200 by default), inside the hold. --gap n presses after n ms instead, so --gap 1000 shows the trip can fail.
 //   leave-back    press by key, which raises a toast and hides a row. While the toast is up, go to `via` and back. Fails if the rows
 //                 differ from just after the press. Can't run if the press hides no row or the toast has gone by the return.
@@ -286,6 +288,17 @@ const PAGES = [
     { id: "sync-all", kind: "enter-twice", strict: true, finding: "F-652", press: { sel: ".tf-main button", text: "Sync all" } },
     { id: "sync-all-pointer", kind: "pointer-twice", strict: true, once: true, finding: "F-652", press: { sel: ".tf-main button", text: "Sync all" } },
   ] },
+  // *Clone all…* (PR #2479): the opener says first in a dialog, its *Clone* starts one run however it is pressed, and the run's one
+  // summary toast stands through a leave and a return. `once`: a second press must not ask for a second run.
+  { page: "Code's Clone all", route: "code", trips: [
+    { id: "clone-all-open", kind: "enter-twice", strict: true, opens: true, finding: "PR #2479", press: { sel: ".tf-fhead button", text: "Clone all…" } },
+    { id: "clone-all-start", kind: "enter-twice", strict: true, finding: "PR #2479", prep: [{ click: ".tf-fhead button", text: "Clone all…" }, { wait: 400 }], press: { sel: ".tf-dialog footer .tf-primary", starts: "Clone" }, returns: "Cloning ", returnsCounting: true },
+    { id: "clone-all-start-pointer", kind: "pointer-twice", strict: true, once: true, finding: "PR #2479", prep: [{ click: ".tf-fhead button", text: "Clone all…" }, { wait: 400 }], press: { sel: ".tf-dialog footer .tf-primary", starts: "Clone" } },
+    { id: "clone-all-toast-back", kind: "leave-back", strict: true, finding: "PR #2479", prep: [{ click: ".tf-fhead button", text: "Clone all…" }, { wait: 400 }], press: { sel: ".tf-dialog footer .tf-primary", starts: "Clone" }, rows: ".tf-main tbody tr", rowsStay: true, via: "inbox", after: 4500 },
+  ] },
+  { page: "Settings' Clone all", route: "settings/checkouts", trips: [
+    { id: "settings-clone-all-open", kind: "enter-twice", strict: true, opens: true, finding: "PR #2479", press: { sel: ".tf-main button", text: "Clone all…" } },
+  ] },
   // A press inside one kept page isn't a hide: its rail or column stays where it was.
   { page: "A rail through a press", route: "builds/teamcity%3AbuildType%3APayout_Lint", trips: [
     { id: "kept-builds-rail", kind: "kept-opening", strict: true, finding: "F-454", then: "press", scroller: ".tf-pl-list", at: 600, press: { sel: ".tf-bmain a[href^='#/build/']" } },
@@ -535,7 +548,7 @@ const PAGES = [
 ];
 
 // Commands that change something. shell/dev/fake's reads, syncs' progress and heartbeats are left out.
-const WRITE = /^(set_|delete_|create_|save_|add_|remove_|rename_|update_|install_|uninstall_|apply_|publish_|start_timer$|stop_timer$|start_work_(amend|retry|run|skip)$|submit_write$|amend_write$|discard_write$|flush_writes$|ack_alert$|unack_alert$|complete_inbox_item$|snooze_inbox_item$|dismiss_|accept_suggestion$|ad_hoc_block$|update_block$|log_work$|unlink$|move_|edit_|clone_repo$|hide_|order_dep_layers$|place_dep_kind$|restore_backup$|backup_now$|bind_|clear_tone_overrides$|docs_create_page$|docs_edit_section$|follow_merges$|complete_first_run$|sync_now$|sync_all$)/;
+const WRITE = /^(set_|delete_|create_|save_|add_|remove_|rename_|update_|install_|uninstall_|apply_|publish_|start_timer$|stop_timer$|start_work_(amend|retry|run|skip)$|submit_write$|amend_write$|discard_write$|flush_writes$|ack_alert$|unack_alert$|complete_inbox_item$|snooze_inbox_item$|dismiss_|accept_suggestion$|ad_hoc_block$|update_block$|log_work$|unlink$|move_|edit_|clone_repo$|hide_|order_dep_layers$|place_dep_kind$|restore_backup$|backup_now$|bind_|clear_tone_overrides$|docs_create_page$|docs_edit_section$|follow_merges$|complete_first_run$|sync_now$|sync_all$|clone_all$)/;
 
 // Runs in the page, once per document, before the app.
 const LIB = String.raw`(() => {
@@ -756,22 +769,25 @@ async function worker(queue, results) {
     if (!did) throw new Error(`the first Enter on "${pressed}" changed nothing`);
     if (first.hash !== before.hash && !t.leaves) throw new Error(`the first Enter on "${pressed}" left for ${first.hash}`);
     if (t.leaves && first.hash === before.hash) throw new Error(`the first Enter on "${pressed}" was meant to leave and stayed`);
-    if (first.dialogs > before.dialogs) throw new Error(`the first Enter on "${pressed}" opened a dialog: ${first.dialog}`);
+    if (first.dialogs > before.dialogs && !t.opens) throw new Error(`the first Enter on "${pressed}" opened a dialog: ${first.dialog}`);
+    if (t.opens && first.dialogs <= before.dialogs) throw new Error(`the first Enter on "${pressed}" was meant to open a dialog and opened none`);
     const rowLeft = !!t.rows && first.rows.length < before.rows.length;
     const landed = (a) => a.control && !a.pressed && a.words !== pressed;
     const reasons = [];
-    if (t.returns && first.active.words !== t.returns) reasons.push(`the first Enter on "${pressed}" should give focus back to "${t.returns}" and it is on "${first.active.words || first.active.tag}"`);
-    else if (landed(first.active) && !t.returns) reasons.push(`the first Enter on "${pressed}" put focus on "${first.active.words}", so the second presses that`);
+    const back = (words) => (t.returnsCounting ? words.startsWith(t.returns) : words === t.returns);
+    if (t.returns && !back(first.active.words)) reasons.push(`the first Enter on "${pressed}" should give focus back to "${t.returns}" and it is on "${first.active.words || first.active.tag}"`);
+    else if (landed(first.active) && !t.returns && !t.opens) reasons.push(`the first Enter on "${pressed}" put focus on "${first.active.words}", so the second presses that`);
     await key("Enter");
     await sleep(t.after ?? 500);
     const second = await snap(t.rows);
     if (second.hash !== first.hash) reasons.push(`the second Enter changed the address to ${second.hash}`);
     if (second.dialogs > first.dialogs) reasons.push(`the second Enter opened "${second.dialog}"`);
+    if (t.opens && second.dialogs < first.dialogs) reasons.push(`the second Enter closed the dialog "${first.dialog}" the first had opened, focus being on "${first.active.words || first.active.tag}"`);
     const sent = added(second, first);
     const inRow = first.active.row && first.active.row !== pressedRow ? ` in "${first.active.row}", pressed in "${pressedRow}"` : "";
     if (sent.length && !(rowLeft && first.active.words === pressed)) reasons.push(`the second Enter sent ${sent.join(", ")}, focus being on "${first.active.words}"${first.active.pressed ? " (the pressed control)" : inRow || (t.rows && !rowLeft ? " with the pressed row still there" : "")}`);
-    if (t.returns && second.active.words !== t.returns && second.hash === first.hash && second.dialogs <= first.dialogs) reasons.push(`after the second Enter focus is on "${second.active.words || second.active.tag}", not "${t.returns}"`);
-    if (!t.returns && second.hash === first.hash && second.dialogs <= first.dialogs && landed(second.active) && !landed(first.active)) reasons.push(`after the second Enter focus is on "${second.active.words}", not "${pressed}"`);
+    if (t.returns && !back(second.active.words) && second.hash === first.hash && second.dialogs <= first.dialogs) reasons.push(`after the second Enter focus is on "${second.active.words || second.active.tag}", not "${t.returns}"`);
+    if (!t.returns && !t.opens && second.hash === first.hash && second.dialogs <= first.dialogs && landed(second.active) && !landed(first.active)) reasons.push(`after the second Enter focus is on "${second.active.words}", not "${pressed}"`);
     return { reasons, note: `"${pressed}": first sent ${added(first, before).join(", ") || "nothing"}, focus then "${first.active.words || first.active.tag}"${rowLeft ? ", row left" : ""}; second sent ${sent.join(", ") || "nothing"}, focus then "${second.active.words || second.active.tag}"` };
   }
 

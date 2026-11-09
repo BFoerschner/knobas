@@ -47,6 +47,8 @@ export interface Clones {
   /** Moves each time a clone finishes, so a page re-reads its checkouts. */
   readonly finished: number;
   start(subject: CloneSubject): Promise<void>;
+  /** Hear every clone's progress, one this window started or not (*Clone all*'s, PR #2479), so rows and pages follow them. */
+  watch(): Promise<unknown>;
   stop(entityId: string): Promise<void>;
   /** Tests only: drop the marks, the finished count, the subjects and the progress listener (#1743). */
   reset(): void;
@@ -105,6 +107,7 @@ export function createClones(ports: ClonePorts = realClonePorts, apps: Apps = sh
     get finished() {
       return finished;
     },
+    watch: () => listen(),
     async start(subject) {
       subjects.set(subject.entityId, subject);
       await listen();

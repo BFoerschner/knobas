@@ -13,6 +13,7 @@ import { listen as tauriListen } from "@tauri-apps/api/event";
 import { EVENTS, ipcErrorMessage } from "../../ipc";
 import { cloneAll, cloneAllPlan, cloneAllState, type CloneAllPlan, type CloneAllState } from "../../ipc/entity";
 import { push, type ToastSpec } from "../../shell/toasts.svelte";
+import { clones as sharedClones, type Clones } from "./clones.svelte";
 
 export interface CloneAllPorts {
   plan: () => Promise<CloneAllPlan>;
@@ -61,7 +62,7 @@ export interface CloneAll {
   reset(): void;
 }
 
-export function createCloneAll(ports: CloneAllPorts = realCloneAllPorts): CloneAll {
+export function createCloneAll(ports: CloneAllPorts = realCloneAllPorts, clones: Pick<Clones, "watch"> = sharedClones): CloneAll {
   let run = $state<CloneAllState | null>(null);
   let starting = false;
   let root: string | null = null;
@@ -71,6 +72,8 @@ export function createCloneAll(ports: CloneAllPorts = realCloneAllPorts): CloneA
 
   /** Hear the run's states: from a start, or a run found going, until the window closes. */
   function listen(): Promise<unknown> {
+    // Each clone's own progress too: a row's *Clone* reads its percent, and a page re-reads its checkouts as each lands.
+    void clones.watch();
     listening ??= Promise.resolve()
       .then(() => ports.listen(EVENTS.cloneAll, ({ payload }) => take(payload as CloneAllState)))
       .catch(() => (listening = null));

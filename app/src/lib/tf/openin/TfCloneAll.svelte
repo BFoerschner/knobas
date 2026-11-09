@@ -89,7 +89,9 @@
           {shown.sources.map((s) => `${s.name} (${s.repositories})`).join(", ")}. They clone in the background, two at a time, and the
           app stays usable; the size is known only once each has cloned.
         </p>
-        <p class="tf-dsub">{shown.names.join(", ")}</p>
+        <!-- The dialog's arrival: what it would clone, focusable so a second Enter on *Clone all…* lands on words, never on a button. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <p class="tf-dsub" tabindex="0" aria-label="Repositories to clone">{shown.names.join(", ")}</p>
       {/if}
       {#if shown.already > 0}
         <p class="tf-dsub">{repositories(shown.already)} already on this machine {shown.already === 1 ? "is" : "are"} left as {shown.already === 1 ? "it is" : "they are"}.</p>

@@ -27,6 +27,13 @@ let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let calls: { plan: number; start: number };
 let hear: ((event: { payload: unknown }) => void) | null;
+/** Whether the run made the per-clone store listen, so rows follow each clone. */
+let watched: number;
+const clonesHeard = {
+  watch: async () => {
+    watched += 1;
+  },
+};
 
 function ports(now: CloneAllState | null = null): CloneAllPorts {
   return {
@@ -48,6 +55,7 @@ function ports(now: CloneAllState | null = null): CloneAllPorts {
 
 beforeEach(() => {
   calls = { plan: 0, start: 0 };
+  watched = 0;
   hear = null;
   toasts.items.splice(0);
   target = document.createElement("div");
@@ -73,7 +81,7 @@ const button = () => target.querySelector<HTMLButtonElement>("button.tf-btn")!;
 const dialog = () => document.querySelector(".tf-dialog");
 const primary = () => document.querySelector<HTMLButtonElement>(".tf-dialog .tf-primary")!;
 
-function drawn(store = createCloneAll(ports())) {
+function drawn(store = createCloneAll(ports(), clonesHeard)) {
   view = mount(TfCloneAll, { target, props: { store, layers: createLayers() } });
   flushSync();
   return store;
@@ -103,6 +111,7 @@ test("pressed twice by pointer, then twice by key, one plan is read and one run 
   await settle();
   expect(calls.start).toBe(1);
   expect(text(button())).toBe("Cloning 1 of 2…");
+  expect(watched).toBeGreaterThan(0);
 
   // Enter twice on the button while the run goes reads nothing and starts nothing.
   button().focus();
@@ -135,7 +144,7 @@ test("the run's end is one toast, with every failure and its reason", async () =
 });
 
 test("a page left and come back to draws the run where it is, and hears it to its end", async () => {
-  const store = createCloneAll(ports(state({ cloned: 1, current: ["ops-runbooks"] })));
+  const store = createCloneAll(ports(state({ cloned: 1, current: ["ops-runbooks"] })), clonesHeard);
   view = mount(TfCloneAll, { target, props: { store, layers: createLayers() } });
   await settle();
   expect(text(button())).toBe("Cloning 2 of 2…");
@@ -150,7 +159,7 @@ test("a page left and come back to draws the run where it is, and hears it to it
 });
 
 test("a run that ended before the window watched it is not summed up again", async () => {
-  drawn(createCloneAll(ports(state({ cloned: 2, finished: true }))));
+  drawn(createCloneAll(ports(state({ cloned: 2, finished: true })), clonesHeard));
   await settle();
   expect(toasts.items).toEqual([]);
   expect(hear).toBeNull();
