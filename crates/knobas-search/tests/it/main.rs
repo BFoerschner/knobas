@@ -23,6 +23,7 @@ mod launcher_kinds;
 mod lists;
 mod name_glob;
 mod parent_key_pin;
+mod pr_by_number;
 mod path_line;
 mod ranking;
 mod reach;
