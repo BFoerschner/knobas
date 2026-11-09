@@ -442,15 +442,24 @@ impl Rig {
 
     /// Every read three times: the first ever (nothing held), in the next
     /// session (what the first held), and again in that session (warm).
-    async fn measure(&self, mode: &str) {
+    /// A forge that is down or hangs answered the first read at full speed,
+    /// as one that went down after knobas read it.
+    async fn measure(&self, mode: &str, ms: u64) {
+        let gone = matches!(mode, "down" | "hang");
+        self.proxy.set(if gone { 0 } else { ms });
         sqlx::query("delete from sync.held_read")
             .execute(&self.pool)
             .await
             .expect("the held reads are cleared");
-        let first = self.pass(&self.session()).await;
+        let one = self.session();
+        let first = self.pass(&one).await;
+        one.settled().await;
+        self.proxy.set(ms);
         let next = self.session();
         let held = self.pass(&next).await;
         let warm = self.pass(&next).await;
+        // Its reads behind end before the next mode clears what is held.
+        next.settled().await;
         for (what, took) in &first {
             let of = |list: &[(&str, Took)]| {
                 list.iter()
@@ -482,8 +491,7 @@ async fn every_read_a_code_page_waits_on_through_a_slow_forge() {
         if !only.is_empty() && !only.split(',').any(|m| m == mode) {
             continue;
         }
-        rig.proxy.set(ms);
-        rig.measure(mode).await;
+        rig.measure(mode, ms).await;
     }
     rig.proxy.set(0);
 }

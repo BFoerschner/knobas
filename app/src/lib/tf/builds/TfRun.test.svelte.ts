@@ -1396,3 +1396,29 @@ test("what was typed in Create ticket outlives Esc and ×, and Cancel ends it (F
   await settle();
   expect(title().value).toBe(prefilled);
 });
+
+// -- what knobas held (ADR-0042) -----------------------------------------------
+
+test("a run's view knobas held draws at once under a line saying from when; a source that does not answer is named, and the view stays", async () => {
+  const handlers: ((event: { payload: unknown }) => void)[] = [];
+  const old = new Date(Date.now() - 2 * 3_600_000).toISOString();
+  let reads = 0;
+  draw("teamcity:build:1187", undefined, {
+    view: (id, section) => {
+      if (section === "tests") return Promise.resolve(TESTS);
+      reads++;
+      return Promise.resolve({ ...viewOf(id === "teamcity:build:1188"), held_at: old });
+    },
+    listen: (event, handler) => {
+      if (event === "view:fresh") handlers.push(handler);
+      return Promise.resolve(() => {});
+    },
+  });
+  await settle();
+  const line = () => target.querySelector(".tf-held")?.textContent?.trim() ?? null;
+  expect(line()).toBe(`As knobas read it 2 h ago. Checking ${PIPELINE.source_name}…`);
+  for (const handler of handlers) handler({ payload: { entity_id: "teamcity:build:1187", section: null, failed: "unreachable: no response headers" } });
+  await settle();
+  expect(reads, "a failure reads nothing again").toBe(1);
+  expect(line()).toBe(`As knobas read it 2 h ago. ${PIPELINE.source_name} did not answer: unreachable: no response headers`);
+});

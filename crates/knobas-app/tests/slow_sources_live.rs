@@ -179,7 +179,8 @@ const SLOWED: [&str; 4] = ["jira", "confluence", "teamcity", "kuma"];
 /// One pass's readings, by what was read.
 struct Pass {
     mode: &'static str,
-    /// Whether this pass queues the writes (the first only).
+    /// Whether this pass queues the writes (the next session's, where the
+    /// source is down or hangs).
     writes: bool,
     took: std::sync::Mutex<Vec<(String, Took)>>,
 }
@@ -683,19 +684,33 @@ impl Rig {
     }
 
     /// Every read three times: the first ever (nothing held), in the next
-    /// session (what the first held), and again in that session (warm).
-    async fn measure(&self, mode: &'static str) {
+    /// session (what the first held), and again in that session (warm). A
+    /// source that is down or hangs answered the first read at full speed, as
+    /// one that went down after knobas read it: the next session is where it
+    /// is down.
+    async fn measure(&self, mode: &'static str, ms: u64) {
+        let gone = matches!(mode, "down" | "hang");
+        self.set(if gone { 0 } else { ms });
         sqlx::query("delete from sync.held_read")
             .execute(&self.state.pool)
             .await
             .expect("the held reads are cleared");
-        let first = Pass::new(mode, true);
-        self.pass(&first, &self.session()).await;
+        // Writes are queued only where the source is down or hangs, so
+        // nothing reaches a product: in the next session's pass.
+        let first = Pass::new(mode, false);
+        let one = self.session();
+        self.pass(&first, &one).await;
+        // What the first read held is the next session's; nothing behind it
+        // lands later.
+        one.settled().await;
+        self.set(ms);
         let next = self.session();
-        let held = Pass::new(mode, false);
+        let held = Pass::new(mode, gone);
         self.pass(&held, &next).await;
         let warm = Pass::new(mode, false);
         self.pass(&warm, &next).await;
+        // Its reads behind end before the next mode clears what is held.
+        next.settled().await;
         let (first, held, warm) = (first.took(), held.took(), warm.took());
         for (what, took) in &first {
             let of = |list: &[(String, Took)]| {
@@ -727,8 +742,7 @@ async fn every_read_a_page_waits_on_through_slow_sources() {
         if !only.is_empty() && !only.split(',').any(|m| m == mode) {
             continue;
         }
-        rig.set(ms);
-        rig.measure(mode).await;
+        rig.measure(mode, ms).await;
     }
     rig.set(0);
 }
