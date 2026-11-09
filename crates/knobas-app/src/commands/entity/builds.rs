@@ -461,34 +461,6 @@ async fn run_lent(
     Ok((entity, lent))
 }
 
-/// Whether the mirror says run `run` has finished: its declared `finished`
-/// instant is set (ADR-0042). A finished run's log, tests and artifacts can
-/// no longer change, so a page reads them from what knobas kept or held. A
-/// run the mirror lacks, or whose kind declares no `finished`, has not.
-async fn run_finished(
-    pool: &PgPool,
-    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
-    run: &EntityRef,
-) -> bool {
-    let row: Option<(String, serde_json::Value)> =
-        sqlx::query_as("select kind, payload from sync.item where entity_id = $1")
-            .bind(run.to_string())
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
-    let Some((kind, payload)) = row else {
-        return false;
-    };
-    let Ok(declarations) = crate::sources::paths::declared_paths(pool, registry).await else {
-        return false;
-    };
-    declarations
-        .get(&run.namespace, &kind)
-        .and_then(|paths| knobas_core::payload::resolve_string(&payload, &paths.finished))
-        .is_some()
-}
-
 /// A source's failure on a run read, as [`crate::sources::to_ipc`] maps it.
 fn run_read_failed(entity: &EntityRef, error: knobas_source::SourceError) -> IpcError {
     crate::sources::to_ipc(&error.into(), Some(&entity.namespace))
@@ -520,7 +492,7 @@ pub async fn run_log_inner(
         .clamp(1, knobas_source::run::LOG_LINES_MAX);
     let id = entity.to_string();
     // A finished run's whole log is kept and held (ADR-0042).
-    let fixed = whole && run_finished(pool, registry.as_ref(), &entity).await;
+    let fixed = whole && crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
     live.fixed_read(
         &lent,
         &id,
@@ -546,7 +518,7 @@ pub async fn run_tests_inner(
 ) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
     let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
     let id = entity.to_string();
-    let fixed = run_finished(pool, registry.as_ref(), &entity).await;
+    let fixed = crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
     live.fixed_read(&lent, &id, "run:tests", fixed, lent.source.run_tests(&id))
         .await
         .map_err(|error| run_read_failed(&entity, error))
@@ -602,7 +574,7 @@ pub async fn run_artifacts_inner(
     artifact_path(path)?;
     let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
     let id = entity.to_string();
-    let fixed = run_finished(pool, registry.as_ref(), &entity).await;
+    let fixed = crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
     let ask = format!("run:artifacts:{path}");
     live.fixed_read(
         &lent,
@@ -631,7 +603,7 @@ pub async fn artifact_preview_inner(
     artifact_path(path)?;
     let (entity, lent) = run_lent(pool, secrets, registry, live, run_id).await?;
     let id = entity.to_string();
-    let fixed = run_finished(pool, registry.as_ref(), &entity).await;
+    let fixed = crate::sources::crud::run_finished(pool, registry.as_ref(), &entity).await;
     let ask = format!("run:preview:{path}");
     live.fixed_read(
         &lent,

@@ -1294,6 +1294,34 @@ pub async fn run_source(
     adapter_for(pool, secrets, registry, live, entity_id).await
 }
 
+/// Whether the mirror says run `run` has finished: its declared `finished`
+/// instant is set (ADR-0042). A finished run's log, tests and artifacts can
+/// no longer change, so a page reads them from what knobas kept or held. A
+/// run the mirror lacks, or whose kind declares no `finished`, has not.
+pub(crate) async fn run_finished(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run: &knobas_core::entity::EntityRef,
+) -> bool {
+    let row: Option<(String, serde_json::Value)> =
+        sqlx::query_as("select kind, payload from sync.item where entity_id = $1")
+            .bind(run.to_string())
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    let Some((kind, payload)) = row else {
+        return false;
+    };
+    let Ok(declarations) = crate::sources::paths::declared_paths(pool, registry).await else {
+        return false;
+    };
+    declarations
+        .get(&run.namespace, &kind)
+        .and_then(|paths| knobas_core::payload::resolve_string(&payload, &paths.finished))
+        .is_some()
+}
+
 /// A repository's web page from a clone URL: its `.git` and trailing slash
 /// taken off, `None` for a remote that is not `http`/`https` ([`commit_page`]'s
 /// rule).
