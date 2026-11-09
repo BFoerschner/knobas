@@ -12,11 +12,10 @@
 //!
 //! # The proxy
 //!
-//! [`slow::Proxy`] forwards bytes between knobas and Gitea and holds the first
-//! chunk of each request for the mode's delay; `hang` holds it forever, so the
-//! HTTP client's own timeouts decide (30 s a try, 45 s a call), and `down`
-//! closes every connection as it opens. It runs in this process, on loopback:
-//! nothing is installed on the WSL box.
+//! [`slow::Proxy`] (`tests/slow_proxy`, shared with `slow_sources_live.rs`)
+//! holds each request to Gitea for the mode's delay, or forever, or refuses
+//! it. It runs in this process, on loopback: nothing is installed on the WSL
+//! box.
 //!
 //! # Read-only at Gitea
 //!
@@ -57,103 +56,8 @@ fn need(name: &str) -> String {
         .to_owned()
 }
 
-/// The delaying proxy.
-mod slow {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::time::Duration;
-
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpListener, TcpStream};
-
-    /// Hold every request forever.
-    pub const HANG: u64 = u64::MAX;
-    /// Close every connection as it opens.
-    pub const DOWN: u64 = u64::MAX - 1;
-
-    pub struct Proxy {
-        pub url: String,
-        delay: Arc<AtomicU64>,
-    }
-
-    impl Proxy {
-        /// Hold each request `ms` milliseconds, or [`HANG`] or [`DOWN`].
-        pub fn set(&self, ms: u64) {
-            self.delay.store(ms, Ordering::SeqCst);
-        }
-    }
-
-    /// A proxy on loopback in front of `upstream` (`http://host:port`).
-    pub async fn start(upstream: &str) -> Proxy {
-        let target = upstream
-            .trim_start_matches("http://")
-            .trim_end_matches('/')
-            .to_owned();
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("a port");
-        let port = listener.local_addr().unwrap().port();
-        let delay = Arc::new(AtomicU64::new(0));
-        let shared = delay.clone();
-        tokio::spawn(async move {
-            loop {
-                let Ok((client, _)) = listener.accept().await else {
-                    return;
-                };
-                let (target, delay) = (target.clone(), shared.clone());
-                tokio::spawn(async move {
-                    let _ = pipe(client, &target, delay).await;
-                });
-            }
-        });
-        Proxy {
-            url: format!("http://127.0.0.1:{port}"),
-            delay,
-        }
-    }
-
-    async fn pipe(client: TcpStream, target: &str, delay: Arc<AtomicU64>) -> std::io::Result<()> {
-        if delay.load(Ordering::SeqCst) == DOWN {
-            return Ok(());
-        }
-        let server = TcpStream::connect(target).await?;
-        let (mut from_client, mut to_client) = client.into_split();
-        let (mut from_server, mut to_server) = server.into_split();
-        // The next bytes from the client start a request.
-        let fresh = Arc::new(AtomicBool::new(true));
-        let seen = fresh.clone();
-        let up = async move {
-            let mut buf = vec![0u8; 64 * 1024];
-            loop {
-                let n = from_client.read(&mut buf).await?;
-                if n == 0 {
-                    let _ = to_server.shutdown().await;
-                    return Ok::<_, std::io::Error>(());
-                }
-                if seen.swap(false, Ordering::SeqCst) {
-                    match delay.load(Ordering::SeqCst) {
-                        HANG => std::future::pending::<()>().await,
-                        0 => {}
-                        ms => tokio::time::sleep(Duration::from_millis(ms)).await,
-                    }
-                }
-                to_server.write_all(&buf[..n]).await?;
-            }
-        };
-        let down = async move {
-            let mut buf = vec![0u8; 64 * 1024];
-            loop {
-                let n = from_server.read(&mut buf).await?;
-                if n == 0 {
-                    let _ = to_client.shutdown().await;
-                    return Ok::<_, std::io::Error>(());
-                }
-                fresh.store(true, Ordering::SeqCst);
-                to_client.write_all(&buf[..n]).await?;
-            }
-        };
-        let _ = tokio::join!(up, down);
-        Ok(())
-    }
-}
+mod slow_proxy;
+use slow_proxy as slow;
 
 #[derive(Default)]
 struct Seen(std::sync::Mutex<Vec<CloneEvent>>);
@@ -346,6 +250,26 @@ async fn time<T, E: std::fmt::Display>(
 }
 
 impl Rig {
+    /// A view as a page reads it (`entity_view`): what knobas held where it
+    /// holds one, since ADR-0042.
+    async fn page(
+        &self,
+        live: &LiveSources,
+        entity: &str,
+        section: Option<&str>,
+    ) -> (Took, Option<SourceView>) {
+        let (took, view) = time(knobas_app::sources::crud::shown(
+            &self.pool,
+            &self.secrets,
+            &self.registry,
+            live,
+            entity,
+            section,
+        ))
+        .await;
+        (took, view.flatten().map(|shown| shown.view))
+    }
+
     async fn view(
         &self,
         live: &LiveSources,
@@ -364,17 +288,13 @@ impl Rig {
         (took, view.flatten())
     }
 
-    /// Every read, once cold and once warm, as the pages make them.
-    async fn measure(&self, mode: &str) {
-        let live = LiveSources::default();
-        let line = |what: &str, cold: &Took, warm: &Took| {
-            println!("SLOW {mode:>6} | {what:<28} | cold {cold} | warm {warm}");
-        };
+    /// Every read once, through `live`, as the pages make them.
+    async fn pass(&self, live: &LiveSources) -> Vec<(&'static str, Took)> {
+        let mut out = Vec::new();
 
         // The repository page's header.
-        let (cold, _) = self.view(&live, &self.repo, Some("branches")).await;
-        let (warm, _) = self.view(&live, &self.repo, Some("branches")).await;
-        line("header: branch list", &cold, &warm);
+        let (cold, _) = self.page(live, &self.repo, Some("branches")).await;
+        out.push(("header: branch list", cold));
         let asks: Vec<_> = ["create_branch", "commit_file"]
             .iter()
             .map(|op| knobas_source::grants::WriteAsk {
@@ -389,24 +309,21 @@ impl Rig {
                     &self.pool,
                     &self.secrets,
                     &self.registry,
-                    &live,
+                    live,
                     &asks,
                 )
                 .await,
             )
         };
         let (cold, _) = time(grants()).await;
-        let (warm, _) = time(grants()).await;
-        line("header: write grants", &cold, &warm);
+        out.push(("header: write grants", cold));
         let checkout = || knobas_app::checkout::view(&self.pool, &self.repo);
         let (cold, _) = time(checkout()).await;
-        let (warm, _) = time(checkout()).await;
-        line("header: checkout (local)", &cold, &warm);
+        out.push(("header: checkout (local)", cold));
 
         // Files: the top, then the README it lands on, a directory, Go to file.
-        let (cold, top) = self.view(&live, &self.repo, Some("files")).await;
-        let (warm, _) = self.view(&live, &self.repo, Some("files")).await;
-        line("files: top directory", &cold, &warm);
+        let (cold, top) = self.page(live, &self.repo, Some("files")).await;
+        out.push(("files: top directory", cold));
         let entries = top
             .as_ref()
             .and_then(|v| v.sections.first())
@@ -432,44 +349,37 @@ impl Rig {
         let readme = readme.unwrap_or_else(|| "file:README.md".to_owned());
         let dir = dir.unwrap_or_else(|| "files:src".to_owned());
         let paths = paths.unwrap_or_else(|| "paths".to_owned());
-        let (cold, _) = self.view(&live, &self.repo, Some(&readme)).await;
-        let (warm, _) = self.view(&live, &self.repo, Some(&readme)).await;
-        line("files: README (landing)", &cold, &warm);
+        let (cold, _) = self.page(live, &self.repo, Some(&readme)).await;
+        out.push(("files: README (landing)", cold));
         // What Files draws first since PR #2479: the checkout's copy (ADR-0041).
         let local = || {
             knobas_app::checkout::local_tree(&self.pool, self.registry.as_ref(), None, &self.repo)
         };
         let (cold, tree) = time(local()).await;
-        let (warm, _) = time(local()).await;
-        line("files: tree at the checkout", &cold, &warm);
+        out.push(("files: tree at the checkout", cold));
         if let Some(Some(tree)) = &tree {
             let file = || {
                 knobas_app::checkout::local_file(&self.pool, &self.repo, &tree.commit, "README.md")
             };
             let (cold, _) = time(file()).await;
-            let (warm, _) = time(file()).await;
-            line("files: README at the checkout", &cold, &warm);
+            out.push(("files: README at the checkout", cold));
         }
-        let (cold, _) = self.view(&live, &self.repo, Some(&dir)).await;
-        let (warm, _) = self.view(&live, &self.repo, Some(&dir)).await;
-        line("files: open a directory", &cold, &warm);
-        let (cold, _) = self.view(&live, &self.repo, Some(&paths)).await;
-        let (warm, _) = self.view(&live, &self.repo, Some(&paths)).await;
-        line("files: go to file", &cold, &warm);
-        let (cold, _) = self.view(&live, &self.repo, Some("commits")).await;
-        let (warm, _) = self.view(&live, &self.repo, Some("commits")).await;
-        line("commits (and last commit)", &cold, &warm);
+        let (cold, _) = self.page(live, &self.repo, Some(&dir)).await;
+        out.push(("files: open a directory", cold));
+        let (cold, _) = self.page(live, &self.repo, Some(&paths)).await;
+        out.push(("files: go to file", cold));
+        let (cold, _) = self.page(live, &self.repo, Some("commits")).await;
+        out.push(("commits (and last commit)", cold));
 
         // Branches and Compare: a branch's whole view is its standing.
-        let (cold, _) = self.view(&live, &self.branch, None).await;
-        let (warm, _) = self.view(&live, &self.branch, None).await;
-        line("branch standing (compare)", &cold, &warm);
+        let (cold, _) = self.page(live, &self.branch, None).await;
+        out.push(("branch standing (compare)", cold));
         let diff = || {
             knobas_app::checkout::range_diff(
                 &self.pool,
                 &self.secrets,
                 &self.registry,
-                &live,
+                live,
                 &self.repo,
                 "main",
                 BRANCH,
@@ -477,45 +387,40 @@ impl Rig {
             )
         };
         let (cold, _) = time(diff()).await;
-        let (warm, _) = time(diff()).await;
-        line("compare / new PR diff", &cold, &warm);
+        out.push(("compare / new PR diff", cold));
         let check = || {
             knobas_app::checkout::source_range_diff(
                 &self.pool,
                 &self.secrets,
                 &self.registry,
-                &live,
+                live,
                 &self.repo,
                 "main",
                 BRANCH,
             )
         };
         let (cold, _) = time(check()).await;
-        let (warm, _) = time(check()).await;
-        line("compare: its check behind", &cold, &warm);
+        out.push(("compare: its check behind", cold));
 
         // A pull request: its view, then its files.
-        let (cold, whole) = self.view(&live, &self.pr, None).await;
-        let (warm, _) = self.view(&live, &self.pr, None).await;
-        line("pull request view", &cold, &warm);
+        let (cold, whole) = self.page(live, &self.pr, None).await;
+        out.push(("pull request view", cold));
         let files = whole
             .as_ref()
             .and_then(|v| v.sections.iter().find(|s| s.deferred))
             .map_or_else(|| "files".to_owned(), |s| s.id.clone());
-        let (cold, _) = self.view(&live, &self.pr, Some(&files)).await;
-        let (warm, _) = self.view(&live, &self.pr, Some(&files)).await;
-        line("pull request diff", &cold, &warm);
+        let (cold, _) = self.page(live, &self.pr, Some(&files)).await;
+        out.push(("pull request diff", cold));
 
         // A commit: its whole view and its diff (local-first since #2319).
-        let (cold, _) = self.view(&live, &self.commit.0, None).await;
-        let (warm, _) = self.view(&live, &self.commit.0, None).await;
-        line("commit view", &cold, &warm);
+        let (cold, _) = self.page(live, &self.commit.0, None).await;
+        out.push(("commit view", cold));
         let diff = || {
             knobas_app::checkout::commit_diff(
                 &self.pool,
                 &self.secrets,
                 &self.registry,
-                &live,
+                live,
                 &self.repo,
                 &self.commit.0,
                 &self.commit.1,
@@ -523,8 +428,41 @@ impl Rig {
             )
         };
         let (cold, _) = time(diff()).await;
-        let (warm, _) = time(diff()).await;
-        line("commit diff", &cold, &warm);
+        out.push(("commit diff", cold));
+        out
+    }
+
+    /// A session as the app makes one, its reads held between sessions
+    /// (ADR-0042) in the scratch database.
+    fn session(&self) -> LiveSources {
+        let live = LiveSources::default();
+        live.hold_in(self.pool.clone());
+        live
+    }
+
+    /// Every read three times: the first ever (nothing held), in the next
+    /// session (what the first held), and again in that session (warm).
+    async fn measure(&self, mode: &str) {
+        sqlx::query("delete from sync.held_read")
+            .execute(&self.pool)
+            .await
+            .expect("the held reads are cleared");
+        let first = self.pass(&self.session()).await;
+        let next = self.session();
+        let held = self.pass(&next).await;
+        let warm = self.pass(&next).await;
+        for (what, took) in &first {
+            let of = |list: &[(&str, Took)]| {
+                list.iter()
+                    .find(|(w, _)| w == what)
+                    .map_or_else(|| "     -".to_owned(), |(_, t)| t.to_string())
+            };
+            println!(
+                "SLOW {mode:>6} | {what:<29} | first {took} | next session {} | warm {}",
+                of(&held),
+                of(&warm)
+            );
+        }
     }
 }
 
@@ -532,6 +470,8 @@ impl Rig {
 #[ignore = "needs the testenv Gitea: eval \"$(testenv/seed --env)\""]
 async fn every_read_a_code_page_waits_on_through_a_slow_forge() {
     let rig = rig().await;
+    // `KNOBAS_SLOW_MODES=1s,down` measures those modes alone.
+    let only = std::env::var("KNOBAS_SLOW_MODES").unwrap_or_default();
     for (mode, ms) in [
         ("0s", 0),
         ("1s", 1_000),
@@ -539,6 +479,9 @@ async fn every_read_a_code_page_waits_on_through_a_slow_forge() {
         ("down", slow::DOWN),
         ("hang", slow::HANG),
     ] {
+        if !only.is_empty() && !only.split(',').any(|m| m == mode) {
+            continue;
+        }
         rig.proxy.set(ms);
         rig.measure(mode).await;
     }
