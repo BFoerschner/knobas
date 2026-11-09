@@ -117,6 +117,26 @@ impl Env {
         me["login"].as_str().expect("a login").to_owned()
     }
 
+    /// The token account's profile name, as Gitea's `/user` gives it; `None`
+    /// where the profile has none (a blank `full_name`), which is what the
+    /// view's `author_name` and `resolved_by_name` say then (F-107).
+    pub async fn profile_name(&self) -> Option<String> {
+        let me: serde_json::Value = reqwest::Client::new()
+            .get(format!("{}/api/v1/user", self.url))
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .await
+            .expect("GET /user")
+            .json()
+            .await
+            .expect("a user record");
+        me["full_name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    }
+
     /// Scoped to the one seeded repository these assertions are written for.
     pub fn one_repo(&self) -> Box<dyn Source> {
         self.source(serde_json::json!({ "repos": [self.full_name()] }))

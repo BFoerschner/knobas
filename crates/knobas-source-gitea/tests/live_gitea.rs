@@ -7629,6 +7629,11 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
     let thread_id = first.id.clone().expect("Gitea's comment id");
     assert!(first.replies, "{first:#?}");
     assert_eq!(first.resolved_by, None);
+    // Its author is the token's account, named by its profile where it has
+    // one and by the login beside it (F-107).
+    let profile = env.profile_name().await;
+    assert_eq!(first.comments[0].author, env.login().await, "{first:#?}");
+    assert_eq!(first.comments[0].author_name, profile, "{first:#?}");
 
     // 2. A reply joins the thread, and Conversation says it.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
@@ -7680,6 +7685,7 @@ async fn a_thread_is_answered_resolved_and_a_reviewer_requested() {
         source.write(resolve(true)).await.expect("Gitea resolves");
         let (readme, _) = files().await;
         assert_eq!(thread(&readme).resolved_by, Some(env.login().await));
+        assert_eq!(thread(&readme).resolved_by_name, profile);
         source.write(resolve(false)).await.expect("Gitea reopens");
         let (readme, _) = files().await;
         assert_eq!(thread(&readme).resolved_by, None);
