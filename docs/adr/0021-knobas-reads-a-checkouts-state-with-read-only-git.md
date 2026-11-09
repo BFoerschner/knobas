@@ -1,5 +1,5 @@
 ---
-status: accepted, amended by ADR-0026
+status: accepted, amended by ADR-0026 and ADR-0041
 ---
 
 # knobas reads a checkout's state with read-only git
