@@ -3397,6 +3397,9 @@ async fn test_source_answers_the_configured_arm_once_the_saved_source_names_the_
 /// The Confluence source id, and the `EntityRef` namespace every mirrored page
 /// is in.
 const CONFLUENCE: &str = "confluence";
+/// What the seeded Confluence source is called, which the digest's reasons
+/// name it by (the live run on #2479: they named it by its id).
+const CONFLUENCE_NAME: &str = "Tidewater Confluence (seeded)";
 
 /// Where the seeded Confluence is, and the fixture ids the seed recorded.
 ///
@@ -3806,7 +3809,7 @@ async fn wiki_app(
         &knobas_sync::config::InsertConfig {
             id: CONFLUENCE.to_owned(),
             adapter_kind: "confluence".to_owned(),
-            display_name: "Tidewater Confluence (seeded)".to_owned(),
+            display_name: CONFLUENCE_NAME.to_owned(),
             base_url: wiki.url.clone(),
             auth_kind: knobas_sync::config::AuthKind::Method(auth),
             // The username is half of the Basic pair **and** the identity the
@@ -4642,10 +4645,10 @@ async fn a_page_the_source_says_is_mine_is_on_the_digest_for_the_day_it_moved() 
         "the mirror half says the source attributes the page to the reader, \
          never that the reader wrote it"
     );
-    assert!(
-        line.reason.contains(CONFLUENCE),
-        "the reason names the source it came from: {:?}",
-        line.reason
+    assert_eq!(
+        line.reason,
+        format!("{CONFLUENCE_NAME} credits this page to you"),
+        "the reason names the source it came from by its name"
     );
     println!("SEEDED digest page line: {} ({})", line.title, line.reason);
 
@@ -4987,10 +4990,11 @@ async fn a_page_edited_through_knobas_is_on_the_digest_under_yesterday() {
         !line.reason.trim().is_empty(),
         "a line whose provenance cannot be shown is not shippable: {line:?}"
     );
-    assert!(
-        line.reason.contains(CONFLUENCE),
-        "the reason names the source the write went to: {:?}",
-        line.reason
+    assert_eq!(
+        line.reason,
+        format!("you edited it in {CONFLUENCE_NAME}"),
+        "the reason says what the reader did and names the source the write went to, \
+         never the op's code"
     );
     println!(
         "SEEDED digest edit line: {} -- {} (version {} -> {})",
