@@ -525,6 +525,18 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
             .unwrap_or_else(|| panic!("the fixture names {who}"))
             .to_owned()
     };
+    // The name the seed gave the account's profile (`seed-gitea.sh`'s
+    // `full_name`), which the view calls the person by (F-107).
+    let named = |who: &str| -> String {
+        fixture["people"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == who)
+            .and_then(|p| p["name"].as_str())
+            .unwrap_or_else(|| panic!("the fixture names {who}"))
+            .to_owned()
+    };
     let pr = fixture["prs"]
         .as_array()
         .unwrap()
@@ -595,7 +607,7 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
         );
     };
     has("State", "open", Some(Tone::Info));
-    has("Author", &person("mara"), None);
+    has("Author", &named("mara"), None);
     has(
         "Branches",
         &format!(
@@ -607,13 +619,26 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     );
     has(
         "Review",
-        &format!("approved by {}", person("priya")),
+        &format!("approved by {}", named("priya")),
         Some(Tone::Ok),
     );
     has(
         "Review",
-        &format!("requested from {}", person("jonas")),
+        &format!("requested from {}", named("jonas")),
         Some(Tone::Muted),
+    );
+    // Each person keeps their login as the fact's account, which the app
+    // compares with its username.
+    let account = |label: &str, value: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label && f.value == value)
+            .and_then(|f| f.account.clone())
+    };
+    assert_eq!(account("Author", &named("mara")), Some(person("mara")));
+    assert_eq!(
+        account("Review", &format!("approved by {}", named("priya"))),
+        Some(person("priya"))
     );
     assert!(
         facts.iter().any(|f| f.label == "Mergeable"),
